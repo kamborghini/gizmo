@@ -101,6 +101,11 @@
         .stat.warn .value { color: var(--warn); }
 
         .section-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); margin: 4px 0 11px; }
+        .seo-score { display: flex; align-items: baseline; gap: 12px; background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--r); padding: 18px 22px; margin-bottom: 18px; box-shadow: var(--sh-1); }
+        .seo-score .num { font-size: 46px; font-weight: 700; letter-spacing: -.03em; line-height: 1; }
+        .seo-score .out { color: var(--ink-2); font-size: 13px; }
+        .seo-score.good .num { color: var(--win); } .seo-score.mid .num { color: var(--warn); } .seo-score.low .num { color: var(--danger); }
 
         /* ---------- Structured response components ---------- */
         .insights { display: flex; flex-direction: column; gap: 9px; }
@@ -234,6 +239,7 @@
             <div class="brand"><span class="logo" id="ic-logo"></span> Store Copilot</div>
             <div class="nav">
                 <button class="nav-item active" data-view="overview" id="nav-overview"></button>
+                <button class="nav-item" data-view="seo" id="nav-seo"></button>
                 <button class="nav-item" data-view="chat" id="nav-chat"></button>
             </div>
             <div class="convo-head"><span>Conversations</span>
@@ -255,6 +261,11 @@
             <!-- Overview -->
             <section class="view active" id="view-overview">
                 <div class="scroll"><div class="ov-wrap" id="ov-content"></div></div>
+            </section>
+
+            <!-- SEO -->
+            <section class="view" id="view-seo">
+                <div class="scroll"><div class="ov-wrap" id="seo-content"></div></div>
             </section>
 
             <!-- Chat -->
@@ -347,6 +358,7 @@
             warning: SV('<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>'),
             opportunity: SV('<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline>'),
             insight: SV('<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>'),
+            search: SV('<circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>'),
             settings: SV('<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>'),
             x: SV('<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>'),
         };
@@ -357,6 +369,7 @@
         // static icon wiring
         $('ic-logo').innerHTML = I.spark;
         $('nav-overview').append(ico(I.grid), document.createTextNode('Overview'));
+        $('nav-seo').append(ico(I.search), document.createTextNode('SEO'));
         $('nav-chat').append(ico(I.chat), document.createTextNode('Chat'));
         $('new-convo').innerHTML = I.plus;
         $('menu-btn').innerHTML = I.menu;
@@ -628,17 +641,59 @@
             renderStructured(box, s, { noFollowups: false });
         }
 
+        /* ---------- SEO audit ---------- */
+        let seoCache = null;
+        async function loadSEO(force) {
+            const box = $('seo-content');
+            if (seoCache && !force) { renderSEO(seoCache); return; }
+            box.innerHTML = '';
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.search;
+            const htext = el('div'); htext.append(el('h2', null, 'SEO Audit'), el('p', null, 'Auditing your store…'));
+            hero.append(badge, htext); box.append(hero);
+            const t = el('div', 'thinking'); t.style.marginTop = '8px';
+            t.append(el('div', 'orb'), el('span', null, 'Crawling pages — indexation, structured data, metadata, alt text…'));
+            box.append(t);
+            try { const data = await api('/api/seo', {}); seoCache = { data, at: Date.now() }; renderSEO(seoCache); }
+            catch (e) {
+                box.innerHTML = ''; box.append(hero);
+                const err = el('div', 'msg error'); err.append(el('div', 'bubble', e.message || String(e))); box.append(err);
+                htext.children[1].textContent = 'Could not run the audit.';
+            }
+        }
+        function renderSEO(cache) {
+            const data = cache.data; const box = $('seo-content'); box.innerHTML = '';
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.search;
+            const htext = el('div'); htext.append(el('h2', null, 'SEO Audit'),
+                el('p', null, data.structured && data.structured.summary ? data.structured.summary : 'Technical SEO health of your store.'));
+            hero.append(badge, htext);
+            const mins = Math.round((Date.now() - cache.at) / 60000);
+            hero.append(el('div', 'ov-updated', mins <= 0 ? 'Updated just now' : `Updated ${mins}m ago`));
+            box.append(hero);
+            if (typeof data.score === 'number') {
+                const tier = data.score >= 80 ? 'good' : data.score >= 60 ? 'mid' : 'low';
+                const sc = el('div', 'seo-score ' + tier);
+                sc.append(el('div', 'num', String(data.score)), el('div', 'out', '/ 100 · technical SEO score'));
+                box.append(sc);
+            }
+            const mets = (data.metrics || []).filter(m => m.label !== 'SEO score');
+            if (mets.length) box.append(metricsGrid(mets));
+            const s = Object.assign({}, data.structured); delete s.summary;
+            if (s.insights && s.insights.length) box.append(el('div', 'section-title', 'Findings & fixes'));
+            renderStructured(box, s, {});
+        }
+
         /* ---------- view switching ---------- */
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
-            $('view-overview').classList.toggle('active', v === 'overview');
-            $('view-chat').classList.toggle('active', v === 'chat');
-            $('view-title').textContent = v === 'overview' ? 'Overview' : (active() ? (active().title || 'Chat') : 'Chat');
+            ['overview', 'seo', 'chat'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            $('view-title').textContent = v === 'overview' ? 'Overview' : v === 'seo' ? 'SEO' : (active() ? (active().title || 'Chat') : 'Chat');
             const act = $('topbar-action'); act.innerHTML = '';
             if (v === 'overview') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadOverview(true); }
+            else if (v === 'seo') { act.append(ico(I.refresh), document.createTextNode('Re-audit')); act.className = 'btn'; act.onclick = () => loadSEO(true); }
             else { act.append(ico(I.plus), document.createTextNode('New chat')); act.className = 'btn btn-primary'; act.onclick = () => newConvo(); }
             closeSidebar();
             if (v === 'overview') loadOverview(false);
+            if (v === 'seo') loadSEO(false);
         }
 
         /* ---------- responsive sidebar ---------- */
@@ -712,6 +767,7 @@
             renderChat();
             if (ov) { overviewCache = { data: ov, at: Date.now() }; }
         };
+        window.__demoSEO = function (d) { seoCache = { data: d, at: Date.now() }; $('nav-seo').click(); };
     })();
     </script>
 </body>

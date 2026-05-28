@@ -21,14 +21,19 @@ Required env vars:
   DASHBOARD_PASSWORD    Enables standalone password mode (optional fallback).
 """
 import os
+import re
 import json
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 
 import anthropic
+import httpx
 import jwt
+from bs4 import BeautifulSoup
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
@@ -488,6 +493,263 @@ async def run_overview(registry: dict, extra_system: str = "", track_inventory: 
 
 
 # ---------------------------------------------------------------------------
+# SEO — knowledge layer + live technical audit
+# ---------------------------------------------------------------------------
+
+SEO_SAMPLE_PAGES = int(os.environ.get("SEO_SAMPLE_PAGES", "5"))
+
+SEO_KNOWLEDGE = """## Technical SEO expertise (apply this model)
+Locate every organic-search issue on the pipeline: Discover → Crawl → Render → Index →
+Understand → Rank → Serve. The first four are GATES (binary): if a page can't be discovered,
+crawled, rendered, or indexed, no ranking work matters — fix gates BEFORE optimizations.
+Prioritize by (business impact × confidence) ÷ effort, favoring template/systemic fixes.
+
+Correct these on sight:
+- robots.txt Disallow ≠ noindex. Disallow blocks crawling; a disallowed URL can still be
+  indexed. To remove from index: allow crawl + noindex, then optionally block.
+- Canonical is a hint, not a directive. Duplicate content is selection, not a penalty.
+- Crawl budget is a non-issue below ~100k URLs unless there's severe waste.
+- Core Web Vitals (LCP/CLS/INP, not FID) are a minor tiebreaker, not a primary factor.
+- Rankings ≠ traffic ≠ revenue — optimize for intent and the highest business metric.
+
+Shopify-specific traps:
+- Faceted/filter and ?variant= URLs create crawl traps and duplicate clusters — control via
+  canonicals/parameters, don't let them bloat the index.
+- Themes/apps can inject accidental noindex or wrong canonicals — verify the rendered tags.
+- Product/Collection pages need Product/Offer/BreadcrumbList JSON-LD; thin descriptions and
+  missing image alt text weaken Understand-stage signals. Collections are topical pillars —
+  internal-link them deliberately.
+
+Ground every claim in the supplied data, name the pipeline stage, and give dev-ready fixes.
+Treat Google Search Central / web.dev / schema.org as ground truth when an exact threshold
+or field matters."""
+
+_SEO_HINTS = ("seo", "search engine", "google", "ranking", "rank ", " index", "crawl",
+              "robots", "sitemap", "canonical", "meta description", "title tag", "schema",
+              "structured data", "keyword", "serp", "backlink", "alt text", "organic")
+
+
+def _is_seo(messages: list[dict]) -> bool:
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            c = m.get("content")
+            text = c if isinstance(c, str) else json.dumps(c)
+            return any(h in text.lower() for h in _SEO_HINTS)
+    return False
+
+
+_domains_cache: dict = {}
+
+
+async def _resolve_domains(registry: dict) -> tuple[str, set]:
+    """Return (primary_domain, allowed_hosts) for the store. Cached per process."""
+    if _domains_cache.get("primary"):
+        return _domains_cache["primary"], _domains_cache["hosts"]
+    shop = await _tool_json(registry, "shopify_get_shop", {})
+    myshop = shop.get("myshopify_domain") or (f"{SHOPIFY_STORE}.myshopify.com" if SHOPIFY_STORE else "")
+    primary = shop.get("domain") or myshop
+    hosts = {h.lower() for h in (primary, myshop) if h}
+    if primary:
+        _domains_cache["primary"], _domains_cache["hosts"] = primary, hosts
+    return primary, hosts
+
+
+async def _http_get(url: str) -> tuple[Optional[int], str]:
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15.0,
+                                     headers={"User-Agent": "StoreCopilot-SEO/1.0"}) as c:
+            r = await c.get(url)
+            return r.status_code, r.text
+    except Exception:
+        return None, ""
+
+
+def _parse_seo(html: str) -> dict:
+    soup = BeautifulSoup(html or "", "html.parser")
+    title = (soup.title.string or "").strip() if soup.title and soup.title.string else ""
+    desc_el = soup.find("meta", attrs={"name": "description"})
+    desc = (desc_el.get("content") or "").strip() if desc_el else ""
+    can_el = soup.find("link", attrs={"rel": lambda v: v and "canonical" in (v if isinstance(v, list) else [v])})
+    canonical = (can_el.get("href") or "").strip() if can_el else ""
+    rb = soup.find("meta", attrs={"name": "robots"})
+    robots = (rb.get("content") or "").strip() if rb else ""
+    types: list[str] = []
+    for s in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        try:
+            data = json.loads(s.string or "")
+        except Exception:
+            continue
+        for it in (data if isinstance(data, list) else [data]):
+            t = it.get("@type") if isinstance(it, dict) else None
+            types.extend(t if isinstance(t, list) else [t] if t else [])
+    imgs = soup.find_all("img")
+    missing_alt = sum(1 for i in imgs if not (i.get("alt") or "").strip())
+    return {
+        "title": title, "title_len": len(title),
+        "meta_description": desc, "meta_description_len": len(desc),
+        "canonical": canonical, "meta_robots": robots, "noindex": "noindex" in robots.lower(),
+        "jsonld_types": sorted({t for t in types if t}),
+        "h1_count": len(soup.find_all("h1")),
+        "images": len(imgs), "images_missing_alt": missing_alt,
+        "word_count": len(soup.get_text(" ", strip=True).split()),
+    }
+
+
+async def _seo_product_signals(registry: dict) -> dict:
+    data = await _tool_json(registry, "shopify_list_products",
+                            {"limit": 250, "fields": "id,title,handle,body_html,images"})
+    products = data.get("products", [])
+    titles: dict = {}
+    thin = no_desc = total_imgs = missing_alt = 0
+    for p in products:
+        t = (p.get("title") or "").strip().lower()
+        titles[t] = titles.get(t, 0) + 1
+        wc = len(re.sub("<[^>]+>", " ", p.get("body_html") or "").split())
+        if wc == 0:
+            no_desc += 1
+        elif wc < 50:
+            thin += 1
+        for img in p.get("images", []):
+            total_imgs += 1
+            if not (img.get("alt") or "").strip():
+                missing_alt += 1
+    return {
+        "products_sampled": len(products),
+        "thin_descriptions": thin, "missing_descriptions": no_desc,
+        "duplicate_titles": sum(1 for c in titles.values() if c > 1),
+        "images": total_imgs, "images_missing_alt": missing_alt,
+        "alt_coverage_pct": round(100 * (total_imgs - missing_alt) / total_imgs) if total_imgs else None,
+    }
+
+
+def _seo_scorecard(signals: dict, rs, ss, pages: list[dict]) -> tuple[int, list[dict]]:
+    score = 100
+    any_noindex = any(p.get("noindex") for p in pages)
+    has_product_schema = any("Product" in (p.get("jsonld_types") or []) for p in pages)
+    sitemap_ok, robots_ok = ss == 200, rs == 200
+    md_pct = round(100 * sum(1 for p in pages if p.get("meta_description")) / len(pages)) if pages else 0
+    alt = signals.get("alt_coverage_pct")
+    thin = signals.get("thin_descriptions", 0)
+    dup = signals.get("duplicate_titles", 0)
+
+    if any_noindex:        score -= 25
+    if not sitemap_ok:     score -= 10
+    if not robots_ok:      score -= 5
+    if not has_product_schema: score -= 12
+    if alt is not None and alt < 90:   score -= min(15, (90 - alt) // 5 * 2)
+    if md_pct < 90:        score -= min(12, (90 - md_pct) // 10 * 3)
+    if thin:               score -= min(10, thin)
+    if dup:                score -= min(10, dup)
+    score = max(0, min(100, score))
+
+    metrics = [
+        {"label": "SEO score", "value": f"{score}/100", "tone": "warn" if score < 70 else None},
+        {"label": "Indexable", "value": "noindex found" if any_noindex else "Yes",
+         "tone": "warn" if any_noindex else None},
+        {"label": "Sitemap", "value": "OK" if sitemap_ok else "Missing", "tone": None if sitemap_ok else "warn"},
+        {"label": "Product schema", "value": "Present" if has_product_schema else "Missing",
+         "tone": None if has_product_schema else "warn"},
+        {"label": "Meta descriptions", "value": f"{md_pct}% of sampled", "tone": "warn" if md_pct < 90 else None},
+        {"label": "Image alt", "value": f"{alt}%" if alt is not None else "n/a",
+         "tone": "warn" if (alt is not None and alt < 90) else None},
+        {"label": "Thin descriptions", "value": str(thin), "tone": "warn" if thin else None},
+        {"label": "Duplicate titles", "value": str(dup), "tone": "warn" if dup else None},
+    ]
+    return score, metrics
+
+
+class SeoFetchPageInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path_or_url: str = Field(..., description="A path like '/products/handle' or a full URL on THIS store's domain.")
+
+
+class SeoEmptyInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+def _build_seo_tools(registry: dict) -> dict:
+    async def seo_fetch_page(params: SeoFetchPageInput) -> str:
+        """Fetch a page on THIS store's storefront and return its on-page SEO signals: title,
+        meta description, canonical, meta robots/noindex, JSON-LD types, H1 count, image alt
+        coverage, and word count. Accepts a path like '/products/handle' or a full store URL."""
+        primary, hosts = await _resolve_domains(registry)
+        if not primary:
+            return json.dumps({"error": "Could not resolve the store domain."})
+        raw = (params.path_or_url or "").strip()
+        if raw.startswith("http"):
+            if urlparse(raw).netloc.lower() not in hosts:
+                return json.dumps({"error": f"Refused: only this store's domain ({primary}) can be fetched."})
+            url = raw
+        else:
+            url = f"https://{primary}/{raw.lstrip('/')}"
+        status, html = await _http_get(url)
+        if not status:
+            return json.dumps({"error": f"Could not fetch {url}"})
+        return json.dumps({"url": url, "status": status, **_parse_seo(html)}, default=str)
+
+    async def seo_check_robots_sitemap(params: SeoEmptyInput) -> str:
+        """Fetch this store's robots.txt and sitemap.xml and summarize their health
+        (found, whether robots references the sitemap, risky Disallow rules, sitemap size)."""
+        primary, _ = await _resolve_domains(registry)
+        rs, rtext = await _http_get(f"https://{primary}/robots.txt")
+        ss, stext = await _http_get(f"https://{primary}/sitemap.xml")
+        return json.dumps({
+            "robots_txt": {"status": rs, "found": rs == 200,
+                           "references_sitemap": "sitemap" in (rtext or "").lower(),
+                           "disallows_products": "Disallow: /products" in (rtext or ""),
+                           "disallows_collections": "Disallow: /collections" in (rtext or ""),
+                           "sample": (rtext or "")[:1500]},
+            "sitemap_xml": {"status": ss, "found": ss == 200, "child_locs": (stext or "").count("<loc>")},
+        }, default=str)
+
+    return {
+        "seo_fetch_page": (seo_fetch_page, SeoFetchPageInput),
+        "seo_check_robots_sitemap": (seo_check_robots_sitemap, SeoEmptyInput),
+    }
+
+
+async def run_seo_audit(registry: dict) -> dict:
+    primary, _ = await _resolve_domains(registry)
+    if not primary:
+        raise RuntimeError("Could not resolve the store's domain to audit.")
+    signals = await _seo_product_signals(registry)
+    rs, rtext = await _http_get(f"https://{primary}/robots.txt")
+    ss, stext = await _http_get(f"https://{primary}/sitemap.xml")
+
+    urls = [f"https://{primary}/"]
+    sample = await _tool_json(registry, "shopify_list_products", {"limit": SEO_SAMPLE_PAGES, "fields": "handle"})
+    urls += [f"https://{primary}/products/{p['handle']}" for p in sample.get("products", []) if p.get("handle")]
+    pages = []
+    for u in urls[:SEO_SAMPLE_PAGES + 1]:
+        st, html = await _http_get(u)
+        if st:
+            pages.append({"url": u, "status": st, **_parse_seo(html)})
+
+    score, metrics = _seo_scorecard(signals, rs, ss, pages)
+    context = {
+        "domain": primary, "computed_seo_score": score, "product_signals": signals,
+        "robots_txt": {"status": rs, "found": rs == 200, "sample": (rtext or "")[:1000]},
+        "sitemap_xml": {"status": ss, "found": ss == 200, "child_locs": (stext or "").count("<loc>")},
+        "sampled_pages": pages,
+    }
+    client = _anthropic()
+    msg = ("Technical SEO audit data for this Shopify store (collected live):\n"
+           + json.dumps(context, indent=2, default=str)
+           + "\n\nProduce the audit now via present_response. Lead with the highest-impact, "
+             "gates-first fixes; be specific to this data; cite the pipeline stage per finding.")
+    resp = await client.messages.create(
+        model=MODEL_FAST, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE,
+        tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
+        messages=[{"role": "user", "content": msg}],
+    )
+    present = next((b.input for b in resp.content
+                    if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
+    structured = _coerce_structured(present or {"summary": "SEO audit complete."})
+    structured.pop("metrics", None)
+    return {"score": score, "metrics": metrics, "structured": structured}
+
+
+# ---------------------------------------------------------------------------
 # Auth: Shopify session token OR dashboard password
 # ---------------------------------------------------------------------------
 
@@ -576,8 +838,9 @@ def _json(data: dict, status: int = 200) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 def add_routes(mcp, registry: dict) -> None:
-    tools = _build_tools(registry)
-    dispatch = _build_dispatch(registry)
+    chat_registry = {**registry, **_build_seo_tools(registry)}  # Shopify tools + live SEO tools
+    tools = _build_tools(chat_registry)
+    dispatch = _build_dispatch(chat_registry)
 
     mode = "embedded (App Bridge)" if SHOPIFY_API_KEY else "standalone (password)"
     logger.info(f"Copilot enabled — mode: {mode}; models: fast={MODEL_FAST}, deep={MODEL_DEEP}; tools: {len(tools)}")
@@ -624,6 +887,8 @@ def add_routes(mcp, registry: dict) -> None:
 
         model = _pick_model(history, bool(body.get("deep")))
         extra = _profile_to_system(_load_profile())
+        if _is_seo(history):
+            extra += "\n\n" + SEO_KNOWLEDGE
         try:
             result = await run_chat(history, dispatch, tools, model, extra)
         except RuntimeError as e:
@@ -675,3 +940,24 @@ def add_routes(mcp, registry: dict) -> None:
                 logger.exception("Profile save failed")
                 return _json({"error": "Couldn't save the profile (is a writable volume mounted at /data?)."}, 500)
         return _json({"profile": _load_profile()})
+
+    @mcp.custom_route("/api/seo", methods=["POST"])
+    async def seo_route(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        ok, _who = _authorize(request, body)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        try:
+            result = await run_seo_audit(registry)
+        except RuntimeError as e:
+            return _json({"error": str(e)}, 500)
+        except anthropic.APIError:
+            logger.exception("Anthropic API error (seo)")
+            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+        except Exception:
+            logger.exception("SEO audit failed")
+            return _json({"error": "Couldn't run the SEO audit. Check the server logs."}, 500)
+        return _json(result)
