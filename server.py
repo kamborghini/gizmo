@@ -114,7 +114,11 @@ class TokenManager:
         self._expires_at: float   = 0.0
         self._lock = asyncio.Lock()
 
-        self._use_client_credentials = bool(client_id and client_secret)
+        # Prefer an explicit static token. client_credentials is only used when
+        # no static token is set — otherwise providing CLIENT_ID/SECRET for App
+        # Bridge embedding would silently switch Admin API auth to a (likely
+        # unscoped) client_credentials grant and break reads.
+        self._use_client_credentials = bool(client_id and client_secret) and not static_token
 
         if self._use_client_credentials:
             logger.info("Token mode: client_credentials (auto-refresh enabled)")

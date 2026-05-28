@@ -37,8 +37,10 @@ logger = logging.getLogger("shopify_mcp.copilot")
 # ---------------------------------------------------------------------------
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL    = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-SHOPIFY_API_KEY    = os.environ.get("SHOPIFY_API_KEY", "")      # app client ID
-SHOPIFY_API_SECRET = os.environ.get("SHOPIFY_API_SECRET", "")   # app client secret
+# App Bridge identity = the app's Client ID + secret. Accept either the
+# SHOPIFY_API_KEY/SECRET names or the SHOPIFY_CLIENT_ID/SECRET names (same values).
+SHOPIFY_API_KEY    = os.environ.get("SHOPIFY_API_KEY") or os.environ.get("SHOPIFY_CLIENT_ID", "")
+SHOPIFY_API_SECRET = os.environ.get("SHOPIFY_API_SECRET") or os.environ.get("SHOPIFY_CLIENT_SECRET", "")
 SHOPIFY_STORE      = os.environ.get("SHOPIFY_STORE", "")        # used to pin session tokens to this shop
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 
