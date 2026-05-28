@@ -215,12 +215,13 @@
         .modal-head { display: flex; align-items: center; padding: 17px 20px; border-bottom: 1px solid var(--border); }
         .modal-head h3 { margin: 0; font-size: 16px; font-weight: 650; flex: 1; letter-spacing: -.01em; }
         .modal-body { padding: 20px; overflow-y: auto; }
-        .field-label { font-size: 13.5px; font-weight: 600; display: block; }
+        .field-label { font-size: 13px; font-weight: 600; display: block; margin-top: 6px; }
         .field-help { font-size: 12.5px; color: var(--ink-2); margin: 4px 0 12px; line-height: 1.5; }
-        #settings-context { width: 100%; min-height: 150px; resize: vertical; border: 1px solid var(--border-2); border-radius: 10px;
-            padding: 12px; font: inherit; font-size: 13.5px; line-height: 1.55; outline: none; color: var(--ink); }
-        #settings-context:focus { border-color: #b9adf8; box-shadow: 0 0 0 3px var(--accent-soft); }
-        .setting-row { display: flex; align-items: center; gap: 16px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+        .pf-input { width: 100%; resize: vertical; border: 1px solid var(--border-2); border-radius: 10px;
+            padding: 9px 11px; font: inherit; font-size: 13px; line-height: 1.5; outline: none; color: var(--ink); margin: 6px 0 12px; }
+        .pf-input:focus { border-color: #b9adf8; box-shadow: 0 0 0 3px var(--accent-soft); }
+        .settings-toggles { margin-top: 6px; }
+        .setting-row { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--border); }
         .setting-row > div:first-child { flex: 1; }
         .setting-title { font-size: 13.5px; font-weight: 550; }
         .setting-sub { font-size: 12px; color: var(--ink-2); margin-top: 2px; line-height: 1.45; }
@@ -282,15 +283,37 @@
                 <button class="icon-btn" id="settings-close" title="Close"></button>
             </div>
             <div class="modal-body">
-                <label class="field-label" for="settings-context">What should the copilot know about your store?</label>
-                <p class="field-help">Persistent instructions added to every chat and the Overview. Describe your business model, priorities, brand voice, and anything to avoid.</p>
-                <textarea id="settings-context" placeholder="e.g. We're print-on-demand with unlimited stock — never give inventory or restock advice. Our focus is AOV and repeat purchases. Brand voice: warm and concise."></textarea>
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-title">Track inventory</div>
-                        <div class="setting-sub">Show low-stock metrics and alerts in the Overview. Turn off if you carry unlimited stock.</div>
+                <p class="field-help" style="margin-top:0">Saved to your store and applied to every chat and the Overview as authoritative context.</p>
+
+                <label class="field-label" for="pf-voice">Brand voice</label>
+                <textarea id="pf-voice" class="pf-input" rows="2" placeholder="e.g. Warm, witty, never pushy. Speaking to eco-conscious millennials."></textarea>
+
+                <label class="field-label" for="pf-goals">Business goals</label>
+                <textarea id="pf-goals" class="pf-input" rows="2" placeholder="e.g. Grow repeat-purchase rate, hit $50k/mo, expand into the EU."></textarea>
+
+                <label class="field-label" for="pf-strategy">Overall strategy</label>
+                <textarea id="pf-strategy" class="pf-input" rows="2" placeholder="e.g. Lead with hero bundles, win on AOV not volume, premium positioning."></textarea>
+
+                <label class="field-label" for="pf-notes">Other notes</label>
+                <textarea id="pf-notes" class="pf-input" rows="2" placeholder="Anything else the copilot should always know — business model, constraints, audience."></textarea>
+
+                <div class="settings-toggles">
+                    <div class="setting-row">
+                        <div><div class="setting-title">Track inventory</div><div class="setting-sub">Show low-stock metrics & advice. Turn off for unlimited stock.</div></div>
+                        <div class="toggle" data-pref="track_inventory"><span class="sw"></span></div>
                     </div>
-                    <div class="toggle" id="settings-track"><span class="sw"></span></div>
+                    <div class="setting-row">
+                        <div><div class="setting-title">Concise responses</div><div class="setting-sub">Prefer short, skimmable answers.</div></div>
+                        <div class="toggle" data-pref="concise"><span class="sw"></span></div>
+                    </div>
+                    <div class="setting-row">
+                        <div><div class="setting-title">Proactive recommendations</div><div class="setting-sub">Always include actions & opportunities.</div></div>
+                        <div class="toggle" data-pref="proactive"><span class="sw"></span></div>
+                    </div>
+                    <div class="setting-row">
+                        <div><div class="setting-title">Flag anomalies</div><div class="setting-sub">Call out risks & unusual changes in the data.</div></div>
+                        <div class="toggle" data-pref="flag_anomalies"><span class="sw"></span></div>
+                    </div>
                 </div>
             </div>
             <div class="modal-foot">
@@ -351,10 +374,18 @@
         try { convos = JSON.parse(localStorage.getItem(LS) || '[]'); } catch (e) { convos = []; }
         const save = () => { try { localStorage.setItem(LS, JSON.stringify(convos)); } catch (e) {} };
 
-        const LS_SET = 'sc_settings_v1';
-        let settings = { context: '', trackInventory: true };
-        try { settings = Object.assign(settings, JSON.parse(localStorage.getItem(LS_SET) || '{}')); } catch (e) {}
-        const saveSettings = () => { try { localStorage.setItem(LS_SET, JSON.stringify(settings)); } catch (e) {} };
+        const LS_SET = 'sc_profile_v1';
+        const DEFAULT_PREFS = { track_inventory: true, concise: false, proactive: true, flag_anomalies: true };
+        let profile = { brand_voice: '', business_goals: '', strategy: '', notes: '', prefs: Object.assign({}, DEFAULT_PREFS) };
+        try { profile = Object.assign(profile, JSON.parse(localStorage.getItem(LS_SET) || '{}')); } catch (e) {}
+        profile.prefs = Object.assign({}, DEFAULT_PREFS, profile.prefs || {});
+        const cacheProfile = () => { try { localStorage.setItem(LS_SET, JSON.stringify(profile)); } catch (e) {} };
+        async function loadProfile() {
+            try {
+                const d = await api('/api/profile', {});
+                if (d && d.profile) { profile = Object.assign(profile, d.profile); profile.prefs = Object.assign({}, DEFAULT_PREFS, d.profile.prefs || {}); cacheProfile(); }
+            } catch (e) { /* keep cached profile */ }
+        }
         const active = () => convos.find(c => c.id === activeId);
         const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
@@ -530,7 +561,7 @@
             $('input').value = ''; $('input').style.height = 'auto';
             renderChat(); busy = true; $('send').disabled = true; showThinking();
             try {
-                const data = await api('/api/chat', { messages: apiHistory(c), deep, context: settings.context });
+                const data = await api('/api/chat', { messages: apiHistory(c), deep });
                 hideThinking();
                 c.turns.push({ role: 'assistant', structured: data.structured || { summary: '(no response)' }, model: data.model });
                 save(); renderChat();
@@ -575,7 +606,7 @@
             hero.append(badge, htext); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; const orb = el('div', 'orb'); t.append(orb, el('span', null, 'Computing live metrics and insights…')); box.append(t);
             try {
-                const data = await api('/api/overview', { context: settings.context, prefs: { track_inventory: settings.trackInventory } });
+                const data = await api('/api/overview', {});
                 overviewCache = { data, at: Date.now() }; renderOverview(overviewCache);
             } catch (e) {
                 box.innerHTML = ''; box.append(hero);
@@ -616,25 +647,43 @@
         $('menu-btn').onclick = openSidebar; $('backdrop').onclick = closeSidebar;
 
         /* ---------- settings (store profile) ---------- */
+        const prefToggles = () => document.querySelectorAll('#settings-modal .toggle[data-pref]');
         function openSettings() {
-            $('settings-context').value = settings.context || '';
-            $('settings-track').classList.toggle('on', settings.trackInventory !== false);
+            $('pf-voice').value = profile.brand_voice || '';
+            $('pf-goals').value = profile.business_goals || '';
+            $('pf-strategy').value = profile.strategy || '';
+            $('pf-notes').value = profile.notes || '';
+            prefToggles().forEach(t => t.classList.toggle('on', !!profile.prefs[t.dataset.pref]));
             $('settings-modal').classList.add('show');
-            $('settings-context').focus();
+            $('pf-voice').focus();
         }
         function closeSettings() { $('settings-modal').classList.remove('show'); }
-        function applySettings() {
-            settings.context = $('settings-context').value.trim();
-            settings.trackInventory = $('settings-track').classList.contains('on');
-            saveSettings(); closeSettings();
-            overviewCache = null; // context/prefs changed — recompute
-            if ($('view-overview').classList.contains('active')) loadOverview(true);
+        async function applySettings() {
+            profile.brand_voice = $('pf-voice').value.trim();
+            profile.business_goals = $('pf-goals').value.trim();
+            profile.strategy = $('pf-strategy').value.trim();
+            profile.notes = $('pf-notes').value.trim();
+            const prefs = {};
+            prefToggles().forEach(t => prefs[t.dataset.pref] = t.classList.contains('on'));
+            profile.prefs = prefs;
+            cacheProfile();
+            const btn = $('settings-save'); btn.disabled = true; btn.textContent = 'Saving…';
+            try {
+                const d = await api('/api/profile', { profile });
+                if (d && d.profile) { profile = d.profile; profile.prefs = Object.assign({}, DEFAULT_PREFS, d.profile.prefs || {}); cacheProfile(); }
+                closeSettings();
+                overviewCache = null; // profile changed — recompute the Overview
+                if ($('view-overview').classList.contains('active')) loadOverview(true);
+                btn.textContent = 'Save profile';
+            } catch (e) {
+                btn.textContent = 'Save failed — retry';
+            } finally { btn.disabled = false; }
         }
         $('settings-btn').onclick = openSettings;
         $('settings-close').onclick = closeSettings;
         $('settings-cancel').onclick = closeSettings;
         $('settings-save').onclick = applySettings;
-        $('settings-track').onclick = function () { this.classList.toggle('on'); };
+        prefToggles().forEach(t => t.onclick = function () { this.classList.toggle('on'); });
         $('settings-modal').onclick = (e) => { if (e.target.id === 'settings-modal') closeSettings(); };
 
         /* ---------- wire up ---------- */
@@ -647,6 +696,7 @@
         input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; });
 
         renderSidebar(); renderChat(); setView('overview');
+        loadProfile();  // pull the saved store profile from the server (for the Settings modal)
 
         // Standalone (password) mode: prompt up front so it isn't hidden behind a click.
         if (MODE !== 'embedded' && !sessionStorage.getItem('dash_pw')) {

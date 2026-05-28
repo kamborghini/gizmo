@@ -56,6 +56,10 @@ MAX_TOOL_ROUNDS    = int(os.environ.get("COPILOT_MAX_TOOL_ROUNDS", "12"))
 MAX_TOKENS         = int(os.environ.get("COPILOT_MAX_TOKENS", "4096"))
 TOOL_RESULT_CAP    = int(os.environ.get("COPILOT_TOOL_RESULT_CAP", "50000"))
 STORE_CONTEXT_CAP  = int(os.environ.get("STORE_CONTEXT_CAP", "4000"))
+# Server-side store profile. Default path lives under /data so a Railway volume
+# mounted there makes it durable across redeploys.
+PROFILE_PATH       = os.environ.get("PROFILE_PATH", "/data/store_profile.json")
+PROFILE_FIELD_CAP  = int(os.environ.get("PROFILE_FIELD_CAP", "6000"))
 
 _PAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "index.html")
 _page_cache: Optional[str] = None
@@ -180,13 +184,74 @@ def _pick_model(messages: list[dict], deep: bool) -> str:
 
 
 def _context_block(context: Optional[str]) -> str:
-    """Format the merchant's Store Profile (custom instructions) as a system addendum."""
+    """Format ad-hoc custom instructions (legacy single-field) as a system addendum."""
     if not context or not str(context).strip():
         return ""
     text = str(context).strip()[:STORE_CONTEXT_CAP]
     return ("\n\n## Store profile — set by the merchant (authoritative)\n"
             "Follow these preferences and constraints in every answer; never contradict them:\n"
             + text)
+
+
+def _load_profile() -> dict:
+    try:
+        with open(PROFILE_PATH, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
+
+
+def _save_profile(data: dict) -> dict:
+    data = data or {}
+    prefs = data.get("prefs") or {}
+    clean = {
+        "brand_voice": str(data.get("brand_voice", ""))[:PROFILE_FIELD_CAP],
+        "business_goals": str(data.get("business_goals", ""))[:PROFILE_FIELD_CAP],
+        "strategy": str(data.get("strategy", ""))[:PROFILE_FIELD_CAP],
+        "notes": str(data.get("notes", ""))[:PROFILE_FIELD_CAP],
+        "prefs": {
+            "track_inventory": bool(prefs.get("track_inventory", True)),
+            "concise": bool(prefs.get("concise", False)),
+            "proactive": bool(prefs.get("proactive", True)),
+            "flag_anomalies": bool(prefs.get("flag_anomalies", True)),
+        },
+    }
+    os.makedirs(os.path.dirname(PROFILE_PATH) or ".", exist_ok=True)
+    tmp = PROFILE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(clean, fh)
+    os.replace(tmp, PROFILE_PATH)
+    return clean
+
+
+def _profile_to_system(p: dict) -> str:
+    """Compose the stored profile into an authoritative system addendum."""
+    if not p:
+        return ""
+    fields = []
+    for key, label in (("brand_voice", "Brand voice"), ("business_goals", "Business goals"),
+                       ("strategy", "Overall strategy"), ("notes", "Other notes")):
+        val = (p.get(key) or "").strip()
+        if val:
+            fields.append(f"- {label}: {val}")
+    prefs = p.get("prefs") or {}
+    rules = []
+    if prefs.get("track_inventory") is False:
+        rules.append("We carry unlimited stock — never give inventory, stock-level, or restock advice.")
+    if prefs.get("concise"):
+        rules.append("Keep answers concise and skimmable; favor short bullets over prose.")
+    if prefs.get("proactive", True):
+        rules.append("Always surface 1–3 concrete recommendations or opportunities, even when not asked.")
+    if prefs.get("flag_anomalies", True):
+        rules.append("Proactively flag anomalies, risks, or unusual changes you notice in the data.")
+    if not fields and not rules:
+        return ""
+    block = "\n\n## Store profile — set by the merchant (authoritative; follow in every answer)\n"
+    if fields:
+        block += "\n".join(fields) + "\n"
+    if rules:
+        block += "Preferences:\n" + "\n".join("- " + r for r in rules)
+    return block
 
 
 # ---------------------------------------------------------------------------
@@ -558,7 +623,7 @@ def add_routes(mcp, registry: dict) -> None:
             return _json({"error": "Provide 'messages' or 'message'"}, 400)
 
         model = _pick_model(history, bool(body.get("deep")))
-        extra = _context_block(body.get("context"))
+        extra = _profile_to_system(_load_profile())
         try:
             result = await run_chat(history, dispatch, tools, model, extra)
         except RuntimeError as e:
@@ -577,10 +642,11 @@ def add_routes(mcp, registry: dict) -> None:
         ok, _who = _authorize(request, body)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
-        extra = _context_block(body.get("context"))
-        prefs = body.get("prefs") or {}
+        profile = _load_profile()
+        extra = _profile_to_system(profile)
+        track = (profile.get("prefs") or {}).get("track_inventory", True)
         try:
-            result = await run_overview(registry, extra, bool(prefs.get("track_inventory", True)))
+            result = await run_overview(registry, extra, bool(track))
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
         except anthropic.APIError:
@@ -590,3 +656,22 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("Overview failed")
             return _json({"error": "Couldn't build the overview. Check the server logs."}, 500)
         return _json(result)
+
+    @mcp.custom_route("/api/profile", methods=["POST"])
+    async def profile_route(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        ok, _who = _authorize(request, body)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        # Save when a profile object is supplied; otherwise just load.
+        if isinstance(body.get("profile"), dict):
+            try:
+                saved = _save_profile(body["profile"])
+                return _json({"profile": saved})
+            except Exception:
+                logger.exception("Profile save failed")
+                return _json({"error": "Couldn't save the profile (is a writable volume mounted at /data?)."}, 500)
+        return _json({"profile": _load_profile()})
