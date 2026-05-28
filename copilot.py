@@ -250,7 +250,11 @@ def _frame_headers(request: Request) -> dict:
         f"https://{shop} https://admin.shopify.com"
         if shop else "https://admin.shopify.com https://*.myshopify.com"
     )
-    return {"Content-Security-Policy": f"frame-ancestors {ancestors};", **_API_HEADERS}
+    return {
+        "Content-Security-Policy": f"frame-ancestors {ancestors};",
+        "Cache-Control": "no-store",  # mode (embedded vs password) is env-dependent — never cache it
+        **_API_HEADERS,
+    }
 
 
 def _json(data: dict, status: int = 200) -> JSONResponse:
