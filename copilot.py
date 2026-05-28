@@ -39,7 +39,11 @@ ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL    = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 SHOPIFY_API_KEY    = os.environ.get("SHOPIFY_API_KEY", "")      # app client ID
 SHOPIFY_API_SECRET = os.environ.get("SHOPIFY_API_SECRET", "")   # app client secret
+SHOPIFY_STORE      = os.environ.get("SHOPIFY_STORE", "")        # used to pin session tokens to this shop
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
+
+# Headers applied to every API/page response (defense in depth).
+_API_HEADERS = {"X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"}
 
 MAX_TOOL_ROUNDS    = int(os.environ.get("COPILOT_MAX_TOOL_ROUNDS", "12"))
 MAX_TOKENS         = int(os.environ.get("COPILOT_MAX_TOKENS", "4096"))
@@ -157,7 +161,7 @@ async def run_chat(history: list[dict], dispatch: Callable, tools: list[dict]) -
         tool_results = []
         for tu in tool_uses:
             tools_used.append(tu.name)
-            logger.info(f"copilot tool call: {tu.name} {tu.input}")
+            logger.info(f"copilot tool call: {tu.name}")  # name only — inputs may contain PII
             result = await dispatch(tu.name, tu.input)
             tool_results.append({
                 "type": "tool_result",
@@ -180,7 +184,7 @@ async def run_chat(history: list[dict], dispatch: Callable, tools: list[dict]) -
 def _verify_session_token(token: str) -> dict:
     if not SHOPIFY_API_SECRET:
         raise RuntimeError("SHOPIFY_API_SECRET not configured")
-    return jwt.decode(
+    claims = jwt.decode(
         token,
         SHOPIFY_API_SECRET,
         algorithms=["HS256"],
@@ -188,6 +192,12 @@ def _verify_session_token(token: str) -> dict:
         leeway=5,
         options={"require": ["exp", "nbf"], "verify_aud": bool(SHOPIFY_API_KEY)},
     )
+    # Defense in depth: only accept tokens minted for this store.
+    if SHOPIFY_STORE:
+        expected = f"https://{SHOPIFY_STORE}.myshopify.com"
+        if claims.get("dest") != expected:
+            raise jwt.InvalidTokenError(f"session token dest mismatch")
+    return claims
 
 
 def _authorize(request: Request, body: dict) -> tuple[bool, Optional[str]]:
@@ -233,13 +243,18 @@ def _render_page() -> str:
 
 
 def _frame_headers(request: Request) -> dict:
-    """CSP so the admin can iframe this page. Must NOT send X-Frame-Options."""
+    """Headers for the chat page: allow the admin iframe (must NOT send
+    X-Frame-Options) and block MIME sniffing / referrer leakage."""
     shop = request.query_params.get("shop")
     ancestors = (
         f"https://{shop} https://admin.shopify.com"
         if shop else "https://admin.shopify.com https://*.myshopify.com"
     )
-    return {"Content-Security-Policy": f"frame-ancestors {ancestors};"}
+    return {"Content-Security-Policy": f"frame-ancestors {ancestors};", **_API_HEADERS}
+
+
+def _json(data: dict, status: int = 200) -> JSONResponse:
+    return JSONResponse(data, status_code=status, headers=_API_HEADERS)
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +271,9 @@ def add_routes(mcp, registry: dict) -> None:
         logger.warning("Copilot: ANTHROPIC_API_KEY not set — chat will return an error until it is.")
     if not SHOPIFY_API_KEY and not DASHBOARD_PASSWORD:
         logger.warning("Copilot: no SHOPIFY_API_SECRET and no DASHBOARD_PASSWORD — /api/chat is locked.")
+    if SHOPIFY_API_SECRET and DASHBOARD_PASSWORD:
+        logger.warning("Copilot: DASHBOARD_PASSWORD is set alongside Shopify auth — consider removing it "
+                       "so access requires signing into Shopify admin.")
 
     @mcp.custom_route("/", methods=["GET"])
     async def index(request: Request):
@@ -270,23 +288,23 @@ def add_routes(mcp, registry: dict) -> None:
         try:
             body = await request.json()
         except Exception:
-            return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+            return _json({"error": "Invalid JSON body"}, 400)
 
         ok, _who = _authorize(request, body)
         if not ok:
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return _json({"error": "Unauthorized"}, 401)
 
         history = body.get("messages")
         if not history and body.get("message"):
             history = [{"role": "user", "content": body["message"]}]
         if not history:
-            return JSONResponse({"error": "Provide 'messages' or 'message'"}, status_code=400)
+            return _json({"error": "Provide 'messages' or 'message'"}, 400)
 
         try:
             result = await run_chat(history, dispatch, tools)
         except RuntimeError as e:
-            return JSONResponse({"error": str(e)}, status_code=500)
-        except anthropic.APIError as e:
-            logger.error(f"Anthropic API error: {e}")
-            return JSONResponse({"error": f"Claude API error: {e}"}, status_code=502)
-        return JSONResponse(result)
+            return _json({"error": str(e)}, 500)
+        except anthropic.APIError:
+            logger.exception("Anthropic API error")
+            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+        return _json(result)

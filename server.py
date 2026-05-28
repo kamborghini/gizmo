@@ -14,11 +14,13 @@ import os
 import logging
 import time
 import asyncio
+import secrets
 from typing import Optional, List, Dict, Any
 from enum import Enum
 import httpx
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from mcp.server.fastmcp import FastMCP
+from starlette.responses import JSONResponse
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -40,6 +42,44 @@ PORT          = int(os.environ.get("PORT", "8000"))
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "streamable-http")
 
 mcp = FastMCP("shopify_mcp", host="0.0.0.0", port=PORT, json_response=True)
+
+
+# ---------------------------------------------------------------------------
+# MCP endpoint authentication (fail-closed)
+# ---------------------------------------------------------------------------
+# The /mcp endpoint exposes every Shopify tool, including destructive writes
+# (delete product, cancel order, set inventory) and full customer/order PII.
+# It must never be open to the internet. Without MCP_BEARER_TOKEN set, /mcp is
+# LOCKED. When set, callers (e.g. the Claude.ai integration) must send
+# `Authorization: Bearer <MCP_BEARER_TOKEN>`.
+MCP_BEARER_TOKEN = os.environ.get("MCP_BEARER_TOKEN", "")
+
+
+class MCPAuthMiddleware:
+    """Pure-ASGI auth gate for /mcp. Kept at the ASGI layer (not
+    BaseHTTPMiddleware) so it never buffers the transport's streaming
+    responses — it only short-circuits unauthorized requests."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            path = scope.get("path", "")
+            if path == "/mcp" or path.startswith("/mcp/"):
+                headers = dict(scope.get("headers") or [])
+                provided = headers.get(b"authorization", b"").decode("latin-1")
+                if not MCP_BEARER_TOKEN:
+                    logger.warning("Blocked /mcp request — MCP_BEARER_TOKEN is not set (endpoint locked).")
+                    await JSONResponse(
+                        {"error": "MCP endpoint is locked. Set MCP_BEARER_TOKEN on the server."},
+                        status_code=503,
+                    )(scope, receive, send)
+                    return
+                if not (provided and secrets.compare_digest(provided, f"Bearer {MCP_BEARER_TOKEN}")):
+                    await JSONResponse({"error": "Unauthorized"}, status_code=401)(scope, receive, send)
+                    return
+        await self.app(scope, receive, send)
 
 
 # ---------------------------------------------------------------------------
@@ -966,4 +1006,13 @@ except Exception as e:
 # Entrypoint
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    mcp.run(transport=MCP_TRANSPORT)
+    if MCP_TRANSPORT == "streamable-http":
+        # Build the ASGI app ourselves so we can wrap /mcp with auth middleware.
+        import uvicorn
+        app = mcp.streamable_http_app()
+        app.add_middleware(MCPAuthMiddleware)
+        if not MCP_BEARER_TOKEN:
+            logger.warning("SECURITY: MCP_BEARER_TOKEN not set — /mcp is locked (returns 503).")
+        uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
+    else:
+        mcp.run(transport=MCP_TRANSPORT)
