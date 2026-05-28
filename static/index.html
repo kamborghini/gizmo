@@ -152,17 +152,20 @@
         }
         function hideTyping(){ const t = document.getElementById('typing'); if (t) t.remove(); }
 
-        async function authHeaders(){
+        async function getAuth(){
+            // Embedded: Shopify session token in a header.
+            // Standalone: password in the request BODY (headers can't hold
+            // arbitrary characters; the body is UTF-8 and accepts anything).
             if (MODE === 'embedded') {
                 const token = await shopify.idToken();
-                return { 'Authorization': 'Bearer ' + token };
+                return { headers: { 'Authorization': 'Bearer ' + token }, body: {} };
             }
             let pw = sessionStorage.getItem('dash_pw');
             if (!pw) {
                 pw = prompt('Enter the dashboard password');
                 if (pw) sessionStorage.setItem('dash_pw', pw);
             }
-            return { 'X-Dashboard-Password': pw || '' };
+            return { headers: {}, body: { password: pw || '' } };
         }
 
         let busy = false;
@@ -176,9 +179,11 @@
             input.value = ''; input.style.height = 'auto';
             setBusy(true); showTyping();
             try {
-                const headers = Object.assign({ 'Content-Type': 'application/json' }, await authHeaders());
+                const auth = await getAuth();
                 const res = await fetch('/api/chat', {
-                    method: 'POST', headers, body: JSON.stringify({ messages: history })
+                    method: 'POST',
+                    headers: Object.assign({ 'Content-Type': 'application/json' }, auth.headers),
+                    body: JSON.stringify(Object.assign({ messages: history }, auth.body))
                 });
                 hideTyping();
                 if (res.status === 401) {
@@ -204,6 +209,12 @@
         input.addEventListener('input', () => {
             input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px';
         });
+
+        // Standalone mode: ask for the password up front so it's obvious.
+        if (MODE !== 'embedded' && !sessionStorage.getItem('dash_pw')) {
+            const pw0 = prompt('Enter the dashboard password to use Store Copilot');
+            if (pw0) sessionStorage.setItem('dash_pw', pw0);
+        }
     </script>
 </body>
 </html>

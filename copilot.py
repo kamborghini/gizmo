@@ -190,8 +190,9 @@ def _verify_session_token(token: str) -> dict:
     )
 
 
-def _authorize(request: Request) -> tuple[bool, Optional[str]]:
-    """Return (ok, who). Accepts a valid Shopify session token or the dashboard password."""
+def _authorize(request: Request, body: dict) -> tuple[bool, Optional[str]]:
+    """Return (ok, who). Accepts a Shopify session token (Bearer header) or the
+    dashboard password (request body, with legacy header fallback)."""
     auth = request.headers.get("authorization", "")
     if auth.startswith("Bearer ") and SHOPIFY_API_SECRET:
         try:
@@ -202,8 +203,9 @@ def _authorize(request: Request) -> tuple[bool, Optional[str]]:
             # fall through to password check
 
     if DASHBOARD_PASSWORD:
-        pw = request.headers.get("x-dashboard-password", "")
-        if pw and secrets.compare_digest(pw, DASHBOARD_PASSWORD):
+        pw = (body or {}).get("password") or request.headers.get("x-dashboard-password", "")
+        # Compare as bytes — secrets.compare_digest raises on non-ASCII strings.
+        if pw and secrets.compare_digest(str(pw).encode("utf-8"), DASHBOARD_PASSWORD.encode("utf-8")):
             return True, "password"
 
     return False, None
@@ -265,13 +267,14 @@ def add_routes(mcp, registry: dict) -> None:
 
     @mcp.custom_route("/api/chat", methods=["POST"])
     async def chat(request: Request):
-        ok, _who = _authorize(request)
-        if not ok:
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
         try:
             body = await request.json()
         except Exception:
             return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+        ok, _who = _authorize(request, body)
+        if not ok:
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
         history = body.get("messages")
         if not history and body.get("message"):
