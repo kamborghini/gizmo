@@ -205,6 +205,26 @@
             .backdrop.show { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.3); z-index: 20; }
             .menu-btn { display: inline-grid; }
         }
+
+        /* ---------- Settings modal ---------- */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(20,20,30,.42); z-index: 50;
+            align-items: center; justify-content: center; padding: 20px; }
+        .modal-overlay.show { display: flex; }
+        .modal { background: var(--surface); border-radius: 16px; box-shadow: var(--sh-2); width: 100%; max-width: 520px;
+            max-height: 90vh; display: flex; flex-direction: column; animation: fadeUp .22s ease; }
+        .modal-head { display: flex; align-items: center; padding: 17px 20px; border-bottom: 1px solid var(--border); }
+        .modal-head h3 { margin: 0; font-size: 16px; font-weight: 650; flex: 1; letter-spacing: -.01em; }
+        .modal-body { padding: 20px; overflow-y: auto; }
+        .field-label { font-size: 13.5px; font-weight: 600; display: block; }
+        .field-help { font-size: 12.5px; color: var(--ink-2); margin: 4px 0 12px; line-height: 1.5; }
+        #settings-context { width: 100%; min-height: 150px; resize: vertical; border: 1px solid var(--border-2); border-radius: 10px;
+            padding: 12px; font: inherit; font-size: 13.5px; line-height: 1.55; outline: none; color: var(--ink); }
+        #settings-context:focus { border-color: #b9adf8; box-shadow: 0 0 0 3px var(--accent-soft); }
+        .setting-row { display: flex; align-items: center; gap: 16px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+        .setting-row > div:first-child { flex: 1; }
+        .setting-title { font-size: 13.5px; font-weight: 550; }
+        .setting-sub { font-size: 12px; color: var(--ink-2); margin-top: 2px; line-height: 1.45; }
+        .modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--border); }
     </style>
 </head>
 <body>
@@ -218,7 +238,8 @@
             <div class="convo-head"><span>Conversations</span>
                 <button class="icon-btn" id="new-convo" title="New conversation"></button></div>
             <div class="convos" id="convos"></div>
-            <div class="side-foot"><span class="dot"></span> Read-only · powered by Claude</div>
+            <div class="side-foot"><span class="dot"></span><span>Read-only · Claude</span>
+                <button class="icon-btn" id="settings-btn" title="Store profile" style="margin-left:auto"></button></div>
         </aside>
         <div class="backdrop" id="backdrop"></div>
 
@@ -254,6 +275,31 @@
         </main>
     </div>
 
+    <div class="modal-overlay" id="settings-modal">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>Store profile</h3>
+                <button class="icon-btn" id="settings-close" title="Close"></button>
+            </div>
+            <div class="modal-body">
+                <label class="field-label" for="settings-context">What should the copilot know about your store?</label>
+                <p class="field-help">Persistent instructions added to every chat and the Overview. Describe your business model, priorities, brand voice, and anything to avoid.</p>
+                <textarea id="settings-context" placeholder="e.g. We're print-on-demand with unlimited stock — never give inventory or restock advice. Our focus is AOV and repeat purchases. Brand voice: warm and concise."></textarea>
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-title">Track inventory</div>
+                        <div class="setting-sub">Show low-stock metrics and alerts in the Overview. Turn off if you carry unlimited stock.</div>
+                    </div>
+                    <div class="toggle" id="settings-track"><span class="sw"></span></div>
+                </div>
+            </div>
+            <div class="modal-foot">
+                <button class="btn" id="settings-cancel">Cancel</button>
+                <button class="btn btn-primary" id="settings-save">Save profile</button>
+            </div>
+        </div>
+    </div>
+
     <script>
     (function () {
         const MODE = "__MODE__";
@@ -278,6 +324,8 @@
             warning: SV('<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>'),
             opportunity: SV('<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline>'),
             insight: SV('<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>'),
+            settings: SV('<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>'),
+            x: SV('<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>'),
         };
         const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
         const ico = (svg) => { const s = el('span'); s.innerHTML = svg; return s; };
@@ -290,6 +338,8 @@
         $('new-convo').innerHTML = I.plus;
         $('menu-btn').innerHTML = I.menu;
         $('send').innerHTML = I.send;
+        $('settings-btn').innerHTML = I.settings;
+        $('settings-close').innerHTML = I.x;
 
         /* ---------- state + storage ---------- */
         const LS = 'sc_convos_v1';
@@ -300,6 +350,11 @@
         let overviewCache = null;
         try { convos = JSON.parse(localStorage.getItem(LS) || '[]'); } catch (e) { convos = []; }
         const save = () => { try { localStorage.setItem(LS, JSON.stringify(convos)); } catch (e) {} };
+
+        const LS_SET = 'sc_settings_v1';
+        let settings = { context: '', trackInventory: true };
+        try { settings = Object.assign(settings, JSON.parse(localStorage.getItem(LS_SET) || '{}')); } catch (e) {}
+        const saveSettings = () => { try { localStorage.setItem(LS_SET, JSON.stringify(settings)); } catch (e) {} };
         const active = () => convos.find(c => c.id === activeId);
         const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
@@ -475,7 +530,7 @@
             $('input').value = ''; $('input').style.height = 'auto';
             renderChat(); busy = true; $('send').disabled = true; showThinking();
             try {
-                const data = await api('/api/chat', { messages: apiHistory(c), deep });
+                const data = await api('/api/chat', { messages: apiHistory(c), deep, context: settings.context });
                 hideThinking();
                 c.turns.push({ role: 'assistant', structured: data.structured || { summary: '(no response)' }, model: data.model });
                 save(); renderChat();
@@ -520,7 +575,7 @@
             hero.append(badge, htext); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; const orb = el('div', 'orb'); t.append(orb, el('span', null, 'Computing live metrics and insights…')); box.append(t);
             try {
-                const data = await api('/api/overview', {});
+                const data = await api('/api/overview', { context: settings.context, prefs: { track_inventory: settings.trackInventory } });
                 overviewCache = { data, at: Date.now() }; renderOverview(overviewCache);
             } catch (e) {
                 box.innerHTML = ''; box.append(hero);
@@ -559,6 +614,28 @@
         function openSidebar() { $('sidebar').classList.add('open'); $('backdrop').classList.add('show'); }
         function closeSidebar() { $('sidebar').classList.remove('open'); $('backdrop').classList.remove('show'); }
         $('menu-btn').onclick = openSidebar; $('backdrop').onclick = closeSidebar;
+
+        /* ---------- settings (store profile) ---------- */
+        function openSettings() {
+            $('settings-context').value = settings.context || '';
+            $('settings-track').classList.toggle('on', settings.trackInventory !== false);
+            $('settings-modal').classList.add('show');
+            $('settings-context').focus();
+        }
+        function closeSettings() { $('settings-modal').classList.remove('show'); }
+        function applySettings() {
+            settings.context = $('settings-context').value.trim();
+            settings.trackInventory = $('settings-track').classList.contains('on');
+            saveSettings(); closeSettings();
+            overviewCache = null; // context/prefs changed — recompute
+            if ($('view-overview').classList.contains('active')) loadOverview(true);
+        }
+        $('settings-btn').onclick = openSettings;
+        $('settings-close').onclick = closeSettings;
+        $('settings-cancel').onclick = closeSettings;
+        $('settings-save').onclick = applySettings;
+        $('settings-track').onclick = function () { this.classList.toggle('on'); };
+        $('settings-modal').onclick = (e) => { if (e.target.id === 'settings-modal') closeSettings(); };
 
         /* ---------- wire up ---------- */
         document.querySelectorAll('.nav-item').forEach(n => n.onclick = () => setView(n.dataset.view));

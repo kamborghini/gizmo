@@ -55,6 +55,7 @@ _API_HEADERS = {"X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-refe
 MAX_TOOL_ROUNDS    = int(os.environ.get("COPILOT_MAX_TOOL_ROUNDS", "12"))
 MAX_TOKENS         = int(os.environ.get("COPILOT_MAX_TOKENS", "4096"))
 TOOL_RESULT_CAP    = int(os.environ.get("COPILOT_TOOL_RESULT_CAP", "50000"))
+STORE_CONTEXT_CAP  = int(os.environ.get("STORE_CONTEXT_CAP", "4000"))
 
 _PAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "index.html")
 _page_cache: Optional[str] = None
@@ -178,6 +179,16 @@ def _pick_model(messages: list[dict], deep: bool) -> str:
     return MODEL_DEEP if any(h in low for h in _DEEP_HINTS) else MODEL_FAST
 
 
+def _context_block(context: Optional[str]) -> str:
+    """Format the merchant's Store Profile (custom instructions) as a system addendum."""
+    if not context or not str(context).strip():
+        return ""
+    text = str(context).strip()[:STORE_CONTEXT_CAP]
+    return ("\n\n## Store profile — set by the merchant (authoritative)\n"
+            "Follow these preferences and constraints in every answer; never contradict them:\n"
+            + text)
+
+
 # ---------------------------------------------------------------------------
 # Anthropic tool schema + dispatch (derived from the injected registry)
 # ---------------------------------------------------------------------------
@@ -241,19 +252,21 @@ def _coerce_structured(data: Any) -> dict:
     return data
 
 
-async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dict], model: str) -> dict:
+async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dict],
+                   model: str, extra_system: str = "") -> dict:
     """Run a multi-step tool-use conversation. The final answer is delivered via
     the present_response tool and returned as a structured dict."""
     client = _anthropic()
     messages = list(history)
     tools_used: list[str] = []
     all_tools = data_tools + [PRESENT_RESPONSE_TOOL]
+    system = SYSTEM_PROMPT + extra_system
 
     for _ in range(MAX_TOOL_ROUNDS):
         resp = await client.messages.create(
             model=model,
             max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
+            system=system,
             tools=all_tools,
             messages=messages,
         )
@@ -326,7 +339,7 @@ def _delta(cur: float, prev: float) -> tuple[Optional[str], str]:
     return (f"{'+' if change >= 0 else ''}{change:.0f}%", trend)
 
 
-async def _compute_metrics(registry: dict) -> tuple[list[dict], dict]:
+async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tuple[list[dict], dict]:
     now = datetime.now(timezone.utc)
     d7, d14 = (now - timedelta(days=7)).isoformat(), (now - timedelta(days=14)).isoformat()
     metrics: list[dict] = []
@@ -359,15 +372,17 @@ async def _compute_metrics(registry: dict) -> tuple[list[dict], dict]:
     if total_products is not None:
         metrics.append({"label": "Products", "value": str(total_products)})
 
-    products = (await _tool_json(registry, "shopify_list_products",
-                                 {"limit": 250, "fields": "id,title,variants"})).get("products", [])
-    low = [
-        {"product": p.get("title"), "variant": v.get("title"), "qty": v.get("inventory_quantity")}
-        for p in products for v in p.get("variants", [])
-        if isinstance(v.get("inventory_quantity"), int) and v["inventory_quantity"] <= LOW_STOCK_THRESHOLD
-    ]
-    metrics.append({"label": f"Low stock (≤{LOW_STOCK_THRESHOLD})", "value": str(len(low)),
-                    "tone": "warn" if low else None})
+    low = []
+    if track_inventory:
+        products = (await _tool_json(registry, "shopify_list_products",
+                                     {"limit": 250, "fields": "id,title,variants"})).get("products", [])
+        low = [
+            {"product": p.get("title"), "variant": v.get("title"), "qty": v.get("inventory_quantity")}
+            for p in products for v in p.get("variants", [])
+            if isinstance(v.get("inventory_quantity"), int) and v["inventory_quantity"] <= LOW_STOCK_THRESHOLD
+        ]
+        metrics.append({"label": f"Low stock (≤{LOW_STOCK_THRESHOLD})", "value": str(len(low)),
+                        "tone": "warn" if low else None})
 
     from collections import Counter
     units = Counter()
@@ -381,21 +396,22 @@ async def _compute_metrics(registry: dict) -> tuple[list[dict], dict]:
         "last_7d": {"revenue": round(rev7, 2), "orders": n7, "aov": round(aov, 2),
                     "unfulfilled": unfulfilled, "new_customers": new_cust},
         "prev_7d": {"revenue": round(revp, 2), "orders": npv},
-        "catalog": {"total_products": total_products, "low_stock_count": len(low),
-                    "low_stock_examples": low[:8]},
+        "catalog": ({"total_products": total_products, "low_stock_count": len(low),
+                     "low_stock_examples": low[:8]} if track_inventory
+                    else {"total_products": total_products, "inventory": "not tracked — unlimited stock"}),
         "top_products_7d": [{"title": t, "units": q} for t, q in units.most_common(5)],
         "note": "Order figures are based on up to 250 orders per 7-day window.",
     }
     return [m for m in metrics if m.get("value") is not None], context
 
 
-async def run_overview(registry: dict) -> dict:
-    metrics, context = await _compute_metrics(registry)
+async def run_overview(registry: dict, extra_system: str = "", track_inventory: bool = True) -> dict:
+    metrics, context = await _compute_metrics(registry, track_inventory)
     client = _anthropic()
     msg = ("Current store KPIs (computed live):\n" + json.dumps(context, indent=2, default=str)
            + "\n\nGive the executive overview now by calling present_response.")
     resp = await client.messages.create(
-        model=MODEL_FAST, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM,
+        model=MODEL_FAST, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
     )
@@ -542,8 +558,9 @@ def add_routes(mcp, registry: dict) -> None:
             return _json({"error": "Provide 'messages' or 'message'"}, 400)
 
         model = _pick_model(history, bool(body.get("deep")))
+        extra = _context_block(body.get("context"))
         try:
-            result = await run_chat(history, dispatch, tools, model)
+            result = await run_chat(history, dispatch, tools, model, extra)
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
         except anthropic.APIError:
@@ -560,8 +577,10 @@ def add_routes(mcp, registry: dict) -> None:
         ok, _who = _authorize(request, body)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        extra = _context_block(body.get("context"))
+        prefs = body.get("prefs") or {}
         try:
-            result = await run_overview(registry)
+            result = await run_overview(registry, extra, bool(prefs.get("track_inventory", True)))
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
         except anthropic.APIError:
