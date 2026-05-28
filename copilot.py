@@ -283,6 +283,14 @@ def add_routes(mcp, registry: dict) -> None:
 
     @mcp.custom_route("/", methods=["GET"])
     async def index(request: Request):
+        # When embedded, only serve the page when it's loaded from Shopify
+        # admin (which always appends shop/host/embedded). A direct browser
+        # visit has none of those — return nothing so the app is invisible
+        # outside the admin. (Real auth is still enforced on /api/chat.)
+        if SHOPIFY_API_KEY:
+            qp = request.query_params
+            if not (qp.get("shop") or qp.get("host") or qp.get("embedded") or qp.get("id_token")):
+                return PlainTextResponse("Not Found", status_code=404, headers=_API_HEADERS)
         return HTMLResponse(_render_page(), headers=_frame_headers(request))
 
     @mcp.custom_route("/healthz", methods=["GET"])
