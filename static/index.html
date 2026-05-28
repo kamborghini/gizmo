@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--APPBRIDGE-->
+    <title>Store Copilot</title>
+    <style>
+        :root {
+            --bg: #f1f1f1; --card: #ffffff; --ink: #1a1a1a; --muted: #616161;
+            --line: #e3e3e3; --accent: #303030; --user: #303030; --bot: #f6f6f7;
+            --green: #007a5c; --danger: #c4351c; --radius: 12px;
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1.5;
+        }
+        .wrap { max-width: 760px; margin: 0 auto; height: 100%; display: flex; flex-direction: column; padding: 16px; }
+        .card {
+            background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+            flex: 1; display: flex; flex-direction: column; overflow: hidden;
+            box-shadow: 0 1px 2px rgba(0,0,0,.05);
+        }
+        header { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+        header .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); }
+        header h1 { font-size: 15px; margin: 0; font-weight: 650; }
+        header .sub { font-size: 12px; color: var(--muted); margin-left: auto; }
+        #log { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+        .msg { display: flex; gap: 10px; max-width: 100%; }
+        .msg .who { font-size: 11px; color: var(--muted); margin-bottom: 3px; text-transform: uppercase; letter-spacing: .04em; }
+        .bubble { padding: 10px 13px; border-radius: 10px; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; }
+        .msg.user { justify-content: flex-end; }
+        .msg.user .bubble { background: var(--user); color: #fff; border-bottom-right-radius: 3px; }
+        .msg.assistant .bubble { background: var(--bot); border: 1px solid var(--line); border-bottom-left-radius: 3px; }
+        .msg.error .bubble { background: #fff1ef; border: 1px solid #f0c2ba; color: var(--danger); }
+        .bubble strong { font-weight: 650; }
+        .bubble code { background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+        .msg.user .bubble code { background: rgba(255,255,255,.18); }
+        .tools { font-size: 11px; color: var(--muted); margin-top: 6px; }
+        .empty { text-align: center; color: var(--muted); margin: auto 0; padding: 20px; }
+        .empty h2 { font-size: 16px; color: var(--ink); margin: 0 0 6px; }
+        .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+        .chip {
+            background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 7px 13px;
+            font-size: 12.5px; cursor: pointer; color: var(--ink); transition: background .12s;
+        }
+        .chip:hover { background: #fafafa; border-color: #c9c9c9; }
+        footer { border-top: 1px solid var(--line); padding: 12px; display: flex; gap: 8px; }
+        #input {
+            flex: 1; resize: none; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px;
+            font: inherit; max-height: 140px; outline: none;
+        }
+        #input:focus { border-color: #9a9a9a; }
+        #send {
+            background: var(--accent); color: #fff; border: 0; border-radius: 9px; padding: 0 18px;
+            font: inherit; font-weight: 600; cursor: pointer;
+        }
+        #send:disabled { opacity: .5; cursor: default; }
+        .typing span { display: inline-block; width: 6px; height: 6px; margin: 0 1px; background: var(--muted);
+            border-radius: 50%; animation: blink 1.2s infinite both; }
+        .typing span:nth-child(2){ animation-delay:.2s } .typing span:nth-child(3){ animation-delay:.4s }
+        @keyframes blink { 0%,80%,100%{opacity:.2} 40%{opacity:1} }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="card">
+            <header>
+                <span class="dot"></span>
+                <h1>Store Copilot</h1>
+                <span class="sub" id="status">read-only · powered by Claude</span>
+            </header>
+            <div id="log">
+                <div class="empty" id="empty">
+                    <h2>Ask anything about your store</h2>
+                    <div>I can read your products, orders, customers and inventory, and suggest improvements.</div>
+                    <div class="chips" id="chips"></div>
+                </div>
+            </div>
+            <footer>
+                <textarea id="input" rows="1" placeholder="Ask about your store, or request suggestions…"></textarea>
+                <button id="send">Send</button>
+            </footer>
+        </div>
+    </div>
+
+    <script>
+        const MODE = "__MODE__";
+        const log = document.getElementById('log');
+        const empty = document.getElementById('empty');
+        const input = document.getElementById('input');
+        const sendBtn = document.getElementById('send');
+        const history = [];
+
+        const STARTERS = [
+            "Suggest 5 improvements to my product titles and descriptions",
+            "Which products are low on or out of stock?",
+            "Summarize my orders from the last 7 days",
+            "Which customers should I re-engage, and why?",
+        ];
+        const chips = document.getElementById('chips');
+        STARTERS.forEach(s => {
+            const b = document.createElement('button');
+            b.className = 'chip'; b.textContent = s;
+            b.onclick = () => { input.value = s; send(); };
+            chips.appendChild(b);
+        });
+
+        function escapeHtml(s){
+            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+        function fmt(s){
+            return escapeHtml(s)
+                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\n/g, '<br>');
+        }
+        function addMsg(role, text, tools){
+            if (empty) empty.style.display = 'none';
+            const wrap = document.createElement('div');
+            wrap.className = 'msg ' + role;
+            const col = document.createElement('div');
+            if (role !== 'user') {
+                const who = document.createElement('div');
+                who.className = 'who';
+                who.textContent = role === 'error' ? 'error' : 'copilot';
+                col.appendChild(who);
+            }
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble';
+            bubble.innerHTML = role === 'user' ? escapeHtml(text) : fmt(text);
+            col.appendChild(bubble);
+            if (tools && tools.length) {
+                const t = document.createElement('div');
+                t.className = 'tools';
+                const uniq = [...new Set(tools)];
+                t.textContent = 'Looked up: ' + uniq.join(', ');
+                col.appendChild(t);
+            }
+            wrap.appendChild(col);
+            log.appendChild(wrap);
+            log.scrollTop = log.scrollHeight;
+            return bubble;
+        }
+        function showTyping(){
+            const wrap = document.createElement('div');
+            wrap.className = 'msg assistant'; wrap.id = 'typing';
+            wrap.innerHTML = '<div><div class="bubble typing"><span></span><span></span><span></span></div></div>';
+            log.appendChild(wrap); log.scrollTop = log.scrollHeight;
+        }
+        function hideTyping(){ const t = document.getElementById('typing'); if (t) t.remove(); }
+
+        async function authHeaders(){
+            if (MODE === 'embedded') {
+                const token = await shopify.idToken();
+                return { 'Authorization': 'Bearer ' + token };
+            }
+            let pw = sessionStorage.getItem('dash_pw');
+            if (!pw) {
+                pw = prompt('Enter the dashboard password');
+                if (pw) sessionStorage.setItem('dash_pw', pw);
+            }
+            return { 'X-Dashboard-Password': pw || '' };
+        }
+
+        let busy = false;
+        function setBusy(b){ busy = b; sendBtn.disabled = b; }
+
+        async function send(){
+            const text = input.value.trim();
+            if (!text || busy) return;
+            addMsg('user', text);
+            history.push({ role: 'user', content: text });
+            input.value = ''; input.style.height = 'auto';
+            setBusy(true); showTyping();
+            try {
+                const headers = Object.assign({ 'Content-Type': 'application/json' }, await authHeaders());
+                const res = await fetch('/api/chat', {
+                    method: 'POST', headers, body: JSON.stringify({ messages: history })
+                });
+                hideTyping();
+                if (res.status === 401) {
+                    sessionStorage.removeItem('dash_pw');
+                    throw new Error('Unauthorized. ' + (MODE === 'embedded' ? 'Open this from inside Shopify admin.' : 'Wrong password — reload to retry.'));
+                }
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                addMsg('assistant', data.reply || '(no response)', data.tools_used);
+                history.push({ role: 'assistant', content: data.reply || '' });
+            } catch (e) {
+                hideTyping();
+                addMsg('error', e.message || String(e));
+            } finally {
+                setBusy(false);
+            }
+        }
+
+        sendBtn.onclick = send;
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+        });
+        input.addEventListener('input', () => {
+            input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px';
+        });
+    </script>
+</body>
+</html>

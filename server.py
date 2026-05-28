@@ -931,6 +931,38 @@ async def shopify_create_webhook(params: CreateWebhookInput) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Store Copilot — embedded Claude chat UI (adds GET / and POST /api/chat)
+# ---------------------------------------------------------------------------
+# Curated READ-ONLY tools exposed to the in-admin chat assistant. Write tools
+# are intentionally excluded so the copilot can analyze and suggest, never
+# mutate the store. The same functions still power the full MCP integration.
+COPILOT_TOOLS = {
+    "shopify_get_shop":              (shopify_get_shop,              EmptyInput),
+    "shopify_list_products":         (shopify_list_products,         ListProductsInput),
+    "shopify_get_product":           (shopify_get_product,           GetProductInput),
+    "shopify_count_products":        (shopify_count_products,        ProductCountInput),
+    "shopify_list_orders":           (shopify_list_orders,           ListOrdersInput),
+    "shopify_get_order":             (shopify_get_order,             GetOrderInput),
+    "shopify_count_orders":          (shopify_count_orders,          OrderCountInput),
+    "shopify_list_customers":        (shopify_list_customers,        ListCustomersInput),
+    "shopify_search_customers":      (shopify_search_customers,      SearchCustomersInput),
+    "shopify_get_customer":          (shopify_get_customer,          GetCustomerInput),
+    "shopify_get_customer_orders":   (shopify_get_customer_orders,   CustomerOrdersInput),
+    "shopify_list_collections":      (shopify_list_collections,      ListCollectionsInput),
+    "shopify_get_collection_products": (shopify_get_collection_products, GetCollectionProductsInput),
+    "shopify_list_locations":        (shopify_list_locations,        ListInventoryLocationsInput),
+    "shopify_get_inventory_levels":  (shopify_get_inventory_levels,  GetInventoryLevelsInput),
+    "shopify_list_webhooks":         (shopify_list_webhooks,         ListWebhooksInput),
+}
+
+try:
+    import copilot
+    copilot.add_routes(mcp, COPILOT_TOOLS)
+except Exception as e:
+    logger.error(f"Store Copilot disabled (chat UI unavailable): {e}")
+
+
+# ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
