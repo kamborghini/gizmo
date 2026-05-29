@@ -64,6 +64,9 @@ ORDER_PAGE_CAP = int(os.environ.get("ORDER_PAGE_CAP", "30"))
 SHOPIFY_API_KEY    = os.environ.get("SHOPIFY_API_KEY") or os.environ.get("SHOPIFY_CLIENT_ID", "")
 SHOPIFY_API_SECRET = os.environ.get("SHOPIFY_API_SECRET") or os.environ.get("SHOPIFY_CLIENT_SECRET", "")
 SHOPIFY_STORE      = os.environ.get("SHOPIFY_STORE", "")        # used to pin session tokens to this shop
+# Public base URL (e.g. https://your-app.up.railway.app). When set, the Google
+# OAuth redirect URI is derived from it rather than the request Host header.
+APP_BASE_URL       = os.environ.get("APP_BASE_URL", "").strip()
 
 # Headers applied to every API/page response (defense in depth).
 _API_HEADERS = {
@@ -1436,11 +1439,18 @@ def _verify_session_token(token: str) -> dict:
         leeway=5,
         options={"require": ["exp", "nbf"], "verify_aud": bool(SHOPIFY_API_KEY)},
     )
+    dest = claims.get("dest") or ""
     # Defense in depth: only accept tokens minted for this store.
     if SHOPIFY_STORE:
         expected = f"https://{SHOPIFY_STORE}.myshopify.com"
-        if claims.get("dest") != expected:
-            raise jwt.InvalidTokenError(f"session token dest mismatch")
+        if dest != expected:
+            raise jwt.InvalidTokenError("session token dest mismatch")
+    # Shopify guidance: the issuer and destination must reference the same shop host.
+    iss = claims.get("iss") or ""
+    if iss and dest:
+        ih, dh = urlparse(iss).netloc, urlparse(dest).netloc
+        if ih and dh and ih != dh:
+            raise jwt.InvalidTokenError("session token iss/dest host mismatch")
     return claims
 
 
@@ -1556,6 +1566,30 @@ def _pre_checks(request: Request, ai: bool = False) -> Optional[JSONResponse]:
     return None
 
 
+async def _read_json_capped(request: Request) -> Optional[dict]:
+    """Read + parse the JSON body, enforcing MAX_BODY_BYTES on the bytes ACTUALLY
+    read (not just the Content-Length header). Returns {} for empty/invalid bodies,
+    or None if the body exceeds the cap (the caller should answer 413). This bounds
+    peak memory even for chunked/unlabeled request bodies."""
+    total, chunks = 0, []
+    try:
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > MAX_BODY_BYTES:
+                return None
+            chunks.append(chunk)
+    except Exception:
+        return {}
+    raw = b"".join(chunks)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # Route registration (mounted onto the existing FastMCP app)
 # ---------------------------------------------------------------------------
@@ -1573,6 +1607,12 @@ def add_routes(mcp, registry: dict) -> None:
     if not SHOPIFY_API_SECRET:
         logger.warning("Copilot: SHOPIFY_API_SECRET/CLIENT_SECRET not set. All API routes are locked "
                        "(session tokens can't be verified).")
+    if not SHOPIFY_API_KEY:
+        logger.warning("Copilot: SHOPIFY_API_KEY/CLIENT_ID not set. Session-token audience (aud) will "
+                       "NOT be verified. Set it so tokens are validated against this app.")
+    if not SHOPIFY_STORE:
+        logger.warning("Copilot: SHOPIFY_STORE not set. Session tokens will NOT be pinned to a specific "
+                       "shop (dest is unverified). Set SHOPIFY_STORE to lock the app to your store.")
 
     @mcp.custom_route("/", methods=["GET"])
     async def index(request: Request):
@@ -1595,14 +1635,12 @@ def add_routes(mcp, registry: dict) -> None:
         pre = _pre_checks(request, ai=True)
         if pre:
             return pre
-        try:
-            body = await request.json()
-        except Exception:
-            return _json({"error": "Invalid JSON body"}, 400)
-
         ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
 
         history = body.get("messages")
         if not history and body.get("message"):
@@ -1639,13 +1677,12 @@ def add_routes(mcp, registry: dict) -> None:
         pre = _pre_checks(request, ai=True)
         if pre:
             return pre
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
         ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
         profile = _load_profile()
         extra = _profile_to_system(profile) + _memory_to_system() + _knowledge_to_system()
         track = (profile.get("prefs") or {}).get("track_inventory", True)
@@ -1666,13 +1703,12 @@ def add_routes(mcp, registry: dict) -> None:
         pre = _pre_checks(request)
         if pre:
             return pre
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
         ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
         # Save when a profile object is supplied; otherwise just load.
         if isinstance(body.get("profile"), dict):
             try:
@@ -1688,13 +1724,12 @@ def add_routes(mcp, registry: dict) -> None:
         pre = _pre_checks(request, ai=True)
         if pre:
             return pre
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
         ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
         extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
         try:
             result = await run_seo_audit(registry, extra)
@@ -1713,13 +1748,12 @@ def add_routes(mcp, registry: dict) -> None:
         pre = _pre_checks(request)
         if pre:
             return pre
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
         ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
         op = body.get("op")
         try:
             if op == "add" and isinstance(body.get("items"), list):
@@ -1738,13 +1772,12 @@ def add_routes(mcp, registry: dict) -> None:
         pre = _pre_checks(request, ai=True)
         if pre:
             return pre
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
         ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
         op = body.get("op")
         if op == "learn":
             try:
@@ -1771,13 +1804,12 @@ def add_routes(mcp, registry: dict) -> None:
         pre = _pre_checks(request)
         if pre:
             return pre
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
         ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
         try:
             months = int(body.get("months") or 0) or None
         except (TypeError, ValueError):
@@ -1793,13 +1825,12 @@ def add_routes(mcp, registry: dict) -> None:
         pre = _pre_checks(request, ai=True)
         if pre:
             return pre
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
         ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
         try:
             pid = int(body.get("product_id"))
         except (TypeError, ValueError):
@@ -1818,6 +1849,10 @@ def add_routes(mcp, registry: dict) -> None:
 
     # ----- Google OAuth connect flow (one-time, secret-gated) -------------
     def _redirect_uri(request: Request) -> str:
+        # Prefer a configured public base URL (must match the URI registered in
+        # Google Cloud) over the attacker-controllable Host header.
+        if APP_BASE_URL:
+            return APP_BASE_URL.rstrip("/") + "/oauth/google/callback"
         host = request.headers.get("host", "")
         return f"https://{host}/oauth/google/callback"
 
@@ -1882,11 +1917,10 @@ def add_routes(mcp, registry: dict) -> None:
         pre = _pre_checks(request)
         if pre:
             return pre
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
         ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
         return _json(google_data.status())

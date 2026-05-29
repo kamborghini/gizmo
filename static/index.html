@@ -1244,7 +1244,7 @@
         }
         function exportCSV(rows) {
             const head = ['Title', 'Status', 'Vendor', 'Type', 'Price', 'Inventory', 'Units (' + pPeriodLabel() + ')', 'Revenue (' + pPeriodLabel() + ')', 'Created', 'Updated'];
-            const esc = (v) => { v = (v == null ? '' : String(v)); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+            const esc = (v) => { v = (v == null ? '' : String(v)); if (/^[=+\-@\t\r]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
             const lines = [head.join(',')];
             rows.forEach(r => { const p = r.p; lines.push([p.title, p.status, p.vendor, p.product_type, p.price, p.inventory, r.units, r.revenue, (p.created_at || '').slice(0, 10), (p.updated_at || '').slice(0, 10)].map(esc).join(',')); });
             const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -1333,7 +1333,8 @@
                 if (!rows.length) { listWrap.append(el('div', 'empty', 'No products match these filters.')); return; }
                 rows.forEach(r => {
                     const p = r.p, row = el('button', 'prod-row');
-                    const th = document.createElement(p.image ? 'img' : 'div'); th.className = 'prod-thumb'; if (p.image) th.src = p.image;
+                    const safeImg = (p.image && /^https:\/\//i.test(p.image)) ? p.image : null;
+                    const th = document.createElement(safeImg ? 'img' : 'div'); th.className = 'prod-thumb'; if (safeImg) th.src = safeImg;
                     const main = el('div', 'prod-main'); main.append(el('div', 'prod-name', p.title || 'Untitled'));
                     const bits = [p.status]; if (p.price) bits.push(fmtMoney(p.price, cur)); if (p.product_type) bits.push(p.product_type); if (p.vendor) bits.push(p.vendor);
                     main.append(el('div', 'prod-sub', bits.filter(Boolean).join(' · ')));

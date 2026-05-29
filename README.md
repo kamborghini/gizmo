@@ -75,7 +75,7 @@ pip install -r requirements.txt
 ### Configure your environment variables
 
 ```bash
-cp .env.example .env
+cp env.example .env
 ```
 
 Open `.env` and fill in your values:
@@ -155,47 +155,27 @@ https://your-app.up.railway.app/mcp
 4. Fill in:
    - **Name:** `Shopify`
    - **URL:** `https://your-app.up.railway.app/mcp`
-5. For the **authentication token** field: leave it blank for now (your server does not require auth by default)
+5. For the **authentication token** field: paste the same value you set for `MCP_BEARER_TOKEN` (see below). The `/mcp` endpoint stays locked until this is set.
 
-> If you want to secure your server with an authentication token (recommended for production), see the section below.
+### The /mcp endpoint is locked by default
 
-### Securing your server with a bearer token (recommended)
+This server fails closed. The `/mcp` endpoint exposes the full Shopify tool set (including writes and customer data), so it returns **503 Service Unavailable** until you set a bearer token. The check is already built into the code (constant-time comparison); there is nothing to add to `server.py`.
 
-By default, anyone who knows your Railway URL can access your MCP server. To protect it, add a bearer token.
+**Step 1 — Set `MCP_BEARER_TOKEN` in Railway:**
 
-**Step 1 — Add a `BEARER_TOKEN` variable in Railway:**
-
-Go to Variables in Railway and add:
+Under Variables, add a long random string:
 
 ```
-BEARER_TOKEN=pick-a-long-random-string-here
+MCP_BEARER_TOKEN=pick-a-long-random-string-here
 ```
 
-**Step 2 — Add auth middleware to `server.py`:**
+Generate one with: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
 
-Add this block right after the line `mcp = FastMCP(...)`:
+**Step 2 — Enter the same value in Claude:**
 
-```python
-import secrets
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+When adding the integration in Claude.ai, paste your `MCP_BEARER_TOKEN` value into the **authentication token** field. Any request without a matching `Authorization: Bearer <token>` header is rejected.
 
-BEARER_TOKEN = os.environ.get("BEARER_TOKEN", "")
-
-class BearerAuthMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        if BEARER_TOKEN:
-            auth = request.headers.get("Authorization", "")
-            if auth != f"Bearer {BEARER_TOKEN}":
-                return Response("Unauthorized", status_code=401)
-        return await call_next(request)
-
-mcp.app.add_middleware(BearerAuthMiddleware)
-```
-
-**Step 3 — Enter the token in Claude:**
-
-When adding the integration in Claude.ai, paste your `BEARER_TOKEN` value into the **authentication token** field.
+> The embedded Store Copilot (the in-admin chat) does not use this token. It is authenticated separately with Shopify session tokens and is strictly read-only.
 
 ---
 
@@ -244,7 +224,9 @@ When adding the integration in Claude.ai, paste your `BEARER_TOKEN` value into t
 | `SHOPIFY_API_VERSION` | No | `2024-10` | Shopify Admin API version |
 | `PORT` | No | `8000` | Port the server listens on |
 | `MCP_TRANSPORT` | No | `streamable-http` | Transport protocol |
-| `BEARER_TOKEN` | No | — | Protects your MCP endpoint (set in both Railway and Claude) |
+| `MCP_BEARER_TOKEN` | Yes for `/mcp` | n/a | Locks the `/mcp` endpoint; `/mcp` returns 503 until set. Use the same value in Claude. |
+
+**Embedded Store Copilot** (the in-admin chat) needs `ANTHROPIC_API_KEY`, `SHOPIFY_API_KEY` (or `SHOPIFY_CLIENT_ID`), `SHOPIFY_API_SECRET` (or `SHOPIFY_CLIENT_SECRET`), and `SHOPIFY_STORE`. Optionally set `APP_BASE_URL` (your public URL) for the Google OAuth redirect. See `env.example` for the full, commented list.
 
 *Either `SHOPIFY_ACCESS_TOKEN` **or** `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` is required.
 
