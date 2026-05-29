@@ -288,6 +288,14 @@
         .chart-tip .tl { color: var(--ink-3); font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
         .chart-tip .tr { display: flex; align-items: center; gap: 7px; color: var(--ink-2); } .chart-tip .tr + .tr { margin-top: 3px; }
         .chart-tip .sw { width: 8px; height: 8px; border-radius: 2px; flex: none; } .chart-tip b { font-weight: 700; color: var(--ink); margin-left: 2px; }
+        .chart-head .cs { font-size: 11px; color: var(--ink-3); margin-top: 3px; display: flex; align-items: center; gap: 6px; }
+        .chart-head .cs .src-dot { width: 7px; height: 7px; border-radius: 2px; flex: none; }
+        .chart-wrap .axis-title { fill: var(--ink-3); font-size: 9.5px; font-family: var(--font); text-transform: uppercase; letter-spacing: .07em; }
+        .chart-avg { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; opacity: .5; }
+        .chart-avg-label, .chart-peak-label { fill: var(--ink-3); font-size: 10px; font-family: var(--font); font-weight: 600; }
+        .chart-bar { transition: opacity .12s; }
+        .chart-end-dot { stroke: var(--surface); stroke-width: 2; }
+        .chart-note { font-size: 11px; color: var(--ink-3); margin-top: 9px; line-height: 1.45; }
         .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
         @media (max-width: 760px) { .charts-grid { grid-template-columns: 1fr; } }
         .chart-anim { animation: chartIn .5s ease backwards; }
@@ -700,70 +708,123 @@
         let _chartSeq = 0;
 
         // opts: {title, value, delta, trend, labels:[], series:[{name,color,values:[]}], format, height, area}
-        function trendChart(opts) {
-            opts = opts || {};
-            const W = 760, H = opts.height || 200, padL = 44, padR = 16, padT = 14, padB = 28;
-            const labels = opts.labels || [];
-            const series = (opts.series || []).filter(s => s && Array.isArray(s.values) && s.values.length);
-            const fmt = opts.format || fmtCompact;
-            const card = el('div', 'chart-card' + (REDUCE_MOTION ? '' : ' chart-anim'));
+        function chartHead(opts, series) {
             const head = el('div', 'chart-head'); const htxt = el('div');
             if (opts.title) htxt.append(el('div', 'ct', opts.title));
+            if (opts.source) { const cs = el('div', 'cs'); const dot = el('span', 'src-dot'); dot.style.background = (series && series[0] && series[0].color) || 'var(--accent)'; cs.append(dot, document.createTextNode('Source: ' + opts.source)); htxt.append(cs); }
             if (opts.value != null) {
                 const v = el('div', 'cv'); v.append(document.createTextNode(opts.value));
                 if (opts.delta) { const d = el('span', 'cd ' + (opts.trend || 'flat')); if (opts.trend === 'up') d.append(ico(I.up)); else if (opts.trend === 'down') d.append(ico(I.down)); d.append(document.createTextNode(opts.delta)); v.append(d); }
                 htxt.append(v);
             }
             head.append(htxt);
-            if (series.length > 1) { const lg = el('div', 'chart-legend'); series.forEach(s => { const it = el('span', 'lg'); const sw = el('span', 'sw'); sw.style.background = s.color || 'var(--accent)'; it.append(sw, document.createTextNode(s.name || '')); lg.append(it); }); head.append(lg); }
-            card.append(head);
+            if (series && series.length > 1) { const lg = el('div', 'chart-legend'); series.forEach(s => { const it = el('span', 'lg'); const sw = el('span', 'sw'); sw.style.background = s.color || 'var(--accent)'; it.append(sw, document.createTextNode(s.name || '')); lg.append(it); }); head.append(lg); }
+            return head;
+        }
+        // Draws gridlines, y-tick labels, x-tick labels, and rotated axis titles. Returns {X, Y}.
+        function drawFrame(svg, c) {
+            const { W, H, padL, padR, padT, padB, n, labels, maxV, fmt } = c;
+            const X = (i) => padL + (n <= 1 ? 0 : (i / (n - 1)) * (W - padL - padR));
+            const Y = (v) => padT + (1 - ((Number(v) || 0) / (maxV || 1))) * (H - padT - padB);
+            const ticks = 4, gy = svgEl('g', { class: 'axis-y' });
+            for (let t = 0; t <= ticks; t++) { const yy = padT + t / ticks * (H - padT - padB); gy.append(svgEl('line', { class: 'gridline', x1: padL, y1: yy, x2: W - padR, y2: yy })); const tx = svgEl('text', { x: padL - 8, y: yy + 3.5, 'text-anchor': 'end' }); tx.textContent = (c.tickFmt || fmt)(maxV * (1 - t / ticks)); gy.append(tx); }
+            svg.append(gy);
+            const gx = svgEl('g', { class: 'axis-x' }), step = Math.max(1, Math.ceil(n / (c.xEvery || 6)));
+            const idxs = []; for (let i = 0; i < n; i += step) idxs.push(i); if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
+            idxs.forEach(i => { const tx = svgEl('text', { x: X(i), y: H - padB + 15, 'text-anchor': 'middle' }); tx.textContent = labels[i]; gx.append(tx); });
+            svg.append(gx);
+            if (c.yUnit) { const cy = padT + (H - padT - padB) / 2; const t = svgEl('text', { class: 'axis-title', x: 12, y: cy, 'text-anchor': 'middle', transform: 'rotate(-90 12 ' + cy.toFixed(1) + ')' }); t.textContent = c.yUnit; svg.append(t); }
+            if (c.xTitle) { const t = svgEl('text', { class: 'axis-title', x: padL + (W - padL - padR) / 2, y: H - 5, 'text-anchor': 'middle' }); t.textContent = c.xTitle; svg.append(t); }
+            return { X, Y };
+        }
+        // Average reference line + peak marker on a single series.
+        function annotate(svg, vals, X, Y, color, fmt, W, padR, padL) {
+            const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1), ya = Y(avg);
+            svg.append(svgEl('line', { class: 'chart-avg', x1: padL, y1: ya, x2: W - padR, y2: ya }));
+            const al = svgEl('text', { class: 'chart-avg-label', x: W - padR, y: ya - 4, 'text-anchor': 'end' }); al.textContent = 'Avg ' + fmt(avg); svg.append(al);
+            let pi = 0; vals.forEach((v, i) => { if (v > vals[pi]) pi = i; });
+            svg.append(svgEl('circle', { cx: X(pi), cy: Y(vals[pi]), r: 3, fill: color }));
+            const pl = svgEl('text', { class: 'chart-peak-label', x: X(pi), y: Y(vals[pi]) - 7, 'text-anchor': X(pi) > W * 0.82 ? 'end' : 'middle' }); pl.textContent = 'Peak ' + fmt(vals[pi]); svg.append(pl);
+        }
+        function trendChart(opts) {
+            opts = opts || {};
+            const W = 760, H = opts.height || 220, padL = 56, padR = 18, padT = 18, padB = 40;
+            const labels = opts.labels || [];
+            const series = (opts.series || []).filter(s => s && Array.isArray(s.values) && s.values.length);
+            const fmt = opts.format || fmtCompact;
+            const card = el('div', 'chart-card' + (REDUCE_MOTION ? '' : ' chart-anim'));
+            card.append(chartHead(opts, series));
             const wrap = el('div', 'chart-wrap'); card.append(wrap);
-            if (!series.length || labels.length < 2) { wrap.append(el('div', 'empty', 'Not enough data to chart yet.')); return card; }
-
+            if (!series.length || labels.length < 2) { wrap.append(el('div', 'empty', 'Not enough data in this range to chart yet.')); return card; }
             const n = labels.length;
             const maxV = niceMax(Math.max.apply(null, series.flatMap(s => s.values).concat([0])));
-            const X = (i) => padL + (i / (n - 1)) * (W - padL - padR);
-            const Y = (v) => padT + (1 - ((Number(v) || 0) / maxV)) * (H - padT - padB);
             const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H });
+            const { X, Y } = drawFrame(svg, { W, H, padL, padR, padT, padB, n, labels, maxV, fmt, tickFmt: opts.tickFormat || fmt, yUnit: opts.yUnit, xTitle: opts.xTitle || 'Month' });
             const uid = 'cg' + (++_chartSeq);
             const defs = svgEl('defs'); const grad = svgEl('linearGradient', { id: uid, x1: 0, y1: 0, x2: 0, y2: 1 });
-            grad.append(svgEl('stop', { offset: '0%', 'stop-color': (series[0].color || '#7b6cff'), 'stop-opacity': '0.30' }));
-            grad.append(svgEl('stop', { offset: '100%', 'stop-color': (series[0].color || '#7b6cff'), 'stop-opacity': '0' }));
+            grad.append(svgEl('stop', { offset: '0%', 'stop-color': series[0].color || '#7b6cff', 'stop-opacity': '0.28' }));
+            grad.append(svgEl('stop', { offset: '100%', 'stop-color': series[0].color || '#7b6cff', 'stop-opacity': '0' }));
             defs.append(grad); svg.append(defs);
-            const axisY = svgEl('g', { class: 'axis-y' });
-            [0, 0.5, 1].forEach(t => { const yy = padT + t * (H - padT - padB); axisY.append(svgEl('line', { class: 'gridline', x1: padL, y1: yy, x2: W - padR, y2: yy })); const tx = svgEl('text', { x: padL - 8, y: yy + 4, 'text-anchor': 'end' }); tx.textContent = fmt(maxV * (1 - t)); axisY.append(tx); });
-            svg.append(axisY);
-            const axisX = svgEl('g', { class: 'axis-x' }); const step = Math.max(1, Math.ceil(n / 6));
-            for (let i = 0; i < n; i += step) { const tx = svgEl('text', { x: X(i), y: H - 8, 'text-anchor': 'middle' }); tx.textContent = labels[i]; axisX.append(tx); }
-            svg.append(axisX);
             const line = (vals) => vals.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join(' ');
-            if (opts.area !== false) { const a = line(series[0].values) + ' L ' + X(n - 1).toFixed(1) + ' ' + (H - padB).toFixed(1) + ' L ' + X(0).toFixed(1) + ' ' + (H - padB).toFixed(1) + ' Z'; svg.append(svgEl('path', { d: a, fill: 'url(#' + uid + ')' })); }
-            series.forEach((s, si) => {
-                const p = svgEl('path', { class: 'chart-line' + (si > 0 ? ' compare' : ''), d: line(s.values), stroke: s.color || (si ? '#6b7280' : '#7b6cff') });
-                if (!REDUCE_MOTION && si === 0) { p.style.strokeDasharray = 1400; p.style.strokeDashoffset = 1400; p.style.animation = 'chartDraw .9s ease forwards'; }
-                svg.append(p);
-            });
+            if (opts.area !== false) { const a = line(series[0].values) + ' L ' + X(n - 1).toFixed(1) + ' ' + Y(0).toFixed(1) + ' L ' + X(0).toFixed(1) + ' ' + Y(0).toFixed(1) + ' Z'; svg.append(svgEl('path', { d: a, fill: 'url(#' + uid + ')' })); }
+            series.forEach((s, si) => { const p = svgEl('path', { class: 'chart-line' + (si > 0 ? ' compare' : ''), d: line(s.values), stroke: s.color || (si ? '#8a93a6' : '#7b6cff') }); if (!REDUCE_MOTION && si === 0) { p.style.strokeDasharray = 1600; p.style.strokeDashoffset = 1600; p.style.animation = 'chartDraw .9s ease forwards'; } svg.append(p); });
+            if (series.length === 1 && opts.annotate !== false) annotate(svg, series[0].values, X, Y, series[0].color || '#7b6cff', fmt, W, padR, padL);
+            series.forEach(s => svg.append(svgEl('circle', { class: 'chart-end-dot', cx: X(n - 1), cy: Y(s.values[n - 1]), r: 3.5, fill: s.color || '#7b6cff' })));
             const hoverLine = svgEl('line', { class: 'chart-hover-line', x1: 0, y1: padT, x2: 0, y2: H - padB, opacity: 0 }); svg.append(hoverLine);
             const dots = series.map(s => { const c = svgEl('circle', { class: 'chart-dot', r: 3.5, fill: s.color || '#7b6cff', opacity: 0 }); svg.append(c); return c; });
             const tip = el('div', 'chart-tip'); wrap.append(tip);
             const overlay = svgEl('rect', { x: padL, y: padT, width: (W - padL - padR), height: (H - padT - padB), fill: 'transparent' }); svg.append(overlay);
             const move = (clientX) => {
                 const rect = svg.getBoundingClientRect(); if (!rect.width) return;
-                const vbX = (clientX - rect.left) / rect.width * W;
-                let i = Math.round((vbX - padL) / (W - padL - padR) * (n - 1)); i = Math.max(0, Math.min(n - 1, i));
+                let i = Math.round(((clientX - rect.left) / rect.width * W - padL) / (W - padL - padR) * (n - 1)); i = Math.max(0, Math.min(n - 1, i));
                 hoverLine.setAttribute('x1', X(i)); hoverLine.setAttribute('x2', X(i)); hoverLine.setAttribute('opacity', 1);
                 dots.forEach((c, si) => { c.setAttribute('cx', X(i)); c.setAttribute('cy', Y(series[si].values[i])); c.setAttribute('opacity', 1); });
                 tip.innerHTML = ''; tip.append(el('div', 'tl', labels[i]));
                 series.forEach(s => { const r = el('div', 'tr'); const sw = el('span', 'sw'); sw.style.background = s.color || '#7b6cff'; r.append(sw); if (series.length > 1) r.append(document.createTextNode(s.name || '')); r.append(el('b', null, fmt(s.values[i]))); tip.append(r); });
-                tip.style.left = (X(i) / W * rect.width) + 'px';
-                tip.style.top = (Math.min.apply(null, series.map(s => Y(s.values[i]))) / H * rect.height) + 'px';
-                tip.style.opacity = 1;
+                tip.style.left = (X(i) / W * rect.width) + 'px'; tip.style.top = (Math.min.apply(null, series.map(s => Y(s.values[i]))) / H * rect.height) + 'px'; tip.style.opacity = 1;
             };
             svg.addEventListener('mousemove', e => move(e.clientX));
             svg.addEventListener('mouseleave', () => { hoverLine.setAttribute('opacity', 0); dots.forEach(c => c.setAttribute('opacity', 0)); tip.style.opacity = 0; });
             svg.addEventListener('touchstart', e => { if (e.touches[0]) move(e.touches[0].clientX); }, { passive: true });
             svg.addEventListener('touchmove', e => { if (e.touches[0]) move(e.touches[0].clientX); }, { passive: true });
             wrap.append(svg);
+            if (opts.note) card.append(el('div', 'chart-note', opts.note));
+            return card;
+        }
+        function barChart(opts) {
+            opts = opts || {};
+            const W = 760, H = opts.height || 230, padL = 56, padR = 18, padT = 18, padB = 40;
+            const labels = opts.labels || [], vals = (opts.values || []).map(v => +v || 0);
+            const fmt = opts.format || fmtCompact, color = opts.color || '#7b6cff';
+            const card = el('div', 'chart-card' + (REDUCE_MOTION ? '' : ' chart-anim'));
+            card.append(chartHead(opts, [{ color }]));
+            const wrap = el('div', 'chart-wrap'); card.append(wrap);
+            if (vals.length < 1) { wrap.append(el('div', 'empty', 'Not enough data in this range to chart yet.')); return card; }
+            const n = vals.length, maxV = niceMax(Math.max.apply(null, vals.concat([0])));
+            const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H });
+            const { X, Y } = drawFrame(svg, { W, H, padL, padR, padT, padB, n, labels, maxV, fmt, tickFmt: opts.tickFormat || fmt, yUnit: opts.yUnit, xTitle: opts.xTitle || 'Month' });
+            const bw = Math.max(2, (W - padL - padR) / n * 0.6), tip = el('div', 'chart-tip'); wrap.append(tip);
+            const bars = vals.map((v, i) => { const y = Y(v), r = svgEl('rect', { class: 'chart-bar', x: (X(i) - bw / 2).toFixed(1), y: y.toFixed(1), width: bw.toFixed(1), height: Math.max(0, Y(0) - y).toFixed(1), rx: 3, fill: color }); svg.append(r); return r; });
+            if (opts.annotate !== false) annotate(svg, vals, X, Y, color, fmt, W, padR, padL);
+            bars.forEach((r, i) => r.addEventListener('mouseenter', () => { bars.forEach(b => b.style.opacity = .38); r.style.opacity = 1; tip.innerHTML = ''; tip.append(el('div', 'tl', labels[i])); const tr = el('div', 'tr'); const sw = el('span', 'sw'); sw.style.background = color; tr.append(sw, el('b', null, fmt(vals[i]))); tip.append(tr); const rect = svg.getBoundingClientRect(); tip.style.left = (X(i) / W * rect.width) + 'px'; tip.style.top = (Y(vals[i]) / H * rect.height) + 'px'; tip.style.opacity = 1; }));
+            svg.addEventListener('mouseleave', () => { bars.forEach(b => b.style.opacity = 1); tip.style.opacity = 0; });
+            wrap.append(svg);
+            if (opts.note) card.append(el('div', 'chart-note', opts.note));
+            return card;
+        }
+        function catBars(opts) {
+            opts = opts || {};
+            const items = (opts.items || []).filter(d => d && d.label).slice(0, 8);
+            const fmt = opts.format || fmtCompact, color = opts.color || '#7b6cff';
+            const card = el('div', 'chart-card' + (REDUCE_MOTION ? '' : ' chart-anim'));
+            card.append(chartHead(opts, [{ color }]));
+            const wrap = el('div', 'chart-wrap'); card.append(wrap);
+            if (!items.length) { wrap.append(el('div', 'empty', 'No breakdown available for this range.')); return card; }
+            const max = Math.max.apply(null, items.map(d => +d.value || 0).concat([1]));
+            const bl = el('div', 'barlist'); bl.style.marginTop = '4px';
+            items.forEach(d => { const row = el('div', 'barrow'); row.append(el('div', 'bn', d.label)); const tr = el('div', 'bartrack'); const i = el('i'); i.style.width = Math.max(2, (+d.value || 0) / max * 100) + '%'; i.style.background = color; tr.append(i); row.append(tr, el('div', 'bv', fmt(d.value))); bl.append(row); });
+            wrap.append(bl);
+            if (opts.note) card.append(el('div', 'chart-note', opts.note));
             return card;
         }
 
@@ -792,34 +853,59 @@
             if (onRange) row.append(segControl(RANGE_OPTS, range, onRange));
             return row;
         }
+        const _avg = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
         function renderTrendsBlock(box, trends, currency, range, onRange) {
             box.append(trendsHeader('Performance over time', range, onRange));
-            if (!trends || !((trends.revenue && trends.revenue.length) || (trends.sessions && trends.sessions.length) || (trends.clicks && trends.clicks.length))) {
-                box.append(el('div', 'empty', 'Trends populate as orders accrue and Google is connected. Up to 24 months of history are shown here.')); return;
+            const has = (k) => trends && trends[k] && trends[k].length;
+            if (!trends || !(has('revenue') || has('orders') || has('sessions') || has('clicks'))) {
+                box.append(el('div', 'empty', 'Trends populate after you run the overview, as orders accrue and Google is connected. Up to 24 months of history are shown here.')); return;
             }
-            const moneyShort = (n) => fmtCompact(n) + (currency ? ' ' + currency : '');
-            if (trends.revenue && trends.revenue.length) {
-                const r = tail(trends.revenue, range);
-                box.append(trendChart({ title: 'Revenue', value: moneyShort(sumv(r)), labels: r.map(p => monthLabel(p.label)), series: [{ name: 'Revenue', color: '#7b6cff', values: r.map(p => +p.value || 0) }], format: moneyShort, height: 210 }));
-            }
-            const pair = [];
-            if (trends.sessions && trends.sessions.length) pair.push({ t: 'Sessions', c: '#22d3ee', d: tail(trends.sessions, range) });
-            if (trends.clicks && trends.clicks.length) pair.push({ t: 'Search clicks', c: '#34d399', d: tail(trends.clicks, range) });
-            if (pair.length) {
-                const grid = el('div', 'charts-grid');
-                pair.forEach(p => grid.append(trendChart({ title: p.t, value: fmtCompact(sumv(p.d)), labels: p.d.map(x => monthLabel(x.label)), series: [{ name: p.t, color: p.c, values: p.d.map(x => +x.value || 0) }], height: 230 })));
-                box.append(grid);
-            }
+            const money = (n) => fmtCompact(n) + (currency ? ' ' + currency : '');
+            const pct = (n) => (Math.round((+n || 0) * 10) / 10) + '%';
+            const num1 = (n) => String(Math.round((+n || 0) * 10) / 10);
+            const cur = currency || 'Revenue';
+            const S = (k) => tail(trends[k], range), L = (a) => a.map(p => monthLabel(p.label)), V = (a) => a.map(p => +p.value || 0);
+
+            // --- Shopify: revenue, orders, AOV ---
+            if (has('revenue')) { const a = S('revenue'); box.append(trendChart({ title: 'Revenue', source: 'Shopify orders', yUnit: cur, value: money(sumv(a)), labels: L(a), series: [{ name: 'Revenue', color: '#7b6cff', values: V(a) }], format: money, tickFormat: fmtCompact, height: 220 })); }
+            const g1 = el('div', 'charts-grid');
+            if (has('orders')) { const a = S('orders'); g1.append(barChart({ title: 'Orders', source: 'Shopify orders', yUnit: 'Orders', value: fmtCompact(sumv(a)), labels: L(a), values: V(a), color: '#9b7cff', format: fmtCompact, height: 230 })); }
+            if (has('aov')) { const a = S('aov'); g1.append(trendChart({ title: 'Average order value', source: 'Shopify orders', yUnit: cur, value: money(_avg(V(a))), labels: L(a), series: [{ name: 'AOV', color: '#22d3ee', values: V(a) }], format: money, tickFormat: fmtCompact, height: 230 })); }
+            if (g1.children.length) box.append(g1);
+
+            // --- Google Analytics 4: sessions, pageviews, channels ---
+            const g2 = el('div', 'charts-grid');
+            if (has('sessions')) { const a = S('sessions'); g2.append(trendChart({ title: 'Sessions', source: 'Google Analytics 4', yUnit: 'Sessions', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Sessions', color: '#22d3ee', values: V(a) }], format: fmtCompact, height: 230 })); }
+            if (has('pageviews')) { const a = S('pageviews'); g2.append(trendChart({ title: 'Pageviews', source: 'Google Analytics 4', yUnit: 'Views', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Views', color: '#38bdf8', values: V(a) }], format: fmtCompact, height: 230 })); }
+            if (g2.children.length) box.append(g2);
+            if (has('channels')) box.append(catBars({ title: 'Traffic by channel', source: 'Google Analytics 4 (range total)', color: '#7b6cff', items: trends.channels, format: fmtCompact }));
+
+            // --- Search Console: clicks, impressions, CTR, position ---
+            const g3 = el('div', 'charts-grid');
+            if (has('clicks')) { const a = S('clicks'); g3.append(trendChart({ title: 'Search clicks', source: 'Google Search Console', yUnit: 'Clicks', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Clicks', color: '#34d399', values: V(a) }], format: fmtCompact, height: 230 })); }
+            if (has('impressions')) { const a = S('impressions'); g3.append(trendChart({ title: 'Impressions', source: 'Google Search Console', yUnit: 'Impressions', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Impressions', color: '#34d399', values: V(a) }], format: fmtCompact, height: 230 })); }
+            if (g3.children.length) box.append(g3);
+            const g4 = el('div', 'charts-grid');
+            if (has('ctr')) { const a = S('ctr'); g4.append(trendChart({ title: 'Search click-through rate', source: 'Google Search Console', yUnit: 'CTR %', value: pct(_avg(V(a))), labels: L(a), series: [{ name: 'CTR', color: '#fbbf24', values: V(a) }], format: pct, height: 230, annotate: false })); }
+            if (has('position')) { const a = S('position'); g4.append(trendChart({ title: 'Average Google position', source: 'Google Search Console', yUnit: 'Position', value: num1(_avg(V(a))), labels: L(a), series: [{ name: 'Position', color: '#f472b6', values: V(a) }], format: num1, height: 230, area: false, annotate: false, note: 'Lower is better. Position 1 is the top of search results.' })); }
+            if (g4.children.length) box.append(g4);
         }
         function renderSeoTrends(box, trends, range, onRange) {
             box.append(trendsHeader('Search performance over time', range, onRange));
-            if (!trends || !((trends.clicks && trends.clicks.length) || (trends.impressions && trends.impressions.length))) {
+            const has = (k) => trends && trends[k] && trends[k].length;
+            if (!trends || !(has('clicks') || has('impressions'))) {
                 box.append(el('div', 'empty', 'Connect Google Search Console to chart search trends. Google provides up to 16 months of history.')); return;
             }
-            const grid = el('div', 'charts-grid');
-            if (trends.clicks && trends.clicks.length) { const c = tail(trends.clicks, range); grid.append(trendChart({ title: 'Clicks', value: fmtCompact(sumv(c)), labels: c.map(x => monthLabel(x.label)), series: [{ name: 'Clicks', color: '#34d399', values: c.map(x => +x.value || 0) }], height: 230 })); }
-            if (trends.impressions && trends.impressions.length) { const m = tail(trends.impressions, range); grid.append(trendChart({ title: 'Impressions', value: fmtCompact(sumv(m)), labels: m.map(x => monthLabel(x.label)), series: [{ name: 'Impressions', color: '#7b6cff', values: m.map(x => +x.value || 0) }], height: 230 })); }
-            box.append(grid);
+            const pct = (n) => (Math.round((+n || 0) * 10) / 10) + '%', num1 = (n) => String(Math.round((+n || 0) * 10) / 10);
+            const S = (k) => tail(trends[k], range), L = (a) => a.map(p => monthLabel(p.label)), V = (a) => a.map(p => +p.value || 0);
+            const g1 = el('div', 'charts-grid');
+            if (has('clicks')) { const a = S('clicks'); g1.append(trendChart({ title: 'Clicks', source: 'Google Search Console', yUnit: 'Clicks', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Clicks', color: '#34d399', values: V(a) }], format: fmtCompact, height: 230 })); }
+            if (has('impressions')) { const a = S('impressions'); g1.append(trendChart({ title: 'Impressions', source: 'Google Search Console', yUnit: 'Impressions', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Impressions', color: '#7b6cff', values: V(a) }], format: fmtCompact, height: 230 })); }
+            box.append(g1);
+            const g2 = el('div', 'charts-grid');
+            if (has('ctr')) { const a = S('ctr'); g2.append(trendChart({ title: 'Click-through rate', source: 'Google Search Console', yUnit: 'CTR %', value: pct(_avg(V(a))), labels: L(a), series: [{ name: 'CTR', color: '#fbbf24', values: V(a) }], format: pct, height: 230, annotate: false })); }
+            if (has('position')) { const a = S('position'); g2.append(trendChart({ title: 'Average position', source: 'Google Search Console', yUnit: 'Position', value: num1(_avg(V(a))), labels: L(a), series: [{ name: 'Position', color: '#f472b6', values: V(a) }], format: num1, height: 230, area: false, annotate: false, note: 'Lower is better. Position 1 is the top of search results.' })); }
+            if (g2.children.length) box.append(g2);
         }
 
         /* ---------- chat rendering ---------- */
@@ -1290,8 +1376,8 @@
                 box.append(el('div', 'section-title', 'Performance over time'));
                 const grid = el('div', 'charts-grid');
                 const moneyShort = (n) => fmtCompact(n) + (d.currency ? ' ' + d.currency : '');
-                if (d.trend.revenue && d.trend.revenue.length) { const r = d.trend.revenue; grid.append(trendChart({ title: 'Revenue', value: moneyShort(sumv(r)), labels: r.map(x => monthLabel(x.label)), series: [{ name: 'Revenue', color: '#7b6cff', values: r.map(x => +x.value || 0) }], format: moneyShort, height: 230 })); }
-                if (d.trend.units && d.trend.units.length) { const u = d.trend.units; grid.append(trendChart({ title: 'Units sold', value: fmtCompact(sumv(u)), labels: u.map(x => monthLabel(x.label)), series: [{ name: 'Units', color: '#22d3ee', values: u.map(x => +x.value || 0) }], height: 230 })); }
+                if (d.trend.revenue && d.trend.revenue.length) { const r = d.trend.revenue; grid.append(trendChart({ title: 'Revenue', source: 'Shopify orders', yUnit: (d.currency || 'Revenue'), value: moneyShort(sumv(r)), labels: r.map(x => monthLabel(x.label)), series: [{ name: 'Revenue', color: '#7b6cff', values: r.map(x => +x.value || 0) }], format: moneyShort, tickFormat: fmtCompact, height: 230 })); }
+                if (d.trend.units && d.trend.units.length) { const u = d.trend.units; grid.append(barChart({ title: 'Units sold', source: 'Shopify orders', yUnit: 'Units', value: fmtCompact(sumv(u)), labels: u.map(x => monthLabel(x.label)), values: u.map(x => +x.value || 0), color: '#22d3ee', format: fmtCompact, height: 230 })); }
                 box.append(grid);
             }
             if (Array.isArray(s.actions) && s.actions.length) { box.append(el('div', 'section-title', 'Top opportunities')); box.append(actionsCard(s.actions)); }

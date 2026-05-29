@@ -774,26 +774,47 @@ async def _overview_trends(registry: dict) -> dict:
     Google (single cheap calls, up to 24/16 months); falls back to Shopify orders
     for revenue when Google is not connected. Always degrades to {} gracefully."""
     trends: dict = {}
+    # Shopify monthly revenue + orders + average order value (one bounded order pull).
+    try:
+        months = _month_axis(min(TREND_MONTHS, 12))
+        orders = await _paginate_orders(registry, days=len(months) * 31)
+        rev = {mk: 0.0 for mk in months}
+        cnt = {mk: 0 for mk in months}
+        for o in orders:
+            mk = _month_key(o.get("created_at"))
+            if mk in rev:
+                rev[mk] += float(o.get("total_price") or 0)
+                cnt[mk] += 1
+        if any(rev[mk] for mk in months):
+            trends["revenue"] = [{"label": mk, "value": round(rev[mk], 2)} for mk in months]
+            trends["orders"] = [{"label": mk, "value": cnt[mk]} for mk in months]
+            trends["aov"] = [{"label": mk, "value": round(rev[mk] / cnt[mk], 2) if cnt[mk] else 0} for mk in months]
+    except Exception:
+        logger.exception("overview shopify trends failed")
+    # Google Analytics 4: sessions, pageviews, engaged, channel mix (+ revenue fallback).
     try:
         if google_data.ga4_configured():
             ts = await google_data.ga4_timeseries(min(TREND_MONTHS, 24) * 31)
             if ts and not ts.get("error"):
-                if ts.get("sessions"):
-                    trends["sessions"] = ts["sessions"]
-                if ts.get("revenue") and any(p.get("value") for p in ts["revenue"]):
+                for k in ("sessions", "pageviews", "engaged"):
+                    if ts.get(k):
+                        trends[k] = ts[k]
+                if ts.get("channels"):
+                    trends["channels"] = ts["channels"]
+                if "revenue" not in trends and ts.get("revenue") and any(p.get("value") for p in ts["revenue"]):
                     trends["revenue"] = ts["revenue"]
+    except Exception:
+        logger.exception("overview ga4 trends failed")
+    # Search Console: clicks, impressions, CTR, average position.
+    try:
         if google_data.gsc_configured():
             gts = await google_data.gsc_timeseries(480)
-            if gts and not gts.get("error") and gts.get("clicks"):
-                trends["clicks"] = gts["clicks"]
-        if "revenue" not in trends:
-            months = _month_axis(min(TREND_MONTHS, 12))
-            orders = await _paginate_orders(registry, days=len(months) * 31)
-            rev = _orders_monthly_revenue(orders, months)
-            if any(p["value"] for p in rev):
-                trends["revenue"] = rev
+            if gts and not gts.get("error"):
+                for k in ("clicks", "impressions", "ctr", "position"):
+                    if gts.get(k):
+                        trends[k] = gts[k]
     except Exception:
-        logger.exception("overview trends failed")
+        logger.exception("overview gsc trends failed")
     return trends
 
 
@@ -1154,10 +1175,9 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
         if google_data.gsc_configured():
             gts = await google_data.gsc_timeseries(480)
             if gts and not gts.get("error"):
-                if gts.get("clicks"):
-                    seo_trends["clicks"] = gts["clicks"]
-                if gts.get("impressions"):
-                    seo_trends["impressions"] = gts["impressions"]
+                for k in ("clicks", "impressions", "ctr", "position"):
+                    if gts.get(k):
+                        seo_trends[k] = gts[k]
     except Exception:
         logger.exception("seo trends failed")
     return {"score": score, "metrics": metrics, "structured": structured, "trends": seo_trends}

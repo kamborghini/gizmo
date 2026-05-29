@@ -308,33 +308,53 @@ async def ga4_summary(days: int = 28) -> dict:
 # ---------------------------------------------------------------------------
 
 async def ga4_timeseries(days: int = 760) -> dict:
-    """Monthly sessions + revenue for up to ~24 months (GA4 'yearMonth' dimension)."""
+    """Monthly sessions, revenue, engaged sessions and pageviews for up to ~24 months
+    (GA4 'yearMonth'), plus a channel breakdown over the whole range."""
     if not ga4_configured():
         return {}
     days = max(28, min(int(days), 760))
+    out: dict = {}
     try:
         data = await _post(_ga4_url(), {
             "dateRanges": [{"startDate": f"{days}daysAgo", "endDate": "yesterday"}],
             "dimensions": [{"name": "yearMonth"}],
-            "metrics": [{"name": "sessions"}, {"name": "totalRevenue"}],
+            "metrics": [{"name": "sessions"}, {"name": "totalRevenue"},
+                        {"name": "engagedSessions"}, {"name": "screenPageViews"}],
             "orderBys": [{"dimension": {"dimensionName": "yearMonth"}}],
             "limit": 100,
         })
-        sessions, revenue = [], []
+        sessions, revenue, engaged, pageviews = [], [], [], []
         for r in data.get("rows", []):
             ym = (r.get("dimensionValues") or [{}])[0].get("value", "")   # "202501"
             if len(ym) != 6:
                 continue
             label = f"{ym[:4]}-{ym[4:]}"
-            vals = r.get("metricValues") or []
-            sessions.append({"label": label, "value": int(float(vals[0]["value"])) if len(vals) > 0 else 0})
-            revenue.append({"label": label, "value": round(float(vals[1]["value"]), 2) if len(vals) > 1 else 0.0})
-        return {"sessions": sessions, "revenue": revenue}
+            v = r.get("metricValues") or []
+            g = lambda i: float(v[i]["value"]) if len(v) > i else 0.0
+            sessions.append({"label": label, "value": int(g(0))})
+            revenue.append({"label": label, "value": round(g(1), 2)})
+            engaged.append({"label": label, "value": int(g(2))})
+            pageviews.append({"label": label, "value": int(g(3))})
+        out = {"sessions": sessions, "revenue": revenue, "engaged": engaged, "pageviews": pageviews}
     except GoogleAPIError as e:
         return {"error": str(e)}
     except Exception as e:
         logger.warning(f"GA4 timeseries failed: {e}")
         return {}
+    try:
+        ch = await _post(_ga4_url(), {
+            "dateRanges": [{"startDate": f"{days}daysAgo", "endDate": "yesterday"}],
+            "dimensions": [{"name": "sessionDefaultChannelGroup"}],
+            "metrics": [{"name": "sessions"}],
+            "orderBys": [{"metric": {"metricName": "sessions"}, "desc": True}],
+            "limit": 8,
+        })
+        out["channels"] = [{"label": (r.get("dimensionValues") or [{}])[0].get("value", "Other"),
+                            "value": int(float((r.get("metricValues") or [{}])[0].get("value", 0)))}
+                           for r in ch.get("rows", [])]
+    except Exception:
+        pass
+    return out
 
 
 async def gsc_timeseries(days: int = 480) -> dict:
@@ -348,16 +368,22 @@ async def gsc_timeseries(days: int = 480) -> dict:
                                         "dimensions": ["date"], "rowLimit": 500, "dataState": "all"})
         clicks_m: dict = {}
         impr_m: dict = {}
+        pos_w: dict = {}    # sum(position * impressions) per month, for an impression-weighted avg
         for r in data.get("rows", []):
             d = (r.get("keys") or [""])[0]    # "YYYY-MM-DD"
             if len(d) < 7:
                 continue
             mk = d[:7]
-            clicks_m[mk] = clicks_m.get(mk, 0) + int(r.get("clicks", 0))
-            impr_m[mk] = impr_m.get(mk, 0) + int(r.get("impressions", 0))
-        clicks = [{"label": k, "value": v} for k, v in sorted(clicks_m.items())]
-        impressions = [{"label": k, "value": v} for k, v in sorted(impr_m.items())]
-        return {"clicks": clicks, "impressions": impressions}
+            c = int(r.get("clicks", 0)); imp = int(r.get("impressions", 0))
+            clicks_m[mk] = clicks_m.get(mk, 0) + c
+            impr_m[mk] = impr_m.get(mk, 0) + imp
+            pos_w[mk] = pos_w.get(mk, 0.0) + float(r.get("position", 0)) * imp
+        ks = sorted(clicks_m.keys())
+        clicks = [{"label": k, "value": clicks_m[k]} for k in ks]
+        impressions = [{"label": k, "value": impr_m[k]} for k in ks]
+        ctr = [{"label": k, "value": round(clicks_m[k] / impr_m[k] * 100, 2) if impr_m[k] else 0} for k in ks]
+        position = [{"label": k, "value": round(pos_w[k] / impr_m[k], 1) if impr_m[k] else 0} for k in ks]
+        return {"clicks": clicks, "impressions": impressions, "ctr": ctr, "position": position}
     except GoogleAPIError as e:
         return {"error": str(e)}
     except Exception as e:
