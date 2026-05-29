@@ -88,35 +88,42 @@ MEMORY_INJECT      = int(os.environ.get("MEMORY_INJECT", "25"))  # max of each k
 _PAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "index.html")
 _page_cache: Optional[str] = None
 
+WRITING_STYLE = ("Write in clear, plain text. Never use em dashes or en dashes anywhere. "
+                 "Use commas, periods, or parentheses instead, and 'to' or a hyphen for ranges "
+                 "(for example '1 to 2 sentences', 'position 5-15'). Be concise and scannable.")
+
 SYSTEM_PROMPT = """You are Store Copilot, a senior e-commerce analyst embedded in the admin of a \
-Shopify store. You help the merchant understand and grow their store.
+Shopify store. You help the merchant understand and grow their store and make more money.
 
 How you work:
-- Always ground answers in real data — use the read tools to look things up before making any claim, \
+- Always ground answers in real data. Use the read tools to look things up before making any claim, \
 number, or suggestion. Never invent figures, product names, or IDs. Call shopify_get_shop when you \
 need the store's currency or timezone.
 - You have READ-ONLY access. You cannot create, update, or delete anything. If asked to make a change, \
 explain exactly what to change and where in the admin to do it, but be clear you can't perform writes.
 - Gather data efficiently: request multiple tools in parallel when they're independent.
 
-How you answer — IMPORTANT:
+How you answer (IMPORTANT):
 - When you have what you need, you MUST deliver your final answer by calling the `present_response` \
 tool. Do not write the final answer as plain prose. Everything the merchant sees comes from that call.
-- Put the headline in `summary` (1–2 sentences). Use `metrics` for the key numbers, `insights` for \
+- Put the headline in `summary` (1 to 2 sentences). Use `metrics` for the key numbers, `insights` for \
 notable findings (type them as win/warning/opportunity/insight), `sections` for supporting detail, \
-`actions` for concrete prioritized recommendations, and `followups` for 2–4 natural next questions.
+`actions` for concrete prioritized recommendations, and `followups` for 2 to 4 natural next questions.
 - Use the `remember` field to persist durable facts, decisions, and the merchant's stated commitments, \
 so you have continuity in future sessions. If your memory context lists open follow-ups, check in on \
 them naturally and close them out when the merchant indicates they're done.
-- Only include fields that add value — a simple factual answer can be just `summary` (+ maybe a metric \
-or two). Don't pad. Be specific and reference real figures from the store."""
+- Only include fields that add value. A simple factual answer can be just `summary` (plus maybe a metric \
+or two). Do not pad. Be specific, quantify impact in money or percentages where you can, and reference \
+real figures from the store.
+""" + WRITING_STYLE
 
 OVERVIEW_SYSTEM = """You are a senior Shopify analyst writing an executive overview. You are given the \
 store's current KPIs (already computed from live data). Identify what truly matters: wins, risks or \
-anomalies, and the highest-impact opportunities — specific to these numbers, not generic advice. \
-Deliver everything by calling `present_response`: a one-line `summary`, 2–4 `insights` \
-(win/warning/opportunity/insight), 2–4 prioritized `actions`, and 3 `followups` the merchant might ask. \
-Do not restate every metric; interpret them."""
+anomalies, and the highest-impact opportunities, specific to these numbers, not generic advice. \
+Deliver everything by calling `present_response`: a one-line `summary`, 2 to 4 `insights` \
+(win/warning/opportunity/insight), 2 to 4 prioritized `actions`, and 3 `followups` the merchant might ask. \
+Do not restate every metric, interpret them and tie recommendations to revenue impact.
+""" + WRITING_STYLE
 
 # Final-answer tool: forces clean structured output instead of raw markdown.
 PRESENT_RESPONSE_TOOL = {
@@ -400,7 +407,7 @@ def _build_dispatch(registry: dict) -> Callable:
         result = await func(payload)
         result = str(result)
         if len(result) > TOOL_RESULT_CAP:
-            result = result[:TOOL_RESULT_CAP] + "\n…[truncated — narrow your query for more]"
+            result = result[:TOOL_RESULT_CAP] + "\n…[truncated, narrow your query for more]"
         return result
     return dispatch
 
@@ -422,13 +429,29 @@ def _anthropic() -> anthropic.AsyncAnthropic:
     return _client
 
 
+def _strip_dashes(obj: Any) -> Any:
+    """Remove em/en dashes from any model-generated text before it reaches the UI.
+    The prompts already instruct against them; this is the guarantee. En dash to
+    hyphen (ranges), em dash to a comma."""
+    if isinstance(obj, str):
+        s = obj.replace("–", "-")
+        s = re.sub(r"\s*—\s*", ", ", s)
+        return s
+    if isinstance(obj, dict):
+        return {k: _strip_dashes(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_strip_dashes(v) for v in obj]
+    return obj
+
+
 def _coerce_structured(data: Any) -> dict:
-    """Make sure we always hand the UI a dict with at least a summary string."""
+    """Make sure we always hand the UI a dict with at least a summary string,
+    with em/en dashes stripped from all text."""
     if not isinstance(data, dict):
-        return {"summary": str(data)}
+        data = {"summary": str(data)}
     if not isinstance(data.get("summary"), str) or not data["summary"].strip():
         data["summary"] = "Here's what I found."
-    return data
+    return _strip_dashes(data)
 
 
 async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dict],
@@ -630,31 +653,44 @@ async def run_overview(registry: dict, extra_system: str = "", track_inventory: 
 
 SEO_SAMPLE_PAGES = int(os.environ.get("SEO_SAMPLE_PAGES", "5"))
 
-SEO_KNOWLEDGE = """## Technical SEO expertise (apply this model)
-Locate every organic-search issue on the pipeline: Discover → Crawl → Render → Index →
-Understand → Rank → Serve. The first four are GATES (binary): if a page can't be discovered,
-crawled, rendered, or indexed, no ranking work matters — fix gates BEFORE optimizations.
-Prioritize by (business impact × confidence) ÷ effort, favoring template/systemic fixes.
+SEO_KNOWLEDGE = """## Technical SEO + revenue-optimization expertise (apply this model)
+You are the store's optimization intelligence layer. Your job is to help the merchant make more
+money by fusing four data sets: technical SEO, Google Search Console (how the store performs in
+search), Google Analytics (traffic and on-site behavior), and Shopify commerce (orders, revenue,
+products). Find where money is being left on the table and rank fixes by expected revenue impact.
+
+Locate every organic-search issue on the pipeline: Discover, Crawl, Render, Index, Understand,
+Rank, Serve. The first four are GATES (binary): if a page cannot be discovered, crawled, rendered,
+or indexed, no ranking work matters, so fix gates BEFORE optimizations. Prioritize by
+(business impact x confidence) / effort, favoring template and systemic fixes.
+
+High-value cross-referenced opportunities to look for:
+- High impressions + low CTR + mid position (roughly 5 to 15) queries: rewrite the title and meta
+  to win clicks already being shown. Quantify the click upside.
+- Pages or products with strong search/traffic but weak conversion or sales: a merchandising,
+  pricing, or page-quality problem, not a traffic problem.
+- Best-selling products that rank poorly or lack rich-result schema: protect and grow the winners.
+- Traffic with no matching revenue (or vice versa): reconcile GA sessions against Shopify orders.
 
 Correct these on sight:
-- robots.txt Disallow ≠ noindex. Disallow blocks crawling; a disallowed URL can still be
-  indexed. To remove from index: allow crawl + noindex, then optionally block.
+- robots.txt Disallow is not noindex. Disallow blocks crawling; a disallowed URL can still be
+  indexed. To remove from the index: allow crawl plus noindex, then optionally block.
 - Canonical is a hint, not a directive. Duplicate content is selection, not a penalty.
-- Crawl budget is a non-issue below ~100k URLs unless there's severe waste.
-- Core Web Vitals (LCP/CLS/INP, not FID) are a minor tiebreaker, not a primary factor.
-- Rankings ≠ traffic ≠ revenue — optimize for intent and the highest business metric.
+- Crawl budget is a non-issue below roughly 100k URLs unless there is severe waste.
+- Core Web Vitals (LCP, CLS, INP, not FID) are a minor tiebreaker, not a primary factor.
+- Rankings are not traffic, traffic is not revenue. Optimize for the highest business metric.
 
 Shopify-specific traps:
-- Faceted/filter and ?variant= URLs create crawl traps and duplicate clusters — control via
-  canonicals/parameters, don't let them bloat the index.
-- Themes/apps can inject accidental noindex or wrong canonicals — verify the rendered tags.
-- Product/Collection pages need Product/Offer/BreadcrumbList JSON-LD; thin descriptions and
-  missing image alt text weaken Understand-stage signals. Collections are topical pillars —
+- Faceted/filter and ?variant= URLs create crawl traps and duplicate clusters. Control them via
+  canonicals and parameters; do not let them bloat the index.
+- Themes and apps can inject accidental noindex or wrong canonicals. Verify the rendered tags.
+- Product and collection pages need Product, Offer, and BreadcrumbList JSON-LD. Thin descriptions
+  and missing image alt text weaken Understand-stage signals. Collections are topical pillars;
   internal-link them deliberately.
 
-Ground every claim in the supplied data, name the pipeline stage, and give dev-ready fixes.
-Treat Google Search Central / web.dev / schema.org as ground truth when an exact threshold
-or field matters."""
+Ground every claim in the supplied data, cite the supporting numbers, name the pipeline stage,
+and give dev-ready fixes. Treat Google Search Central, web.dev, and schema.org as ground truth
+when an exact threshold or field matters."""
 
 _SEO_HINTS = ("seo", "search engine", "google", "ranking", "rank ", " index", "crawl",
               "robots", "sitemap", "canonical", "meta description", "title tag", "schema",
@@ -872,7 +908,7 @@ def _build_google_tools() -> dict:
             Use this to ground SEO advice in how the store actually performs in Google Search —
             e.g. high-impression, low-CTR, mid-position queries are title/meta rewrite opportunities."""
             if not google_data.gsc_configured():
-                return json.dumps({"error": "Google isn't connected yet — connect it in Settings."})
+                return json.dumps({"error": "Google isn't connected yet. Connect it in Settings."})
             days = params.days or 28
             return json.dumps({"overview": await google_data.gsc_overview(days),
                                "top_queries": await google_data.gsc_top_queries(days)}, default=str)
@@ -884,7 +920,7 @@ def _build_google_tools() -> dict:
             the top traffic channels over the window. Use to ground answers about traffic, acquisition
             and on-site performance in real analytics rather than order data alone."""
             if not google_data.ga4_configured():
-                return json.dumps({"error": "Google isn't connected yet — connect it in Settings."})
+                return json.dumps({"error": "Google isn't connected yet. Connect it in Settings."})
             return json.dumps(await google_data.ga4_summary(params.days or 28), default=str)
         tools["get_ga4_data"] = (get_ga4_data, DaysInput)
 
@@ -916,23 +952,42 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
         "sampled_pages": pages,
     }
 
-    # Real Search Console performance turns the technical audit into opportunity
-    # work (e.g. high-impression, low-CTR queries → title/meta rewrites).
-    gsc_note = ""
+    # Fuse the other data sets so opportunities can be revenue-ranked.
     if google_data.gsc_configured():
-        overview = await google_data.gsc_overview(28)
-        queries = await google_data.gsc_top_queries(28)
-        context["search_console"] = {"overview": overview, "top_queries": queries}
-        if not overview.get("error"):
-            gsc_note = (" Real Search Console data is included — use it: surface specific "
-                        "high-impression / low-CTR / mid-position queries as concrete CTR (title & "
-                        "meta) opportunities, and reconcile them with the on-page findings.")
+        context["search_console"] = {
+            "overview": await google_data.gsc_overview(28),
+            "top_queries": await google_data.gsc_top_queries(28),
+        }
+    if google_data.ga4_configured():
+        context["analytics"] = await google_data.ga4_summary(28)
+
+    # Shopify commerce context: 28-day revenue, orders, and best sellers.
+    shop = await _tool_json(registry, "shopify_get_shop", {})
+    since28 = (datetime.now(timezone.utc) - timedelta(days=28)).isoformat()
+    o28 = (await _tool_json(registry, "shopify_list_orders",
+                            {"status": "any", "created_at_min": since28, "limit": 250})).get("orders", [])
+    from collections import Counter
+    units: Counter = Counter()
+    for o in o28:
+        for li in o.get("line_items", []):
+            if li.get("title"):
+                units[li["title"]] += li.get("quantity") or 0
+    context["commerce"] = {
+        "currency": shop.get("currency"),
+        "revenue_28d": round(sum(float(o.get("total_price") or 0) for o in o28), 2),
+        "orders_28d": len(o28),
+        "top_products_28d": [{"title": t, "units": q} for t, q in units.most_common(8)],
+    }
 
     client = _anthropic()
-    msg = ("Technical SEO audit data for this Shopify store (collected live):\n"
+    msg = ("Optimization intelligence for this Shopify store (collected live, fusing technical SEO, "
+           "Google Search Console, Google Analytics, and Shopify commerce):\n"
            + json.dumps(context, indent=2, default=str)
-           + "\n\nProduce the audit now via present_response. Lead with the highest-impact, "
-             "gates-first fixes; be specific to this data; cite the pipeline stage per finding." + gsc_note)
+           + "\n\nProduce the report now via present_response. Goal: help the merchant make more money. "
+             "Lead with the highest-impact, revenue-ranked opportunities in `actions` (each with the "
+             "supporting numbers and the expected impact). Use `insights` for the most important "
+             "performance issues and wins, cross-referencing the data sets. Fix indexation and crawl "
+             "gates before optimizations. Be specific and quantify in money or percent wherever you can.")
     resp = await client.messages.create(
         model=MODEL_DEEP, max_tokens=MAX_TOKENS,
         system=OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE + extra_system,
@@ -1068,7 +1123,7 @@ def _pre_checks(request: Request, ai: bool = False) -> Optional[JSONResponse]:
     if len(_rl_hits) > 5000:  # guard the dict from unbounded growth
         _rl_hits.clear()
     if not _window_ok(_rl_hits.setdefault(_client_key(request), []), RATE_MAX_CLIENT, now):
-        return _json({"error": "Too many requests — please slow down."}, 429)
+        return _json({"error": "Too many requests. Please slow down."}, 429)
     if ai and not _window_ok(_rl_global, RATE_MAX_GLOBAL, now):
         return _json({"error": "The assistant is busy right now. Please try again shortly."}, 429)
     cl = request.headers.get("content-length", "")
@@ -1090,9 +1145,9 @@ def add_routes(mcp, registry: dict) -> None:
     logger.info(f"Copilot enabled — embedded-only; models: fast={MODEL_FAST}, deep={MODEL_DEEP}; "
                 f"effort={ANTHROPIC_EFFORT}; max_tokens={MAX_TOKENS}; tools: {len(tools)}")
     if not ANTHROPIC_API_KEY:
-        logger.warning("Copilot: ANTHROPIC_API_KEY not set — chat will return an error until it is.")
+        logger.warning("Copilot: ANTHROPIC_API_KEY not set. Chat will return an error until it is.")
     if not SHOPIFY_API_SECRET:
-        logger.warning("Copilot: SHOPIFY_API_SECRET/CLIENT_SECRET not set — all API routes are locked "
+        logger.warning("Copilot: SHOPIFY_API_SECRET/CLIENT_SECRET not set. All API routes are locked "
                        "(session tokens can't be verified).")
 
     @mcp.custom_route("/", methods=["GET"])
@@ -1131,7 +1186,7 @@ def add_routes(mcp, registry: dict) -> None:
         if not history:
             return _json({"error": "Provide 'messages' or 'message'"}, 400)
         if not isinstance(history, list) or len(history) > MAX_MESSAGES:
-            return _json({"error": "Conversation too long — start a new chat."}, 400)
+            return _json({"error": "Conversation too long. Start a new chat."}, 400)
         if len(json.dumps(history)) > MAX_CHAT_CHARS:
             return _json({"error": "Message too large."}, 413)
 
@@ -1304,7 +1359,7 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("Google OAuth exchange error")
             ok = False
         if not ok:
-            return _oauth_page("Connection failed", "Couldn't complete the connection — please try again.")
+            return _oauth_page("Connection failed", "Couldn't complete the connection. Please try again.")
         return _oauth_page("✅ Connected to Google", "Search Console & Analytics are now linked. "
                            "You can close this tab and return to Store Copilot.")
 

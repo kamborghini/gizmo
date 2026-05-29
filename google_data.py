@@ -184,7 +184,7 @@ async def _token() -> str:
                 "refresh_token": rt, "grant_type": "refresh_token",
             })
         if r.status_code != 200:
-            raise RuntimeError("Google OAuth token refresh failed — reconnect Google.")
+            raise RuntimeError("Google OAuth token refresh failed. Reconnect Google.")
         data = r.json()
         _access["token"] = data["access_token"]
         _access["exp"] = time.monotonic() + int(data.get("expires_in", 3600)) - 60
@@ -291,7 +291,7 @@ async def ga4_summary(days: int = 28) -> dict:
             "orderBys": [{"metric": {"metricName": "sessions"}, "desc": True}],
             "limit": 5,
         })
-        channels = [{"channel": (r.get("dimensionValues") or [{}])[0].get("value", "—"),
+        channels = [{"channel": (r.get("dimensionValues") or [{}])[0].get("value", "Other"),
                      "sessions": int(float((r.get("metricValues") or [{}])[0].get("value", 0)))}
                     for r in chan.get("rows", [])]
         return {"sessions": sessions, "revenue": revenue, "engaged_sessions": engaged,

@@ -81,31 +81,36 @@
         .scroll { flex: 1; overflow-y: auto; }
 
         /* ---------- Overview ---------- */
-        .ov-wrap { max-width: 920px; margin: 0 auto; padding: 26px 24px 60px; width: 100%; }
+        .ov-wrap { max-width: 1080px; margin: 0 auto; padding: 28px 28px 64px; width: 100%; }
         .ov-hero { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 22px; }
         .ov-hero .badge { width: 38px; height: 38px; border-radius: 11px; background: var(--accent-soft); color: var(--accent);
             display: grid; place-items: center; flex-shrink: 0; }
         .ov-hero .badge svg { width: 20px; height: 20px; }
-        .ov-hero h2 { font-size: 19px; margin: 0 0 3px; font-weight: 650; letter-spacing: -.02em; }
-        .ov-hero p { margin: 0; color: var(--ink-2); font-size: 13.5px; }
-        .ov-updated { font-size: 12px; color: var(--ink-3); margin-left: auto; white-space: nowrap; padding-top: 4px; }
-        .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; margin-bottom: 24px; }
-        .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 15px 16px; box-shadow: var(--sh-1);
+        .ov-hero h2 { font-size: 20px; margin: 0 0 4px; font-weight: 680; letter-spacing: -.02em; }
+        .ov-hero p { margin: 0; color: var(--ink-2); font-size: 14px; line-height: 1.5; max-width: 70ch; }
+        .ov-updated { font-size: 11.5px; color: var(--ink-3); margin-left: auto; white-space: nowrap; padding-top: 5px; }
+        /* KPI cards: uppercase micro-label + large figure + colored delta */
+        .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 22px; }
+        .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 13px 15px; box-shadow: var(--sh-1);
             animation: fadeUp .4s ease backwards; }
-        .stat .label { font-size: 12px; color: var(--ink-2); font-weight: 500; margin-bottom: 8px; }
-        .stat .value { font-size: 23px; font-weight: 650; letter-spacing: -.02em; line-height: 1.1; }
-        .stat .delta { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; margin-top: 7px; }
+        .stat .label { font-size: 10.5px; color: var(--ink-3); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 7px; }
+        .stat .value { font-size: 26px; font-weight: 700; letter-spacing: -.025em; line-height: 1.05; }
+        .stat .delta { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; margin-top: 6px; }
         .stat .delta svg { width: 13px; height: 13px; }
         .delta.up { color: var(--win); } .delta.down { color: var(--danger); } .delta.flat { color: var(--ink-3); }
-        .stat.warn { border-color: #f3d9bf; background: linear-gradient(180deg, #fffaf4, #fff); }
+        .stat.warn { border-color: #f0cda8; background: linear-gradient(180deg, #fffaf3, #fff); }
         .stat.warn .value { color: var(--warn); }
 
-        .section-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); margin: 4px 0 11px; }
-        .seo-score { display: flex; align-items: baseline; gap: 12px; background: var(--surface); border: 1px solid var(--border);
+        .section-title { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3);
+            margin: 22px 0 11px; display: flex; align-items: center; gap: 8px; }
+        .section-title::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+        .seo-score { display: flex; align-items: center; gap: 16px; background: var(--surface); border: 1px solid var(--border);
             border-radius: var(--r); padding: 18px 22px; margin-bottom: 18px; box-shadow: var(--sh-1); }
-        .seo-score .num { font-size: 46px; font-weight: 700; letter-spacing: -.03em; line-height: 1; }
+        .seo-score .num { font-size: 50px; font-weight: 760; letter-spacing: -.035em; line-height: 1; }
         .seo-score .out { color: var(--ink-2); font-size: 13px; }
-        .seo-score.good .num { color: var(--win); } .seo-score.mid .num { color: var(--warn); } .seo-score.low .num { color: var(--danger); }
+        .seo-score.good { border-left: 4px solid var(--win); } .seo-score.good .num { color: var(--win); }
+        .seo-score.mid { border-left: 4px solid var(--warn); } .seo-score.mid .num { color: var(--warn); }
+        .seo-score.low { border-left: 4px solid var(--danger); } .seo-score.low .num { color: var(--danger); }
         .mem-card { display: flex; align-items: flex-start; gap: 12px; background: var(--surface); border: 1px solid var(--border);
             border-radius: var(--r); padding: 12px 14px; margin-bottom: 9px; box-shadow: var(--sh-1); animation: fadeUp .3s ease backwards; }
         .mem-left { display: flex; align-items: flex-start; gap: 10px; flex: 1; min-width: 0; }
@@ -152,7 +157,8 @@
         details.sect .body ul { margin: 0; padding-left: 18px; } details.sect .body li { margin: 3px 0; }
 
         .actions { padding: 6px 4px; }
-        .action { display: flex; align-items: flex-start; gap: 11px; padding: 10px 12px; border-radius: var(--r-sm); }
+        .action { display: flex; align-items: flex-start; gap: 11px; padding: 11px 12px; border-radius: var(--r-sm); }
+        .action + .action { border-top: 1px solid var(--border); }
         .action:hover { background: var(--surface-2); }
         .action .check { width: 19px; height: 19px; border-radius: 6px; border: 1.8px solid var(--border-2); flex-shrink: 0; margin-top: 1px;
             display: grid; place-items: center; cursor: pointer; transition: all .15s; }
@@ -160,7 +166,7 @@
         .action.done .check { background: var(--win); border-color: var(--win); }
         .action.done .check svg { opacity: 1; }
         .action.done .text { color: var(--ink-3); text-decoration: line-through; }
-        .action .text { flex: 1; font-size: 13.5px; }
+        .action .text { flex: 1; font-size: 13.5px; line-height: 1.45; }
         .pill { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 20px; flex-shrink: 0; }
         .pill.high { background: #fdecea; color: var(--danger); } .pill.medium { background: var(--warn-bg); color: var(--warn); }
         .pill.low { background: var(--surface-3); color: var(--ink-3); }
@@ -331,7 +337,7 @@
                 <textarea id="pf-strategy" class="pf-input" rows="2" placeholder="e.g. Lead with hero bundles, win on AOV not volume, premium positioning."></textarea>
 
                 <label class="field-label" for="pf-notes">Other notes</label>
-                <textarea id="pf-notes" class="pf-input" rows="2" placeholder="Anything else the copilot should always know — business model, constraints, audience."></textarea>
+                <textarea id="pf-notes" class="pf-input" rows="2" placeholder="Anything else the copilot should always know: business model, constraints, audience."></textarea>
 
                 <div class="settings-toggles">
                     <div class="setting-row">
@@ -369,7 +375,7 @@
     <script>
     (function () {
         /* ---------- icons (constant SVG; safe to inject) ---------- */
-        // Feather Icons (https://feathericons.com) — inlined so there are no extra requests.
+        // Feather Icons (https://feathericons.com), inlined so there are no extra requests.
         const SV = (inner) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
         const I = {
             spark: SV('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>'),
@@ -448,7 +454,7 @@
                 headers: Object.assign({ 'Content-Type': 'application/json' }, await authHeaders()),
                 body: JSON.stringify(payload || {}),
             });
-            if (res.status === 401) throw new Error('Unauthorized — open this from inside your Shopify admin.');
+            if (res.status === 401) throw new Error('Unauthorized. Open this from inside your Shopify admin.');
             const data = await res.json();
             if (data.error) throw new Error(data.error);
             return data;
@@ -564,7 +570,7 @@
             const w = el('div', 'empty-chat');
             const big = el('div', 'big'); big.innerHTML = I.spark;
             w.append(big, el('h2', null, 'Your store copilot'),
-                el('p', null, 'Ask anything about your products, orders, customers and inventory — I read live data and reply with structured insights.'));
+                el('p', null, 'Ask anything about your products, orders, customers and inventory. I read live data and reply with structured insights.'));
             const starters = el('div', 'starters');
             ['Suggest 5 ways to improve my product pages', 'What changed in my orders this week?', 'Which products are low on stock?', 'Who are my best customers?']
                 .forEach(s => { const b = el('button', 'chip'); b.append(ico(I.spark), document.createTextNode(s)); b.onclick = () => send(s); starters.append(b); });
@@ -693,7 +699,7 @@
             const htext = el('div'); htext.append(el('h2', null, 'SEO Audit'), el('p', null, 'Auditing your store…'));
             hero.append(badge, htext); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px';
-            t.append(el('div', 'orb'), el('span', null, 'Crawling pages — indexation, structured data, metadata, alt text…'));
+            t.append(el('div', 'orb'), el('span', null, 'Crawling pages: indexation, structured data, metadata, alt text…'));
             box.append(t);
             try { const data = await api('/api/seo', {}); seoCache = { data, at: Date.now() }; renderSEO(seoCache); }
             catch (e) {
@@ -704,24 +710,37 @@
         }
         function renderSEO(cache) {
             const data = cache.data; const box = $('seo-content'); box.innerHTML = '';
+            const s = data.structured || {};
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.search;
-            const htext = el('div'); htext.append(el('h2', null, 'SEO Audit'),
-                el('p', null, data.structured && data.structured.summary ? data.structured.summary : 'Technical SEO health of your store.'));
+            const htext = el('div'); htext.append(el('h2', null, 'SEO & Optimization'),
+                el('p', null, s.summary || 'How your store performs across search, traffic and sales, and where to grow revenue.'));
             hero.append(badge, htext);
             const mins = Math.round((Date.now() - cache.at) / 60000);
             hero.append(el('div', 'ov-updated', mins <= 0 ? 'Updated just now' : `Updated ${mins}m ago`));
             box.append(hero);
+            // Score + KPI strip
             if (typeof data.score === 'number') {
                 const tier = data.score >= 80 ? 'good' : data.score >= 60 ? 'mid' : 'low';
                 const sc = el('div', 'seo-score ' + tier);
-                sc.append(el('div', 'num', String(data.score)), el('div', 'out', '/ 100 · technical SEO score'));
+                const left = el('div'); left.append(el('div', 'num', String(data.score)));
+                sc.append(left, el('div', 'out', 'out of 100, optimization health score'));
                 box.append(sc);
             }
             const mets = (data.metrics || []).filter(m => m.label !== 'SEO score');
             if (mets.length) box.append(metricsGrid(mets));
-            const s = Object.assign({}, data.structured); delete s.summary;
-            if (s.insights && s.insights.length) box.append(el('div', 'section-title', 'Findings & fixes'));
-            renderStructured(box, s, {});
+            // Lead with money opportunities, then findings, then supporting detail
+            if (Array.isArray(s.actions) && s.actions.length) {
+                box.append(el('div', 'section-title', 'Top opportunities'));
+                box.append(actionsCard(s.actions));
+            }
+            if (Array.isArray(s.insights) && s.insights.length) {
+                box.append(el('div', 'section-title', 'Performance findings'));
+                const b = el('div', 'insights'); s.insights.forEach((ins, i) => b.append(insightCard(ins, i))); box.append(b);
+            }
+            if (Array.isArray(s.sections) && s.sections.length) {
+                box.append(el('div', 'section-title', 'Details'));
+                s.sections.forEach(sec => box.append(sectionCard(sec)));
+            }
         }
 
         /* ---------- memory ---------- */
@@ -756,7 +775,7 @@
             const box = $('memory-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.bookmark;
             const htext = el('div'); htext.append(el('h2', null, 'Memory'),
-                el('p', null, 'What your copilot remembers about your store. It captures facts, decisions and follow-ups as you chat — edit or remove anything here.'));
+                el('p', null, 'What your copilot remembers about your store. It captures facts, decisions and follow-ups as you chat. Edit or remove anything here.'));
             hero.append(badge, htext); box.append(hero);
             if (!memories.length) {
                 const e = el('div', 'empty'); e.style.margin = '24px 0';
@@ -805,7 +824,7 @@
                     badge.className = 'g-badge on'; badge.textContent = 'Connected';
                     const parts = [];
                     if (s.ga4_ready) parts.push('GA4'); if (s.gsc_ready) parts.push('Search Console');
-                    sub.textContent = parts.length ? ('Linked: ' + parts.join(' + ')) : 'Connected — set GA4_PROPERTY_ID / GSC_SITE_URL to pull data.';
+                    sub.textContent = parts.length ? ('Linked: ' + parts.join(' + ')) : 'Connected. Set GA4_PROPERTY_ID / GSC_SITE_URL to pull data.';
                 } else {
                     badge.className = 'g-badge off'; badge.textContent = 'Not connected';
                     sub.textContent = 'Connect via the one-time setup link (see your deploy notes).';
@@ -837,11 +856,11 @@
                 const d = await api('/api/profile', { profile });
                 if (d && d.profile) { profile = d.profile; profile.prefs = Object.assign({}, DEFAULT_PREFS, d.profile.prefs || {}); cacheProfile(); }
                 closeSettings();
-                overviewCache = null; // profile changed — recompute the Overview
+                overviewCache = null; // profile changed, recompute the Overview
                 if ($('view-overview').classList.contains('active')) loadOverview(true);
                 btn.textContent = 'Save profile';
             } catch (e) {
-                btn.textContent = 'Save failed — retry';
+                btn.textContent = 'Save failed, retry';
             } finally { btn.disabled = false; }
         }
         $('settings-btn').onclick = openSettings;
