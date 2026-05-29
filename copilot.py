@@ -318,9 +318,10 @@ def _add_memories(items: list[dict]) -> list[dict]:
                          "status": "open", "created": now, "updated": now})
         seen.add(text.lower())
     if len(memories) > MEMORY_MAX:  # keep open follow-ups + the most recent of everything else
-        keep = [m for m in memories if m.get("type") == "followup" and m.get("status") == "open"]
+        keep = [m for m in memories if m.get("type") == "followup" and m.get("status") == "open"][:MEMORY_MAX]
         rest = [m for m in memories if not (m.get("type") == "followup" and m.get("status") == "open")]
-        memories = keep + rest[-(MEMORY_MAX - len(keep)):]
+        slots = max(0, MEMORY_MAX - len(keep))
+        memories = keep + (rest[-slots:] if slots else [])  # slots==0 must yield [], not rest[-0:]
     return _write_memory(memories)
 
 
