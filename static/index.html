@@ -128,11 +128,11 @@
         .seo-score .out { color: var(--ink-2); font-size: 13px; margin-top: 2px; }
         .seo-score .bar { flex: 1; height: 8px; border-radius: 20px; background: var(--surface-3); overflow: hidden; min-width: 90px; box-shadow: inset 0 0 0 1px var(--border); }
         .seo-score .bar > i { display: block; height: 100%; border-radius: 20px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
-        .seo-score.good { border-left: 3px solid var(--win); } .seo-score.good .num { color: var(--win); }
+        .seo-score.good .num { color: var(--win); }
         .seo-score.good .bar > i { background: linear-gradient(90deg, #2bbf86, var(--win)); }
-        .seo-score.mid { border-left: 3px solid var(--warn); } .seo-score.mid .num { color: var(--warn); }
+        .seo-score.mid .num { color: var(--warn); }
         .seo-score.mid .bar > i { background: linear-gradient(90deg, #e0a020, var(--warn)); }
-        .seo-score.low { border-left: 3px solid var(--danger); } .seo-score.low .num { color: var(--danger); }
+        .seo-score.low .num { color: var(--danger); }
         .seo-score.low .bar > i { background: linear-gradient(90deg, #e05670, var(--danger)); }
         .mem-card { display: flex; align-items: flex-start; gap: 12px; background: var(--surface); border: 1px solid var(--border);
             border-radius: var(--r); padding: 13px 15px; margin-bottom: 9px; box-shadow: var(--sh-1); animation: fadeUp .3s ease backwards; }
@@ -188,14 +188,11 @@
         .insight .ico svg { width: 14px; height: 14px; }
         .insight .t { font-weight: 650; font-size: 13.5px; margin: 1px 0 3px; letter-spacing: -.01em; }
         .insight .d { color: var(--ink-2); font-size: 13px; line-height: 1.55; }
+        .insight:hover { border-color: var(--border-2); }
         .insight.win .ico { background: var(--win-bg); color: var(--win); }
-        .insight.win { border-left: 3px solid var(--win); }
         .insight.warning .ico { background: var(--warn-bg); color: var(--warn); }
-        .insight.warning { border-left: 3px solid var(--warn); }
         .insight.opportunity .ico { background: var(--opp-bg); color: var(--opp); }
-        .insight.opportunity { border-left: 3px solid var(--opp); }
         .insight.insight .ico { background: var(--info-bg); color: var(--info); }
-        .insight.insight { border-left: 3px solid var(--info); }
 
         .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--sh-1), var(--hair); }
         details.sect { border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); margin-bottom: 9px; overflow: hidden; box-shadow: var(--sh-1); }
@@ -228,8 +225,44 @@
         .chip { border: 1px solid var(--border-2); background: var(--surface-2); border-radius: 20px; padding: 8px 14px; font-size: 12.5px;
             color: var(--ink); display: inline-flex; align-items: center; gap: 7px; transition: all .14s; cursor: pointer; }
         .chip:hover { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); }
-        .chip svg { width: 13px; height: 13px; opacity: .55; }
+        .chip > span { display: grid; place-items: center; flex: none; }
+        .chip svg { width: 13px; height: 13px; opacity: .6; display: block; }
         .empty { background: var(--surface); border: 1px dashed var(--border-2); border-radius: var(--r); padding: 22px; color: var(--ink-2); font-size: 13.5px; text-align: center; }
+
+        /* ---------- Charts ---------- */
+        .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--sh-1), var(--hair); padding: 16px 18px 10px; margin-bottom: 12px; position: relative; }
+        .chart-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+        .chart-head .ct { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); }
+        .chart-head .cv { font-size: 23px; font-weight: 700; letter-spacing: -.03em; margin-top: 3px; display: flex; align-items: center; }
+        .chart-head .cd { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; font-weight: 600; padding: 3px 8px; border-radius: 7px; margin-left: 9px; }
+        .chart-head .cd > span { display: grid; place-items: center; } .chart-head .cd svg { width: 12px; height: 12px; display: block; }
+        .cd.up { color: var(--win); background: var(--win-bg); } .cd.down { color: var(--danger); background: var(--danger-bg); } .cd.flat { color: var(--ink-3); background: var(--surface-3); }
+        .chart-legend { margin-left: auto; display: flex; gap: 14px; align-items: center; padding-top: 3px; }
+        .chart-legend .lg { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-2); }
+        .chart-legend .sw { width: 9px; height: 9px; border-radius: 3px; }
+        .chart-wrap { position: relative; }
+        .chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
+        .chart-wrap .gridline { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+        .chart-wrap .axis-x text, .chart-wrap .axis-y text { fill: var(--ink-3); font-size: 11px; font-family: var(--font); }
+        .chart-line { fill: none; stroke-width: 2.25; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
+        .chart-line.compare { stroke-dasharray: 4 4; opacity: .7; }
+        .chart-dot { stroke: var(--surface); stroke-width: 2; }
+        .chart-hover-line { stroke: var(--border-3); stroke-width: 1; vector-effect: non-scaling-stroke; }
+        .chart-tip { position: absolute; pointer-events: none; background: rgba(13,17,27,.97); border: 1px solid var(--border-2); border-radius: 10px; padding: 8px 10px; font-size: 12px; box-shadow: var(--sh-2); transform: translate(-50%, calc(-100% - 12px)); white-space: nowrap; opacity: 0; transition: opacity .12s; z-index: 4; }
+        .chart-tip .tl { color: var(--ink-3); font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+        .chart-tip .tr { display: flex; align-items: center; gap: 7px; color: var(--ink-2); } .chart-tip .tr + .tr { margin-top: 3px; }
+        .chart-tip .sw { width: 8px; height: 8px; border-radius: 2px; flex: none; } .chart-tip b { font-weight: 700; color: var(--ink); margin-left: 2px; }
+        .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+        @media (max-width: 760px) { .charts-grid { grid-template-columns: 1fr; } }
+        .chart-anim { animation: chartIn .5s ease backwards; }
+        @keyframes chartIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+        @keyframes chartDraw { to { stroke-dashoffset: 0; } }
+        .spark { display: block; width: 100%; height: 32px; overflow: visible; }
+        /* segmented range control */
+        .seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 10px; padding: 3px; gap: 2px; }
+        .seg button { border: 0; background: transparent; color: var(--ink-2); font: inherit; font-size: 12px; font-weight: 550; padding: 5px 11px; border-radius: 7px; transition: all .14s; }
+        .seg button:hover { color: var(--ink); } .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+        .seg button.on { background: var(--accent-soft); color: #fff; box-shadow: inset 0 0 0 1px var(--accent-line); }
 
         /* ---------- Chat ---------- */
         .chat-scroll { flex: 1; overflow-y: auto; }
@@ -499,6 +532,10 @@
         let deep = false;
         let busy = false;
         let overviewCache = null;
+        let ovRange = 12, seoRange = 12;   // months of history shown in trend charts (sliced client-side)
+        const RANGE_OPTS = [{ label: '3M', value: 3 }, { label: '6M', value: 6 }, { label: '12M', value: 12 }, { label: '24M', value: 24 }];
+        const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const monthLabel = (ym) => { const m = /^(\d{4})-(\d{2})$/.exec(ym || ''); return m ? (MONTH_ABBR[+m[2] - 1] + (m[2] === '01' ? " '" + m[1].slice(2) : '')) : (ym || ''); };
         try { convos = JSON.parse(localStorage.getItem(LS) || '[]'); } catch (e) { convos = []; }
         const save = () => { try { localStorage.setItem(LS, JSON.stringify(convos)); } catch (e) {} };
 
@@ -615,6 +652,137 @@
             if (!opts.noFollowups && Array.isArray(s.followups) && s.followups.length) {
                 container.append(followupChips(s.followups, send));
             }
+        }
+
+        /* ---------- charts (hand-rolled inline SVG, no deps, CSP-safe) ---------- */
+        const REDUCE_MOTION = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        const SVGNS = 'http://www.w3.org/2000/svg';
+        const svgEl = (tag, attrs) => { const e = document.createElementNS(SVGNS, tag); for (const k in (attrs || {})) e.setAttribute(k, attrs[k]); return e; };
+        const niceMax = (v) => { v = Number(v) || 0; if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const u = v / p; const m = u <= 1 ? 1 : u <= 2 ? 2 : u <= 5 ? 5 : 10; return m * p; };
+        const fmtCompact = (n) => { n = Number(n) || 0; const a = Math.abs(n); if (a >= 1e6) return (n / 1e6).toFixed(a >= 1e7 ? 0 : 1).replace(/\.0$/, '') + 'M'; if (a >= 1e3) return (n / 1e3).toFixed(a >= 1e4 ? 0 : 1).replace(/\.0$/, '') + 'k'; return String(Math.round(n)); };
+        let _chartSeq = 0;
+
+        // opts: {title, value, delta, trend, labels:[], series:[{name,color,values:[]}], format, height, area}
+        function trendChart(opts) {
+            opts = opts || {};
+            const W = 760, H = opts.height || 200, padL = 44, padR = 16, padT = 14, padB = 28;
+            const labels = opts.labels || [];
+            const series = (opts.series || []).filter(s => s && Array.isArray(s.values) && s.values.length);
+            const fmt = opts.format || fmtCompact;
+            const card = el('div', 'chart-card' + (REDUCE_MOTION ? '' : ' chart-anim'));
+            const head = el('div', 'chart-head'); const htxt = el('div');
+            if (opts.title) htxt.append(el('div', 'ct', opts.title));
+            if (opts.value != null) {
+                const v = el('div', 'cv'); v.append(document.createTextNode(opts.value));
+                if (opts.delta) { const d = el('span', 'cd ' + (opts.trend || 'flat')); if (opts.trend === 'up') d.append(ico(I.up)); else if (opts.trend === 'down') d.append(ico(I.down)); d.append(document.createTextNode(opts.delta)); v.append(d); }
+                htxt.append(v);
+            }
+            head.append(htxt);
+            if (series.length > 1) { const lg = el('div', 'chart-legend'); series.forEach(s => { const it = el('span', 'lg'); const sw = el('span', 'sw'); sw.style.background = s.color || 'var(--accent)'; it.append(sw, document.createTextNode(s.name || '')); lg.append(it); }); head.append(lg); }
+            card.append(head);
+            const wrap = el('div', 'chart-wrap'); card.append(wrap);
+            if (!series.length || labels.length < 2) { wrap.append(el('div', 'empty', 'Not enough data to chart yet.')); return card; }
+
+            const n = labels.length;
+            const maxV = niceMax(Math.max.apply(null, series.flatMap(s => s.values).concat([0])));
+            const X = (i) => padL + (i / (n - 1)) * (W - padL - padR);
+            const Y = (v) => padT + (1 - ((Number(v) || 0) / maxV)) * (H - padT - padB);
+            const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H });
+            const uid = 'cg' + (++_chartSeq);
+            const defs = svgEl('defs'); const grad = svgEl('linearGradient', { id: uid, x1: 0, y1: 0, x2: 0, y2: 1 });
+            grad.append(svgEl('stop', { offset: '0%', 'stop-color': (series[0].color || '#7b6cff'), 'stop-opacity': '0.30' }));
+            grad.append(svgEl('stop', { offset: '100%', 'stop-color': (series[0].color || '#7b6cff'), 'stop-opacity': '0' }));
+            defs.append(grad); svg.append(defs);
+            const axisY = svgEl('g', { class: 'axis-y' });
+            [0, 0.5, 1].forEach(t => { const yy = padT + t * (H - padT - padB); axisY.append(svgEl('line', { class: 'gridline', x1: padL, y1: yy, x2: W - padR, y2: yy })); const tx = svgEl('text', { x: padL - 8, y: yy + 4, 'text-anchor': 'end' }); tx.textContent = fmt(maxV * (1 - t)); axisY.append(tx); });
+            svg.append(axisY);
+            const axisX = svgEl('g', { class: 'axis-x' }); const step = Math.max(1, Math.ceil(n / 6));
+            for (let i = 0; i < n; i += step) { const tx = svgEl('text', { x: X(i), y: H - 8, 'text-anchor': 'middle' }); tx.textContent = labels[i]; axisX.append(tx); }
+            svg.append(axisX);
+            const line = (vals) => vals.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join(' ');
+            if (opts.area !== false) { const a = line(series[0].values) + ' L ' + X(n - 1).toFixed(1) + ' ' + (H - padB).toFixed(1) + ' L ' + X(0).toFixed(1) + ' ' + (H - padB).toFixed(1) + ' Z'; svg.append(svgEl('path', { d: a, fill: 'url(#' + uid + ')' })); }
+            series.forEach((s, si) => {
+                const p = svgEl('path', { class: 'chart-line' + (si > 0 ? ' compare' : ''), d: line(s.values), stroke: s.color || (si ? '#6b7280' : '#7b6cff') });
+                if (!REDUCE_MOTION && si === 0) { p.style.strokeDasharray = 1400; p.style.strokeDashoffset = 1400; p.style.animation = 'chartDraw .9s ease forwards'; }
+                svg.append(p);
+            });
+            const hoverLine = svgEl('line', { class: 'chart-hover-line', x1: 0, y1: padT, x2: 0, y2: H - padB, opacity: 0 }); svg.append(hoverLine);
+            const dots = series.map(s => { const c = svgEl('circle', { class: 'chart-dot', r: 3.5, fill: s.color || '#7b6cff', opacity: 0 }); svg.append(c); return c; });
+            const tip = el('div', 'chart-tip'); wrap.append(tip);
+            const overlay = svgEl('rect', { x: padL, y: padT, width: (W - padL - padR), height: (H - padT - padB), fill: 'transparent' }); svg.append(overlay);
+            const move = (clientX) => {
+                const rect = svg.getBoundingClientRect(); if (!rect.width) return;
+                const vbX = (clientX - rect.left) / rect.width * W;
+                let i = Math.round((vbX - padL) / (W - padL - padR) * (n - 1)); i = Math.max(0, Math.min(n - 1, i));
+                hoverLine.setAttribute('x1', X(i)); hoverLine.setAttribute('x2', X(i)); hoverLine.setAttribute('opacity', 1);
+                dots.forEach((c, si) => { c.setAttribute('cx', X(i)); c.setAttribute('cy', Y(series[si].values[i])); c.setAttribute('opacity', 1); });
+                tip.innerHTML = ''; tip.append(el('div', 'tl', labels[i]));
+                series.forEach(s => { const r = el('div', 'tr'); const sw = el('span', 'sw'); sw.style.background = s.color || '#7b6cff'; r.append(sw); if (series.length > 1) r.append(document.createTextNode(s.name || '')); r.append(el('b', null, fmt(s.values[i]))); tip.append(r); });
+                tip.style.left = (X(i) / W * rect.width) + 'px';
+                tip.style.top = (Math.min.apply(null, series.map(s => Y(s.values[i]))) / H * rect.height) + 'px';
+                tip.style.opacity = 1;
+            };
+            svg.addEventListener('mousemove', e => move(e.clientX));
+            svg.addEventListener('mouseleave', () => { hoverLine.setAttribute('opacity', 0); dots.forEach(c => c.setAttribute('opacity', 0)); tip.style.opacity = 0; });
+            svg.addEventListener('touchstart', e => { if (e.touches[0]) move(e.touches[0].clientX); }, { passive: true });
+            svg.addEventListener('touchmove', e => { if (e.touches[0]) move(e.touches[0].clientX); }, { passive: true });
+            wrap.append(svg);
+            return card;
+        }
+
+        function sparkline(values, color) {
+            const W = 120, H = 32, p = 3; const vals = (values || []).map(Number);
+            const svg = svgEl('svg', { class: 'spark', viewBox: '0 0 ' + W + ' ' + H });
+            if (vals.length < 2) return svg;
+            const mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals), rng = (mx - mn) || 1;
+            const X = i => p + i / (vals.length - 1) * (W - 2 * p), Y = v => p + (1 - (v - mn) / rng) * (H - 2 * p);
+            const d = vals.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join(' ');
+            svg.append(svgEl('path', { d, fill: 'none', stroke: color || '#7b6cff', 'stroke-width': 2, 'vector-effect': 'non-scaling-stroke', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+            return svg;
+        }
+
+        function segControl(options, current, onPick) {
+            const seg = el('div', 'seg');
+            options.forEach(o => { const b = el('button', o.value === current ? 'on' : null, o.label); b.onclick = () => onPick(o.value); seg.append(b); });
+            return seg;
+        }
+        const tail = (arr, k) => (arr || []).slice(Math.max(0, (arr || []).length - k));
+        const sumv = (arr) => (arr || []).reduce((a, b) => a + (+(b && b.value) || 0), 0);
+        function trendsHeader(title, range, onRange) {
+            const row = el('div'); row.style.cssText = 'display:flex;align-items:center;gap:12px;margin:26px 0 13px;';
+            const t = el('div', null, title); t.style.cssText = 'font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);';
+            const sp = el('div'); sp.style.flex = '1'; row.append(t, sp);
+            if (onRange) row.append(segControl(RANGE_OPTS, range, onRange));
+            return row;
+        }
+        function renderTrendsBlock(box, trends, currency, range, onRange) {
+            box.append(trendsHeader('Performance over time', range, onRange));
+            if (!trends || !((trends.revenue && trends.revenue.length) || (trends.sessions && trends.sessions.length) || (trends.clicks && trends.clicks.length))) {
+                box.append(el('div', 'empty', 'Trends populate as orders accrue and Google is connected. Up to 24 months of history are shown here.')); return;
+            }
+            const moneyShort = (n) => fmtCompact(n) + (currency ? ' ' + currency : '');
+            if (trends.revenue && trends.revenue.length) {
+                const r = tail(trends.revenue, range);
+                box.append(trendChart({ title: 'Revenue', value: moneyShort(sumv(r)), labels: r.map(p => monthLabel(p.label)), series: [{ name: 'Revenue', color: '#7b6cff', values: r.map(p => +p.value || 0) }], format: moneyShort, height: 210 }));
+            }
+            const pair = [];
+            if (trends.sessions && trends.sessions.length) pair.push({ t: 'Sessions', c: '#22d3ee', d: tail(trends.sessions, range) });
+            if (trends.clicks && trends.clicks.length) pair.push({ t: 'Search clicks', c: '#34d399', d: tail(trends.clicks, range) });
+            if (pair.length) {
+                const grid = el('div', 'charts-grid');
+                pair.forEach(p => grid.append(trendChart({ title: p.t, value: fmtCompact(sumv(p.d)), labels: p.d.map(x => monthLabel(x.label)), series: [{ name: p.t, color: p.c, values: p.d.map(x => +x.value || 0) }], height: 230 })));
+                box.append(grid);
+            }
+        }
+        function renderSeoTrends(box, trends, range, onRange) {
+            box.append(trendsHeader('Search performance over time', range, onRange));
+            if (!trends || !((trends.clicks && trends.clicks.length) || (trends.impressions && trends.impressions.length))) {
+                box.append(el('div', 'empty', 'Connect Google Search Console to chart search trends. Google provides up to 16 months of history.')); return;
+            }
+            const grid = el('div', 'charts-grid');
+            if (trends.clicks && trends.clicks.length) { const c = tail(trends.clicks, range); grid.append(trendChart({ title: 'Clicks', value: fmtCompact(sumv(c)), labels: c.map(x => monthLabel(x.label)), series: [{ name: 'Clicks', color: '#34d399', values: c.map(x => +x.value || 0) }], height: 230 })); }
+            if (trends.impressions && trends.impressions.length) { const m = tail(trends.impressions, range); grid.append(trendChart({ title: 'Impressions', value: fmtCompact(sumv(m)), labels: m.map(x => monthLabel(x.label)), series: [{ name: 'Impressions', color: '#7b6cff', values: m.map(x => +x.value || 0) }], height: 230 })); }
+            box.append(grid);
         }
 
         /* ---------- chat rendering ---------- */
@@ -764,6 +932,7 @@
                 box.append(card);
             }
             if (Array.isArray(data.metrics) && data.metrics.length) box.append(metricsGrid(data.metrics));
+            renderTrendsBlock(box, data.trends, data.currency, ovRange, (v) => { ovRange = v; renderOverview(overviewCache); });
             const s = Object.assign({}, data.structured); delete s.summary;
             if (s.insights && s.insights.length) box.append(el('div', 'section-title', 'What’s notable'));
             renderStructured(box, s, { noFollowups: false });
@@ -811,6 +980,7 @@
             }
             const mets = (data.metrics || []).filter(m => m.label !== 'SEO score');
             if (mets.length) box.append(metricsGrid(mets));
+            renderSeoTrends(box, data.trends, seoRange, (v) => { seoRange = v; renderSEO(seoCache); });
             // Lead with money opportunities, then findings, then supporting detail
             if (Array.isArray(s.actions) && s.actions.length) {
                 box.append(el('div', 'section-title', 'Top opportunities'));
@@ -899,6 +1069,14 @@
                 el('p', null, s.summary || 'Optimization plan for this product.'));
             hero.append(badge, ht); box.append(hero);
             if (Array.isArray(d.metrics) && d.metrics.length) box.append(metricsGrid(d.metrics));
+            if (d.trend && ((d.trend.revenue && d.trend.revenue.length) || (d.trend.units && d.trend.units.length))) {
+                box.append(el('div', 'section-title', 'Performance over time'));
+                const grid = el('div', 'charts-grid');
+                const moneyShort = (n) => fmtCompact(n) + (d.currency ? ' ' + d.currency : '');
+                if (d.trend.revenue && d.trend.revenue.length) { const r = d.trend.revenue; grid.append(trendChart({ title: 'Revenue', value: moneyShort(sumv(r)), labels: r.map(x => monthLabel(x.label)), series: [{ name: 'Revenue', color: '#7b6cff', values: r.map(x => +x.value || 0) }], format: moneyShort, height: 230 })); }
+                if (d.trend.units && d.trend.units.length) { const u = d.trend.units; grid.append(trendChart({ title: 'Units sold', value: fmtCompact(sumv(u)), labels: u.map(x => monthLabel(x.label)), series: [{ name: 'Units', color: '#22d3ee', values: u.map(x => +x.value || 0) }], height: 230 })); }
+                box.append(grid);
+            }
             if (Array.isArray(s.actions) && s.actions.length) { box.append(el('div', 'section-title', 'Top opportunities')); box.append(actionsCard(s.actions)); }
             if (Array.isArray(s.insights) && s.insights.length) { box.append(el('div', 'section-title', 'Findings')); const b = el('div', 'insights'); s.insights.forEach((x, i) => b.append(insightCard(x, i))); box.append(b); }
             if (Array.isArray(s.sections) && s.sections.length) { box.append(el('div', 'section-title', 'Details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
