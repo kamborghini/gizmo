@@ -864,23 +864,26 @@ class DaysInput(BaseModel):
 
 def _build_google_tools() -> dict:
     tools: dict = {}
-    if google_data.gsc_configured():
+    if google_data.gsc_enabled():
         async def get_search_console_data(params: DaysInput) -> str:
             """Real Google Search Console data for this store: total clicks, impressions, CTR and
             average position, plus the top search queries (with per-query impressions/CTR/position).
             Use this to ground SEO advice in how the store actually performs in Google Search —
             e.g. high-impression, low-CTR, mid-position queries are title/meta rewrite opportunities."""
+            if not google_data.gsc_configured():
+                return json.dumps({"error": "Google isn't connected yet — connect it in Settings."})
             days = params.days or 28
-            overview = await google_data.gsc_overview(days)
-            queries = await google_data.gsc_top_queries(days)
-            return json.dumps({"overview": overview, "top_queries": queries}, default=str)
+            return json.dumps({"overview": await google_data.gsc_overview(days),
+                               "top_queries": await google_data.gsc_top_queries(days)}, default=str)
         tools["get_search_console_data"] = (get_search_console_data, DaysInput)
 
-    if google_data.ga4_configured():
+    if google_data.ga4_enabled():
         async def get_ga4_data(params: DaysInput) -> str:
             """Real Google Analytics 4 data for this store: sessions, revenue, engaged sessions and
             the top traffic channels over the window. Use to ground answers about traffic, acquisition
             and on-site performance in real analytics rather than order data alone."""
+            if not google_data.ga4_configured():
+                return json.dumps({"error": "Google isn't connected yet — connect it in Settings."})
             return json.dumps(await google_data.ga4_summary(params.days or 28), default=str)
         tools["get_ga4_data"] = (get_ga4_data, DaysInput)
 
@@ -1038,6 +1041,7 @@ def _json(data: dict, status: int = 200) -> JSONResponse:
 # threaded and these helpers never await, so no lock is needed.
 _rl_hits: dict[str, list[float]] = {}
 _rl_global: list[float] = []
+_oauth_states: dict[str, float] = {}   # state nonce -> expiry (Google OAuth connect flow)
 
 
 def _client_key(request: Request) -> str:
@@ -1246,3 +1250,71 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("Memory op failed")
             return _json({"error": "Couldn't update memory (is a writable volume mounted at /data?)."}, 500)
         return _json({"memories": _load_memory()})
+
+    # ----- Google OAuth connect flow (one-time, secret-gated) -------------
+    def _redirect_uri(request: Request) -> str:
+        host = request.headers.get("host", "")
+        return f"https://{host}/oauth/google/callback"
+
+    def _oauth_page(title: str, msg: str) -> HTMLResponse:
+        body = (f"<!doctype html><meta charset=utf-8><title>{title}</title>"
+                "<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f7f7f8;"
+                "color:#16161a;display:grid;place-items:center;height:100vh;margin:0}"
+                ".c{background:#fff;border:1px solid #e7e7ea;border-radius:14px;padding:28px 32px;"
+                "max-width:420px;text-align:center;box-shadow:0 6px 24px -6px rgba(20,20,40,.1)}"
+                "h1{font-size:17px;margin:0 0 8px}p{color:#5c5f66;font-size:14px;margin:0}</style>"
+                f"<div class=c><h1>{title}</h1><p>{msg}</p></div>")
+        return HTMLResponse(body, headers=_API_HEADERS)
+
+    @mcp.custom_route("/oauth/google/start", methods=["GET"])
+    async def google_start(request: Request):
+        if not google_data.oauth_client_configured():
+            return _oauth_page("Not configured", "Set GOOGLE_OAUTH_CLIENT_ID / SECRET on the server first.")
+        key = request.query_params.get("key", "")
+        if not (google_data.CONNECT_SECRET and key and
+                secrets.compare_digest(key, google_data.CONNECT_SECRET)):
+            return PlainTextResponse("Forbidden", status_code=403, headers=_API_HEADERS)
+        now = time.time()
+        for s, exp in list(_oauth_states.items()):  # prune expired
+            if exp < now:
+                _oauth_states.pop(s, None)
+        state = secrets.token_urlsafe(24)
+        _oauth_states[state] = now + 900  # 15-minute TTL
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(google_data.consent_url(_redirect_uri(request), state), status_code=302)
+
+    @mcp.custom_route("/oauth/google/callback", methods=["GET"])
+    async def google_callback(request: Request):
+        qp = request.query_params
+        if qp.get("error"):
+            return _oauth_page("Connection cancelled", f"Google returned: {qp.get('error')}")
+        state = qp.get("state", "")
+        exp = _oauth_states.pop(state, None)  # single-use
+        if not state or exp is None or exp < time.time():
+            return _oauth_page("Link expired", "That connect link expired or was already used. Start again.")
+        code = qp.get("code", "")
+        if not code:
+            return _oauth_page("Connection failed", "No authorization code returned.")
+        try:
+            ok = await google_data.exchange_code(code, _redirect_uri(request))
+        except Exception:
+            logger.exception("Google OAuth exchange error")
+            ok = False
+        if not ok:
+            return _oauth_page("Connection failed", "Couldn't complete the connection — please try again.")
+        return _oauth_page("✅ Connected to Google", "Search Console & Analytics are now linked. "
+                           "You can close this tab and return to Store Copilot.")
+
+    @mcp.custom_route("/api/google/status", methods=["POST"])
+    async def google_status(request: Request):
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        return _json(google_data.status())
