@@ -301,3 +301,59 @@ async def ga4_summary(days: int = 28) -> dict:
     except Exception as e:
         logger.warning(f"GA4 summary failed: {e}")
         return {"error": "Could not fetch GA4 data."}
+
+
+# ---------------------------------------------------------------------------
+# Per-page (per-product) queries, filtered by URL path
+# ---------------------------------------------------------------------------
+
+async def gsc_page_queries(page_path: str, days: int = 28, limit: int = 10) -> dict:
+    """Search Console performance for one page (path 'contains' match): totals plus
+    the top queries that page ranks for."""
+    if not gsc_configured():
+        return {}
+    start, end = _date_range(days, lag_days=2)
+    flt = [{"filters": [{"dimension": "page", "operator": "contains", "expression": page_path}]}]
+    try:
+        tot = await _post(_gsc_url(), {"startDate": start, "endDate": end, "dataState": "all",
+                                       "dimensionFilterGroups": flt})
+        rows = tot.get("rows", [])
+        totals = {}
+        if rows:
+            r = rows[0]
+            totals = {"clicks": int(r.get("clicks", 0)), "impressions": int(r.get("impressions", 0)),
+                      "ctr": round(r.get("ctr", 0) * 100, 2), "position": round(r.get("position", 0), 1)}
+        q = await _post(_gsc_url(), {"startDate": start, "endDate": end, "dimensions": ["query"],
+                                     "rowLimit": limit, "dataState": "all", "dimensionFilterGroups": flt})
+        queries = [{"query": (r.get("keys") or [""])[0], "clicks": int(r.get("clicks", 0)),
+                    "impressions": int(r.get("impressions", 0)), "ctr": round(r.get("ctr", 0) * 100, 2),
+                    "position": round(r.get("position", 0), 1)} for r in q.get("rows", [])]
+        return {"totals": totals, "queries": queries, "range_days": days}
+    except GoogleAPIError as e:
+        return {"error": str(e)[:300]}
+    except Exception as e:
+        logger.warning(f"GSC page queries failed: {e}")
+        return {"error": "Could not fetch Search Console data for this page."}
+
+
+async def ga4_page(path: str, days: int = 28) -> dict:
+    """GA4 sessions + revenue for pages whose path contains the given fragment."""
+    if not ga4_configured():
+        return {}
+    try:
+        data = await _post(_ga4_url(), {
+            "dateRanges": [{"startDate": f"{days}daysAgo", "endDate": "yesterday"}],
+            "metrics": [{"name": "sessions"}, {"name": "totalRevenue"}],
+            "dimensionFilter": {"filter": {"fieldName": "pagePath",
+                                           "stringFilter": {"matchType": "CONTAINS", "value": path}}},
+        })
+        row = (data.get("rows") or [{}])
+        vals = (row[0].get("metricValues") if row and row[0] else []) or []
+        return {"sessions": int(float(vals[0]["value"])) if len(vals) > 0 else 0,
+                "revenue": round(float(vals[1]["value"]), 2) if len(vals) > 1 else 0.0,
+                "range_days": days}
+    except GoogleAPIError as e:
+        return {"error": str(e)[:300]}
+    except Exception as e:
+        logger.warning(f"GA4 page failed: {e}")
+        return {"error": "Could not fetch GA4 data for this page."}

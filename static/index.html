@@ -142,6 +142,21 @@
         .know-text { margin-top: 11px; font-size: 13px; color: var(--ink-2); line-height: 1.6; max-height: 360px; overflow: auto; }
         .know-text p { margin: 0 0 9px; } .know-text ul { margin: 0 0 9px; padding-left: 18px; } .know-text li { margin: 3px 0; }
         @media (max-width: 560px) { .know-head { flex-wrap: wrap; } .know-acts { margin-left: 0; } }
+        /* Products list */
+        .prod-search { width: 100%; border: 1px solid var(--border-2); border-radius: 10px; padding: 9px 12px; font: inherit; font-size: 13.5px; outline: none; margin-bottom: 14px; }
+        .prod-search:focus { border-color: #b9adf8; box-shadow: 0 0 0 3px var(--accent-soft); }
+        .prod-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-sm);
+            background: var(--surface); box-shadow: var(--sh-1); margin-bottom: 8px; cursor: pointer; text-align: left; width: 100%; font: inherit; color: var(--ink); }
+        .prod-row:hover { border-color: #c9c2f5; background: var(--surface-2); }
+        .prod-thumb { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; background: var(--surface-3); flex-shrink: 0; }
+        .prod-main { flex: 1; min-width: 0; }
+        .prod-name { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .prod-sub { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+        .prod-chips { display: flex; gap: 18px; flex-shrink: 0; }
+        .prod-chip { text-align: right; } .prod-chip .n { font-weight: 650; font-size: 14px; } .prod-chip .l { font-size: 9.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; }
+        .prod-go { color: var(--ink-3); display: grid; flex-shrink: 0; } .prod-go svg { width: 18px; height: 18px; transform: rotate(180deg); }
+        .back-btn { margin-bottom: 14px; }
+        @media (max-width: 640px) { .prod-chips { gap: 12px; } .prod-chip.rev { display: none; } }
 
         /* ---------- Structured response components ---------- */
         .insights { display: flex; flex-direction: column; gap: 9px; }
@@ -280,6 +295,7 @@
             <div class="nav">
                 <button class="nav-item active" data-view="overview" id="nav-overview"></button>
                 <button class="nav-item" data-view="seo" id="nav-seo"></button>
+                <button class="nav-item" data-view="products" id="nav-products"></button>
                 <button class="nav-item" data-view="memory" id="nav-memory"></button>
                 <button class="nav-item" data-view="chat" id="nav-chat"></button>
             </div>
@@ -307,6 +323,11 @@
             <!-- SEO -->
             <section class="view" id="view-seo">
                 <div class="scroll"><div class="ov-wrap" id="seo-content"></div></div>
+            </section>
+
+            <!-- Products -->
+            <section class="view" id="view-products">
+                <div class="scroll"><div class="ov-wrap" id="products-content"></div></div>
             </section>
 
             <!-- Memory -->
@@ -413,6 +434,8 @@
             bookmark: SV('<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>'),
             book: SV('<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>'),
             rotate: SV('<polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>'),
+            box: SV('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line>'),
+            chevLeft: SV('<polyline points="15 18 9 12 15 6"></polyline>'),
             settings: SV('<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>'),
             x: SV('<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>'),
         };
@@ -424,6 +447,7 @@
         $('ic-logo').innerHTML = I.spark;
         $('nav-overview').append(ico(I.grid), document.createTextNode('Overview'));
         $('nav-seo').append(ico(I.search), document.createTextNode('SEO'));
+        $('nav-products').append(ico(I.box), document.createTextNode('Products'));
         $('nav-memory').append(ico(I.bookmark), document.createTextNode('Memory'));
         $('nav-chat').append(ico(I.chat), document.createTextNode('Chat'));
         $('new-convo').innerHTML = I.plus;
@@ -763,6 +787,84 @@
             }
         }
 
+        /* ---------- products ---------- */
+        let productList = null;
+        const fmtMoney = (n, cur) => Math.round(n || 0).toLocaleString() + (cur ? (' ' + cur) : '');
+        async function loadProducts(force) {
+            const box = $('products-content');
+            if (productList && !force) { renderProductList(); return; }
+            box.innerHTML = '';
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
+            const ht = el('div'); ht.append(el('h2', null, 'Products'), el('p', null, 'Loading your products and sales…'));
+            hero.append(badge, ht); box.append(hero);
+            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(el('div', 'orb'), el('span', null, 'Loading products…')); box.append(t);
+            try { productList = await api('/api/products', {}); renderProductList(); }
+            catch (e) {
+                box.innerHTML = ''; box.append(hero);
+                const er = el('div', 'msg error'); er.append(el('div', 'bubble', e.message || String(e))); box.append(er);
+                ht.children[1].textContent = 'Could not load products.';
+            }
+        }
+        function renderProductList() {
+            const box = $('products-content'); box.innerHTML = '';
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
+            const ht = el('div'); ht.append(el('h2', null, 'Products'),
+                el('p', null, 'Pick a product for a focused optimization plan across search, traffic and sales. Best sellers first.'));
+            hero.append(badge, ht); box.append(hero);
+            const products = (productList && productList.products) || []; const cur = (productList && productList.currency) || '';
+            if (!products.length) { const e = el('div', 'empty'); e.append(el('div', null, 'No products found.')); box.append(e); return; }
+            const search = el('input', 'prod-search'); search.placeholder = 'Search products…'; box.append(search);
+            const listWrap = el('div'); box.append(listWrap);
+            function draw(filter) {
+                listWrap.innerHTML = '';
+                const f = (filter || '').toLowerCase();
+                const rows = products.filter(p => !f || (p.title || '').toLowerCase().includes(f));
+                rows.forEach(p => {
+                    const row = el('button', 'prod-row');
+                    const th = document.createElement(p.image ? 'img' : 'div'); th.className = 'prod-thumb'; if (p.image) th.src = p.image;
+                    const main = el('div', 'prod-main'); main.append(el('div', 'prod-name', p.title || 'Untitled'));
+                    main.append(el('div', 'prod-sub', (p.status || '') + (p.price ? (' · ' + p.price + ' ' + cur) : '')));
+                    const chips = el('div', 'prod-chips');
+                    const c1 = el('div', 'prod-chip'); c1.append(el('div', 'n', String(p.units_28d || 0)), el('div', 'l', 'units 28d'));
+                    const c2 = el('div', 'prod-chip rev'); c2.append(el('div', 'n', fmtMoney(p.revenue_28d, cur)), el('div', 'l', 'rev 28d'));
+                    chips.append(c1, c2);
+                    const go = el('span', 'prod-go'); go.innerHTML = I.chevLeft;
+                    row.append(th, main, chips, go);
+                    row.onclick = () => openProduct(p.id, p.title);
+                    listWrap.append(row);
+                });
+                if (!rows.length) { const e = el('div', 'empty'); e.append(el('div', null, 'No products match.')); listWrap.append(e); }
+            }
+            search.addEventListener('input', () => draw(search.value));
+            draw('');
+        }
+        function productBack() { const b = el('button', 'btn back-btn'); b.append(ico(I.chevLeft), document.createTextNode('Products')); b.onclick = renderProductList; return b; }
+        async function openProduct(id, title) {
+            const box = $('products-content'); box.innerHTML = '';
+            box.append(productBack());
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
+            const ht = el('div'); ht.append(el('h2', null, title || 'Product'), el('p', null, 'Analyzing search, traffic, sales and on-page SEO…'));
+            hero.append(badge, ht); box.append(hero);
+            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(el('div', 'orb'), el('span', null, 'Building the optimization plan. This can take up to a minute…')); box.append(t);
+            try { renderProductDetail(await api('/api/product', { product_id: id })); }
+            catch (e) {
+                box.innerHTML = ''; box.append(productBack());
+                const er = el('div', 'msg error'); er.append(el('div', 'bubble', e.message || String(e))); box.append(er);
+            }
+        }
+        function renderProductDetail(d) {
+            const box = $('products-content'); box.innerHTML = ''; box.append(productBack());
+            const s = d.structured || {};
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
+            const ht = el('div'); ht.append(el('h2', null, (d.product && d.product.title) || 'Product'),
+                el('p', null, s.summary || 'Optimization plan for this product.'));
+            hero.append(badge, ht); box.append(hero);
+            if (Array.isArray(d.metrics) && d.metrics.length) box.append(metricsGrid(d.metrics));
+            if (Array.isArray(s.actions) && s.actions.length) { box.append(el('div', 'section-title', 'Top opportunities')); box.append(actionsCard(s.actions)); }
+            if (Array.isArray(s.insights) && s.insights.length) { box.append(el('div', 'section-title', 'Findings')); const b = el('div', 'insights'); s.insights.forEach((x, i) => b.append(insightCard(x, i))); box.append(b); }
+            if (Array.isArray(s.sections) && s.sections.length) { box.append(el('div', 'section-title', 'Details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
+        }
+
         /* ---------- memory ---------- */
         let memories = [];
         let knowledge = {};
@@ -868,16 +970,18 @@
         /* ---------- view switching ---------- */
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
-            ['overview', 'seo', 'memory', 'chat'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', memory: 'Memory' };
+            ['overview', 'seo', 'products', 'memory', 'chat'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            const titles = { overview: 'Overview', seo: 'SEO', products: 'Products', memory: 'Memory' };
             $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
             const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory') ? 'none' : '';
             if (v === 'overview') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadOverview(true); }
             else if (v === 'seo') { act.append(ico(I.refresh), document.createTextNode('Re-audit')); act.className = 'btn'; act.onclick = () => loadSEO(true); }
+            else if (v === 'products') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadProducts(true); }
             else if (v === 'chat') { act.append(ico(I.plus), document.createTextNode('New chat')); act.className = 'btn btn-primary'; act.onclick = () => newConvo(); }
             closeSidebar();
             if (v === 'overview') loadOverview(false);
             if (v === 'seo') loadSEO(false);
+            if (v === 'products') loadProducts(false);
             if (v === 'memory') loadMemory();
         }
 
@@ -968,6 +1072,8 @@
         window.__demoSEO = function (d) { seoCache = { data: d, at: Date.now() }; $('nav-seo').click(); };
         window.__demoMem = function (list) { memories = list; $('nav-memory').click(); };
         window.__demoKnow = function (k) { knowledge = k; setView('memory'); renderMemory(); };
+        window.__demoProducts = function (pl) { productList = pl; setView('products'); renderProductList(); };
+        window.__demoProductDetail = function (d) { setView('products'); renderProductDetail(d); };
     })();
     </script>
 </body>

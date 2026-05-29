@@ -1115,6 +1115,121 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Per-product optimization plans
+# ---------------------------------------------------------------------------
+
+async def _orders_28d(registry: dict) -> list:
+    since = (datetime.now(timezone.utc) - timedelta(days=28)).isoformat()
+    return (await _tool_json(registry, "shopify_list_orders",
+                             {"status": "any", "created_at_min": since, "limit": 250})).get("orders", [])
+
+
+async def run_products_list(registry: dict) -> dict:
+    """Lightweight product list with 28-day sales signals, best sellers first."""
+    data = await _tool_json(registry, "shopify_list_products",
+                            {"limit": 250, "fields": "id,title,handle,status,image,variants"})
+    products = data.get("products", [])
+    shop = await _tool_json(registry, "shopify_get_shop", {})
+    from collections import Counter
+    units: Counter = Counter()
+    revenue: dict = {}
+    for o in await _orders_28d(registry):
+        for li in o.get("line_items", []):
+            pid = li.get("product_id")
+            if pid:
+                qty = li.get("quantity") or 0
+                units[pid] += qty
+                revenue[pid] = revenue.get(pid, 0.0) + float(li.get("price") or 0) * qty
+    out = []
+    for p in products:
+        pid = p.get("id")
+        img = p.get("image") or {}
+        out.append({
+            "id": pid, "title": p.get("title"), "handle": p.get("handle"), "status": p.get("status"),
+            "image": img.get("src") if isinstance(img, dict) else None,
+            "price": (p.get("variants") or [{}])[0].get("price"),
+            "units_28d": units.get(pid, 0), "revenue_28d": round(revenue.get(pid, 0.0), 2),
+        })
+    out.sort(key=lambda x: (x["units_28d"], x["revenue_28d"]), reverse=True)
+    return {"currency": shop.get("currency", ""), "products": out[:200]}
+
+
+async def run_product_audit(registry: dict, product_id: int, extra_system: str = "") -> dict:
+    p = await _tool_json(registry, "shopify_get_product", {"product_id": product_id})
+    if not p or not p.get("id"):
+        raise RuntimeError("Product not found.")
+    handle = p.get("handle") or ""
+    path = f"/products/{handle}"
+    primary, hosts = await _resolve_domains(registry)
+
+    page = {}
+    if primary and handle:
+        st, html = await _http_get(f"https://{primary}{path}", allowed_hosts=hosts)
+        if st and html:
+            page = {"url": f"https://{primary}{path}", "status": st, **_parse_seo(html)}
+
+    gsc = await google_data.gsc_page_queries(path) if google_data.gsc_configured() else {}
+    ga = await google_data.ga4_page(path) if google_data.ga4_configured() else {}
+
+    units, rev = 0, 0.0
+    for o in await _orders_28d(registry):
+        for li in o.get("line_items", []):
+            if li.get("product_id") == product_id:
+                qty = li.get("quantity") or 0
+                units += qty
+                rev += float(li.get("price") or 0) * qty
+    shop = await _tool_json(registry, "shopify_get_shop", {})
+    currency = shop.get("currency", "")
+    imgs = p.get("images", []) or []
+
+    context = {
+        "product": {
+            "title": p.get("title"), "handle": handle, "status": p.get("status"),
+            "price": (p.get("variants") or [{}])[0].get("price"),
+            "product_type": p.get("product_type"), "tags": p.get("tags"),
+            "description_words": len(re.sub("<[^>]+>", " ", p.get("body_html") or "").split()),
+            "images": len(imgs),
+            "images_missing_alt": sum(1 for i in imgs if not (i.get("alt") or "").strip()),
+        },
+        "page_seo": page,
+        "search_console": gsc,
+        "analytics": ga,
+        "sales_28d": {"units": units, "revenue": round(rev, 2), "currency": currency},
+    }
+    client = _anthropic()
+    msg = ("Per-product optimization data for one product (collected live):\n"
+           + json.dumps(context, indent=2, default=str)
+           + "\n\nProduce a focused, money-ranked optimization plan for THIS product via present_response. "
+             "Lead with the highest-impact opportunities in `actions` (with the supporting numbers and the "
+             "expected impact). Use `insights` for the key findings across search, traffic, sales and on-page "
+             "SEO. Be specific to this product and quantify wherever you can.")
+    resp = await client.messages.create(
+        model=MODEL_DEEP, max_tokens=MAX_TOKENS,
+        system=OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE + extra_system,
+        tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
+        messages=[{"role": "user", "content": msg}],
+        output_config={"effort": _effort_for(MODEL_DEEP)},
+    )
+    present = next((b.input for b in resp.content
+                    if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
+    structured = _coerce_structured(present or {"summary": "Optimization plan ready."})
+    structured.pop("metrics", None)
+
+    metrics = []
+    if gsc and gsc.get("totals"):
+        t = gsc["totals"]
+        metrics += [{"label": "Search clicks (28d)", "value": f"{t.get('clicks', 0):,}"},
+                    {"label": "Impressions (28d)", "value": f"{t.get('impressions', 0):,}"}]
+        if t.get("position"):
+            metrics.append({"label": "Avg position", "value": str(t["position"])})
+    if ga and not ga.get("error") and ("sessions" in ga):
+        metrics.append({"label": "Sessions (28d)", "value": f"{ga.get('sessions', 0):,}"})
+    metrics.append({"label": "Units sold (28d)", "value": str(units)})
+    metrics.append({"label": "Revenue (28d)", "value": _money(rev, currency)})
+    return {"product": {"title": p.get("title"), "handle": handle}, "metrics": metrics, "structured": structured}
+
+
+# ---------------------------------------------------------------------------
 # Auth: Shopify session token only (embedded-only; no password fallback)
 # ---------------------------------------------------------------------------
 
@@ -1453,6 +1568,52 @@ def add_routes(mcp, registry: dict) -> None:
                 return _json({"error": "Couldn't delete the stored knowledge."}, 500)
             return _json({"knowledge": {}})
         return _json({"knowledge": _load_knowledge()})
+
+    @mcp.custom_route("/api/products", methods=["POST"])
+    async def products_route(request: Request):
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        try:
+            return _json(await run_products_list(registry))
+        except Exception:
+            logger.exception("Product list failed")
+            return _json({"error": "Couldn't load products."}, 500)
+
+    @mcp.custom_route("/api/product", methods=["POST"])
+    async def product_route(request: Request):
+        pre = _pre_checks(request, ai=True)
+        if pre:
+            return pre
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        try:
+            pid = int(body.get("product_id"))
+        except (TypeError, ValueError):
+            return _json({"error": "A numeric product_id is required."}, 400)
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
+        try:
+            return _json(await run_product_audit(registry, pid, extra))
+        except RuntimeError as e:
+            return _json({"error": str(e)}, 400)
+        except anthropic.APIError:
+            logger.exception("Anthropic API error (product)")
+            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+        except Exception:
+            logger.exception("Product audit failed")
+            return _json({"error": "Couldn't analyze this product. Check the server logs."}, 500)
 
     # ----- Google OAuth connect flow (one-time, secret-gated) -------------
     def _redirect_uri(request: Request) -> str:
