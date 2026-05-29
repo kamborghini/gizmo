@@ -20,6 +20,7 @@ Required env vars:
 """
 import os
 import re
+import html
 import json
 import time
 import logging
@@ -1282,13 +1283,18 @@ def _render_page() -> str:
     return _page_cache.replace("<!--APPBRIDGE-->", head)
 
 
+_SHOP_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$")
+
+
 def _frame_headers(request: Request) -> dict:
     """Headers for the chat page: allow the admin iframe (must NOT send
     X-Frame-Options) and block MIME sniffing / referrer leakage."""
-    shop = request.query_params.get("shop")
+    shop = request.query_params.get("shop", "")
+    # Only trust a well-formed myshopify domain in the CSP; otherwise fall back
+    # to the wildcard so a crafted ?shop= value cannot inject extra frame hosts.
     ancestors = (
         f"https://{shop} https://admin.shopify.com"
-        if shop else "https://admin.shopify.com https://*.myshopify.com"
+        if _SHOP_RE.match(shop) else "https://admin.shopify.com https://*.myshopify.com"
     )
     # Full CSP: lock down sources while allowing exactly what the page needs —
     # App Bridge (cdn.shopify.com), Google Fonts, same-origin API calls, and the
@@ -1621,17 +1627,24 @@ def add_routes(mcp, registry: dict) -> None:
         return f"https://{host}/oauth/google/callback"
 
     def _oauth_page(title: str, msg: str) -> HTMLResponse:
-        body = (f"<!doctype html><meta charset=utf-8><title>{title}</title>"
+        # Escape both inputs (any reflected query value is neutralized) and ship a
+        # locked-down CSP: no scripts at all, only inline styles. Defense in depth.
+        t, m = html.escape(str(title)), html.escape(str(msg))
+        body = (f"<!doctype html><meta charset=utf-8><title>{t}</title>"
                 "<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f7f7f8;"
                 "color:#16161a;display:grid;place-items:center;height:100vh;margin:0}"
                 ".c{background:#fff;border:1px solid #e7e7ea;border-radius:14px;padding:28px 32px;"
                 "max-width:420px;text-align:center;box-shadow:0 6px 24px -6px rgba(20,20,40,.1)}"
                 "h1{font-size:17px;margin:0 0 8px}p{color:#5c5f66;font-size:14px;margin:0}</style>"
-                f"<div class=c><h1>{title}</h1><p>{msg}</p></div>")
-        return HTMLResponse(body, headers=_API_HEADERS)
+                f"<div class=c><h1>{t}</h1><p>{m}</p></div>")
+        headers = {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
+                   "base-uri 'none'; form-action 'none'", **_API_HEADERS}
+        return HTMLResponse(body, headers=headers)
 
     @mcp.custom_route("/oauth/google/start", methods=["GET"])
     async def google_start(request: Request):
+        if not _window_ok(_rl_hits.setdefault("oauth:" + _client_key(request), []), RATE_MAX_CLIENT, time.monotonic()):
+            return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
         if not google_data.oauth_client_configured():
             return _oauth_page("Not configured", "Set GOOGLE_OAUTH_CLIENT_ID / SECRET on the server first.")
         key = request.query_params.get("key", "")
