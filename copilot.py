@@ -23,11 +23,12 @@ Required env vars:
 import os
 import re
 import json
+import time
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import anthropic
 import httpx
@@ -55,7 +56,20 @@ SHOPIFY_STORE      = os.environ.get("SHOPIFY_STORE", "")        # used to pin se
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 
 # Headers applied to every API/page response (defense in depth).
-_API_HEADERS = {"X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"}
+_API_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+}
+
+# --- Abuse / cost controls --------------------------------------------------
+RATE_WINDOW      = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))      # seconds
+RATE_MAX_CLIENT  = int(os.environ.get("RATE_LIMIT_PER_CLIENT", "30"))  # requests/window/client
+RATE_MAX_GLOBAL  = int(os.environ.get("RATE_LIMIT_GLOBAL", "150"))     # AI requests/window (cost ceiling)
+MAX_BODY_BYTES   = int(os.environ.get("MAX_BODY_BYTES", str(256 * 1024)))  # 256 KB
+MAX_MESSAGES     = int(os.environ.get("MAX_MESSAGES", "100"))          # chat history length
+MAX_CHAT_CHARS   = int(os.environ.get("MAX_CHAT_CHARS", "100000"))     # total chars in a chat request
 
 MAX_TOOL_ROUNDS    = int(os.environ.get("COPILOT_MAX_TOOL_ROUNDS", "12"))
 MAX_TOKENS         = int(os.environ.get("COPILOT_MAX_TOKENS", "4096"))
@@ -652,12 +666,26 @@ async def _resolve_domains(registry: dict) -> tuple[str, set]:
     return primary, hosts
 
 
-async def _http_get(url: str) -> tuple[Optional[int], str]:
+async def _http_get(url: str, allowed_hosts: Optional[set] = None) -> tuple[Optional[int], str]:
+    """Fetch a URL, following redirects MANUALLY (max 4 hops). When allowed_hosts
+    is given, every hop — including the initial URL — must be on that allow-list,
+    which blocks redirect-based SSRF (e.g. a page 302-ing to an internal/metadata
+    address). Returns (status, text); ("blocked" hops yield the redirect status, "")."""
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=15.0,
+        if allowed_hosts is not None and urlparse(url).netloc.lower() not in allowed_hosts:
+            return None, ""
+        async with httpx.AsyncClient(follow_redirects=False, timeout=15.0,
                                      headers={"User-Agent": "StoreCopilot-SEO/1.0"}) as c:
-            r = await c.get(url)
-            return r.status_code, r.text
+            for _ in range(4):
+                r = await c.get(url)
+                if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
+                    nxt = urljoin(url, r.headers["location"])
+                    if allowed_hosts is not None and urlparse(nxt).netloc.lower() not in allowed_hosts:
+                        return r.status_code, ""  # refuse to follow off-allowlist redirect
+                    url = nxt
+                    continue
+                return r.status_code, r.text
+            return None, ""  # too many redirects
     except Exception:
         return None, ""
 
@@ -780,7 +808,7 @@ def _build_seo_tools(registry: dict) -> dict:
             url = raw
         else:
             url = f"https://{primary}/{raw.lstrip('/')}"
-        status, html = await _http_get(url)
+        status, html = await _http_get(url, allowed_hosts=hosts)
         if not status:
             return json.dumps({"error": f"Could not fetch {url}"})
         return json.dumps({"url": url, "status": status, **_parse_seo(html)}, default=str)
@@ -788,9 +816,9 @@ def _build_seo_tools(registry: dict) -> dict:
     async def seo_check_robots_sitemap(params: SeoEmptyInput) -> str:
         """Fetch this store's robots.txt and sitemap.xml and summarize their health
         (found, whether robots references the sitemap, risky Disallow rules, sitemap size)."""
-        primary, _ = await _resolve_domains(registry)
-        rs, rtext = await _http_get(f"https://{primary}/robots.txt")
-        ss, stext = await _http_get(f"https://{primary}/sitemap.xml")
+        primary, hosts = await _resolve_domains(registry)
+        rs, rtext = await _http_get(f"https://{primary}/robots.txt", allowed_hosts=hosts)
+        ss, stext = await _http_get(f"https://{primary}/sitemap.xml", allowed_hosts=hosts)
         return json.dumps({
             "robots_txt": {"status": rs, "found": rs == 200,
                            "references_sitemap": "sitemap" in (rtext or "").lower(),
@@ -807,19 +835,19 @@ def _build_seo_tools(registry: dict) -> dict:
 
 
 async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
-    primary, _ = await _resolve_domains(registry)
+    primary, hosts = await _resolve_domains(registry)
     if not primary:
         raise RuntimeError("Could not resolve the store's domain to audit.")
     signals = await _seo_product_signals(registry)
-    rs, rtext = await _http_get(f"https://{primary}/robots.txt")
-    ss, stext = await _http_get(f"https://{primary}/sitemap.xml")
+    rs, rtext = await _http_get(f"https://{primary}/robots.txt", allowed_hosts=hosts)
+    ss, stext = await _http_get(f"https://{primary}/sitemap.xml", allowed_hosts=hosts)
 
     urls = [f"https://{primary}/"]
     sample = await _tool_json(registry, "shopify_list_products", {"limit": SEO_SAMPLE_PAGES, "fields": "handle"})
     urls += [f"https://{primary}/products/{p['handle']}" for p in sample.get("products", []) if p.get("handle")]
     pages = []
     for u in urls[:SEO_SAMPLE_PAGES + 1]:
-        st, html = await _http_get(u)
+        st, html = await _http_get(u, allowed_hosts=hosts)
         if st:
             pages.append({"url": u, "status": st, **_parse_seo(html)})
 
@@ -921,8 +949,24 @@ def _frame_headers(request: Request) -> dict:
         f"https://{shop} https://admin.shopify.com"
         if shop else "https://admin.shopify.com https://*.myshopify.com"
     )
+    # Full CSP: lock down sources while allowing exactly what the page needs —
+    # App Bridge (cdn.shopify.com), Google Fonts, same-origin API calls, and the
+    # store/admin for the embed. 'unsafe-inline' is scoped to the app's own inline
+    # script/style; there is no untrusted-data→HTML sink (verified), so this is a
+    # sound risk tradeoff vs. the nonce machinery App Bridge can be finicky about.
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.shopify.com https://*.shopify.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src https://fonts.gstatic.com data:; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' https://*.shopify.com https://*.myshopify.com; "
+        "frame-src https://*.shopify.com; "
+        "base-uri 'self'; form-action 'self'; object-src 'none'; "
+        f"frame-ancestors {ancestors};"
+    )
     return {
-        "Content-Security-Policy": f"frame-ancestors {ancestors};",
+        "Content-Security-Policy": csp,
         "Cache-Control": "no-store",  # mode (embedded vs password) is env-dependent — never cache it
         **_API_HEADERS,
     }
@@ -930,6 +974,47 @@ def _frame_headers(request: Request) -> dict:
 
 def _json(data: dict, status: int = 200) -> JSONResponse:
     return JSONResponse(data, status_code=status, headers=_API_HEADERS)
+
+
+# ---------------------------------------------------------------------------
+# Abuse / cost controls — in-memory rate limiting + request-size guards
+# ---------------------------------------------------------------------------
+# Per-process and best-effort (fine at this scale; if the app is ever scaled to
+# multiple instances, move this to a shared store like Redis). asyncio is single
+# threaded and these helpers never await, so no lock is needed.
+_rl_hits: dict[str, list[float]] = {}
+_rl_global: list[float] = []
+
+
+def _client_key(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _window_ok(bucket: list[float], limit: int, now: float) -> bool:
+    cutoff = now - RATE_WINDOW
+    bucket[:] = [t for t in bucket if t >= cutoff]
+    if len(bucket) >= limit:
+        return False
+    bucket.append(now)
+    return True
+
+
+def _pre_checks(request: Request, ai: bool = False) -> Optional[JSONResponse]:
+    """Rate-limit (per-client + global for AI endpoints) and reject oversized bodies."""
+    now = time.monotonic()
+    if len(_rl_hits) > 5000:  # guard the dict from unbounded growth
+        _rl_hits.clear()
+    if not _window_ok(_rl_hits.setdefault(_client_key(request), []), RATE_MAX_CLIENT, now):
+        return _json({"error": "Too many requests — please slow down."}, 429)
+    if ai and not _window_ok(_rl_global, RATE_MAX_GLOBAL, now):
+        return _json({"error": "The assistant is busy right now. Please try again shortly."}, 429)
+    cl = request.headers.get("content-length", "")
+    if cl.isdigit() and int(cl) > MAX_BODY_BYTES:
+        return _json({"error": "Request too large."}, 413)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -969,6 +1054,9 @@ def add_routes(mcp, registry: dict) -> None:
 
     @mcp.custom_route("/api/chat", methods=["POST"])
     async def chat(request: Request):
+        pre = _pre_checks(request, ai=True)
+        if pre:
+            return pre
         try:
             body = await request.json()
         except Exception:
@@ -983,6 +1071,10 @@ def add_routes(mcp, registry: dict) -> None:
             history = [{"role": "user", "content": body["message"]}]
         if not history:
             return _json({"error": "Provide 'messages' or 'message'"}, 400)
+        if not isinstance(history, list) or len(history) > MAX_MESSAGES:
+            return _json({"error": "Conversation too long — start a new chat."}, 400)
+        if len(json.dumps(history)) > MAX_CHAT_CHARS:
+            return _json({"error": "Message too large."}, 413)
 
         model = _pick_model(history, bool(body.get("deep")))
         extra = _profile_to_system(_load_profile()) + _memory_to_system()
@@ -1006,6 +1098,9 @@ def add_routes(mcp, registry: dict) -> None:
 
     @mcp.custom_route("/api/overview", methods=["POST"])
     async def overview(request: Request):
+        pre = _pre_checks(request, ai=True)
+        if pre:
+            return pre
         try:
             body = await request.json()
         except Exception:
@@ -1030,6 +1125,9 @@ def add_routes(mcp, registry: dict) -> None:
 
     @mcp.custom_route("/api/profile", methods=["POST"])
     async def profile_route(request: Request):
+        pre = _pre_checks(request)
+        if pre:
+            return pre
         try:
             body = await request.json()
         except Exception:
@@ -1049,6 +1147,9 @@ def add_routes(mcp, registry: dict) -> None:
 
     @mcp.custom_route("/api/seo", methods=["POST"])
     async def seo_route(request: Request):
+        pre = _pre_checks(request, ai=True)
+        if pre:
+            return pre
         try:
             body = await request.json()
         except Exception:
@@ -1071,6 +1172,9 @@ def add_routes(mcp, registry: dict) -> None:
 
     @mcp.custom_route("/api/memory", methods=["POST"])
     async def memory_route(request: Request):
+        pre = _pre_checks(request)
+        if pre:
+            return pre
         try:
             body = await request.json()
         except Exception:
