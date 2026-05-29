@@ -31,6 +31,7 @@ from urllib.parse import urlparse, urljoin
 import anthropic
 import httpx
 import jwt
+import google_data
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import Request
@@ -581,6 +582,27 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
         "top_products_7d": [{"title": t, "units": q} for t, q in units.most_common(5)],
         "note": "Order figures are based on up to 250 orders per 7-day window.",
     }
+
+    # Real traffic + search performance (only when Google is connected).
+    if google_data.ga4_configured():
+        ga = await google_data.ga4_summary(28)
+        if ga and not ga.get("error"):
+            metrics.append({"label": "Sessions (GA4, 28d)", "value": f"{ga['sessions']:,}"})
+            metrics.append({"label": "Revenue (GA4, 28d)", "value": _money(ga["revenue"], currency)})
+            context["ga4_28d"] = ga
+        elif ga.get("error"):
+            context["ga4_28d"] = ga
+    if google_data.gsc_configured():
+        gsc = await google_data.gsc_overview(28)
+        if gsc and not gsc.get("error"):
+            metrics.append({"label": "Search clicks (28d)", "value": f"{gsc['clicks']:,}"})
+            metrics.append({"label": "Search impressions (28d)", "value": f"{gsc['impressions']:,}"})
+            if gsc.get("position") is not None:
+                metrics.append({"label": "Avg Google position", "value": str(gsc["position"])})
+            context["search_console_28d"] = gsc
+        elif gsc.get("error"):
+            context["search_console_28d"] = gsc
+
     return [m for m in metrics if m.get("value") is not None], context
 
 
@@ -831,6 +853,40 @@ def _build_seo_tools(registry: dict) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Google data chat tools (only registered when GSC/GA4 is configured)
+# ---------------------------------------------------------------------------
+
+class DaysInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    days: Optional[int] = Field(default=28, ge=1, le=180, description="Look-back window in days.")
+
+
+def _build_google_tools() -> dict:
+    tools: dict = {}
+    if google_data.gsc_configured():
+        async def get_search_console_data(params: DaysInput) -> str:
+            """Real Google Search Console data for this store: total clicks, impressions, CTR and
+            average position, plus the top search queries (with per-query impressions/CTR/position).
+            Use this to ground SEO advice in how the store actually performs in Google Search —
+            e.g. high-impression, low-CTR, mid-position queries are title/meta rewrite opportunities."""
+            days = params.days or 28
+            overview = await google_data.gsc_overview(days)
+            queries = await google_data.gsc_top_queries(days)
+            return json.dumps({"overview": overview, "top_queries": queries}, default=str)
+        tools["get_search_console_data"] = (get_search_console_data, DaysInput)
+
+    if google_data.ga4_configured():
+        async def get_ga4_data(params: DaysInput) -> str:
+            """Real Google Analytics 4 data for this store: sessions, revenue, engaged sessions and
+            the top traffic channels over the window. Use to ground answers about traffic, acquisition
+            and on-site performance in real analytics rather than order data alone."""
+            return json.dumps(await google_data.ga4_summary(params.days or 28), default=str)
+        tools["get_ga4_data"] = (get_ga4_data, DaysInput)
+
+    return tools
+
+
 async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
     primary, hosts = await _resolve_domains(registry)
     if not primary:
@@ -855,11 +911,24 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
         "sitemap_xml": {"status": ss, "found": ss == 200, "child_locs": (stext or "").count("<loc>")},
         "sampled_pages": pages,
     }
+
+    # Real Search Console performance turns the technical audit into opportunity
+    # work (e.g. high-impression, low-CTR queries → title/meta rewrites).
+    gsc_note = ""
+    if google_data.gsc_configured():
+        overview = await google_data.gsc_overview(28)
+        queries = await google_data.gsc_top_queries(28)
+        context["search_console"] = {"overview": overview, "top_queries": queries}
+        if not overview.get("error"):
+            gsc_note = (" Real Search Console data is included — use it: surface specific "
+                        "high-impression / low-CTR / mid-position queries as concrete CTR (title & "
+                        "meta) opportunities, and reconcile them with the on-page findings.")
+
     client = _anthropic()
     msg = ("Technical SEO audit data for this Shopify store (collected live):\n"
            + json.dumps(context, indent=2, default=str)
            + "\n\nProduce the audit now via present_response. Lead with the highest-impact, "
-             "gates-first fixes; be specific to this data; cite the pipeline stage per finding.")
+             "gates-first fixes; be specific to this data; cite the pipeline stage per finding." + gsc_note)
     resp = await client.messages.create(
         model=MODEL_FAST, max_tokens=MAX_TOKENS,
         system=OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE + extra_system,
@@ -1007,7 +1076,8 @@ def _pre_checks(request: Request, ai: bool = False) -> Optional[JSONResponse]:
 # ---------------------------------------------------------------------------
 
 def add_routes(mcp, registry: dict) -> None:
-    chat_registry = {**registry, **_build_seo_tools(registry)}  # Shopify tools + live SEO tools
+    # Shopify tools + live SEO tools + Google data tools (the last only if configured)
+    chat_registry = {**registry, **_build_seo_tools(registry), **_build_google_tools()}
     tools = _build_tools(chat_registry)
     dispatch = _build_dispatch(chat_registry)
 
