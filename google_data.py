@@ -49,6 +49,10 @@ _sa_creds = None                       # cached service-account credentials
 _access: dict = {"token": "", "exp": 0.0}  # cached OAuth access token
 
 
+class GoogleAPIError(Exception):
+    """Carries Google's own error message so the UI can show the real cause."""
+
+
 # ---------------------------------------------------------------------------
 # Connection state
 # ---------------------------------------------------------------------------
@@ -194,10 +198,16 @@ async def _post(url: str, body: dict) -> dict:
     token = await _token()
     async with httpx.AsyncClient(timeout=20.0) as c:
         r = await c.post(url, headers={"Authorization": f"Bearer {token}"}, json=body)
-        if r.status_code == 403:
-            raise PermissionError("Google denied access — make sure the connected account can view "
-                                  "this GA4 property / Search Console site.")
-        r.raise_for_status()
+        if r.status_code >= 400:
+            # Surface Google's own error message — it's specific and actionable
+            # (e.g. "<API> has not been used in project N before or it is disabled…",
+            # or "User does not have sufficient permission for site '…'").
+            try:
+                detail = r.json().get("error", {}).get("message", "") or r.text[:300]
+            except Exception:
+                detail = r.text[:300]
+            logger.warning(f"Google API {r.status_code}: {detail}")
+            raise GoogleAPIError(detail.strip()[:400] or f"HTTP {r.status_code}")
         return r.json()
 
 
@@ -227,7 +237,7 @@ async def gsc_overview(days: int = 28) -> dict:
         return {"clicks": int(r.get("clicks", 0)), "impressions": int(r.get("impressions", 0)),
                 "ctr": round(r.get("ctr", 0) * 100, 2), "position": round(r.get("position", 0), 1),
                 "range_days": days}
-    except PermissionError as e:
+    except GoogleAPIError as e:
         return {"error": str(e)}
     except Exception as e:
         logger.warning(f"GSC overview failed: {e}")
@@ -245,7 +255,7 @@ async def gsc_top_queries(days: int = 28, limit: int = 15) -> dict:
                 "impressions": int(r.get("impressions", 0)), "ctr": round(r.get("ctr", 0) * 100, 2),
                 "position": round(r.get("position", 0), 1)} for r in data.get("rows", [])]
         return {"queries": out, "range_days": days}
-    except PermissionError as e:
+    except GoogleAPIError as e:
         return {"error": str(e)}
     except Exception as e:
         logger.warning(f"GSC queries failed: {e}")
@@ -286,7 +296,7 @@ async def ga4_summary(days: int = 28) -> dict:
                     for r in chan.get("rows", [])]
         return {"sessions": sessions, "revenue": revenue, "engaged_sessions": engaged,
                 "top_channels": channels, "range_days": days}
-    except PermissionError as e:
+    except GoogleAPIError as e:
         return {"error": str(e)}
     except Exception as e:
         logger.warning(f"GA4 summary failed: {e}")
