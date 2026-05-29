@@ -358,8 +358,6 @@
 
     <script>
     (function () {
-        const MODE = "__MODE__";
-
         /* ---------- icons (constant SVG; safe to inject) ---------- */
         // Feather Icons (https://feathericons.com) — inlined so there are no extra requests.
         const SV = (inner) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
@@ -426,24 +424,21 @@
         const active = () => convos.find(c => c.id === activeId);
         const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
-        /* ---------- auth (embedded session token OR password) ---------- */
-        async function getAuth() {
-            if (MODE === 'embedded') {
-                const token = await shopify.idToken();
-                return { headers: { 'Authorization': 'Bearer ' + token }, body: {} };
+        /* ---------- auth (Shopify session token only; embedded-only) ---------- */
+        async function authHeaders() {
+            if (typeof shopify === 'undefined' || !shopify.idToken) {
+                throw new Error('Open Store Copilot from inside your Shopify admin.');
             }
-            let pw = sessionStorage.getItem('dash_pw');
-            if (!pw) { pw = prompt('Enter the dashboard password'); if (pw) sessionStorage.setItem('dash_pw', pw); }
-            return { headers: {}, body: { password: pw || '' } };
+            const token = await shopify.idToken();
+            return { 'Authorization': 'Bearer ' + token };
         }
         async function api(path, payload) {
-            const auth = await getAuth();
             const res = await fetch(path, {
                 method: 'POST',
-                headers: Object.assign({ 'Content-Type': 'application/json' }, auth.headers),
-                body: JSON.stringify(Object.assign({}, payload, auth.body)),
+                headers: Object.assign({ 'Content-Type': 'application/json' }, await authHeaders()),
+                body: JSON.stringify(payload || {}),
             });
-            if (res.status === 401) { sessionStorage.removeItem('dash_pw'); throw new Error('Unauthorized — open this from inside your Shopify admin.'); }
+            if (res.status === 401) throw new Error('Unauthorized — open this from inside your Shopify admin.');
             const data = await res.json();
             if (data.error) throw new Error(data.error);
             return data;
@@ -840,12 +835,6 @@
         renderSidebar(); renderChat(); setView('overview');
         loadProfile();  // pull the saved store profile from the server (for the Settings modal)
         loadMemory();   // pull saved memories (for Overview follow-ups + the Memory tab)
-
-        // Standalone (password) mode: prompt up front so it isn't hidden behind a click.
-        if (MODE !== 'embedded' && !sessionStorage.getItem('dash_pw')) {
-            const pw0 = prompt('Enter the dashboard password to use Store Copilot');
-            if (pw0) sessionStorage.setItem('dash_pw', pw0);
-        }
 
         // Demo hook for visual testing (no data exposed).
         window.__demo = function (sample, ov) {

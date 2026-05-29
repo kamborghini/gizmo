@@ -9,16 +9,14 @@ This module adds an in-admin chat experience to the existing MCP server:
 It REUSES the Shopify tool functions already defined in server.py (passed in
 as a registry), so there is one source of truth for Shopify API access.
 
-Auth on /api/chat (either is accepted):
-  1. Shopify session token (Bearer JWT from App Bridge) — used when embedded.
-  2. A shared dashboard password (X-Dashboard-Password) — used standalone.
+Auth (embedded-only): every API request must carry a verified Shopify session
+token (Bearer JWT from App Bridge). There is no password fallback.
 
 Required env vars:
   ANTHROPIC_API_KEY     Claude API key (sk-ant-...). Required to chat.
   ANTHROPIC_MODEL       Optional. Defaults to claude-sonnet-4-6.
-  SHOPIFY_API_KEY       App client ID. Enables embedded/App Bridge mode.
+  SHOPIFY_API_KEY       App client ID. Enables App Bridge + session-token auth.
   SHOPIFY_API_SECRET    App client secret. Verifies session tokens.
-  DASHBOARD_PASSWORD    Enables standalone password mode (optional fallback).
 """
 import os
 import re
@@ -53,7 +51,6 @@ LOW_STOCK_THRESHOLD = int(os.environ.get("LOW_STOCK_THRESHOLD", "5"))
 SHOPIFY_API_KEY    = os.environ.get("SHOPIFY_API_KEY") or os.environ.get("SHOPIFY_CLIENT_ID", "")
 SHOPIFY_API_SECRET = os.environ.get("SHOPIFY_API_SECRET") or os.environ.get("SHOPIFY_CLIENT_SECRET", "")
 SHOPIFY_STORE      = os.environ.get("SHOPIFY_STORE", "")        # used to pin session tokens to this shop
-DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 
 # Headers applied to every API/page response (defense in depth).
 _API_HEADERS = {
@@ -877,7 +874,7 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Auth: Shopify session token OR dashboard password
+# Auth: Shopify session token only (embedded-only; no password fallback)
 # ---------------------------------------------------------------------------
 
 def _verify_session_token(token: str) -> dict:
@@ -899,9 +896,9 @@ def _verify_session_token(token: str) -> dict:
     return claims
 
 
-def _authorize(request: Request, body: dict) -> tuple[bool, Optional[str]]:
-    """Return (ok, who). Accepts a Shopify session token (Bearer header) or the
-    dashboard password (request body, with legacy header fallback)."""
+def _authorize(request: Request) -> tuple[bool, Optional[str]]:
+    """Return (ok, who). The only accepted credential is a verified Shopify
+    session token (Bearer JWT from App Bridge) — the app is embedded-only."""
     auth = request.headers.get("authorization", "")
     if auth.startswith("Bearer ") and SHOPIFY_API_SECRET:
         try:
@@ -909,14 +906,6 @@ def _authorize(request: Request, body: dict) -> tuple[bool, Optional[str]]:
             return True, claims.get("dest")
         except Exception as e:
             logger.warning(f"session token rejected: {e}")
-            # fall through to password check
-
-    if DASHBOARD_PASSWORD:
-        pw = (body or {}).get("password") or request.headers.get("x-dashboard-password", "")
-        # Compare as bytes — secrets.compare_digest raises on non-ASCII strings.
-        if pw and secrets.compare_digest(str(pw).encode("utf-8"), DASHBOARD_PASSWORD.encode("utf-8")):
-            return True, "password"
-
     return False, None
 
 
@@ -929,16 +918,12 @@ def _render_page() -> str:
     if _page_cache is None:
         with open(_PAGE_PATH, "r", encoding="utf-8") as fh:
             _page_cache = fh.read()
-    if SHOPIFY_API_KEY:
-        head = (
-            f'<meta name="shopify-api-key" content="{SHOPIFY_API_KEY}" />\n'
-            '    <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>'
-        )
-        mode = "embedded"
-    else:
-        head = ""
-        mode = "password"
-    return _page_cache.replace("<!--APPBRIDGE-->", head).replace("__MODE__", mode)
+    # Embedded-only: always load App Bridge (which provides the session token).
+    head = (
+        f'<meta name="shopify-api-key" content="{SHOPIFY_API_KEY}" />\n'
+        '    <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>'
+    ) if SHOPIFY_API_KEY else ""
+    return _page_cache.replace("<!--APPBRIDGE-->", head)
 
 
 def _frame_headers(request: Request) -> dict:
@@ -1026,15 +1011,12 @@ def add_routes(mcp, registry: dict) -> None:
     tools = _build_tools(chat_registry)
     dispatch = _build_dispatch(chat_registry)
 
-    mode = "embedded (App Bridge)" if SHOPIFY_API_KEY else "standalone (password)"
-    logger.info(f"Copilot enabled — mode: {mode}; models: fast={MODEL_FAST}, deep={MODEL_DEEP}; tools: {len(tools)}")
+    logger.info(f"Copilot enabled — embedded-only; models: fast={MODEL_FAST}, deep={MODEL_DEEP}; tools: {len(tools)}")
     if not ANTHROPIC_API_KEY:
         logger.warning("Copilot: ANTHROPIC_API_KEY not set — chat will return an error until it is.")
-    if not SHOPIFY_API_KEY and not DASHBOARD_PASSWORD:
-        logger.warning("Copilot: no SHOPIFY_API_SECRET and no DASHBOARD_PASSWORD — /api/chat is locked.")
-    if SHOPIFY_API_SECRET and DASHBOARD_PASSWORD:
-        logger.warning("Copilot: DASHBOARD_PASSWORD is set alongside Shopify auth — consider removing it "
-                       "so access requires signing into Shopify admin.")
+    if not SHOPIFY_API_SECRET:
+        logger.warning("Copilot: SHOPIFY_API_SECRET/CLIENT_SECRET not set — all API routes are locked "
+                       "(session tokens can't be verified).")
 
     @mcp.custom_route("/", methods=["GET"])
     async def index(request: Request):
@@ -1062,7 +1044,7 @@ def add_routes(mcp, registry: dict) -> None:
         except Exception:
             return _json({"error": "Invalid JSON body"}, 400)
 
-        ok, _who = _authorize(request, body)
+        ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
 
@@ -1105,7 +1087,7 @@ def add_routes(mcp, registry: dict) -> None:
             body = await request.json()
         except Exception:
             body = {}
-        ok, _who = _authorize(request, body)
+        ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
         profile = _load_profile()
@@ -1132,7 +1114,7 @@ def add_routes(mcp, registry: dict) -> None:
             body = await request.json()
         except Exception:
             body = {}
-        ok, _who = _authorize(request, body)
+        ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
         # Save when a profile object is supplied; otherwise just load.
@@ -1154,7 +1136,7 @@ def add_routes(mcp, registry: dict) -> None:
             body = await request.json()
         except Exception:
             body = {}
-        ok, _who = _authorize(request, body)
+        ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
         extra = _profile_to_system(_load_profile()) + _memory_to_system()
@@ -1179,7 +1161,7 @@ def add_routes(mcp, registry: dict) -> None:
             body = await request.json()
         except Exception:
             body = {}
-        ok, _who = _authorize(request, body)
+        ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
         op = body.get("op")
