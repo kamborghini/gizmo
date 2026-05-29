@@ -84,6 +84,10 @@ PROFILE_FIELD_CAP  = int(os.environ.get("PROFILE_FIELD_CAP", "6000"))
 MEMORY_PATH        = os.environ.get("MEMORY_PATH", "/data/store_memory.json")
 MEMORY_MAX         = int(os.environ.get("MEMORY_MAX", "200"))    # max stored memories
 MEMORY_INJECT      = int(os.environ.get("MEMORY_INJECT", "25"))  # max of each kind injected into prompts
+KNOWLEDGE_PATH     = os.environ.get("KNOWLEDGE_PATH", "/data/store_knowledge.json")
+KNOWLEDGE_CAP      = int(os.environ.get("KNOWLEDGE_CAP", "8000"))     # max stored knowledge chars
+LEARN_MAX_PAGES    = int(os.environ.get("LEARN_MAX_PAGES", "12"))    # pages crawled when learning
+LEARN_PAGE_CHARS   = int(os.environ.get("LEARN_PAGE_CHARS", "3000"))  # text kept per page
 
 _PAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "index.html")
 _page_cache: Optional[str] = None
@@ -366,13 +370,121 @@ def _memory_to_system(memories: Optional[list[dict]] = None) -> str:
              and m.get("status") != "dismissed"][-MEMORY_INJECT:]
     if not open_fu and not facts:
         return ""
-    block = "\n\n## Memory — what you know from past sessions (use for continuity)\n"
+    block = "\n\n## Memory (what you know from past sessions; use for continuity)\n"
     if facts:
         block += "Known facts & decisions:\n" + "\n".join("- " + m["text"] for m in facts) + "\n"
     if open_fu:
         block += ("Open follow-ups (check in on these when relevant; close them out if done):\n"
                   + "\n".join("- " + m["text"] for m in open_fu))
     return block
+
+
+# ---------------------------------------------------------------------------
+# Store knowledge — learned once from the store's site, kept until deleted
+# ---------------------------------------------------------------------------
+
+LEARN_SYSTEM = """You are studying a Shopify merchant's public website (homepage, About and other \
+pages, and blog posts) to build a durable knowledge profile the store's AI copilot will reference in \
+every future answer. Read the supplied page text and write a clear, factual profile of the business.
+
+Cover, when the content supports it: what the business is and sells, who its customers are, its \
+positioning and points of difference, brand voice and tone, key products or collections and their \
+selling points, the themes and expertise shown in the blog, and any policies or promises that shape \
+how it should be represented. Be specific and use the store's own language. Do not invent anything \
+not supported by the content. Write plain prose with short headed sections, no preamble. Never use \
+em dashes or en dashes."""
+
+
+def _load_knowledge() -> dict:
+    try:
+        with open(KNOWLEDGE_PATH, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
+
+
+def _save_knowledge(text: str, sources: list[str]) -> dict:
+    data = {"knowledge": text[:KNOWLEDGE_CAP], "sources": sources[:50],
+            "learned_at": datetime.now(timezone.utc).isoformat()}
+    os.makedirs(os.path.dirname(KNOWLEDGE_PATH) or ".", exist_ok=True)
+    tmp = KNOWLEDGE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh)
+    os.replace(tmp, KNOWLEDGE_PATH)
+    return data
+
+
+def _delete_knowledge() -> None:
+    try:
+        os.remove(KNOWLEDGE_PATH)
+    except FileNotFoundError:
+        pass
+
+
+def _knowledge_to_system() -> str:
+    k = _load_knowledge()
+    text = (k.get("knowledge") or "").strip()
+    if not text:
+        return ""
+    return ("\n\n## Store knowledge (learned from the store's own site; authoritative background "
+            "about the business; use it to inform every answer)\n" + text)
+
+
+async def _discover_content_urls(primary: str, hosts: set, limit: int) -> list[str]:
+    """Find homepage + About/other pages + blog posts via the sitemap (SSRF-guarded)."""
+    def _is_content(u: str) -> bool:
+        return ("/pages/" in u) or ("/blogs/" in u)
+    _, sm = await _http_get(f"https://{primary}/sitemap.xml", allowed_hosts=hosts)
+    locs = re.findall(r"<loc>\s*(.*?)\s*</loc>", sm or "")
+    page_urls = [l for l in locs if _is_content(l)]
+    # Shopify's root sitemap is an index; follow the pages/blogs child sitemaps.
+    for child in [l for l in locs if l.endswith(".xml") and ("page" in l or "blog" in l)][:4]:
+        if urlparse(child).netloc.lower() in hosts:
+            _, c = await _http_get(child, allowed_hosts=hosts)
+            page_urls += [l for l in re.findall(r"<loc>\s*(.*?)\s*</loc>", c or "") if _is_content(l)]
+    out, seen = [], set()
+    for u in [f"https://{primary}/"] + page_urls:
+        if u in seen or urlparse(u).netloc.lower() not in hosts:
+            continue
+        seen.add(u); out.append(u)
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def run_learn(registry: dict) -> dict:
+    primary, hosts = await _resolve_domains(registry)
+    if not primary:
+        raise RuntimeError("Could not resolve the store's domain to learn from.")
+    shop = await _tool_json(registry, "shopify_get_shop", {})
+    urls = await _discover_content_urls(primary, hosts, LEARN_MAX_PAGES)
+    pages = []
+    for u in urls:
+        st, html = await _http_get(u, allowed_hosts=hosts)
+        if not (st and html):
+            continue
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header", "noscript", "svg"]):
+            tag.extract()
+        text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))[:LEARN_PAGE_CHARS]
+        title = (soup.title.string or "").strip() if soup.title and soup.title.string else u
+        if len(text) > 80:
+            pages.append({"url": u, "title": title, "text": text})
+    if not pages:
+        raise RuntimeError("Couldn't read any public pages from the storefront to learn from.")
+    corpus = json.dumps({"shop": {"name": shop.get("name"), "domain": primary}, "pages": pages},
+                        default=str)[:30000]
+    client = _anthropic()
+    resp = await client.messages.create(
+        model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=LEARN_SYSTEM,
+        messages=[{"role": "user", "content": "Store website content:\n" + corpus
+                   + "\n\nWrite the store knowledge profile now."}],
+        output_config={"effort": _effort_for(MODEL_DEEP)},
+    )
+    text = _strip_dashes("".join(b.text for b in resp.content if b.type == "text").strip())
+    if not text:
+        raise RuntimeError("Couldn't synthesize store knowledge. Please try again.")
+    return _save_knowledge(text, [p["url"] for p in pages])
 
 
 # ---------------------------------------------------------------------------
@@ -1191,7 +1303,7 @@ def add_routes(mcp, registry: dict) -> None:
             return _json({"error": "Message too large."}, 413)
 
         model = _pick_model(bool(body.get("deep")))
-        extra = _profile_to_system(_load_profile()) + _memory_to_system()
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
         if _is_seo(history):
             extra += "\n\n" + SEO_KNOWLEDGE
         try:
@@ -1223,7 +1335,7 @@ def add_routes(mcp, registry: dict) -> None:
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
         profile = _load_profile()
-        extra = _profile_to_system(profile) + _memory_to_system()
+        extra = _profile_to_system(profile) + _memory_to_system() + _knowledge_to_system()
         track = (profile.get("prefs") or {}).get("track_inventory", True)
         try:
             result = await run_overview(registry, extra, bool(track))
@@ -1271,7 +1383,7 @@ def add_routes(mcp, registry: dict) -> None:
         ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
-        extra = _profile_to_system(_load_profile()) + _memory_to_system()
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
         try:
             result = await run_seo_audit(registry, extra)
         except RuntimeError as e:
@@ -1308,6 +1420,39 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("Memory op failed")
             return _json({"error": "Couldn't update memory (is a writable volume mounted at /data?)."}, 500)
         return _json({"memories": _load_memory()})
+
+    @mcp.custom_route("/api/learn", methods=["POST"])
+    async def learn_route(request: Request):
+        pre = _pre_checks(request, ai=True)
+        if pre:
+            return pre
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        op = body.get("op")
+        if op == "learn":
+            try:
+                return _json({"knowledge": await run_learn(registry)})
+            except RuntimeError as e:
+                return _json({"error": str(e)}, 500)
+            except anthropic.APIError:
+                logger.exception("Anthropic API error (learn)")
+                return _json({"error": "The AI service returned an error. Please try again."}, 502)
+            except Exception:
+                logger.exception("Learn failed")
+                return _json({"error": "Couldn't learn the store. Check the server logs."}, 500)
+        if op == "delete":
+            try:
+                _delete_knowledge()
+            except Exception:
+                logger.exception("Knowledge delete failed")
+                return _json({"error": "Couldn't delete the stored knowledge."}, 500)
+            return _json({"knowledge": {}})
+        return _json({"knowledge": _load_knowledge()})
 
     # ----- Google OAuth connect flow (one-time, secret-gated) -------------
     def _redirect_uri(request: Request) -> str:

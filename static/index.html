@@ -55,9 +55,10 @@
         .convo:hover { background: var(--surface-3); color: var(--ink); }
         .convo.active { background: var(--surface-3); color: var(--ink); font-weight: 500; }
         .convo .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .convo .del { opacity: 0; color: var(--ink-3); }
-        .convo:hover .del { opacity: 1; }
-        .convo .del:hover { color: var(--danger); }
+        .convo .del { opacity: .5; color: var(--ink-3); padding: 2px; border-radius: 5px; display: grid; place-items: center; }
+        .convo .del svg { width: 14px; height: 14px; }
+        .convo:hover .del { opacity: .8; }
+        .convo .del:hover { opacity: 1; color: var(--danger); background: var(--surface); }
         .convo-empty { color: var(--ink-3); font-size: 12.5px; padding: 8px 10px; }
         .side-foot { padding: 12px 16px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--ink-3); display: flex; align-items: center; gap: 7px; }
         .side-foot .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--win); }
@@ -127,6 +128,20 @@
         .mem-btn:hover { background: var(--surface-3); color: var(--ink); }
         .mem-btn.ok:hover { color: var(--win); }
         .mem-btn.del:hover { color: var(--danger); }
+        /* Store-knowledge card */
+        .know { padding: 16px 18px; margin-bottom: 20px; }
+        .know-head { display: flex; align-items: flex-start; gap: 12px; }
+        .know-ic { width: 32px; height: 32px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex-shrink: 0; }
+        .know-ic svg { width: 17px; height: 17px; }
+        .know-title { font-weight: 650; font-size: 14.5px; }
+        .know-sub { color: var(--ink-2); font-size: 12.5px; margin-top: 2px; line-height: 1.5; }
+        .know-acts { margin-left: auto; display: flex; gap: 8px; flex-shrink: 0; }
+        .know-body { margin-top: 13px; border-top: 1px solid var(--border); padding-top: 11px; }
+        .know-body summary { font-size: 12.5px; color: var(--accent-ink); cursor: pointer; font-weight: 550; list-style: none; }
+        .know-body summary::-webkit-details-marker { display: none; }
+        .know-text { margin-top: 11px; font-size: 13px; color: var(--ink-2); line-height: 1.6; max-height: 360px; overflow: auto; }
+        .know-text p { margin: 0 0 9px; } .know-text ul { margin: 0 0 9px; padding-left: 18px; } .know-text li { margin: 3px 0; }
+        @media (max-width: 560px) { .know-head { flex-wrap: wrap; } .know-acts { margin-left: 0; } }
 
         /* ---------- Structured response components ---------- */
         .insights { display: flex; flex-direction: column; gap: 9px; }
@@ -396,6 +411,8 @@
             insight: SV('<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>'),
             search: SV('<circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>'),
             bookmark: SV('<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>'),
+            book: SV('<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>'),
+            rotate: SV('<polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>'),
             settings: SV('<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>'),
             x: SV('<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>'),
         };
@@ -629,7 +646,10 @@
         function selectConvo(id) { activeId = id; renderSidebar(); renderChat(); setView('chat'); }
         function deleteConvo(id, ev) {
             ev.stopPropagation();
-            convos = convos.filter(c => c.id !== id);
+            const c = convos.find(x => x.id === id);
+            const name = (c && c.title) ? c.title : 'this conversation';
+            if (!confirm('Delete "' + name + '"? This cannot be undone.')) return;
+            convos = convos.filter(x => x.id !== id);
             if (activeId === id) activeId = convos[0] ? convos[0].id : null;
             save(); renderSidebar(); renderChat();
         }
@@ -745,14 +765,67 @@
 
         /* ---------- memory ---------- */
         let memories = [];
+        let knowledge = {};
+        let learning = false;
         async function loadMemory() {
             try { const d = await api('/api/memory', {}); if (d && Array.isArray(d.memories)) memories = d.memories; } catch (e) {}
+            try { const k = await api('/api/learn', {}); knowledge = (k && k.knowledge) || {}; } catch (e) {}
             if ($('view-memory').classList.contains('active')) renderMemory();
         }
         async function memOp(payload) {
             try { const d = await api('/api/memory', payload); if (d && Array.isArray(d.memories)) memories = d.memories; } catch (e) {}
             renderMemory();
             if ($('view-overview').classList.contains('active') && overviewCache) renderOverview(overviewCache);
+        }
+        async function learnStore() {
+            if (learning) return;
+            learning = true; renderMemory();
+            try {
+                const d = await api('/api/learn', { op: 'learn' });
+                knowledge = (d && d.knowledge) || {};
+            } catch (e) {
+                addToast('Learning failed: ' + (e.message || e));
+            } finally { learning = false; renderMemory(); }
+        }
+        async function deleteKnowledge() {
+            if (!confirm('Delete what the copilot has learned about your store? This cannot be undone.')) return;
+            try { const d = await api('/api/learn', { op: 'delete' }); knowledge = (d && d.knowledge) || {}; } catch (e) {}
+            renderMemory();
+        }
+        function addToast(msg) { try { alert(msg); } catch (e) {} }
+        function knowledgeCard() {
+            const card = el('div', 'card know');
+            const head = el('div', 'know-head');
+            const ic = el('span', 'know-ic'); ic.innerHTML = I.book;
+            const ht = el('div'); ht.append(el('div', 'know-title', 'Store knowledge'));
+            const learned = !!(knowledge && knowledge.knowledge);
+            const sub = el('div', 'know-sub');
+            if (learning) sub.textContent = 'Reading your homepage, pages and blog. This can take up to a minute.';
+            else if (learned) {
+                let when = '';
+                if (knowledge.learned_at) { const dt = new Date(knowledge.learned_at); if (!isNaN(dt)) when = ' on ' + dt.toLocaleDateString(); }
+                const n = (knowledge.sources || []).length;
+                sub.textContent = 'Learned' + when + (n ? ' from ' + n + ' page' + (n > 1 ? 's' : '') : '') + '. Referenced in every answer.';
+            } else sub.textContent = 'Teach the copilot about your business by reading your homepage, pages and blog. Saved until you delete it.';
+            ht.append(sub); head.append(ic, ht);
+            const acts = el('div', 'know-acts');
+            if (learning) {
+                const b = el('button', 'btn'); b.disabled = true; b.textContent = 'Learning…'; acts.append(b);
+            } else if (learned) {
+                const re = el('button', 'btn'); re.append(ico(I.rotate), document.createTextNode('Re-learn')); re.onclick = learnStore;
+                const del = el('button', 'btn'); del.append(ico(I.trash), document.createTextNode('Delete')); del.onclick = deleteKnowledge;
+                acts.append(re, del);
+            } else {
+                const b = el('button', 'btn btn-primary'); b.append(ico(I.book), document.createTextNode('Learn my store')); b.onclick = learnStore; acts.append(b);
+            }
+            head.append(acts); card.append(head);
+            if (learned && !learning) {
+                const det = el('details', 'know-body');
+                const sum = el('summary'); sum.textContent = 'View what was learned';
+                const body = el('div', 'know-text'); body.append(bodyToNodes(knowledge.knowledge));
+                det.append(sum, body); card.append(det);
+            }
+            return card;
         }
         function memCard(m, isOpenFollowup) {
             const c = el('div', 'mem-card' + (m.status === 'done' ? ' done' : ''));
@@ -774,18 +847,19 @@
         function renderMemory() {
             const box = $('memory-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.bookmark;
-            const htext = el('div'); htext.append(el('h2', null, 'Memory'),
-                el('p', null, 'What your copilot remembers about your store. It captures facts, decisions and follow-ups as you chat. Edit or remove anything here.'));
+            const htext = el('div'); htext.append(el('h2', null, 'Memory & Knowledge'),
+                el('p', null, 'What your copilot knows about your store. Learn your site once, and it captures facts, decisions and follow-ups as you chat. Edit or remove anything here.'));
             hero.append(badge, htext); box.append(hero);
-            if (!memories.length) {
-                const e = el('div', 'empty'); e.style.margin = '24px 0';
-                e.append(el('h2', null, 'Nothing remembered yet'),
-                    el('div', null, "As you chat, I'll note key facts, your decisions, and follow-ups here."));
-                box.append(e); return;
-            }
+            box.append(knowledgeCard());
             const openFu = memories.filter(m => m.type === 'followup' && m.status === 'open');
             const facts = memories.filter(m => m.type === 'fact' || m.type === 'decision');
             const closed = memories.filter(m => m.type === 'followup' && m.status !== 'open');
+            if (!openFu.length && !facts.length && !closed.length) {
+                box.append(el('div', 'section-title', 'Notes'));
+                const e = el('div', 'empty'); e.style.margin = '4px 0 0';
+                e.append(el('div', null, "No notes yet. As you chat, the copilot captures key facts, your decisions, and follow-ups here."));
+                box.append(e); return;
+            }
             if (openFu.length) { box.append(el('div', 'section-title', 'Open follow-ups')); openFu.forEach(m => box.append(memCard(m, true))); }
             if (facts.length) { box.append(el('div', 'section-title', 'Facts & decisions')); facts.forEach(m => box.append(memCard(m, false))); }
             if (closed.length) { box.append(el('div', 'section-title', 'Closed follow-ups')); closed.forEach(m => box.append(memCard(m, false))); }
@@ -893,6 +967,7 @@
         };
         window.__demoSEO = function (d) { seoCache = { data: d, at: Date.now() }; $('nav-seo').click(); };
         window.__demoMem = function (list) { memories = list; $('nav-memory').click(); };
+        window.__demoKnow = function (k) { knowledge = k; setView('memory'); renderMemory(); };
     })();
     </script>
 </body>
