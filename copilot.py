@@ -43,9 +43,13 @@ logger = logging.getLogger("shopify_mcp.copilot")
 # Configuration
 # ---------------------------------------------------------------------------
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
-# Hybrid models: a fast model for normal chat, a deep model for heavy analysis.
-MODEL_FAST = os.environ.get("ANTHROPIC_MODEL_FAST") or os.environ.get("ANTHROPIC_MODEL") or "claude-sonnet-4-6"
-MODEL_DEEP = os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-4-7")
+# Model tiers. Default to Claude Opus 4.8 (most capable) everywhere; the env vars
+# let you re-introduce a faster/cheaper tier (e.g. claude-sonnet-4-6) for chat later.
+MODEL_FAST = os.environ.get("ANTHROPIC_MODEL_FAST") or os.environ.get("ANTHROPIC_MODEL") or "claude-opus-4-8"
+MODEL_DEEP = os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-4-8")
+# Effort (Opus-tier knob: low|medium|high|xhigh|max). "max" = maximum capability,
+# at higher latency/cost. Dial down here if responses feel slow.
+ANTHROPIC_EFFORT = os.environ.get("ANTHROPIC_EFFORT", "max")
 LOW_STOCK_THRESHOLD = int(os.environ.get("LOW_STOCK_THRESHOLD", "5"))
 # App Bridge identity = the app's Client ID + secret. Accept either the
 # SHOPIFY_API_KEY/SECRET names or the SHOPIFY_CLIENT_ID/SECRET names (same values).
@@ -70,7 +74,7 @@ MAX_MESSAGES     = int(os.environ.get("MAX_MESSAGES", "100"))          # chat hi
 MAX_CHAT_CHARS   = int(os.environ.get("MAX_CHAT_CHARS", "100000"))     # total chars in a chat request
 
 MAX_TOOL_ROUNDS    = int(os.environ.get("COPILOT_MAX_TOOL_ROUNDS", "12"))
-MAX_TOKENS         = int(os.environ.get("COPILOT_MAX_TOKENS", "4096"))
+MAX_TOKENS         = int(os.environ.get("COPILOT_MAX_TOKENS", "16000"))  # headroom for rich output at high effort (non-streaming-safe)
 TOOL_RESULT_CAP    = int(os.environ.get("COPILOT_TOOL_RESULT_CAP", "50000"))
 STORE_CONTEXT_CAP  = int(os.environ.get("STORE_CONTEXT_CAP", "4000"))
 # Server-side store profile. Default path lives under /data so a Railway volume
@@ -449,6 +453,7 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
             system=system,
             tools=all_tools,
             messages=messages,
+            output_config={"effort": ANTHROPIC_EFFORT},
         )
 
         assistant_blocks: list[dict] = []
@@ -615,6 +620,7 @@ async def run_overview(registry: dict, extra_system: str = "", track_inventory: 
         model=MODEL_FAST, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
+        output_config={"effort": ANTHROPIC_EFFORT},
     )
     present = next((b.input for b in resp.content
                     if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
@@ -937,6 +943,7 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
         system=OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
+        output_config={"effort": ANTHROPIC_EFFORT},
     )
     present = next((b.input for b in resp.content
                     if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
@@ -1085,7 +1092,8 @@ def add_routes(mcp, registry: dict) -> None:
     tools = _build_tools(chat_registry)
     dispatch = _build_dispatch(chat_registry)
 
-    logger.info(f"Copilot enabled — embedded-only; models: fast={MODEL_FAST}, deep={MODEL_DEEP}; tools: {len(tools)}")
+    logger.info(f"Copilot enabled — embedded-only; models: fast={MODEL_FAST}, deep={MODEL_DEEP}; "
+                f"effort={ANTHROPIC_EFFORT}; max_tokens={MAX_TOKENS}; tools: {len(tools)}")
     if not ANTHROPIC_API_KEY:
         logger.warning("Copilot: ANTHROPIC_API_KEY not set — chat will return an error until it is.")
     if not SHOPIFY_API_SECRET:
