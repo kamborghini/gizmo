@@ -52,6 +52,13 @@ MODEL_DEEP = os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-4-8")
 # at higher latency/cost. Dial down here if responses feel slow.
 ANTHROPIC_EFFORT = os.environ.get("ANTHROPIC_EFFORT", "max")
 LOW_STOCK_THRESHOLD = int(os.environ.get("LOW_STOCK_THRESHOLD", "5"))
+# History windows for trend charts + product analytics. Up to 24 months of
+# Shopify order history is paginated for the Products tab and product detail;
+# Google (GA4/GSC) timeseries are single calls. ORDER_PAGE_CAP bounds how many
+# 250-order pages we will page through so the request stays responsive.
+TREND_MONTHS = int(os.environ.get("TREND_MONTHS", "24"))
+PRODUCT_TREND_MONTHS = int(os.environ.get("PRODUCT_TREND_MONTHS", "12"))
+ORDER_PAGE_CAP = int(os.environ.get("ORDER_PAGE_CAP", "30"))
 # App Bridge identity = the app's Client ID + secret. Accept either the
 # SHOPIFY_API_KEY/SECRET names or the SHOPIFY_CLIENT_ID/SECRET names (same values).
 SHOPIFY_API_KEY    = os.environ.get("SHOPIFY_API_KEY") or os.environ.get("SHOPIFY_CLIENT_ID", "")
@@ -757,7 +764,37 @@ async def run_overview(registry: dict, extra_system: str = "", track_inventory: 
                     if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
     structured = _coerce_structured(present or {"summary": "Here's your store overview."})
     structured.pop("metrics", None)  # UI shows the computed metrics, not Claude's echo
-    return {"metrics": metrics, "structured": structured}
+    currency = (context.get("shop") or {}).get("currency", "")
+    return {"metrics": metrics, "structured": structured,
+            "trends": await _overview_trends(registry), "currency": currency}
+
+
+async def _overview_trends(registry: dict) -> dict:
+    """Monthly revenue + sessions + search clicks for the trend charts. Prefers
+    Google (single cheap calls, up to 24/16 months); falls back to Shopify orders
+    for revenue when Google is not connected. Always degrades to {} gracefully."""
+    trends: dict = {}
+    try:
+        if google_data.ga4_configured():
+            ts = await google_data.ga4_timeseries(min(TREND_MONTHS, 24) * 31)
+            if ts and not ts.get("error"):
+                if ts.get("sessions"):
+                    trends["sessions"] = ts["sessions"]
+                if ts.get("revenue") and any(p.get("value") for p in ts["revenue"]):
+                    trends["revenue"] = ts["revenue"]
+        if google_data.gsc_configured():
+            gts = await google_data.gsc_timeseries(480)
+            if gts and not gts.get("error") and gts.get("clicks"):
+                trends["clicks"] = gts["clicks"]
+        if "revenue" not in trends:
+            months = _month_axis(min(TREND_MONTHS, 12))
+            orders = await _paginate_orders(registry, days=len(months) * 31)
+            rev = _orders_monthly_revenue(orders, months)
+            if any(p["value"] for p in rev):
+                trends["revenue"] = rev
+    except Exception:
+        logger.exception("overview trends failed")
+    return trends
 
 
 # ---------------------------------------------------------------------------
@@ -1112,7 +1149,18 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
                     if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
     structured = _coerce_structured(present or {"summary": "SEO audit complete."})
     structured.pop("metrics", None)
-    return {"score": score, "metrics": metrics, "structured": structured}
+    seo_trends: dict = {}
+    try:
+        if google_data.gsc_configured():
+            gts = await google_data.gsc_timeseries(480)
+            if gts and not gts.get("error"):
+                if gts.get("clicks"):
+                    seo_trends["clicks"] = gts["clicks"]
+                if gts.get("impressions"):
+                    seo_trends["impressions"] = gts["impressions"]
+    except Exception:
+        logger.exception("seo trends failed")
+    return {"score": score, "metrics": metrics, "structured": structured, "trends": seo_trends}
 
 
 # ---------------------------------------------------------------------------
@@ -1125,34 +1173,146 @@ async def _orders_28d(registry: dict) -> list:
                              {"status": "any", "created_at_min": since, "limit": 250})).get("orders", [])
 
 
-async def run_products_list(registry: dict) -> dict:
-    """Lightweight product list with 28-day sales signals, best sellers first."""
-    data = await _tool_json(registry, "shopify_list_products",
-                            {"limit": 250, "fields": "id,title,handle,status,image,variants"})
-    products = data.get("products", [])
-    shop = await _tool_json(registry, "shopify_get_shop", {})
-    from collections import Counter
-    units: Counter = Counter()
-    revenue: dict = {}
-    for o in await _orders_28d(registry):
+def _month_key(iso: Optional[str]) -> str:
+    return (iso or "")[:7]            # "2025-01-15T..." -> "2025-01"
+
+
+def _month_axis(months: int) -> list:
+    """Ascending list of the last `months` month keys, ending this month."""
+    now = datetime.now(timezone.utc)
+    y, m, out = now.year, now.month, []
+    for _ in range(max(1, months)):
+        out.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m, y = 12, y - 1
+    return list(reversed(out))
+
+
+async def _paginate_orders(registry: dict, days: int, max_pages: int = ORDER_PAGE_CAP) -> list:
+    """Page through orders created in the last `days`, ascending by id (since_id),
+    capped at max_pages * 250 to stay responsive. Pulls only the fields we bucket."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    out: list = []
+    since_id, pages = 0, 0
+    while pages < max_pages:
+        batch = (await _tool_json(registry, "shopify_list_orders",
+                                  {"status": "any", "created_at_min": since, "limit": 250,
+                                   "since_id": since_id,
+                                   "fields": "id,created_at,total_price,line_items"})).get("orders", [])
+        if not batch:
+            break
+        out += batch
+        pages += 1
+        if len(batch) < 250:
+            break
+        since_id = max((o.get("id") or 0) for o in batch)
+    return out
+
+
+def _orders_monthly_revenue(orders: list, months: list) -> list:
+    idx = {mk: 0.0 for mk in months}
+    for o in orders:
+        mk = _month_key(o.get("created_at"))
+        if mk in idx:
+            idx[mk] += float(o.get("total_price") or 0)
+    return [{"label": mk, "value": round(idx[mk], 2)} for mk in months]
+
+
+def _orders_product_monthly(orders: list, months: list) -> dict:
+    """{product_id: {"units": {mk: int}, "revenue": {mk: float}}} within the months."""
+    mset = set(months)
+    out: dict = {}
+    for o in orders:
+        mk = _month_key(o.get("created_at"))
+        if mk not in mset:
+            continue
         for li in o.get("line_items", []):
             pid = li.get("product_id")
-            if pid:
-                qty = li.get("quantity") or 0
-                units[pid] += qty
-                revenue[pid] = revenue.get(pid, 0.0) + float(li.get("price") or 0) * qty
+            if not pid:
+                continue
+            qty = li.get("quantity") or 0
+            d = out.setdefault(pid, {"units": {}, "revenue": {}})
+            d["units"][mk] = d["units"].get(mk, 0) + qty
+            d["revenue"][mk] = d["revenue"].get(mk, 0.0) + float(li.get("price") or 0) * qty
+    return out
+
+
+async def run_products_list(registry: dict, months_window: Optional[int] = None) -> dict:
+    """Rich product dataset for the Products tab: catalog fields + per-month units &
+    revenue buckets (so the UI can filter, sort and compare any period entirely
+    client-side) + facet lists. Order history is paginated up to `months_window`
+    (default PRODUCT_TREND_MONTHS, capped at 24) and bounded by ORDER_PAGE_CAP."""
+    months_window = min(max(int(months_window or PRODUCT_TREND_MONTHS), 1), 24)
+    months = _month_axis(months_window)
+    fields = ("id,title,handle,status,image,variants,product_type,vendor,tags,"
+              "created_at,updated_at,published_at")
+    data = await _tool_json(registry, "shopify_list_products", {"limit": 250, "fields": fields})
+    products = data.get("products", [])
+    shop = await _tool_json(registry, "shopify_get_shop", {})
+    currency = shop.get("currency", "")
+
+    orders = await _paginate_orders(registry, days=len(months) * 31)
+    bucket = _orders_product_monthly(orders, months)
+    cutoff28 = datetime.now(timezone.utc) - timedelta(days=28)
+    units28: dict = {}
+    rev28: dict = {}
+    for o in orders:
+        try:
+            created = datetime.fromisoformat((o.get("created_at") or "").replace("Z", "+00:00"))
+        except Exception:
+            created = None
+        if not (created and created >= cutoff28):
+            continue
+        for li in o.get("line_items", []):
+            pid = li.get("product_id")
+            if not pid:
+                continue
+            q = li.get("quantity") or 0
+            units28[pid] = units28.get(pid, 0) + q
+            rev28[pid] = rev28.get(pid, 0.0) + float(li.get("price") or 0) * q
+
+    vendors: set = set()
+    types: set = set()
     out = []
     for p in products:
         pid = p.get("id")
         img = p.get("image") or {}
+        variants = p.get("variants") or []
+        price = None
+        for v in variants:
+            try:
+                price = float(v.get("price"))
+                break
+            except (TypeError, ValueError):
+                continue
+        inv_vals = [v.get("inventory_quantity") for v in variants if isinstance(v.get("inventory_quantity"), int)]
+        inventory = sum(inv_vals) if inv_vals else None
+        stock = ("untracked" if inventory is None else
+                 "out" if inventory <= 0 else
+                 "low" if inventory <= LOW_STOCK_THRESHOLD else "in")
+        tags = p.get("tags")
+        tags = [t.strip() for t in tags.split(",") if t.strip()] if isinstance(tags, str) else (tags or [])
+        b = bucket.get(pid, {"units": {}, "revenue": {}})
+        monthly = {mk: {"units": b["units"].get(mk, 0), "revenue": round(b["revenue"].get(mk, 0.0), 2)}
+                   for mk in months if b["units"].get(mk) or b["revenue"].get(mk)}
+        if p.get("vendor"):
+            vendors.add(p["vendor"])
+        if p.get("product_type"):
+            types.add(p["product_type"])
         out.append({
             "id": pid, "title": p.get("title"), "handle": p.get("handle"), "status": p.get("status"),
             "image": img.get("src") if isinstance(img, dict) else None,
-            "price": (p.get("variants") or [{}])[0].get("price"),
-            "units_28d": units.get(pid, 0), "revenue_28d": round(revenue.get(pid, 0.0), 2),
+            "price": price, "vendor": p.get("vendor") or "", "product_type": p.get("product_type") or "",
+            "tags": tags, "created_at": p.get("created_at"), "updated_at": p.get("updated_at"),
+            "published_at": p.get("published_at"), "inventory": inventory, "stock_status": stock,
+            "units_28d": units28.get(pid, 0), "revenue_28d": round(rev28.get(pid, 0.0), 2),
+            "monthly": monthly,
         })
-    out.sort(key=lambda x: (x["units_28d"], x["revenue_28d"]), reverse=True)
-    return {"currency": shop.get("currency", ""), "products": out[:200]}
+    out.sort(key=lambda x: (x["units_28d"], x["revenue_28d"]), reverse=True)  # best sellers first by default
+    return {"currency": currency, "months": months,
+            "vendors": sorted(vendors), "product_types": sorted(types),
+            "products": out[:250]}
 
 
 async def run_product_audit(registry: dict, product_id: int, extra_system: str = "") -> dict:
@@ -1227,7 +1387,18 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
         metrics.append({"label": "Sessions (28d)", "value": f"{ga.get('sessions', 0):,}"})
     metrics.append({"label": "Units sold (28d)", "value": str(units)})
     metrics.append({"label": "Revenue (28d)", "value": _money(rev, currency)})
-    return {"product": {"title": p.get("title"), "handle": handle}, "metrics": metrics, "structured": structured}
+
+    trend = {"units": [], "revenue": []}
+    try:
+        months = _month_axis(PRODUCT_TREND_MONTHS)
+        p_orders = await _paginate_orders(registry, days=len(months) * 31)
+        b = _orders_product_monthly(p_orders, months).get(product_id, {"units": {}, "revenue": {}})
+        trend = {"units": [{"label": mk, "value": b["units"].get(mk, 0)} for mk in months],
+                 "revenue": [{"label": mk, "value": round(b["revenue"].get(mk, 0.0), 2)} for mk in months]}
+    except Exception:
+        logger.exception("product trend failed")
+    return {"product": {"title": p.get("title"), "handle": handle}, "metrics": metrics,
+            "structured": structured, "trend": trend, "currency": currency}
 
 
 # ---------------------------------------------------------------------------
@@ -1588,7 +1759,11 @@ def add_routes(mcp, registry: dict) -> None:
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
         try:
-            return _json(await run_products_list(registry))
+            months = int(body.get("months") or 0) or None
+        except (TypeError, ValueError):
+            months = None
+        try:
+            return _json(await run_products_list(registry, months))
         except Exception:
             logger.exception("Product list failed")
             return _json({"error": "Couldn't load products."}, 500)

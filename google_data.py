@@ -304,6 +304,68 @@ async def ga4_summary(days: int = 28) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Monthly time series (for trend charts)
+# ---------------------------------------------------------------------------
+
+async def ga4_timeseries(days: int = 760) -> dict:
+    """Monthly sessions + revenue for up to ~24 months (GA4 'yearMonth' dimension)."""
+    if not ga4_configured():
+        return {}
+    days = max(28, min(int(days), 760))
+    try:
+        data = await _post(_ga4_url(), {
+            "dateRanges": [{"startDate": f"{days}daysAgo", "endDate": "yesterday"}],
+            "dimensions": [{"name": "yearMonth"}],
+            "metrics": [{"name": "sessions"}, {"name": "totalRevenue"}],
+            "orderBys": [{"dimension": {"dimensionName": "yearMonth"}}],
+            "limit": 100,
+        })
+        sessions, revenue = [], []
+        for r in data.get("rows", []):
+            ym = (r.get("dimensionValues") or [{}])[0].get("value", "")   # "202501"
+            if len(ym) != 6:
+                continue
+            label = f"{ym[:4]}-{ym[4:]}"
+            vals = r.get("metricValues") or []
+            sessions.append({"label": label, "value": int(float(vals[0]["value"])) if len(vals) > 0 else 0})
+            revenue.append({"label": label, "value": round(float(vals[1]["value"]), 2) if len(vals) > 1 else 0.0})
+        return {"sessions": sessions, "revenue": revenue}
+    except GoogleAPIError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        logger.warning(f"GA4 timeseries failed: {e}")
+        return {}
+
+
+async def gsc_timeseries(days: int = 480) -> dict:
+    """Monthly clicks + impressions, aggregated from daily rows. GSC keeps ~16 months."""
+    if not gsc_configured():
+        return {}
+    days = max(28, min(int(days), 480))
+    start, end = _date_range(days, lag_days=2)
+    try:
+        data = await _post(_gsc_url(), {"startDate": start, "endDate": end,
+                                        "dimensions": ["date"], "rowLimit": 500, "dataState": "all"})
+        clicks_m: dict = {}
+        impr_m: dict = {}
+        for r in data.get("rows", []):
+            d = (r.get("keys") or [""])[0]    # "YYYY-MM-DD"
+            if len(d) < 7:
+                continue
+            mk = d[:7]
+            clicks_m[mk] = clicks_m.get(mk, 0) + int(r.get("clicks", 0))
+            impr_m[mk] = impr_m.get(mk, 0) + int(r.get("impressions", 0))
+        clicks = [{"label": k, "value": v} for k, v in sorted(clicks_m.items())]
+        impressions = [{"label": k, "value": v} for k, v in sorted(impr_m.items())]
+        return {"clicks": clicks, "impressions": impressions}
+    except GoogleAPIError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        logger.warning(f"GSC timeseries failed: {e}")
+        return {}
+
+
+# ---------------------------------------------------------------------------
 # Per-page (per-product) queries, filtered by URL path
 # ---------------------------------------------------------------------------
 

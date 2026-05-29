@@ -26,7 +26,7 @@
         html, body { height: 100%; margin: 0; }
         body { font-family: var(--font); background: var(--bg); color: var(--ink);
             font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased; letter-spacing: -.011em;
-            font-variant-numeric: tabular-nums; }
+            font-variant-numeric: tabular-nums; color-scheme: dark; }
         body::before { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
             background:
               radial-gradient(56% 46% at 16% -4%, rgba(123,108,255,.18), transparent 60%),
@@ -179,6 +179,33 @@
         .prod-go { color: var(--ink-3); display: grid; flex-shrink: 0; } .prod-go svg { width: 18px; height: 18px; transform: rotate(180deg); }
         .back-btn { margin-bottom: 16px; }
         @media (max-width: 640px) { .prod-chips { gap: 12px; } .prod-chip.rev { display: none; } }
+        /* Products toolbar + filters */
+        .ptools { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
+        .ptools .row1 { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .ptools .grow { flex: 1; min-width: 200px; }
+        .psel { background: var(--surface-3); border: 1px solid var(--border-2); color: var(--ink); border-radius: 10px; padding: 8px 11px; font: inherit; font-size: 13px; outline: none; }
+        .psel:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+        select.psel { cursor: pointer; } .pnum { width: 110px; }
+        .btn.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); }
+        .pfilters { display: none; flex-wrap: wrap; gap: 12px 14px; padding: 15px 16px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); box-shadow: var(--hair); }
+        .pfilters.show { display: flex; }
+        .pfield { display: flex; flex-direction: column; gap: 6px; }
+        .pfield label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); }
+        .fchips { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 14px; }
+        .fchip { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-soft); border: 1px solid var(--accent-line); color: var(--accent-ink); border-radius: 20px; padding: 4px 7px 4px 11px; font-size: 12px; font-weight: 550; }
+        .fchip button { border: 0; background: transparent; color: inherit; display: grid; place-items: center; padding: 2px; border-radius: 50%; cursor: pointer; }
+        .fchip button:hover { background: rgba(255,255,255,.14); } .fchip button svg { width: 12px; height: 12px; display: block; }
+        .psummary { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; color: var(--ink-2); font-size: 13px; margin-bottom: 14px; }
+        .psummary b { color: var(--ink); font-weight: 700; }
+        .prod-chip .cmp { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 6px; margin-top: 4px; display: inline-block; }
+        .prod-chip .cmp.up { color: var(--win); background: var(--win-bg); } .prod-chip .cmp.down { color: var(--danger); background: var(--danger-bg); } .prod-chip .cmp.flat { color: var(--ink-3); background: var(--surface-3); }
+        .barlist { display: flex; flex-direction: column; gap: 9px; margin-bottom: 8px; }
+        .barrow { display: grid; grid-template-columns: 170px 1fr 96px; gap: 14px; align-items: center; font-size: 12.5px; }
+        .barrow .bn { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .bartrack { height: 8px; background: var(--surface-3); border-radius: 20px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--border); }
+        .bartrack > i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: 20px; }
+        .barrow .bv { text-align: right; font-weight: 700; }
+        @media (max-width: 600px) { .barrow { grid-template-columns: 110px 1fr 80px; } }
 
         /* ---------- Structured response components ---------- */
         .insights { display: flex; flex-direction: column; gap: 10px; }
@@ -997,8 +1024,9 @@
         }
 
         /* ---------- products ---------- */
-        let productList = null;
+        let productList = null;   // full /api/products payload (or demo)
         const fmtMoney = (n, cur) => Math.round(n || 0).toLocaleString() + (cur ? (' ' + cur) : '');
+        const pState = { q: '', status: '', stock: '', vendor: '', type: '', tag: '', priceMin: null, priceMax: null, minRev: null, minUnits: null, createdAfter: '', createdBefore: '', sort: 'revenue_desc', period: 12, customFrom: null, customTo: null, compare: false, showFilters: false };
         async function loadProducts(force) {
             const box = $('products-content');
             if (productList && !force) { renderProductList(); return; }
@@ -1006,46 +1034,202 @@
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
             const ht = el('div'); ht.append(el('h2', null, 'Products'), el('p', null, 'Loading your products and sales…'));
             hero.append(badge, ht); box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Loading products…')); box.append(t);
-            try { productList = await api('/api/products', {}); renderProductList(); }
+            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Loading products and up to 24 months of sales…')); box.append(t);
+            try { productList = await api('/api/products', { months: 24 }); renderProductList(); }
             catch (e) {
                 box.innerHTML = ''; box.append(hero);
                 const er = el('div', 'msg error'); er.append(el('div', 'bubble', e.message || String(e))); box.append(er);
                 ht.children[1].textContent = 'Could not load products.';
             }
         }
+        const pMonths = () => (productList && productList.months) || [];
+        function pSelectedMonths() {
+            const months = pMonths();
+            if (pState.period === 'custom' && pState.customFrom != null && pState.customTo != null) {
+                const a = Math.min(pState.customFrom, pState.customTo), b = Math.max(pState.customFrom, pState.customTo);
+                return months.slice(a, b + 1);
+            }
+            const n = pState.period === 'all' ? months.length : Math.min(pState.period, months.length);
+            return months.slice(months.length - n);
+        }
+        function pPrevMonths(sel) {
+            const months = pMonths(); if (!sel.length) return [];
+            const start = months.indexOf(sel[0]); if (start <= 0) return [];
+            return months.slice(Math.max(0, start - sel.length), start);
+        }
+        const pAgg = (p, ms) => { let u = 0, r = 0; (ms || []).forEach(mk => { const m = p.monthly && p.monthly[mk]; if (m) { u += m.units || 0; r += m.revenue || 0; } }); return { units: u, revenue: r }; };
+        function pPeriodLabel() {
+            if (pState.period === 'all') return 'all time';
+            if (pState.period === 'custom') { const s = pSelectedMonths(); return s.length ? (monthLabel(s[0]) + ' to ' + monthLabel(s[s.length - 1])) : 'custom range'; }
+            return 'last ' + pState.period + ' month' + (pState.period > 1 ? 's' : '');
+        }
+        function pComputeRows() {
+            const sel = pSelectedMonths(), prev = pState.compare ? pPrevMonths(sel) : [], F = pState;
+            let rows = ((productList && productList.products) || []).map(p => {
+                const c = pAgg(p, sel), pr = F.compare ? pAgg(p, prev) : null;
+                return { p, units: c.units, revenue: c.revenue, prevRevenue: pr ? pr.revenue : null };
+            });
+            rows = rows.filter(r => {
+                const p = r.p;
+                if (F.q && !(p.title || '').toLowerCase().includes(F.q.toLowerCase())) return false;
+                if (F.status && p.status !== F.status) return false;
+                if (F.stock && p.stock_status !== F.stock) return false;
+                if (F.vendor && p.vendor !== F.vendor) return false;
+                if (F.type && p.product_type !== F.type) return false;
+                if (F.tag && !((p.tags || []).some(t => (t || '').toLowerCase() === F.tag.toLowerCase()))) return false;
+                if (F.priceMin != null && !(Number(p.price) >= F.priceMin)) return false;
+                if (F.priceMax != null && !(Number(p.price) <= F.priceMax)) return false;
+                if (F.minRev != null && !(r.revenue >= F.minRev)) return false;
+                if (F.minUnits != null && !(r.units >= F.minUnits)) return false;
+                if (F.createdAfter && !((p.created_at || '') >= F.createdAfter)) return false;
+                if (F.createdBefore && !((p.created_at || '') <= F.createdBefore + 'T23:59:59')) return false;
+                return true;
+            });
+            const C = {
+                revenue_desc: (a, b) => b.revenue - a.revenue, revenue_asc: (a, b) => a.revenue - b.revenue,
+                units_desc: (a, b) => b.units - a.units, units_asc: (a, b) => a.units - b.units,
+                newest: (a, b) => (b.p.created_at || '').localeCompare(a.p.created_at || ''),
+                oldest: (a, b) => (a.p.created_at || '').localeCompare(b.p.created_at || ''),
+                updated: (a, b) => (b.p.updated_at || '').localeCompare(a.p.updated_at || ''),
+                price_desc: (a, b) => (b.p.price || 0) - (a.p.price || 0), price_asc: (a, b) => (a.p.price || 0) - (b.p.price || 0),
+                title: (a, b) => (a.p.title || '').localeCompare(b.p.title || ''),
+            }[F.sort] || ((a, b) => b.revenue - a.revenue);
+            rows.sort(C);
+            return { rows, sel, prev };
+        }
+        const pctDelta = (cur, prev) => {
+            if (!prev) return { txt: cur > 0 ? 'new' : 'flat', cls: cur > 0 ? 'up' : 'flat' };
+            const ch = (cur - prev) / prev * 100;
+            return { txt: (ch >= 0 ? '+' : '') + ch.toFixed(0) + '%', cls: ch > 1 ? 'up' : ch < -1 ? 'down' : 'flat' };
+        };
+        function pActiveChips(rerender) {
+            const F = pState, defs = [];
+            if (F.status) defs.push(['Status: ' + F.status, () => F.status = '']);
+            if (F.stock) defs.push(['Stock: ' + F.stock, () => F.stock = '']);
+            if (F.vendor) defs.push(['Vendor: ' + F.vendor, () => F.vendor = '']);
+            if (F.type) defs.push(['Type: ' + F.type, () => F.type = '']);
+            if (F.tag) defs.push(['Tag: ' + F.tag, () => F.tag = '']);
+            if (F.priceMin != null) defs.push(['Price >= ' + F.priceMin, () => F.priceMin = null]);
+            if (F.priceMax != null) defs.push(['Price <= ' + F.priceMax, () => F.priceMax = null]);
+            if (F.minRev != null) defs.push(['Revenue >= ' + F.minRev, () => F.minRev = null]);
+            if (F.minUnits != null) defs.push(['Units >= ' + F.minUnits, () => F.minUnits = null]);
+            if (F.createdAfter) defs.push(['Created after ' + F.createdAfter, () => F.createdAfter = '']);
+            if (F.createdBefore) defs.push(['Created before ' + F.createdBefore, () => F.createdBefore = '']);
+            if (!defs.length) return null;
+            const wrap = el('div', 'fchips');
+            defs.forEach(([label, clear]) => { const c = el('span', 'fchip', label); const b = el('button'); b.title = 'Remove'; b.innerHTML = I.x; b.onclick = () => { clear(); rerender(); }; c.append(b); wrap.append(c); });
+            const all = el('span', 'fchip'); all.style.cursor = 'pointer'; all.textContent = 'Clear all';
+            all.onclick = () => { Object.assign(F, { status: '', stock: '', vendor: '', type: '', tag: '', priceMin: null, priceMax: null, minRev: null, minUnits: null, createdAfter: '', createdBefore: '' }); rerender(); };
+            wrap.append(all);
+            return wrap;
+        }
+        function exportCSV(rows) {
+            const head = ['Title', 'Status', 'Vendor', 'Type', 'Price', 'Inventory', 'Units (' + pPeriodLabel() + ')', 'Revenue (' + pPeriodLabel() + ')', 'Created', 'Updated'];
+            const esc = (v) => { v = (v == null ? '' : String(v)); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+            const lines = [head.join(',')];
+            rows.forEach(r => { const p = r.p; lines.push([p.title, p.status, p.vendor, p.product_type, p.price, p.inventory, r.units, r.revenue, (p.created_at || '').slice(0, 10), (p.updated_at || '').slice(0, 10)].map(esc).join(',')); });
+            const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+            const url = URL.createObjectURL(blob), a = document.createElement('a');
+            a.href = url; a.download = 'products-' + pPeriodLabel().replace(/\s+/g, '-') + '.csv'; document.body.append(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
         function renderProductList() {
             const box = $('products-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
             const ht = el('div'); ht.append(el('h2', null, 'Products'),
-                el('p', null, 'Pick a product for a focused optimization plan across search, traffic and sales. Best sellers first.'));
+                el('p', null, 'Filter, sort and compare your catalog by revenue, sales, stock and more. Open a product for a full optimization plan.'));
             hero.append(badge, ht); box.append(hero);
-            const products = (productList && productList.products) || []; const cur = (productList && productList.currency) || '';
-            if (!products.length) { const e = el('div', 'empty'); e.append(el('div', null, 'No products found.')); box.append(e); return; }
-            const search = el('input', 'prod-search'); search.placeholder = 'Search products…'; box.append(search);
+            const cur = (productList && productList.currency) || '';
+            if (!((productList && productList.products) || []).length) { box.append(el('div', 'empty', 'No products found.')); return; }
+            const rerender = renderProductList;
+
+            const tools = el('div', 'ptools');
+            const row1 = el('div', 'row1');
+            const search = el('input', 'psel grow'); search.placeholder = 'Search products…'; search.value = pState.q;
+            search.addEventListener('input', () => { pState.q = search.value; drawList(); });
+            row1.append(search);
+            row1.append(segControl([{ label: '1M', value: 1 }, { label: '3M', value: 3 }, { label: '6M', value: 6 }, { label: '12M', value: 12 }, { label: 'All', value: 'all' }, { label: 'Custom', value: 'custom' }], pState.period, v => { pState.period = v; rerender(); }));
+            const sort = el('select', 'psel');
+            [['revenue_desc', 'Revenue: high to low'], ['revenue_asc', 'Revenue: low to high'], ['units_desc', 'Units: high to low'], ['units_asc', 'Units: low to high'], ['newest', 'Newest first'], ['oldest', 'Oldest first'], ['updated', 'Recently updated'], ['price_desc', 'Price: high to low'], ['price_asc', 'Price: low to high'], ['title', 'Title A to Z']].forEach(([v, l]) => { const o = el('option', null, l); o.value = v; if (v === pState.sort) o.selected = true; sort.append(o); });
+            sort.onchange = () => { pState.sort = sort.value; drawList(); };
+            row1.append(sort);
+            const fbtn = el('button', 'btn' + (pState.showFilters ? ' on' : '')); fbtn.append(ico(I.search), document.createTextNode('Filters')); fbtn.onclick = () => { pState.showFilters = !pState.showFilters; rerender(); };
+            const cbtn = el('button', 'btn' + (pState.compare ? ' on' : '')); cbtn.textContent = 'Compare periods'; cbtn.onclick = () => { pState.compare = !pState.compare; rerender(); };
+            const xbtn = el('button', 'btn'); xbtn.append(ico(I.down), document.createTextNode('Export CSV'));
+            row1.append(fbtn, cbtn, xbtn);
+            tools.append(row1);
+
+            if (pState.period === 'custom') {
+                const months = pMonths();
+                if (pState.customFrom == null) pState.customFrom = Math.max(0, months.length - 6);
+                if (pState.customTo == null) pState.customTo = months.length - 1;
+                const cr = el('div', 'row1');
+                const mkSel = (val, on, label) => { const f = el('div', 'pfield'); f.append(el('label', null, label)); const s = el('select', 'psel'); months.forEach((mk, idx) => { const o = el('option', null, monthLabel(mk)); o.value = idx; if (idx === val) o.selected = true; s.append(o); }); s.onchange = () => { on(+s.value); drawList(); }; f.append(s); return f; };
+                cr.append(mkSel(pState.customFrom, v => pState.customFrom = v, 'From'), mkSel(pState.customTo, v => pState.customTo = v, 'To'));
+                tools.append(cr);
+            }
+
+            const fp = el('div', 'pfilters' + (pState.showFilters ? ' show' : ''));
+            const selField = (label, value, opts, on) => { const f = el('div', 'pfield'); f.append(el('label', null, label)); const s = el('select', 'psel'); const a = el('option', null, 'Any'); a.value = ''; s.append(a); opts.forEach(o => { const op = el('option', null, o); op.value = o; if (o === value) op.selected = true; s.append(op); }); s.onchange = () => { on(s.value); drawList(); pchips(); }; f.append(s); return f; };
+            const numField = (label, value, on) => { const f = el('div', 'pfield'); f.append(el('label', null, label)); const i = el('input', 'psel pnum'); i.type = 'number'; i.min = '0'; if (value != null) i.value = value; i.oninput = () => { on(i.value === '' ? null : Number(i.value)); drawList(); pchips(); }; f.append(i); return f; };
+            const dateField = (label, value, on) => { const f = el('div', 'pfield'); f.append(el('label', null, label)); const i = el('input', 'psel'); i.type = 'date'; if (value) i.value = value; i.onchange = () => { on(i.value); drawList(); pchips(); }; f.append(i); return f; };
+            fp.append(selField('Status', pState.status, ['active', 'draft', 'archived'], v => pState.status = v));
+            fp.append(selField('Stock', pState.stock, ['in', 'low', 'out', 'untracked'], v => pState.stock = v));
+            if ((productList.vendors || []).length) fp.append(selField('Vendor', pState.vendor, productList.vendors, v => pState.vendor = v));
+            if ((productList.product_types || []).length) fp.append(selField('Type', pState.type, productList.product_types, v => pState.type = v));
+            fp.append(numField('Min price', pState.priceMin, v => pState.priceMin = v));
+            fp.append(numField('Max price', pState.priceMax, v => pState.priceMax = v));
+            fp.append(numField('Min revenue', pState.minRev, v => pState.minRev = v));
+            fp.append(numField('Min units', pState.minUnits, v => pState.minUnits = v));
+            fp.append(dateField('Created after', pState.createdAfter, v => pState.createdAfter = v));
+            fp.append(dateField('Created before', pState.createdBefore, v => pState.createdBefore = v));
+            const tf = el('div', 'pfield'); tf.append(el('label', null, 'Tag')); const tagIn = el('input', 'psel'); tagIn.placeholder = 'exact tag'; if (pState.tag) tagIn.value = pState.tag; tagIn.oninput = () => { pState.tag = tagIn.value; drawList(); pchips(); }; tf.append(tagIn); fp.append(tf);
+            tools.append(fp);
+            box.append(tools);
+
+            const chipsHost = el('div'); box.append(chipsHost);
+            function pchips() { chipsHost.innerHTML = ''; const c = pActiveChips(rerender); if (c) chipsHost.append(c); }
+            pchips();
+
+            const summary = el('div', 'psummary'); box.append(summary);
+            const topHost = el('div'); box.append(topHost);
             const listWrap = el('div'); box.append(listWrap);
-            function draw(filter) {
+            xbtn.onclick = () => { const { rows } = pComputeRows(); if (rows.length) exportCSV(rows); };
+
+            function drawList() {
+                const { rows } = pComputeRows();
+                summary.innerHTML = '';
+                const totRev = rows.reduce((a, r) => a + r.revenue, 0), totUnits = rows.reduce((a, r) => a + r.units, 0);
+                summary.append(el('span', null, rows.length + ' product' + (rows.length === 1 ? '' : 's')));
+                const s2 = el('span'); s2.append(el('b', null, fmtMoney(totRev, cur)), document.createTextNode(' revenue · ' + totUnits.toLocaleString() + ' units · ' + pPeriodLabel())); summary.append(s2);
+                topHost.innerHTML = '';
+                const top = rows.filter(r => r.revenue > 0).slice(0, 6);
+                if (top.length > 1) {
+                    topHost.append(el('div', 'section-title', 'Top products by revenue (' + pPeriodLabel() + ')'));
+                    const bl = el('div', 'barlist'); const max = top[0].revenue || 1;
+                    top.forEach(r => { const row = el('div', 'barrow'); row.append(el('div', 'bn', r.p.title || 'Untitled')); const tr = el('div', 'bartrack'); const i = el('i'); i.style.width = Math.max(2, r.revenue / max * 100) + '%'; tr.append(i); row.append(tr, el('div', 'bv', fmtMoney(r.revenue, cur))); bl.append(row); });
+                    topHost.append(bl, el('div', 'section-title', 'All products'));
+                }
                 listWrap.innerHTML = '';
-                const f = (filter || '').toLowerCase();
-                const rows = products.filter(p => !f || (p.title || '').toLowerCase().includes(f));
-                rows.forEach(p => {
-                    const row = el('button', 'prod-row');
+                if (!rows.length) { listWrap.append(el('div', 'empty', 'No products match these filters.')); return; }
+                rows.forEach(r => {
+                    const p = r.p, row = el('button', 'prod-row');
                     const th = document.createElement(p.image ? 'img' : 'div'); th.className = 'prod-thumb'; if (p.image) th.src = p.image;
                     const main = el('div', 'prod-main'); main.append(el('div', 'prod-name', p.title || 'Untitled'));
-                    main.append(el('div', 'prod-sub', (p.status || '') + (p.price ? (' · ' + p.price + ' ' + cur) : '')));
+                    const bits = [p.status]; if (p.price) bits.push(fmtMoney(p.price, cur)); if (p.product_type) bits.push(p.product_type); if (p.vendor) bits.push(p.vendor);
+                    main.append(el('div', 'prod-sub', bits.filter(Boolean).join(' · ')));
                     const chips = el('div', 'prod-chips');
-                    const c1 = el('div', 'prod-chip'); c1.append(el('div', 'n', String(p.units_28d || 0)), el('div', 'l', 'units 28d'));
-                    const c2 = el('div', 'prod-chip rev'); c2.append(el('div', 'n', fmtMoney(p.revenue_28d, cur)), el('div', 'l', 'rev 28d'));
+                    const c1 = el('div', 'prod-chip'); c1.append(el('div', 'n', r.units.toLocaleString()), el('div', 'l', 'units'));
+                    const c2 = el('div', 'prod-chip rev'); c2.append(el('div', 'n', fmtMoney(r.revenue, cur)), el('div', 'l', 'revenue'));
+                    if (pState.compare && r.prevRevenue != null) { const d = pctDelta(r.revenue, r.prevRevenue); c2.append(el('span', 'cmp ' + d.cls, d.txt)); }
                     chips.append(c1, c2);
                     const go = el('span', 'prod-go'); go.innerHTML = I.chevLeft;
                     row.append(th, main, chips, go);
                     row.onclick = () => openProduct(p.id, p.title);
                     listWrap.append(row);
                 });
-                if (!rows.length) { const e = el('div', 'empty'); e.append(el('div', null, 'No products match.')); listWrap.append(e); }
             }
-            search.addEventListener('input', () => draw(search.value));
-            draw('');
+            drawList();
         }
         function productBack() { const b = el('button', 'btn back-btn'); b.append(ico(I.chevLeft), document.createTextNode('Products')); b.onclick = renderProductList; return b; }
         async function openProduct(id, title) {
