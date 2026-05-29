@@ -106,6 +106,22 @@
         .seo-score .num { font-size: 46px; font-weight: 700; letter-spacing: -.03em; line-height: 1; }
         .seo-score .out { color: var(--ink-2); font-size: 13px; }
         .seo-score.good .num { color: var(--win); } .seo-score.mid .num { color: var(--warn); } .seo-score.low .num { color: var(--danger); }
+        .mem-card { display: flex; align-items: flex-start; gap: 12px; background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--r); padding: 12px 14px; margin-bottom: 9px; box-shadow: var(--sh-1); animation: fadeUp .3s ease backwards; }
+        .mem-left { display: flex; align-items: flex-start; gap: 10px; flex: 1; min-width: 0; }
+        .mem-text { font-size: 13.5px; line-height: 1.45; }
+        .mem-card.done .mem-text { text-decoration: line-through; color: var(--ink-3); }
+        .mem-tag { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 2px 8px;
+            border-radius: 20px; flex-shrink: 0; margin-top: 1px; }
+        .mem-tag.fact { background: var(--info-bg); color: var(--info); }
+        .mem-tag.decision { background: var(--opp-bg); color: var(--opp); }
+        .mem-tag.followup { background: var(--warn-bg); color: var(--warn); }
+        .mem-acts { display: flex; gap: 3px; flex-shrink: 0; }
+        .mem-btn { border: 0; background: transparent; color: var(--ink-3); padding: 5px; border-radius: 6px; display: grid; place-items: center; }
+        .mem-btn svg { width: 15px; height: 15px; }
+        .mem-btn:hover { background: var(--surface-3); color: var(--ink); }
+        .mem-btn.ok:hover { color: var(--win); }
+        .mem-btn.del:hover { color: var(--danger); }
 
         /* ---------- Structured response components ---------- */
         .insights { display: flex; flex-direction: column; gap: 9px; }
@@ -240,6 +256,7 @@
             <div class="nav">
                 <button class="nav-item active" data-view="overview" id="nav-overview"></button>
                 <button class="nav-item" data-view="seo" id="nav-seo"></button>
+                <button class="nav-item" data-view="memory" id="nav-memory"></button>
                 <button class="nav-item" data-view="chat" id="nav-chat"></button>
             </div>
             <div class="convo-head"><span>Conversations</span>
@@ -266,6 +283,11 @@
             <!-- SEO -->
             <section class="view" id="view-seo">
                 <div class="scroll"><div class="ov-wrap" id="seo-content"></div></div>
+            </section>
+
+            <!-- Memory -->
+            <section class="view" id="view-memory">
+                <div class="scroll"><div class="ov-wrap" id="memory-content"></div></div>
             </section>
 
             <!-- Chat -->
@@ -359,6 +381,7 @@
             opportunity: SV('<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline>'),
             insight: SV('<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>'),
             search: SV('<circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>'),
+            bookmark: SV('<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>'),
             settings: SV('<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>'),
             x: SV('<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>'),
         };
@@ -370,6 +393,7 @@
         $('ic-logo').innerHTML = I.spark;
         $('nav-overview').append(ico(I.grid), document.createTextNode('Overview'));
         $('nav-seo').append(ico(I.search), document.createTextNode('SEO'));
+        $('nav-memory').append(ico(I.bookmark), document.createTextNode('Memory'));
         $('nav-chat').append(ico(I.chat), document.createTextNode('Chat'));
         $('new-convo').innerHTML = I.plus;
         $('menu-btn').innerHTML = I.menu;
@@ -577,7 +601,7 @@
                 const data = await api('/api/chat', { messages: apiHistory(c), deep });
                 hideThinking();
                 c.turns.push({ role: 'assistant', structured: data.structured || { summary: '(no response)' }, model: data.model });
-                save(); renderChat();
+                save(); renderChat(); loadMemory();  // refresh anything the copilot just remembered
             } catch (e) {
                 hideThinking();
                 const m = el('div', 'msg error'); m.append(el('div', 'bubble', e.message || String(e))); $('chat-log').append(m); scrollChat();
@@ -635,6 +659,19 @@
             const mins = Math.round((Date.now() - cache.at) / 60000);
             hero.append(el('div', 'ov-updated', mins <= 0 ? 'Updated just now' : `Updated ${mins}m ago`));
             box.append(hero);
+            const ofu = memories.filter(m => m.type === 'followup' && m.status === 'open');
+            if (ofu.length) {
+                box.append(el('div', 'section-title', 'Open follow-ups'));
+                const card = el('div', 'card actions'); card.style.marginBottom = '18px';
+                ofu.slice(0, 6).forEach(m => {
+                    const row = el('div', 'action');
+                    const ck = el('div', 'check'); ck.innerHTML = I.check; ck.title = 'Mark done';
+                    ck.onclick = (e) => { e.stopPropagation(); memOp({ op: 'set_status', id: m.id, status: 'done' }); };
+                    row.append(ck, el('div', 'text', m.text));
+                    card.append(row);
+                });
+                box.append(card);
+            }
             if (Array.isArray(data.metrics) && data.metrics.length) box.append(metricsGrid(data.metrics));
             const s = Object.assign({}, data.structured); delete s.summary;
             if (s.insights && s.insights.length) box.append(el('div', 'section-title', 'What’s notable'));
@@ -682,18 +719,68 @@
             renderStructured(box, s, {});
         }
 
+        /* ---------- memory ---------- */
+        let memories = [];
+        async function loadMemory() {
+            try { const d = await api('/api/memory', {}); if (d && Array.isArray(d.memories)) memories = d.memories; } catch (e) {}
+            if ($('view-memory').classList.contains('active')) renderMemory();
+        }
+        async function memOp(payload) {
+            try { const d = await api('/api/memory', payload); if (d && Array.isArray(d.memories)) memories = d.memories; } catch (e) {}
+            renderMemory();
+            if ($('view-overview').classList.contains('active') && overviewCache) renderOverview(overviewCache);
+        }
+        function memCard(m, isOpenFollowup) {
+            const c = el('div', 'mem-card' + (m.status === 'done' ? ' done' : ''));
+            const left = el('div', 'mem-left');
+            left.append(el('span', 'mem-tag ' + m.type, m.type), el('div', 'mem-text', m.text));
+            const acts = el('div', 'mem-acts');
+            if (isOpenFollowup) {
+                const done = el('button', 'mem-btn ok'); done.innerHTML = I.check; done.title = 'Mark done';
+                done.onclick = () => memOp({ op: 'set_status', id: m.id, status: 'done' });
+                const dis = el('button', 'mem-btn'); dis.innerHTML = I.x; dis.title = 'Dismiss';
+                dis.onclick = () => memOp({ op: 'set_status', id: m.id, status: 'dismissed' });
+                acts.append(done, dis);
+            }
+            const del = el('button', 'mem-btn del'); del.innerHTML = I.trash; del.title = 'Delete';
+            del.onclick = () => memOp({ op: 'delete', id: m.id });
+            acts.append(del);
+            c.append(left, acts); return c;
+        }
+        function renderMemory() {
+            const box = $('memory-content'); box.innerHTML = '';
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.bookmark;
+            const htext = el('div'); htext.append(el('h2', null, 'Memory'),
+                el('p', null, 'What your copilot remembers about your store. It captures facts, decisions and follow-ups as you chat — edit or remove anything here.'));
+            hero.append(badge, htext); box.append(hero);
+            if (!memories.length) {
+                const e = el('div', 'empty'); e.style.margin = '24px 0';
+                e.append(el('h2', null, 'Nothing remembered yet'),
+                    el('div', null, "As you chat, I'll note key facts, your decisions, and follow-ups here."));
+                box.append(e); return;
+            }
+            const openFu = memories.filter(m => m.type === 'followup' && m.status === 'open');
+            const facts = memories.filter(m => m.type === 'fact' || m.type === 'decision');
+            const closed = memories.filter(m => m.type === 'followup' && m.status !== 'open');
+            if (openFu.length) { box.append(el('div', 'section-title', 'Open follow-ups')); openFu.forEach(m => box.append(memCard(m, true))); }
+            if (facts.length) { box.append(el('div', 'section-title', 'Facts & decisions')); facts.forEach(m => box.append(memCard(m, false))); }
+            if (closed.length) { box.append(el('div', 'section-title', 'Closed follow-ups')); closed.forEach(m => box.append(memCard(m, false))); }
+        }
+
         /* ---------- view switching ---------- */
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
-            ['overview', 'seo', 'chat'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            $('view-title').textContent = v === 'overview' ? 'Overview' : v === 'seo' ? 'SEO' : (active() ? (active().title || 'Chat') : 'Chat');
-            const act = $('topbar-action'); act.innerHTML = '';
+            ['overview', 'seo', 'memory', 'chat'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            const titles = { overview: 'Overview', seo: 'SEO', memory: 'Memory' };
+            $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
+            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory') ? 'none' : '';
             if (v === 'overview') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadOverview(true); }
             else if (v === 'seo') { act.append(ico(I.refresh), document.createTextNode('Re-audit')); act.className = 'btn'; act.onclick = () => loadSEO(true); }
-            else { act.append(ico(I.plus), document.createTextNode('New chat')); act.className = 'btn btn-primary'; act.onclick = () => newConvo(); }
+            else if (v === 'chat') { act.append(ico(I.plus), document.createTextNode('New chat')); act.className = 'btn btn-primary'; act.onclick = () => newConvo(); }
             closeSidebar();
             if (v === 'overview') loadOverview(false);
             if (v === 'seo') loadSEO(false);
+            if (v === 'memory') loadMemory();
         }
 
         /* ---------- responsive sidebar ---------- */
@@ -752,6 +839,7 @@
 
         renderSidebar(); renderChat(); setView('overview');
         loadProfile();  // pull the saved store profile from the server (for the Settings modal)
+        loadMemory();   // pull saved memories (for Overview follow-ups + the Memory tab)
 
         // Standalone (password) mode: prompt up front so it isn't hidden behind a click.
         if (MODE !== 'embedded' && !sessionStorage.getItem('dash_pw')) {
@@ -768,6 +856,7 @@
             if (ov) { overviewCache = { data: ov, at: Date.now() }; }
         };
         window.__demoSEO = function (d) { seoCache = { data: d, at: Date.now() }; $('nav-seo').click(); };
+        window.__demoMem = function (list) { memories = list; $('nav-memory').click(); };
     })();
     </script>
 </body>

@@ -65,6 +65,9 @@ STORE_CONTEXT_CAP  = int(os.environ.get("STORE_CONTEXT_CAP", "4000"))
 # mounted there makes it durable across redeploys.
 PROFILE_PATH       = os.environ.get("PROFILE_PATH", "/data/store_profile.json")
 PROFILE_FIELD_CAP  = int(os.environ.get("PROFILE_FIELD_CAP", "6000"))
+MEMORY_PATH        = os.environ.get("MEMORY_PATH", "/data/store_memory.json")
+MEMORY_MAX         = int(os.environ.get("MEMORY_MAX", "200"))    # max stored memories
+MEMORY_INJECT      = int(os.environ.get("MEMORY_INJECT", "25"))  # max of each kind injected into prompts
 
 _PAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "index.html")
 _page_cache: Optional[str] = None
@@ -86,6 +89,9 @@ tool. Do not write the final answer as plain prose. Everything the merchant sees
 - Put the headline in `summary` (1–2 sentences). Use `metrics` for the key numbers, `insights` for \
 notable findings (type them as win/warning/opportunity/insight), `sections` for supporting detail, \
 `actions` for concrete prioritized recommendations, and `followups` for 2–4 natural next questions.
+- Use the `remember` field to persist durable facts, decisions, and the merchant's stated commitments, \
+so you have continuity in future sessions. If your memory context lists open follow-ups, check in on \
+them naturally and close them out when the merchant indicates they're done.
 - Only include fields that add value — a simple factual answer can be just `summary` (+ maybe a metric \
 or two). Don't pad. Be specific and reference real figures from the store."""
 
@@ -162,6 +168,23 @@ PRESENT_RESPONSE_TOOL = {
                 "type": "array",
                 "description": "2–4 natural next questions the merchant might ask.",
                 "items": {"type": "string"},
+            },
+            "remember": {
+                "type": "array",
+                "description": (
+                    "Durable things to remember across FUTURE sessions. Record important stable store "
+                    "facts ('fact'), decisions the merchant makes ('decision'), and commitments/plans they "
+                    "state to revisit later ('followup', e.g. 'plans to reorder hoodies Friday'). Omit "
+                    "trivial, ephemeral, or already-obvious details. Leave empty if nothing is worth keeping."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string", "enum": ["fact", "decision", "followup"]},
+                        "text": {"type": "string"},
+                    },
+                    "required": ["type", "text"],
+                },
             },
         },
         "required": ["summary"],
@@ -256,6 +279,80 @@ def _profile_to_system(p: dict) -> str:
         block += "\n".join(fields) + "\n"
     if rules:
         block += "Preferences:\n" + "\n".join("- " + r for r in rules)
+    return block
+
+
+# ---------------------------------------------------------------------------
+# Memory — durable facts, decisions, and follow-ups across sessions
+# ---------------------------------------------------------------------------
+
+def _load_memory() -> list[dict]:
+    try:
+        with open(MEMORY_PATH, "r", encoding="utf-8") as fh:
+            return json.load(fh).get("memories", [])
+    except Exception:
+        return []
+
+
+def _write_memory(memories: list[dict]) -> list[dict]:
+    os.makedirs(os.path.dirname(MEMORY_PATH) or ".", exist_ok=True)
+    tmp = MEMORY_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"memories": memories}, fh)
+    os.replace(tmp, MEMORY_PATH)
+    return memories
+
+
+def _add_memories(items: list[dict]) -> list[dict]:
+    memories = _load_memory()
+    seen = {m.get("text", "").strip().lower() for m in memories}
+    now = datetime.now(timezone.utc).isoformat()
+    for it in (items or []):
+        if not isinstance(it, dict):
+            continue
+        text = str(it.get("text", "")).strip()[:500]
+        if not text or text.lower() in seen:
+            continue
+        mtype = it.get("type") if it.get("type") in ("fact", "decision", "followup") else "fact"
+        memories.append({"id": secrets.token_hex(5), "type": mtype, "text": text,
+                         "status": "open", "created": now, "updated": now})
+        seen.add(text.lower())
+    if len(memories) > MEMORY_MAX:  # keep open follow-ups + the most recent of everything else
+        keep = [m for m in memories if m.get("type") == "followup" and m.get("status") == "open"]
+        rest = [m for m in memories if not (m.get("type") == "followup" and m.get("status") == "open")]
+        memories = keep + rest[-(MEMORY_MAX - len(keep)):]
+    return _write_memory(memories)
+
+
+def _update_memory(mid: str, status: str) -> list[dict]:
+    memories = _load_memory()
+    if status in ("open", "done", "dismissed"):
+        for m in memories:
+            if m.get("id") == mid:
+                m["status"] = status
+                m["updated"] = datetime.now(timezone.utc).isoformat()
+    return _write_memory(memories)
+
+
+def _delete_memory(mid: str) -> list[dict]:
+    return _write_memory([m for m in _load_memory() if m.get("id") != mid])
+
+
+def _memory_to_system(memories: Optional[list[dict]] = None) -> str:
+    memories = _load_memory() if memories is None else memories
+    if not memories:
+        return ""
+    open_fu = [m for m in memories if m.get("type") == "followup" and m.get("status") == "open"][-MEMORY_INJECT:]
+    facts = [m for m in memories if m.get("type") in ("fact", "decision")
+             and m.get("status") != "dismissed"][-MEMORY_INJECT:]
+    if not open_fu and not facts:
+        return ""
+    block = "\n\n## Memory — what you know from past sessions (use for continuity)\n"
+    if facts:
+        block += "Known facts & decisions:\n" + "\n".join("- " + m["text"] for m in facts) + "\n"
+    if open_fu:
+        block += ("Open follow-ups (check in on these when relevant; close them out if done):\n"
+                  + "\n".join("- " + m["text"] for m in open_fu))
     return block
 
 
@@ -708,7 +805,7 @@ def _build_seo_tools(registry: dict) -> dict:
     }
 
 
-async def run_seo_audit(registry: dict) -> dict:
+async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
     primary, _ = await _resolve_domains(registry)
     if not primary:
         raise RuntimeError("Could not resolve the store's domain to audit.")
@@ -738,7 +835,8 @@ async def run_seo_audit(registry: dict) -> dict:
            + "\n\nProduce the audit now via present_response. Lead with the highest-impact, "
              "gates-first fixes; be specific to this data; cite the pipeline stage per finding.")
     resp = await client.messages.create(
-        model=MODEL_FAST, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE,
+        model=MODEL_FAST, max_tokens=MAX_TOKENS,
+        system=OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
     )
@@ -886,7 +984,7 @@ def add_routes(mcp, registry: dict) -> None:
             return _json({"error": "Provide 'messages' or 'message'"}, 400)
 
         model = _pick_model(history, bool(body.get("deep")))
-        extra = _profile_to_system(_load_profile())
+        extra = _profile_to_system(_load_profile()) + _memory_to_system()
         if _is_seo(history):
             extra += "\n\n" + SEO_KNOWLEDGE
         try:
@@ -896,6 +994,13 @@ def add_routes(mcp, registry: dict) -> None:
         except anthropic.APIError:
             logger.exception("Anthropic API error")
             return _json({"error": "The AI service returned an error. Please try again."}, 502)
+        # Persist anything the copilot flagged to remember (then hide it from the UI).
+        mems = result.get("structured", {}).pop("remember", None)
+        if isinstance(mems, list) and mems:
+            try:
+                _add_memories(mems)
+            except Exception:
+                logger.exception("Memory capture failed")
         return _json(result)
 
     @mcp.custom_route("/api/overview", methods=["POST"])
@@ -908,7 +1013,7 @@ def add_routes(mcp, registry: dict) -> None:
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
         profile = _load_profile()
-        extra = _profile_to_system(profile)
+        extra = _profile_to_system(profile) + _memory_to_system()
         track = (profile.get("prefs") or {}).get("track_inventory", True)
         try:
             result = await run_overview(registry, extra, bool(track))
@@ -950,8 +1055,9 @@ def add_routes(mcp, registry: dict) -> None:
         ok, _who = _authorize(request, body)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        extra = _profile_to_system(_load_profile()) + _memory_to_system()
         try:
-            result = await run_seo_audit(registry)
+            result = await run_seo_audit(registry, extra)
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
         except anthropic.APIError:
@@ -961,3 +1067,25 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("SEO audit failed")
             return _json({"error": "Couldn't run the SEO audit. Check the server logs."}, 500)
         return _json(result)
+
+    @mcp.custom_route("/api/memory", methods=["POST"])
+    async def memory_route(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        ok, _who = _authorize(request, body)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        op = body.get("op")
+        try:
+            if op == "add" and isinstance(body.get("items"), list):
+                _add_memories(body["items"])
+            elif op == "set_status" and body.get("id"):
+                _update_memory(body["id"], body.get("status", "done"))
+            elif op == "delete" and body.get("id"):
+                _delete_memory(body["id"])
+        except Exception:
+            logger.exception("Memory op failed")
+            return _json({"error": "Couldn't update memory (is a writable volume mounted at /data?)."}, 500)
+        return _json({"memories": _load_memory()})
