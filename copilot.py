@@ -45,7 +45,7 @@ logger = logging.getLogger("shopify_mcp.copilot")
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 # Model tiers. Default to Claude Opus 4.8 (most capable) everywhere; the env vars
 # let you re-introduce a faster/cheaper tier (e.g. claude-sonnet-4-6) for chat later.
-MODEL_FAST = os.environ.get("ANTHROPIC_MODEL_FAST") or os.environ.get("ANTHROPIC_MODEL") or "claude-opus-4-8"
+MODEL_FAST = os.environ.get("ANTHROPIC_MODEL_FAST") or os.environ.get("ANTHROPIC_MODEL") or "claude-sonnet-4-6"
 MODEL_DEEP = os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-4-8")
 # Effort (Opus-tier knob: low|medium|high|xhigh|max). "max" = maximum capability,
 # at higher latency/cost. Dial down here if responses feel slow.
@@ -207,24 +207,19 @@ PRESENT_RESPONSE_TOOL = {
     },
 }
 
-# Heuristic: escalate to the deep model for broad, analytical asks.
-_DEEP_HINTS = (
-    "analyz", "audit", "full", "overall", "everything", "deep", "strateg", "grow",
-    "optimi", "improve my", "whole store", "all my", "report", "forecast", "why are",
-)
+def _pick_model(deep: bool) -> str:
+    """The Deep-analysis toggle is authoritative: on → deep model (Opus 4.8),
+    off → fast model (Sonnet 4.6)."""
+    return MODEL_DEEP if deep else MODEL_FAST
 
 
-def _pick_model(messages: list[dict], deep: bool) -> str:
-    if deep:
-        return MODEL_DEEP
-    last = ""
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            c = m.get("content")
-            last = c if isinstance(c, str) else json.dumps(c)
-            break
-    low = last.lower()
-    return MODEL_DEEP if any(h in low for h in _DEEP_HINTS) else MODEL_FAST
+def _effort_for(model: str) -> str:
+    """effort 'max' and 'xhigh' are Opus-tier only and 400 on Sonnet/Haiku —
+    cap non-Opus models at 'high' so the request never errors."""
+    eff = ANTHROPIC_EFFORT
+    if "opus" not in model.lower() and eff in ("max", "xhigh"):
+        return "high"
+    return eff
 
 
 def _context_block(context: Optional[str]) -> str:
@@ -453,7 +448,7 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
             system=system,
             tools=all_tools,
             messages=messages,
-            output_config={"effort": ANTHROPIC_EFFORT},
+            output_config={"effort": _effort_for(model)},
         )
 
         assistant_blocks: list[dict] = []
@@ -617,10 +612,10 @@ async def run_overview(registry: dict, extra_system: str = "", track_inventory: 
     msg = ("Current store KPIs (computed live):\n" + json.dumps(context, indent=2, default=str)
            + "\n\nGive the executive overview now by calling present_response.")
     resp = await client.messages.create(
-        model=MODEL_FAST, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
+        model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
-        output_config={"effort": ANTHROPIC_EFFORT},
+        output_config={"effort": _effort_for(MODEL_DEEP)},
     )
     present = next((b.input for b in resp.content
                     if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
@@ -939,11 +934,11 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
            + "\n\nProduce the audit now via present_response. Lead with the highest-impact, "
              "gates-first fixes; be specific to this data; cite the pipeline stage per finding." + gsc_note)
     resp = await client.messages.create(
-        model=MODEL_FAST, max_tokens=MAX_TOKENS,
+        model=MODEL_DEEP, max_tokens=MAX_TOKENS,
         system=OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
-        output_config={"effort": ANTHROPIC_EFFORT},
+        output_config={"effort": _effort_for(MODEL_DEEP)},
     )
     present = next((b.input for b in resp.content
                     if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
@@ -1140,7 +1135,7 @@ def add_routes(mcp, registry: dict) -> None:
         if len(json.dumps(history)) > MAX_CHAT_CHARS:
             return _json({"error": "Message too large."}, 413)
 
-        model = _pick_model(history, bool(body.get("deep")))
+        model = _pick_model(bool(body.get("deep")))
         extra = _profile_to_system(_load_profile()) + _memory_to_system()
         if _is_seo(history):
             extra += "\n\n" + SEO_KNOWLEDGE
