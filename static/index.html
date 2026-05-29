@@ -224,9 +224,20 @@
         .msg.error .bubble { background: #fff1ef; border: 1px solid #f3c7bf; color: var(--danger); padding: 11px 14px; border-radius: 12px; font-size: 13px; }
 
         .thinking { display: flex; align-items: center; gap: 11px; color: var(--ink-2); font-size: 13.5px; }
-        .thinking .orb { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg,#6b4ff7,#9b5cf6); position: relative; }
-        .thinking .orb::after { content: ""; position: absolute; inset: 0; border-radius: 6px; background: inherit; animation: pulse 1.4s ease-in-out infinite; }
-        @keyframes pulse { 0%,100% { opacity: .4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.08); } }
+        .thinking .three-body { --uib-size: 24px; --uib-speed: .8s; --uib-color: #6b4ff7;
+            position: relative; display: inline-block; flex: none; height: var(--uib-size); width: var(--uib-size);
+            animation: tb-spin calc(var(--uib-speed) * 2.5) infinite linear; }
+        .thinking .three-body__dot { position: absolute; height: 100%; width: 30%; }
+        .thinking .three-body__dot::after { content: ""; position: absolute; height: 0; width: 100%; padding-bottom: 100%; background-color: var(--uib-color); border-radius: 50%; }
+        .thinking .three-body__dot:nth-child(1) { bottom: 5%; left: 0; transform: rotate(60deg); transform-origin: 50% 85%; }
+        .thinking .three-body__dot:nth-child(1)::after { bottom: 0; left: 0; animation: tb-wobble1 var(--uib-speed) infinite ease-in-out; animation-delay: calc(var(--uib-speed) * -.3); }
+        .thinking .three-body__dot:nth-child(2) { bottom: 5%; right: 0; transform: rotate(-60deg); transform-origin: 50% 85%; }
+        .thinking .three-body__dot:nth-child(2)::after { bottom: 0; left: 0; animation: tb-wobble1 var(--uib-speed) infinite calc(var(--uib-speed) * -.15) ease-in-out; }
+        .thinking .three-body__dot:nth-child(3) { bottom: -5%; left: 0; transform: translateX(116.666%); }
+        .thinking .three-body__dot:nth-child(3)::after { top: 0; left: 0; animation: tb-wobble2 var(--uib-speed) infinite ease-in-out; }
+        @keyframes tb-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes tb-wobble1 { 0%,100% { transform: translateY(0%) scale(1); opacity: 1; } 50% { transform: translateY(-66%) scale(.65); opacity: .8; } }
+        @keyframes tb-wobble2 { 0%,100% { transform: translateY(0%) scale(1); opacity: 1; } 50% { transform: translateY(66%) scale(.65); opacity: .8; } }
         .empty-chat { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 30px; }
         .empty-chat .big { width: 52px; height: 52px; border-radius: 15px; background: linear-gradient(135deg,#6b4ff7,#9b5cf6);
             display: grid; place-items: center; margin-bottom: 16px; box-shadow: 0 8px 24px -6px rgba(91,61,245,.5); }
@@ -440,6 +451,7 @@
             x: SV('<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>'),
         };
         const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
+        const loader = () => { const b = el('div', 'three-body'); b.append(el('div', 'three-body__dot'), el('div', 'three-body__dot'), el('div', 'three-body__dot')); return b; };
         const ico = (svg) => { const s = el('span'); s.innerHTML = svg; return s; };
         const $ = (id) => document.getElementById(id);
 
@@ -621,7 +633,7 @@
         function showThinking() {
             const log = $('chat-log');
             const m = el('div', 'msg assistant'); m.id = 'thinking-msg';
-            const t = el('div', 'thinking'); const orb = el('div', 'orb'); const label = el('span', null, THINKING[0]);
+            const t = el('div', 'thinking'); const orb = loader(); const label = el('span', null, THINKING[0]);
             t.append(orb, label); m.append(t); log.append(m); scrollChat();
             let i = 0; m._timer = setInterval(() => { i = (i + 1) % THINKING.length; label.textContent = THINKING[i]; }, 1600);
         }
@@ -696,7 +708,7 @@
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.grid;
             const htext = el('div'); htext.append(el('h2', null, 'Store Overview'), el('p', null, 'Analyzing your store…'));
             hero.append(badge, htext); box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = '8px'; const orb = el('div', 'orb'); t.append(orb, el('span', null, 'Computing live metrics and insights…')); box.append(t);
+            const t = el('div', 'thinking'); t.style.marginTop = '8px'; const orb = loader(); t.append(orb, el('span', null, 'Computing live metrics and insights…')); box.append(t);
             try {
                 const data = await api('/api/overview', {});
                 overviewCache = { data, at: Date.now() }; renderOverview(overviewCache);
@@ -743,7 +755,7 @@
             const htext = el('div'); htext.append(el('h2', null, 'SEO Audit'), el('p', null, 'Auditing your store…'));
             hero.append(badge, htext); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px';
-            t.append(el('div', 'orb'), el('span', null, 'Crawling pages: indexation, structured data, metadata, alt text…'));
+            t.append(loader(), el('span', null, 'Crawling pages: indexation, structured data, metadata, alt text…'));
             box.append(t);
             try { const data = await api('/api/seo', {}); seoCache = { data, at: Date.now() }; renderSEO(seoCache); }
             catch (e) {
@@ -797,7 +809,7 @@
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
             const ht = el('div'); ht.append(el('h2', null, 'Products'), el('p', null, 'Loading your products and sales…'));
             hero.append(badge, ht); box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(el('div', 'orb'), el('span', null, 'Loading products…')); box.append(t);
+            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Loading products…')); box.append(t);
             try { productList = await api('/api/products', {}); renderProductList(); }
             catch (e) {
                 box.innerHTML = ''; box.append(hero);
@@ -845,7 +857,7 @@
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
             const ht = el('div'); ht.append(el('h2', null, title || 'Product'), el('p', null, 'Analyzing search, traffic, sales and on-page SEO…'));
             hero.append(badge, ht); box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(el('div', 'orb'), el('span', null, 'Building the optimization plan. This can take up to a minute…')); box.append(t);
+            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Building the optimization plan. This can take up to a minute…')); box.append(t);
             try { renderProductDetail(await api('/api/product', { product_id: id })); }
             catch (e) {
                 box.innerHTML = ''; box.append(productBack());
