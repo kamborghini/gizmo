@@ -392,6 +392,60 @@ async def gsc_timeseries(days: int = 480) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Google Ads cost / CPC / ROAS (via the GA4 <-> Google Ads link)
+# ---------------------------------------------------------------------------
+
+async def ga4_ads(days: int = 90) -> dict:
+    """Paid-search performance from GA4's advertiser metrics (populated only when
+    Google Ads is linked to the GA4 property). Returns overall totals plus the top
+    campaigns by cost. `has_ads` is False when no paid data is present."""
+    if not ga4_configured():
+        return {}
+    days = max(7, min(int(days), 365))
+    rng = [{"startDate": f"{days}daysAgo", "endDate": "yesterday"}]
+    try:
+        tot = await _post(_ga4_url(), {"dateRanges": rng, "metrics": [
+            {"name": "advertiserAdCost"}, {"name": "advertiserAdClicks"},
+            {"name": "advertiserAdImpressions"}, {"name": "advertiserAdCostPerClick"},
+            {"name": "conversions"}, {"name": "totalRevenue"}, {"name": "returnOnAdSpend"}]})
+        row = (tot.get("rows") or [{}])
+        v = (row[0].get("metricValues") if row and row[0] else []) or []
+        g = lambda i: float(v[i]["value"]) if len(v) > i else 0.0
+        totals = {"cost": round(g(0), 2), "clicks": int(g(1)), "impressions": int(g(2)),
+                  "cpc": round(g(3), 2), "conversions": round(g(4), 1),
+                  "revenue": round(g(5), 2), "roas": round(g(6), 2)}
+        out = {"totals": totals, "has_ads": totals["cost"] > 0 or totals["clicks"] > 0, "range_days": days}
+    except GoogleAPIError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        logger.warning(f"GA4 ads totals failed: {e}")
+        return {}
+    try:
+        camp = await _post(_ga4_url(), {
+            "dateRanges": rng,
+            "dimensions": [{"name": "sessionGoogleAdsCampaignName"}],
+            "metrics": [{"name": "advertiserAdCost"}, {"name": "advertiserAdClicks"},
+                        {"name": "advertiserAdCostPerClick"}, {"name": "conversions"},
+                        {"name": "returnOnAdSpend"}],
+            "orderBys": [{"metric": {"metricName": "advertiserAdCost"}, "desc": True}],
+            "limit": 12,
+        })
+        rows = []
+        for r in camp.get("rows", []):
+            name = (r.get("dimensionValues") or [{}])[0].get("value", "(not set)")
+            mv = r.get("metricValues") or []
+            gg = lambda i: float(mv[i]["value"]) if len(mv) > i else 0.0
+            row = {"campaign": name, "cost": round(gg(0), 2), "clicks": int(gg(1)),
+                   "cpc": round(gg(2), 2), "conversions": round(gg(3), 1), "roas": round(gg(4), 2)}
+            if row["cost"] > 0 or row["clicks"] > 0:
+                rows.append(row)
+        out["campaigns"] = rows
+    except Exception:
+        pass
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Per-page (per-product) queries, filtered by URL path
 # ---------------------------------------------------------------------------
 

@@ -23,8 +23,11 @@ import re
 import html
 import json
 import time
+import socket
+import asyncio
 import logging
 import secrets
+import ipaddress
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 from urllib.parse import urlparse, urljoin
@@ -994,6 +997,116 @@ def _parse_seo(html: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Keyword scraper for arbitrary external URLs (SSRF-guarded) + on-page keywords
+# ---------------------------------------------------------------------------
+
+EXTERNAL_FETCH_MAX = int(os.environ.get("EXTERNAL_FETCH_MAX", str(600 * 1024)))  # bytes of text kept
+
+_STOPWORDS = set((
+    "the a an and or but of to in on for with at by from as is are was were be been being this that "
+    "these those it its your you we our us they them their he she his her i me my our ours not no yes "
+    "do does did have has had will would can could should may might must shall into over under out up "
+    "down off about above below more most some any all each every other than then once here there when "
+    "where why how what which who whom whose if else while because so such only own same too very just "
+    "get got make made use used new free shop store home page click here read learn back next per via "
+    "also one two three com www http https"
+).split())
+
+
+def _host_is_public(host: str) -> bool:
+    """True only if every resolved IP for host is a public, routable address.
+    Blocks loopback, private, link-local (incl. cloud metadata 169.254.169.254),
+    reserved, multicast and unspecified ranges. Used to gate external scraping."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+                or ip.is_multicast or ip.is_unspecified):
+            return False
+    return True
+
+
+async def _fetch_external(url: str) -> tuple[Optional[int], str, str]:
+    """Fetch an arbitrary http(s) URL with SSRF protection: validates the scheme and
+    that the host resolves only to public IPs, on the initial URL AND every redirect
+    hop (redirects are followed manually). Returns (status, final_url, text)."""
+    for _ in range(5):
+        p = urlparse(url)
+        if p.scheme not in ("http", "https") or not p.hostname:
+            raise RuntimeError("Enter a full http or https URL.")
+        if not await asyncio.to_thread(_host_is_public, p.hostname):
+            raise RuntimeError("That address is not allowed (only public websites can be scanned).")
+        async with httpx.AsyncClient(follow_redirects=False, timeout=12.0,
+                                     headers={"User-Agent": "StoreCopilot-SEO/1.0"}) as c:
+            r = await c.get(url)
+        if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
+            url = urljoin(url, r.headers["location"])
+            continue
+        return r.status_code, str(r.url), (r.text or "")[:EXTERNAL_FETCH_MAX]
+    raise RuntimeError("Too many redirects.")
+
+
+def _extract_page_keywords(html_text: str) -> dict:
+    """Pull on-page keyword signals: title, meta, headings, and the top single terms
+    and two-word phrases by frequency (stopwords removed)."""
+    from collections import Counter
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    title = (soup.title.string or "").strip() if soup.title and soup.title.string else ""
+    desc_el = soup.find("meta", attrs={"name": "description"})
+    desc = (desc_el.get("content") or "").strip() if desc_el else ""
+    kw_el = soup.find("meta", attrs={"name": "keywords"})
+    meta_kw = (kw_el.get("content") or "").strip() if kw_el else ""
+    h1 = [h.get_text(" ", strip=True) for h in soup.find_all("h1")][:10]
+    h2 = [h.get_text(" ", strip=True) for h in soup.find_all("h2")][:25]
+    h3 = [h.get_text(" ", strip=True) for h in soup.find_all("h3")][:25]
+    for t in soup(["script", "style", "noscript"]):
+        t.extract()
+    text = soup.get_text(" ", strip=True).lower()
+    words = re.findall(r"[a-z][a-z'-]{2,}", text)
+    toks = [w for w in words if w not in _STOPWORDS and len(w) > 2]
+    uni = Counter(toks)
+    bigrams = Counter(toks[i] + " " + toks[i + 1] for i in range(len(toks) - 1)
+                      if toks[i] not in _STOPWORDS and toks[i + 1] not in _STOPWORDS)
+    return {
+        "title": title, "title_len": len(title), "meta_description": desc, "meta_keywords": meta_kw,
+        "h1": h1, "h2": h2, "h3": h3, "word_count": len(words),
+        "top_terms": [{"term": t, "count": c} for t, c in uni.most_common(25)],
+        "top_phrases": [{"term": t, "count": c} for t, c in bigrams.most_common(15) if c > 1],
+    }
+
+
+KEYWORD_SYSTEM = """You are a senior search and paid-media strategist for a Shopify store. You turn raw \
+keyword and ad data into a money-ranked plan, never generic tips.
+
+Organic (Google Search Console): each query has clicks, impressions, CTR and average position. Find the money:
+- Page-2 keywords (position roughly 11 to 20) with real impressions: small ranking gains move them onto \
+page 1. Usually the highest-leverage opportunity. Name them.
+- High impressions plus low CTR at a decent position: the page ranks but the title and meta are not \
+winning the click. Recommend a specific rewrite and quantify the click upside.
+- High-intent commercial queries versus informational ones: prioritize the queries buyers use.
+- Separate branded from non-branded; non-branded growth is real new demand.
+
+Paid (Google Ads, surfaced through GA4): you may have ad cost, clicks, CPC, conversions and ROAS overall \
+and per campaign. Optimize for profit, not clicks:
+- High CPC with low conversion or low ROAS: spend is being wasted. Recommend pausing, tightening match \
+types, or fixing the landing page, and say which.
+- Strong-ROAS campaigns: recommend scaling budget, with the expected return.
+- Reconcile paid against organic: where you already rank organically for a term you also pay for, you \
+may be able to cut paid spend and keep the traffic.
+
+Ground every claim in the supplied numbers, cite them, and quantify impact in money or percent. Rank \
+recommendations by (business impact x confidence) / effort.""" + WRITING_STYLE
+
+
 async def _seo_product_signals(registry: dict) -> dict:
     data = await _tool_json(registry, "shopify_list_products",
                             {"limit": 250, "fields": "id,title,handle,body_html,images"})
@@ -1227,6 +1340,97 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
     except Exception:
         logger.exception("seo trends failed")
     return {"score": score, "metrics": metrics, "structured": structured, "trends": seo_trends}
+
+
+# ---------------------------------------------------------------------------
+# Keyword + CPC intelligence, and the external-URL keyword scanner
+# ---------------------------------------------------------------------------
+
+async def run_keywords(registry: dict, extra_system: str = "") -> dict:
+    """Fuse Search Console keywords with Google Ads (via GA4) into a money-ranked
+    keyword + CPC plan. Returns the AI analysis plus the raw keyword list and ad data
+    for the UI tables. Degrades gracefully when Google is not connected."""
+    days = 90
+    gsc_ok = google_data.gsc_configured()
+    ga4_ok = google_data.ga4_configured()
+    overview = await google_data.gsc_overview(days) if gsc_ok else {}
+    top = await google_data.gsc_top_queries(days, limit=100) if gsc_ok else {}
+    ads = await google_data.ga4_ads(days) if ga4_ok else {}
+    shop = await _tool_json(registry, "shopify_get_shop", {})
+    currency = shop.get("currency", "")
+    queries = top.get("queries", []) if isinstance(top, dict) else []
+
+    metrics: list[dict] = []
+    if overview and not overview.get("error"):
+        metrics.append({"label": "Search clicks (90d)", "value": f"{overview.get('clicks', 0):,}"})
+        metrics.append({"label": "Impressions (90d)", "value": f"{overview.get('impressions', 0):,}"})
+        if overview.get("ctr") is not None:
+            metrics.append({"label": "Avg CTR", "value": f"{overview.get('ctr', 0)}%"})
+        if overview.get("position") is not None:
+            metrics.append({"label": "Avg position", "value": str(overview.get("position"))})
+    if ads and ads.get("totals") and ads.get("has_ads"):
+        t = ads["totals"]
+        metrics.append({"label": "Ad spend (90d)", "value": _money(t["cost"], currency)})
+        metrics.append({"label": "Avg CPC", "value": f"{t['cpc']:.2f} {currency}".strip()})
+        if t.get("roas"):
+            metrics.append({"label": "ROAS", "value": f"{t['roas']}x"})
+
+    context = {"currency": currency, "range_days": days,
+               "search_console_overview": overview, "top_queries": queries,
+               "google_ads_via_ga4": ads}
+    client = _anthropic()
+    msg = ("Keyword and paid-search data for this store (collected live):\n"
+           + json.dumps(context, indent=2, default=str)
+           + "\n\nProduce a money-ranked keyword and cost-per-click optimization plan via present_response. "
+             "Lead with the highest-value opportunities in `actions` (each with the supporting numbers and "
+             "expected impact). Use `insights` for the key findings across organic search and paid. Use "
+             "`sections` for supporting detail. If paid data is absent, focus on organic and say what to "
+             "connect. Be specific and quantify in money or percent.")
+    resp = await client.messages.create(
+        model=MODEL_DEEP, max_tokens=MAX_TOKENS,
+        system=OVERVIEW_SYSTEM + "\n\n" + KEYWORD_SYSTEM + extra_system,
+        tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
+        messages=[{"role": "user", "content": msg}],
+        output_config={"effort": _effort_for(MODEL_DEEP)},
+    )
+    present = next((b.input for b in resp.content
+                    if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
+    structured = _coerce_structured(present or {"summary": "Keyword analysis ready."})
+    structured.pop("metrics", None)
+    return {"metrics": metrics, "structured": structured, "currency": currency,
+            "keywords": queries, "ads": ads if (ads and not ads.get("error")) else None,
+            "gsc_connected": gsc_ok, "ga4_connected": ga4_ok}
+
+
+async def run_keyword_scan(registry: dict, url: str, extra_system: str = "") -> dict:
+    """Scrape an external URL (SSRF-guarded), extract its on-page keyword targeting,
+    and have Claude analyze what it targets and how the merchant can compete."""
+    status, final_url, html_text = await _fetch_external(url)
+    if not html_text:
+        raise RuntimeError("Could not read that page (it returned no readable HTML).")
+    extracted = _extract_page_keywords(html_text)
+    ours = await google_data.gsc_top_queries(90, limit=40) if google_data.gsc_configured() else {}
+    context = {"scanned_url": final_url, "http_status": status, "page": extracted,
+               "your_top_queries": (ours.get("queries") if isinstance(ours, dict) else [])}
+    client = _anthropic()
+    msg = ("On-page keyword extraction from an external URL (treat it as a competitor or reference page):\n"
+           + json.dumps(context, indent=2, default=str)
+           + "\n\nAnalyze it via present_response. In `summary`, state the page's primary topic and the "
+             "keywords it targets. Use `insights` for what it does well and where it is weak. Use `actions` "
+             "for specific keywords, topics or pages the merchant should create or optimize to compete, "
+             "cross-referencing the merchant's own queries when provided. Be concrete and prioritized.")
+    resp = await client.messages.create(
+        model=MODEL_DEEP, max_tokens=MAX_TOKENS,
+        system=OVERVIEW_SYSTEM + "\n\n" + KEYWORD_SYSTEM + extra_system,
+        tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
+        messages=[{"role": "user", "content": msg}],
+        output_config={"effort": _effort_for(MODEL_DEEP)},
+    )
+    present = next((b.input for b in resp.content
+                    if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
+    structured = _coerce_structured(present or {"summary": "Scan complete."})
+    structured.pop("metrics", None)
+    return {"url": final_url, "extracted": extracted, "structured": structured}
 
 
 # ---------------------------------------------------------------------------
@@ -1785,6 +1989,57 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("SEO audit failed")
             return _json({"error": "Couldn't run the SEO audit. Check the server logs."}, 500)
         return _json(result)
+
+    @mcp.custom_route("/api/keywords", methods=["POST"])
+    async def keywords_route(request: Request):
+        pre = _pre_checks(request, ai=True)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
+        try:
+            return _json(await run_keywords(registry, extra))
+        except anthropic.APIError:
+            logger.exception("Anthropic API error (keywords)")
+            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+        except Exception:
+            logger.exception("Keyword analysis failed")
+            return _json({"error": "Couldn't run the keyword analysis. Check the server logs."}, 500)
+
+    @mcp.custom_route("/api/keyword-scan", methods=["POST"])
+    async def keyword_scan_route(request: Request):
+        pre = _pre_checks(request, ai=True)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        url = (body.get("url") or "").strip()
+        if not url:
+            return _json({"error": "Enter a URL to scan."}, 400)
+        if not re.match(r"^https?://", url, re.I):
+            url = "https://" + url
+        if len(url) > 2048:
+            return _json({"error": "That URL is too long."}, 400)
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
+        try:
+            return _json(await run_keyword_scan(registry, url, extra))
+        except RuntimeError as e:
+            return _json({"error": str(e)}, 400)
+        except anthropic.APIError:
+            logger.exception("Anthropic API error (keyword-scan)")
+            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+        except Exception:
+            logger.exception("Keyword scan failed")
+            return _json({"error": "Couldn't scan that URL. Check that it is a public web page."}, 500)
 
     @mcp.custom_route("/api/memory", methods=["POST"])
     async def memory_route(request: Request):
