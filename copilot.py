@@ -2494,3 +2494,28 @@ def add_routes(mcp, registry: dict) -> None:
         if body is None:
             return _json({"error": "Request too large."}, 413)
         return _json(google_data.status())
+
+    @mcp.custom_route("/api/status", methods=["POST"])
+    async def status_route(request: Request):
+        """Connection-health summary for the Settings panel: Shopify, AI, and Google."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        shop_ok, shop_name, currency = False, None, None
+        try:
+            shop = await _tool_json(registry, "shopify_get_shop", {})
+            if shop and shop.get("name"):
+                shop_ok, shop_name, currency = True, shop.get("name"), shop.get("currency")
+        except Exception:
+            pass
+        return _json({
+            "shopify": {"ok": shop_ok, "name": shop_name, "currency": currency},
+            "ai": {"ok": bool(ANTHROPIC_API_KEY)},
+            "google": google_data.status(),
+        })

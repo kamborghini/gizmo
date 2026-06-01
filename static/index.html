@@ -120,6 +120,14 @@
         .stat.warn .value { color: var(--warn); }
         .stat-spark { margin-top: 11px; position: relative; opacity: .92; }
         .stat-spark .spark { height: 30px; }
+        .ov-customize { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-bottom: 11px; }
+        .ov-cust-hint { font-size: 12px; color: var(--ink-3); margin-right: auto; }
+        .stat-edit { cursor: grab; outline: 1px dashed var(--border-3); outline-offset: -1px; }
+        .stat-edit.dragging { opacity: .45; }
+        .stat-hidden { opacity: .4; }
+        .stat-hide { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--ink-3); display: grid; place-items: center; cursor: pointer; z-index: 3; padding: 0; }
+        .stat-hide:hover { color: var(--ink); border-color: var(--border-3); }
+        .stat-hide svg { width: 12px; height: 12px; }
 
         .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3);
             margin: 26px 0 13px; display: flex; align-items: center; gap: 10px; }
@@ -449,6 +457,7 @@
         .g-badge { font-size: 11px; font-weight: 600; padding: 4px 11px; border-radius: 20px; white-space: nowrap; }
         .g-badge.on { background: var(--win-bg); color: var(--win); }
         .g-badge.off { background: var(--surface-3); color: var(--ink-3); }
+        .g-badge.mid { background: var(--warn-bg); color: var(--warn); }
     </style>
 </head>
 <body>
@@ -568,13 +577,8 @@
                         <div class="toggle" data-pref="flag_anomalies"><span class="sw"></span></div>
                     </div>
                 </div>
-                <div class="setting-row" id="google-row" style="display:none">
-                    <div>
-                        <div class="setting-title">Google Search Console &amp; Analytics</div>
-                        <div class="setting-sub" id="google-status-sub">Checking…</div>
-                    </div>
-                    <span class="g-badge" id="google-badge"></span>
-                </div>
+                <div class="section-title" style="margin: 22px 0 6px;">Connections</div>
+                <div id="connections"><div class="setting-sub">Checking connections…</div></div>
             </div>
             <div class="modal-foot">
                 <button class="btn" id="settings-cancel">Cancel</button>
@@ -730,6 +734,56 @@
         function metricsGrid(metrics) {
             const g = el('div', 'metrics');
             metrics.forEach((m, i) => g.append(statCard(m, i)));
+            return g;
+        }
+        /* ---------- dashboard customization (Overview KPIs: reorder + hide) ---------- */
+        const OV_LAYOUT_KEY = 'sc_ov_layout_v1';
+        let ovEdit = false;
+        let ovLayout = (() => { try { return JSON.parse(localStorage.getItem(OV_LAYOUT_KEY)) || { order: [], hidden: [] }; } catch (e) { return { order: [], hidden: [] }; } })();
+        const saveOvLayout = () => { try { localStorage.setItem(OV_LAYOUT_KEY, JSON.stringify(ovLayout)); } catch (e) {} };
+        function ovOrderedLabels(allLabels) {
+            let order = (ovLayout.order || []).filter(l => allLabels.includes(l));
+            allLabels.forEach(l => { if (!order.includes(l)) order.push(l); });
+            return order;
+        }
+        function reorderOv(from, to) {
+            if (!from || from === to || !overviewCache) return;
+            const all = (overviewCache.data.metrics || []).map(m => m.label);
+            const order = ovOrderedLabels(all);
+            const fi = order.indexOf(from), ti = order.indexOf(to);
+            if (fi < 0 || ti < 0) return;
+            order.splice(ti, 0, order.splice(fi, 1)[0]);
+            ovLayout.order = order; saveOvLayout(); renderOverview(overviewCache);
+        }
+        function toggleHideOv(label) {
+            const h = new Set(ovLayout.hidden || []);
+            h.has(label) ? h.delete(label) : h.add(label);
+            ovLayout.hidden = [...h]; saveOvLayout(); renderOverview(overviewCache);
+        }
+        function metricsGridCustom(metrics) {
+            const g = el('div', 'metrics');
+            const byLabel = {}; metrics.forEach(m => byLabel[m.label] = m);
+            const order = ovOrderedLabels(metrics.map(m => m.label));
+            const hidden = new Set(ovLayout.hidden || []);
+            let dragLabel = null;
+            order.forEach((lbl, i) => {
+                const m = byLabel[lbl]; if (!m) return;
+                const isHidden = hidden.has(lbl);
+                if (isHidden && !ovEdit) return;
+                const card = statCard(m, i);
+                if (isHidden) card.classList.add('stat-hidden');
+                if (ovEdit) {
+                    card.classList.add('stat-edit'); card.draggable = true;
+                    card.addEventListener('dragstart', e => { dragLabel = lbl; card.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+                    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+                    card.addEventListener('dragover', e => e.preventDefault());
+                    card.addEventListener('drop', e => { e.preventDefault(); reorderOv(dragLabel, lbl); });
+                    const tg = el('button', 'stat-hide'); tg.innerHTML = isHidden ? I.plus : I.x; tg.title = isHidden ? 'Show' : 'Hide';
+                    tg.onclick = (e) => { e.stopPropagation(); toggleHideOv(lbl); };
+                    card.append(tg);
+                }
+                g.append(card);
+            });
             return g;
         }
         function insightCard(ins, i) {
@@ -1200,7 +1254,18 @@
                 });
                 box.append(card);
             }
-            if (Array.isArray(data.metrics) && data.metrics.length) box.append(metricsGrid(withSparks(data.metrics, data.trends)));
+            if (Array.isArray(data.metrics) && data.metrics.length) {
+                const ctrl = el('div', 'ov-customize');
+                const cust = el('button', 'btn' + (ovEdit ? ' on' : '')); cust.append(ico(I.settings), document.createTextNode(ovEdit ? 'Done' : 'Customize'));
+                cust.onclick = () => { ovEdit = !ovEdit; renderOverview(overviewCache); };
+                ctrl.append(cust);
+                if (ovEdit) {
+                    const hint = el('span', 'ov-cust-hint', 'Drag to reorder, use the x to hide.'); ctrl.insertBefore(hint, cust);
+                    const rst = el('button', 'btn'); rst.textContent = 'Reset'; rst.onclick = () => { ovLayout = { order: [], hidden: [] }; saveOvLayout(); renderOverview(overviewCache); }; ctrl.append(rst);
+                }
+                box.append(ctrl);
+                box.append(metricsGridCustom(withSparks(data.metrics, data.trends)));
+            }
             renderTrendsBlock(box, data.trends, data.currency, ovRange, (v) => { ovRange = v; renderOverview(overviewCache); });
             const s = Object.assign({}, data.structured); delete s.summary;
             if (s.insights && s.insights.length) box.append(el('div', 'section-title', 'What’s notable'));
@@ -1889,22 +1954,40 @@
 
         /* ---------- settings (store profile) ---------- */
         const prefToggles = () => document.querySelectorAll('#settings-modal .toggle[data-pref]');
-        async function loadGoogleStatus() {
-            const row = $('google-row'), sub = $('google-status-sub'), badge = $('google-badge');
-            try {
-                const s = await api('/api/google/status', {});
-                if (!s.oauth_client && !s.connected) { row.style.display = 'none'; return; }
-                row.style.display = 'flex';
-                if (s.connected) {
-                    badge.className = 'g-badge on'; badge.textContent = 'Connected';
-                    const parts = [];
-                    if (s.ga4_ready) parts.push('GA4'); if (s.gsc_ready) parts.push('Search Console');
-                    sub.textContent = parts.length ? ('Linked: ' + parts.join(' + ')) : 'Connected. Set GA4_PROPERTY_ID / GSC_SITE_URL to pull data.';
-                } else {
-                    badge.className = 'g-badge off'; badge.textContent = 'Not connected';
-                    sub.textContent = 'Connect via the one-time setup link (see your deploy notes).';
-                }
-            } catch (e) { row.style.display = 'none'; }
+        function connRow(title, state, sub) {
+            const row = el('div', 'setting-row');
+            const left = el('div'); left.append(el('div', 'setting-title', title), el('div', 'setting-sub', sub));
+            const pill = el('span', 'g-badge ' + (state === 'on' ? 'on' : state === 'mid' ? 'mid' : 'off'),
+                state === 'on' ? 'Connected' : state === 'mid' ? 'Needs setup' : 'Not connected');
+            row.append(left, pill);
+            return row;
+        }
+        async function loadConnections() {
+            const host = $('connections'); host.innerHTML = '';
+            let s;
+            try { s = await api('/api/status', {}); } catch (e) { host.append(el('div', 'setting-sub', 'Could not check connections.')); return; }
+            const g = s.google || {};
+            // Shopify
+            host.append(connRow('Shopify store', s.shopify && s.shopify.ok ? 'on' : 'off',
+                s.shopify && s.shopify.ok ? ((s.shopify.name || 'Connected') + (s.shopify.currency ? ' (' + s.shopify.currency + ')' : '')) : 'Reads are not working. Check your access token.'));
+            // AI
+            host.append(connRow('Claude AI', s.ai && s.ai.ok ? 'on' : 'off',
+                s.ai && s.ai.ok ? 'Active. Powers every analysis and the chat.' : 'Add your ANTHROPIC_API_KEY to enable analysis and chat.'));
+            // GA4
+            host.append(connRow('Google Analytics 4',
+                g.ga4_ready ? 'on' : (g.connected || g.oauth_client) ? 'mid' : 'off',
+                g.ga4_ready ? ('Connected' + (g.ga4_property ? ' (property ' + g.ga4_property + ')' : '')) :
+                    g.connected ? 'Connected, but set GA4_PROPERTY_ID to pull traffic data.' :
+                        g.oauth_client ? 'Connect Google via the one-time setup link.' : 'Set up the Google connection to add traffic and revenue data.'));
+            // Search Console
+            host.append(connRow('Google Search Console',
+                g.gsc_ready ? 'on' : (g.connected || g.oauth_client) ? 'mid' : 'off',
+                g.gsc_ready ? ('Connected' + (g.gsc_site ? ' (' + g.gsc_site + ')' : '')) :
+                    g.connected ? 'Connected, but set GSC_SITE_URL to pull search data.' :
+                        g.oauth_client ? 'Connect Google via the one-time setup link.' : 'Set up the Google connection to add keyword and search data.'));
+            // Google Ads (CPC) rides on GA4
+            host.append(connRow('Google Ads (CPC)', g.ga4_ready ? 'mid' : 'off',
+                g.ga4_ready ? 'Link Google Ads to your GA4 property to see paid CPC and ROAS.' : 'Needs GA4 connected, then a Google Ads link in GA4.'));
         }
         function openSettings() {
             $('pf-voice').value = profile.brand_voice || '';
@@ -1914,7 +1997,7 @@
             prefToggles().forEach(t => t.classList.toggle('on', !!profile.prefs[t.dataset.pref]));
             $('settings-modal').classList.add('show');
             $('pf-voice').focus();
-            loadGoogleStatus();
+            loadConnections();
         }
         function closeSettings() { $('settings-modal').classList.remove('show'); }
         async function applySettings() {
