@@ -106,6 +106,8 @@ MEMORY_MAX         = int(os.environ.get("MEMORY_MAX", "500"))    # max stored me
 MEMORY_INJECT      = int(os.environ.get("MEMORY_INJECT", "40"))  # max of each kind injected into prompts
 KNOWLEDGE_PATH     = os.environ.get("KNOWLEDGE_PATH", "/data/store_knowledge.json")
 KNOWLEDGE_CAP      = int(os.environ.get("KNOWLEDGE_CAP", "8000"))     # max stored knowledge chars
+IMPACT_PATH        = os.environ.get("IMPACT_PATH", "/data/impact.json")  # tracked-action impact log
+IMPACT_MAX         = int(os.environ.get("IMPACT_MAX", "100"))
 LEARN_MAX_PAGES    = int(os.environ.get("LEARN_MAX_PAGES", "12"))    # pages crawled when learning
 LEARN_PAGE_CHARS   = int(os.environ.get("LEARN_PAGE_CHARS", "3000"))  # text kept per page
 
@@ -411,6 +413,85 @@ def _update_memory(mid: str, status: str) -> list[dict]:
 
 def _delete_memory(mid: str) -> list[dict]:
     return _write_memory([m for m in _load_memory() if m.get("id") != mid])
+
+
+# ---------------------------------------------------------------------------
+# Impact tracking — "close the loop": snapshot headline metrics when a change is
+# made, then measure how they moved since. Proves whether advice worked.
+# ---------------------------------------------------------------------------
+
+def _load_impact() -> list[dict]:
+    try:
+        with open(IMPACT_PATH, "r", encoding="utf-8") as fh:
+            return json.load(fh).get("items", [])
+    except Exception:
+        return []
+
+
+def _write_impact(items: list[dict]) -> list[dict]:
+    os.makedirs(os.path.dirname(IMPACT_PATH) or ".", exist_ok=True)
+    tmp = IMPACT_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"items": items[:IMPACT_MAX]}, fh)
+    os.replace(tmp, IMPACT_PATH)
+    return items[:IMPACT_MAX]
+
+
+async def _impact_snapshot(registry: dict) -> dict:
+    """A light 28-day headline-metric snapshot (revenue, orders, sessions, search
+    clicks). Each source degrades to absent on error, so this never raises."""
+    snap: dict = {"at": datetime.now(timezone.utc).isoformat()}
+    try:
+        orders = await _orders_28d(registry)
+        snap["revenue_28d"] = round(sum(float(o.get("total_price") or 0) for o in orders), 2)
+        snap["orders_28d"] = len(orders)
+    except Exception:
+        pass
+    try:
+        if google_data.ga4_configured():
+            ga = await google_data.ga4_summary(28)
+            if ga and not ga.get("error") and ga.get("sessions") is not None:
+                snap["sessions_28d"] = ga["sessions"]
+    except Exception:
+        pass
+    try:
+        if google_data.gsc_configured():
+            g = await google_data.gsc_overview(28)
+            if g and not g.get("error") and g.get("clicks") is not None:
+                snap["clicks_28d"] = g["clicks"]
+    except Exception:
+        pass
+    return snap
+
+
+_IMPACT_METRICS = [("revenue_28d", "Revenue", True), ("orders_28d", "Orders", False),
+                   ("sessions_28d", "Sessions", False), ("clicks_28d", "Search clicks", False)]
+
+
+def _impact_with_deltas(items: list[dict], current: dict) -> list[dict]:
+    out = []
+    for it in items:
+        base = it.get("baseline") or {}
+        deltas = []
+        for key, label, _money_flag in _IMPACT_METRICS:
+            b, c = base.get(key), current.get(key)
+            if isinstance(b, (int, float)) and isinstance(c, (int, float)):
+                pct = round((c - b) / b * 100) if b else None
+                deltas.append({"key": key, "label": label, "from": b, "to": c, "pct": pct})
+        out.append({**it, "deltas": deltas})
+    return out
+
+
+def _impact_learning_text(it: dict, current: dict) -> str:
+    base = it.get("baseline") or {}
+    b, c = base.get("revenue_28d"), current.get("revenue_28d")
+    when = (it.get("started_at") or "")[:10]
+    if isinstance(b, (int, float)) and isinstance(c, (int, float)) and b:
+        pct = round((c - b) / b * 100)
+        direction = "up" if pct > 0 else "down" if pct < 0 else "flat"
+        return (f"After '{it.get('text', '')}' (tracked from {when}), 28-day revenue is {direction} "
+                f"{abs(pct)}% (from {b:.0f} to {c:.0f}).")
+    return f"Tracked the change '{it.get('text', '')}' from {when}."
 
 
 def _memory_to_system(memories: Optional[list[dict]] = None) -> str:
@@ -2064,6 +2145,49 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("Memory op failed")
             return _json({"error": "Couldn't update memory (is a writable volume mounted at /data?)."}, 500)
         return _json({"memories": _load_memory()})
+
+    @mcp.custom_route("/api/impact", methods=["POST"])
+    async def impact_route(request: Request):
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        op = body.get("op") or "list"
+        items = _load_impact()
+        try:
+            if op == "add":
+                text = (body.get("text") or "").strip()[:300]
+                if not text:
+                    return _json({"error": "Nothing to track."}, 400)
+                snap = await _impact_snapshot(registry)
+                items.insert(0, {"id": secrets.token_hex(5), "text": text,
+                                 "source": str(body.get("source") or "copilot")[:24],
+                                 "baseline": snap, "started_at": snap["at"], "status": "tracking"})
+                items = _write_impact(items)
+            elif op == "delete" and body.get("id"):
+                items = _write_impact([x for x in items if x.get("id") != body["id"]])
+            elif op == "conclude" and body.get("id"):
+                cur = await _impact_snapshot(registry)
+                for x in items:
+                    if x.get("id") == body["id"] and x.get("status") != "concluded":
+                        x["status"] = "concluded"
+                        x["concluded_at"] = cur["at"]
+                        x["final"] = cur
+                        try:
+                            _add_memories([{"type": "insight", "text": _impact_learning_text(x, cur)}])
+                        except Exception:
+                            logger.exception("impact learning capture failed")
+                items = _write_impact(items)
+        except Exception:
+            logger.exception("Impact op failed")
+            return _json({"error": "Couldn't update impact tracking (is a writable volume mounted at /data?)."}, 500)
+        current = await _impact_snapshot(registry)
+        return _json({"impact": _impact_with_deltas(items, current), "current": current})
 
     @mcp.custom_route("/api/learn", methods=["POST"])
     async def learn_route(request: Request):

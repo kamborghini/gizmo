@@ -286,6 +286,22 @@
         .kchip { background: var(--surface-3); border: 1px solid var(--border-2); border-radius: 20px; padding: 4px 11px; font-size: 12px; color: var(--ink-2); }
         .kchip b { color: var(--ink); font-weight: 700; }
         .kmeta { font-size: 12.5px; color: var(--ink-2); margin: 4px 0 2px; word-break: break-all; } .kmeta b { color: var(--ink); }
+        /* ---------- Impact tracking ---------- */
+        .track-btn { border: 1px solid var(--border-2); background: var(--surface-2); color: var(--ink-2); font: inherit; font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 7px; display: inline-flex; align-items: center; gap: 5px; flex: none; cursor: pointer; transition: all .14s; }
+        .track-btn:hover { color: var(--ink); border-color: var(--border-3); }
+        .track-btn.on { background: var(--win-bg); color: var(--win); border-color: transparent; cursor: default; }
+        .track-btn > span { display: grid; place-items: center; } .track-btn svg { width: 12px; height: 12px; display: block; }
+        .impact-card { padding: 14px 16px; margin-bottom: 10px; }
+        .impact-card.done { opacity: .72; }
+        .impact-top { display: flex; align-items: flex-start; gap: 12px; }
+        .impact-text { flex: 1; font-weight: 600; font-size: 13.5px; line-height: 1.45; }
+        .impact-acts { display: flex; gap: 3px; flex: none; }
+        .impact-sub { font-size: 11.5px; color: var(--ink-3); margin: 7px 0 10px; }
+        .impact-deltas { display: flex; flex-wrap: wrap; gap: 8px; }
+        .idelta { display: flex; flex-direction: column; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 7px 12px; min-width: 86px; }
+        .idelta .il { font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); font-weight: 600; }
+        .idelta .iv { font-size: 14.5px; font-weight: 700; }
+        .idelta.up .iv { color: var(--win); } .idelta.down .iv { color: var(--danger); } .idelta.flat .iv { color: var(--ink-2); }
 
         /* ---------- Charts ---------- */
         .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--sh-1), var(--hair); padding: 16px 18px 10px; margin-bottom: 12px; position: relative; }
@@ -729,7 +745,7 @@
             const body = el('div', 'body'); body.append(bodyToNodes(s.body));
             d.append(sum, body); return d;
         }
-        function actionsCard(actions) {
+        function actionsCard(actions, source) {
             const card = el('div', 'card actions');
             actions.forEach(a => {
                 const row = el('div', 'action');
@@ -737,6 +753,16 @@
                 row.onclick = () => row.classList.toggle('done');
                 row.append(ck, el('div', 'text', a.text || ''));
                 if (a.priority) { const p = el('span', 'pill ' + a.priority, a.priority); row.append(p); }
+                const track = el('button', 'track-btn'); track.append(ico(I.tag), document.createTextNode('Track'));
+                track.title = 'Snapshot your metrics now and measure this change over time';
+                track.onclick = async (e) => {
+                    e.stopPropagation();
+                    if (track.disabled) return;
+                    track.disabled = true; track.textContent = 'Saving…';
+                    try { await api('/api/impact', { op: 'add', text: a.text || '', source: source || 'copilot' }); track.textContent = 'Tracking'; track.classList.add('on'); }
+                    catch (err) { track.disabled = false; track.innerHTML = ''; track.append(ico(I.tag), document.createTextNode('Track')); addToast('Could not track: ' + (err.message || err)); }
+                };
+                row.append(track);
                 card.append(row);
             });
             return card;
@@ -1606,10 +1632,36 @@
         let memories = [];
         let knowledge = {};
         let learning = false;
+        let impact = [];
         async function loadMemory() {
             try { const d = await api('/api/memory', {}); if (d && Array.isArray(d.memories)) memories = d.memories; } catch (e) {}
             try { const k = await api('/api/learn', {}); knowledge = (k && k.knowledge) || {}; } catch (e) {}
+            try { const im = await api('/api/impact', {}); if (im && Array.isArray(im.impact)) impact = im.impact; } catch (e) {}
             if ($('view-memory').classList.contains('active')) renderMemory();
+        }
+        function impactOp(payload) {
+            api('/api/impact', payload).then(d => { if (d && Array.isArray(d.impact)) impact = d.impact; renderMemory(); loadMemory(); }).catch(() => {});
+        }
+        function impactCard(it) {
+            const c = el('div', 'card impact-card' + (it.status === 'concluded' ? ' done' : ''));
+            const top = el('div', 'impact-top');
+            top.append(el('div', 'impact-text', it.text || ''));
+            const acts = el('div', 'impact-acts');
+            if (it.status !== 'concluded') { const cc = el('button', 'mem-btn ok'); cc.innerHTML = I.check; cc.title = 'Conclude and save the learning'; cc.onclick = () => impactOp({ op: 'conclude', id: it.id }); acts.append(cc); }
+            const del = el('button', 'mem-btn del'); del.innerHTML = I.trash; del.title = 'Delete'; del.onclick = () => impactOp({ op: 'delete', id: it.id }); acts.append(del);
+            top.append(acts); c.append(top);
+            const when = (it.started_at || '').slice(0, 10);
+            c.append(el('div', 'impact-sub', (it.status === 'concluded' ? 'Concluded' : 'Tracking since ' + when) + '. Change in your headline metrics since then:'));
+            const chips = el('div', 'impact-deltas');
+            (it.deltas || []).forEach(d => {
+                const cls = d.pct == null ? 'flat' : d.pct > 0 ? 'up' : d.pct < 0 ? 'down' : 'flat';
+                const chip = el('div', 'idelta ' + cls);
+                chip.append(el('span', 'il', d.label), el('span', 'iv', d.pct == null ? 'n/a' : ((d.pct > 0 ? '+' : '') + d.pct + '%')));
+                chips.append(chip);
+            });
+            if (!(it.deltas || []).length) chips.append(el('div', 'impact-sub', 'Waiting for data. Check back in a few days.'));
+            c.append(chips);
+            return c;
         }
         async function memOp(payload) {
             try { const d = await api('/api/memory', payload); if (d && Array.isArray(d.memories)) memories = d.memories; } catch (e) {}
@@ -1690,6 +1742,10 @@
                 el('p', null, 'What your copilot knows about your store. Learn your site once, and it captures facts, decisions, your preferences and proven learnings as you chat, then uses them in every answer. Edit or remove anything here.'));
             hero.append(badge, htext); box.append(hero);
             box.append(knowledgeCard());
+            if (impact.length) {
+                box.append(el('div', 'section-title', 'Tracked impact'));
+                impact.forEach(it => box.append(impactCard(it)));
+            }
             const openFu = memories.filter(m => m.type === 'followup' && m.status === 'open');
             const facts = memories.filter(m => m.type === 'fact' || m.type === 'decision');
             const learned = memories.filter(m => m.type === 'preference' || m.type === 'insight');
@@ -1817,6 +1873,7 @@
         window.__demoScan = function (out, d) { renderScanResult(out || document.body, d); };
         window.__demoMem = function (list) { memories = list; $('nav-memory').click(); };
         window.__demoKnow = function (k) { knowledge = k; setView('memory'); renderMemory(); };
+        window.__demoImpact = function (list) { impact = list; setView('memory'); renderMemory(); };
         window.__demoProducts = function (pl) { productList = pl; setView('products'); renderProductList(); };
         window.__demoProductDetail = function (d) { setView('products'); renderProductDetail(d); };
     })();
