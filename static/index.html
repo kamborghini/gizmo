@@ -118,6 +118,8 @@
         .delta.up { color: var(--win); background: var(--win-bg); } .delta.down { color: var(--danger); background: var(--danger-bg); } .delta.flat { color: var(--ink-3); background: var(--surface-3); }
         .stat.warn { border-color: rgba(251,191,36,.32); }
         .stat.warn .value { color: var(--warn); }
+        .stat-spark { margin-top: 11px; position: relative; opacity: .92; }
+        .stat-spark .spark { height: 30px; }
 
         .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3);
             margin: 26px 0 13px; display: flex; align-items: center; gap: 10px; }
@@ -316,6 +318,12 @@
         .chart-bar { transition: opacity .12s; }
         .chart-end-dot { stroke: var(--surface); stroke-width: 2; }
         .chart-note { font-size: 11px; color: var(--ink-3); margin-top: 9px; line-height: 1.45; }
+        .chart-card .chart-head { padding-right: 32px; }
+        .chart-expand { position: absolute; top: 13px; right: 13px; z-index: 2; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--ink-3); width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; cursor: pointer; transition: all .14s; opacity: .75; }
+        .chart-expand:hover { color: var(--ink); border-color: var(--border-3); opacity: 1; }
+        .chart-expand svg { width: 14px; height: 14px; display: block; }
+        .cmodal { max-width: 980px; }
+        .chart-modal .modal-body { padding: 18px 22px 24px; }
         .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
         @media (max-width: 760px) { .charts-grid { grid-template-columns: 1fr; } }
         .chart-anim { animation: chartIn .5s ease backwards; }
@@ -579,6 +587,7 @@
             chevLeft: SV('<polyline points="15 18 9 12 15 6"></polyline>'),
             settings: SV('<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>'),
             x: SV('<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>'),
+            maximize: SV('<polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line>'),
         };
         const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
         const loader = () => { const b = el('div', 'three-body'); b.append(el('div', 'three-body__dot'), el('div', 'three-body__dot'), el('div', 'three-body__dot')); return b; };
@@ -659,8 +668,34 @@
                 d.append(document.createTextNode(m.delta));
                 c.append(d);
             }
+            if (Array.isArray(m.spark) && m.spark.length > 1) {
+                const sw = el('div', 'stat-spark');
+                const col = m.trend === 'up' ? '#34d399' : m.trend === 'down' ? '#fb7185' : '#7b6cff';
+                sw.append(sparkline(m.spark, col));
+                c.append(sw);
+            }
             return c;
         }
+        // Attach a 12-point sparkline to each KPI by matching its label to a trend series.
+        function sparkFor(label, trends) {
+            if (!trends) return null;
+            const l = (label || '').toLowerCase();
+            const pick = (k) => (trends[k] && trends[k].length) ? tail(trends[k], 12).map(p => +p.value || 0) : null;
+            if (l.includes('order value') || l.includes('aov')) return pick('aov');
+            if (l.includes('revenue')) return pick('revenue');
+            if (l.includes('order')) return pick('orders');
+            if (l.includes('session')) return pick('sessions');
+            if (l.includes('pageview')) return pick('pageviews');
+            if (l.includes('impression')) return pick('impressions');
+            if (l.includes('click')) return pick('clicks');
+            if (l.includes('ctr')) return pick('ctr');
+            if (l.includes('position')) return pick('position');
+            return null;
+        }
+        const withSparks = (metrics, trends) => (metrics || []).map(m => {
+            const s = sparkFor(m.label, trends);
+            return (s && s.length > 1) ? Object.assign({}, m, { spark: s }) : m;
+        });
         function metricsGrid(metrics) {
             const g = el('div', 'metrics');
             metrics.forEach((m, i) => g.append(statCard(m, i)));
@@ -737,7 +772,7 @@
         let _chartSeq = 0;
 
         // opts: {title, value, delta, trend, labels:[], series:[{name,color,values:[]}], format, height, area}
-        function chartHead(opts, series) {
+        function chartHead(opts, series, kind) {
             const head = el('div', 'chart-head'); const htxt = el('div');
             if (opts.title) htxt.append(el('div', 'ct', opts.title));
             if (opts.source) { const cs = el('div', 'cs'); const dot = el('span', 'src-dot'); dot.style.background = (series && series[0] && series[0].color) || 'var(--accent)'; cs.append(dot, document.createTextNode('Source: ' + opts.source)); htxt.append(cs); }
@@ -748,6 +783,7 @@
             }
             head.append(htxt);
             if (series && series.length > 1) { const lg = el('div', 'chart-legend'); series.forEach(s => { const it = el('span', 'lg'); const sw = el('span', 'sw'); sw.style.background = s.color || 'var(--accent)'; it.append(sw, document.createTextNode(s.name || '')); lg.append(it); }); head.append(lg); }
+            if (kind && !opts.noExpand) { const ex = el('button', 'chart-expand'); ex.title = 'Expand'; ex.innerHTML = I.maximize; ex.onclick = () => openChartModal(kind, opts); head.append(ex); }
             return head;
         }
         // Draws gridlines, y-tick labels, x-tick labels, and rotated axis titles. Returns {X, Y}.
@@ -782,7 +818,7 @@
             const series = (opts.series || []).filter(s => s && Array.isArray(s.values) && s.values.length);
             const fmt = opts.format || fmtCompact;
             const card = el('div', 'chart-card' + (REDUCE_MOTION ? '' : ' chart-anim'));
-            card.append(chartHead(opts, series));
+            card.append(chartHead(opts, series, 'trend'));
             const wrap = el('div', 'chart-wrap'); card.append(wrap);
             if (!series.length || labels.length < 2) { wrap.append(el('div', 'empty', 'Not enough data in this range to chart yet.')); return card; }
             const n = labels.length;
@@ -826,7 +862,7 @@
             const labels = opts.labels || [], vals = (opts.values || []).map(v => +v || 0);
             const fmt = opts.format || fmtCompact, color = opts.color || '#7b6cff';
             const card = el('div', 'chart-card' + (REDUCE_MOTION ? '' : ' chart-anim'));
-            card.append(chartHead(opts, [{ color }]));
+            card.append(chartHead(opts, [{ color }], 'bar'));
             const wrap = el('div', 'chart-wrap'); card.append(wrap);
             if (vals.length < 1) { wrap.append(el('div', 'empty', 'Not enough data in this range to chart yet.')); return card; }
             const n = vals.length, maxV = niceMax(Math.max.apply(null, vals.concat([0])));
@@ -846,7 +882,7 @@
             const items = (opts.items || []).filter(d => d && d.label).slice(0, 8);
             const fmt = opts.format || fmtCompact, color = opts.color || '#7b6cff';
             const card = el('div', 'chart-card' + (REDUCE_MOTION ? '' : ' chart-anim'));
-            card.append(chartHead(opts, [{ color }]));
+            card.append(chartHead(opts, [{ color }], 'cat'));
             const wrap = el('div', 'chart-wrap'); card.append(wrap);
             if (!items.length) { wrap.append(el('div', 'empty', 'No breakdown available for this range.')); return card; }
             const max = Math.max.apply(null, items.map(d => +d.value || 0).concat([1]));
@@ -855,6 +891,23 @@
             wrap.append(bl);
             if (opts.note) card.append(el('div', 'chart-note', opts.note));
             return card;
+        }
+
+        const CHART_BUILDERS = { trend: (o) => trendChart(o), bar: (o) => barChart(o), cat: (o) => catBars(o) };
+        function openChartModal(kind, opts) {
+            const builder = CHART_BUILDERS[kind] || CHART_BUILDERS.trend;
+            const overlay = el('div', 'modal-overlay chart-modal show');
+            const modal = el('div', 'modal cmodal');
+            const head = el('div', 'modal-head'); head.append(el('h3', null, opts.title || 'Chart'));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
+            const body = el('div', 'modal-body');
+            body.append(builder(Object.assign({}, opts, { height: 360, noExpand: true })));
+            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+            const close = () => { overlay.remove(); document.removeEventListener('keydown', esc); };
+            function esc(e) { if (e.key === 'Escape') close(); }
+            x.onclick = close;
+            overlay.onclick = (e) => { if (e.target === overlay) close(); };
+            document.addEventListener('keydown', esc);
         }
 
         function sparkline(values, color) {
@@ -1106,7 +1159,7 @@
                 });
                 box.append(card);
             }
-            if (Array.isArray(data.metrics) && data.metrics.length) box.append(metricsGrid(data.metrics));
+            if (Array.isArray(data.metrics) && data.metrics.length) box.append(metricsGrid(withSparks(data.metrics, data.trends)));
             renderTrendsBlock(box, data.trends, data.currency, ovRange, (v) => { ovRange = v; renderOverview(overviewCache); });
             const s = Object.assign({}, data.structured); delete s.summary;
             if (s.insights && s.insights.length) box.append(el('div', 'section-title', 'What’s notable'));
@@ -1154,7 +1207,7 @@
                 box.append(sc);
             }
             const mets = (data.metrics || []).filter(m => m.label !== 'SEO score');
-            if (mets.length) box.append(metricsGrid(mets));
+            if (mets.length) box.append(metricsGrid(withSparks(mets, data.trends)));
             renderSeoTrends(box, data.trends, seoRange, (v) => { seoRange = v; renderSEO(seoCache); });
             // Lead with money opportunities, then findings, then supporting detail
             if (Array.isArray(s.actions) && s.actions.length) {
