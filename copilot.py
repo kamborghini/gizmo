@@ -1540,17 +1540,17 @@ def _month_axis(months: int) -> list:
     return list(reversed(out))
 
 
-async def _paginate_orders(registry: dict, days: int, max_pages: int = ORDER_PAGE_CAP) -> list:
+async def _paginate_orders(registry: dict, days: int, max_pages: int = ORDER_PAGE_CAP,
+                           fields: str = "id,created_at,total_price,line_items") -> list:
     """Page through orders created in the last `days`, ascending by id (since_id),
-    capped at max_pages * 250 to stay responsive. Pulls only the fields we bucket."""
+    capped at max_pages * 250 to stay responsive. Pulls only the requested fields."""
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     out: list = []
     since_id, pages = 0, 0
     while pages < max_pages:
         batch = (await _tool_json(registry, "shopify_list_orders",
                                   {"status": "any", "created_at_min": since, "limit": 250,
-                                   "since_id": since_id,
-                                   "fields": "id,created_at,total_price,line_items"})).get("orders", [])
+                                   "since_id": since_id, "fields": fields})).get("orders", [])
         if not batch:
             break
         out += batch
@@ -1664,6 +1664,133 @@ async def run_products_list(registry: dict, months_window: Optional[int] = None)
     return {"currency": currency, "months": months,
             "vendors": sorted(vendors), "product_types": sorted(types),
             "products": out[:250]}
+
+
+# ---------------------------------------------------------------------------
+# Customers & retention analytics (from Shopify customers + orders)
+# ---------------------------------------------------------------------------
+
+async def _paginate_customers(registry: dict, max_pages: int = ORDER_PAGE_CAP) -> list:
+    fields = "id,first_name,last_name,email,orders_count,total_spent,created_at,updated_at,state,tags"
+    out: list = []
+    since_id, pages = 0, 0
+    while pages < max_pages:
+        batch = (await _tool_json(registry, "shopify_list_customers",
+                                  {"limit": 250, "since_id": since_id, "fields": fields})).get("customers", [])
+        if not batch:
+            break
+        out += batch
+        pages += 1
+        if len(batch) < 250:
+            break
+        since_id = max((c.get("id") or 0) for c in batch)
+    return out
+
+
+async def run_customers(registry: dict, extra_system: str = "") -> dict:
+    """Customer + retention intelligence: LTV, new vs returning, repeat rate, RFM-style
+    segments, churn risk, top customers, and a new-customers trend, with an AI plan."""
+    shop = await _tool_json(registry, "shopify_get_shop", {})
+    currency = shop.get("currency", "")
+    customers = await _paginate_customers(registry)
+    months = _month_axis(12)
+    orders = await _paginate_orders(registry, days=len(months) * 31, fields="id,created_at,customer")
+    now = datetime.now(timezone.utc)
+
+    last_order: dict = {}
+    for o in orders:
+        cid = (o.get("customer") or {}).get("id")
+        if not cid:
+            continue
+        try:
+            dt = datetime.fromisoformat((o.get("created_at") or "").replace("Z", "+00:00"))
+        except Exception:
+            continue
+        if cid not in last_order or dt > last_order[cid]:
+            last_order[cid] = dt
+
+    seg: dict = {k: [] for k in ("champions", "loyal", "new", "at_risk", "one_time", "prospects")}
+    new_by_month = {mk: 0 for mk in months}
+    purchasers = repeat = 0
+    spend_total = 0.0
+    top: list = []
+    cutoff30 = (now - timedelta(days=30)).isoformat()
+    new_30 = 0
+    for c in customers:
+        oc = int(c.get("orders_count") or 0)
+        try:
+            ts = float(c.get("total_spent") or 0)
+        except (TypeError, ValueError):
+            ts = 0.0
+        created = c.get("created_at") or ""
+        if created[:7] in new_by_month:
+            new_by_month[created[:7]] += 1
+        if created >= cutoff30:
+            new_30 += 1
+        if oc >= 1:
+            purchasers += 1
+            spend_total += ts
+        if oc >= 2:
+            repeat += 1
+        lo = last_order.get(c.get("id"))
+        ds = (now - lo).days if lo else None
+        name = (((c.get("first_name") or "") + " " + (c.get("last_name") or "")).strip()) or (c.get("email") or "Customer")
+        rec = {"name": name, "email": c.get("email"), "orders": oc, "spent": round(ts, 2), "days_since": ds}
+        top.append(rec)
+        if oc == 0:
+            seg["prospects"].append(rec)
+        elif oc >= 3:
+            (seg["champions"] if (ds is not None and ds <= 90) else seg["at_risk"]).append(rec)
+        elif oc == 2:
+            (seg["loyal"] if (ds is not None and ds <= 120) else seg["at_risk"]).append(rec)
+        else:
+            (seg["new"] if (ds is not None and ds <= 60) else seg["one_time"]).append(rec)
+
+    top.sort(key=lambda x: x["spent"], reverse=True)
+    total = len(customers)
+    repeat_rate = round(repeat / purchasers * 100, 1) if purchasers else 0.0
+    avg_ltv = round(spend_total / purchasers, 2) if purchasers else 0.0
+    seg_defs = [("champions", "Champions", "3+ orders, active in 90 days"),
+                ("loyal", "Loyal", "2 orders, active"),
+                ("new", "New", "First order in last 60 days"),
+                ("at_risk", "At risk", "Repeat buyers who have gone quiet"),
+                ("one_time", "One and done", "One older order, no repeat"),
+                ("prospects", "Prospects", "Account created, no orders yet")]
+    segments = [{"key": k, "name": n, "desc": d, "count": len(seg[k]),
+                 "revenue": round(sum(r["spent"] for r in seg[k]), 2)} for k, n, d in seg_defs]
+    metrics = [
+        {"label": "Customers", "value": f"{total:,}"},
+        {"label": "Repeat rate", "value": f"{repeat_rate}%"},
+        {"label": "Avg lifetime value", "value": _money(avg_ltv, currency)},
+        {"label": "New (30d)", "value": f"{new_30:,}"},
+        {"label": "At risk", "value": f"{len(seg['at_risk']):,}", "tone": "warn" if seg["at_risk"] else None},
+    ]
+    trends = {"new_customers": [{"label": mk, "value": new_by_month[mk]} for mk in months]}
+    context = {"currency": currency,
+               "totals": {"customers": total, "purchasers": purchasers, "repeat_rate_pct": repeat_rate,
+                          "avg_ltv": avg_ltv, "new_30d": new_30},
+               "segments": [{k: s[k] for k in ("name", "count", "revenue")} for s in segments],
+               "top_customers": top[:15],
+               "note": "Customers and orders are paginated up to a cap; very large stores may be truncated."}
+    client = _anthropic()
+    msg = ("Customer and retention data for this store (collected live):\n"
+           + json.dumps(context, indent=2, default=str)
+           + "\n\nProduce a retention-focused, money-ranked plan via present_response. Lead with the highest-value "
+             "actions in `actions` (win back at-risk repeat customers, convert one-time buyers into repeat, lift "
+             "repeat rate and lifetime value), each with the supporting numbers and expected impact. Use `insights` "
+             "for the key findings about who your best customers are and where retention leaks. Quantify in money or percent.")
+    resp = await client.messages.create(
+        model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
+        tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
+        messages=[{"role": "user", "content": msg}],
+        output_config={"effort": _effort_for(MODEL_DEEP)},
+    )
+    present = next((b.input for b in resp.content
+                    if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
+    structured = _coerce_structured(present or {"summary": "Customer analysis ready."})
+    structured.pop("metrics", None)
+    return {"metrics": metrics, "structured": structured, "currency": currency,
+            "segments": segments, "top_customers": top[:25], "trends": trends, "totals": context["totals"]}
 
 
 async def run_product_audit(registry: dict, product_id: int, extra_system: str = "") -> dict:
@@ -2241,6 +2368,27 @@ def add_routes(mcp, registry: dict) -> None:
         except Exception:
             logger.exception("Product list failed")
             return _json({"error": "Couldn't load products."}, 500)
+
+    @mcp.custom_route("/api/customers", methods=["POST"])
+    async def customers_route(request: Request):
+        pre = _pre_checks(request, ai=True)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
+        try:
+            return _json(await run_customers(registry, extra))
+        except anthropic.APIError:
+            logger.exception("Anthropic API error (customers)")
+            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+        except Exception:
+            logger.exception("Customer analysis failed")
+            return _json({"error": "Couldn't run the customer analysis. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/product", methods=["POST"])
     async def product_route(request: Request):

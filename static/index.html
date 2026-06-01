@@ -302,6 +302,13 @@
         .idelta .il { font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); font-weight: 600; }
         .idelta .iv { font-size: 14.5px; font-weight: 700; }
         .idelta.up .iv { color: var(--win); } .idelta.down .iv { color: var(--danger); } .idelta.flat .iv { color: var(--ink-2); }
+        /* ---------- Customer segments ---------- */
+        .segs { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+        .seg-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 14px 15px; box-shadow: var(--sh-1), var(--hair); }
+        .seg-card .seg-n { font-size: 24px; font-weight: 700; letter-spacing: -.025em; }
+        .seg-card .seg-name { font-size: 13px; font-weight: 650; margin-top: 2px; }
+        .seg-card .seg-desc { font-size: 11.5px; color: var(--ink-3); margin-top: 3px; line-height: 1.45; }
+        .seg-card .seg-rev { font-size: 11.5px; color: var(--ink-2); margin-top: 9px; }
 
         /* ---------- Charts ---------- */
         .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--sh-1), var(--hair); padding: 16px 18px 10px; margin-bottom: 12px; position: relative; }
@@ -453,6 +460,7 @@
                 <button class="nav-item" data-view="seo" id="nav-seo"></button>
                 <button class="nav-item" data-view="keywords" id="nav-keywords"></button>
                 <button class="nav-item" data-view="products" id="nav-products"></button>
+                <button class="nav-item" data-view="customers" id="nav-customers"></button>
                 <button class="nav-item" data-view="memory" id="nav-memory"></button>
                 <button class="nav-item" data-view="chat" id="nav-chat"></button>
             </div>
@@ -490,6 +498,11 @@
             <!-- Products -->
             <section class="view" id="view-products">
                 <div class="scroll"><div class="ov-wrap" id="products-content"></div></div>
+            </section>
+
+            <!-- Customers -->
+            <section class="view" id="view-customers">
+                <div class="scroll"><div class="ov-wrap" id="customers-content"></div></div>
             </section>
 
             <!-- Memory -->
@@ -598,6 +611,7 @@
             book: SV('<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>'),
             tag: SV('<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line>'),
             globe: SV('<circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>'),
+            users: SV('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>'),
             rotate: SV('<polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>'),
             box: SV('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line>'),
             chevLeft: SV('<polyline points="15 18 9 12 15 6"></polyline>'),
@@ -616,6 +630,7 @@
         $('nav-seo').append(ico(I.search), document.createTextNode('SEO'));
         $('nav-keywords').append(ico(I.tag), document.createTextNode('Keywords'));
         $('nav-products').append(ico(I.box), document.createTextNode('Products'));
+        $('nav-customers').append(ico(I.users), document.createTextNode('Customers'));
         $('nav-memory').append(ico(I.bookmark), document.createTextNode('Memory'));
         $('nav-chat').append(ico(I.chat), document.createTextNode('Chat'));
         $('new-convo').innerHTML = I.plus;
@@ -1384,6 +1399,87 @@
             if (Array.isArray(s.sections) && s.sections.length) { box.append(el('div', 'section-title', 'Details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
         }
 
+        /* ---------- customers & retention ---------- */
+        let customersCache = null;
+        function showCustomersView() {
+            if (customersCache) { renderCustomers(customersCache); return; }
+            renderRunGate('customers-content', { icon: I.users, title: 'Customers and retention',
+                desc: 'See who your best customers are, your repeat-purchase rate and lifetime value, the new vs returning split, and which repeat buyers are slipping away, with a money-ranked plan to keep them.',
+                cta: 'Run customer analysis', note: 'Uses AI credits. Reads your Shopify customers and orders.',
+                onRun: () => loadCustomers(true) });
+        }
+        async function loadCustomers(force) {
+            const box = $('customers-content');
+            if (customersCache && !force) { renderCustomers(customersCache); return; }
+            box.innerHTML = '';
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.users;
+            const ht = el('div'); ht.append(el('h2', null, 'Customers'), el('p', null, 'Analyzing your customers and retention…'));
+            hero.append(badge, ht); box.append(hero);
+            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Reading customers and 12 months of orders. This can take up to a minute…')); box.append(t);
+            try { const data = await api('/api/customers', {}); customersCache = { data, at: Date.now() }; renderCustomers(customersCache); }
+            catch (e) {
+                box.innerHTML = ''; box.append(hero);
+                const er = el('div', 'msg error'); er.append(el('div', 'bubble', e.message || String(e))); box.append(er);
+                ht.children[1].textContent = 'Could not run customer analysis.';
+            }
+        }
+        function segCards(segments, cur) {
+            const wrap = el('div', 'segs');
+            (segments || []).forEach(s => {
+                const c = el('div', 'seg-card');
+                c.append(el('div', 'seg-n', (s.count || 0).toLocaleString()));
+                c.append(el('div', 'seg-name', s.name || ''));
+                c.append(el('div', 'seg-desc', s.desc || ''));
+                c.append(el('div', 'seg-rev', fmtMoney(s.revenue || 0, cur) + ' lifetime'));
+                wrap.append(c);
+            });
+            return wrap;
+        }
+        function customersTable(rows, cur) {
+            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
+            const thead = el('thead'); const htr = el('tr');
+            ['Customer', 'Orders', 'Lifetime spend', 'Last order'].forEach((h, i) => htr.append(el('th', i ? 'num' : null, h)));
+            thead.append(htr); tbl.append(thead); const tb = el('tbody');
+            rows.slice(0, 25).forEach(r => {
+                const tr = el('tr'); const c0 = el('td', 'kw'); c0.append(document.createTextNode(r.name || 'Customer'));
+                if (r.email) c0.append(el('div', 'prod-sub', r.email));
+                tr.append(c0);
+                tr.append(el('td', 'num', (r.orders || 0).toLocaleString()));
+                tr.append(el('td', 'num', fmtMoney(r.spent || 0, cur)));
+                tr.append(el('td', 'num', r.days_since == null ? 'over 1y' : (r.days_since + 'd ago')));
+                tb.append(tr);
+            });
+            tbl.append(tb); wrap.append(tbl); return wrap;
+        }
+        function renderCustomers(cache) {
+            const data = cache.data; const box = $('customers-content'); box.innerHTML = '';
+            const s = data.structured || {}; const cur = data.currency || '';
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.users;
+            const ht = el('div'); ht.append(el('h2', null, 'Customers and retention'),
+                el('p', null, s.summary || 'Who your best customers are, how well you retain them, and where to grow lifetime value.'));
+            hero.append(badge, ht);
+            const mins = Math.round((Date.now() - cache.at) / 60000);
+            hero.append(el('div', 'ov-updated', mins <= 0 ? 'Updated just now' : ('Updated ' + mins + 'm ago')));
+            box.append(hero);
+            if (Array.isArray(data.metrics) && data.metrics.length) box.append(metricsGrid(data.metrics));
+            if (data.trends && data.trends.new_customers && data.trends.new_customers.length) {
+                const nc = data.trends.new_customers;
+                box.append(el('div', 'section-title', 'New customers over time'));
+                box.append(barChart({ title: 'New customers', source: 'Shopify customers', yUnit: 'Customers', value: fmtCompact(sumv(nc)), labels: nc.map(x => monthLabel(x.label)), values: nc.map(x => +x.value || 0), color: '#22d3ee', format: fmtCompact, height: 220 }));
+            }
+            if (Array.isArray(data.segments) && data.segments.length) {
+                box.append(el('div', 'section-title', 'Customer segments'));
+                box.append(segCards(data.segments, cur));
+            }
+            if (Array.isArray(s.actions) && s.actions.length) { box.append(el('div', 'section-title', 'Retention opportunities')); box.append(actionsCard(s.actions, 'customers')); }
+            if (Array.isArray(s.insights) && s.insights.length) { box.append(el('div', 'section-title', 'Findings')); const b = el('div', 'insights'); s.insights.forEach((x, i) => b.append(insightCard(x, i))); box.append(b); }
+            if (Array.isArray(data.top_customers) && data.top_customers.length) {
+                box.append(el('div', 'section-title', 'Top customers by lifetime spend'));
+                box.append(customersTable(data.top_customers, cur));
+            }
+            if (Array.isArray(s.sections) && s.sections.length) { box.append(el('div', 'section-title', 'Details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
+        }
+
         /* ---------- products ---------- */
         let productList = null;   // full /api/products payload (or demo)
         const fmtMoney = (n, cur) => Math.round(n || 0).toLocaleString() + (cur ? (' ' + cur) : '');
@@ -1765,20 +1861,22 @@
         /* ---------- view switching ---------- */
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
-            ['overview', 'seo', 'keywords', 'products', 'memory', 'chat'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', memory: 'Memory' };
+            ['overview', 'seo', 'keywords', 'products', 'customers', 'memory', 'chat'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', memory: 'Memory' };
             $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
             const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory') ? 'none' : '';
             if (v === 'overview') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadOverview(true); }
             else if (v === 'seo') { act.append(ico(I.refresh), document.createTextNode('Re-audit')); act.className = 'btn'; act.onclick = () => loadSEO(true); }
             else if (v === 'keywords') { act.append(ico(I.refresh), document.createTextNode('Re-run')); act.className = 'btn'; act.onclick = () => loadKeywords(true); }
             else if (v === 'products') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadProducts(true); }
+            else if (v === 'customers') { act.append(ico(I.refresh), document.createTextNode('Re-run')); act.className = 'btn'; act.onclick = () => loadCustomers(true); }
             else if (v === 'chat') { act.append(ico(I.plus), document.createTextNode('New chat')); act.className = 'btn btn-primary'; act.onclick = () => newConvo(); }
             closeSidebar();
             // Tabs render cached results if present, otherwise an idle "Run" gate.
             // Nothing fetches or spends tokens until the user starts the task.
             if (v === 'overview') showOverviewView();
             if (v === 'seo') showSeoView();
+            if (v === 'customers') showCustomersView();
             if (v === 'keywords') showKeywordsView();
             if (v === 'products') showProductsView();
             if (v === 'memory') loadMemory();
@@ -1875,6 +1973,7 @@
         window.__demoKnow = function (k) { knowledge = k; setView('memory'); renderMemory(); };
         window.__demoImpact = function (list) { impact = list; setView('memory'); renderMemory(); };
         window.__demoProducts = function (pl) { productList = pl; setView('products'); renderProductList(); };
+        window.__demoCustomers = function (d) { customersCache = { data: d, at: Date.now() }; setView('customers'); };
         window.__demoProductDetail = function (d) { setView('products'); renderProductDetail(d); };
     })();
     </script>
