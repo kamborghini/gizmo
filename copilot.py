@@ -705,6 +705,23 @@ def _coerce_structured(data: Any) -> dict:
     return _strip_dashes(data)
 
 
+_TOOL_LABELS = {
+    "shopify_get_shop": "Shop details", "shopify_list_orders": "Orders", "shopify_count_orders": "Order count",
+    "shopify_get_order": "Order details", "shopify_list_products": "Products", "shopify_get_product": "Product details",
+    "shopify_count_products": "Product count", "shopify_list_customers": "Customers",
+    "shopify_search_customers": "Customer search", "shopify_get_customer": "Customer details",
+    "shopify_get_customer_orders": "Customer orders", "shopify_list_collections": "Collections",
+    "shopify_get_collection_products": "Collection products", "shopify_list_locations": "Locations",
+    "shopify_get_inventory_levels": "Inventory levels", "shopify_list_fulfillments": "Fulfillments",
+    "get_search_console_data": "Google Search Console", "get_ga4_data": "Google Analytics 4",
+    "seo_fetch_page": "On-page SEO", "seo_fetch_robots": "robots.txt", "seo_fetch_sitemap": "Sitemap",
+}
+
+
+def _tool_label(name: str) -> str:
+    return _TOOL_LABELS.get(name) or name.replace("shopify_", "").replace("_", " ").strip().capitalize()
+
+
 async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dict],
                    model: str, extra_system: str = "") -> dict:
     """Run a multi-step tool-use conversation. The final answer is delivered via
@@ -712,6 +729,7 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
     client = _anthropic()
     messages = list(history)
     tools_used: list[str] = []
+    data_used: list[dict] = []   # for the UI "show the data behind this" drill-down
     all_tools = data_tools + [PRESENT_RESPONSE_TOOL]
     system = SYSTEM_PROMPT + extra_system
 
@@ -741,27 +759,30 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
         messages.append({"role": "assistant", "content": resp.content})
 
         if present is not None:
-            return {"structured": _coerce_structured(present), "tools_used": tools_used, "model": model}
+            return {"structured": _coerce_structured(present), "tools_used": tools_used,
+                    "data_used": data_used, "model": model}
 
         if not data_uses:
             # Ended without present_response — wrap any prose as the summary.
             text = "".join(text_parts).strip()
-            return {"structured": {"summary": text or "(no response)"}, "tools_used": tools_used, "model": model}
+            return {"structured": {"summary": text or "(no response)"}, "tools_used": tools_used,
+                    "data_used": data_used, "model": model}
 
         tool_results = []
         for tu in data_uses:
             tools_used.append(tu.name)
             logger.info(f"copilot tool call: {tu.name}")  # name only — inputs may contain PII
-            tool_results.append({
-                "type": "tool_result", "tool_use_id": tu.id,
-                "content": await dispatch(tu.name, tu.input),
-            })
+            content = await dispatch(tu.name, tu.input)
+            tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "content": content})
+            if len(data_used) < 16:
+                data_used.append({"tool": tu.name, "label": _tool_label(tu.name),
+                                  "preview": _strip_dashes(str(content))[:500]})
         messages.append({"role": "user", "content": tool_results})
 
     return {
         "structured": {"summary": "I gathered a lot of data but couldn't finalize an answer. "
                                   "Please narrow the question and try again."},
-        "tools_used": tools_used, "model": model,
+        "tools_used": tools_used, "data_used": data_used, "model": model,
     }
 
 

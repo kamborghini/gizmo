@@ -128,6 +128,17 @@
         .stat-hide { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--ink-3); display: grid; place-items: center; cursor: pointer; z-index: 3; padding: 0; }
         .stat-hide:hover { color: var(--ink); border-color: var(--border-3); }
         .stat-hide svg { width: 12px; height: 12px; }
+        .stat .label.has-help { text-decoration: underline dotted var(--border-3); text-underline-offset: 3px; cursor: help; }
+        /* chat drill-down: show the data behind this */
+        .data-drill { margin-top: 14px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); overflow: hidden; }
+        .data-drill summary { padding: 11px 14px; cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); font-weight: 550; }
+        .data-drill summary::-webkit-details-marker { display: none; }
+        .data-drill summary > span { display: grid; place-items: center; } .data-drill summary svg { width: 13px; height: 13px; opacity: .6; }
+        .data-drill[open] summary { border-bottom: 1px solid var(--border); }
+        .data-drill-body { padding: 4px 14px 12px; max-height: 320px; overflow: auto; }
+        .data-src { margin-top: 11px; }
+        .data-src-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); font-weight: 700; margin-bottom: 5px; }
+        .data-src-pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--ink-2); white-space: pre-wrap; word-break: break-word; background: var(--surface-3); border-radius: 8px; padding: 8px 10px; line-height: 1.5; }
 
         .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3);
             margin: 26px 0 13px; display: flex; align-items: center; gap: 10px; }
@@ -693,10 +704,37 @@
         }
 
         /* ---------- structured response components ---------- */
+        const METRIC_HELP = [
+            ['repeat rate', 'The share of your purchasing customers who have ordered more than once. Higher means stronger retention.'],
+            ['lifetime value', 'Average total a purchasing customer has spent with you across all their orders.'],
+            ['order value', 'Average amount spent per order (revenue divided by orders).'],
+            ['conversion', 'Share of sessions that resulted in an order.'],
+            ['sessions', 'Visits to your store, from Google Analytics.'],
+            ['pageview', 'Pages viewed across all sessions, from Google Analytics.'],
+            ['impression', 'How many times your store appeared in Google search results.'],
+            ['ctr', 'Click-through rate: clicks divided by impressions in search.'],
+            ['position', 'Your average ranking position in Google search. Lower is better.'],
+            ['clicks', 'Clicks to your store from Google search results.'],
+            ['ad spend', 'Total spent on Google Ads in the period.'],
+            ['cpc', 'Average cost per click on your paid ads.'],
+            ['roas', 'Return on ad spend: revenue divided by ad cost. Above 1 covers the ad cost.'],
+            ['revenue', 'Total sales in the period, from Shopify orders.'],
+            ['orders', 'Number of orders placed in the period.'],
+            ['unfulfilled', 'Orders that still need to be shipped.'],
+            ['low stock', 'Variants at or below your low-stock threshold.'],
+            ['new customers', 'Customers who created their account in the period.'],
+            ['new (', 'Customers who created their account in the last 30 days.'],
+            ['at risk', 'Repeat customers who have not ordered recently and may be churning.'],
+            ['customers', 'Total customers on record.'],
+        ];
+        const metricHelp = (label) => { const l = (label || '').toLowerCase(); for (const [k, v] of METRIC_HELP) if (l.includes(k)) return v; return null; };
         function statCard(m, i) {
             const c = el('div', 'stat' + (m.tone === 'warn' ? ' warn' : ''));
             c.style.animationDelay = (i * 40) + 'ms';
-            c.append(el('div', 'label', m.label), el('div', 'value', m.value));
+            const labelEl = el('div', 'label', m.label);
+            const help = metricHelp(m.label);
+            if (help) { labelEl.title = help; labelEl.classList.add('has-help'); }
+            c.append(labelEl, el('div', 'value', m.value));
             if (m.delta) {
                 const d = el('div', 'delta ' + (m.trend || 'flat'));
                 if (m.trend === 'up') d.append(ico(I.up)); else if (m.trend === 'down') d.append(ico(I.down));
@@ -1096,12 +1134,12 @@
                 if (turn.role === 'user') {
                     const m = el('div', 'msg user'); m.append(el('div', 'bubble', turn.text)); log.append(m);
                 } else {
-                    log.append(assistantMsg(turn.structured, turn.model));
+                    log.append(assistantMsg(turn.structured, turn.model, turn.data_used));
                 }
             });
             scrollChat();
         }
-        function assistantMsg(structured, model) {
+        function assistantMsg(structured, model, dataUsed) {
             const m = el('div', 'msg assistant');
             const head = el('div', 'resp-head');
             const av = el('span', 'av'); av.innerHTML = I.spark;
@@ -1109,7 +1147,22 @@
             if (model && /opus/i.test(model)) head.append(el('span', 'tag', 'Deep analysis'));
             m.append(head);
             renderStructured(m, structured || {});
+            if (Array.isArray(dataUsed) && dataUsed.length) m.append(dataDrill(dataUsed));
             return m;
+        }
+        function dataDrill(dataUsed) {
+            const d = el('details', 'data-drill');
+            const sum = el('summary');
+            sum.append(ico(I.search), document.createTextNode('Show the data behind this (' + dataUsed.length + ' source' + (dataUsed.length > 1 ? 's' : '') + ')'));
+            d.append(sum);
+            const body = el('div', 'data-drill-body');
+            dataUsed.forEach(s => {
+                const item = el('div', 'data-src');
+                item.append(el('div', 'data-src-label', s.label || s.tool || 'Data'));
+                const pre = el('div', 'data-src-pre'); pre.textContent = (s.preview || '').trim() || '(no preview)';
+                item.append(pre); body.append(item);
+            });
+            d.append(body); return d;
         }
         function renderEmptyChat(log) {
             const w = el('div', 'empty-chat');
@@ -1156,7 +1209,7 @@
             try {
                 const data = await api('/api/chat', { messages: apiHistory(c), deep });
                 hideThinking();
-                c.turns.push({ role: 'assistant', structured: data.structured || { summary: '(no response)' }, model: data.model });
+                c.turns.push({ role: 'assistant', structured: data.structured || { summary: '(no response)' }, model: data.model, data_used: data.data_used });
                 save(); renderChat(); loadMemory();  // refresh anything the copilot just remembered
             } catch (e) {
                 hideThinking();
@@ -2057,6 +2110,7 @@
         window.__demoImpact = function (list) { impact = list; setView('memory'); renderMemory(); };
         window.__demoProducts = function (pl) { productList = pl; setView('products'); renderProductList(); };
         window.__demoCustomers = function (d) { customersCache = { data: d, at: Date.now() }; setView('customers'); };
+        window.__demoChatData = function (du) { const c = active(); if (c && c.turns.length) { c.turns[c.turns.length - 1].data_used = du; renderChat(); } };
         window.__demoProductDetail = function (d) { setView('products'); renderProductDetail(d); };
     })();
     </script>
