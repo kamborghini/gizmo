@@ -144,6 +144,8 @@
         .mem-tag.fact { background: var(--info-bg); color: var(--info); }
         .mem-tag.decision { background: var(--opp-bg); color: var(--opp); }
         .mem-tag.followup { background: var(--warn-bg); color: var(--warn); }
+        .mem-tag.preference { background: rgba(34,211,238,.14); color: #22d3ee; }
+        .mem-tag.insight { background: var(--accent-soft); color: var(--accent-ink); }
         .mem-acts { display: flex; gap: 3px; flex-shrink: 0; }
         .mem-btn { border: 0; background: transparent; color: var(--ink-3); padding: 6px; border-radius: 7px; display: grid; place-items: center; transition: all .14s; }
         .mem-btn svg { width: 15px; height: 15px; }
@@ -1471,19 +1473,21 @@
             const box = $('memory-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.bookmark;
             const htext = el('div'); htext.append(el('h2', null, 'Memory & Knowledge'),
-                el('p', null, 'What your copilot knows about your store. Learn your site once, and it captures facts, decisions and follow-ups as you chat. Edit or remove anything here.'));
+                el('p', null, 'What your copilot knows about your store. Learn your site once, and it captures facts, decisions, your preferences and proven learnings as you chat, then uses them in every answer. Edit or remove anything here.'));
             hero.append(badge, htext); box.append(hero);
             box.append(knowledgeCard());
             const openFu = memories.filter(m => m.type === 'followup' && m.status === 'open');
             const facts = memories.filter(m => m.type === 'fact' || m.type === 'decision');
+            const learned = memories.filter(m => m.type === 'preference' || m.type === 'insight');
             const closed = memories.filter(m => m.type === 'followup' && m.status !== 'open');
-            if (!openFu.length && !facts.length && !closed.length) {
+            if (!openFu.length && !facts.length && !learned.length && !closed.length) {
                 box.append(el('div', 'section-title', 'Notes'));
                 const e = el('div', 'empty'); e.style.margin = '4px 0 0';
-                e.append(el('div', null, "No notes yet. As you chat, the copilot captures key facts, your decisions, and follow-ups here."));
+                e.append(el('div', null, "No notes yet. As you chat, the copilot captures key facts, decisions, your preferences, and proven learnings here."));
                 box.append(e); return;
             }
             if (openFu.length) { box.append(el('div', 'section-title', 'Open follow-ups')); openFu.forEach(m => box.append(memCard(m, true))); }
+            if (learned.length) { box.append(el('div', 'section-title', 'Preferences & learnings')); learned.forEach(m => box.append(memCard(m, false))); }
             if (facts.length) { box.append(el('div', 'section-title', 'Facts & decisions')); facts.forEach(m => box.append(memCard(m, false))); }
             if (closed.length) { box.append(el('div', 'section-title', 'Closed follow-ups')); closed.forEach(m => box.append(memCard(m, false))); }
         }

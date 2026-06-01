@@ -51,6 +51,12 @@ MODEL_DEEP = os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-4-8")
 # Effort (Opus-tier knob: low|medium|high|xhigh|max). "max" = maximum capability,
 # at higher latency/cost. Dial down here if responses feel slow.
 ANTHROPIC_EFFORT = os.environ.get("ANTHROPIC_EFFORT", "max")
+# Extended thinking for the interactive chat loop. "adaptive" lets the model
+# decide when and how deeply to reason (fast on simple questions, deep on hard
+# ones). Set ANTHROPIC_THINKING=off to disable if ever needed.
+THINKING_MODE = os.environ.get("ANTHROPIC_THINKING", "adaptive").strip().lower()
+if THINKING_MODE in ("off", "none", "disabled", "0", ""):
+    THINKING_MODE = ""
 LOW_STOCK_THRESHOLD = int(os.environ.get("LOW_STOCK_THRESHOLD", "5"))
 # History windows for trend charts + product analytics. Up to 24 months of
 # Shopify order history is paginated for the Products tab and product detail;
@@ -93,8 +99,8 @@ STORE_CONTEXT_CAP  = int(os.environ.get("STORE_CONTEXT_CAP", "4000"))
 PROFILE_PATH       = os.environ.get("PROFILE_PATH", "/data/store_profile.json")
 PROFILE_FIELD_CAP  = int(os.environ.get("PROFILE_FIELD_CAP", "6000"))
 MEMORY_PATH        = os.environ.get("MEMORY_PATH", "/data/store_memory.json")
-MEMORY_MAX         = int(os.environ.get("MEMORY_MAX", "200"))    # max stored memories
-MEMORY_INJECT      = int(os.environ.get("MEMORY_INJECT", "25"))  # max of each kind injected into prompts
+MEMORY_MAX         = int(os.environ.get("MEMORY_MAX", "500"))    # max stored memories
+MEMORY_INJECT      = int(os.environ.get("MEMORY_INJECT", "40"))  # max of each kind injected into prompts
 KNOWLEDGE_PATH     = os.environ.get("KNOWLEDGE_PATH", "/data/store_knowledge.json")
 KNOWLEDGE_CAP      = int(os.environ.get("KNOWLEDGE_CAP", "8000"))     # max stored knowledge chars
 LEARN_MAX_PAGES    = int(os.environ.get("LEARN_MAX_PAGES", "12"))    # pages crawled when learning
@@ -107,37 +113,64 @@ WRITING_STYLE = ("Write in clear, plain text. Never use em dashes or en dashes a
                  "Use commas, periods, or parentheses instead, and 'to' or a hyphen for ranges "
                  "(for example '1 to 2 sentences', 'position 5-15'). Be concise and scannable.")
 
-SYSTEM_PROMPT = """You are Store Copilot, a senior e-commerce analyst embedded in the admin of a \
-Shopify store. You help the merchant understand and grow their store and make more money.
+SYSTEM_PROMPT = """You are Store Copilot, a senior e-commerce analyst and growth strategist embedded in \
+the admin of a Shopify store. Your job is to help the merchant make more money with specific, \
+evidence-backed analysis, never generic advice.
 
 How you work:
-- Always ground answers in real data. Use the read tools to look things up before making any claim, \
-number, or suggestion. Never invent figures, product names, or IDs. Call shopify_get_shop when you \
+- Ground every claim in real data. Use the read tools to look things up before stating any number, \
+name, or recommendation. Never invent figures, product names, or IDs. Call shopify_get_shop when you \
 need the store's currency or timezone.
-- You have READ-ONLY access. You cannot create, update, or delete anything. If asked to make a change, \
-explain exactly what to change and where in the admin to do it, but be clear you can't perform writes.
-- Gather data efficiently: request multiple tools in parallel when they're independent.
+- Gather what you actually need before answering, and request independent tools in parallel. It is \
+better to make several tool calls and be precise than to guess. Think step by step about which data \
+would change your answer, then go get it.
+- Reason across the full funnel and cross-reference every data set you can reach: Shopify commerce \
+(orders, products, customers, inventory), Google Analytics (sessions, traffic sources, behavior), and \
+Search Console (impressions, clicks, position). The sharpest insights live at the SEAMS between them, \
+for example: high search impressions but low clicks (a title or meta problem), strong traffic but weak \
+conversion (a page or offer problem), revenue concentrated in a few SKUs (concentration risk), or one \
+channel converting far better than the rest (reallocate budget). Diagnose the weakest link, then \
+quantify the upside and state the assumption behind your estimate.
+- You have READ-ONLY access. You cannot create, update, or delete anything. When a change is needed, \
+say exactly what to change and where in the admin, and be clear you cannot perform writes.
+- Treat the store profile, your memory, and the learned store knowledge below as authoritative context. \
+Honor stated preferences (for example, unlimited stock means give no restock advice), apply proven \
+learnings, and do not re-ask what you already know. Check in on open follow-ups when relevant and close \
+them out when the merchant says they are done.
+- If the data you would need is missing or a connection (such as Google) is not set up, say so plainly \
+and state what to connect, rather than padding with generic tips.
 
 How you answer (IMPORTANT):
 - When you have what you need, you MUST deliver your final answer by calling the `present_response` \
 tool. Do not write the final answer as plain prose. Everything the merchant sees comes from that call.
-- Put the headline in `summary` (1 to 2 sentences). Use `metrics` for the key numbers, `insights` for \
-notable findings (type them as win/warning/opportunity/insight), `sections` for supporting detail, \
-`actions` for concrete prioritized recommendations, and `followups` for 2 to 4 natural next questions.
-- Use the `remember` field to persist durable facts, decisions, and the merchant's stated commitments, \
-so you have continuity in future sessions. If your memory context lists open follow-ups, check in on \
-them naturally and close them out when the merchant indicates they're done.
-- Only include fields that add value. A simple factual answer can be just `summary` (plus maybe a metric \
-or two). Do not pad. Be specific, quantify impact in money or percentages where you can, and reference \
-real figures from the store.
+- Put the single most important takeaway in `summary` (1 to 2 sentences). Use `metrics` for the key \
+numbers, `insights` for notable findings (type them win/warning/opportunity/insight), `sections` for \
+supporting detail and your reasoning, `actions` for concrete prioritized recommendations (most impactful \
+first, each with its expected revenue or percentage impact), and `followups` for 2 to 4 natural next \
+questions.
+- Use the `remember` field to persist what will make you more useful next time: durable facts, decisions \
+the merchant makes, their preferences, commitments to revisit, and proven learnings about THIS store.
+- Only include fields that add value. A simple factual answer can be just `summary` plus a metric. Do \
+not pad. Be specific, cite the real figures and where they came from, and quantify impact in money or \
+percentages wherever you can.
 """ + WRITING_STYLE
 
-OVERVIEW_SYSTEM = """You are a senior Shopify analyst writing an executive overview. You are given the \
-store's current KPIs (already computed from live data). Identify what truly matters: wins, risks or \
-anomalies, and the highest-impact opportunities, specific to these numbers, not generic advice. \
-Deliver everything by calling `present_response`: a one-line `summary`, 2 to 4 `insights` \
-(win/warning/opportunity/insight), 2 to 4 prioritized `actions`, and 3 `followups` the merchant might ask. \
-Do not restate every metric, interpret them and tie recommendations to revenue impact.
+OVERVIEW_SYSTEM = """You are a senior Shopify analyst and growth strategist writing an executive \
+overview from the store's live KPIs (already computed and provided to you), together with any Google \
+Analytics and Search Console figures included.
+
+Find what truly matters in THESE numbers, not generic advice:
+- The biggest win, the biggest risk or anomaly, and the single highest-impact opportunity.
+- Cross-reference the data sets where you can: reconcile traffic against revenue, search performance \
+against sales, new versus returning behavior, and revenue concentration across products.
+- Diagnose the weakest link in the funnel (visibility, traffic, conversion, average order value, \
+retention) and say which lever moves the needle most.
+
+Deliver everything by calling `present_response`: a one-line `summary` with the headline takeaway, 2 to \
+4 `insights` (win/warning/opportunity/insight) that interpret the numbers, 2 to 4 prioritized `actions` \
+each tied to an expected revenue or percentage impact, and 3 `followups` the merchant might ask. Do not \
+restate every metric, interpret them. Cite the specific figures you are reasoning from, and honor the \
+store profile, memory, and learned knowledge provided as context.
 """ + WRITING_STYLE
 
 # Final-answer tool: forces clean structured output instead of raw markdown.
@@ -210,15 +243,19 @@ PRESENT_RESPONSE_TOOL = {
             "remember": {
                 "type": "array",
                 "description": (
-                    "Durable things to remember across FUTURE sessions. Record important stable store "
-                    "facts ('fact'), decisions the merchant makes ('decision'), and commitments/plans they "
-                    "state to revisit later ('followup', e.g. 'plans to reorder hoodies Friday'). Omit "
+                    "Durable things to remember and reuse in FUTURE sessions so you get more tailored "
+                    "over time. Record stable store facts ('fact'), decisions the merchant makes "
+                    "('decision'), their stated preferences ('preference', e.g. 'wants concise answers', "
+                    "'runs unlimited stock so skip restock advice'), commitments to revisit ('followup', "
+                    "e.g. 'plans to reorder hoodies Friday'), and proven analytical learnings about THIS "
+                    "store ('insight', e.g. 'email converts about 3x better than social here'). Omit "
                     "trivial, ephemeral, or already-obvious details. Leave empty if nothing is worth keeping."
                 ),
                 "items": {
                     "type": "object",
                     "properties": {
-                        "type": {"type": "string", "enum": ["fact", "decision", "followup"]},
+                        "type": {"type": "string",
+                                 "enum": ["fact", "decision", "followup", "preference", "insight"]},
                         "text": {"type": "string"},
                     },
                     "required": ["type", "text"],
@@ -343,10 +380,11 @@ def _add_memories(items: list[dict]) -> list[dict]:
     for it in (items or []):
         if not isinstance(it, dict):
             continue
-        text = str(it.get("text", "")).strip()[:500]
+        text = str(it.get("text", "")).strip()[:800]
         if not text or text.lower() in seen:
             continue
-        mtype = it.get("type") if it.get("type") in ("fact", "decision", "followup") else "fact"
+        mtype = it.get("type") if it.get("type") in (
+            "fact", "decision", "followup", "preference", "insight") else "fact"
         memories.append({"id": secrets.token_hex(5), "type": mtype, "text": text,
                          "status": "open", "created": now, "updated": now})
         seen.add(text.lower())
@@ -376,14 +414,20 @@ def _memory_to_system(memories: Optional[list[dict]] = None) -> str:
     memories = _load_memory() if memories is None else memories
     if not memories:
         return ""
-    open_fu = [m for m in memories if m.get("type") == "followup" and m.get("status") == "open"][-MEMORY_INJECT:]
-    facts = [m for m in memories if m.get("type") in ("fact", "decision")
-             and m.get("status") != "dismissed"][-MEMORY_INJECT:]
-    if not open_fu and not facts:
+    active = [m for m in memories if m.get("status") != "dismissed"]
+    open_fu = [m for m in active if m.get("type") == "followup" and m.get("status") == "open"][-MEMORY_INJECT:]
+    facts = [m for m in active if m.get("type") in ("fact", "decision")][-MEMORY_INJECT:]
+    prefs = [m for m in active if m.get("type") == "preference"][-MEMORY_INJECT:]
+    learnings = [m for m in active if m.get("type") == "insight"][-MEMORY_INJECT:]
+    if not (open_fu or facts or prefs or learnings):
         return ""
-    block = "\n\n## Memory (what you know from past sessions; use for continuity)\n"
+    block = "\n\n## Memory (what you have learned about this store; use it actively for continuity and tailoring)\n"
     if facts:
-        block += "Known facts & decisions:\n" + "\n".join("- " + m["text"] for m in facts) + "\n"
+        block += "Facts and decisions:\n" + "\n".join("- " + m["text"] for m in facts) + "\n"
+    if prefs:
+        block += "Merchant preferences (always honor these):\n" + "\n".join("- " + m["text"] for m in prefs) + "\n"
+    if learnings:
+        block += "Proven learnings about this store (apply them):\n" + "\n".join("- " + m["text"] for m in learnings) + "\n"
     if open_fu:
         block += ("Open follow-ups (check in on these when relevant; close them out if done):\n"
                   + "\n".join("- " + m["text"] for m in open_fu))
@@ -588,37 +632,36 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
     system = SYSTEM_PROMPT + extra_system
 
     for _ in range(MAX_TOOL_ROUNDS):
-        resp = await client.messages.create(
-            model=model,
-            max_tokens=MAX_TOKENS,
-            system=system,
-            tools=all_tools,
-            messages=messages,
-            output_config={"effort": _effort_for(model)},
-        )
+        kwargs = {
+            "model": model, "max_tokens": MAX_TOKENS, "system": system,
+            "tools": all_tools, "messages": messages,
+            "output_config": {"effort": _effort_for(model)},
+        }
+        if THINKING_MODE:  # adaptive thinking: deeper reasoning, model self-paces
+            kwargs["thinking"] = {"type": THINKING_MODE}
+        resp = await client.messages.create(**kwargs)
 
-        assistant_blocks: list[dict] = []
         data_uses: list[Any] = []
         present: Optional[dict] = None
+        text_parts: list[str] = []
         for block in resp.content:
             if block.type == "text":
-                assistant_blocks.append({"type": "text", "text": block.text})
+                text_parts.append(block.text)
             elif block.type == "tool_use":
-                assistant_blocks.append({
-                    "type": "tool_use", "id": block.id, "name": block.name, "input": block.input,
-                })
                 if block.name == PRESENT_RESPONSE_TOOL["name"]:
                     present = block.input
                 else:
                     data_uses.append(block)
-        messages.append({"role": "assistant", "content": assistant_blocks})
+        # Append the model's turn verbatim (preserving any thinking blocks, which
+        # interleaved thinking requires us to pass back on the next tool round).
+        messages.append({"role": "assistant", "content": resp.content})
 
         if present is not None:
             return {"structured": _coerce_structured(present), "tools_used": tools_used, "model": model}
 
         if not data_uses:
             # Ended without present_response — wrap any prose as the summary.
-            text = "".join(b["text"] for b in assistant_blocks if b["type"] == "text").strip()
+            text = "".join(text_parts).strip()
             return {"structured": {"summary": text or "(no response)"}, "tools_used": tools_used, "model": model}
 
         tool_results = []
