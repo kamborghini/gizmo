@@ -115,6 +115,8 @@ SKILLS_MAX         = int(os.environ.get("SKILLS_MAX", "200"))        # max store
 SKILL_TITLE_CAP    = int(os.environ.get("SKILL_TITLE_CAP", "120"))   # chars per skill title
 SKILL_BODY_CAP     = int(os.environ.get("SKILL_BODY_CAP", "6000"))   # chars per skill body
 SKILLS_INJECT_CAP  = int(os.environ.get("SKILLS_INJECT_CAP", "24000"))  # max total skill chars injected
+ANALYSIS_CACHE_PATH      = os.environ.get("ANALYSIS_CACHE_PATH", "/data/analysis_cache.json")  # last result per AI tab
+ANALYSIS_CACHE_MAX_BYTES = int(os.environ.get("ANALYSIS_CACHE_MAX_BYTES", "800000"))  # per-entry size guard
 
 _PAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "index.html")
 _page_cache: Optional[str] = None
@@ -501,6 +503,45 @@ def _skills_to_system() -> str:
         out += ("More saved skills exist (full text in the Skills tab; ask the merchant if one applies): "
                 + ", ".join(overflow) + "\n")
     return out
+
+
+# ---------------------------------------------------------------------------
+# Analysis cache: the last result of each AI tab (overview/seo/keywords/
+# customers), persisted so reopening the app shows it instantly without
+# spending tokens. The merchant clicks Refresh on a tab to recompute.
+# ---------------------------------------------------------------------------
+
+_ANALYSIS_KINDS = ("overview", "seo", "keywords", "customers")
+
+
+def _load_analysis_cache() -> dict:
+    try:
+        with open(ANALYSIS_CACHE_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_analysis(kind: str, result: dict) -> None:
+    """Persist the latest result for a tab. Best-effort: never raises, so a
+    disk problem can't break the analysis response the merchant is waiting on."""
+    if kind not in _ANALYSIS_KINDS or not isinstance(result, dict) or result.get("error"):
+        return
+    try:
+        blob = json.dumps(result, default=str)
+        if len(blob) > ANALYSIS_CACHE_MAX_BYTES:
+            logger.warning("analysis cache: %s result too large (%d bytes); not caching", kind, len(blob))
+            return
+        cache = _load_analysis_cache()
+        cache[kind] = {"result": json.loads(blob), "at": datetime.now(timezone.utc).isoformat()}
+        os.makedirs(os.path.dirname(ANALYSIS_CACHE_PATH) or ".", exist_ok=True)
+        tmp = ANALYSIS_CACHE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(cache, fh)
+        os.replace(tmp, ANALYSIS_CACHE_PATH)
+    except Exception:
+        logger.exception("analysis cache: failed to save %s", kind)
 
 
 # ---------------------------------------------------------------------------
@@ -2331,6 +2372,7 @@ def add_routes(mcp, registry: dict) -> None:
         except Exception:
             logger.exception("Overview failed")
             return _json({"error": "Couldn't build the overview. Check the server logs."}, 500)
+        _save_analysis("overview", result)
         return _json(result)
 
     @mcp.custom_route("/api/profile", methods=["POST"])
@@ -2376,6 +2418,7 @@ def add_routes(mcp, registry: dict) -> None:
         except Exception:
             logger.exception("SEO audit failed")
             return _json({"error": "Couldn't run the SEO audit. Check the server logs."}, 500)
+        _save_analysis("seo", result)
         return _json(result)
 
     @mcp.custom_route("/api/keywords", methods=["POST"])
@@ -2391,7 +2434,9 @@ def add_routes(mcp, registry: dict) -> None:
             return _json({"error": "Request too large."}, 413)
         extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         try:
-            return _json(await run_keywords(registry, extra))
+            res = await run_keywords(registry, extra)
+            _save_analysis("keywords", res)
+            return _json(res)
         except anthropic.APIError:
             logger.exception("Anthropic API error (keywords)")
             return _json({"error": "The AI service returned an error. Please try again."}, 502)
@@ -2478,6 +2523,20 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("Skills op failed")
             return _json({"error": "Couldn't update skills (is a writable volume mounted at /data?)."}, 500)
         return _json({"skills": _load_skills()})
+
+    @mcp.custom_route("/api/cache", methods=["POST"])
+    async def cache_route(request: Request):
+        # Returns the last saved result of each AI tab so the app can show it
+        # instantly on open. Read-only, no AI, no body needed.
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        cache = _load_analysis_cache()
+        out = {k: cache[k] for k in _ANALYSIS_KINDS if isinstance(cache.get(k), dict)}
+        return _json(out)
 
     @mcp.custom_route("/api/impact", methods=["POST"])
     async def impact_route(request: Request):
@@ -2588,7 +2647,9 @@ def add_routes(mcp, registry: dict) -> None:
             return _json({"error": "Request too large."}, 413)
         extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         try:
-            return _json(await run_customers(registry, extra))
+            res = await run_customers(registry, extra)
+            _save_analysis("customers", res)
+            return _json(res)
         except anthropic.APIError:
             logger.exception("Anthropic API error (customers)")
             return _json({"error": "The AI service returned an error. Please try again."}, 502)

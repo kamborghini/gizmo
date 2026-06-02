@@ -666,6 +666,15 @@
         const loader = () => { const b = el('div', 'three-body'); b.append(el('div', 'three-body__dot'), el('div', 'three-body__dot'), el('div', 'three-body__dot')); return b; };
         const ico = (svg) => { const s = el('span'); s.innerHTML = svg; return s; };
         const $ = (id) => document.getElementById(id);
+        function freshLabel(at) {
+            const m = Math.max(0, Math.round((Date.now() - (at || 0)) / 60000));
+            if (m < 1) return 'Updated just now';
+            if (m < 60) return 'Updated ' + m + 'm ago';
+            const h = Math.round(m / 60);
+            if (h < 24) return 'Updated ' + h + 'h ago';
+            const d = Math.round(h / 24);
+            return 'Updated ' + d + (d === 1 ? ' day ago' : ' days ago');
+        }
 
         // static icon wiring
         $('ic-logo').innerHTML = I.spark;
@@ -1371,8 +1380,7 @@
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.grid;
             const htext = el('div'); htext.append(el('h2', null, 'Store Overview'), el('p', null, data.structured && data.structured.summary ? data.structured.summary : 'Here’s how your store is doing.'));
             hero.append(badge, htext);
-            const mins = Math.round((Date.now() - cache.at) / 60000);
-            hero.append(el('div', 'ov-updated', mins <= 0 ? 'Updated just now' : `Updated ${mins}m ago`));
+            hero.append(el('div', 'ov-updated', freshLabel(cache.at)));
             box.append(hero);
             const ofu = memories.filter(m => m.type === 'followup' && m.status === 'open');
             if (ofu.length) {
@@ -1431,8 +1439,7 @@
             const htext = el('div'); htext.append(el('h2', null, 'SEO & Optimization'),
                 el('p', null, s.summary || 'How your store performs across search, traffic and sales, and where to grow revenue.'));
             hero.append(badge, htext);
-            const mins = Math.round((Date.now() - cache.at) / 60000);
-            hero.append(el('div', 'ov-updated', mins <= 0 ? 'Updated just now' : `Updated ${mins}m ago`));
+            hero.append(el('div', 'ov-updated', freshLabel(cache.at)));
             box.append(hero);
             // Score + KPI strip
             if (typeof data.score === 'number') {
@@ -1578,8 +1585,7 @@
             const ht = el('div'); ht.append(el('h2', null, 'Keyword and CPC intelligence'),
                 el('p', null, s.summary || 'Your ranking keywords, paid performance, and where to win more profitable search traffic.'));
             hero.append(badge, ht);
-            const mins = Math.round((Date.now() - cache.at) / 60000);
-            hero.append(el('div', 'ov-updated', mins <= 0 ? 'Updated just now' : ('Updated ' + mins + 'm ago')));
+            hero.append(el('div', 'ov-updated', freshLabel(cache.at)));
             box.append(hero);
             box.append(keywordScanCard());
             if (Array.isArray(data.metrics) && data.metrics.length) box.append(metricsGrid(data.metrics));
@@ -1656,8 +1662,7 @@
             const ht = el('div'); ht.append(el('h2', null, 'Customers and retention'),
                 el('p', null, s.summary || 'Who your best customers are, how well you retain them, and where to grow lifetime value.'));
             hero.append(badge, ht);
-            const mins = Math.round((Date.now() - cache.at) / 60000);
-            hero.append(el('div', 'ov-updated', mins <= 0 ? 'Updated just now' : ('Updated ' + mins + 'm ago')));
+            hero.append(el('div', 'ov-updated', freshLabel(cache.at)));
             box.append(hero);
             if (Array.isArray(data.metrics) && data.metrics.length) box.append(metricsGrid(data.metrics));
             if (data.trends && data.trends.new_customers && data.trends.new_customers.length) {
@@ -2278,9 +2283,30 @@
         input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
         input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; });
 
+        // Restore the last results of the AI tabs from the server so reopening
+        // the app shows them instantly. No tokens are spent until the merchant
+        // clicks Refresh on a tab to recompute.
+        function applyCachedAnalysis(d) {
+            if (!d) return;
+            const seed = (e) => (e && e.result) ? { data: e.result, at: Date.parse(e.at) || Date.now() } : null;
+            overviewCache = seed(d.overview) || overviewCache;
+            seoCache = seed(d.seo) || seoCache;
+            keywordsCache = seed(d.keywords) || keywordsCache;
+            customersCache = seed(d.customers) || customersCache;
+            // re-render whichever analysis tab is open so the saved result replaces its Run gate
+            if ($('view-overview').classList.contains('active')) showOverviewView();
+            else if ($('view-seo').classList.contains('active')) showSeoView();
+            else if ($('view-keywords').classList.contains('active')) showKeywordsView();
+            else if ($('view-customers').classList.contains('active')) showCustomersView();
+        }
+        async function loadAnalysisCache() {
+            try { applyCachedAnalysis(await api('/api/cache', {})); } catch (e) {}
+        }
+
         renderSidebar(); renderChat(); setView('overview');
         loadProfile();  // pull the saved store profile from the server (for the Settings modal)
         loadMemory();   // pull saved memories (for Overview follow-ups + the Memory tab)
+        loadAnalysisCache();  // restore last AI-tab results (no tokens spent)
 
         // Demo hook for visual testing (no data exposed).
         window.__demo = function (sample, ov) {
@@ -2299,6 +2325,7 @@
         window.__demoImpact = function (list) { impact = list; setView('memory'); renderMemory(); };
         window.__demoProducts = function (pl) { productList = pl; setView('products'); renderProductList(); };
         window.__demoCustomers = function (d) { customersCache = { data: d, at: Date.now() }; setView('customers'); };
+        window.__demoCache = function (d) { applyCachedAnalysis(d); };
         window.__demoChatData = function (du) { const c = active(); if (c && c.turns.length) { c.turns[c.turns.length - 1].data_used = du; renderChat(); } };
         window.__demoProductDetail = function (d) { setView('products'); renderProductDetail(d); };
     })();
