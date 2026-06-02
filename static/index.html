@@ -936,13 +936,19 @@
             return { X, Y };
         }
         // Average reference line + peak marker on a single series.
-        function annotate(svg, vals, X, Y, color, fmt, W, padR, padL) {
+        function annotate(svg, vals, X, Y, color, fmt, W, padR, padL, padT) {
+            const top = (padT || 0) + 9;
             const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1), ya = Y(avg);
             svg.append(svgEl('line', { class: 'chart-avg', x1: padL, y1: ya, x2: W - padR, y2: ya }));
-            const al = svgEl('text', { class: 'chart-avg-label', x: W - padR, y: ya - 4, 'text-anchor': 'end' }); al.textContent = 'Avg ' + fmt(avg); svg.append(al);
+            // keep the label inside the plot: below the line when the line is near the top
+            const aly = (ya - 5 < top) ? ya + 14 : ya - 5;
+            const al = svgEl('text', { class: 'chart-avg-label', x: W - padR, y: aly, 'text-anchor': 'end' }); al.textContent = 'Avg ' + fmt(avg); svg.append(al);
             let pi = 0; vals.forEach((v, i) => { if (v > vals[pi]) pi = i; });
             svg.append(svgEl('circle', { cx: X(pi), cy: Y(vals[pi]), r: 3, fill: color }));
-            const pl = svgEl('text', { class: 'chart-peak-label', x: X(pi), y: Y(vals[pi]) - 7, 'text-anchor': X(pi) > W * 0.82 ? 'end' : 'middle' }); pl.textContent = 'Peak ' + fmt(vals[pi]); svg.append(pl);
+            // peak label: clamp so it never clips into the header; drop below the dot when near the top
+            const ply = (Y(vals[pi]) - 8 < top) ? Y(vals[pi]) + 17 : Y(vals[pi]) - 8;
+            const anchor = X(pi) > W * 0.85 ? 'end' : X(pi) < W * 0.12 ? 'start' : 'middle';
+            const pl = svgEl('text', { class: 'chart-peak-label', x: X(pi), y: ply, 'text-anchor': anchor }); pl.textContent = 'Peak ' + fmt(vals[pi]); svg.append(pl);
         }
         function trendChart(opts) {
             opts = opts || {};
@@ -966,7 +972,7 @@
             const line = (vals) => vals.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join(' ');
             if (opts.area !== false) { const a = line(series[0].values) + ' L ' + X(n - 1).toFixed(1) + ' ' + Y(0).toFixed(1) + ' L ' + X(0).toFixed(1) + ' ' + Y(0).toFixed(1) + ' Z'; svg.append(svgEl('path', { d: a, fill: 'url(#' + uid + ')' })); }
             series.forEach((s, si) => { const p = svgEl('path', { class: 'chart-line' + (si > 0 ? ' compare' : ''), d: line(s.values), stroke: s.color || (si ? '#8a93a6' : '#7b6cff') }); if (!REDUCE_MOTION && si === 0) { p.style.strokeDasharray = 1600; p.style.strokeDashoffset = 1600; p.style.animation = 'chartDraw .9s ease forwards'; } svg.append(p); });
-            if (series.length === 1 && opts.annotate !== false) annotate(svg, series[0].values, X, Y, series[0].color || '#7b6cff', fmt, W, padR, padL);
+            if (series.length === 1 && opts.annotate !== false) annotate(svg, series[0].values, X, Y, series[0].color || '#7b6cff', fmt, W, padR, padL, padT);
             series.forEach(s => svg.append(svgEl('circle', { class: 'chart-end-dot', cx: X(n - 1), cy: Y(s.values[n - 1]), r: 3.5, fill: s.color || '#7b6cff' })));
             const hoverLine = svgEl('line', { class: 'chart-hover-line', x1: 0, y1: padT, x2: 0, y2: H - padB, opacity: 0 }); svg.append(hoverLine);
             const dots = series.map(s => { const c = svgEl('circle', { class: 'chart-dot', r: 3.5, fill: s.color || '#7b6cff', opacity: 0 }); svg.append(c); return c; });
@@ -1003,7 +1009,7 @@
             const { X, Y } = drawFrame(svg, { W, H, padL, padR, padT, padB, n, labels, maxV, fmt, tickFmt: opts.tickFormat || fmt, yUnit: opts.yUnit, xTitle: opts.xTitle || 'Month' });
             const bw = Math.max(2, (W - padL - padR) / n * 0.6), tip = el('div', 'chart-tip'); wrap.append(tip);
             const bars = vals.map((v, i) => { const y = Y(v), r = svgEl('rect', { class: 'chart-bar', x: (X(i) - bw / 2).toFixed(1), y: y.toFixed(1), width: bw.toFixed(1), height: Math.max(0, Y(0) - y).toFixed(1), rx: 3, fill: color }); svg.append(r); return r; });
-            if (opts.annotate !== false) annotate(svg, vals, X, Y, color, fmt, W, padR, padL);
+            if (opts.annotate !== false) annotate(svg, vals, X, Y, color, fmt, W, padR, padL, padT);
             bars.forEach((r, i) => r.addEventListener('mouseenter', () => { bars.forEach(b => b.style.opacity = .38); r.style.opacity = 1; tip.innerHTML = ''; tip.append(el('div', 'tl', labels[i])); const tr = el('div', 'tr'); const sw = el('span', 'sw'); sw.style.background = color; tr.append(sw, el('b', null, fmt(vals[i]))); tip.append(tr); const rect = svg.getBoundingClientRect(); tip.style.left = (X(i) / W * rect.width) + 'px'; tip.style.top = (Y(vals[i]) / H * rect.height) + 'px'; tip.style.opacity = 1; }));
             svg.addEventListener('mouseleave', () => { bars.forEach(b => b.style.opacity = 1); tip.style.opacity = 0; });
             wrap.append(svg);
