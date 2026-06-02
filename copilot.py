@@ -110,6 +110,11 @@ IMPACT_PATH        = os.environ.get("IMPACT_PATH", "/data/impact.json")  # track
 IMPACT_MAX         = int(os.environ.get("IMPACT_MAX", "100"))
 LEARN_MAX_PAGES    = int(os.environ.get("LEARN_MAX_PAGES", "12"))    # pages crawled when learning
 LEARN_PAGE_CHARS   = int(os.environ.get("LEARN_PAGE_CHARS", "3000"))  # text kept per page
+SKILLS_PATH        = os.environ.get("SKILLS_PATH", "/data/store_skills.json")  # merchant-authored skills
+SKILLS_MAX         = int(os.environ.get("SKILLS_MAX", "200"))        # max stored skills
+SKILL_TITLE_CAP    = int(os.environ.get("SKILL_TITLE_CAP", "120"))   # chars per skill title
+SKILL_BODY_CAP     = int(os.environ.get("SKILL_BODY_CAP", "6000"))   # chars per skill body
+SKILLS_INJECT_CAP  = int(os.environ.get("SKILLS_INJECT_CAP", "24000"))  # max total skill chars injected
 
 _PAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "index.html")
 _page_cache: Optional[str] = None
@@ -138,7 +143,7 @@ channel converting far better than the rest (reallocate budget). Diagnose the we
 quantify the upside and state the assumption behind your estimate.
 - You have READ-ONLY access. You cannot create, update, or delete anything. When a change is needed, \
 say exactly what to change and where in the admin, and be clear you cannot perform writes.
-- Treat the store profile, your memory, and the learned store knowledge below as authoritative context. \
+- Treat the store profile, your memory, the learned store knowledge, and the merchant's saved skills below as authoritative context. \
 Honor stated preferences (for example, unlimited stock means give no restock advice), apply proven \
 learnings, and do not re-ask what you already know. Check in on open follow-ups when relevant and close \
 them out when the merchant says they are done.
@@ -175,7 +180,7 @@ Deliver everything by calling `present_response`: a one-line `summary` with the 
 4 `insights` (win/warning/opportunity/insight) that interpret the numbers, 2 to 4 prioritized `actions` \
 each tied to an expected revenue or percentage impact, and 3 `followups` the merchant might ask. Do not \
 restate every metric, interpret them. Cite the specific figures you are reasoning from, and honor the \
-store profile, memory, and learned knowledge provided as context.
+store profile, memory, learned knowledge, and saved skills provided as context.
 """ + WRITING_STYLE
 
 # Final-answer tool: forces clean structured output instead of raw markdown.
@@ -413,6 +418,89 @@ def _update_memory(mid: str, status: str) -> list[dict]:
 
 def _delete_memory(mid: str) -> list[dict]:
     return _write_memory([m for m in _load_memory() if m.get("id") != mid])
+
+
+# ---------------------------------------------------------------------------
+# Skills: merchant-authored instructions and playbooks. Permanent until the
+# merchant edits or deletes them; injected into every answer as authoritative
+# guidance the copilot follows (distinct from Memory, which the AI manages).
+# ---------------------------------------------------------------------------
+
+def _load_skills() -> list[dict]:
+    try:
+        with open(SKILLS_PATH, "r", encoding="utf-8") as fh:
+            return json.load(fh).get("skills", [])
+    except Exception:
+        return []
+
+
+def _write_skills(skills: list[dict]) -> list[dict]:
+    os.makedirs(os.path.dirname(SKILLS_PATH) or ".", exist_ok=True)
+    tmp = SKILLS_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"skills": skills}, fh)
+    os.replace(tmp, SKILLS_PATH)
+    return skills
+
+
+def _add_skill(title: str, content: str) -> list[dict]:
+    title = str(title or "").strip()[:SKILL_TITLE_CAP]
+    content = str(content or "").strip()[:SKILL_BODY_CAP]
+    if not title or not content:
+        raise ValueError("A skill needs both a title and some details.")
+    skills = _load_skills()
+    if len(skills) >= SKILLS_MAX:
+        raise ValueError(f"You have reached the limit of {SKILLS_MAX} skills. Delete one to add another.")
+    now = datetime.now(timezone.utc).isoformat()
+    # newest first, so a just-added skill is visible at the top of the list
+    skills.insert(0, {"id": secrets.token_hex(5), "title": title, "content": content,
+                      "created": now, "updated": now})
+    return _write_skills(skills)
+
+
+def _update_skill(sid: str, title: str, content: str) -> list[dict]:
+    title = str(title or "").strip()[:SKILL_TITLE_CAP]
+    content = str(content or "").strip()[:SKILL_BODY_CAP]
+    if not title or not content:
+        raise ValueError("A skill needs both a title and some details.")
+    skills = _load_skills()
+    for s in skills:
+        if s.get("id") == sid:
+            s["title"], s["content"] = title, content
+            s["updated"] = datetime.now(timezone.utc).isoformat()
+    return _write_skills(skills)
+
+
+def _delete_skill(sid: str) -> list[dict]:
+    return _write_skills([s for s in _load_skills() if s.get("id") != sid])
+
+
+def _skills_to_system() -> str:
+    skills = _load_skills()
+    if not skills:
+        return ""
+    body, used, overflow = "", 0, []
+    for s in skills:
+        title = (s.get("title") or "").strip()
+        content = (s.get("content") or "").strip()
+        if not title or not content:
+            continue
+        block = f"### {title}\n{content}\n\n"
+        if body and used + len(block) > SKILLS_INJECT_CAP:
+            overflow.append(title)
+            continue
+        body += block
+        used += len(block)
+    if not body:
+        return ""
+    head = ("\n\n## Skills (instructions and playbooks the merchant saved for you to follow; treat them "
+            "as authoritative, apply them whenever relevant, and note the merchant may refer to a skill "
+            "by its title)\n")
+    out = head + body.rstrip() + "\n"
+    if overflow:
+        out += ("More saved skills exist (full text in the Skills tab; ask the merchant if one applies): "
+                + ", ".join(overflow) + "\n")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -2135,7 +2223,7 @@ def add_routes(mcp, registry: dict) -> None:
             return _json({"error": "Message too large."}, 413)
 
         model = _pick_model(bool(body.get("deep")))
-        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         if _is_seo(history):
             extra += "\n\n" + SEO_KNOWLEDGE
         try:
@@ -2179,7 +2267,7 @@ def add_routes(mcp, registry: dict) -> None:
             return _json({"error": "Message too large."}, 413)
 
         model = _pick_model(bool(body.get("deep")))
-        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         if _is_seo(history):
             extra += "\n\n" + SEO_KNOWLEDGE
 
@@ -2231,7 +2319,7 @@ def add_routes(mcp, registry: dict) -> None:
         if body is None:
             return _json({"error": "Request too large."}, 413)
         profile = _load_profile()
-        extra = _profile_to_system(profile) + _memory_to_system() + _knowledge_to_system()
+        extra = _profile_to_system(profile) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         track = (profile.get("prefs") or {}).get("track_inventory", True)
         try:
             result = await run_overview(registry, extra, bool(track))
@@ -2277,7 +2365,7 @@ def add_routes(mcp, registry: dict) -> None:
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
-        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         try:
             result = await run_seo_audit(registry, extra)
         except RuntimeError as e:
@@ -2301,7 +2389,7 @@ def add_routes(mcp, registry: dict) -> None:
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
-        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         try:
             return _json(await run_keywords(registry, extra))
         except anthropic.APIError:
@@ -2329,7 +2417,7 @@ def add_routes(mcp, registry: dict) -> None:
             url = "https://" + url
         if len(url) > 2048:
             return _json({"error": "That URL is too long."}, 400)
-        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         try:
             return _json(await run_keyword_scan(registry, url, extra))
         except RuntimeError as e:
@@ -2364,6 +2452,32 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("Memory op failed")
             return _json({"error": "Couldn't update memory (is a writable volume mounted at /data?)."}, 500)
         return _json({"memories": _load_memory()})
+
+    @mcp.custom_route("/api/skills", methods=["POST"])
+    async def skills_route(request: Request):
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        op = body.get("op")
+        try:
+            if op == "add":
+                _add_skill(body.get("title", ""), body.get("content", ""))
+            elif op == "update" and body.get("id"):
+                _update_skill(body["id"], body.get("title", ""), body.get("content", ""))
+            elif op == "delete" and body.get("id"):
+                _delete_skill(body["id"])
+        except ValueError as e:
+            return _json({"error": str(e)}, 400)
+        except Exception:
+            logger.exception("Skills op failed")
+            return _json({"error": "Couldn't update skills (is a writable volume mounted at /data?)."}, 500)
+        return _json({"skills": _load_skills()})
 
     @mcp.custom_route("/api/impact", methods=["POST"])
     async def impact_route(request: Request):
@@ -2472,7 +2586,7 @@ def add_routes(mcp, registry: dict) -> None:
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
-        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         try:
             return _json(await run_customers(registry, extra))
         except anthropic.APIError:
@@ -2497,7 +2611,7 @@ def add_routes(mcp, registry: dict) -> None:
             pid = int(body.get("product_id"))
         except (TypeError, ValueError):
             return _json({"error": "A numeric product_id is required."}, 400)
-        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         try:
             return _json(await run_product_audit(registry, pid, extra))
         except RuntimeError as e:
