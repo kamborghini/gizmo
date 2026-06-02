@@ -299,6 +299,26 @@
         .sk-body.clamped { max-height: 118px; overflow: hidden; -webkit-mask-image: linear-gradient(180deg, #000 58%, transparent); mask-image: linear-gradient(180deg, #000 58%, transparent); }
         .sk-more { background: transparent; border: 0; color: var(--accent-ink); font: inherit; font-size: 12px; font-weight: 600; padding: 7px 0 0; cursor: pointer; }
         .sk-meta { font-size: 11px; color: var(--ink-3); margin-top: 10px; }
+        /* refresh all */
+        .nav-refresh { display: flex; align-items: center; gap: 9px; width: 100%; margin-top: 9px; padding: 8px 11px; border-radius: var(--r-sm); border: 1px solid var(--border); background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 550; transition: background .14s, color .14s, border-color .14s; }
+        .nav-refresh:hover { background: var(--surface-2); color: var(--ink); border-color: var(--border-2); }
+        .nav-refresh:disabled { cursor: default; opacity: .75; }
+        .nav-refresh svg { width: 15px; height: 15px; flex-shrink: 0; }
+        .nav-refresh.spin svg { animation: navspin 1s linear infinite; }
+        @keyframes navspin { to { transform: rotate(360deg); } }
+        /* per-page ask panel */
+        .page-chat { margin-top: 28px; }
+        .pchat { padding: 0; overflow: hidden; }
+        .pchat-thread { display: flex; flex-direction: column; gap: 14px; padding: 16px; }
+        .pchat-hint { font-size: 12px; color: var(--ink-3); }
+        .pchat-thread .msg { margin: 0; max-width: 100%; }
+        .pchat-thread .msg.user { align-self: flex-end; max-width: 86%; }
+        .pchat-thread .msg.assistant { align-self: stretch; }
+        .pchat-input { display: flex; gap: 8px; align-items: flex-end; padding: 12px 14px; border-top: 1px solid var(--border); background: var(--surface-2); }
+        .pchat-ta { flex: 1; resize: none; max-height: 140px; background: var(--bg-2); border: 1px solid var(--border-2); border-radius: 11px; color: var(--ink); font: inherit; font-size: 13.5px; padding: 10px 12px; line-height: 1.5; outline: none; transition: border-color .14s, box-shadow .14s; }
+        .pchat-ta:focus { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+        .pchat-send { flex-shrink: 0; padding: 0; width: 40px; height: 40px; display: grid; place-items: center; }
+        .pchat-send svg { width: 16px; height: 16px; }
         /* run-task gate (tabs stay idle until the user starts the task) */
         .run-gate { max-width: 480px; margin: 7vh auto 0; text-align: center; display: flex; flex-direction: column; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 38px 34px; box-shadow: var(--sh-1), var(--hair); animation: fadeUp .4s ease backwards; }
         .run-gate .rg-ic { width: 56px; height: 56px; border-radius: 16px; background: var(--accent-soft); color: var(--accent-ink); display: grid; place-items: center; box-shadow: inset 0 0 0 1px var(--accent-line); margin-bottom: 18px; }
@@ -506,6 +526,7 @@
                 <button class="nav-item" data-view="skills" id="nav-skills"></button>
                 <button class="nav-item" data-view="chat" id="nav-chat"></button>
             </div>
+            <button class="nav-refresh" id="refresh-all" title="Re-run all reports"></button>
             <div class="convo-head"><span>Conversations</span>
                 <button class="icon-btn" id="new-convo" title="New conversation"></button></div>
             <div class="convos" id="convos"></div>
@@ -686,6 +707,8 @@
         $('nav-memory').append(ico(I.bookmark), document.createTextNode('Memory'));
         $('nav-skills').append(ico(I.book), document.createTextNode('Skills'));
         $('nav-chat').append(ico(I.chat), document.createTextNode('Chat'));
+        $('refresh-all').append(ico(I.rotate), el('span', 'nr-label', 'Refresh all'));
+        $('refresh-all').onclick = refreshAll;
         $('new-convo').innerHTML = I.plus;
         $('menu-btn').innerHTML = I.menu;
         $('send').innerHTML = I.send;
@@ -1306,6 +1329,110 @@
             } finally { busy = false; $('send').disabled = false; }
         }
 
+        /* ---------- refresh all reports ---------- */
+        let refreshingAll = false;
+        function setRefreshLabel(text) { const b = $('refresh-all'); const l = b && b.querySelector('.nr-label'); if (l) l.textContent = text; }
+        async function refreshAll() {
+            if (refreshingAll) return;
+            if (!confirm('Refresh all reports now? This re-runs the Overview, SEO, Keywords and Customers audits and uses AI credits. It can take a couple of minutes.')) return;
+            refreshingAll = true;
+            const btn = $('refresh-all'); btn.disabled = true; btn.classList.add('spin');
+            const steps = [['Overview', () => loadOverview(true)], ['SEO', () => loadSEO(true)], ['Keywords', () => loadKeywords(true)], ['Customers', () => loadCustomers(true)]];
+            for (const [name, fn] of steps) {
+                setRefreshLabel('Refreshing ' + name + '…');
+                try { await fn(); } catch (e) { /* each loader shows its own error in-tab */ }
+            }
+            btn.classList.remove('spin'); btn.disabled = false; refreshingAll = false;
+            setRefreshLabel('Refresh all');
+            addToast('Reports refreshed. Open any tab to see the latest.');
+        }
+
+        /* ---------- per-page "ask about this report" ---------- */
+        const PAGE_LABELS = { overview: 'overview', seo: 'SEO audit', keywords: 'keyword analysis', customers: 'customer analysis' };
+        const pageThreads = { overview: [], seo: [], keywords: [], customers: [] };
+        const pageBusy = {};
+        function pageReport(page, data) {
+            const s = (data && data.structured) || {}; const rep = {};
+            if (s.summary) rep.summary = s.summary;
+            if (Array.isArray(data.metrics)) rep.metrics = data.metrics.map(m => ({ label: m.label, value: m.value }));
+            if (Array.isArray(s.insights)) rep.insights = s.insights.map(i => ({ title: i.title, detail: i.detail, type: i.type }));
+            if (Array.isArray(s.actions)) rep.actions = s.actions.map(a => ({ text: a.text, impact: a.impact }));
+            if (Array.isArray(s.sections)) rep.sections = s.sections.map(x => ({ title: x.title, body: (x.body || '').slice(0, 400) }));
+            if (typeof data.score === 'number') rep.score = data.score;
+            if (page === 'keywords') {
+                if (Array.isArray(data.keywords)) rep.top_keywords = data.keywords.slice(0, 12).map(k => ({ query: k.query, clicks: k.clicks, impressions: k.impressions, position: k.position }));
+                if (data.ads && data.ads.totals) rep.ads_totals = data.ads.totals;
+            }
+            if (page === 'customers' && Array.isArray(data.segments)) rep.segments = data.segments.map(x => ({ name: x.name, count: x.count }));
+            return rep;
+        }
+        function pageAssistant(page, t, data) {
+            const m = el('div', 'msg assistant');
+            const head = el('div', 'resp-head'); const av = el('span', 'av'); av.innerHTML = I.spark;
+            head.append(av, el('span', 'who', 'Copilot'));
+            if (t.model && /opus/i.test(t.model)) head.append(el('span', 'tag', 'Deep analysis'));
+            m.append(head);
+            renderStructured(m, t.structured || {}, { noFollowups: true });
+            if (Array.isArray(t.data_used) && t.data_used.length) m.append(dataDrill(t.data_used));
+            const fu = (t.structured && t.structured.followups) || [];
+            if (fu.length) m.append(followupChips(fu.slice(0, 4), q => pageAsk(page, q, data)));
+            return m;
+        }
+        function renderPageThread(page, thread, data) {
+            thread.innerHTML = '';
+            const items = pageThreads[page] || [];
+            if (!items.length) {
+                const sugg = ((data.structured && data.structured.followups) || []).slice(0, 4);
+                if (sugg.length) { thread.append(el('div', 'pchat-hint', 'Suggested questions from this report')); thread.append(followupChips(sugg, q => pageAsk(page, q, data))); }
+                else thread.append(el('div', 'pchat-hint', 'Ask anything about the numbers and recommendations on this page.'));
+                return;
+            }
+            items.forEach(t => {
+                if (t.role === 'user') { const m = el('div', 'msg user'); m.append(el('div', 'bubble', t.text)); thread.append(m); }
+                else thread.append(pageAssistant(page, t, data));
+            });
+        }
+        function pageChatPanel(page, data) {
+            const wrap = el('div', 'page-chat');
+            wrap.append(el('div', 'section-title', 'Ask about this ' + (PAGE_LABELS[page] || 'report')));
+            const card = el('div', 'card pchat');
+            const thread = el('div', 'pchat-thread'); thread.id = 'pchat-thread-' + page;
+            renderPageThread(page, thread, data); card.append(thread);
+            const row = el('div', 'pchat-input');
+            const ta = el('textarea', 'pchat-ta'); ta.rows = 1; ta.placeholder = 'Ask a question about this report…';
+            ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'; });
+            ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const v = ta.value; ta.value = ''; ta.style.height = 'auto'; pageAsk(page, v, data); } });
+            const btn = el('button', 'btn btn-primary pchat-send'); btn.innerHTML = I.send; btn.title = 'Ask';
+            btn.onclick = () => { const v = ta.value; ta.value = ''; ta.style.height = 'auto'; pageAsk(page, v, data); };
+            row.append(ta, btn); card.append(row); wrap.append(card);
+            return wrap;
+        }
+        async function pageAsk(page, text, data) {
+            text = (text || '').trim(); if (!text || pageBusy[page]) return;
+            pageThreads[page] = pageThreads[page] || [];
+            pageThreads[page].push({ role: 'user', text });
+            const thread = $('pchat-thread-' + page); if (!thread) return;
+            renderPageThread(page, thread, data);
+            const tm = el('div', 'msg assistant'); const th = el('div', 'thinking'); th.append(loader(), el('span', null, 'Thinking…')); tm.append(th); thread.append(tm);
+            try { tm.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+            pageBusy[page] = true;
+            const history = pageThreads[page].map(t => t.role === 'user' ? { role: 'user', content: t.text } : { role: 'assistant', content: structuredToText(t.structured) });
+            const payload = { messages: history, deep: false, context: { page, report: pageReport(page, data) } };
+            try {
+                let res;
+                try { res = await streamChat(payload, lbl => { const sp = th.querySelector('span'); if (sp && lbl) sp.textContent = lbl; }); }
+                catch (se) { if ((se.message || '') === 'STREAM_TRANSPORT') res = await api('/api/chat', payload); else throw se; }
+                pageThreads[page].push({ role: 'assistant', structured: res.structured || { summary: '(no response)' }, model: res.model, data_used: res.data_used });
+                loadMemory();
+            } catch (e) {
+                pageThreads[page].push({ role: 'assistant', structured: { summary: e.message || String(e) } });
+            } finally {
+                pageBusy[page] = false;
+                const th2 = $('pchat-thread-' + page);
+                if (th2) { renderPageThread(page, th2, data); const last = th2.lastElementChild; if (last) { try { last.scrollIntoView({ block: 'nearest' }); } catch (e) {} } }
+            }
+        }
+
         /* ---------- conversations ---------- */
         function newConvo(switchView) {
             const c = { id: uid(), title: 'New conversation', ts: Date.now(), turns: [] };
@@ -1410,7 +1537,8 @@
             renderTrendsBlock(box, data.trends, data.currency, ovRange, (v) => { ovRange = v; renderOverview(overviewCache); });
             const s = Object.assign({}, data.structured); delete s.summary;
             if (s.insights && s.insights.length) box.append(el('div', 'section-title', 'What’s notable'));
-            renderStructured(box, s, { noFollowups: false });
+            renderStructured(box, s, { noFollowups: true });
+            box.append(pageChatPanel('overview', data));
         }
 
         /* ---------- SEO audit ---------- */
@@ -1468,6 +1596,7 @@
                 box.append(el('div', 'section-title', 'Details'));
                 s.sections.forEach(sec => box.append(sectionCard(sec)));
             }
+            box.append(pageChatPanel('seo', data));
         }
 
         /* ---------- keywords + CPC ---------- */
@@ -1601,6 +1730,7 @@
             box.append(el('div', 'section-title', 'Paid search (cost per click)'));
             box.append(renderCPC(data.ads, cur));
             if (Array.isArray(s.sections) && s.sections.length) { box.append(el('div', 'section-title', 'Details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
+            box.append(pageChatPanel('keywords', data));
         }
 
         /* ---------- customers & retention ---------- */
@@ -1681,6 +1811,7 @@
                 box.append(customersTable(data.top_customers, cur));
             }
             if (Array.isArray(s.sections) && s.sections.length) { box.append(el('div', 'section-title', 'Details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
+            box.append(pageChatPanel('customers', data));
         }
 
         /* ---------- products ---------- */
