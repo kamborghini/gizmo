@@ -319,6 +319,14 @@
         .pchat-ta:focus { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
         .pchat-send { flex-shrink: 0; padding: 0; width: 40px; height: 40px; display: grid; place-items: center; }
         .pchat-send svg { width: 16px; height: 16px; }
+        /* customer sector selector */
+        .secbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+        .secbtn { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--ink-2); font-size: 13px; font-weight: 600; transition: background .14s, color .14s, border-color .14s; }
+        .secbtn:hover { color: var(--ink); border-color: var(--border-3); }
+        .secbtn.on { background: var(--accent-soft); color: #fff; border-color: var(--accent-line); }
+        .secbtn .cdot { width: 6px; height: 6px; border-radius: 50%; background: var(--win); }
+        .seclink { background: transparent; border: 0; color: var(--accent-ink); font: inherit; font-weight: 600; cursor: pointer; padding: 0; text-align: left; }
+        .seclink:hover { text-decoration: underline; }
         /* run-task gate (tabs stay idle until the user starts the task) */
         .run-gate { max-width: 480px; margin: 7vh auto 0; text-align: center; display: flex; flex-direction: column; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 38px 34px; box-shadow: var(--sh-1), var(--hair); animation: fadeUp .4s ease backwards; }
         .run-gate .rg-ic { width: 56px; height: 56px; border-radius: 16px; background: var(--accent-soft); color: var(--accent-ink); display: grid; place-items: center; box-shadow: inset 0 0 0 1px var(--accent-line); margin-bottom: 18px; }
@@ -1363,7 +1371,11 @@
                 if (Array.isArray(data.keywords)) rep.top_keywords = data.keywords.slice(0, 12).map(k => ({ query: k.query, clicks: k.clicks, impressions: k.impressions, position: k.position }));
                 if (data.ads && data.ads.totals) rep.ads_totals = data.ads.totals;
             }
-            if (page === 'customers' && Array.isArray(data.segments)) rep.segments = data.segments.map(x => ({ name: x.name, count: x.count }));
+            if (page === 'customers') {
+                if (data.segment) rep.sector = data.segment;
+                if (Array.isArray(data.segments)) rep.segments = data.segments.map(x => ({ name: x.name, count: x.count }));
+                if (Array.isArray(data.sector_comparison) && data.sector_comparison.length) rep.sector_comparison = data.sector_comparison;
+            }
             return rep;
         }
         function pageAssistant(page, t, data) {
@@ -1734,27 +1746,84 @@
         }
 
         /* ---------- customers & retention ---------- */
-        let customersCache = null;
-        function showCustomersView() {
-            if (customersCache) { renderCustomers(customersCache); return; }
-            renderRunGate('customers-content', { icon: I.users, title: 'Customers and retention',
-                desc: 'See who your best customers are, your repeat-purchase rate and lifetime value, the new vs returning split, and which repeat buyers are slipping away, with a money-ranked plan to keep them.',
-                cta: 'Run customer analysis', note: 'Uses AI credits. Reads your Shopify customers and orders.',
-                onRun: () => loadCustomers(true) });
+        let customersCache = {};       // segKey -> { data, at }
+        let customersSeg = '__all__';  // current sector ('__all__' = comprehensive across sectors)
+        let customerTags = null;       // detected sectors [{tag, count}] (null = not yet loaded)
+        const SEG_ALL = '__all__';
+        function segOptions() {
+            const opts = [{ label: 'Comprehensive', value: SEG_ALL }];
+            (customerTags || []).forEach(t => opts.push({ label: t.tag, value: t.tag }));
+            return opts;
         }
-        async function loadCustomers(force) {
-            const box = $('customers-content');
-            if (customersCache && !force) { renderCustomers(customersCache); return; }
-            box.innerHTML = '';
+        async function loadCustomerTags() {
+            if (customerTags !== null) return;   // load once per session
+            try { const d = await api('/api/customer-tags', {}); customerTags = (d && Array.isArray(d.tags)) ? d.tags : []; }
+            catch (e) { customerTags = []; }
+            if ($('view-customers').classList.contains('active')) renderCustomers(customersSeg);
+        }
+        function sectorBar() {
+            const wrap = el('div', 'secbar');
+            segOptions().forEach(o => {
+                const b = el('button', 'secbtn' + (o.value === customersSeg ? ' on' : ''));
+                b.append(document.createTextNode(o.label));
+                if (customersCache[o.value]) { const d = el('span', 'cdot'); d.title = 'Loaded'; b.append(d); }
+                b.onclick = () => pickSector(o.value);
+                wrap.append(b);
+            });
+            return wrap;
+        }
+        function pickSector(seg) { customersSeg = seg; renderCustomers(seg); }
+        function customerGate(seg) {
+            const comp = seg === SEG_ALL;
+            const card = el('div', 'run-gate');
+            const ic = el('div', 'rg-ic'); ic.innerHTML = I.users; card.append(ic);
+            card.append(el('h2', null, comp ? 'Comprehensive customer audit' : (seg + ' sector audit')),
+                el('p', null, comp
+                    ? 'Analyze all customers and compare your sectors by retention, lifetime value and revenue, with a money-ranked plan.'
+                    : ('Analyze the ' + seg + ' sector on its own: retention, lifetime value, segments, and a money-ranked plan for these customers.')));
+            const btn = el('button', 'btn btn-primary rg-btn'); btn.append(ico(I.play), document.createTextNode(comp ? 'Run comprehensive audit' : ('Run ' + seg + ' audit'))); btn.onclick = () => loadCustomers(true, seg);
+            card.append(btn);
+            card.append(el('div', 'rg-note', 'Uses AI credits. Reads your Shopify customers and orders.'));
+            return card;
+        }
+        function sectorComparisonTable(rows, cur) {
+            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
+            const thead = el('thead'); const htr = el('tr');
+            ['Sector', 'Customers', 'Repeat rate', 'Avg LTV', 'Lifetime revenue'].forEach((h, i) => htr.append(el('th', i ? 'num' : null, h)));
+            thead.append(htr); tbl.append(thead); const tb = el('tbody');
+            rows.forEach(r => {
+                const tr = el('tr'); const c0 = el('td', 'kw');
+                const link = el('button', 'seclink'); link.textContent = r.sector || ''; link.onclick = () => pickSector(r.sector);
+                c0.append(link); tr.append(c0);
+                tr.append(el('td', 'num', (r.customers || 0).toLocaleString()));
+                tr.append(el('td', 'num', (r.repeat_rate != null ? r.repeat_rate + '%' : '')));
+                tr.append(el('td', 'num', fmtMoney(r.avg_ltv || 0, cur)));
+                tr.append(el('td', 'num', fmtMoney(r.lifetime_revenue || 0, cur)));
+                tb.append(tr);
+            });
+            tbl.append(tb); wrap.append(tbl); return wrap;
+        }
+        function showCustomersView() {
+            loadCustomerTags();
+            renderCustomers(customersSeg);
+        }
+        async function loadCustomers(force, seg) {
+            seg = (typeof seg === 'string' && seg) ? seg : (customersSeg || SEG_ALL);
+            customersSeg = seg;
+            if (customersCache[seg] && !force) { renderCustomers(seg); return; }
+            const comp = seg === SEG_ALL;
+            const box = $('customers-content'); box.innerHTML = ''; box.append(sectorBar());
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.users;
-            const ht = el('div'); ht.append(el('h2', null, 'Customers'), el('p', null, 'Analyzing your customers and retention…'));
+            const ht = el('div'); ht.append(el('h2', null, comp ? 'Customers' : (seg + ' sector')), el('p', null, 'Analyzing ' + (comp ? 'your customers and sectors' : ('the ' + seg + ' sector')) + '…'));
             hero.append(badge, ht); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Reading customers and 12 months of orders. This can take up to a minute…')); box.append(t);
-            try { const data = await api('/api/customers', {}); customersCache = { data, at: Date.now() }; renderCustomers(customersCache); }
-            catch (e) {
-                box.innerHTML = ''; box.append(hero);
+            try {
+                const data = await api('/api/customers', { segment: comp ? '' : seg });
+                customersCache[seg] = { data, at: Date.now() }; renderCustomers(seg);
+            } catch (e) {
+                box.innerHTML = ''; box.append(sectorBar(), hero);
                 const er = el('div', 'msg error'); er.append(el('div', 'bubble', e.message || String(e))); box.append(er);
-                ht.children[1].textContent = 'Could not run customer analysis.';
+                ht.children[1].textContent = 'Could not run the analysis.';
             }
         }
         function segCards(segments, cur) {
@@ -1785,16 +1854,26 @@
             });
             tbl.append(tb); wrap.append(tbl); return wrap;
         }
-        function renderCustomers(cache) {
-            const data = cache.data; const box = $('customers-content'); box.innerHTML = '';
-            const s = data.structured || {}; const cur = data.currency || '';
+        function renderCustomers(seg) {
+            seg = (typeof seg === 'string' && seg) ? seg : (customersSeg || SEG_ALL);
+            customersSeg = seg;
+            const box = $('customers-content'); box.innerHTML = '';
+            box.append(sectorBar());
+            const cached = customersCache[seg];
+            if (!cached) { box.append(customerGate(seg)); return; }
+            const data = cached.data; const s = data.structured || {}; const cur = data.currency || '';
+            const comp = seg === SEG_ALL;
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.users;
-            const ht = el('div'); ht.append(el('h2', null, 'Customers and retention'),
-                el('p', null, s.summary || 'Who your best customers are, how well you retain them, and where to grow lifetime value.'));
+            const ht = el('div'); ht.append(el('h2', null, comp ? 'Customers and retention' : (seg + ' sector')),
+                el('p', null, s.summary || (comp ? 'Who your best customers are, how well you retain them, and where to grow lifetime value.' : ('Retention and lifetime value for your ' + seg + ' customers.'))));
             hero.append(badge, ht);
-            hero.append(el('div', 'ov-updated', freshLabel(cache.at)));
+            hero.append(el('div', 'ov-updated', freshLabel(cached.at)));
             box.append(hero);
             if (Array.isArray(data.metrics) && data.metrics.length) box.append(metricsGrid(data.metrics));
+            if (comp && Array.isArray(data.sector_comparison) && data.sector_comparison.length) {
+                box.append(el('div', 'section-title', 'Sector comparison'));
+                box.append(sectorComparisonTable(data.sector_comparison, cur));
+            }
             if (data.trends && data.trends.new_customers && data.trends.new_customers.length) {
                 const nc = data.trends.new_customers;
                 box.append(el('div', 'section-title', 'New customers over time'));
@@ -2423,7 +2502,9 @@
             overviewCache = seed(d.overview) || overviewCache;
             seoCache = seed(d.seo) || seoCache;
             keywordsCache = seed(d.keywords) || keywordsCache;
-            customersCache = seed(d.customers) || customersCache;
+            if (d.customers_segments && typeof d.customers_segments === 'object') {
+                for (const k in d.customers_segments) { const e = d.customers_segments[k]; if (e && e.result) customersCache[k] = { data: e.result, at: Date.parse(e.at) || Date.now() }; }
+            }
             // re-render whichever analysis tab is open so the saved result replaces its Run gate
             if ($('view-overview').classList.contains('active')) showOverviewView();
             else if ($('view-seo').classList.contains('active')) showSeoView();
@@ -2455,7 +2536,8 @@
         window.__demoKnow = function (k) { knowledge = k; setView('memory'); renderMemory(); };
         window.__demoImpact = function (list) { impact = list; setView('memory'); renderMemory(); };
         window.__demoProducts = function (pl) { productList = pl; setView('products'); renderProductList(); };
-        window.__demoCustomers = function (d) { customersCache = { data: d, at: Date.now() }; setView('customers'); };
+        window.__demoCustomers = function (d, seg) { seg = seg || SEG_ALL; customersCache[seg] = { data: d, at: Date.now() }; customersSeg = seg; setView('customers'); };
+        window.__demoCustomerTags = function (tags) { customerTags = tags || []; if ($('view-customers').classList.contains('active')) renderCustomers(customersSeg); };
         window.__demoCache = function (d) { applyCachedAnalysis(d); };
         window.__demoChatData = function (du) { const c = active(); if (c && c.turns.length) { c.turns[c.turns.length - 1].data_used = du; renderChat(); } };
         window.__demoProductDetail = function (d) { setView('products'); renderProductDetail(d); };

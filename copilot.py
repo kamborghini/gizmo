@@ -545,6 +545,33 @@ def _save_analysis(kind: str, result: dict) -> None:
         logger.exception("analysis cache: failed to save %s", kind)
 
 
+def _save_customer_segment(seg_key: str, result: dict) -> None:
+    """Persist a customer audit per sector (key '__all__' for the comprehensive run), so
+    reopening shows each sector instantly. Best-effort: never raises."""
+    if not isinstance(result, dict) or result.get("error"):
+        return
+    try:
+        blob = json.dumps(result, default=str)
+        if len(blob) > ANALYSIS_CACHE_MAX_BYTES:
+            logger.warning("analysis cache: customers/%s result too large; not caching", seg_key)
+            return
+        cache = _load_analysis_cache()
+        segs = cache.get("customers_segments")
+        if not isinstance(segs, dict):
+            segs = {}
+        segs[str(seg_key)[:80]] = {"result": json.loads(blob), "at": datetime.now(timezone.utc).isoformat()}
+        if len(segs) > 24:  # keep the most recently refreshed sectors
+            segs = dict(sorted(segs.items(), key=lambda kv: kv[1].get("at", ""), reverse=True)[:24])
+        cache["customers_segments"] = segs
+        os.makedirs(os.path.dirname(ANALYSIS_CACHE_PATH) or ".", exist_ok=True)
+        tmp = ANALYSIS_CACHE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(cache, fh)
+        os.replace(tmp, ANALYSIS_CACHE_PATH)
+    except Exception:
+        logger.exception("analysis cache: failed to save customer segment %s", seg_key)
+
+
 _PAGE_LABELS = {
     "overview": "Store Overview",
     "seo": "SEO and optimization audit",
@@ -1874,12 +1901,39 @@ async def _paginate_customers(registry: dict, max_pages: int = ORDER_PAGE_CAP) -
     return out
 
 
-async def run_customers(registry: dict, extra_system: str = "") -> dict:
+def _customer_tags(c) -> list:
+    """Normalize a customer's tags (Shopify REST returns a comma-joined string)."""
+    t = c.get("tags")
+    if isinstance(t, str):
+        return [x.strip() for x in t.split(",") if x.strip()]
+    return [str(x).strip() for x in (t or []) if str(x).strip()]
+
+
+def _detect_sector_tags(customers: list, cap: int = 12) -> list:
+    """Distinct customer tags actually in use, most common first (the merchant's sectors)."""
+    counts: dict = {}
+    for c in customers:
+        for t in _customer_tags(c):
+            counts[t] = counts.get(t, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].lower()))
+    return [{"tag": t, "count": n} for t, n in ranked[:cap]]
+
+
+async def run_customers(registry: dict, extra_system: str = "", segment: Optional[str] = None) -> dict:
     """Customer + retention intelligence: LTV, new vs returning, repeat rate, RFM-style
-    segments, churn risk, top customers, and a new-customers trend, with an AI plan."""
+    segments, churn risk, top customers, and a new-customers trend, with an AI plan.
+    With `segment` (a customer tag) the figures are filtered to that sector; otherwise the
+    analysis covers all customers and compares the sectors."""
     shop = await _tool_json(registry, "shopify_get_shop", {})
     currency = shop.get("currency", "")
-    customers = await _paginate_customers(registry)
+    all_customers = await _paginate_customers(registry)
+    sector_tags = _detect_sector_tags(all_customers)
+    seg_norm = (segment or "").strip()
+    if seg_norm:
+        low = seg_norm.lower()
+        customers = [c for c in all_customers if low in [t.lower() for t in _customer_tags(c)]]
+    else:
+        customers = all_customers
     months = _month_axis(12)
     orders = await _paginate_orders(registry, days=len(months) * 31, fields="id,created_at,customer")
     now = datetime.now(timezone.utc)
@@ -1953,19 +2007,45 @@ async def run_customers(registry: dict, extra_system: str = "") -> dict:
         {"label": "At risk", "value": f"{len(seg['at_risk']):,}", "tone": "warn" if seg["at_risk"] else None},
     ]
     trends = {"new_customers": [{"label": mk, "value": new_by_month[mk]} for mk in months]}
-    context = {"currency": currency,
-               "totals": {"customers": total, "purchasers": purchasers, "repeat_rate_pct": repeat_rate,
-                          "avg_ltv": avg_ltv, "new_30d": new_30},
+    totals = {"customers": total, "purchasers": purchasers, "repeat_rate_pct": repeat_rate,
+              "avg_ltv": avg_ltv, "new_30d": new_30, "lifetime_revenue": round(spend_total, 2)}
+    # Comprehensive runs compute a compact per-sector comparison from the raw tags.
+    sector_comparison = []
+    if not seg_norm:
+        for tg in sector_tags:
+            low = tg["tag"].lower()
+            sub = [c for c in all_customers if low in [t.lower() for t in _customer_tags(c)]]
+            pur = sum(1 for c in sub if int(c.get("orders_count") or 0) >= 1)
+            rep = sum(1 for c in sub if int(c.get("orders_count") or 0) >= 2)
+            sp = sum(float(c.get("total_spent") or 0) for c in sub if int(c.get("orders_count") or 0) >= 1)
+            sector_comparison.append({"sector": tg["tag"], "customers": len(sub),
+                                      "repeat_rate": round(rep / pur * 100, 1) if pur else 0.0,
+                                      "avg_ltv": round(sp / pur, 2) if pur else 0.0,
+                                      "lifetime_revenue": round(sp, 2)})
+    context = {"currency": currency, "totals": totals,
                "segments": [{k: s[k] for k in ("name", "count", "revenue")} for s in segments],
-               "top_customers": top[:15],
-               "note": "Customers and orders are paginated up to a cap; very large stores may be truncated."}
+               "top_customers": top[:15]}
+    if seg_norm:
+        context["sector"] = seg_norm
+        msg = ("Customer and retention data for the '" + seg_norm + "' customer sector, filtered to customers "
+               "carrying that tag (collected live):\n" + json.dumps(context, indent=2, default=str)
+               + "\n\nEvery figure here is for the '" + seg_norm + "' sector only. Produce a retention-focused, "
+                 "money-ranked plan for THIS sector via present_response: lead with the highest-value `actions` "
+                 "(win back at-risk repeat buyers, convert one-time into repeat, lift repeat rate and lifetime "
+                 "value), each with supporting numbers and expected impact; use `insights` for who the best "
+                 "customers in this sector are and where retention leaks. Quantify in money or percent.")
+    else:
+        context["sector_comparison"] = sector_comparison
+        context["note"] = ("Customers and orders are paginated up to a cap; very large stores may be truncated. "
+                           "Some customers carry no sector tag or several.")
+        msg = ("Store-wide customer and retention data, with a per-sector breakdown by customer tag (collected "
+               "live):\n" + json.dumps(context, indent=2, default=str)
+               + "\n\nProduce a comprehensive, money-ranked retention plan via present_response that COMPARES the "
+                 "sectors in `sector_comparison`: state which sector has the strongest and weakest retention and "
+                 "lifetime value, where the biggest revenue opportunity sits, and give per-sector actions. Use "
+                 "`insights` for the key cross-sector findings and `actions` for prioritized moves, each with "
+                 "expected impact in money or percent.")
     client = _anthropic()
-    msg = ("Customer and retention data for this store (collected live):\n"
-           + json.dumps(context, indent=2, default=str)
-           + "\n\nProduce a retention-focused, money-ranked plan via present_response. Lead with the highest-value "
-             "actions in `actions` (win back at-risk repeat customers, convert one-time buyers into repeat, lift "
-             "repeat rate and lifetime value), each with the supporting numbers and expected impact. Use `insights` "
-             "for the key findings about who your best customers are and where retention leaks. Quantify in money or percent.")
     resp = await client.messages.create(
         model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
@@ -1977,7 +2057,8 @@ async def run_customers(registry: dict, extra_system: str = "") -> dict:
     structured = _coerce_structured(present or {"summary": "Customer analysis ready."})
     structured.pop("metrics", None)
     return {"metrics": metrics, "structured": structured, "currency": currency,
-            "segments": segments, "top_customers": top[:25], "trends": trends, "totals": context["totals"]}
+            "segments": segments, "top_customers": top[:25], "trends": trends, "totals": totals,
+            "segment": seg_norm or None, "sector_comparison": sector_comparison, "sector_tags": sector_tags}
 
 
 async def run_product_audit(registry: dict, product_id: int, extra_system: str = "") -> dict:
@@ -2568,7 +2649,9 @@ def add_routes(mcp, registry: dict) -> None:
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
         cache = _load_analysis_cache()
-        out = {k: cache[k] for k in _ANALYSIS_KINDS if isinstance(cache.get(k), dict)}
+        out = {k: cache[k] for k in ("overview", "seo", "keywords") if isinstance(cache.get(k), dict) and "result" in cache[k]}
+        if isinstance(cache.get("customers_segments"), dict):
+            out["customers_segments"] = cache["customers_segments"]
         return _json(out)
 
     @mcp.custom_route("/api/impact", methods=["POST"])
@@ -2678,10 +2761,11 @@ def add_routes(mcp, registry: dict) -> None:
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
+        segment = (body.get("segment") or "").strip()[:80]
         extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         try:
-            res = await run_customers(registry, extra)
-            _save_analysis("customers", res)
+            res = await run_customers(registry, extra, segment=segment or None)
+            _save_customer_segment(segment or "__all__", res)
             return _json(res)
         except anthropic.APIError:
             logger.exception("Anthropic API error (customers)")
@@ -2689,6 +2773,22 @@ def add_routes(mcp, registry: dict) -> None:
         except Exception:
             logger.exception("Customer analysis failed")
             return _json({"error": "Couldn't run the customer analysis. Check the server logs."}, 500)
+
+    @mcp.custom_route("/api/customer-tags", methods=["POST"])
+    async def customer_tags_route(request: Request):
+        # Auto-detect the customer-account tags in use (the merchant's sectors). No AI.
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        try:
+            customers = await _paginate_customers(registry)
+            return _json({"tags": _detect_sector_tags(customers), "total": len(customers)})
+        except Exception:
+            logger.exception("customer-tags failed")
+            return _json({"error": "Couldn't read your customer tags."}, 500)
 
     @mcp.custom_route("/api/product", methods=["POST"])
     async def product_route(request: Request):
