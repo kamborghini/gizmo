@@ -1179,10 +1179,48 @@
             const log = $('chat-log');
             const m = el('div', 'msg assistant'); m.id = 'thinking-msg';
             const t = el('div', 'thinking'); const orb = loader(); const label = el('span', null, THINKING[0]);
-            t.append(orb, label); m.append(t); log.append(m); scrollChat();
+            t.append(orb, label); m.append(t); m._label = label; log.append(m); scrollChat();
             let i = 0; m._timer = setInterval(() => { i = (i + 1) % THINKING.length; label.textContent = THINKING[i]; }, 1600);
         }
+        function setThinkingLabel(text) {
+            const m = $('thinking-msg'); if (!m) return;
+            if (m._timer) { clearInterval(m._timer); m._timer = null; }  // real steps replace the canned rotation
+            if (m._label && text) { m._label.textContent = text; scrollChat(); }
+        }
         function hideThinking() { const m = $('thinking-msg'); if (m) { clearInterval(m._timer); m.remove(); } }
+        // Stream a chat turn over SSE. Calls onStep(label) for live progress; returns the
+        // final result. Throws 'STREAM_TRANSPORT' on a transport problem so send() can fall back.
+        async function streamChat(payload, onStep) {
+            let res;
+            try {
+                res = await fetch('/api/chat/stream', {
+                    method: 'POST',
+                    headers: Object.assign({ 'Content-Type': 'application/json' }, await authHeaders()),
+                    body: JSON.stringify(payload),
+                });
+            } catch (e) { throw new Error('STREAM_TRANSPORT'); }
+            if (!res.ok || !res.body) throw new Error('STREAM_TRANSPORT');
+            const reader = res.body.getReader(), dec = new TextDecoder();
+            let buf = '', result = null, errored = null;
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buf += dec.decode(value, { stream: true });
+                let idx;
+                while ((idx = buf.indexOf('\n\n')) >= 0) {
+                    const line = buf.slice(0, idx).split('\n').find(l => l.startsWith('data:'));
+                    buf = buf.slice(idx + 2);
+                    if (!line) continue;
+                    let ev; try { ev = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+                    if (ev.type === 'step') { if (onStep) onStep(ev.label); }
+                    else if (ev.type === 'done') result = ev.result;
+                    else if (ev.type === 'error') errored = ev.error;
+                }
+            }
+            if (errored) throw new Error(errored);          // real server error: do NOT fall back
+            if (!result) throw new Error('STREAM_TRANSPORT'); // truncated: fall back
+            return result;
+        }
 
         /* ---------- send ---------- */
         function apiHistory(c) {
@@ -1206,8 +1244,15 @@
             if (c.turns.filter(t => t.role === 'user').length === 1) { c.title = text.slice(0, 48); renderSidebar(); }
             $('input').value = ''; $('input').style.height = 'auto';
             renderChat(); busy = true; $('send').disabled = true; showThinking();
+            const payload = { messages: apiHistory(c), deep };
             try {
-                const data = await api('/api/chat', { messages: apiHistory(c), deep });
+                let data;
+                try {
+                    data = await streamChat(payload, setThinkingLabel);   // live progress
+                } catch (se) {
+                    if ((se.message || '') === 'STREAM_TRANSPORT') data = await api('/api/chat', payload);  // fallback
+                    else throw se;
+                }
                 hideThinking();
                 c.turns.push({ role: 'assistant', structured: data.structured || { summary: '(no response)' }, model: data.model, data_used: data.data_used });
                 save(); renderChat(); loadMemory();  // refresh anything the copilot just remembered

@@ -39,7 +39,7 @@ import google_data
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 logger = logging.getLogger("shopify_mcp.copilot")
 
@@ -723,15 +723,18 @@ def _tool_label(name: str) -> str:
 
 
 async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dict],
-                   model: str, extra_system: str = "") -> dict:
+                   model: str, extra_system: str = "", emit: Optional[Callable] = None) -> dict:
     """Run a multi-step tool-use conversation. The final answer is delivered via
-    the present_response tool and returned as a structured dict."""
+    the present_response tool and returned as a structured dict. If `emit` is given,
+    it is awaited with progress events ({"type":"step","label":...}) for live streaming."""
     client = _anthropic()
     messages = list(history)
     tools_used: list[str] = []
     data_used: list[dict] = []   # for the UI "show the data behind this" drill-down
     all_tools = data_tools + [PRESENT_RESPONSE_TOOL]
     system = SYSTEM_PROMPT + extra_system
+    if emit:
+        await emit({"type": "step", "label": "Analyzing your question"})
 
     for _ in range(MAX_TOOL_ROUNDS):
         kwargs = {
@@ -768,6 +771,9 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
             return {"structured": {"summary": text or "(no response)"}, "tools_used": tools_used,
                     "data_used": data_used, "model": model}
 
+        if emit:
+            labels = sorted({_tool_label(tu.name) for tu in data_uses})
+            await emit({"type": "step", "label": "Reading " + ", ".join(labels)})
         tool_results = []
         for tu in data_uses:
             tools_used.append(tu.name)
@@ -2147,6 +2153,71 @@ def add_routes(mcp, registry: dict) -> None:
             except Exception:
                 logger.exception("Memory capture failed")
         return _json(result)
+
+    @mcp.custom_route("/api/chat/stream", methods=["POST"])
+    async def chat_stream(request: Request):
+        """Server-sent-events variant of /api/chat: emits real tool-step progress as
+        the model works, then a final structured result. The client falls back to
+        /api/chat if streaming is unavailable."""
+        pre = _pre_checks(request, ai=True)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        history = body.get("messages")
+        if not history and body.get("message"):
+            history = [{"role": "user", "content": body["message"]}]
+        if not history:
+            return _json({"error": "Provide 'messages' or 'message'"}, 400)
+        if not isinstance(history, list) or len(history) > MAX_MESSAGES:
+            return _json({"error": "Conversation too long. Start a new chat."}, 400)
+        if len(json.dumps(history)) > MAX_CHAT_CHARS:
+            return _json({"error": "Message too large."}, 413)
+
+        model = _pick_model(bool(body.get("deep")))
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
+        if _is_seo(history):
+            extra += "\n\n" + SEO_KNOWLEDGE
+
+        q: asyncio.Queue = asyncio.Queue()
+
+        async def runner():
+            try:
+                result = await run_chat(history, dispatch, tools, model, extra, emit=q.put)
+                mems = result.get("structured", {}).pop("remember", None)
+                if isinstance(mems, list) and mems:
+                    try:
+                        _add_memories(mems)
+                    except Exception:
+                        logger.exception("Memory capture failed")
+                await q.put({"type": "done", "result": result})
+            except anthropic.APIError:
+                logger.exception("Anthropic API error (stream)")
+                await q.put({"type": "error", "error": "The AI service returned an error. Please try again."})
+            except RuntimeError as e:
+                await q.put({"type": "error", "error": str(e)})
+            except Exception:
+                logger.exception("Chat stream failed")
+                await q.put({"type": "error", "error": "Something went wrong. Please try again."})
+
+        async def gen():
+            task = asyncio.create_task(runner())
+            try:
+                while True:
+                    ev = await q.get()
+                    yield "data: " + json.dumps(ev) + "\n\n"
+                    if ev.get("type") in ("done", "error"):
+                        break
+            finally:
+                if not task.done():
+                    task.cancel()
+
+        headers = {**_API_HEADERS, "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
+        return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
 
     @mcp.custom_route("/api/overview", methods=["POST"])
     async def overview(request: Request):
