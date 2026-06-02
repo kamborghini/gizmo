@@ -1006,18 +1006,32 @@ def _delta(cur: float, prev: float) -> tuple[Optional[str], str]:
     return (f"{'+' if change >= 0 else ''}{change:.0f}%", trend)
 
 
+async def _ret(value=None):
+    """A pre-resolved coroutine so optional calls can still join an asyncio.gather()."""
+    return value
+
+
 async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tuple[list[dict], dict]:
     now = datetime.now(timezone.utc)
     d7, d14 = (now - timedelta(days=7)).isoformat(), (now - timedelta(days=14)).isoformat()
     metrics: list[dict] = []
 
-    shop = await _tool_json(registry, "shopify_get_shop", {})
+    # Pull every independent input at once (Shopify reads + Google), then compute.
+    ga4_on, gsc_on = google_data.ga4_configured(), google_data.gsc_configured()
+    shop, o7r, opr, custr, cntr, prodr, ga, gsc = await asyncio.gather(
+        _tool_json(registry, "shopify_get_shop", {}),
+        _tool_json(registry, "shopify_list_orders", {"status": "any", "created_at_min": d7, "limit": 250}),
+        _tool_json(registry, "shopify_list_orders", {"status": "any", "created_at_min": d14, "created_at_max": d7, "limit": 250}),
+        _tool_json(registry, "shopify_list_customers", {"created_at_min": d7, "limit": 250}),
+        _tool_json(registry, "shopify_count_products", {}),
+        _tool_json(registry, "shopify_list_products", {"limit": 250, "fields": "id,title,variants"}) if track_inventory else _ret({}),
+        google_data.ga4_summary(28) if ga4_on else _ret({}),
+        google_data.gsc_overview(28) if gsc_on else _ret({}),
+    )
+    shop = shop or {}
     currency = shop.get("currency", "")
-
-    o7 = (await _tool_json(registry, "shopify_list_orders",
-                           {"status": "any", "created_at_min": d7, "limit": 250})).get("orders", [])
-    op = (await _tool_json(registry, "shopify_list_orders",
-                           {"status": "any", "created_at_min": d14, "created_at_max": d7, "limit": 250})).get("orders", [])
+    o7 = o7r.get("orders", [])
+    op = opr.get("orders", [])
     rev7 = sum(float(o.get("total_price") or 0) for o in o7)
     revp = sum(float(o.get("total_price") or 0) for o in op)
     n7, npv = len(o7), len(op)
@@ -1031,18 +1045,16 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
     metrics.append({"label": "Avg order value", "value": _money(aov, currency)})
     metrics.append({"label": "Unfulfilled (7d)", "value": str(unfulfilled), "tone": "warn" if unfulfilled else None})
 
-    new_cust = len((await _tool_json(registry, "shopify_list_customers",
-                                     {"created_at_min": d7, "limit": 250})).get("customers", []))
+    new_cust = len(custr.get("customers", []))
     metrics.append({"label": "New customers (7d)", "value": str(new_cust)})
 
-    total_products = (await _tool_json(registry, "shopify_count_products", {})).get("count")
+    total_products = cntr.get("count")
     if total_products is not None:
         metrics.append({"label": "Products", "value": str(total_products)})
 
     low = []
     if track_inventory:
-        products = (await _tool_json(registry, "shopify_list_products",
-                                     {"limit": 250, "fields": "id,title,variants"})).get("products", [])
+        products = prodr.get("products", [])
         low = [
             {"product": p.get("title"), "variant": v.get("title"), "qty": v.get("inventory_quantity")}
             for p in products for v in p.get("variants", [])
@@ -1065,30 +1077,26 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
         "prev_7d": {"revenue": round(revp, 2), "orders": npv},
         "catalog": ({"total_products": total_products, "low_stock_count": len(low),
                      "low_stock_examples": low[:8]} if track_inventory
-                    else {"total_products": total_products, "inventory": "not tracked — unlimited stock"}),
+                    else {"total_products": total_products, "inventory": "not tracked, unlimited stock"}),
         "top_products_7d": [{"title": t, "units": q} for t, q in units.most_common(5)],
         "note": "Order figures are based on up to 250 orders per 7-day window.",
     }
 
     # Real traffic + search performance (only when Google is connected).
-    if google_data.ga4_configured():
-        ga = await google_data.ga4_summary(28)
-        if ga and not ga.get("error"):
-            metrics.append({"label": "Sessions (GA4, 28d)", "value": f"{ga['sessions']:,}"})
-            metrics.append({"label": "Revenue (GA4, 28d)", "value": _money(ga["revenue"], currency)})
-            context["ga4_28d"] = ga
-        elif ga.get("error"):
-            context["ga4_28d"] = ga
-    if google_data.gsc_configured():
-        gsc = await google_data.gsc_overview(28)
-        if gsc and not gsc.get("error"):
-            metrics.append({"label": "Search clicks (28d)", "value": f"{gsc['clicks']:,}"})
-            metrics.append({"label": "Search impressions (28d)", "value": f"{gsc['impressions']:,}"})
-            if gsc.get("position") is not None:
-                metrics.append({"label": "Avg Google position", "value": str(gsc["position"])})
-            context["search_console_28d"] = gsc
-        elif gsc.get("error"):
-            context["search_console_28d"] = gsc
+    if ga4_on and ga and not ga.get("error"):
+        metrics.append({"label": "Sessions (GA4, 28d)", "value": f"{ga['sessions']:,}"})
+        metrics.append({"label": "Revenue (GA4, 28d)", "value": _money(ga["revenue"], currency)})
+        context["ga4_28d"] = ga
+    elif ga4_on and isinstance(ga, dict) and ga.get("error"):
+        context["ga4_28d"] = ga
+    if gsc_on and gsc and not gsc.get("error"):
+        metrics.append({"label": "Search clicks (28d)", "value": f"{gsc['clicks']:,}"})
+        metrics.append({"label": "Search impressions (28d)", "value": f"{gsc['impressions']:,}"})
+        if gsc.get("position") is not None:
+            metrics.append({"label": "Avg Google position", "value": str(gsc["position"])})
+        context["search_console_28d"] = gsc
+    elif gsc_on and isinstance(gsc, dict) and gsc.get("error"):
+        context["search_console_28d"] = gsc
 
     return [m for m in metrics if m.get("value") is not None], context
 
@@ -1098,19 +1106,22 @@ async def run_overview(registry: dict, extra_system: str = "", track_inventory: 
     client = _anthropic()
     msg = ("Current store KPIs (computed live):\n" + json.dumps(context, indent=2, default=str)
            + "\n\nGive the executive overview now by calling present_response.")
-    resp = await client.messages.create(
-        model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
-        tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
-        messages=[{"role": "user", "content": msg}],
-        output_config={"effort": _effort_for(MODEL_DEEP)},
+    # Fetch the chart data WHILE the model writes the analysis (overlaps a full data pull with the AI step).
+    resp, trends = await asyncio.gather(
+        client.messages.create(
+            model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
+            tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
+            messages=[{"role": "user", "content": msg}],
+            output_config={"effort": _effort_for(MODEL_DEEP)},
+        ),
+        _overview_trends(registry),
     )
     present = next((b.input for b in resp.content
                     if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
     structured = _coerce_structured(present or {"summary": "Here's your store overview."})
     structured.pop("metrics", None)  # UI shows the computed metrics, not Claude's echo
     currency = (context.get("shop") or {}).get("currency", "")
-    return {"metrics": metrics, "structured": structured,
-            "trends": await _overview_trends(registry), "currency": currency}
+    return {"metrics": metrics, "structured": structured, "trends": trends, "currency": currency}
 
 
 async def _overview_trends(registry: dict) -> dict:
@@ -1118,10 +1129,19 @@ async def _overview_trends(registry: dict) -> dict:
     Google (single cheap calls, up to 24/16 months); falls back to Shopify orders
     for revenue when Google is not connected. Always degrades to {} gracefully."""
     trends: dict = {}
-    # Shopify monthly revenue + orders + average order value (one bounded order pull).
+    months = _month_axis(min(TREND_MONTHS, 12))
+    ga4_on, gsc_on = google_data.ga4_configured(), google_data.gsc_configured()
+    # Fetch the Shopify order history and both Google timeseries at once.
+    orders, ts, gts = await asyncio.gather(
+        _paginate_orders(registry, days=len(months) * 31),
+        google_data.ga4_timeseries(min(TREND_MONTHS, 24) * 31) if ga4_on else _ret({}),
+        google_data.gsc_timeseries(480) if gsc_on else _ret({}),
+        return_exceptions=True,
+    )
+    # Shopify monthly revenue + orders + average order value.
     try:
-        months = _month_axis(min(TREND_MONTHS, 12))
-        orders = await _paginate_orders(registry, days=len(months) * 31)
+        if isinstance(orders, Exception):
+            raise orders
         rev = {mk: 0.0 for mk in months}
         cnt = {mk: 0 for mk in months}
         for o in orders:
@@ -1137,26 +1157,22 @@ async def _overview_trends(registry: dict) -> dict:
         logger.exception("overview shopify trends failed")
     # Google Analytics 4: sessions, pageviews, engaged, channel mix (+ revenue fallback).
     try:
-        if google_data.ga4_configured():
-            ts = await google_data.ga4_timeseries(min(TREND_MONTHS, 24) * 31)
-            if ts and not ts.get("error"):
-                for k in ("sessions", "pageviews", "engaged"):
-                    if ts.get(k):
-                        trends[k] = ts[k]
-                if ts.get("channels"):
-                    trends["channels"] = ts["channels"]
-                if "revenue" not in trends and ts.get("revenue") and any(p.get("value") for p in ts["revenue"]):
-                    trends["revenue"] = ts["revenue"]
+        if ga4_on and isinstance(ts, dict) and not ts.get("error"):
+            for k in ("sessions", "pageviews", "engaged"):
+                if ts.get(k):
+                    trends[k] = ts[k]
+            if ts.get("channels"):
+                trends["channels"] = ts["channels"]
+            if "revenue" not in trends and ts.get("revenue") and any(p.get("value") for p in ts["revenue"]):
+                trends["revenue"] = ts["revenue"]
     except Exception:
         logger.exception("overview ga4 trends failed")
     # Search Console: clicks, impressions, CTR, average position.
     try:
-        if google_data.gsc_configured():
-            gts = await google_data.gsc_timeseries(480)
-            if gts and not gts.get("error"):
-                for k in ("clicks", "impressions", "ctr", "position"):
-                    if gts.get(k):
-                        trends[k] = gts[k]
+        if gsc_on and isinstance(gts, dict) and not gts.get("error"):
+            for k in ("clicks", "impressions", "ctr", "position"):
+                if gts.get(k):
+                    trends[k] = gts[k]
     except Exception:
         logger.exception("overview gsc trends failed")
     return trends
@@ -1556,18 +1572,30 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
     primary, hosts = await _resolve_domains(registry)
     if not primary:
         raise RuntimeError("Could not resolve the store's domain to audit.")
-    signals = await _seo_product_signals(registry)
-    rs, rtext = await _http_get(f"https://{primary}/robots.txt", allowed_hosts=hosts)
-    ss, stext = await _http_get(f"https://{primary}/sitemap.xml", allowed_hosts=hosts)
-
-    urls = [f"https://{primary}/"]
-    sample = await _tool_json(registry, "shopify_list_products", {"limit": SEO_SAMPLE_PAGES, "fields": "handle"})
-    urls += [f"https://{primary}/products/{p['handle']}" for p in sample.get("products", []) if p.get("handle")]
-    pages = []
-    for u in urls[:SEO_SAMPLE_PAGES + 1]:
-        st, html = await _http_get(u, allowed_hosts=hosts)
-        if st:
-            pages.append({"url": u, "status": st, **_parse_seo(html)})
+    gsc_on, ga4_on = google_data.gsc_configured(), google_data.ga4_configured()
+    since28 = (datetime.now(timezone.utc) - timedelta(days=28)).isoformat()
+    # First wave: every independent input at once (product signals, robots, sitemap, a product
+    # sample for page audits, Search Console + Analytics, shop, and 28-day orders).
+    signals, robots, sitemap, sample, gsc_ov, gsc_tq, ga_sum, shop, o28r = await asyncio.gather(
+        _seo_product_signals(registry),
+        _http_get(f"https://{primary}/robots.txt", allowed_hosts=hosts),
+        _http_get(f"https://{primary}/sitemap.xml", allowed_hosts=hosts),
+        _tool_json(registry, "shopify_list_products", {"limit": SEO_SAMPLE_PAGES, "fields": "handle"}),
+        google_data.gsc_overview(28) if gsc_on else _ret({}),
+        google_data.gsc_top_queries(28) if gsc_on else _ret({}),
+        google_data.ga4_summary(28) if ga4_on else _ret({}),
+        _tool_json(registry, "shopify_get_shop", {}),
+        _tool_json(registry, "shopify_list_orders", {"status": "any", "created_at_min": since28, "limit": 250}),
+    )
+    rs, rtext = robots
+    ss, stext = sitemap
+    shop = shop or {}
+    urls = [f"https://{primary}/"] + [f"https://{primary}/products/{p['handle']}"
+                                      for p in sample.get("products", []) if p.get("handle")]
+    urls = urls[:SEO_SAMPLE_PAGES + 1]
+    # Second wave: fetch the sampled pages concurrently.
+    fetched = await asyncio.gather(*[_http_get(u, allowed_hosts=hosts) for u in urls])
+    pages = [{"url": u, "status": st, **_parse_seo(html)} for u, (st, html) in zip(urls, fetched) if st]
 
     score, metrics = _seo_scorecard(signals, rs, ss, pages)
     context = {
@@ -1576,21 +1604,13 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
         "sitemap_xml": {"status": ss, "found": ss == 200, "child_locs": (stext or "").count("<loc>")},
         "sampled_pages": pages,
     }
-
-    # Fuse the other data sets so opportunities can be revenue-ranked.
-    if google_data.gsc_configured():
-        context["search_console"] = {
-            "overview": await google_data.gsc_overview(28),
-            "top_queries": await google_data.gsc_top_queries(28),
-        }
-    if google_data.ga4_configured():
-        context["analytics"] = await google_data.ga4_summary(28)
+    if gsc_on:
+        context["search_console"] = {"overview": gsc_ov, "top_queries": gsc_tq}
+    if ga4_on:
+        context["analytics"] = ga_sum
 
     # Shopify commerce context: 28-day revenue, orders, and best sellers.
-    shop = await _tool_json(registry, "shopify_get_shop", {})
-    since28 = (datetime.now(timezone.utc) - timedelta(days=28)).isoformat()
-    o28 = (await _tool_json(registry, "shopify_list_orders",
-                            {"status": "any", "created_at_min": since28, "limit": 250})).get("orders", [])
+    o28 = o28r.get("orders", [])
     from collections import Counter
     units: Counter = Counter()
     for o in o28:
@@ -1613,12 +1633,16 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
              "supporting numbers and the expected impact). Use `insights` for the most important "
              "performance issues and wins, cross-referencing the data sets. Fix indexation and crawl "
              "gates before optimizations. Be specific and quantify in money or percent wherever you can.")
-    resp = await client.messages.create(
-        model=MODEL_DEEP, max_tokens=MAX_TOKENS,
-        system=OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE + extra_system,
-        tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
-        messages=[{"role": "user", "content": msg}],
-        output_config={"effort": _effort_for(MODEL_DEEP)},
+    # Fetch the search trend series WHILE the model writes the report.
+    resp, gts = await asyncio.gather(
+        client.messages.create(
+            model=MODEL_DEEP, max_tokens=MAX_TOKENS,
+            system=OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE + extra_system,
+            tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
+            messages=[{"role": "user", "content": msg}],
+            output_config={"effort": _effort_for(MODEL_DEEP)},
+        ),
+        google_data.gsc_timeseries(480) if gsc_on else _ret({}),
     )
     present = next((b.input for b in resp.content
                     if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
@@ -1626,12 +1650,10 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
     structured.pop("metrics", None)
     seo_trends: dict = {}
     try:
-        if google_data.gsc_configured():
-            gts = await google_data.gsc_timeseries(480)
-            if gts and not gts.get("error"):
-                for k in ("clicks", "impressions", "ctr", "position"):
-                    if gts.get(k):
-                        seo_trends[k] = gts[k]
+        if gsc_on and isinstance(gts, dict) and not gts.get("error"):
+            for k in ("clicks", "impressions", "ctr", "position"):
+                if gts.get(k):
+                    seo_trends[k] = gts[k]
     except Exception:
         logger.exception("seo trends failed")
     return {"score": score, "metrics": metrics, "structured": structured, "trends": seo_trends}
@@ -1648,10 +1670,13 @@ async def run_keywords(registry: dict, extra_system: str = "") -> dict:
     days = 90
     gsc_ok = google_data.gsc_configured()
     ga4_ok = google_data.ga4_configured()
-    overview = await google_data.gsc_overview(days) if gsc_ok else {}
-    top = await google_data.gsc_top_queries(days, limit=100) if gsc_ok else {}
-    ads = await google_data.ga4_ads(days) if ga4_ok else {}
-    shop = await _tool_json(registry, "shopify_get_shop", {})
+    overview, top, ads, shop = await asyncio.gather(
+        google_data.gsc_overview(days) if gsc_ok else _ret({}),
+        google_data.gsc_top_queries(days, limit=100) if gsc_ok else _ret({}),
+        google_data.ga4_ads(days) if ga4_ok else _ret({}),
+        _tool_json(registry, "shopify_get_shop", {}),
+    )
+    shop = shop or {}
     currency = shop.get("currency", "")
     queries = top.get("queries", []) if isinstance(top, dict) else []
 
@@ -1924,9 +1949,14 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
     segments, churn risk, top customers, and a new-customers trend, with an AI plan.
     With `segment` (a customer tag) the figures are filtered to that sector; otherwise the
     analysis covers all customers and compares the sectors."""
-    shop = await _tool_json(registry, "shopify_get_shop", {})
+    months = _month_axis(12)
+    shop, all_customers, orders = await asyncio.gather(
+        _tool_json(registry, "shopify_get_shop", {}),
+        _paginate_customers(registry),
+        _paginate_orders(registry, days=len(months) * 31, fields="id,created_at,customer"),
+    )
+    shop = shop or {}
     currency = shop.get("currency", "")
-    all_customers = await _paginate_customers(registry)
     sector_tags = _detect_sector_tags(all_customers)
     seg_norm = (segment or "").strip()
     if seg_norm:
@@ -1934,8 +1964,6 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
         customers = [c for c in all_customers if low in [t.lower() for t in _customer_tags(c)]]
     else:
         customers = all_customers
-    months = _month_axis(12)
-    orders = await _paginate_orders(registry, days=len(months) * 31, fields="id,created_at,customer")
     now = datetime.now(timezone.utc)
 
     last_order: dict = {}
