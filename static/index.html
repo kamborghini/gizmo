@@ -331,6 +331,21 @@
         .changes-strip { margin: 2px 0 22px; }
         .changes-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
         .changes-head svg { width: 13px; height: 13px; }
+        /* scheduled-change alerts */
+        .alerts-banner { background: var(--warn-bg); border: 1px solid var(--warn); border-radius: var(--r); padding: 14px 16px; margin-bottom: 20px; }
+        .alerts-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 700; color: var(--warn); margin-bottom: 8px; }
+        .alerts-head svg { width: 15px; height: 15px; }
+        .alerts-clear { margin-left: auto; background: transparent; border: 0; color: var(--ink-3); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+        .alerts-clear:hover { color: var(--ink); }
+        .alert-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border); font-size: 13px; }
+        .alert-row .adot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+        .alert-row .adot.up { background: var(--win); } .alert-row .adot.down { background: var(--danger); } .alert-row .adot.flat { background: var(--ink-3); }
+        .alert-row .a-tab { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); }
+        .alert-row .a-metric { flex: 1; color: var(--ink); }
+        .alert-row .a-pct { font-weight: 700; font-variant-numeric: tabular-nums; }
+        .alert-row .a-pct.up { color: var(--win); } .alert-row .a-pct.down { color: var(--danger); }
+        .alert-x { background: transparent; border: 0; color: var(--ink-3); padding: 3px; border-radius: 6px; display: grid; place-items: center; cursor: pointer; }
+        .alert-x:hover { color: var(--ink); background: var(--surface-2); } .alert-x svg { width: 14px; height: 14px; }
         /* PDF export (print) */
         .print-head { display: none; align-items: center; justify-content: space-between; padding: 0 0 14px; margin-bottom: 14px; border-bottom: 1px solid var(--border-2); }
         .print-head .ph-brand { font-weight: 800; font-size: 17px; letter-spacing: -.02em; }
@@ -669,6 +684,19 @@
                         <div><div class="setting-title">Flag anomalies</div><div class="setting-sub">Call out risks & unusual changes in the data.</div></div>
                         <div class="toggle" data-pref="flag_anomalies"><span class="sw"></span></div>
                     </div>
+                </div>
+                <div class="section-title" style="margin: 22px 0 6px;">Automatic refresh</div>
+                <div class="setting-row">
+                    <div><div class="setting-title">Auto-refresh reports</div><div class="setting-sub">Re-run your audits on a schedule so they stay fresh, and flag big changes as alerts. Off by default; uses AI credits on each run.</div></div>
+                    <div class="toggle" id="sched-toggle"><span class="sw"></span></div>
+                </div>
+                <div class="setting-row" id="sched-freq-row">
+                    <div><div class="setting-title">Frequency</div><div class="setting-sub">How often to refresh and check for notable changes.</div></div>
+                    <select id="sched-freq" class="psel" style="max-width:160px">
+                        <option value="24">Daily</option>
+                        <option value="72">Every 3 days</option>
+                        <option value="168">Weekly</option>
+                    </select>
                 </div>
                 <div class="section-title" style="margin: 22px 0 6px;">Connections</div>
                 <div id="connections"><div class="setting-sub">Checking connections…</div></div>
@@ -1555,6 +1583,35 @@
                 htext.children[1].textContent = 'Could not load overview.';
             }
         }
+        /* ---------- scheduled-change alerts ---------- */
+        let alerts = [];
+        async function loadAlerts() {
+            try { const d = await api('/api/alerts', {}); if (d && Array.isArray(d.alerts)) alerts = d.alerts; } catch (e) {}
+            if ($('view-overview').classList.contains('active') && overviewCache) renderOverview(overviewCache);
+        }
+        async function alertOp(payload) {
+            try { const d = await api('/api/alerts', payload); if (d && Array.isArray(d.alerts)) alerts = d.alerts; } catch (e) {}
+            if (overviewCache) renderOverview(overviewCache);
+        }
+        function alertsBanner() {
+            const fresh = (alerts || []).filter(a => a.status === 'new');
+            if (!fresh.length) return null;
+            const wrap = el('div', 'alerts-banner');
+            const head = el('div', 'alerts-head'); head.append(ico(I.warning), document.createTextNode(fresh.length + ' notable change' + (fresh.length > 1 ? 's' : '') + ' since the last scheduled refresh'));
+            const clear = el('button', 'alerts-clear'); clear.textContent = 'Dismiss all'; clear.onclick = () => alertOp({ op: 'clear' });
+            head.append(clear); wrap.append(head);
+            fresh.slice(0, 8).forEach(a => {
+                const lowerBetter = /position|at risk|unfulfilled|low stock|cpc|bounce/i.test(a.metric || '');
+                const good = a.pct == null ? null : (lowerBetter ? a.pct < 0 : a.pct > 0);
+                const dir = good == null ? 'flat' : good ? 'up' : 'down';
+                const row = el('div', 'alert-row');
+                row.append(el('span', 'adot ' + dir), el('span', 'a-tab', a.tab_label || ''), el('span', 'a-metric', a.metric || ''),
+                    el('span', 'a-pct ' + dir, (a.pct > 0 ? '+' : '') + a.pct + '%'));
+                const x = el('button', 'alert-x'); x.innerHTML = I.x; x.title = 'Dismiss'; x.onclick = () => alertOp({ op: 'dismiss', id: a.id });
+                row.append(x); wrap.append(row);
+            });
+            return wrap;
+        }
         function sectorSalesTable(rows, cur) {
             const days = (rows[0] && rows[0].days) ? rows[0].days : 28;
             const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
@@ -1593,6 +1650,7 @@
         }
         function renderOverview(cache) {
             const data = cache.data; const box = $('ov-content'); box.innerHTML = '';
+            { const ab = alertsBanner(); if (ab) box.append(ab); }
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.grid;
             const htext = el('div'); htext.append(el('h2', null, 'Store Overview'), el('p', null, data.structured && data.structured.summary ? data.structured.summary : 'Here’s how your store is doing.'));
             hero.append(badge, htext);
@@ -2540,6 +2598,7 @@
             $('settings-modal').classList.add('show');
             $('pf-voice').focus();
             loadConnections();
+            loadSchedule();
         }
         function closeSettings() { $('settings-modal').classList.remove('show'); }
         async function applySettings() {
@@ -2568,6 +2627,23 @@
         $('settings-cancel').onclick = closeSettings;
         $('settings-save').onclick = applySettings;
         prefToggles().forEach(t => t.onclick = function () { this.classList.toggle('on'); });
+        function loadSchedule() {
+            api('/api/schedule', {}).then(d => {
+                const s = (d && d.schedule) || {};
+                $('sched-toggle').classList.toggle('on', !!s.enabled);
+                if (s.every_hours) $('sched-freq').value = String(s.every_hours);
+                $('sched-freq-row').style.display = s.enabled ? '' : 'none';
+            }).catch(() => {});
+        }
+        $('sched-toggle').onclick = function () {
+            this.classList.toggle('on');
+            const on = this.classList.contains('on');
+            $('sched-freq-row').style.display = on ? '' : 'none';
+            api('/api/schedule', { config: { enabled: on, every_hours: parseInt($('sched-freq').value, 10) || 168 } }).catch(() => {});
+        };
+        $('sched-freq').onchange = function () {
+            api('/api/schedule', { config: { every_hours: parseInt(this.value, 10) || 168 } }).catch(() => {});
+        };
         $('settings-modal').onclick = (e) => { if (e.target.id === 'settings-modal') closeSettings(); };
 
         /* ---------- wire up ---------- */
@@ -2605,6 +2681,7 @@
         loadProfile();  // pull the saved store profile from the server (for the Settings modal)
         loadMemory();   // pull saved memories (for Overview follow-ups + the Memory tab)
         loadAnalysisCache();  // restore last AI-tab results (no tokens spent)
+        loadAlerts();         // any change alerts from scheduled refreshes
 
         // Demo hook for visual testing (no data exposed).
         window.__demo = function (sample, ov) {
@@ -2625,6 +2702,7 @@
         window.__demoCustomers = function (d, seg) { seg = seg || SEG_ALL; customersCache[seg] = { data: d, at: Date.now() }; customersSeg = seg; setView('customers'); };
         window.__demoCustomerTags = function (tags) { customerTags = tags || []; if ($('view-customers').classList.contains('active')) renderCustomers(customersSeg); };
         window.__demoCache = function (d) { applyCachedAnalysis(d); };
+        window.__demoAlerts = function (list) { alerts = list || []; if (overviewCache) renderOverview(overviewCache); };
         window.__demoChatData = function (du) { const c = active(); if (c && c.turns.length) { c.turns[c.turns.length - 1].data_used = du; renderChat(); } };
         window.__demoProductDetail = function (d) { setView('products'); renderProductDetail(d); };
     })();

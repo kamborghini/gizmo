@@ -118,6 +118,10 @@ SKILLS_INJECT_CAP  = int(os.environ.get("SKILLS_INJECT_CAP", "24000"))  # max to
 ANALYSIS_CACHE_PATH      = os.environ.get("ANALYSIS_CACHE_PATH", "/data/analysis_cache.json")  # last result per AI tab
 ANALYSIS_CACHE_MAX_BYTES = int(os.environ.get("ANALYSIS_CACHE_MAX_BYTES", "800000"))  # per-entry size guard
 CHAT_CONTEXT_CAP   = int(os.environ.get("CHAT_CONTEXT_CAP", "12000"))  # max chars of page-report context injected into chat
+SCHEDULE_PATH      = os.environ.get("SCHEDULE_PATH", "/data/schedule.json")  # auto-refresh config (off by default)
+ALERTS_PATH        = os.environ.get("ALERTS_PATH", "/data/alerts.json")      # change alerts from scheduled runs
+ALERTS_MAX         = int(os.environ.get("ALERTS_MAX", "60"))
+SCHEDULE_CHECK_SECS = int(os.environ.get("SCHEDULE_CHECK_SECS", "900"))       # how often the scheduler wakes to check
 
 _PAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "index.html")
 _page_cache: Optional[str] = None
@@ -2439,6 +2443,152 @@ async def _read_json_capped(request: Request) -> Optional[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Scheduled refresh + change alerts. Off by default (automatic token spend is
+# opt-in). When enabled, a background loop periodically re-runs the audits
+# server-side and records notable metric moves as in-app alerts.
+# ---------------------------------------------------------------------------
+
+_SCHEDULE_DEFAULT = {"enabled": False, "every_hours": 168, "threshold_pct": 15, "last_run": None}
+
+
+def _load_schedule() -> dict:
+    try:
+        with open(SCHEDULE_PATH, "r", encoding="utf-8") as fh:
+            return {**_SCHEDULE_DEFAULT, **(json.load(fh) or {})}
+    except Exception:
+        return dict(_SCHEDULE_DEFAULT)
+
+
+def _save_schedule(cfg: dict) -> dict:
+    cur = _load_schedule()
+    if "enabled" in cfg:
+        cur["enabled"] = bool(cfg["enabled"])
+    if "every_hours" in cfg:
+        try:
+            cur["every_hours"] = max(1, min(744, int(cfg["every_hours"])))
+        except (TypeError, ValueError):
+            pass
+    if "threshold_pct" in cfg:
+        try:
+            cur["threshold_pct"] = max(1, min(100, int(cfg["threshold_pct"])))
+        except (TypeError, ValueError):
+            pass
+    if "last_run" in cfg:
+        cur["last_run"] = cfg["last_run"]
+    os.makedirs(os.path.dirname(SCHEDULE_PATH) or ".", exist_ok=True)
+    tmp = SCHEDULE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(cur, fh)
+    os.replace(tmp, SCHEDULE_PATH)
+    return cur
+
+
+def _load_alerts() -> list:
+    try:
+        with open(ALERTS_PATH, "r", encoding="utf-8") as fh:
+            return json.load(fh).get("alerts", [])
+    except Exception:
+        return []
+
+
+def _write_alerts(alerts: list) -> list:
+    os.makedirs(os.path.dirname(ALERTS_PATH) or ".", exist_ok=True)
+    tmp = ALERTS_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"alerts": alerts[:ALERTS_MAX]}, fh)
+    os.replace(tmp, ALERTS_PATH)
+    return alerts[:ALERTS_MAX]
+
+
+def _add_alerts(items: list) -> list:
+    alerts = _load_alerts()
+    now = datetime.now(timezone.utc).isoformat()
+    for it in (items or []):
+        alerts.insert(0, {"id": secrets.token_hex(5), "at": now, "status": "new", **it})
+    return _write_alerts(alerts)
+
+
+def _update_alert(aid: str, status: str) -> list:
+    alerts = _load_alerts()
+    if status == "delete":
+        return _write_alerts([a for a in alerts if a.get("id") != aid])
+    for a in alerts:
+        if a.get("id") == aid:
+            a["status"] = status
+    return _write_alerts(alerts)
+
+
+async def _run_scheduled_audits(registry: dict) -> list:
+    """Re-run the audits server-side (no session needed) and record notable metric
+    moves as alerts. Returns the new alerts. Never raises."""
+    extra = (_profile_to_system(_load_profile()) + _memory_to_system()
+             + _knowledge_to_system() + _skills_to_system())
+    threshold = _load_schedule().get("threshold_pct", 15)
+    track = (_load_profile().get("prefs") or {}).get("track_inventory", True)
+    jobs = [
+        ("Overview", "overview", lambda: run_overview(registry, extra, bool(track))),
+        ("SEO", "seo", lambda: run_seo_audit(registry, extra)),
+        ("Keywords", "keywords", lambda: run_keywords(registry, extra)),
+        ("Customers", "customers", lambda: run_customers(registry, extra)),
+    ]
+    found = []
+    for label, kind, run in jobs:
+        try:
+            res = await run()
+            res = _save_customer_segment("__all__", res) if kind == "customers" else _save_analysis(kind, res)
+            for ch in (res.get("changes") or []):
+                if ch.get("pct") is not None and abs(ch["pct"]) >= threshold:
+                    found.append({"tab": kind, "tab_label": label, "metric": ch["label"],
+                                  "pct": ch["pct"], "prev": ch["prev"], "cur": ch["cur"]})
+        except Exception:
+            logger.exception("scheduled audit failed: %s", kind)
+    cfg = _load_schedule()
+    cfg["last_run"] = datetime.now(timezone.utc).isoformat()
+    _save_schedule(cfg)
+    if found:
+        _add_alerts(found)
+    logger.info("scheduler: ran audits, %d alert(s)", len(found))
+    return found
+
+
+_scheduler_started = False
+
+
+async def _scheduler_loop(registry: dict) -> None:
+    await asyncio.sleep(60)  # let the app settle after boot
+    while True:
+        try:
+            cfg = _load_schedule()
+            if cfg.get("enabled") and ANTHROPIC_API_KEY:
+                last = cfg.get("last_run")
+                due = True
+                if last:
+                    try:
+                        elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds()
+                        due = elapsed >= cfg.get("every_hours", 168) * 3600
+                    except Exception:
+                        due = True
+                if due:
+                    await _run_scheduled_audits(registry)
+        except Exception:
+            logger.exception("scheduler loop error")
+        await asyncio.sleep(SCHEDULE_CHECK_SECS)
+
+
+def _ensure_scheduler(registry: dict) -> None:
+    """Start the background scheduler once, lazily, when an event loop is running."""
+    global _scheduler_started
+    if _scheduler_started:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _scheduler_started = True
+    loop.create_task(_scheduler_loop(registry))
+
+
+# ---------------------------------------------------------------------------
 # Route registration (mounted onto the existing FastMCP app)
 # ---------------------------------------------------------------------------
 
@@ -2472,6 +2622,7 @@ def add_routes(mcp, registry: dict) -> None:
             qp = request.query_params
             if not (qp.get("shop") or qp.get("host") or qp.get("embedded") or qp.get("id_token")):
                 return PlainTextResponse("Not Found", status_code=404, headers=_API_HEADERS)
+        _ensure_scheduler(registry)  # start the background auto-refresh loop on first load (no-op until enabled)
         return HTMLResponse(_render_page(), headers=_frame_headers(request))
 
     @mcp.custom_route("/healthz", methods=["GET"])
@@ -2778,6 +2929,54 @@ def add_routes(mcp, registry: dict) -> None:
         if isinstance(cache.get("customers_segments"), dict):
             out["customers_segments"] = cache["customers_segments"]
         return _json(out)
+
+    @mcp.custom_route("/api/schedule", methods=["POST"])
+    async def schedule_route(request: Request):
+        # Get or set the automatic-refresh config (off by default).
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        try:
+            if isinstance(body.get("config"), dict):
+                cfg = _save_schedule(body["config"])
+                if cfg.get("enabled"):
+                    _ensure_scheduler(registry)
+            else:
+                cfg = _load_schedule()
+        except Exception:
+            logger.exception("schedule op failed")
+            return _json({"error": "Couldn't update the schedule (is a writable volume mounted at /data?)."}, 500)
+        return _json({"schedule": cfg})
+
+    @mcp.custom_route("/api/alerts", methods=["POST"])
+    async def alerts_route(request: Request):
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        op = body.get("op")
+        try:
+            if op == "dismiss" and body.get("id"):
+                _update_alert(body["id"], "seen")
+            elif op == "delete" and body.get("id"):
+                _update_alert(body["id"], "delete")
+            elif op == "clear":
+                _write_alerts([])
+        except Exception:
+            logger.exception("alerts op failed")
+            return _json({"error": "Couldn't update alerts."}, 500)
+        return _json({"alerts": _load_alerts()})
 
     @mcp.custom_route("/api/impact", methods=["POST"])
     async def impact_route(request: Request):
