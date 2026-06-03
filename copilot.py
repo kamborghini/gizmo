@@ -524,18 +524,70 @@ def _load_analysis_cache() -> dict:
         return {}
 
 
-def _save_analysis(kind: str, result: dict) -> None:
-    """Persist the latest result for a tab. Best-effort: never raises, so a
-    disk problem can't break the analysis response the merchant is waiting on."""
+def _parse_num(v):
+    """Best-effort number out of a formatted metric value ('$12,345', '24%', '1.2k', '3x')."""
+    s = str(v).strip().lower().replace(",", "")
+    m = re.search(r"(-?\d+(?:\.\d+)?)\s*([km])?", s)
+    if not m:
+        return None
+    num = float(m.group(1))
+    if m.group(2) == "k":
+        num *= 1000
+    elif m.group(2) == "m":
+        num *= 1_000_000
+    return num
+
+
+def _metric_snapshot(result: dict) -> dict:
+    """A compact {label: number} snapshot of a result's KPIs, for run-over-run diffs."""
+    snap = {}
+    for m in (result.get("metrics") or []):
+        if isinstance(m, dict) and m.get("label"):
+            n = _parse_num(m.get("value"))
+            if n is not None:
+                snap[str(m["label"])] = n
+    if isinstance(result.get("score"), (int, float)):
+        snap["SEO score"] = float(result["score"])
+    return {"at": datetime.now(timezone.utc).isoformat(), "metrics": snap}
+
+
+def _compute_changes(cur: dict, prev: dict) -> list:
+    """Per-metric deltas for labels present in both snapshots (skips unchanged)."""
+    out = []
+    for label, c in cur.items():
+        if label in prev:
+            p = prev[label]
+            if c == p:
+                continue
+            pct = None if not p else round((c - p) / abs(p) * 100, 1)
+            out.append({"label": label, "prev": p, "cur": c, "pct": pct})
+    return out
+
+
+def _with_changes(result: dict, prev_snap: dict, new_snap: dict) -> dict:
+    """Attach 'changes' + 'changes_since' to a result, computed vs the previous run."""
+    if prev_snap and prev_snap.get("at"):
+        return {**result, "changes": _compute_changes(new_snap.get("metrics", {}),
+                                                       prev_snap.get("metrics", {})),
+                "changes_since": prev_snap["at"]}
+    return result
+
+
+def _save_analysis(kind: str, result: dict) -> dict:
+    """Persist the latest result for a tab and return it augmented with run-over-run
+    changes. Best-effort: never raises, so a disk problem can't break the response."""
     if kind not in _ANALYSIS_KINDS or not isinstance(result, dict) or result.get("error"):
-        return
+        return result
     try:
+        snap = _metric_snapshot(result)
+        cache = _load_analysis_cache()
+        prev = (cache.get(kind) or {}).get("snapshot") or {}
+        result = _with_changes(result, prev, snap)
         blob = json.dumps(result, default=str)
         if len(blob) > ANALYSIS_CACHE_MAX_BYTES:
             logger.warning("analysis cache: %s result too large (%d bytes); not caching", kind, len(blob))
-            return
-        cache = _load_analysis_cache()
-        cache[kind] = {"result": json.loads(blob), "at": datetime.now(timezone.utc).isoformat()}
+            return result
+        cache[kind] = {"result": json.loads(blob), "at": datetime.now(timezone.utc).isoformat(), "snapshot": snap}
         os.makedirs(os.path.dirname(ANALYSIS_CACHE_PATH) or ".", exist_ok=True)
         tmp = ANALYSIS_CACHE_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -543,23 +595,28 @@ def _save_analysis(kind: str, result: dict) -> None:
         os.replace(tmp, ANALYSIS_CACHE_PATH)
     except Exception:
         logger.exception("analysis cache: failed to save %s", kind)
+    return result
 
 
-def _save_customer_segment(seg_key: str, result: dict) -> None:
-    """Persist a customer audit per sector (key '__all__' for the comprehensive run), so
-    reopening shows each sector instantly. Best-effort: never raises."""
+def _save_customer_segment(seg_key: str, result: dict) -> dict:
+    """Persist a customer audit per sector (key '__all__' for the comprehensive run) and
+    return it augmented with run-over-run changes. Best-effort: never raises."""
     if not isinstance(result, dict) or result.get("error"):
-        return
+        return result
+    key = str(seg_key)[:80]
     try:
-        blob = json.dumps(result, default=str)
-        if len(blob) > ANALYSIS_CACHE_MAX_BYTES:
-            logger.warning("analysis cache: customers/%s result too large; not caching", seg_key)
-            return
+        snap = _metric_snapshot(result)
         cache = _load_analysis_cache()
         segs = cache.get("customers_segments")
         if not isinstance(segs, dict):
             segs = {}
-        segs[str(seg_key)[:80]] = {"result": json.loads(blob), "at": datetime.now(timezone.utc).isoformat()}
+        prev = (segs.get(key) or {}).get("snapshot") or {}
+        result = _with_changes(result, prev, snap)
+        blob = json.dumps(result, default=str)
+        if len(blob) > ANALYSIS_CACHE_MAX_BYTES:
+            logger.warning("analysis cache: customers/%s result too large; not caching", seg_key)
+            return result
+        segs[key] = {"result": json.loads(blob), "at": datetime.now(timezone.utc).isoformat(), "snapshot": snap}
         if len(segs) > 24:  # keep the most recently refreshed sectors
             segs = dict(sorted(segs.items(), key=lambda kv: kv[1].get("at", ""), reverse=True)[:24])
         cache["customers_segments"] = segs
@@ -570,6 +627,7 @@ def _save_customer_segment(seg_key: str, result: dict) -> None:
         os.replace(tmp, ANALYSIS_CACHE_PATH)
     except Exception:
         logger.exception("analysis cache: failed to save customer segment %s", seg_key)
+    return result
 
 
 _PAGE_LABELS = {
@@ -2514,7 +2572,7 @@ def add_routes(mcp, registry: dict) -> None:
         except Exception:
             logger.exception("Overview failed")
             return _json({"error": "Couldn't build the overview. Check the server logs."}, 500)
-        _save_analysis("overview", result)
+        result = _save_analysis("overview", result)
         return _json(result)
 
     @mcp.custom_route("/api/profile", methods=["POST"])
@@ -2560,7 +2618,7 @@ def add_routes(mcp, registry: dict) -> None:
         except Exception:
             logger.exception("SEO audit failed")
             return _json({"error": "Couldn't run the SEO audit. Check the server logs."}, 500)
-        _save_analysis("seo", result)
+        result = _save_analysis("seo", result)
         return _json(result)
 
     @mcp.custom_route("/api/keywords", methods=["POST"])
@@ -2577,7 +2635,7 @@ def add_routes(mcp, registry: dict) -> None:
         extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         try:
             res = await run_keywords(registry, extra)
-            _save_analysis("keywords", res)
+            res = _save_analysis("keywords", res)
             return _json(res)
         except anthropic.APIError:
             logger.exception("Anthropic API error (keywords)")
@@ -2793,7 +2851,7 @@ def add_routes(mcp, registry: dict) -> None:
         extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         try:
             res = await run_customers(registry, extra, segment=segment or None)
-            _save_customer_segment(segment or "__all__", res)
+            res = _save_customer_segment(segment or "__all__", res)
             return _json(res)
         except anthropic.APIError:
             logger.exception("Anthropic API error (customers)")

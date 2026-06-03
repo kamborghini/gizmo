@@ -327,6 +327,10 @@
         .secbtn .cdot { width: 6px; height: 6px; border-radius: 50%; background: var(--win); }
         .seclink { background: transparent; border: 0; color: var(--accent-ink); font: inherit; font-weight: 600; cursor: pointer; padding: 0; text-align: left; }
         .seclink:hover { text-decoration: underline; }
+        /* what-changed digest */
+        .changes-strip { margin: 2px 0 22px; }
+        .changes-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
+        .changes-head svg { width: 13px; height: 13px; }
         /* run-task gate (tabs stay idle until the user starts the task) */
         .run-gate { max-width: 480px; margin: 7vh auto 0; text-align: center; display: flex; flex-direction: column; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 38px 34px; box-shadow: var(--sh-1), var(--hair); animation: fadeUp .4s ease backwards; }
         .run-gate .rg-ic { width: 56px; height: 56px; border-radius: 16px; background: var(--accent-soft); color: var(--accent-ink); display: grid; place-items: center; box-shadow: inset 0 0 0 1px var(--accent-line); margin-bottom: 18px; }
@@ -1518,6 +1522,24 @@
                 htext.children[1].textContent = 'Could not load overview.';
             }
         }
+        function changesStrip(changes, since) {
+            if (!Array.isArray(changes) || !changes.length) return null;
+            const wrap = el('div', 'changes-strip');
+            const head = el('div', 'changes-head'); head.append(ico(I.rotate));
+            let label = 'What changed';
+            if (since) { const d = new Date(since); if (!isNaN(d)) label += ' since ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); }
+            head.append(document.createTextNode(label)); wrap.append(head);
+            const row = el('div', 'impact-deltas');
+            changes.slice().sort((a, b) => Math.abs(b.pct || 0) - Math.abs(a.pct || 0)).slice(0, 8).forEach(ch => {
+                const lowerBetter = /position|at risk|unfulfilled|low stock|cpc|bounce/i.test(ch.label || '');
+                const good = ch.pct == null ? null : (lowerBetter ? ch.pct < 0 : ch.pct > 0);
+                const cls = good == null ? 'flat' : good ? 'up' : 'down';
+                const chip = el('div', 'idelta ' + cls);
+                chip.append(el('span', 'il', ch.label), el('span', 'iv', ch.pct == null ? '~' : ((ch.pct > 0 ? '+' : '') + ch.pct + '%')));
+                row.append(chip);
+            });
+            wrap.append(row); return wrap;
+        }
         function renderOverview(cache) {
             const data = cache.data; const box = $('ov-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.grid;
@@ -1525,6 +1547,7 @@
             hero.append(badge, htext);
             hero.append(el('div', 'ov-updated', freshLabel(cache.at)));
             box.append(hero);
+            { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
             const ofu = memories.filter(m => m.type === 'followup' && m.status === 'open');
             if (ofu.length) {
                 box.append(el('div', 'section-title', 'Open follow-ups'));
@@ -1585,6 +1608,7 @@
             hero.append(badge, htext);
             hero.append(el('div', 'ov-updated', freshLabel(cache.at)));
             box.append(hero);
+            { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
             // Score + KPI strip
             if (typeof data.score === 'number') {
                 const tier = data.score >= 80 ? 'good' : data.score >= 60 ? 'mid' : 'low';
@@ -1732,6 +1756,7 @@
             hero.append(badge, ht);
             hero.append(el('div', 'ov-updated', freshLabel(cache.at)));
             box.append(hero);
+            { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
             box.append(keywordScanCard());
             if (Array.isArray(data.metrics) && data.metrics.length) box.append(metricsGrid(data.metrics));
             if (Array.isArray(s.actions) && s.actions.length) { box.append(el('div', 'section-title', 'Top keyword opportunities')); box.append(actionsCard(s.actions)); }
@@ -1873,6 +1898,7 @@
             hero.append(badge, ht);
             hero.append(el('div', 'ov-updated', freshLabel(cached.at)));
             box.append(hero);
+            { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
             if (Array.isArray(data.metrics) && data.metrics.length) box.append(metricsGrid(data.metrics));
             if (comp && Array.isArray(data.sector_comparison) && data.sector_comparison.length) {
                 box.append(el('div', 'section-title', 'Sector comparison'));
