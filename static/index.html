@@ -1555,6 +1555,24 @@
                 htext.children[1].textContent = 'Could not load overview.';
             }
         }
+        function sectorSalesTable(rows, cur) {
+            const days = (rows[0] && rows[0].days) ? rows[0].days : 28;
+            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
+            const thead = el('thead'); const htr = el('tr');
+            ['Sector', 'Revenue (' + days + 'd)', 'Orders', 'AOV'].forEach((h, i) => htr.append(el('th', i ? 'num' : null, h)));
+            thead.append(htr); tbl.append(thead); const tb = el('tbody');
+            rows.forEach(r => {
+                const tr = el('tr'); const c0 = el('td', 'kw');
+                const link = el('button', 'seclink'); link.textContent = r.sector || '';
+                link.title = 'Open this sector in Customers'; link.onclick = () => { customersSeg = r.sector; setView('customers'); };
+                c0.append(link); tr.append(c0);
+                tr.append(el('td', 'num', fmtMoney(r.revenue || 0, cur)));
+                tr.append(el('td', 'num', (r.orders || 0).toLocaleString()));
+                tr.append(el('td', 'num', fmtMoney(r.aov || 0, cur)));
+                tb.append(tr);
+            });
+            tbl.append(tb); wrap.append(tbl); return wrap;
+        }
         function changesStrip(changes, since) {
             if (!Array.isArray(changes) || !changes.length) return null;
             const wrap = el('div', 'changes-strip');
@@ -1605,6 +1623,10 @@
                 }
                 box.append(ctrl);
                 box.append(metricsGridCustom(withSparks(data.metrics, data.trends)));
+            }
+            if (Array.isArray(data.sector_sales) && data.sector_sales.length) {
+                box.append(el('div', 'section-title', 'Sales by sector'));
+                box.append(sectorSalesTable(data.sector_sales, data.currency));
             }
             renderTrendsBlock(box, data.trends, data.currency, ovRange, (v) => { ovRange = v; renderOverview(overviewCache); });
             const s = Object.assign({}, data.structured); delete s.summary;

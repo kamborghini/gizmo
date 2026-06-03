@@ -1159,13 +1159,50 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
     return [m for m in metrics if m.get("value") is not None], context
 
 
+async def _sector_sales(registry: dict, days: int = 28) -> list:
+    """Revenue / orders / AOV for the period, split by customer-account tag (the
+    merchant's sectors). Returns [] when no tags are in use. Never raises."""
+    try:
+        customers, orders = await asyncio.gather(
+            _paginate_customers(registry),
+            _paginate_orders(registry, days=days, fields="id,total_price,created_at,customer"),
+        )
+        tags = _detect_sector_tags(customers)
+        if not tags:
+            return []
+        cid_tags = {}
+        for c in customers:
+            cid = c.get("id")
+            if cid is not None:
+                cid_tags[cid] = [t.lower() for t in _customer_tags(c)]
+        wanted = {t["tag"].lower(): t["tag"] for t in tags}
+        agg = {t["tag"]: {"sector": t["tag"], "revenue": 0.0, "orders": 0} for t in tags}
+        for o in orders:
+            cid = (o.get("customer") or {}).get("id")
+            rev = float(o.get("total_price") or 0)
+            for lt in cid_tags.get(cid, []):
+                if lt in wanted:
+                    a = agg[wanted[lt]]
+                    a["revenue"] += rev
+                    a["orders"] += 1
+        out = [{"sector": t["tag"], "revenue": round(agg[t["tag"]]["revenue"], 2),
+                "orders": agg[t["tag"]]["orders"],
+                "aov": round(agg[t["tag"]]["revenue"] / agg[t["tag"]]["orders"], 2) if agg[t["tag"]]["orders"] else 0,
+                "days": days} for t in tags]
+        out.sort(key=lambda x: x["revenue"], reverse=True)
+        return out
+    except Exception:
+        logger.exception("sector sales failed")
+        return []
+
+
 async def run_overview(registry: dict, extra_system: str = "", track_inventory: bool = True) -> dict:
     metrics, context = await _compute_metrics(registry, track_inventory)
     client = _anthropic()
     msg = ("Current store KPIs (computed live):\n" + json.dumps(context, indent=2, default=str)
            + "\n\nGive the executive overview now by calling present_response.")
-    # Fetch the chart data WHILE the model writes the analysis (overlaps a full data pull with the AI step).
-    resp, trends = await asyncio.gather(
+    # Fetch the chart data + sector sales WHILE the model writes the analysis (free wall-clock).
+    resp, trends, sector_sales = await asyncio.gather(
         client.messages.create(
             model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
             tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
@@ -1173,13 +1210,15 @@ async def run_overview(registry: dict, extra_system: str = "", track_inventory: 
             output_config={"effort": _effort_for(MODEL_DEEP)},
         ),
         _overview_trends(registry),
+        _sector_sales(registry),
     )
     present = next((b.input for b in resp.content
                     if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
     structured = _coerce_structured(present or {"summary": "Here's your store overview."})
     structured.pop("metrics", None)  # UI shows the computed metrics, not Claude's echo
     currency = (context.get("shop") or {}).get("currency", "")
-    return {"metrics": metrics, "structured": structured, "trends": trends, "currency": currency}
+    return {"metrics": metrics, "structured": structured, "trends": trends,
+            "currency": currency, "sector_sales": sector_sales}
 
 
 async def _overview_trends(registry: dict) -> dict:
