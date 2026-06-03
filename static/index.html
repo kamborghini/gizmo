@@ -991,7 +991,11 @@
         // Draws gridlines, y-tick labels, x-tick labels, and rotated axis titles. Returns {X, Y}.
         function drawFrame(svg, c) {
             const { W, H, padL, padR, padT, padB, n, labels, maxV, fmt } = c;
-            const X = (i) => padL + (n <= 1 ? 0 : (i / (n - 1)) * (W - padL - padR));
+            // Bars use a band scale (each bar centered in its own slot, inset from the axes);
+            // lines/areas use an endpoint scale (the series touches both axes).
+            const X = c.band
+                ? (i) => padL + ((i + 0.5) / Math.max(1, n)) * (W - padL - padR)
+                : (i) => padL + (n <= 1 ? 0 : (i / (n - 1)) * (W - padL - padR));
             const Y = (v) => padT + (1 - ((Number(v) || 0) / (maxV || 1))) * (H - padT - padB);
             const ticks = 4, gy = svgEl('g', { class: 'axis-y' });
             for (let t = 0; t <= ticks; t++) { const yy = padT + t / ticks * (H - padT - padB); gy.append(svgEl('line', { class: 'gridline', x1: padL, y1: yy, x2: W - padR, y2: yy })); const tx = svgEl('text', { x: padL - 8, y: yy + 3.5, 'text-anchor': 'end' }); tx.textContent = (c.tickFmt || fmt)(maxV * (1 - t / ticks)); gy.append(tx); }
@@ -1075,8 +1079,8 @@
             if (vals.length < 1) { wrap.append(el('div', 'empty', 'Not enough data in this range to chart yet.')); return card; }
             const n = vals.length, maxV = niceMax(Math.max.apply(null, vals.concat([0])));
             const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H });
-            const { X, Y } = drawFrame(svg, { W, H, padL, padR, padT, padB, n, labels, maxV, fmt, tickFmt: opts.tickFormat || fmt, yUnit: opts.yUnit, xTitle: opts.xTitle || 'Month' });
-            const bw = Math.max(2, (W - padL - padR) / n * 0.6), tip = el('div', 'chart-tip'); wrap.append(tip);
+            const { X, Y } = drawFrame(svg, { W, H, padL, padR, padT, padB, n, labels, maxV, fmt, tickFmt: opts.tickFormat || fmt, yUnit: opts.yUnit, xTitle: opts.xTitle || 'Month', band: true });
+            const bw = Math.max(2, (W - padL - padR) / n * 0.62), tip = el('div', 'chart-tip'); wrap.append(tip);
             const bars = vals.map((v, i) => { const y = Y(v), r = svgEl('rect', { class: 'chart-bar', x: (X(i) - bw / 2).toFixed(1), y: y.toFixed(1), width: bw.toFixed(1), height: Math.max(0, Y(0) - y).toFixed(1), rx: 3, fill: color }); svg.append(r); return r; });
             if (opts.annotate !== false) annotate(svg, vals, X, Y, color, fmt, W, padR, padL, padT);
             bars.forEach((r, i) => r.addEventListener('mouseenter', () => { bars.forEach(b => b.style.opacity = .38); r.style.opacity = 1; tip.innerHTML = ''; tip.append(el('div', 'tl', labels[i])); const tr = el('div', 'tr'); const sw = el('span', 'sw'); sw.style.background = color; tr.append(sw, el('b', null, fmt(vals[i]))); tip.append(tr); const rect = svg.getBoundingClientRect(); tip.style.left = (X(i) / W * rect.width) + 'px'; tip.style.top = (Y(vals[i]) / H * rect.height) + 'px'; tip.style.opacity = 1; }));
