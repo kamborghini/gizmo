@@ -29,6 +29,7 @@ import logging
 import secrets
 import ipaddress
 from datetime import datetime, timedelta, timezone
+import contextvars
 from typing import Any, Callable, Optional
 from urllib.parse import urlparse, urljoin
 
@@ -122,6 +123,14 @@ SCHEDULE_PATH      = os.environ.get("SCHEDULE_PATH", "/data/schedule.json")  # a
 ALERTS_PATH        = os.environ.get("ALERTS_PATH", "/data/alerts.json")      # change alerts from scheduled runs
 ALERTS_MAX         = int(os.environ.get("ALERTS_MAX", "60"))
 SCHEDULE_CHECK_SECS = int(os.environ.get("SCHEDULE_CHECK_SECS", "900"))       # how often the scheduler wakes to check
+USAGE_PATH         = os.environ.get("USAGE_PATH", "/data/usage.json")          # AI token-usage + cost log (measurement)
+USAGE_MAX          = int(os.environ.get("USAGE_MAX", "5000"))                  # max usage events retained
+# Anthropic list prices, $ per 1M tokens (input, output). Cache read ~0.1x input, write ~1.25x input.
+_MODEL_PRICE = {
+    "claude-opus-4-8": (5.0, 25.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-haiku-4-5": (1.0, 5.0),
+}
 
 _PAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "index.html")
 _page_cache: Optional[str] = None
@@ -863,7 +872,7 @@ async def run_learn(registry: dict) -> dict:
     corpus = json.dumps({"shop": {"name": shop.get("name"), "domain": primary}, "pages": pages},
                         default=str)[:30000]
     client = _anthropic()
-    resp = await client.messages.create(
+    resp = await _xcreate(client,
         model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=LEARN_SYSTEM,
         messages=[{"role": "user", "content": "Store website content:\n" + corpus
                    + "\n\nWrite the store knowledge profile now."}],
@@ -929,6 +938,84 @@ def _anthropic() -> anthropic.AsyncAnthropic:
     return _client
 
 
+# ---------------------------------------------------------------------------
+# AI usage + cost logging (measurement, to inform pricing). Every model call
+# goes through _xcreate, which records real token counts + estimated cost,
+# tagged with the audit type via the _ai_kind context var.
+# ---------------------------------------------------------------------------
+_ai_kind: "contextvars.ContextVar[str]" = contextvars.ContextVar("ai_kind", default="ai")
+
+
+def _price_for(model: str, inp: int, out: int, cache_read: int = 0, cache_write: int = 0) -> float:
+    pi, po = _MODEL_PRICE.get(model, (5.0, 25.0))
+    return round((inp * pi + cache_write * pi * 1.25 + cache_read * pi * 0.10 + out * po) / 1_000_000, 6)
+
+
+def _log_usage(kind: str, model: str, usage) -> None:
+    """Append one model call's token usage + estimated cost. Best-effort; never raises."""
+    if usage is None:
+        return
+    try:
+        inp = int(getattr(usage, "input_tokens", 0) or 0)
+        out = int(getattr(usage, "output_tokens", 0) or 0)
+        cr = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+        cw = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+        rec = {"at": datetime.now(timezone.utc).isoformat(), "kind": kind, "model": model,
+               "in": inp, "out": out, "cache_read": cr, "cache_write": cw,
+               "cost": _price_for(model, inp, out, cr, cw)}
+        try:
+            with open(USAGE_PATH, "r", encoding="utf-8") as fh:
+                events = json.load(fh).get("events", [])
+        except Exception:
+            events = []
+        events.append(rec)
+        events = events[-USAGE_MAX:]
+        os.makedirs(os.path.dirname(USAGE_PATH) or ".", exist_ok=True)
+        tmp = USAGE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"events": events}, fh)
+        os.replace(tmp, USAGE_PATH)
+    except Exception:
+        logger.exception("usage log failed")
+
+
+async def _xcreate(client, **kwargs):
+    """Wrapper around messages.create that logs token usage + cost per call."""
+    resp = await getattr(client.messages, "create")(**kwargs)
+    _log_usage(_ai_kind.get("ai"), kwargs.get("model", ""), getattr(resp, "usage", None))
+    return resp
+
+
+def _usage_summary(days: int = 30) -> dict:
+    """Aggregate the usage log: totals, per-kind breakdown, and what the same token
+    volume would cost on Sonnet / Haiku (to inform the model strategy)."""
+    try:
+        with open(USAGE_PATH, "r", encoding="utf-8") as fh:
+            events = json.load(fh).get("events", [])
+    except Exception:
+        events = []
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    ev = [e for e in events if (e.get("at") or "") >= cutoff]
+    by_kind: dict = {}
+    tot_cost = tot_in = tot_out = 0.0
+    cost_sonnet = cost_haiku = 0.0
+    for e in ev:
+        k = e.get("kind", "ai")
+        b = by_kind.setdefault(k, {"kind": k, "runs": 0, "in": 0, "out": 0, "cost": 0.0})
+        i_, o_, cr, cw = e.get("in", 0), e.get("out", 0), e.get("cache_read", 0), e.get("cache_write", 0)
+        b["runs"] += 1; b["in"] += i_; b["out"] += o_; b["cost"] += e.get("cost", 0)
+        tot_cost += e.get("cost", 0); tot_in += i_; tot_out += o_
+        cost_sonnet += _price_for("claude-sonnet-4-6", i_, o_, cr, cw)
+        cost_haiku += _price_for("claude-haiku-4-5", i_, o_, cr, cw)
+    for b in by_kind.values():
+        b["cost"] = round(b["cost"], 4)
+        b["avg_cost"] = round(b["cost"] / b["runs"], 4) if b["runs"] else 0
+    return {"days": days, "runs": len(ev), "cost": round(tot_cost, 4),
+            "in": int(tot_in), "out": int(tot_out),
+            "cost_if_sonnet": round(cost_sonnet, 4), "cost_if_haiku": round(cost_haiku, 4),
+            "by_kind": sorted(by_kind.values(), key=lambda x: -x["cost"])}
+
+
 def _strip_dashes(obj: Any) -> Any:
     """Remove em/en dashes from any model-generated text before it reaches the UI.
     The prompts already instruct against them; this is the guarantee. En dash to
@@ -976,6 +1063,7 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
     """Run a multi-step tool-use conversation. The final answer is delivered via
     the present_response tool and returned as a structured dict. If `emit` is given,
     it is awaited with progress events ({"type":"step","label":...}) for live streaming."""
+    _ai_kind.set("chat")
     client = _anthropic()
     messages = list(history)
     tools_used: list[str] = []
@@ -993,7 +1081,7 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
         }
         if THINKING_MODE:  # adaptive thinking: deeper reasoning, model self-paces
             kwargs["thinking"] = {"type": THINKING_MODE}
-        resp = await client.messages.create(**kwargs)
+        resp = await _xcreate(client,**kwargs)
 
         data_uses: list[Any] = []
         present: Optional[dict] = None
@@ -1201,13 +1289,14 @@ async def _sector_sales(registry: dict, days: int = 28) -> list:
 
 
 async def run_overview(registry: dict, extra_system: str = "", track_inventory: bool = True) -> dict:
+    _ai_kind.set("overview")
     metrics, context = await _compute_metrics(registry, track_inventory)
     client = _anthropic()
     msg = ("Current store KPIs (computed live):\n" + json.dumps(context, indent=2, default=str)
            + "\n\nGive the executive overview now by calling present_response.")
     # Fetch the chart data + sector sales WHILE the model writes the analysis (free wall-clock).
     resp, trends, sector_sales = await asyncio.gather(
-        client.messages.create(
+        _xcreate(client,
             model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
             tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
             messages=[{"role": "user", "content": msg}],
@@ -1670,6 +1759,7 @@ def _build_google_tools() -> dict:
 
 
 async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
+    _ai_kind.set("seo")
     primary, hosts = await _resolve_domains(registry)
     if not primary:
         raise RuntimeError("Could not resolve the store's domain to audit.")
@@ -1736,7 +1826,7 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
              "gates before optimizations. Be specific and quantify in money or percent wherever you can.")
     # Fetch the search trend series WHILE the model writes the report.
     resp, gts = await asyncio.gather(
-        client.messages.create(
+        _xcreate(client,
             model=MODEL_DEEP, max_tokens=MAX_TOKENS,
             system=OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE + extra_system,
             tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
@@ -1768,6 +1858,7 @@ async def run_keywords(registry: dict, extra_system: str = "") -> dict:
     """Fuse Search Console keywords with Google Ads (via GA4) into a money-ranked
     keyword + CPC plan. Returns the AI analysis plus the raw keyword list and ad data
     for the UI tables. Degrades gracefully when Google is not connected."""
+    _ai_kind.set("keywords")
     days = 90
     gsc_ok = google_data.gsc_configured()
     ga4_ok = google_data.ga4_configured()
@@ -1807,7 +1898,7 @@ async def run_keywords(registry: dict, extra_system: str = "") -> dict:
              "expected impact). Use `insights` for the key findings across organic search and paid. Use "
              "`sections` for supporting detail. If paid data is absent, focus on organic and say what to "
              "connect. Be specific and quantify in money or percent.")
-    resp = await client.messages.create(
+    resp = await _xcreate(client,
         model=MODEL_DEEP, max_tokens=MAX_TOKENS,
         system=OVERVIEW_SYSTEM + "\n\n" + KEYWORD_SYSTEM + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
@@ -1840,7 +1931,7 @@ async def run_keyword_scan(registry: dict, url: str, extra_system: str = "") -> 
              "keywords it targets. Use `insights` for what it does well and where it is weak. Use `actions` "
              "for specific keywords, topics or pages the merchant should create or optimize to compete, "
              "cross-referencing the merchant's own queries when provided. Be concrete and prioritized.")
-    resp = await client.messages.create(
+    resp = await _xcreate(client,
         model=MODEL_DEEP, max_tokens=MAX_TOKENS,
         system=OVERVIEW_SYSTEM + "\n\n" + KEYWORD_SYSTEM + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
@@ -2050,6 +2141,7 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
     segments, churn risk, top customers, and a new-customers trend, with an AI plan.
     With `segment` (a customer tag) the figures are filtered to that sector; otherwise the
     analysis covers all customers and compares the sectors."""
+    _ai_kind.set("customers")
     months = _month_axis(12)
     shop, all_customers, orders = await asyncio.gather(
         _tool_json(registry, "shopify_get_shop", {}),
@@ -2175,7 +2267,7 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
                  "`insights` for the key cross-sector findings and `actions` for prioritized moves, each with "
                  "expected impact in money or percent.")
     client = _anthropic()
-    resp = await client.messages.create(
+    resp = await _xcreate(client,
         model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
@@ -2239,7 +2331,7 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
              "Lead with the highest-impact opportunities in `actions` (with the supporting numbers and the "
              "expected impact). Use `insights` for the key findings across search, traffic, sales and on-page "
              "SEO. Be specific to this product and quantify wherever you can.")
-    resp = await client.messages.create(
+    resp = await _xcreate(client,
         model=MODEL_DEEP, max_tokens=MAX_TOKENS,
         system=OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
@@ -2977,6 +3069,24 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("alerts op failed")
             return _json({"error": "Couldn't update alerts."}, 500)
         return _json({"alerts": _load_alerts()})
+
+    @mcp.custom_route("/api/usage", methods=["POST"])
+    async def usage_route(request: Request):
+        # AI token usage + estimated cost (measurement, no AI).
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        days = 30
+        if isinstance(body, dict):
+            try:
+                days = max(1, min(365, int(body.get("days", 30))))
+            except (TypeError, ValueError):
+                days = 30
+        return _json({"usage": _usage_summary(days)})
 
     @mcp.custom_route("/api/impact", methods=["POST"])
     async def impact_route(request: Request):

@@ -700,6 +700,8 @@
                 </div>
                 <div class="section-title" style="margin: 22px 0 6px;">Connections</div>
                 <div id="connections"><div class="setting-sub">Checking connections…</div></div>
+                <div class="section-title" style="margin: 22px 0 6px;">AI usage (last 30 days)</div>
+                <div id="usage"><div class="setting-sub">Loading usage…</div></div>
             </div>
             <div class="modal-foot">
                 <button class="btn" id="settings-cancel">Cancel</button>
@@ -2599,6 +2601,7 @@
             $('pf-voice').focus();
             loadConnections();
             loadSchedule();
+            loadUsage();
         }
         function closeSettings() { $('settings-modal').classList.remove('show'); }
         async function applySettings() {
@@ -2627,6 +2630,35 @@
         $('settings-cancel').onclick = closeSettings;
         $('settings-save').onclick = applySettings;
         prefToggles().forEach(t => t.onclick = function () { this.classList.toggle('on'); });
+        function loadUsage() {
+            const box = $('usage'); if (!box) return;
+            box.innerHTML = '<div class="setting-sub">Loading usage…</div>';
+            api('/api/usage', { days: 30 }).then(d => {
+                const u = (d && d.usage) || {}; box.innerHTML = '';
+                const top = el('div', 'setting-sub');
+                top.append(document.createTextNode('Estimated AI spend: '));
+                top.append(el('b', null, '$' + (u.cost || 0).toFixed(2)));
+                top.append(document.createTextNode(' across ' + (u.runs || 0) + ' calls. Same volume on Sonnet ≈ $' + (u.cost_if_sonnet || 0).toFixed(2) + ', on Haiku ≈ $' + (u.cost_if_haiku || 0).toFixed(2) + '.'));
+                box.append(top);
+                if (Array.isArray(u.by_kind) && u.by_kind.length) {
+                    const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = '10px'; const tbl = el('table', 'ktable');
+                    const thead = el('thead'); const htr = el('tr');
+                    ['Type', 'Runs', 'Avg cost', 'Total'].forEach((h, i) => htr.append(el('th', i ? 'num' : null, h)));
+                    thead.append(htr); tbl.append(thead); const tb = el('tbody');
+                    u.by_kind.forEach(k => {
+                        const tr = el('tr');
+                        tr.append(el('td', 'kw', k.kind));
+                        tr.append(el('td', 'num', String(k.runs)));
+                        tr.append(el('td', 'num', '$' + (k.avg_cost || 0).toFixed(3)));
+                        tr.append(el('td', 'num', '$' + (k.cost || 0).toFixed(2)));
+                        tb.append(tr);
+                    });
+                    tbl.append(tb); wrap.append(tbl); box.append(wrap);
+                } else {
+                    box.append(el('div', 'setting-sub', 'No AI usage recorded yet. Run an audit or chat, then reopen this.'));
+                }
+            }).catch(() => { box.innerHTML = '<div class="setting-sub">Usage unavailable.</div>'; });
+        }
         function loadSchedule() {
             api('/api/schedule', {}).then(d => {
                 const s = (d && d.schedule) || {};
