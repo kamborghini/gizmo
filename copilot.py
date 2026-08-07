@@ -3426,6 +3426,89 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("Production labels failed")
             return _json({"error": "Couldn't load production orders. Check the server logs."}, 500)
 
+    @mcp.custom_route("/print/production-labels", methods=["GET"])
+    async def print_labels_doc(request: Request):
+        """Printable label document for the admin print-action extensions. The admin's
+        print modal loads this URL directly (with the embedded id_token appended, the
+        same way it loads the app page) and shows it in the print preview, so the
+        merchant prints without ever leaving the order. Accepts ?ids=<order ids or
+        GIDs, comma separated> and optional ?size=4x2|4x3|4x6|2x4|a4."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+
+        def deny(msg: str):
+            return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>" + html.escape(msg) + "</p>",
+                                status_code=401, headers=_API_HEADERS)
+
+        # Auth: the print frame passes id_token as a query param; extension fetches
+        # would use the Authorization header. Either verifies the same way.
+        token = request.query_params.get("id_token") or ""
+        if not token:
+            auth = request.headers.get("authorization", "")
+            if auth.startswith("Bearer "):
+                token = auth[7:]
+        if not token or not SHOPIFY_API_SECRET:
+            return deny("Unauthorized. Open this from your Shopify admin.")
+        try:
+            _verify_session_token(token)
+        except Exception:
+            return deny("Unauthorized. Open this from your Shopify admin.")
+
+        ids = []
+        for part in str(request.query_params.get("ids") or "").split(","):
+            m = re.search(r"(\d+)\s*$", part.strip())
+            if m:
+                ids.append(int(m.group(1)))
+        ids = list(dict.fromkeys(ids))[:50]
+        if not ids:
+            return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>No orders were selected.</p>",
+                                headers=_API_HEADERS)
+
+        sizes = {"4x2": (101.6, 50.8), "4x3": (101.6, 76.2), "4x6": (101.6, 152.4),
+                 "2x4": (50.8, 101.6), "a4": (210, 297)}
+        w, h = sizes.get(str(request.query_params.get("size") or "4x2"), sizes["4x2"])
+
+        results = await asyncio.gather(*[run_production_labels(registry, order_id=i) for i in ids])
+        orders = [r["orders"][0] for r in results if r.get("orders")]
+        esc = html.escape
+        sheets = []
+        for o in orders:
+            items = []
+            for it in o.get("items", []):
+                opts = "".join(
+                    "<li class='opt'>" + (("<b>" + esc(op.get("name", "")) + ":</b> ") if op.get("name") else "")
+                    + esc(op.get("value", "")) + "</li>"
+                    for op in it.get("options", []))
+                items.append("<li><div class='item'><span class='qty'>" + esc(str(it.get("quantity", 1)))
+                             + " x</span> " + esc(it.get("title", "")) + "</div>"
+                             + ("<ul class='opts'>" + opts + "</ul>" if opts else "") + "</li>")
+            party_k = "Company" if o.get("is_company") else "Customer"
+            sheets.append(
+                "<div class='sheet'><div class='num'>Order Number: " + esc(str(o.get("name") or ("#" + str(o.get("order_number", ""))))) + "</div>"
+                + "<div class='party'><span class='k'>" + party_k + ":</span> " + esc(o.get("display_name", "")) + "</div>"
+                + "<div class='rule'></div><ul class='items'>" + "".join(items) + "</ul></div>")
+        if not sheets:
+            return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>Those orders could not be found.</p>",
+                                headers=_API_HEADERS)
+
+        compact = h <= 60
+        doc = ("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Production labels</title><style>"
+               "@page { size: " + str(w) + "mm " + str(h) + "mm; margin: 0; }"
+               "* { box-sizing: border-box; margin: 0; padding: 0; }"
+               "body { font-family: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; background: #fff; color: #000; }"
+               ".sheet { width: " + str(w) + "mm; height: " + str(h) + "mm; padding: " + ("3.5mm 4mm" if compact else "5mm 5.5mm") + ";"
+               " overflow: hidden; page-break-after: always; break-after: page; font-size: " + ("13px" if compact else "15px") + "; line-height: 1.22; }"
+               ".sheet:last-child { page-break-after: auto; break-after: auto; }"
+               ".num { font-size: 1.32em; font-weight: 800; letter-spacing: -.02em; }"
+               ".party { font-size: .95em; font-weight: 700; margin-top: .2em; } .party .k { color: #444; font-weight: 600; }"
+               ".rule { border-top: 1px solid #bbb; margin: .45em 0 .4em; }"
+               "ul { list-style: none; } .item { font-size: .92em; font-weight: 700; padding-top: .2em; } .qty { font-weight: 800; }"
+               ".opts { padding-left: .8em; margin: .05em 0 .1em; } .opt { font-size: .82em; color: #222; padding: .06em 0; font-weight: 500; } .opt b { font-weight: 700; }"
+               "</style></head><body>" + "".join(sheets) + "</body></html>")
+        headers = {**_API_HEADERS, "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store"}
+        return HTMLResponse(doc, headers=headers)
+
     @mcp.custom_route("/api/products", methods=["POST"])
     async def products_route(request: Request):
         pre = _pre_checks(request)

@@ -1,0 +1,12 @@
+api_version = "2026-04"
+
+[[extensions]]
+name = "Print production labels"
+handle = "print-label-bulk"
+uid = "a47470e0-91b6-11df-bc14-29067280fc220d439494"
+type = "ui_extension"
+description = "Preview and print the production label for every selected order at once"
+
+[[extensions.targeting]]
+module = "./src/PrintActionExtension.jsx"
+target = "admin.order-index.selection-print-action.render"

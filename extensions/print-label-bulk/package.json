@@ -1,0 +1,10 @@
+{
+  "name": "print-label-bulk",
+  "private": true,
+  "version": "1.0.0",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "preact": "^10.10.0",
+    "@shopify/ui-extensions": "2026-04"
+  }
+}

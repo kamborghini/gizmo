@@ -1,0 +1,12 @@
+api_version = "2026-04"
+
+[[extensions]]
+name = "Print production label"
+handle = "print-label-order"
+uid = "db9a0fd3-a01c-b7c4-6d90-6e2aa8bcb80499b76f5d"
+type = "ui_extension"
+description = "Preview and print the production label without leaving the order"
+
+[[extensions.targeting]]
+module = "./src/PrintActionExtension.jsx"
+target = "admin.order-details.print-action.render"
