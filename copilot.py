@@ -2498,6 +2498,28 @@ def _item_prop(li: dict, name: str) -> str:
     return ""
 
 
+def _item_model(li: dict, manufacturer: str) -> str:
+    """The item's model, wherever the store's option sets put it: a plain "Model"
+    property, or a per-manufacturer dropdown like "American DJ Models: Ikon
+    Profile". The manufacturer's own dropdown wins over any other leftover one."""
+    v = _item_prop(li, "Model")
+    if v:
+        return v
+    nmfr = _norm_key(manufacturer)
+    fallback = ""
+    for p in (li.get("properties") or []):
+        if not isinstance(p, dict):
+            continue
+        name = _norm_key(p.get("name"))
+        val = str(p.get("value") or "").strip()
+        if not val or not (name.endswith(" models") or name.endswith(" model")):
+            continue
+        if nmfr and name.startswith(nmfr):
+            return val
+        fallback = fallback or val
+    return fallback
+
+
 def _shape_label_order(o: dict, names: dict) -> dict:
     """One order in the shape the label UI prints."""
     company, person = _label_party(o)
@@ -2505,7 +2527,7 @@ def _shape_label_order(o: dict, names: dict) -> dict:
     items = []
     for li in (o.get("line_items") or []):
         mfr = _strip_price(_item_prop(li, "Manufacturer"))
-        model = _strip_price(_item_prop(li, "Model"))
+        model = _strip_price(_item_model(li, mfr))
         entry, reason = _gobo_lookup(mfr, model)
         dsize = _gobo_domain_size(mfr, model, entry, domain)
         items.append({
@@ -2585,7 +2607,7 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
         for li in (o.get("line_items") or []):
             items_seen += 1
             mfr = _strip_price(_item_prop(li, "Manufacturer"))
-            model = _strip_price(_item_prop(li, "Model"))
+            model = _strip_price(_item_model(li, mfr))
             if not model and not mfr:
                 # No gobo options at all: an accessory or plain product, not a miss.
                 no_model += 1
