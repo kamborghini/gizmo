@@ -376,6 +376,14 @@
         .label-sheet .ls-opts { list-style: none; margin: .1em 0 .15em; padding: 0 0 0 1em; }
         .label-sheet .ls-opt { font-size: .82em; color: #222; padding: .08em 0; font-weight: 500; }
         .label-sheet .ls-opt b { font-weight: 700; }
+        /* Short stock (4 x 2 and similar): drop the "Contents" heading to a plain rule and
+           tighten everything, so the space goes to the order number and the items. */
+        .label-sheet.compact { padding: 3.5mm 4mm; font-size: 13px; line-height: 1.2; }
+        .label-sheet.compact .ls-num { font-size: 1.32em; }
+        .label-sheet.compact .ls-party { font-size: .95em; margin-top: .2em; }
+        .label-sheet.compact .ls-head { font-size: 0; height: 0; margin: .45em 0 .4em; padding-top: .45em; }
+        .label-sheet.compact .ls-item { padding: .2em 0 0; font-size: .92em; }
+        .label-sheet.compact .ls-opts { padding-left: .8em; margin: .05em 0 .1em; }
         .lbl-size { background: var(--bg-2); border: 1px solid var(--border-2); border-radius: var(--r-sm); color: var(--ink);
             font: inherit; font-size: 12.5px; padding: 7px 10px; }
         .lbl-preview-note { font-size: 11.5px; color: var(--ink-3); margin: 8px 0 0; }
@@ -2640,12 +2648,20 @@
         // Physical label stock. The sheet is rendered at these exact dimensions, so the
         // on-screen preview is a true representation of what comes out of the printer.
         const LABEL_SIZES = {
-            '4x6': { w: 100, h: 150, label: '4 x 6 in (100 x 150 mm)' },
-            '4x3': { w: 100, h: 76, label: '4 x 3 in (100 x 76 mm)' },
-            '2x4': { w: 50, h: 100, label: '2 x 4 in (50 x 100 mm)' },
+            '4x2': { w: 101.6, h: 50.8, label: '4 x 2 in (102 x 51 mm)' },
+            '4x3': { w: 101.6, h: 76.2, label: '4 x 3 in (102 x 76 mm)' },
+            '4x6': { w: 101.6, h: 152.4, label: '4 x 6 in (102 x 152 mm)' },
+            '2x4': { w: 50.8, h: 101.6, label: '2 x 4 in (51 x 102 mm)' },
             'a4': { w: 210, h: 297, label: 'A4 page' },
         };
-        let labelSize = '4x6';
+        // Option types that are not needed on a production label. They eat the space a
+        // small label does not have; the quantity of each product matters more.
+        const LABEL_SKIP_OPTIONS = ['projection type', 'artwork type', 'gobo type'];
+        function labelKeepOption(op) {
+            const n = String(op.name || '').trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/:$/, '');
+            return LABEL_SKIP_OPTIONS.indexOf(n) === -1;
+        }
+        let labelSize = '4x2';
         try { const v = localStorage.getItem('sc_label_size'); if (v && LABEL_SIZES[v]) labelSize = v; } catch (e) {}
         function labelDims() { return LABEL_SIZES[labelSize] || LABEL_SIZES['4x6']; }
         // Shrink the text until the whole order fits on one label. Every internal size is
@@ -2767,6 +2783,7 @@
             const s = el('div', 'label-sheet');
             const d = labelDims();
             s.style.width = d.w + 'mm'; s.style.height = d.h + 'mm';
+            if (d.h <= 60) s.classList.add('compact');   // short stock needs the tighter layout
             s.append(el('div', 'ls-num', 'Order Number: ' + orderNo(o)));
             const party = el('div', 'ls-party');
             party.append(el('span', 'k', (o.is_company ? 'Company: ' : 'Customer: ')), document.createTextNode(o.display_name));
@@ -2776,12 +2793,14 @@
             (o.items || []).forEach(it => {
                 const li = el('li');
                 const row = el('div', 'ls-item');
-                if (it.quantity > 1) row.append(el('span', 'ls-qty', it.quantity + ' x'));
+                // Quantity always shows: production needs to know how many of each.
+                row.append(el('span', 'ls-qty', it.quantity + ' x'));
                 row.append(document.createTextNode(it.title));
                 li.append(row);
-                if (it.options && it.options.length) {
+                const opts = (it.options || []).filter(labelKeepOption);
+                if (opts.length) {
                     const ol = el('ul', 'ls-opts');
-                    it.options.forEach(op => {
+                    opts.forEach(op => {
                         const o2 = el('li', 'ls-opt');
                         if (op.name) o2.append(el('b', null, op.name + ': '));
                         o2.append(document.createTextNode(op.value));
