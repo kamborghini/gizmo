@@ -3428,14 +3428,24 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("Production labels failed")
             return _json({"error": "Couldn't load production orders. Check the server logs."}, 500)
 
+    _PRINT_ORIGINS = {"https://extensions.shopifycdn.com", "https://admin.shopify.com"}
+
+    def _print_cors(request: Request) -> dict:
+        origin = request.headers.get("origin") or ""
+        base = {"Access-Control-Allow-Headers": "Authorization, Content-Type",
+                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                "Access-Control-Max-Age": "600"}
+        if origin in _PRINT_ORIGINS or origin.endswith(".myshopify.com") and origin.startswith("https://"):
+            return {**base, "Access-Control-Allow-Origin": origin,
+                    "Access-Control-Allow-Credentials": "true", "Vary": "Origin"}
+        return {**base, "Access-Control-Allow-Origin": "*"}
+
     @mcp.custom_route("/print/production-labels/sign", methods=["POST", "OPTIONS"])
     async def sign_label_doc(request: Request):
         """The print-action extension calls this with the merchant's id token and gets
         back a short-lived signed URL for the label document, which the admin's print
         preview can load without a session. 5 minute expiry."""
-        cors = {"Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Authorization, Content-Type",
-                "Access-Control-Allow-Methods": "POST, OPTIONS"}
+        cors = _print_cors(request)
         if request.method == "OPTIONS":
             return PlainTextResponse("", headers=cors)
         pre = _pre_checks(request)
@@ -3466,7 +3476,7 @@ def add_routes(mcp, registry: dict) -> None:
         return JSONResponse({"url": base + path, "path": path, "expires_in": 300},
                             headers={**_API_HEADERS, **cors})
 
-    @mcp.custom_route("/print/production-labels", methods=["GET"])
+    @mcp.custom_route("/print/production-labels", methods=["GET", "OPTIONS"])
     async def print_labels_doc(request: Request):
         """Printable label document for the admin print-action extensions. The admin's
         print modal loads this URL directly (with the embedded id_token appended, the
@@ -3481,7 +3491,7 @@ def add_routes(mcp, registry: dict) -> None:
                     str(request.query_params.get("ids") or "")[:120],
                     "sig" if request.query_params.get("sig") else ("id_token" if request.query_params.get("id_token") else ("bearer" if request.headers.get("authorization") else "none")),
                     request.headers.get("origin"))
-        doc_headers = {**_API_HEADERS, "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store"}
+        doc_headers = {**_API_HEADERS, **_print_cors(request), "Cache-Control": "no-store"}
 
         def deny(msg: str):
             return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>" + html.escape(msg) + "</p>",
