@@ -126,6 +126,8 @@ SCHEDULE_CHECK_SECS = int(os.environ.get("SCHEDULE_CHECK_SECS", "900"))       # 
 USAGE_PATH         = os.environ.get("USAGE_PATH", "/data/usage.json")          # AI token-usage + cost log (measurement)
 USAGE_MAX          = int(os.environ.get("USAGE_MAX", "5000"))                  # max usage events retained
 DAILY_COST_CAP     = float(os.environ.get("DAILY_COST_CAP", "25"))             # hard $/day AI ceiling (0 disables)
+PRODUCTION_TAG     = os.environ.get("PRODUCTION_LABEL_TAG", "IP")              # order tag that means "in production"
+PRODUCTION_DAYS    = int(os.environ.get("PRODUCTION_LABEL_DAYS", "180"))       # how far back to look for tagged orders
 # Anthropic list prices, $ per 1M tokens (input, output). Cache read ~0.1x input, write ~1.25x input.
 _MODEL_PRICE = {
     "claude-opus-4-8": (5.0, 25.0),
@@ -2089,6 +2091,132 @@ def _orders_product_monthly(orders: list, months: list) -> dict:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Production labels: orders carrying the production tag, shaped for printing a
+# picking/production label (order number, who it is for, and what to build).
+# No AI is involved; this is a plain Shopify read.
+# ---------------------------------------------------------------------------
+
+def _order_tags(order: dict) -> list:
+    raw = order.get("tags")
+    if isinstance(raw, str):
+        return [t.strip() for t in raw.split(",") if t.strip()]
+    return [str(t).strip() for t in (raw or []) if str(t).strip()]
+
+
+def _has_tag(order: dict, tag: str) -> bool:
+    want = (tag or "").strip().lower()
+    return any(t.lower() == want for t in _order_tags(order))
+
+
+def _label_party(order: dict) -> tuple:
+    """(company, person) for the label. A company name wins when the order has one,
+    falling back to the customer's own name."""
+    ship = order.get("shipping_address") or {}
+    bill = order.get("billing_address") or {}
+    cust = order.get("customer") or {}
+    dflt = cust.get("default_address") or {}
+    company = next((str(c).strip() for c in (ship.get("company"), bill.get("company"), dflt.get("company"))
+                    if c and str(c).strip()), "")
+    person = " ".join(p for p in [str(cust.get("first_name") or "").strip(),
+                                  str(cust.get("last_name") or "").strip()] if p).strip()
+    if not person:
+        person = next((str(n).strip() for n in (ship.get("name"), bill.get("name"), cust.get("email"))
+                       if n and str(n).strip()), "")
+    return company, person
+
+
+def _variant_is_real(li: dict) -> bool:
+    vt = str(li.get("variant_title") or "").strip()
+    return bool(vt) and vt.lower() != "default title"
+
+
+def _line_options(li: dict, option_names: dict) -> list:
+    """Selected options for a line item, as [{name, value}].
+
+    Two sources, both shown: custom line-item properties (already name/value, e.g.
+    "Gobo Size"), and variant options, whose names come from the product's option
+    definitions so a variant reads "Gobo Size: 20 Watt Range" rather than a bare value."""
+    opts: list = []
+    seen = set()
+
+    def add(name: str, value: str) -> None:
+        name, value = str(name or "").strip(), str(value or "").strip()
+        if not value:
+            return
+        key = (name.lower(), value.lower())
+        if key in seen:
+            return
+        seen.add(key)
+        opts.append({"name": name, "value": value})
+
+    for p in (li.get("properties") or []):
+        if isinstance(p, dict):
+            nm = str(p.get("name") or "").strip()
+            if nm.startswith("_"):      # Shopify convention for hidden/internal properties
+                continue
+            add(nm, p.get("value"))
+
+    if _variant_is_real(li):
+        values = [v.strip() for v in str(li.get("variant_title")).split(" / ")]
+        names = option_names.get(li.get("product_id")) or []
+        for i, val in enumerate(values):
+            add(names[i] if i < len(names) else "Option", val)
+    return opts
+
+
+async def _product_option_names(registry: dict, product_ids) -> dict:
+    """Map product_id -> its option names (e.g. ["Gobo Size"]), fetched concurrently."""
+    ids = [p for p in dict.fromkeys(product_ids) if p][:40]   # de-duped and bounded
+    if not ids:
+        return {}
+
+    async def one(pid):
+        d = await _tool_json(registry, "shopify_get_product", {"product_id": pid})
+        if not _ok(d):
+            return pid, []
+        return pid, [str(o.get("name") or "").strip() for o in (d.get("options") or [])]
+
+    return {pid: names for pid, names in await asyncio.gather(*[one(i) for i in ids])}
+
+
+async def run_production_labels(registry: dict, tag: Optional[str] = None,
+                                days: Optional[int] = None) -> dict:
+    tag = (tag or PRODUCTION_TAG).strip() or PRODUCTION_TAG
+    days = max(1, min(int(days or PRODUCTION_DAYS), 730))
+    fields = ("id,order_number,name,created_at,tags,customer,billing_address,"
+              "shipping_address,line_items,note")
+    orders = await _paginate_orders(registry, days=days, fields=fields)
+    tagged = [o for o in orders if _has_tag(o, tag)]
+    tagged.sort(key=lambda o: str(o.get("created_at") or ""), reverse=True)
+
+    names = await _product_option_names(
+        registry,
+        [li.get("product_id") for o in tagged for li in (o.get("line_items") or []) if _variant_is_real(li)],
+    )
+
+    out = []
+    for o in tagged:
+        company, person = _label_party(o)
+        items = [{"title": str(li.get("title") or li.get("name") or "Item").strip(),
+                  "quantity": int(li.get("quantity") or 1),
+                  "sku": str(li.get("sku") or "").strip(),
+                  "options": _line_options(li, names)}
+                 for li in (o.get("line_items") or [])]
+        out.append({
+            "id": o.get("id"),
+            "order_number": o.get("order_number") or str(o.get("name") or "").lstrip("#"),
+            "name": o.get("name"),
+            "created_at": o.get("created_at"),
+            "company": company,
+            "customer": person,
+            "display_name": company or person or "Customer",
+            "is_company": bool(company),
+            "items": items,
+        })
+    return {"tag": tag, "days": days, "count": len(out), "orders": out}
+
+
 async def run_products_list(registry: dict, months_window: Optional[int] = None) -> dict:
     """Rich product dataset for the Products tab: catalog fields + per-month units &
     revenue buckets (so the UI can filter, sort and compare any period entirely
@@ -3255,6 +3383,29 @@ def add_routes(mcp, registry: dict) -> None:
                 return _json({"error": "Couldn't delete the stored knowledge."}, 500)
             return _json({"knowledge": {}})
         return _json({"knowledge": _load_knowledge()})
+
+    @mcp.custom_route("/api/production-labels", methods=["POST"])
+    async def production_labels_route(request: Request):
+        # Orders carrying the production tag, shaped for printing. Shopify read, no AI.
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        tag = str(body.get("tag") or "").strip()[:60] or None
+        try:
+            days = int(body.get("days") or 0) or None
+        except (TypeError, ValueError):
+            days = None
+        try:
+            return _json(await run_production_labels(registry, tag=tag, days=days))
+        except Exception:
+            logger.exception("Production labels failed")
+            return _json({"error": "Couldn't load production orders. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/products", methods=["POST"])
     async def products_route(request: Request):
