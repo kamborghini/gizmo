@@ -31,3 +31,6 @@ Thumbs.db
 
 # Icon library source — icons are inlined into static/index.html, no need to ship these
 feather/
+
+# Shopify CLI local state
+.shopify/

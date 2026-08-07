@@ -1,0 +1,14 @@
+# Admin link: adds "Print production label" to the More actions menu on every
+# order details page in the Shopify admin. Clicking it opens Store Copilot at
+# /?view=labels and Shopify appends the order's id, which the app uses to fetch
+# that order, open its true-size label preview, and pop the print dialog.
+[[extensions]]
+name = "Print production label"
+description = "Open Store Copilot and print the production label for this order"
+handle = "print-production-label"
+uid = "833fa94b-1eb9-9bfd-5fdf-37ba295c6f16e01c6d69"
+type = "admin_link"
+
+[[extensions.targeting]]
+target = "admin.order-details.action.link"
+url = "/?view=labels"
