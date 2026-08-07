@@ -23,6 +23,8 @@ import re
 import html
 import json
 import time
+import hmac
+import hashlib
 import socket
 import asyncio
 import logging
@@ -31,7 +33,7 @@ import ipaddress
 from datetime import datetime, timedelta, timezone
 import contextvars
 from typing import Any, Callable, Optional
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, quote
 
 import anthropic
 import httpx
@@ -3426,6 +3428,40 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("Production labels failed")
             return _json({"error": "Couldn't load production orders. Check the server logs."}, 500)
 
+    @mcp.custom_route("/print/production-labels/sign", methods=["POST", "OPTIONS"])
+    async def sign_label_doc(request: Request):
+        """The print-action extension calls this with the merchant's id token and gets
+        back a short-lived signed URL for the label document, which the admin's print
+        preview can load without a session. 5 minute expiry."""
+        cors = {"Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type",
+                "Access-Control-Allow-Methods": "POST, OPTIONS"}
+        if request.method == "OPTIONS":
+            return PlainTextResponse("", headers=cors)
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return JSONResponse({"error": "Unauthorized"}, status_code=401, headers={**_API_HEADERS, **cors})
+        body = await _read_json_capped(request)
+        if body is None:
+            return JSONResponse({"error": "Request too large."}, status_code=413, headers={**_API_HEADERS, **cors})
+        raw_ids = str(body.get("ids") or "")[:2000]
+        raw_size = str(body.get("size") or "4x2")
+        if raw_size not in ("4x2", "4x3", "4x6", "2x4", "a4"):
+            raw_size = "4x2"
+        if not raw_ids.strip():
+            return JSONResponse({"error": "No order ids given."}, status_code=400, headers={**_API_HEADERS, **cors})
+        exp = int(time.time()) + 300
+        sig = hmac.new(SHOPIFY_API_SECRET.encode(),
+                       f"{raw_ids}|{raw_size}|{exp}".encode(), hashlib.sha256).hexdigest()
+        base = (APP_BASE_URL.rstrip("/") if APP_BASE_URL
+                else f"https://{request.headers.get('host', '')}")
+        url = (f"{base}/print/production-labels?ids={quote(raw_ids, safe='')}"
+               f"&size={raw_size}&exp={exp}&sig={sig}")
+        return JSONResponse({"url": url, "expires_in": 300}, headers={**_API_HEADERS, **cors})
+
     @mcp.custom_route("/print/production-labels", methods=["GET"])
     async def print_labels_doc(request: Request):
         """Printable label document for the admin print-action extensions. The admin's
@@ -3441,19 +3477,32 @@ def add_routes(mcp, registry: dict) -> None:
             return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>" + html.escape(msg) + "</p>",
                                 status_code=401, headers=_API_HEADERS)
 
-        # Auth: the print frame passes id_token as a query param; extension fetches
-        # would use the Authorization header. Either verifies the same way.
-        token = request.query_params.get("id_token") or ""
-        if not token:
-            auth = request.headers.get("authorization", "")
-            if auth.startswith("Bearer "):
-                token = auth[7:]
-        if not token or not SHOPIFY_API_SECRET:
-            return deny("Unauthorized. Open this from your Shopify admin.")
-        try:
-            _verify_session_token(token)
-        except Exception:
-            return deny("Unauthorized. Open this from your Shopify admin.")
+        # Auth, any of three ways: a short-lived HMAC-signed URL (minted by the sign
+        # endpoint for the print-action extensions; the admin's preview frame carries
+        # no session of its own), the embedded id_token query param, or a bearer token.
+        authed = False
+        qp = request.query_params
+        raw_ids, raw_size = str(qp.get("ids") or ""), str(qp.get("size") or "4x2")
+        exp_s, sig = str(qp.get("exp") or ""), str(qp.get("sig") or "")
+        if exp_s and sig and SHOPIFY_API_SECRET:
+            try:
+                expect = hmac.new(SHOPIFY_API_SECRET.encode(),
+                                  f"{raw_ids}|{raw_size}|{exp_s}".encode(), hashlib.sha256).hexdigest()
+                authed = int(exp_s) > time.time() and hmac.compare_digest(sig, expect)
+            except (TypeError, ValueError):
+                authed = False
+        if not authed:
+            token = qp.get("id_token") or ""
+            if not token:
+                auth = request.headers.get("authorization", "")
+                if auth.startswith("Bearer "):
+                    token = auth[7:]
+            if not token or not SHOPIFY_API_SECRET:
+                return deny("Unauthorized. Open this from your Shopify admin.")
+            try:
+                _verify_session_token(token)
+            except Exception:
+                return deny("Unauthorized. Open this from your Shopify admin.")
 
         ids = []
         for part in str(request.query_params.get("ids") or "").split(","):
