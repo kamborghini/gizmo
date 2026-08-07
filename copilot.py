@@ -3960,7 +3960,9 @@ def add_routes(mcp, registry: dict) -> None:
                 "<div class='sheet'><div class='hd'><div class='num'>"
                 + esc(str(o.get("name") or ("#" + str(o.get("order_number", ""))))) + "</div>"
                 + "<div class='party'>" + esc(o.get("display_name", "")) + "</div></div>"
-                + "<ul class='items'>" + "".join(items) + "</ul></div>")
+                + "<ul class='items'>" + "".join(items) + "</ul>"
+                + "<div class='rate'>&#9733;&#9733;&#9733;&#9733;&#9733; <b>5 Star Service</b>"
+                + "<span class='rs'>&middot;</span>Leave us a review on <b>Trustpilot</b></div></div>")
         if not sheets:
             return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>Those orders could not be found.</p>",
                                 headers=doc_headers)
@@ -3978,7 +3980,8 @@ def add_routes(mcp, registry: dict) -> None:
                "* { box-sizing: border-box; margin: 0; padding: 0; }"
                "body { font-family: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; background: #fff; color: #000; }"
                ".sheet { width: " + str(w) + "mm; height: " + str(h) + "mm; padding: " + ("3.5mm 4mm" if compact else "5mm 5.5mm") + ";"
-               " overflow: hidden; page-break-after: always; break-after: page; font-size: " + ("13px" if compact else "15px") + "; line-height: 1.22; }"
+               " overflow: hidden; page-break-after: always; break-after: page; font-size: " + ("13px" if compact else "15px") + ";"
+               " line-height: 1.22; display: flex; flex-direction: column; }"
                ".sheet:last-child { page-break-after: auto; break-after: auto; }"
                ".hd { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;"
                " gap: 0 .7em; border-bottom: 2px solid #000; padding-bottom: .28em; }"
@@ -3999,6 +4002,9 @@ def add_routes(mcp, registry: dict) -> None:
                " margin: .18em 0 .08em; display: inline-flex; align-items: baseline; gap: .35em; }"
                ".flag .fb { font-weight: 900; letter-spacing: .05em; }"
                ".ctx { font-size: .76em; color: #222; margin-top: .08em; }"
+               ".rate { margin-top: auto; padding-top: .3em; border-top: 1px solid #000;"
+               " font-size: .68em; font-weight: 500; text-align: center; }"
+               ".rate b { font-weight: 800; } .rate .rs { margin: 0 .5em; }"
                + rot_css
                + "</style></head><body>"
                + ("".join("<div class='pw'>" + sh + "</div>" for sh in sheets) if portrait else "".join(sheets))

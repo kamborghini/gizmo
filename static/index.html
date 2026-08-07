@@ -365,7 +365,7 @@
            font-size on .label-sheet and the whole label scales with it. */
         .label-sheet { background: #fff; color: #000; border: 1px solid var(--border-2); border-radius: 6px;
             box-sizing: border-box; padding: 5mm 5.5mm; overflow: hidden; font-size: 15px; line-height: 1.25;
-            width: 100mm; height: 150mm; }
+            width: 100mm; height: 150mm; display: flex; flex-direction: column; }
         /* One header row: order number left, who it is for right, heavy rule beneath.
            Below it each item is a grid row (qty | detail) whose loudest line is the
            production size, because that is what the manufacturing team reads. */
@@ -388,6 +388,11 @@
             padding: .16em .45em; margin: .18em 0 .08em; display: inline-flex; align-items: baseline; gap: .35em; }
         .label-sheet .ls-flag .ls-fb { font-weight: 900; letter-spacing: .05em; }
         .label-sheet .ls-ctx { font-size: .76em; color: #222; margin-top: .08em; }
+        /* Bottom strip for the customer: the label rides on the parcel. */
+        .label-sheet .ls-rate { margin-top: auto; padding-top: .3em; border-top: 1px solid #000;
+            font-size: .68em; font-weight: 500; text-align: center; }
+        .label-sheet .ls-rate b { font-weight: 800; }
+        .label-sheet .ls-rate .ls-rs { margin: 0 .5em; }
         .label-sheet .ls-opts { list-style: none; margin: .1em 0 .15em; padding: 0; }
         .label-sheet .ls-opt { font-size: .82em; color: #222; padding: .08em 0; font-weight: 500; }
         .label-sheet .ls-opt b { font-weight: 700; }
@@ -2929,6 +2934,10 @@
                 ul.append(li);
             });
             s.append(ul);
+            const rate = el('div', 'ls-rate');
+            rate.append(document.createTextNode('★★★★★ '), el('b', null, '5 Star Service'),
+                el('span', 'ls-rs', '·'), document.createTextNode('Leave us a review on '), el('b', null, 'Trustpilot'));
+            s.append(rate);
             return s;
         }
         let printSeq = 0;
