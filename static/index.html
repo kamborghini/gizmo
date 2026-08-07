@@ -2755,7 +2755,7 @@
                 renderLabels();
             };
             bar.append(sizeSel);
-            bar.append(el('div', 'lbl-count', orders.length + (orders.length === 1 ? ' order' : ' orders') + ' in production'));
+            bar.append(el('div', 'lbl-count', data.single ? 'Opened from the order page. Refresh shows the full production list.' : (orders.length + (orders.length === 1 ? ' order' : ' orders') + ' in production')));
             box.append(bar);
 
             if (!orders.length) {
@@ -2834,6 +2834,25 @@
             return s;
         }
         let printSeq = 0;
+        async function printFromAdminLink(orderId) {
+            const box = $('labels-content'); box.innerHTML = '';
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
+            const ht = el('div'); ht.append(el('h2', null, 'Production labels'), el('p', null, 'Preparing the label for this order\u2026'));
+            hero.append(badge, ht); box.append(hero);
+            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Fetching the order\u2026')); box.append(t);
+            try {
+                const data = await api('/api/production-labels', { order_id: orderId });
+                if (!data.orders || !data.orders.length) throw new Error(data.error_note || 'Order not found.');
+                labelsCache = { data, at: Date.now() };
+                labelSel = data.orders[0].id;
+                renderLabels();
+                setTimeout(() => printLabels([data.orders[0]]), 450);   // preview is up; open the print dialog
+            } catch (e) {
+                box.innerHTML = ''; box.append(hero);
+                const er = el('div', 'msg error'); er.append(el('div', 'bubble', e.message || String(e))); box.append(er);
+                ht.children[1].textContent = 'Could not load that order.';
+            }
+        }
         function printLabels(orders) {
             // Sequence guard: a rapid second print must not be torn down by the previous
             // print's pending cleanup (which would strip its page size and its sheets).
@@ -3056,7 +3075,11 @@
             try { applyCachedAnalysis(await api('/api/cache', {})); } catch (e) {}
         }
 
-        renderSidebar(); renderChat(); setView('overview');
+        const bootQP = new URLSearchParams(location.search);
+        const bootLabels = bootQP.get('view') === 'labels';
+        const bootOrderId = bootLabels ? parseInt(bootQP.get('id') || '0', 10) : 0;
+        renderSidebar(); renderChat(); setView(bootLabels ? 'labels' : 'overview');
+        if (bootOrderId) printFromAdminLink(bootOrderId);
         loadProfile();  // pull the saved store profile from the server (for the Settings modal)
         loadMemory();   // pull saved memories (for Overview follow-ups + the Memory tab)
         loadAnalysisCache();  // restore last AI-tab results (no tokens spent)
@@ -3081,6 +3104,7 @@
         window.__demoCustomers = function (d, seg) { seg = seg || SEG_ALL; customersCache[seg] = { data: d, at: Date.now() }; customersSeg = seg; setView('customers'); };
         window.__demoCustomerTags = function (tags) { customerTags = tags || []; if ($('view-customers').classList.contains('active')) renderCustomers(customersSeg); };
         window.__demoCache = function (d) { applyCachedAnalysis(d); };
+        window.__demoAdminLink = function (id) { setView('labels'); printFromAdminLink(id); };
         window.__demoAlerts = function (list) { alerts = list || []; if (overviewCache) renderOverview(overviewCache); };
         window.__demoChatData = function (du) { const c = active(); if (c && c.turns.length) { c.turns[c.turns.length - 1].data_used = du; renderChat(); } };
         window.__demoProductDetail = function (d) { setView('products'); renderProductDetail(d); };

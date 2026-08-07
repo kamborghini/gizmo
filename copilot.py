@@ -2180,8 +2180,42 @@ async def _product_option_names(registry: dict, product_ids) -> dict:
     return {pid: names for pid, names in await asyncio.gather(*[one(i) for i in ids])}
 
 
+def _shape_label_order(o: dict, names: dict) -> dict:
+    """One order in the shape the label UI prints."""
+    company, person = _label_party(o)
+    items = [{"title": str(li.get("title") or li.get("name") or "Item").strip(),
+              "quantity": int(li.get("quantity") or 1),
+              "sku": str(li.get("sku") or "").strip(),
+              "options": _line_options(li, names)}
+             for li in (o.get("line_items") or [])]
+    return {
+        "id": o.get("id"),
+        "order_number": o.get("order_number") or str(o.get("name") or "").lstrip("#"),
+        "name": o.get("name"),
+        "created_at": o.get("created_at"),
+        "company": company,
+        "customer": person,
+        "display_name": company or person or "Customer",
+        "is_company": bool(company),
+        "items": items,
+    }
+
+
 async def run_production_labels(registry: dict, tag: Optional[str] = None,
-                                days: Optional[int] = None) -> dict:
+                                days: Optional[int] = None,
+                                order_id: Optional[int] = None) -> dict:
+    # Deep-link path (the admin's More actions menu): fetch ONE order by id,
+    # regardless of tag or age, so the merchant can print for exactly that order.
+    if order_id:
+        o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+        if not _ok(o) or not o.get("id"):
+            return {"tag": PRODUCTION_TAG, "days": 0, "count": 0, "orders": [],
+                    "error_note": "Order not found."}
+        names = await _product_option_names(
+            registry, [li.get("product_id") for li in (o.get("line_items") or []) if _variant_is_real(li)])
+        return {"tag": PRODUCTION_TAG, "days": 0, "count": 1,
+                "orders": [_shape_label_order(o, names)], "single": True}
+
     tag = (tag or PRODUCTION_TAG).strip() or PRODUCTION_TAG
     days = max(1, min(int(days or PRODUCTION_DAYS), 730))
     fields = ("id,order_number,name,created_at,tags,customer,billing_address,"
@@ -2194,27 +2228,8 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
         registry,
         [li.get("product_id") for o in tagged for li in (o.get("line_items") or []) if _variant_is_real(li)],
     )
-
-    out = []
-    for o in tagged:
-        company, person = _label_party(o)
-        items = [{"title": str(li.get("title") or li.get("name") or "Item").strip(),
-                  "quantity": int(li.get("quantity") or 1),
-                  "sku": str(li.get("sku") or "").strip(),
-                  "options": _line_options(li, names)}
-                 for li in (o.get("line_items") or [])]
-        out.append({
-            "id": o.get("id"),
-            "order_number": o.get("order_number") or str(o.get("name") or "").lstrip("#"),
-            "name": o.get("name"),
-            "created_at": o.get("created_at"),
-            "company": company,
-            "customer": person,
-            "display_name": company or person or "Customer",
-            "is_company": bool(company),
-            "items": items,
-        })
-    return {"tag": tag, "days": days, "count": len(out), "orders": out}
+    return {"tag": tag, "days": days, "count": len(tagged),
+            "orders": [_shape_label_order(o, names) for o in tagged]}
 
 
 async def run_products_list(registry: dict, months_window: Optional[int] = None) -> dict:
@@ -3402,7 +3417,11 @@ def add_routes(mcp, registry: dict) -> None:
         except (TypeError, ValueError):
             days = None
         try:
-            return _json(await run_production_labels(registry, tag=tag, days=days))
+            order_id = int(body.get("order_id") or 0) or None
+        except (TypeError, ValueError):
+            order_id = None
+        try:
+            return _json(await run_production_labels(registry, tag=tag, days=days, order_id=order_id))
         except Exception:
             logger.exception("Production labels failed")
             return _json({"error": "Couldn't load production orders. Check the server logs."}, 500)
