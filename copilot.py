@@ -2184,7 +2184,10 @@ async def _product_option_names(registry: dict, product_ids) -> dict:
     return {pid: names for pid, names in await asyncio.gather(*[one(i) for i in ids])}
 
 
-_gobo_cache = {"mtime": None, "by_mm": {}, "by_model": {}, "by_mm_loose": {}, "by_model_loose": {}}
+_gobo_cache = {"mtime": None, "by_mm": {}, "by_model": {}, "by_mm_loose": {}, "by_model_loose": {},
+               "by_mm_digit": {}, "by_model_digit": {}, "rows": []}
+GOBO_ALIASES_PATH = os.environ.get("GOBO_ALIASES_PATH",
+                                   os.path.join(os.path.dirname(__file__), "data", "gobo-aliases.csv"))
 
 
 def _norm_key(v) -> str:
@@ -2196,19 +2199,59 @@ def _loose_key(v) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(v or "").lower())).strip()
 
 
+def _digit_key(v) -> str:
+    """Loose key that also splits letter-digit boundaries, so the store's "EVE E100Z"
+    meets the sheet's "EVE E-100Z" ("eve e 100 z" both ways)."""
+    return re.sub(r"\s+", " ",
+                  re.sub(r"(?<=[a-z])(?=[0-9])|(?<=[0-9])(?=[a-z])", " ", _loose_key(v))).strip()
+
+
+def _word_run_in(needle: tuple, hay: tuple) -> bool:
+    """True when needle appears in hay as a CONTIGUOUS word run. Contiguity is what
+    keeps "Source Four B Size" out of "Source Four Effects Gate B Size"."""
+    n = len(needle)
+    if not n or n > len(hay):
+        return False
+    return any(hay[i:i + n] == needle for i in range(len(hay) - n + 1))
+
+
 def _gobo_sizes() -> dict:
-    """Model -> production size lookup from the merchant's CSV, reloaded when the
-    file changes. Multi-model cells ("VR8, VRX, VRXSR") index each model. Keys map
-    to LISTS because the sheet genuinely repeats some (manufacturer, model) rows
-    with different sizes; those must flag for review, never pick-one."""
+    """Model -> production size lookup from the merchant's CSV, reloaded when it or
+    the aliases file changes. Multi-model cells ("VR8, VRX, VRXSR") index each
+    model. Keys map to LISTS because the sheet genuinely repeats some
+    (manufacturer, model) rows with different sizes; those must flag for review,
+    never pick-one. data/gobo-aliases.csv maps spellings the store's dropdowns use
+    ("40W/80W") onto sheet models ("40/80 Watt Range") and survives sheet updates."""
     try:
         mtime = os.path.getmtime(GOBO_SIZES_PATH)
     except OSError:
         return _gobo_cache
+    try:
+        mtime = (mtime, os.path.getmtime(GOBO_ALIASES_PATH))
+    except OSError:
+        mtime = (mtime, None)
     if _gobo_cache["mtime"] == mtime:
         return _gobo_cache
     import csv as _csv
     by_mm, by_model, by_mm_loose, by_model_loose = {}, {}, {}, {}
+    by_mm_digit, by_model_digit, rows = {}, {}, []
+
+    def index_model(entry: dict, nm: str, lm: str, model: str):
+        key = _norm_key(model)
+        if not key:
+            return
+        by_mm.setdefault((nm, key), []).append(entry)
+        by_model.setdefault(key, []).append(entry)
+        lkey = _loose_key(model)
+        if lkey:
+            by_mm_loose.setdefault((lm, lkey), []).append(entry)
+            by_model_loose.setdefault(lkey, []).append(entry)
+            rows.append((lm, tuple(lkey.split()), entry))
+        dkey = _digit_key(model)
+        if dkey:
+            by_mm_digit.setdefault((lm, dkey), []).append(entry)
+            by_model_digit.setdefault(dkey, []).append(entry)
+
     try:
         with open(GOBO_SIZES_PATH, newline="", encoding="utf-8-sig") as fh:
             for row in _csv.DictReader(fh):
@@ -2221,34 +2264,47 @@ def _gobo_sizes() -> dict:
                 nm = _norm_key(entry["manufacturer"])
                 lm = _loose_key(entry["manufacturer"])
                 for model in entry["model"].split(","):
-                    key = _norm_key(model)
-                    if not key:
-                        continue
-                    by_mm.setdefault((nm, key), []).append(entry)
-                    by_model.setdefault(key, []).append(entry)
-                    lkey = _loose_key(model)
-                    if lkey:
-                        by_mm_loose.setdefault((lm, lkey), []).append(entry)
-                        by_model_loose.setdefault(lkey, []).append(entry)
+                    index_model(entry, nm, lm, model)
     except Exception:
         logger.exception("gobo sizes: failed to load %s", GOBO_SIZES_PATH)
         return _gobo_cache
+    try:
+        with open(GOBO_ALIASES_PATH, newline="", encoding="utf-8-sig") as fh:
+            for row in _csv.DictReader(fh):
+                mfr = str(row.get("Manufacturer") or "").strip()
+                store = str(row.get("Store Model") or "").strip()
+                target = str(row.get("List Model") or "").strip()
+                hits = (by_mm.get((_norm_key(mfr), _norm_key(target)))
+                        or by_model.get(_norm_key(target)) or [])
+                for entry in hits:
+                    index_model(entry, _norm_key(mfr), _loose_key(mfr), store)
+                if not hits:
+                    logger.warning("gobo aliases: %r -> %r matches nothing in the size list", store, target)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.exception("gobo aliases: failed to load %s", GOBO_ALIASES_PATH)
     _gobo_cache.update({"mtime": mtime, "by_mm": by_mm, "by_model": by_model,
-                        "by_mm_loose": by_mm_loose, "by_model_loose": by_model_loose})
+                        "by_mm_loose": by_mm_loose, "by_model_loose": by_model_loose,
+                        "by_mm_digit": by_mm_digit, "by_model_digit": by_model_digit, "rows": rows})
     logger.info("gobo sizes: loaded %d model keys from %s", len(by_model), GOBO_SIZES_PATH)
     return _gobo_cache
 
 
-def _gobo_resolve_key(cache: dict, manufacturer: str, key: str, loose: bool):
+_GOBO_INDEXES = {"strict": ("by_mm", "by_model"), "loose": ("by_mm_loose", "by_model_loose"),
+                 "digit": ("by_mm_digit", "by_model_digit")}
+
+
+def _gobo_resolve_key(cache: dict, manufacturer: str, key: str, which: str):
     """Entries for one candidate key, or ("ambiguous"|None). Manufacturer+model
     first; model alone only when every row with that model is from one maker."""
-    mm = cache["by_mm_loose" if loose else "by_mm"]
-    bm = cache["by_model_loose" if loose else "by_model"]
-    entries = mm.get((manufacturer, key)) if manufacturer else None
+    mm_name, bm_name = _GOBO_INDEXES[which]
+    entries = cache[mm_name].get((manufacturer, key)) if manufacturer else None
     if entries:
         return entries, None
-    candidates = bm.get(key) or []
-    makers = {(_loose_key if loose else _norm_key)(e["manufacturer"]) for e in candidates}
+    candidates = cache[bm_name].get(key) or []
+    keyfn = _norm_key if which == "strict" else _loose_key
+    makers = {keyfn(e["manufacturer"]) for e in candidates}
     if len(makers) == 1:
         return candidates, None
     if len(makers) > 1:
@@ -2256,42 +2312,82 @@ def _gobo_resolve_key(cache: dict, manufacturer: str, key: str, loose: bool):
     return None, None
 
 
+def _gobo_contain(cache: dict, lmfr: str, words: tuple):
+    """Rows whose model shares a contiguous word run with the part. Within the
+    named maker's own rows both directions match: "viva" inside "Robin Viva",
+    "BMFL" as the head of "BMFL Spot". The cross-maker fallback (for maker-name
+    mismatches like store "Infinity" vs sheet "Showtec") only matches the store's
+    full part INSIDE a sheet model, never the reverse: one-word sheet models like
+    "Spot" or "Zoom" would otherwise latch onto anything containing that word.
+    Cross-maker matches must also all come from a single maker."""
+    if not words:
+        return None, None
+    hits = [(lm, e) for lm, rw, e in cache["rows"]
+            if lm == lmfr and (_word_run_in(words, rw) or _word_run_in(rw, words))] if lmfr else []
+    if not hits:
+        hits = [(lm, e) for lm, rw, e in cache["rows"] if _word_run_in(words, rw)]
+        if len({lm for lm, _ in hits}) > 1:
+            return None, "ambiguous"
+    return ([e for _, e in hits] or None), None
+
+
+def _gobo_resolve_part(cache: dict, nmfr: str, lmfr: str, part: str, notes: set):
+    """One store-written model name -> matching sheet rows, trying exact keys
+    (strict, punctuation-insensitive, digit-boundary), then parenthetical and
+    manufacturer-prefix stripping, then word-run containment."""
+    variants = [(_norm_key(part), "strict"), (_loose_key(part), "loose"), (_digit_key(part), "digit")]
+    stripped = re.sub(r"\([^)]*\)", " ", part)
+    if stripped.strip() and stripped != part:
+        variants += [(_norm_key(stripped), "strict"), (_loose_key(stripped), "loose"),
+                     (_digit_key(stripped), "digit")]
+    lpart = _loose_key(part)
+    if lmfr and lpart.startswith(lmfr + " "):
+        variants.append((lpart[len(lmfr):].strip(), "loose"))
+    seen = set()
+    for key, which in variants:
+        if not key or (key, which) in seen:
+            continue
+        seen.add((key, which))
+        entries, note = _gobo_resolve_key(cache, nmfr if which == "strict" else lmfr, key, which)
+        if entries:
+            return entries
+        if note == "ambiguous":
+            notes.add("ambiguous")
+    for cand in dict.fromkeys([lpart, _loose_key(stripped)]):
+        if not cand:
+            continue
+        entries, note = _gobo_contain(cache, lmfr, tuple(cand.split()))
+        if entries:
+            return entries
+        if note == "ambiguous":
+            notes.add("ambiguous")
+    return None
+
+
 def _gobo_lookup(manufacturer: str, model: str):
     """(entry, review_reason). The store's Model values can bundle several models
-    ("ESPRITE, iESPRITE (Not iESPRITE LTL WB)") and punctuate differently from the
-    sheet ("Source Four (B Size)" vs "Source Four B-Size"), so each comma part is
-    tried strict, then punctuation-insensitive, then with parentheticals or the
-    manufacturer prefix stripped. Never guesses: parts that match different sizes,
-    duplicate sheet rows with different sizes, ambiguity and misses all come back
-    as review reasons instead of a size."""
+    ("ESPRITE, iESPRITE (Not iESPRITE LTL WB)", "Ikon LED / Ikon IR") and spell
+    them differently from the sheet ("Source Four (B Size)" vs "Source Four
+    B-Size", "Robin Viva" vs "Viva", "EVE E100Z" vs "EVE E-100Z"), so the whole
+    value is tried first and then each comma or slash part, through exact keys,
+    stripped forms and word-run containment. Never guesses: parts that match
+    different sizes, duplicate sheet rows with different sizes, ambiguity and
+    misses all come back as review reasons instead of a size."""
     cache = _gobo_sizes()
     raw = str(model or "").strip()
     if not raw:
         return None, "No model specified on this item"
     nmfr, lmfr = _norm_key(manufacturer), _loose_key(manufacturer)
-    parts = [raw] if "," not in raw else [p for p in raw.split(",") if p.strip()]
-    resolved, saw_ambiguous = [], False
-    for part in parts:
-        variants = [(_norm_key(part), False), (_loose_key(part), True)]
-        stripped = re.sub(r"\([^)]*\)", " ", part)
-        if stripped != part:
-            variants += [(_norm_key(stripped), False), (_loose_key(stripped), True)]
-        lpart = _loose_key(part)
-        if lmfr and lpart.startswith(lmfr + " "):
-            variants.append((lpart[len(lmfr):].strip(), True))
-        seen = set()
-        for key, loose in variants:
-            if not key or (key, loose) in seen:
-                continue
-            seen.add((key, loose))
-            entries, note = _gobo_resolve_key(cache, lmfr if loose else nmfr, key, loose)
-            if entries:
-                resolved.extend(entries)
-                break
-            if note == "ambiguous":
-                saw_ambiguous = True
+    notes: set = set()
+    resolved = _gobo_resolve_part(cache, nmfr, lmfr, raw, notes)
     if not resolved:
-        if saw_ambiguous:
+        parts = [p for p in re.split(r"[,/]", raw) if p.strip()]
+        if len(parts) > 1:
+            resolved = []
+            for part in parts:
+                resolved.extend(_gobo_resolve_part(cache, nmfr, lmfr, part, notes) or [])
+    if not resolved:
+        if "ambiguous" in notes:
             return None, "Model matches more than one manufacturer in the size list"
         return None, "Model not found in the size list"
     sizes = {e["production_size"] for e in resolved}
