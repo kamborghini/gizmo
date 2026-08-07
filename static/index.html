@@ -378,6 +378,9 @@
         .label-sheet .ls-opts { list-style: none; margin: .1em 0 .15em; padding: 0 0 0 1em; }
         .label-sheet .ls-opt { font-size: .82em; color: #222; padding: .08em 0; font-weight: 500; }
         .label-sheet .ls-opt b { font-weight: 700; }
+        .label-sheet .ls-size { font-size: 1.18em; font-weight: 800; margin: .12em 0 .3em; }
+        .label-sheet .ls-flag { font-size: .95em; font-weight: 800; border: 2px solid #000; padding: .18em .4em; margin: .15em 0; display: inline-block; }
+        .label-sheet .ls-ctx { font-size: .78em; color: #333; margin-bottom: .25em; }
         /* Short stock (4 x 2 and similar): drop the "Contents" heading to a plain rule and
            tighten everything, so the space goes to the order number and the items. */
         .label-sheet.compact { padding: 3.5mm 4mm; font-size: 13px; line-height: 1.2; }
@@ -2815,18 +2818,28 @@
                 const row = el('div', 'ls-item');
                 // Quantity always shows: production needs to know how many of each.
                 row.append(el('span', 'ls-qty', it.quantity + ' x'));
-                row.append(document.createTextNode(it.title));
+                const who = [it.manufacturer, it.model].filter(Boolean).join(' ');
+                row.append(document.createTextNode(who || it.title));
                 li.append(row);
-                const opts = (it.options || []).filter(labelKeepOption);
-                if (opts.length) {
-                    const ol = el('ul', 'ls-opts');
-                    opts.forEach(op => {
-                        const o2 = el('li', 'ls-opt');
-                        if (op.name) o2.append(el('b', null, op.name + ': '));
-                        o2.append(document.createTextNode(op.value));
-                        ol.append(o2);
-                    });
-                    li.append(ol);
+                if (it.review_reason) {
+                    li.append(el('div', 'ls-flag', 'CHECK: ' + it.review_reason));
+                    li.append(el('div', 'ls-ctx', it.title || ''));
+                } else if (it.production_size) {
+                    li.append(el('div', 'ls-size', 'Production Size: ' + it.production_size + ' mm'));
+                    if (it.size_note) li.append(el('div', 'ls-ctx', it.size_note));
+                } else {
+                    // Older cached payloads predate the size fields: fall back to options.
+                    const opts = (it.options || []).filter(labelKeepOption);
+                    if (opts.length) {
+                        const ol = el('ul', 'ls-opts');
+                        opts.forEach(op => {
+                            const o2 = el('li', 'ls-opt');
+                            if (op.name) o2.append(el('b', null, op.name + ': '));
+                            o2.append(document.createTextNode(op.value));
+                            ol.append(o2);
+                        });
+                        li.append(ol);
+                    }
                 }
                 ul.append(li);
             });

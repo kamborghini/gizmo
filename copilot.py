@@ -130,6 +130,8 @@ USAGE_MAX          = int(os.environ.get("USAGE_MAX", "5000"))                  #
 DAILY_COST_CAP     = float(os.environ.get("DAILY_COST_CAP", "25"))             # hard $/day AI ceiling (0 disables)
 PRODUCTION_TAG     = os.environ.get("PRODUCTION_LABEL_TAG", "IP")              # order tag that means "in production"
 PRODUCTION_DAYS    = int(os.environ.get("PRODUCTION_LABEL_DAYS", "180"))       # how far back to look for tagged orders
+GOBO_SIZES_PATH    = os.environ.get("GOBO_SIZES_PATH",
+                                    os.path.join(os.path.dirname(__file__), "data", "gobo-sizes.csv"))
 # Anthropic list prices, $ per 1M tokens (input, output). Cache read ~0.1x input, write ~1.25x input.
 _MODEL_PRICE = {
     "claude-opus-4-8": (5.0, 25.0),
@@ -2182,14 +2184,96 @@ async def _product_option_names(registry: dict, product_ids) -> dict:
     return {pid: names for pid, names in await asyncio.gather(*[one(i) for i in ids])}
 
 
+_gobo_cache = {"mtime": None, "by_mm": {}, "by_model": {}}
+
+
+def _norm_key(v) -> str:
+    return re.sub(r"\s+", " ", str(v or "").strip().lower())
+
+
+def _gobo_sizes() -> dict:
+    """Model -> production size lookup from the merchant's CSV, reloaded when the
+    file changes. Multi-model cells ("VR8, VRX, VRXSR") index each model."""
+    try:
+        mtime = os.path.getmtime(GOBO_SIZES_PATH)
+    except OSError:
+        return _gobo_cache
+    if _gobo_cache["mtime"] == mtime:
+        return _gobo_cache
+    import csv as _csv
+    by_mm, by_model = {}, {}
+    try:
+        with open(GOBO_SIZES_PATH, newline="", encoding="utf-8-sig") as fh:
+            for row in _csv.DictReader(fh):
+                entry = {
+                    "manufacturer": str(row.get("Manufacturer") or "").strip(),
+                    "model": str(row.get("Model") or "").strip(),
+                    "production_size": str(row.get("Closest Production Size (mm)") or "").strip(),
+                    "review": str(row.get("Production Review") or "").strip(),
+                }
+                nm = _norm_key(entry["manufacturer"])
+                for model in entry["model"].split(","):
+                    key = _norm_key(model)
+                    if not key:
+                        continue
+                    by_mm[(nm, key)] = entry
+                    by_model.setdefault(key, []).append(entry)
+    except Exception:
+        logger.exception("gobo sizes: failed to load %s", GOBO_SIZES_PATH)
+        return _gobo_cache
+    _gobo_cache.update({"mtime": mtime, "by_mm": by_mm, "by_model": by_model})
+    logger.info("gobo sizes: loaded %d model keys from %s", len(by_model), GOBO_SIZES_PATH)
+    return _gobo_cache
+
+
+def _gobo_lookup(manufacturer: str, model: str):
+    """(entry, review_reason). Manufacturer+model first; model alone only when it is
+    unambiguous. Never guesses: ambiguity and misses come back as review reasons."""
+    cache = _gobo_sizes()
+    nmod = _norm_key(model)
+    if not nmod:
+        return None, "No model specified on this item"
+    hit = cache["by_mm"].get((_norm_key(manufacturer), nmod))
+    if not hit:
+        candidates = cache["by_model"].get(nmod) or []
+        if len(candidates) == 1:
+            hit = candidates[0]
+        elif len(candidates) > 1:
+            return None, "Model matches more than one manufacturer in the size list"
+        else:
+            return None, "Model not found in the size list"
+    if not hit["production_size"]:
+        return hit, (hit["review"] or "No production size listed for this model")
+    return hit, None
+
+
+def _item_prop(li: dict, name: str) -> str:
+    want = _norm_key(name)
+    for p in (li.get("properties") or []):
+        if isinstance(p, dict) and _norm_key(p.get("name")) == want:
+            return str(p.get("value") or "").strip()
+    return ""
+
+
 def _shape_label_order(o: dict, names: dict) -> dict:
     """One order in the shape the label UI prints."""
     company, person = _label_party(o)
-    items = [{"title": str(li.get("title") or li.get("name") or "Item").strip(),
-              "quantity": int(li.get("quantity") or 1),
-              "sku": str(li.get("sku") or "").strip(),
-              "options": _line_options(li, names)}
-             for li in (o.get("line_items") or [])]
+    items = []
+    for li in (o.get("line_items") or []):
+        mfr = _item_prop(li, "Manufacturer")
+        model = _item_prop(li, "Model")
+        entry, reason = _gobo_lookup(mfr, model)
+        items.append({
+            "title": str(li.get("title") or li.get("name") or "Item").strip(),
+            "quantity": int(li.get("quantity") or 1),
+            "sku": str(li.get("sku") or "").strip(),
+            "options": _line_options(li, names),
+            "manufacturer": mfr or (entry["manufacturer"] if entry else ""),
+            "model": model,
+            "production_size": (entry["production_size"] if (entry and not reason) else ""),
+            "size_note": (entry["review"] if entry and entry["production_size"] and entry["review"] else ""),
+            "review_reason": reason or "",
+        })
     return {
         "id": o.get("id"),
         "order_number": o.get("order_number") or str(o.get("name") or "").lstrip("#"),
@@ -3547,13 +3631,17 @@ def add_routes(mcp, registry: dict) -> None:
         for o in orders:
             items = []
             for it in o.get("items", []):
-                opts = "".join(
-                    "<li class='opt'>" + (("<b>" + esc(op.get("name", "")) + ":</b> ") if op.get("name") else "")
-                    + esc(op.get("value", "")) + "</li>"
-                    for op in it.get("options", []))
-                items.append("<li><div class='item'><span class='qty'>" + esc(str(it.get("quantity", 1)))
-                             + " x</span> " + esc(it.get("title", "")) + "</div>"
-                             + ("<ul class='opts'>" + opts + "</ul>" if opts else "") + "</li>")
+                head = ("<div class='item'><span class='qty'>" + esc(str(it.get("quantity", 1))) + " x</span> "
+                        + esc(" ".join(v for v in [it.get("manufacturer", ""), it.get("model", "")] if v)
+                              or it.get("title", "")) + "</div>")
+                if it.get("review_reason"):
+                    body = ("<div class='flag'>CHECK: " + esc(it["review_reason"]) + "</div>"
+                            + "<div class='ctx'>" + esc(it.get("title", "")) + "</div>")
+                else:
+                    body = "<div class='size'>Production Size: " + esc(it.get("production_size", "")) + " mm</div>"
+                    if it.get("size_note"):
+                        body += "<div class='ctx'>" + esc(it["size_note"]) + "</div>"
+                items.append("<li>" + head + body + "</li>")
             party_k = "Company" if o.get("is_company") else "Customer"
             sheets.append(
                 "<div class='sheet'><div class='num'>Order Number: " + esc(str(o.get("name") or ("#" + str(o.get("order_number", ""))))) + "</div>"
@@ -3583,6 +3671,9 @@ def add_routes(mcp, registry: dict) -> None:
                ".rule { border-top: 1px solid #bbb; margin: .45em 0 .4em; }"
                "ul { list-style: none; } .item { font-size: .92em; font-weight: 700; padding-top: .2em; } .qty { font-weight: 800; }"
                ".opts { padding-left: .8em; margin: .05em 0 .1em; } .opt { font-size: .82em; color: #222; padding: .06em 0; font-weight: 500; } .opt b { font-weight: 700; }"
+               ".size { font-size: 1.18em; font-weight: 800; margin: .12em 0 .3em; }"
+               ".flag { font-size: .95em; font-weight: 800; border: 2px solid #000; padding: .18em .4em; margin: .15em 0; display: inline-block; }"
+               ".ctx { font-size: .78em; color: #333; margin-bottom: .25em; }"
                + rot_css
                + "</style></head><body>"
                + ("".join("<div class='pw'>" + sh + "</div>" for sh in sheets) if portrait else "".join(sheets))
