@@ -358,26 +358,35 @@
         .lbl-who .sub { display: block; font-size: 11.5px; color: var(--ink-3); }
         .lbl-meta { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
         .lbl-actions { display: flex; gap: 8px; align-items: center; }
-        /* the label itself: also the print artwork, so keep it plain and high contrast */
-        .label-sheet { background: #fff; color: #000; border-radius: 10px; padding: 26px 28px; border: 1px solid var(--border-2); }
-        .label-sheet .ls-num { font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
-        .label-sheet .ls-party { font-size: 17px; font-weight: 600; margin-top: 8px; }
-        .label-sheet .ls-party .k { color: #555; font-weight: 600; }
-        .label-sheet .ls-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .09em; color: #555;
-            margin: 20px 0 8px; border-top: 1px solid #ddd; padding-top: 12px; }
+        /* The label is sized to the real label stock, so the preview is what prints.
+           All internal sizes are in em, so shrink-to-fit only has to change one
+           font-size on .label-sheet and the whole label scales with it. */
+        .label-sheet { background: #fff; color: #000; border: 1px solid var(--border-2); border-radius: 6px;
+            box-sizing: border-box; padding: 5mm 5.5mm; overflow: hidden; font-size: 15px; line-height: 1.25;
+            width: 100mm; height: 150mm; }
+        .label-sheet .ls-num { font-size: 1.55em; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
+        .label-sheet .ls-party { font-size: 1.05em; font-weight: 700; margin-top: .35em; line-height: 1.2; }
+        .label-sheet .ls-party .k { color: #444; font-weight: 600; }
+        .label-sheet .ls-head { font-size: .66em; font-weight: 700; text-transform: uppercase; letter-spacing: .09em; color: #444;
+            margin: .8em 0 .35em; border-top: 1px solid #bbb; padding-top: .5em; }
         .label-sheet ul { list-style: none; margin: 0; padding: 0; }
-        .label-sheet .ls-item { font-size: 15.5px; font-weight: 600; padding: 7px 0 0; display: flex; gap: 8px; }
+        .label-sheet .ls-item { font-size: .95em; font-weight: 700; padding: .35em 0 0; display: flex; gap: .4em;
+            page-break-inside: avoid; break-inside: avoid; }
         .label-sheet .ls-qty { font-weight: 800; }
-        .label-sheet .ls-opts { list-style: none; margin: 3px 0 4px; padding: 0 0 0 18px; }
-        .label-sheet .ls-opt { font-size: 13.5px; color: #333; padding: 2px 0; }
+        .label-sheet .ls-opts { list-style: none; margin: .1em 0 .15em; padding: 0 0 0 1em; }
+        .label-sheet .ls-opt { font-size: .82em; color: #222; padding: .08em 0; font-weight: 500; }
         .label-sheet .ls-opt b { font-weight: 700; }
-        .label-sheet .ls-foot { margin-top: 18px; border-top: 1px solid #ddd; padding-top: 10px; font-size: 11px; color: #666; }
-        #label-print { display: none; }
+        .lbl-size { background: var(--bg-2); border: 1px solid var(--border-2); border-radius: var(--r-sm); color: var(--ink);
+            font: inherit; font-size: 12.5px; padding: 7px 10px; }
+        .lbl-preview-note { font-size: 11.5px; color: var(--ink-3); margin: 8px 0 0; }
+        /* Off-screen staging area: it must have real layout (not display:none) so the
+           shrink-to-fit measurement is accurate before printing. */
+        #label-print { position: absolute; left: -10000px; top: 0; }
         @media print {
-            /* When printing a label, print ONLY the label sheets, one per page. */
+            /* Label mode prints ONLY the label sheets, one per physical label. */
             body.printing-label #app { display: none !important; }
-            body.printing-label #label-print { display: block !important; }
-            body.printing-label .label-sheet { border: 0 !important; border-radius: 0 !important; padding: 0 !important;
+            body.printing-label #label-print { position: static !important; left: auto !important; }
+            body.printing-label .label-sheet { border: 0 !important; border-radius: 0 !important;
                 break-after: page; page-break-after: always; }
             body.printing-label .label-sheet:last-child { break-after: auto; page-break-after: auto; }
         }
@@ -2628,6 +2637,30 @@
         let labelsCache = null;      // { data, at }
         let labelSel = null;         // selected order id
         const LABEL_TAG = 'IP';
+        // Physical label stock. The sheet is rendered at these exact dimensions, so the
+        // on-screen preview is a true representation of what comes out of the printer.
+        const LABEL_SIZES = {
+            '4x6': { w: 100, h: 150, label: '4 x 6 in (100 x 150 mm)' },
+            '4x3': { w: 100, h: 76, label: '4 x 3 in (100 x 76 mm)' },
+            '2x4': { w: 50, h: 100, label: '2 x 4 in (50 x 100 mm)' },
+            'a4': { w: 210, h: 297, label: 'A4 page' },
+        };
+        let labelSize = '4x6';
+        try { const v = localStorage.getItem('sc_label_size'); if (v && LABEL_SIZES[v]) labelSize = v; } catch (e) {}
+        function labelDims() { return LABEL_SIZES[labelSize] || LABEL_SIZES['4x6']; }
+        // Shrink the text until the whole order fits on one label. Every internal size is
+        // in em, so changing this one font-size scales the entire label proportionally.
+        function fitLabel(sheet) {
+            sheet.style.fontSize = '';
+            const base = parseFloat(getComputedStyle(sheet).fontSize) || 15;
+            let size = base;
+            const floor = base * 0.42;
+            while (sheet.scrollHeight > sheet.clientHeight && size > floor) {
+                size -= 0.5;
+                sheet.style.fontSize = size + 'px';
+            }
+            return Math.round(size / base * 100);
+        }
         function showLabelsView() {
             if (labelsCache) { renderLabels(); return; }
             renderRunGate('labels-content', { icon: I.printer, title: 'Production labels',
@@ -2678,6 +2711,18 @@
                 all.onclick = () => printLabels(orders);
                 bar.append(all);
             }
+            const sizeSel = el('select', 'lbl-size'); sizeSel.title = 'Label stock size';
+            Object.keys(LABEL_SIZES).forEach(k => {
+                const opt = el('option', null, LABEL_SIZES[k].label); opt.value = k;
+                if (k === labelSize) opt.selected = true;
+                sizeSel.append(opt);
+            });
+            sizeSel.onchange = function () {
+                labelSize = this.value;
+                try { localStorage.setItem('sc_label_size', labelSize); } catch (e) {}
+                renderLabels();
+            };
+            bar.append(sizeSel);
             bar.append(el('div', 'lbl-count', orders.length + (orders.length === 1 ? ' order' : ' orders') + ' in production'));
             box.append(bar);
 
@@ -2701,18 +2746,27 @@
                 box.append(row);
                 if (labelSel === o.id) {
                     const wrap = el('div'); wrap.style.margin = '4px 0 16px';
-                    wrap.append(labelSheet(o));
+                    const sheet = labelSheet(o);
+                    wrap.append(sheet);
+                    const note = el('div', 'lbl-preview-note'); wrap.append(note);
                     const act = el('div', 'lbl-toolbar'); act.style.marginTop = '12px';
                     const p2 = el('button', 'btn btn-primary'); p2.append(ico(I.printer), document.createTextNode('Print this label'));
                     p2.onclick = () => printLabels([o]);
                     act.append(p2); wrap.append(act);
                     box.append(wrap);
+                    // Must run after it is in the document, or there is nothing to measure.
+                    const pct = fitLabel(sheet);
+                    const d = labelDims();
+                    note.textContent = 'Actual size preview: ' + d.label
+                        + (pct < 100 ? '. Text shrunk to ' + pct + '% so the whole order fits one label.' : '.');
                 }
             });
         }
         // Builds the label. This same markup is what gets printed.
         function labelSheet(o) {
             const s = el('div', 'label-sheet');
+            const d = labelDims();
+            s.style.width = d.w + 'mm'; s.style.height = d.h + 'mm';
             s.append(el('div', 'ls-num', 'Order Number: ' + orderNo(o)));
             const party = el('div', 'ls-party');
             party.append(el('span', 'k', (o.is_company ? 'Company: ' : 'Customer: ')), document.createTextNode(o.display_name));
@@ -2740,11 +2794,30 @@
             s.append(ul);
             return s;
         }
+        let printSeq = 0;
         function printLabels(orders) {
+            // Sequence guard: a rapid second print must not be torn down by the previous
+            // print's pending cleanup (which would strip its page size and its sheets).
+            const seq = ++printSeq;
             const box = $('label-print'); box.innerHTML = '';
-            orders.forEach(o => box.append(labelSheet(o)));
+            const d = labelDims();
+            // Drive the printer's page size from the chosen stock. This has to be injected
+            // rather than written in the stylesheet, because @page cannot be scoped by a
+            // class and the report print rules already declare their own A4 page.
+            let rule = $('label-page-rule');
+            if (!rule) { rule = document.createElement('style'); rule.id = 'label-page-rule'; document.head.append(rule); }
+            rule.textContent = '@page { size: ' + d.w + 'mm ' + d.h + 'mm; margin: 0; }';
+            // Staged off-screen with real layout so each label can be measured and fitted.
+            const sheets = orders.map(o => { const s = labelSheet(o); box.append(s); return s; });
+            sheets.forEach(fitLabel);
             document.body.classList.add('printing-label');
-            const cleanup = () => { document.body.classList.remove('printing-label'); box.innerHTML = ''; };
+            const cleanup = () => {
+                if (seq !== printSeq) return;   // a newer print took over; leave it alone
+                document.body.classList.remove('printing-label');
+                box.innerHTML = '';
+                const r = $('label-page-rule');
+                if (r && r.parentNode) r.parentNode.removeChild(r);
+            };
             if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
             setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);
         }
