@@ -3467,11 +3467,11 @@ def add_routes(mcp, registry: dict) -> None:
             return JSONResponse({"error": "No order ids given."}, status_code=400, headers={**_API_HEADERS, **cors})
         exp = int(time.time()) + 300
         sig = hmac.new(SHOPIFY_API_SECRET.encode(),
-                       f"{raw_ids}|{raw_size}|{exp}".encode(), hashlib.sha256).hexdigest()
+                       f"{raw_ids}|{exp}".encode(), hashlib.sha256).hexdigest()
         base = (APP_BASE_URL.rstrip("/") if APP_BASE_URL
                 else f"https://{request.headers.get('host', '')}")
         path = (f"/print/production-labels?ids={quote(raw_ids, safe='')}"
-                f"&size={raw_size}&exp={exp}&sig={sig}")
+                f"&exp={exp}&sig={sig}")
         logger.info("print-labels sign: ok ids=%s size=%s", raw_ids[:120], raw_size)
         return JSONResponse({"url": base + path, "path": path, "expires_in": 300},
                             headers={**_API_HEADERS, **cors})
@@ -3504,12 +3504,12 @@ def add_routes(mcp, registry: dict) -> None:
         # no session of its own), the embedded id_token query param, or a bearer token.
         authed = False
         qp = request.query_params
-        raw_ids, raw_size = str(qp.get("ids") or ""), str(qp.get("size") or "4x2")
+        raw_ids = str(qp.get("ids") or "")
         exp_s, sig = str(qp.get("exp") or ""), str(qp.get("sig") or "")
         if exp_s and sig and SHOPIFY_API_SECRET:
             try:
                 expect = hmac.new(SHOPIFY_API_SECRET.encode(),
-                                  f"{raw_ids}|{raw_size}|{exp_s}".encode(), hashlib.sha256).hexdigest()
+                                  f"{raw_ids}|{exp_s}".encode(), hashlib.sha256).hexdigest()
                 authed = int(exp_s) > time.time() and hmac.compare_digest(sig, expect)
             except (TypeError, ValueError):
                 authed = False
