@@ -17,7 +17,7 @@ export default async () => {
 function Extension() {
   const { data } = shopify;
   const [baseUrl, setBaseUrl] = useState(null);
-  const [size, setSize] = useState("4x2");
+  const [size, setSize] = useState("4x6");
   const [portrait, setPortrait] = useState(false);
   const [status, setStatus] = useState("starting");
 
@@ -62,7 +62,7 @@ function Extension() {
           onChange={(e) => e && e.target && e.target.value && setSize(e.target.value)}
         >
           {SIZES.map((o) => (
-            <s-option value={o.value} defaultSelected={o.value === "4x2" ? true : undefined}>
+            <s-option value={o.value} defaultSelected={o.value === "4x6" ? true : undefined}>
               {o.label}
             </s-option>
           ))}

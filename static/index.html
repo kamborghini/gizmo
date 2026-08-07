@@ -390,12 +390,9 @@
             padding: .16em .45em; margin: .18em 0 .08em; display: inline-flex; align-items: baseline; gap: .35em; }
         .label-sheet .ls-flag .ls-fb { font-weight: 900; letter-spacing: .05em; }
         .label-sheet .ls-ctx { font-size: .76em; color: #222; margin-top: .08em; }
-        /* Customer strip: follows the last item (rule directly beneath it) rather than
-           pinning to the label's bottom edge. The QR keeps a fixed physical size:
-           shrink-to-fit scales the text, but a code below ~10mm stops scanning. */
+        /* Customer strip: follows the last item, rule directly beneath it. */
         .label-sheet .ls-rate { margin-top: .5em; padding-top: .35em; border-top: 1px solid #000;
-            display: flex; align-items: center; justify-content: flex-start; gap: 2mm; }
-        .label-sheet .ls-rate .qr { width: 13mm; height: 13mm; flex: none; }
+            display: flex; align-items: center; justify-content: flex-start; }
         .label-sheet .ls-rt { font-size: .68em; font-weight: 500; text-align: left; }
         .label-sheet .ls-r1 { font-weight: 800; font-size: 1.06em; }
         .label-sheet .ls-rate b { font-weight: 800; }
@@ -2700,11 +2697,8 @@
             const n = String(op.name || '').trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/:$/, '');
             return LABEL_SKIP_OPTIONS.indexOf(n) === -1;
         }
-        // Review QR for the label's customer strip (fixed URL, generated once,
-        // decode-verified at print rasters). Trusted static markup.
-        const LABEL_QR = "<svg class='qr' viewBox='0 0 41 41' xmlns='http://www.w3.org/2000/svg'><path d='M0 0h7v1h-7zM10 0h1v1h-1zM14 0h2v1h-2zM18 0h3v1h-3zM22 0h2v1h-2zM28 0h5v1h-5zM34 0h7v1h-7zM0 1h1v1h-1zM6 1h1v1h-1zM11 1h1v1h-1zM13 1h2v1h-2zM18 1h1v1h-1zM20 1h1v1h-1zM22 1h1v1h-1zM24 1h1v1h-1zM27 1h3v1h-3zM32 1h1v1h-1zM34 1h1v1h-1zM40 1h1v1h-1zM0 2h1v1h-1zM2 2h3v1h-3zM6 2h1v1h-1zM8 2h1v1h-1zM14 2h1v1h-1zM16 2h1v1h-1zM19 2h1v1h-1zM23 2h1v1h-1zM26 2h7v1h-7zM34 2h1v1h-1zM36 2h3v1h-3zM40 2h1v1h-1zM0 3h1v1h-1zM2 3h3v1h-3zM6 3h1v1h-1zM8 3h2v1h-2zM11 3h1v1h-1zM13 3h1v1h-1zM16 3h1v1h-1zM18 3h1v1h-1zM20 3h3v1h-3zM27 3h1v1h-1zM31 3h1v1h-1zM34 3h1v1h-1zM36 3h3v1h-3zM40 3h1v1h-1zM0 4h1v1h-1zM2 4h3v1h-3zM6 4h1v1h-1zM8 4h1v1h-1zM10 4h1v1h-1zM12 4h2v1h-2zM16 4h1v1h-1zM19 4h1v1h-1zM21 4h1v1h-1zM23 4h1v1h-1zM26 4h1v1h-1zM28 4h1v1h-1zM30 4h3v1h-3zM34 4h1v1h-1zM36 4h3v1h-3zM40 4h1v1h-1zM0 5h1v1h-1zM6 5h1v1h-1zM8 5h2v1h-2zM11 5h2v1h-2zM14 5h2v1h-2zM18 5h1v1h-1zM21 5h2v1h-2zM25 5h1v1h-1zM27 5h1v1h-1zM29 5h1v1h-1zM32 5h1v1h-1zM34 5h1v1h-1zM40 5h1v1h-1zM0 6h7v1h-7zM8 6h1v1h-1zM10 6h1v1h-1zM12 6h1v1h-1zM14 6h1v1h-1zM16 6h1v1h-1zM18 6h1v1h-1zM20 6h1v1h-1zM22 6h1v1h-1zM24 6h1v1h-1zM26 6h1v1h-1zM28 6h1v1h-1zM30 6h1v1h-1zM32 6h1v1h-1zM34 6h7v1h-7zM8 7h1v1h-1zM12 7h1v1h-1zM14 7h3v1h-3zM19 7h3v1h-3zM27 7h2v1h-2zM0 8h1v1h-1zM2 8h5v1h-5zM12 8h6v1h-6zM19 8h1v1h-1zM22 8h2v1h-2zM25 8h5v1h-5zM31 8h2v1h-2zM34 8h5v1h-5zM4 9h2v1h-2zM8 9h2v1h-2zM11 9h2v1h-2zM14 9h8v1h-8zM23 9h1v1h-1zM25 9h1v1h-1zM28 9h1v1h-1zM31 9h2v1h-2zM34 9h3v1h-3zM38 9h3v1h-3zM0 10h1v1h-1zM2 10h5v1h-5zM8 10h2v1h-2zM11 10h2v1h-2zM20 10h2v1h-2zM26 10h2v1h-2zM32 10h1v1h-1zM34 10h1v1h-1zM1 11h3v1h-3zM5 11h1v1h-1zM7 11h2v1h-2zM10 11h3v1h-3zM15 11h2v1h-2zM20 11h2v1h-2zM23 11h2v1h-2zM26 11h2v1h-2zM31 11h2v1h-2zM34 11h4v1h-4zM40 11h1v1h-1zM0 12h3v1h-3zM6 12h1v1h-1zM9 12h1v1h-1zM17 12h1v1h-1zM19 12h1v1h-1zM22 12h1v1h-1zM26 12h2v1h-2zM29 12h1v1h-1zM31 12h2v1h-2zM35 12h1v1h-1zM37 12h3v1h-3zM0 13h2v1h-2zM3 13h1v1h-1zM7 13h1v1h-1zM12 13h1v1h-1zM14 13h1v1h-1zM16 13h2v1h-2zM20 13h2v1h-2zM24 13h6v1h-6zM34 13h3v1h-3zM39 13h2v1h-2zM4 14h3v1h-3zM8 14h1v1h-1zM13 14h5v1h-5zM19 14h1v1h-1zM21 14h2v1h-2zM26 14h1v1h-1zM32 14h2v1h-2zM35 14h1v1h-1zM37 14h2v1h-2zM2 15h1v1h-1zM8 15h1v1h-1zM10 15h1v1h-1zM19 15h4v1h-4zM24 15h1v1h-1zM26 15h1v1h-1zM28 15h1v1h-1zM34 15h2v1h-2zM37 15h1v1h-1zM39 15h2v1h-2zM1 16h1v1h-1zM3 16h1v1h-1zM5 16h4v1h-4zM10 16h2v1h-2zM16 16h2v1h-2zM19 16h2v1h-2zM22 16h1v1h-1zM24 16h2v1h-2zM28 16h2v1h-2zM32 16h2v1h-2zM35 16h1v1h-1zM38 16h1v1h-1zM2 17h3v1h-3zM7 17h1v1h-1zM10 17h2v1h-2zM13 17h5v1h-5zM19 17h8v1h-8zM28 17h1v1h-1zM30 17h1v1h-1zM32 17h1v1h-1zM34 17h3v1h-3zM38 17h3v1h-3zM1 18h1v1h-1zM3 18h1v1h-1zM5 18h2v1h-2zM9 18h3v1h-3zM13 18h5v1h-5zM20 18h2v1h-2zM24 18h5v1h-5zM30 18h1v1h-1zM32 18h2v1h-2zM36 18h2v1h-2zM0 19h1v1h-1zM4 19h1v1h-1zM8 19h5v1h-5zM15 19h1v1h-1zM17 19h9v1h-9zM27 19h1v1h-1zM32 19h3v1h-3zM36 19h2v1h-2zM39 19h2v1h-2zM1 20h2v1h-2zM4 20h1v1h-1zM6 20h5v1h-5zM12 20h3v1h-3zM19 20h1v1h-1zM21 20h1v1h-1zM24 20h1v1h-1zM26 20h1v1h-1zM28 20h1v1h-1zM30 20h2v1h-2zM38 20h1v1h-1zM40 20h1v1h-1zM1 21h1v1h-1zM3 21h2v1h-2zM7 21h1v1h-1zM10 21h2v1h-2zM13 21h4v1h-4zM18 21h6v1h-6zM25 21h1v1h-1zM28 21h1v1h-1zM31 21h7v1h-7zM39 21h2v1h-2zM2 22h7v1h-7zM10 22h3v1h-3zM15 22h1v1h-1zM17 22h1v1h-1zM20 22h3v1h-3zM25 22h5v1h-5zM37 22h1v1h-1zM1 23h3v1h-3zM5 23h1v1h-1zM14 23h2v1h-2zM19 23h4v1h-4zM24 23h1v1h-1zM26 23h3v1h-3zM31 23h2v1h-2zM36 23h1v1h-1zM39 23h2v1h-2zM3 24h1v1h-1zM6 24h2v1h-2zM10 24h1v1h-1zM15 24h1v1h-1zM17 24h1v1h-1zM22 24h1v1h-1zM24 24h6v1h-6zM37 24h2v1h-2zM2 25h1v1h-1zM7 25h4v1h-4zM13 25h1v1h-1zM18 25h4v1h-4zM23 25h1v1h-1zM25 25h1v1h-1zM28 25h1v1h-1zM31 25h1v1h-1zM34 25h1v1h-1zM36 25h2v1h-2zM39 25h2v1h-2zM0 26h1v1h-1zM3 26h4v1h-4zM9 26h2v1h-2zM12 26h1v1h-1zM15 26h1v1h-1zM17 26h2v1h-2zM20 26h2v1h-2zM25 26h3v1h-3zM29 26h1v1h-1zM32 26h4v1h-4zM0 27h4v1h-4zM10 27h2v1h-2zM16 27h1v1h-1zM18 27h1v1h-1zM21 27h2v1h-2zM26 27h1v1h-1zM28 27h1v1h-1zM31 27h3v1h-3zM35 27h3v1h-3zM39 27h2v1h-2zM0 28h2v1h-2zM3 28h4v1h-4zM12 28h4v1h-4zM17 28h1v1h-1zM19 28h2v1h-2zM22 28h1v1h-1zM24 28h3v1h-3zM28 28h4v1h-4zM33 28h1v1h-1zM37 28h3v1h-3zM0 29h3v1h-3zM10 29h1v1h-1zM12 29h4v1h-4zM18 29h1v1h-1zM21 29h1v1h-1zM25 29h1v1h-1zM27 29h1v1h-1zM32 29h2v1h-2zM36 29h3v1h-3zM40 29h1v1h-1zM0 30h1v1h-1zM2 30h2v1h-2zM5 30h5v1h-5zM11 30h6v1h-6zM20 30h5v1h-5zM26 30h3v1h-3zM31 30h1v1h-1zM33 30h6v1h-6zM0 31h1v1h-1zM3 31h2v1h-2zM7 31h1v1h-1zM9 31h1v1h-1zM11 31h1v1h-1zM13 31h3v1h-3zM21 31h1v1h-1zM23 31h1v1h-1zM26 31h2v1h-2zM31 31h5v1h-5zM37 31h1v1h-1zM0 32h1v1h-1zM5 32h3v1h-3zM12 32h1v1h-1zM16 32h2v1h-2zM20 32h1v1h-1zM22 32h2v1h-2zM25 32h3v1h-3zM29 32h1v1h-1zM31 32h6v1h-6zM38 32h1v1h-1zM8 33h2v1h-2zM13 33h2v1h-2zM16 33h1v1h-1zM20 33h1v1h-1zM23 33h1v1h-1zM26 33h1v1h-1zM28 33h3v1h-3zM32 33h1v1h-1zM36 33h2v1h-2zM39 33h2v1h-2zM0 34h7v1h-7zM9 34h4v1h-4zM14 34h2v1h-2zM18 34h1v1h-1zM20 34h1v1h-1zM22 34h1v1h-1zM27 34h1v1h-1zM29 34h1v1h-1zM31 34h2v1h-2zM34 34h1v1h-1zM36 34h2v1h-2zM39 34h1v1h-1zM0 35h1v1h-1zM6 35h1v1h-1zM8 35h1v1h-1zM14 35h1v1h-1zM16 35h1v1h-1zM20 35h1v1h-1zM24 35h1v1h-1zM26 35h7v1h-7zM36 35h2v1h-2zM0 36h1v1h-1zM2 36h3v1h-3zM6 36h1v1h-1zM8 36h3v1h-3zM12 36h2v1h-2zM16 36h1v1h-1zM18 36h2v1h-2zM21 36h2v1h-2zM24 36h1v1h-1zM27 36h2v1h-2zM32 36h7v1h-7zM0 37h1v1h-1zM2 37h3v1h-3zM6 37h1v1h-1zM8 37h2v1h-2zM12 37h1v1h-1zM15 37h2v1h-2zM19 37h3v1h-3zM23 37h1v1h-1zM25 37h2v1h-2zM28 37h1v1h-1zM30 37h1v1h-1zM33 37h1v1h-1zM35 37h1v1h-1zM37 37h2v1h-2zM0 38h1v1h-1zM2 38h3v1h-3zM6 38h1v1h-1zM8 38h2v1h-2zM12 38h2v1h-2zM16 38h3v1h-3zM20 38h3v1h-3zM25 38h1v1h-1zM27 38h3v1h-3zM31 38h1v1h-1zM33 38h5v1h-5zM0 39h1v1h-1zM6 39h1v1h-1zM11 39h1v1h-1zM17 39h2v1h-2zM21 39h1v1h-1zM23 39h2v1h-2zM28 39h1v1h-1zM31 39h2v1h-2zM36 39h2v1h-2zM39 39h1v1h-1zM0 40h7v1h-7zM8 40h2v1h-2zM12 40h2v1h-2zM17 40h3v1h-3zM22 40h1v1h-1zM24 40h3v1h-3zM29 40h3v1h-3zM35 40h2v1h-2zM38 40h1v1h-1z' fill='#000'/></svg>";
-        let labelSize = '4x2';
-        try { const v = localStorage.getItem('sc_label_size'); if (v && LABEL_SIZES[v]) labelSize = v; } catch (e) {}
+        let labelSize = '4x6';
+        try { const v = localStorage.getItem('sc_label_size2'); if (v && LABEL_SIZES[v]) labelSize = v; } catch (e) {}
         function labelDims() { return LABEL_SIZES[labelSize] || LABEL_SIZES['4x6']; }
         // Shrink the text until the whole order fits on one label. Every internal size is
         // in em, so changing this one font-size scales the entire label proportionally.
@@ -2784,7 +2778,7 @@
             });
             sizeSel.onchange = function () {
                 labelSize = this.value;
-                try { localStorage.setItem('sc_label_size', labelSize); } catch (e) {}
+                try { localStorage.setItem('sc_label_size2', labelSize); } catch (e) {}
                 renderLabels();
             };
             bar.append(sizeSel);
@@ -2952,11 +2946,10 @@
             });
             s.append(ul);
             const rate = el('div', 'ls-rate');
-            rate.innerHTML = LABEL_QR;   // trusted static markup, same as the icon constants
             const rt = el('div', 'ls-rt');
             rt.append(el('div', 'ls-r1', '★★★★★ 5 Star Service'));
             const r2 = el('div', 'ls-r2');
-            r2.append(document.createTextNode('Scan to leave us a review on '), el('b', null, 'Trustpilot'));
+            r2.append(document.createTextNode('Leave us a review on '), el('b', null, 'Trustpilot'));
             rt.append(r2);
             rate.append(rt);
             s.append(rate);
