@@ -3483,6 +3483,8 @@ def add_routes(mcp, registry: dict) -> None:
         same way it loads the app page) and shows it in the print preview, so the
         merchant prints without ever leaving the order. Accepts ?ids=<order ids or
         GIDs, comma separated> and optional ?size=4x2|4x3|4x6|2x4|a4."""
+        if request.method == "OPTIONS":
+            return PlainTextResponse("", headers=_print_cors(request))
         pre = _pre_checks(request)
         if pre:
             return pre
