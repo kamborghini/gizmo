@@ -2498,6 +2498,20 @@ def _item_prop(li: dict, name: str) -> str:
     return ""
 
 
+def _short_glass(v) -> str:
+    """Label-friendly glass type: "Monochrome Glass - Original" prints as
+    "Mono - Original", "Colour Glass - Copy" as "Colour - Copy"."""
+    s = _strip_price(v)
+    s = re.sub(r"\bmonochrome\b", "Mono", s, flags=re.I)
+    s = re.sub(r"\s*\bglass\b", "", s, flags=re.I)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+# Product titles that carry no information on a label: the customer's own
+# artwork has no name on these, so the quoted title line is dropped.
+_GENERIC_TITLES = {"create your own gobo"}
+
+
 def _item_model(li: dict, manufacturer: str) -> str:
     """The item's model, wherever the store's option sets put it: a plain "Model"
     property, or a per-manufacturer dropdown like "American DJ Models: Ikon
@@ -2530,14 +2544,16 @@ def _shape_label_order(o: dict, names: dict) -> dict:
         model = _strip_price(_item_model(li, mfr))
         entry, reason = _gobo_lookup(mfr, model)
         dsize = _gobo_domain_size(mfr, model, entry, domain)
+        title = str(li.get("title") or li.get("name") or "Item").strip()
         items.append({
-            "title": str(li.get("title") or li.get("name") or "Item").strip(),
+            "title": title,
+            "artwork": ("" if _norm_key(title) in _GENERIC_TITLES else title),
             "quantity": int(li.get("quantity") or 1),
             "sku": str(li.get("sku") or "").strip(),
             "options": _line_options(li, names),
             "manufacturer": mfr or (entry["manufacturer"] if entry else ""),
             "model": model,
-            "glass_type": _strip_price(_item_prop(li, "Glass Type")),
+            "glass_type": _short_glass(_item_prop(li, "Glass Type")),
             "production_size": dsize or (entry["production_size"] if (entry and not reason) else ""),
             "size_note": ("Size for this customer" if dsize
                           else (entry["review"] if entry and entry["production_size"] and entry["review"] else "")),
@@ -3997,9 +4013,11 @@ def add_routes(mcp, registry: dict) -> None:
                     continue
                 size = esc(it.get("production_size", ""))
                 chip = ("<span class='chip'>" + esc(it["glass_type"]) + "</span>") if it.get("glass_type") else ""
+                art = it.get("artwork", it.get("title", ""))
                 row = ("<li class='row'><div class='it'><span class='iqs'>" + qty + "x"
                        + ((" " + size + "mm") if size else "") + "</span>" + chip
-                       + "<span class='desc'>&quot;" + esc(it.get("title", "")) + "&quot;</span></div>")
+                       + (("<span class='desc'>&quot;" + esc(art) + "&quot;</span>") if art else "")
+                       + "</div>")
                 if it.get("size_note"):
                     row += "<div class='ctx'>" + esc(it["size_note"]) + "</div>"
                 items.append(row + "</li>")

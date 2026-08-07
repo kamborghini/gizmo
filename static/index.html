@@ -2929,7 +2929,8 @@
                     row.append(el('span', 'ls-iqs',
                         it.quantity + 'x' + (it.production_size ? ' ' + it.production_size + 'mm' : '')));
                     if (it.glass_type) row.append(el('span', 'ls-chip', it.glass_type));
-                    row.append(el('span', 'ls-desc', '"' + (it.title || '') + '"'));
+                    const art = ('artwork' in it) ? it.artwork : (it.title || '');
+                    if (art) row.append(el('span', 'ls-desc', '"' + art + '"'));
                     li.append(row);
                     if (it.size_note) li.append(el('div', 'ls-ctx', it.size_note));
                 }
