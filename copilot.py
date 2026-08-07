@@ -2184,16 +2184,23 @@ async def _product_option_names(registry: dict, product_ids) -> dict:
     return {pid: names for pid, names in await asyncio.gather(*[one(i) for i in ids])}
 
 
-_gobo_cache = {"mtime": None, "by_mm": {}, "by_model": {}}
+_gobo_cache = {"mtime": None, "by_mm": {}, "by_model": {}, "by_mm_loose": {}, "by_model_loose": {}}
 
 
 def _norm_key(v) -> str:
     return re.sub(r"\s+", " ", str(v or "").strip().lower())
 
 
+def _loose_key(v) -> str:
+    """Punctuation-insensitive key: "Source Four B-Size" == "Source Four (B Size)"."""
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(v or "").lower())).strip()
+
+
 def _gobo_sizes() -> dict:
     """Model -> production size lookup from the merchant's CSV, reloaded when the
-    file changes. Multi-model cells ("VR8, VRX, VRXSR") index each model."""
+    file changes. Multi-model cells ("VR8, VRX, VRXSR") index each model. Keys map
+    to LISTS because the sheet genuinely repeats some (manufacturer, model) rows
+    with different sizes; those must flag for review, never pick-one."""
     try:
         mtime = os.path.getmtime(GOBO_SIZES_PATH)
     except OSError:
@@ -2201,7 +2208,7 @@ def _gobo_sizes() -> dict:
     if _gobo_cache["mtime"] == mtime:
         return _gobo_cache
     import csv as _csv
-    by_mm, by_model = {}, {}
+    by_mm, by_model, by_mm_loose, by_model_loose = {}, {}, {}, {}
     try:
         with open(GOBO_SIZES_PATH, newline="", encoding="utf-8-sig") as fh:
             for row in _csv.DictReader(fh):
@@ -2212,36 +2219,85 @@ def _gobo_sizes() -> dict:
                     "review": str(row.get("Production Review") or "").strip(),
                 }
                 nm = _norm_key(entry["manufacturer"])
+                lm = _loose_key(entry["manufacturer"])
                 for model in entry["model"].split(","):
                     key = _norm_key(model)
                     if not key:
                         continue
-                    by_mm[(nm, key)] = entry
+                    by_mm.setdefault((nm, key), []).append(entry)
                     by_model.setdefault(key, []).append(entry)
+                    lkey = _loose_key(model)
+                    if lkey:
+                        by_mm_loose.setdefault((lm, lkey), []).append(entry)
+                        by_model_loose.setdefault(lkey, []).append(entry)
     except Exception:
         logger.exception("gobo sizes: failed to load %s", GOBO_SIZES_PATH)
         return _gobo_cache
-    _gobo_cache.update({"mtime": mtime, "by_mm": by_mm, "by_model": by_model})
+    _gobo_cache.update({"mtime": mtime, "by_mm": by_mm, "by_model": by_model,
+                        "by_mm_loose": by_mm_loose, "by_model_loose": by_model_loose})
     logger.info("gobo sizes: loaded %d model keys from %s", len(by_model), GOBO_SIZES_PATH)
     return _gobo_cache
 
 
+def _gobo_resolve_key(cache: dict, manufacturer: str, key: str, loose: bool):
+    """Entries for one candidate key, or ("ambiguous"|None). Manufacturer+model
+    first; model alone only when every row with that model is from one maker."""
+    mm = cache["by_mm_loose" if loose else "by_mm"]
+    bm = cache["by_model_loose" if loose else "by_model"]
+    entries = mm.get((manufacturer, key)) if manufacturer else None
+    if entries:
+        return entries, None
+    candidates = bm.get(key) or []
+    makers = {(_loose_key if loose else _norm_key)(e["manufacturer"]) for e in candidates}
+    if len(makers) == 1:
+        return candidates, None
+    if len(makers) > 1:
+        return None, "ambiguous"
+    return None, None
+
+
 def _gobo_lookup(manufacturer: str, model: str):
-    """(entry, review_reason). Manufacturer+model first; model alone only when it is
-    unambiguous. Never guesses: ambiguity and misses come back as review reasons."""
+    """(entry, review_reason). The store's Model values can bundle several models
+    ("ESPRITE, iESPRITE (Not iESPRITE LTL WB)") and punctuate differently from the
+    sheet ("Source Four (B Size)" vs "Source Four B-Size"), so each comma part is
+    tried strict, then punctuation-insensitive, then with parentheticals or the
+    manufacturer prefix stripped. Never guesses: parts that match different sizes,
+    duplicate sheet rows with different sizes, ambiguity and misses all come back
+    as review reasons instead of a size."""
     cache = _gobo_sizes()
-    nmod = _norm_key(model)
-    if not nmod:
+    raw = str(model or "").strip()
+    if not raw:
         return None, "No model specified on this item"
-    hit = cache["by_mm"].get((_norm_key(manufacturer), nmod))
-    if not hit:
-        candidates = cache["by_model"].get(nmod) or []
-        if len(candidates) == 1:
-            hit = candidates[0]
-        elif len(candidates) > 1:
+    nmfr, lmfr = _norm_key(manufacturer), _loose_key(manufacturer)
+    parts = [raw] if "," not in raw else [p for p in raw.split(",") if p.strip()]
+    resolved, saw_ambiguous = [], False
+    for part in parts:
+        variants = [(_norm_key(part), False), (_loose_key(part), True)]
+        stripped = re.sub(r"\([^)]*\)", " ", part)
+        if stripped != part:
+            variants += [(_norm_key(stripped), False), (_loose_key(stripped), True)]
+        lpart = _loose_key(part)
+        if lmfr and lpart.startswith(lmfr + " "):
+            variants.append((lpart[len(lmfr):].strip(), True))
+        seen = set()
+        for key, loose in variants:
+            if not key or (key, loose) in seen:
+                continue
+            seen.add((key, loose))
+            entries, note = _gobo_resolve_key(cache, lmfr if loose else nmfr, key, loose)
+            if entries:
+                resolved.extend(entries)
+                break
+            if note == "ambiguous":
+                saw_ambiguous = True
+    if not resolved:
+        if saw_ambiguous:
             return None, "Model matches more than one manufacturer in the size list"
-        else:
-            return None, "Model not found in the size list"
+        return None, "Model not found in the size list"
+    sizes = {e["production_size"] for e in resolved}
+    if len(sizes) > 1:
+        return None, "More than one production size listed for this model"
+    hit = resolved[0]
     if not hit["production_size"]:
         return hit, (hit["review"] or "No production size listed for this model")
     return hit, None
