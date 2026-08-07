@@ -125,6 +125,7 @@ ALERTS_MAX         = int(os.environ.get("ALERTS_MAX", "60"))
 SCHEDULE_CHECK_SECS = int(os.environ.get("SCHEDULE_CHECK_SECS", "900"))       # how often the scheduler wakes to check
 USAGE_PATH         = os.environ.get("USAGE_PATH", "/data/usage.json")          # AI token-usage + cost log (measurement)
 USAGE_MAX          = int(os.environ.get("USAGE_MAX", "5000"))                  # max usage events retained
+DAILY_COST_CAP     = float(os.environ.get("DAILY_COST_CAP", "25"))             # hard $/day AI ceiling (0 disables)
 # Anthropic list prices, $ per 1M tokens (input, output). Cache read ~0.1x input, write ~1.25x input.
 _MODEL_PRICE = {
     "claude-opus-4-8": (5.0, 25.0),
@@ -540,14 +541,16 @@ def _load_analysis_cache() -> dict:
 def _parse_num(v):
     """Best-effort number out of a formatted metric value ('$12,345', '24%', '1.2k', '3x')."""
     s = str(v).strip().lower().replace(",", "")
-    m = re.search(r"(-?\d+(?:\.\d+)?)\s*([km])?", s)
+    m = re.search(r"-?\d+(?:\.\d+)?", s)
     if not m:
         return None
-    num = float(m.group(1))
-    if m.group(2) == "k":
-        num *= 1000
-    elif m.group(2) == "m":
-        num *= 1_000_000
+    num = float(m.group(0))
+    # Apply a k/m multiplier ONLY when it directly abuts the digits and is not the start
+    # of a word. Otherwise a currency code hijacks it: "0.42 MXN" -> 420000, "1234 KRW"
+    # -> 1,234,000. Note "3.2x" (ROAS) must stay 3.2.
+    mult = re.match(r"([km])(?![a-z])", s[m.end():])
+    if mult:
+        num *= 1000 if mult.group(1) == "k" else 1_000_000
     return num
 
 
@@ -850,6 +853,7 @@ async def _discover_content_urls(primary: str, hosts: set, limit: int) -> list[s
 
 
 async def run_learn(registry: dict) -> dict:
+    _ai_kind.set("learn")
     primary, hosts = await _resolve_domains(registry)
     if not primary:
         raise RuntimeError("Could not resolve the store's domain to learn from.")
@@ -963,6 +967,8 @@ def _log_usage(kind: str, model: str, usage) -> None:
         rec = {"at": datetime.now(timezone.utc).isoformat(), "kind": kind, "model": model,
                "in": inp, "out": out, "cache_read": cr, "cache_write": cw,
                "cost": _price_for(model, inp, out, cr, cw)}
+        _spend_today()                      # ensure the day bucket is current
+        _spend["cost"] += rec["cost"]       # keep the daily cap in sync without re-reading
         try:
             with open(USAGE_PATH, "r", encoding="utf-8") as fh:
                 events = json.load(fh).get("events", [])
@@ -979,8 +985,42 @@ def _log_usage(kind: str, model: str, usage) -> None:
         logger.exception("usage log failed")
 
 
+_spend = {"day": "", "cost": 0.0}
+
+
+def _utc_day() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _spend_today() -> float:
+    """Today's AI spend. Recomputed from the usage log when the day rolls over or the
+    process restarts, so a redeploy cannot silently reset the cap."""
+    day = _utc_day()
+    if _spend["day"] != day:
+        total = 0.0
+        try:
+            with open(USAGE_PATH, "r", encoding="utf-8") as fh:
+                for e in json.load(fh).get("events", []):
+                    if (e.get("at") or "").startswith(day):
+                        total += float(e.get("cost") or 0)
+        except Exception:
+            total = 0.0
+        _spend["day"], _spend["cost"] = day, total
+    return _spend["cost"]
+
+
+def _spend_guard() -> None:
+    if DAILY_COST_CAP > 0 and _spend_today() >= DAILY_COST_CAP:
+        raise RuntimeError(
+            f"The daily AI spending limit of ${DAILY_COST_CAP:.2f} has been reached, so analysis is "
+            "paused until tomorrow. This is a safety cap. Raise DAILY_COST_CAP in Railway to change it."
+        )
+
+
 async def _xcreate(client, **kwargs):
-    """Wrapper around messages.create that logs token usage + cost per call."""
+    """Wrapper around messages.create that enforces the daily spend cap and logs
+    token usage + cost per call."""
+    _spend_guard()
     resp = await getattr(client.messages, "create")(**kwargs)
     _log_usage(_ai_kind.get("ai"), kwargs.get("model", ""), getattr(resp, "usage", None))
     return resp
@@ -1138,7 +1178,15 @@ async def _tool_json(registry: dict, name: str, args: dict) -> dict:
     try:
         return json.loads(await func(model(**(args or {}))))
     except Exception:
-        return {}
+        # Signal failure rather than an empty result: callers must not report a
+        # throttled/errored fetch as a real zero (that produces false alerts).
+        logger.warning("shopify tool %s failed; treating as unavailable", name)
+        return {"_failed": True}
+
+
+def _ok(d) -> bool:
+    """True when a _tool_json result is real data (not a swallowed failure)."""
+    return isinstance(d, dict) and not d.get("_failed")
 
 
 def _money(amount: float, currency: str) -> str:
@@ -1188,22 +1236,34 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
     aov = rev7 / n7 if n7 else 0
     unfulfilled = sum(1 for o in o7 if o.get("fulfillment_status") in (None, "partial", "unfulfilled"))
 
+    # Only publish a metric when its source fetch actually succeeded. A throttled or
+    # errored Shopify call must not surface as a real 0 (it would poison the saved
+    # snapshot and fire a bogus "-100%" change alert on the next run).
+    stale: list[str] = []
     rev_delta, rev_trend = _delta(rev7, revp)
     ord_delta, ord_trend = _delta(n7, npv)
-    metrics.append({"label": "Revenue (7d)", "value": _money(rev7, currency), "delta": rev_delta, "trend": rev_trend})
-    metrics.append({"label": "Orders (7d)", "value": str(n7), "delta": ord_delta, "trend": ord_trend})
-    metrics.append({"label": "Avg order value", "value": _money(aov, currency)})
-    metrics.append({"label": "Unfulfilled (7d)", "value": str(unfulfilled), "tone": "warn" if unfulfilled else None})
+    if _ok(o7r):
+        metrics.append({"label": "Revenue (7d)", "value": _money(rev7, currency), "delta": rev_delta, "trend": rev_trend})
+        metrics.append({"label": "Orders (7d)", "value": str(n7), "delta": ord_delta, "trend": ord_trend})
+        metrics.append({"label": "Avg order value", "value": _money(aov, currency)})
+        metrics.append({"label": "Unfulfilled (7d)", "value": str(unfulfilled), "tone": "warn" if unfulfilled else None})
+    else:
+        stale.append("orders")
 
     new_cust = len(custr.get("customers", []))
-    metrics.append({"label": "New customers (7d)", "value": str(new_cust)})
+    if _ok(custr):
+        metrics.append({"label": "New customers (7d)", "value": str(new_cust)})
+    else:
+        stale.append("customers")
 
     total_products = cntr.get("count")
-    if total_products is not None:
+    if _ok(cntr) and total_products is not None:
         metrics.append({"label": "Products", "value": str(total_products)})
 
     low = []
-    if track_inventory:
+    if track_inventory and not _ok(prodr):
+        stale.append("inventory")
+    elif track_inventory:
         products = prodr.get("products", [])
         low = [
             {"product": p.get("title"), "variant": v.get("title"), "qty": v.get("inventory_quantity")}
@@ -1231,6 +1291,10 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
         "top_products_7d": [{"title": t, "units": q} for t, q in units.most_common(5)],
         "note": "Order figures are based on up to 250 orders per 7-day window.",
     }
+    if stale:
+        context["data_warning"] = (
+            "These Shopify reads failed on this run and are NOT included: " + ", ".join(stale)
+            + ". Do not treat the missing areas as zero; say the data was unavailable.")
 
     # Real traffic + search performance (only when Google is connected).
     if ga4_on and ga and not ga.get("error"):
@@ -1272,11 +1336,15 @@ async def _sector_sales(registry: dict, days: int = 28) -> list:
         for o in orders:
             cid = (o.get("customer") or {}).get("id")
             rev = float(o.get("total_price") or 0)
+            # Attribute each order to ONE sector (the highest-ranked matching tag), so a
+            # customer tagged e.g. "Wholesale, VIP" cannot count their revenue twice and
+            # the sector rows still sum to at most store revenue.
             for lt in cid_tags.get(cid, []):
                 if lt in wanted:
                     a = agg[wanted[lt]]
                     a["revenue"] += rev
                     a["orders"] += 1
+                    break
         out = [{"sector": t["tag"], "revenue": round(agg[t["tag"]]["revenue"], 2),
                 "orders": agg[t["tag"]]["orders"],
                 "aov": round(agg[t["tag"]]["revenue"] / agg[t["tag"]]["orders"], 2) if agg[t["tag"]]["orders"] else 0,
@@ -1917,6 +1985,7 @@ async def run_keywords(registry: dict, extra_system: str = "") -> dict:
 async def run_keyword_scan(registry: dict, url: str, extra_system: str = "") -> dict:
     """Scrape an external URL (SSRF-guarded), extract its on-page keyword targeting,
     and have Claude analyze what it targets and how the merchant can compete."""
+    _ai_kind.set("keyword_scan")
     status, final_url, html_text = await _fetch_external(url)
     if not html_text:
         raise RuntimeError("Could not read that page (it returned no readable HTML).")
@@ -2283,6 +2352,7 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
 
 
 async def run_product_audit(registry: dict, product_id: int, extra_system: str = "") -> dict:
+    _ai_kind.set("product")
     p = await _tool_json(registry, "shopify_get_product", {"product_id": product_id})
     if not p or not p.get("id"):
         raise RuntimeError("Product not found.")
@@ -2480,9 +2550,14 @@ _oauth_states: dict[str, float] = {}   # state nonce -> expiry (Google OAuth con
 
 
 def _client_key(request: Request) -> str:
+    # Use the RIGHTMOST X-Forwarded-For entry: proxies append, so the last hop is the
+    # one our own edge observed. The leftmost value is client-supplied and trivially
+    # spoofed, which would hand every request a fresh rate-limit bucket.
     xff = request.headers.get("x-forwarded-for", "")
     if xff:
-        return xff.split(",")[0].strip()
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     return request.client.host if request.client else "unknown"
 
 
@@ -2551,10 +2626,15 @@ def _load_schedule() -> dict:
         return dict(_SCHEDULE_DEFAULT)
 
 
-def _save_schedule(cfg: dict) -> dict:
+def _save_schedule(cfg: dict, _internal: bool = False) -> dict:
     cur = _load_schedule()
     if "enabled" in cfg:
+        was = bool(cur.get("enabled"))
         cur["enabled"] = bool(cfg["enabled"])
+        # Turning it on should not fire a full paid run within the next tick; start the
+        # clock now so the first automatic run lands one interval later.
+        if cur["enabled"] and not was and not cur.get("last_run"):
+            cur["last_run"] = datetime.now(timezone.utc).isoformat()
     if "every_hours" in cfg:
         try:
             cur["every_hours"] = max(1, min(744, int(cfg["every_hours"])))
@@ -2565,7 +2645,9 @@ def _save_schedule(cfg: dict) -> dict:
             cur["threshold_pct"] = max(1, min(100, int(cfg["threshold_pct"])))
         except (TypeError, ValueError):
             pass
-    if "last_run" in cfg:
+    # last_run is server-owned. Accepting it from a client allowed an unparseable value
+    # to make every tick look "due", which would run paid audits every check interval.
+    if _internal and "last_run" in cfg:
         cur["last_run"] = cfg["last_run"]
     os.makedirs(os.path.dirname(SCHEDULE_PATH) or ".", exist_ok=True)
     tmp = SCHEDULE_PATH + ".tmp"
@@ -2636,7 +2718,7 @@ async def _run_scheduled_audits(registry: dict) -> list:
             logger.exception("scheduled audit failed: %s", kind)
     cfg = _load_schedule()
     cfg["last_run"] = datetime.now(timezone.utc).isoformat()
-    _save_schedule(cfg)
+    _save_schedule(cfg, _internal=True)
     if found:
         _add_alerts(found)
     logger.info("scheduler: ran audits, %d alert(s)", len(found))
@@ -2656,10 +2738,18 @@ async def _scheduler_loop(registry: dict) -> None:
                 due = True
                 if last:
                     try:
-                        elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds()
-                        due = elapsed >= cfg.get("every_hours", 168) * 3600
+                        prev = datetime.fromisoformat(last)
+                        if prev.tzinfo is None:                      # tolerate a naive stamp
+                            prev = prev.replace(tzinfo=timezone.utc)
+                        elapsed = (datetime.now(timezone.utc) - prev).total_seconds()
+                        due = elapsed >= max(1, cfg.get("every_hours", 168)) * 3600
                     except Exception:
-                        due = True
+                        # Fail CLOSED: an unreadable timestamp must not make every tick
+                        # "due" and spend money in a loop. Re-stamp and wait a full cycle.
+                        logger.warning("scheduler: unreadable last_run %r; re-stamping", last)
+                        cfg["last_run"] = datetime.now(timezone.utc).isoformat()
+                        _save_schedule(cfg, _internal=True)
+                        due = False
                 if due:
                     await _run_scheduled_audits(registry)
         except Exception:
@@ -2719,6 +2809,9 @@ def add_routes(mcp, registry: dict) -> None:
 
     @mcp.custom_route("/healthz", methods=["GET"])
     async def healthz(request: Request):
+        # Also the scheduler's boot hook: the platform polls this, so auto-refresh
+        # resumes after a redeploy without waiting for someone to open the app.
+        _ensure_scheduler(registry)
         return PlainTextResponse("ok")
 
     @mcp.custom_route("/api/chat", methods=["POST"])

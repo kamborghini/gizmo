@@ -352,7 +352,17 @@
         .print-head .ph-meta { font-size: 12px; color: var(--ink-2); }
         @media print {
             @page { margin: 14mm; }
-            body * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            /* Print on paper: flip the dark theme to a light one. Without this the page
+               background drops to white while the ink stays near-white (invisible). */
+            :root {
+                --bg: #fff; --bg-2: #fff; --surface: #fff; --surface-2: #fff; --surface-3: #f4f4f6;
+                --ink: #101317; --ink-2: #43474f; --ink-3: #676c77;
+                --border: rgba(0,0,0,.14); --border-2: rgba(0,0,0,.2); --border-3: rgba(0,0,0,.28);
+            }
+            html, body, #app { height: auto !important; display: block !important; background: #fff !important; }
+            body::before { display: none !important; }
+            body, body * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            .card, .chart-card, .stat, .seg-card, .insight, .ktable-wrap, .run-gate { box-shadow: none !important; }
             .sidebar, .backdrop, .topbar, #print-btn, .modal-overlay { display: none !important; }
             .main { display: block !important; height: auto !important; }
             .view { display: none !important; }
@@ -779,6 +789,23 @@
         $('send').innerHTML = I.send;
         $('settings-btn').innerHTML = I.settings;
         $('settings-close').innerHTML = I.x;
+        // Re-evaluate the PDF button after a report finishes loading (setView runs before
+        // the data arrives, so the button would otherwise stay hidden until you switch tabs).
+        function syncPrintBtn() {
+            const av = document.querySelector('.view.active');
+            const v = av ? av.id.replace('view-', '') : '';
+            const b = $('print-btn'); if (!b) return;
+            b.style.display = (['overview', 'seo', 'keywords', 'products', 'customers'].indexOf(v) >= 0 && printableCache(v)) ? '' : 'none';
+        }
+        // Which cache backs the printable report for a view (null = nothing to print yet).
+        function printableCache(v) {
+            if (v === 'overview') return overviewCache;
+            if (v === 'seo') return seoCache;
+            if (v === 'keywords') return keywordsCache;
+            if (v === 'customers') return customersCache[customersSeg];
+            if (v === 'products') return productList ? { at: Date.now() } : null;
+            return null;
+        }
         $('print-btn').innerHTML = I.download;
         $('print-btn').onclick = function () {
             const av = document.querySelector('.view.active');
@@ -786,7 +813,14 @@
             const titles = { overview: 'Store Overview', seo: 'SEO and optimization audit', keywords: 'Keyword and CPC analysis', products: 'Products', customers: 'Customers and retention' };
             let label = titles[v] || 'Report';
             if (v === 'customers' && typeof customersSeg !== 'undefined' && customersSeg && customersSeg !== SEG_ALL) label = customersSeg + ' sector';
-            $('print-meta').textContent = label + '   ·   ' + new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+            // Stamp when the DATA was computed, not when the PDF was printed. The
+            // on-screen "Updated ..." line is hidden in print, so this is the only
+            // freshness signal the reader gets.
+            const cached = printableCache(v);
+            const when = cached && cached.at ? new Date(cached.at) : null;
+            $('print-meta').textContent = label + '   ·   ' + (when
+                ? 'Data as of ' + when.toLocaleString()
+                : new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }));
             setTimeout(function () { window.print(); }, 30);
         };
 
@@ -1273,6 +1307,7 @@
         const chatLog = $('chat-scroll');
         function scrollChat() { chatLog.scrollTop = chatLog.scrollHeight; }
         function renderChat() {
+            hideThinking();   // clears the spinner's interval before the node is wiped
             const log = $('chat-log'); log.innerHTML = '';
             const c = active();
             if (!c || !c.turns.length) { renderEmptyChat(log); return; }
@@ -1429,6 +1464,8 @@
         /* ---------- per-page "ask about this report" ---------- */
         const PAGE_LABELS = { overview: 'overview', seo: 'SEO audit', keywords: 'keyword analysis', customers: 'customer analysis' };
         const pageThreads = { overview: [], seo: [], keywords: [], customers: [] };
+        // Customers is per sector: each sector is a different report, so it needs its own thread.
+        const threadKey = (page) => (page === 'customers' && customersSeg && customersSeg !== SEG_ALL) ? ('customers:' + customersSeg) : page;
         const pageBusy = {};
         function pageReport(page, data) {
             const s = (data && data.structured) || {}; const rep = {};
@@ -1463,7 +1500,7 @@
         }
         function renderPageThread(page, thread, data) {
             thread.innerHTML = '';
-            const items = pageThreads[page] || [];
+            const items = pageThreads[threadKey(page)] || [];
             if (!items.length) {
                 const sugg = ((data.structured && data.structured.followups) || []).slice(0, 4);
                 if (sugg.length) { thread.append(el('div', 'pchat-hint', 'Suggested questions from this report')); thread.append(followupChips(sugg, q => pageAsk(page, q, data))); }
@@ -1479,7 +1516,7 @@
             const wrap = el('div', 'page-chat');
             wrap.append(el('div', 'section-title', 'Ask about this ' + (PAGE_LABELS[page] || 'report')));
             const card = el('div', 'card pchat');
-            const thread = el('div', 'pchat-thread'); thread.id = 'pchat-thread-' + page;
+            const thread = el('div', 'pchat-thread'); thread.id = 'pchat-thread-' + threadKey(page);
             renderPageThread(page, thread, data); card.append(thread);
             const row = el('div', 'pchat-input');
             const ta = el('textarea', 'pchat-ta'); ta.rows = 1; ta.placeholder = 'Ask a question about this report…';
@@ -1491,27 +1528,29 @@
             return wrap;
         }
         async function pageAsk(page, text, data) {
-            text = (text || '').trim(); if (!text || pageBusy[page]) return;
-            pageThreads[page] = pageThreads[page] || [];
-            pageThreads[page].push({ role: 'user', text });
-            const thread = $('pchat-thread-' + page); if (!thread) return;
+            text = (text || '').trim(); if (!text) return;
+            const tk = threadKey(page);
+            if (pageBusy[tk]) return;   // guard BEFORE mutating the thread or drawing a spinner
+            pageThreads[tk] = pageThreads[tk] || [];
+            pageThreads[tk].push({ role: 'user', text });
+            const thread = $('pchat-thread-' + tk); if (!thread) return;
             renderPageThread(page, thread, data);
             const tm = el('div', 'msg assistant'); const th = el('div', 'thinking'); th.append(loader(), el('span', null, 'Thinking…')); tm.append(th); thread.append(tm);
             try { tm.scrollIntoView({ block: 'nearest' }); } catch (e) {}
-            pageBusy[page] = true;
-            const history = pageThreads[page].map(t => t.role === 'user' ? { role: 'user', content: t.text } : { role: 'assistant', content: structuredToText(t.structured) });
+            pageBusy[tk] = true;
+            const history = pageThreads[tk].map(t => t.role === 'user' ? { role: 'user', content: t.text } : { role: 'assistant', content: structuredToText(t.structured) });
             const payload = { messages: history, deep: false, context: { page, report: pageReport(page, data) } };
             try {
                 let res;
                 try { res = await streamChat(payload, lbl => { const sp = th.querySelector('span'); if (sp && lbl) sp.textContent = lbl; }); }
                 catch (se) { if ((se.message || '') === 'STREAM_TRANSPORT') res = await api('/api/chat', payload); else throw se; }
-                pageThreads[page].push({ role: 'assistant', structured: res.structured || { summary: '(no response)' }, model: res.model, data_used: res.data_used });
+                pageThreads[tk].push({ role: 'assistant', structured: res.structured || { summary: '(no response)' }, model: res.model, data_used: res.data_used });
                 loadMemory();
             } catch (e) {
-                pageThreads[page].push({ role: 'assistant', structured: { summary: e.message || String(e) } });
+                pageThreads[tk].push({ role: 'assistant', structured: { summary: e.message || String(e) } });
             } finally {
-                pageBusy[page] = false;
-                const th2 = $('pchat-thread-' + page);
+                pageBusy[tk] = false;
+                const th2 = $('pchat-thread-' + tk);
                 if (th2) { renderPageThread(page, th2, data); const last = th2.lastElementChild; if (last) { try { last.scrollIntoView({ block: 'nearest' }); } catch (e) {} } }
             }
         }
@@ -1693,6 +1732,7 @@
             if (s.insights && s.insights.length) box.append(el('div', 'section-title', 'What’s notable'));
             renderStructured(box, s, { noFollowups: true });
             box.append(pageChatPanel('overview', data));
+            syncPrintBtn();
         }
 
         /* ---------- SEO audit ---------- */
@@ -1752,6 +1792,7 @@
                 s.sections.forEach(sec => box.append(sectionCard(sec)));
             }
             box.append(pageChatPanel('seo', data));
+            syncPrintBtn();
         }
 
         /* ---------- keywords + CPC ---------- */
@@ -1887,6 +1928,7 @@
             box.append(renderCPC(data.ads, cur));
             if (Array.isArray(s.sections) && s.sections.length) { box.append(el('div', 'section-title', 'Details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
             box.append(pageChatPanel('keywords', data));
+            syncPrintBtn();
         }
 
         /* ---------- customers & retention ---------- */
@@ -1903,7 +1945,9 @@
             if (customerTags !== null) return;   // load once per session
             try { const d = await api('/api/customer-tags', {}); customerTags = (d && Array.isArray(d.tags)) ? d.tags : []; }
             catch (e) { customerTags = []; }
-            if ($('view-customers').classList.contains('active')) renderCustomers(customersSeg);
+            // Never repaint over an analysis that is mid-flight (that would restore the
+            // Run gate and make the merchant think their click was ignored).
+            if ($('view-customers').classList.contains('active') && !customersLoading) renderCustomers(customersSeg);
         }
         function sectorBar() {
             const wrap = el('div', 'secbar');
@@ -1951,23 +1995,33 @@
             loadCustomerTags();
             renderCustomers(customersSeg);
         }
+        let customersLoading = null;   // sector currently being analyzed (guards stale renders)
         async function loadCustomers(force, seg) {
             seg = (typeof seg === 'string' && seg) ? seg : (customersSeg || SEG_ALL);
             customersSeg = seg;
             if (customersCache[seg] && !force) { renderCustomers(seg); return; }
+            if (customersLoading === seg) return;   // already running: don't start a second paid run
             const comp = seg === SEG_ALL;
             const box = $('customers-content'); box.innerHTML = ''; box.append(sectorBar());
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.users;
             const ht = el('div'); ht.append(el('h2', null, comp ? 'Customers' : (seg + ' sector')), el('p', null, 'Analyzing ' + (comp ? 'your customers and sectors' : ('the ' + seg + ' sector')) + '…'));
             hero.append(badge, ht); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Reading customers and 12 months of orders. This can take up to a minute…')); box.append(t);
+            customersLoading = seg;
             try {
                 const data = await api('/api/customers', { segment: comp ? '' : seg });
-                customersCache[seg] = { data, at: Date.now() }; renderCustomers(seg);
+                customersCache[seg] = { data, at: Date.now() };
+                // Only paint if the merchant is still looking at this sector: they may
+                // have switched tabs during the run, and clobbering their view looks
+                // like the click did nothing (which invites a second paid run).
+                if (customersSeg === seg) renderCustomers(seg);
             } catch (e) {
+                if (customersSeg !== seg) return;
                 box.innerHTML = ''; box.append(sectorBar(), hero);
                 const er = el('div', 'msg error'); er.append(el('div', 'bubble', e.message || String(e))); box.append(er);
                 ht.children[1].textContent = 'Could not run the analysis.';
+            } finally {
+                if (customersLoading === seg) customersLoading = null;
             }
         }
         function segCards(segments, cur) {
@@ -2036,6 +2090,7 @@
             }
             if (Array.isArray(s.sections) && s.sections.length) { box.append(el('div', 'section-title', 'Details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
             box.append(pageChatPanel('customers', data));
+            syncPrintBtn();
         }
 
         /* ---------- products ---------- */
@@ -2530,7 +2585,9 @@
             const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', memory: 'Memory', skills: 'Skills' };
             $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
             const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills') ? 'none' : '';
-            $('print-btn').style.display = (['overview', 'seo', 'keywords', 'products', 'customers'].indexOf(v) >= 0) ? '' : 'none';
+            // Only offer the PDF when there is actually a report to print: the print
+            // stylesheet hides the Run gate, so printing an un-run tab yields a blank page.
+            $('print-btn').style.display = (['overview', 'seo', 'keywords', 'products', 'customers'].indexOf(v) >= 0 && printableCache(v)) ? '' : 'none';
             if (v === 'overview') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadOverview(true); }
             else if (v === 'seo') { act.append(ico(I.refresh), document.createTextNode('Re-audit')); act.className = 'btn'; act.onclick = () => loadSEO(true); }
             else if (v === 'keywords') { act.append(ico(I.refresh), document.createTextNode('Re-run')); act.className = 'btn'; act.onclick = () => loadKeywords(true); }
