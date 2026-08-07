@@ -34,6 +34,7 @@
               radial-gradient(70% 60% at 52% 116%, rgba(123,108,255,.07), transparent 60%); }
         button { font-family: inherit; cursor: pointer; }
         input::placeholder, textarea::placeholder { color: var(--ink-3); }
+        :is(button, select, input, textarea, [role="button"], .toggle):focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
         ::-webkit-scrollbar { width: 11px; height: 11px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.11); border-radius: 8px; border: 3px solid transparent; background-clip: padding-box; }
@@ -239,10 +240,10 @@
         .insight .t { font-weight: 650; font-size: 13.5px; margin: 1px 0 3px; letter-spacing: -.01em; }
         .insight .d { color: var(--ink-2); font-size: 13px; line-height: 1.55; }
         .insight:hover { border-color: var(--border-2); }
+        .insight .ico { background: var(--info-bg); color: var(--info); }  /* generic first: .insight.insight would match EVERY card and clobber the typed colors below */
         .insight.win .ico { background: var(--win-bg); color: var(--win); }
         .insight.warning .ico { background: var(--warn-bg); color: var(--warn); }
         .insight.opportunity .ico { background: var(--opp-bg); color: var(--opp); }
-        .insight.insight .ico { background: var(--info-bg); color: var(--info); }
 
         .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--sh-1), var(--hair); }
         details.sect { border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); margin-bottom: 9px; overflow: hidden; box-shadow: var(--sh-1); }
@@ -354,9 +355,10 @@
         .lbl-row:hover { background: var(--surface-2); border-color: var(--border-2); }
         .lbl-row.on { border-color: var(--accent-line); background: var(--accent-soft); }
         .lbl-num { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 92px; }
-        .lbl-who { flex: 1; font-size: 13.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .lbl-who { flex: 1; min-width: 0; font-size: 13.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .lbl-who .sub { display: block; font-size: 11.5px; color: var(--ink-3); }
         .lbl-meta { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+        @media (max-width: 720px) { .lbl-meta { display: none; } }  /* on phones the name matters more than the date */
         .lbl-actions { display: flex; gap: 8px; align-items: center; }
         /* The label is sized to the real label stock, so the preview is what prints.
            All internal sizes are in em, so shrink-to-fit only has to change one
@@ -422,6 +424,7 @@
             .view.active .scroll { height: auto !important; max-height: none !important; overflow: visible !important; }
             /* drop interactive bits from a static report */
             .page-chat, .composer-wrap, .run-gate, .chart-expand, .ov-customize, .secbar, .data-drill,
+            .ptools, .pfilters, .fchips, .scan-card, .seg, .alerts-banner, .back-btn,
             .track-btn, .mem-acts, .sk-acts, .skill-form, .chart-tip, .sk-more, .ov-updated { display: none !important; }
             .print-head { display: flex !important; }
             /* keep blocks whole across page breaks */
@@ -517,6 +520,7 @@
         .cmodal { max-width: 980px; }
         .chart-modal .modal-body { padding: 18px 22px 24px; }
         .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+        .charts-grid > .chart-card:only-child { grid-column: 1 / -1; }  /* no orphan half-width charts */
         @media (max-width: 760px) { .charts-grid { grid-template-columns: 1fr; } }
         .chart-anim { animation: chartIn .5s ease backwards; }
         @keyframes chartIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
@@ -636,18 +640,18 @@
                 <button class="nav-item" data-view="skills" id="nav-skills"></button>
                 <button class="nav-item" data-view="chat" id="nav-chat"></button>
             </div>
-            <button class="nav-refresh" id="refresh-all" title="Re-run all reports"></button>
+            <button class="nav-refresh" id="refresh-all" title="Refresh all reports"></button>
             <div class="convo-head"><span>Conversations</span>
-                <button class="icon-btn" id="new-convo" title="New conversation"></button></div>
+                <button class="icon-btn" id="new-convo" title="New chat"></button></div>
             <div class="convos" id="convos"></div>
             <div class="side-foot"><span class="dot"></span><span>Read-only · Claude</span>
-                <button class="icon-btn" id="settings-btn" title="Store profile" style="margin-left:auto"></button></div>
+                <button class="icon-btn" id="settings-btn" title="Settings" style="margin-left:auto"></button></div>
         </aside>
         <div class="backdrop" id="backdrop"></div>
 
         <main class="main">
             <div class="topbar">
-                <button class="icon-btn menu-btn" id="menu-btn"></button>
+                <button class="icon-btn menu-btn" id="menu-btn" title="Menu"></button>
                 <h1 id="view-title">Overview</h1>
                 <div class="spacer"></div>
                 <button class="icon-btn" id="print-btn" title="Download as PDF"></button>
@@ -720,11 +724,12 @@
     <div class="modal-overlay" id="settings-modal">
         <div class="modal">
             <div class="modal-head">
-                <h3>Store profile</h3>
+                <h3>Settings</h3>
                 <button class="icon-btn" id="settings-close" title="Close"></button>
             </div>
             <div class="modal-body">
-                <p class="field-help" style="margin-top:0">Saved to your store and applied to every chat and the Overview as authoritative context.</p>
+                <div class="section-title" style="margin: 0 0 6px;">Store profile</div>
+                <p class="field-help" style="margin-top:0">Saved to your store and applied to every chat and every report as authoritative context.</p>
 
                 <label class="field-label" for="pf-voice">Brand voice</label>
                 <textarea id="pf-voice" class="pf-input" rows="2" placeholder="e.g. Warm, witty, never pushy. Speaking to eco-conscious millennials."></textarea>
@@ -738,6 +743,7 @@
                 <label class="field-label" for="pf-notes">Other notes</label>
                 <textarea id="pf-notes" class="pf-input" rows="2" placeholder="Anything else the copilot should always know: business model, constraints, audience."></textarea>
 
+                <div class="section-title" style="margin: 22px 0 6px;">Preferences</div>
                 <div class="settings-toggles">
                     <div class="setting-row">
                         <div><div class="setting-title">Track inventory</div><div class="setting-sub">Show low-stock metrics & advice. Turn off for unlimited stock.</div></div>
@@ -824,6 +830,13 @@
         const loader = () => { const b = el('div', 'three-body'); b.append(el('div', 'three-body__dot'), el('div', 'three-body__dot'), el('div', 'three-body__dot')); return b; };
         const ico = (svg) => { const s = el('span'); s.innerHTML = svg; return s; };
         const $ = (id) => document.getElementById(id);
+        function fmtDate(iso) {
+            const d = new Date(iso);
+            if (isNaN(d)) return String(iso || '').slice(0, 10);
+            const opts = { day: 'numeric', month: 'short' };
+            if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+            return d.toLocaleDateString(undefined, opts);
+        }
         function freshLabel(at) {
             const m = Math.max(0, Math.round((Date.now() - (at || 0)) / 60000));
             if (m < 1) return 'Updated just now';
@@ -866,14 +879,14 @@
             if (v === 'seo') return seoCache;
             if (v === 'keywords') return keywordsCache;
             if (v === 'customers') return customersCache[customersSeg];
-            if (v === 'products') return productList ? { at: Date.now() } : null;
+            if (v === 'products') return productList ? { at: productListAt || Date.now() } : null;
             return null;
         }
         $('print-btn').innerHTML = I.download;
         $('print-btn').onclick = function () {
             const av = document.querySelector('.view.active');
             const v = av ? av.id.replace('view-', '') : '';
-            const titles = { overview: 'Store Overview', seo: 'SEO and optimization audit', keywords: 'Keyword and CPC analysis', products: 'Products', customers: 'Customers and retention' };
+            const titles = { overview: 'Store overview', seo: 'SEO and optimization', keywords: 'Keyword and CPC intelligence', products: 'Products', customers: 'Customers and retention' };
             let label = titles[v] || 'Report';
             if (v === 'customers' && typeof customersSeg !== 'undefined' && customersSeg && customersSeg !== SEG_ALL) label = customersSeg + ' sector';
             // Stamp when the DATA was computed, not when the PDF was printed. The
@@ -1637,7 +1650,7 @@
         }
         function renderSidebar() {
             const box = $('convos'); box.innerHTML = '';
-            if (!convos.length) { box.append(el('div', 'convo-empty', 'No conversations yet')); return; }
+            if (!convos.length) { box.append(el('div', 'convo-empty', 'No conversations yet.')); return; }
             convos.forEach(c => {
                 const b = el('button', 'convo' + (c.id === activeId ? ' active' : ''));
                 b.append(el('span', 'title', c.title || 'Conversation'));
@@ -1660,11 +1673,11 @@
         }
         function showOverviewView() {
             if (overviewCache) { renderOverview(overviewCache); return; }
-            renderRunGate('ov-content', { icon: I.grid, title: 'Store overview', desc: 'Compute live KPIs and an AI executive summary from your latest orders, customers and traffic.', cta: 'Run overview', note: 'Uses AI credits, and only when you choose to run it.', onRun: () => loadOverview(true) });
+            renderRunGate('ov-content', { icon: I.grid, title: 'Store overview', desc: 'Compute live KPIs and an AI executive summary from your latest orders, customers and traffic.', cta: 'Run overview', note: 'Uses AI credits only when you run it.', onRun: () => loadOverview(true) });
         }
         function showSeoView() {
             if (seoCache) { renderSEO(seoCache); return; }
-            renderRunGate('seo-content', { icon: I.search, title: 'SEO and optimization audit', desc: 'Crawl your storefront and fuse Search Console, Analytics and Shopify sales into a money-ranked plan.', cta: 'Run audit', note: 'Uses AI credits and can take up to a minute.', onRun: () => loadSEO(true) });
+            renderRunGate('seo-content', { icon: I.search, title: 'SEO and optimization audit', desc: 'Crawl your storefront and fuse Search Console, Analytics and Shopify sales into a money-ranked plan.', cta: 'Run SEO audit', note: 'Uses AI credits only when you run it. Can take up to a minute.', onRun: () => loadSEO(true) });
         }
         function showProductsView() {
             if (productList) { renderProductList(); return; }
@@ -1675,7 +1688,7 @@
             if (overviewCache && !force) { renderOverview(overviewCache); return; }
             box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.grid;
-            const htext = el('div'); htext.append(el('h2', null, 'Store Overview'), el('p', null, 'Analyzing your store…'));
+            const htext = el('div'); htext.append(el('h2', null, 'Store overview'), el('p', null, 'Analyzing your store…'));
             hero.append(badge, htext); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; const orb = loader(); t.append(orb, el('span', null, 'Computing live metrics and insights…')); box.append(t);
             try {
@@ -1710,7 +1723,7 @@
                 const dir = good == null ? 'flat' : good ? 'up' : 'down';
                 const row = el('div', 'alert-row');
                 row.append(el('span', 'adot ' + dir), el('span', 'a-tab', a.tab_label || ''), el('span', 'a-metric', a.metric || ''),
-                    el('span', 'a-pct ' + dir, (a.pct > 0 ? '+' : '') + a.pct + '%'));
+                    el('span', 'a-pct ' + dir, a.pct == null ? '~' : ((a.pct > 0 ? '+' : '') + a.pct + '%')));
                 const x = el('button', 'alert-x'); x.innerHTML = I.x; x.title = 'Dismiss'; x.onclick = () => alertOp({ op: 'dismiss', id: a.id });
                 row.append(x); wrap.append(row);
             });
@@ -1756,7 +1769,7 @@
             const data = cache.data; const box = $('ov-content'); box.innerHTML = '';
             { const ab = alertsBanner(); if (ab) box.append(ab); }
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.grid;
-            const htext = el('div'); htext.append(el('h2', null, 'Store Overview'), el('p', null, data.structured && data.structured.summary ? data.structured.summary : 'Here’s how your store is doing.'));
+            const htext = el('div'); htext.append(el('h2', null, 'Store overview'), el('p', null, data.structured && data.structured.summary ? data.structured.summary : 'Here’s how your store is doing.'));
             hero.append(badge, htext);
             hero.append(el('div', 'ov-updated', freshLabel(cache.at)));
             box.append(hero);
@@ -1805,7 +1818,7 @@
             if (seoCache && !force) { renderSEO(seoCache); return; }
             box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.search;
-            const htext = el('div'); htext.append(el('h2', null, 'SEO Audit'), el('p', null, 'Auditing your store…'));
+            const htext = el('div'); htext.append(el('h2', null, 'SEO and optimization'), el('p', null, 'Auditing your store…'));
             hero.append(badge, htext); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px';
             t.append(loader(), el('span', null, 'Crawling pages: indexation, structured data, metadata, alt text…'));
@@ -1821,7 +1834,7 @@
             const data = cache.data; const box = $('seo-content'); box.innerHTML = '';
             const s = data.structured || {};
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.search;
-            const htext = el('div'); htext.append(el('h2', null, 'SEO & Optimization'),
+            const htext = el('div'); htext.append(el('h2', null, 'SEO and optimization'),
                 el('p', null, s.summary || 'How your store performs across search, traffic and sales, and where to grow revenue.'));
             hero.append(badge, htext);
             hero.append(el('div', 'ov-updated', freshLabel(cache.at)));
@@ -1864,7 +1877,7 @@
             if (keywordsCache) { renderKeywords(keywordsCache); return; }
             renderRunGate('keywords-content', { icon: I.tag, title: 'Keyword and CPC intelligence',
                 desc: 'Pull the keywords you rank for from Search Console and your paid spend, CPC and ROAS from Google Ads (via GA4), then get a money-ranked plan. You can also scan any public URL for the keywords it targets.',
-                cta: 'Run keyword analysis', note: 'Uses AI credits, and reads Search Console + GA4.',
+                cta: 'Run keyword analysis', note: 'Uses AI credits only when you run it. Reads Search Console and GA4.',
                 onRun: () => loadKeywords(true) });
         }
         async function loadKeywords(force) {
@@ -1872,7 +1885,7 @@
             if (keywordsCache && !force) { renderKeywords(keywordsCache); return; }
             box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.tag;
-            const ht = el('div'); ht.append(el('h2', null, 'Keywords'), el('p', null, 'Analyzing your keywords and paid search…'));
+            const ht = el('div'); ht.append(el('h2', null, 'Keyword and CPC intelligence'), el('p', null, 'Analyzing your keywords and paid search…'));
             hero.append(badge, ht); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Fusing Search Console keywords with Google Ads. This can take up to a minute…')); box.append(t);
             try { const data = await api('/api/keywords', {}); keywordsCache = { data, at: Date.now() }; renderKeywords(keywordsCache); }
@@ -2034,7 +2047,7 @@
                     : ('Analyze the ' + seg + ' sector on its own: retention, lifetime value, segments, and a money-ranked plan for these customers.')));
             const btn = el('button', 'btn btn-primary rg-btn'); btn.append(ico(I.play), document.createTextNode(comp ? 'Run comprehensive audit' : ('Run ' + seg + ' audit'))); btn.onclick = () => loadCustomers(true, seg);
             card.append(btn);
-            card.append(el('div', 'rg-note', 'Uses AI credits. Reads your Shopify customers and orders.'));
+            card.append(el('div', 'rg-note', 'Uses AI credits only when you run it. Reads your Shopify customers and orders.'));
             return card;
         }
         function sectorComparisonTable(rows, cur) {
@@ -2067,7 +2080,7 @@
             const comp = seg === SEG_ALL;
             const box = $('customers-content'); box.innerHTML = ''; box.append(sectorBar());
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.users;
-            const ht = el('div'); ht.append(el('h2', null, comp ? 'Customers' : (seg + ' sector')), el('p', null, 'Analyzing ' + (comp ? 'your customers and sectors' : ('the ' + seg + ' sector')) + '…'));
+            const ht = el('div'); ht.append(el('h2', null, comp ? 'Customers and retention' : (seg + ' sector')), el('p', null, 'Analyzing ' + (comp ? 'your customers and sectors' : ('the ' + seg + ' sector')) + '…'));
             hero.append(badge, ht); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Reading customers and 12 months of orders. This can take up to a minute…')); box.append(t);
             customersLoading = seg;
@@ -2158,6 +2171,7 @@
 
         /* ---------- products ---------- */
         let productList = null;   // full /api/products payload (or demo)
+        let productListAt = null; // when it was fetched, for the freshness stamp
         const fmtMoney = (n, cur) => Math.round(n || 0).toLocaleString() + (cur ? (' ' + cur) : '');
         const pState = { q: '', status: '', stock: '', vendor: '', type: '', tag: '', priceMin: null, priceMax: null, minRev: null, minUnits: null, createdAfter: '', createdBefore: '', sort: 'revenue_desc', period: 12, customFrom: null, customTo: null, compare: false, showFilters: false };
         async function loadProducts(force) {
@@ -2168,7 +2182,7 @@
             const ht = el('div'); ht.append(el('h2', null, 'Products'), el('p', null, 'Loading your products and sales…'));
             hero.append(badge, ht); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Loading products and up to 24 months of sales…')); box.append(t);
-            try { productList = await api('/api/products', { months: 24 }); renderProductList(); }
+            try { productList = await api('/api/products', { months: 24 }); productListAt = Date.now(); renderProductList(); }
             catch (e) {
                 box.innerHTML = ''; box.append(hero);
                 const er = el('div', 'msg error'); er.append(el('div', 'bubble', e.message || String(e))); box.append(er);
@@ -2271,7 +2285,9 @@
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
             const ht = el('div'); ht.append(el('h2', null, 'Products'),
                 el('p', null, 'Filter, sort and compare your catalog by revenue, sales, stock and more. Open a product for a full optimization plan.'));
-            hero.append(badge, ht); box.append(hero);
+            hero.append(badge, ht);
+            if (productListAt) hero.append(el('div', 'ov-updated', freshLabel(productListAt)));
+            box.append(hero);
             const cur = (productList && productList.currency) || '';
             if (!((productList && productList.products) || []).length) { box.append(el('div', 'empty', 'No products found.')); return; }
             const rerender = renderProductList;
@@ -2422,7 +2438,7 @@
             if (it.status !== 'concluded') { const cc = el('button', 'mem-btn ok'); cc.innerHTML = I.check; cc.title = 'Conclude and save the learning'; cc.onclick = () => impactOp({ op: 'conclude', id: it.id }); acts.append(cc); }
             const del = el('button', 'mem-btn del'); del.innerHTML = I.trash; del.title = 'Delete'; del.onclick = () => impactOp({ op: 'delete', id: it.id }); acts.append(del);
             top.append(acts); c.append(top);
-            const when = (it.started_at || '').slice(0, 10);
+            const when = fmtDate(it.started_at);
             c.append(el('div', 'impact-sub', (it.status === 'concluded' ? 'Concluded' : 'Tracking since ' + when) + '. Change in your headline metrics since then:'));
             const chips = el('div', 'impact-deltas');
             (it.deltas || []).forEach(d => {
@@ -2510,7 +2526,7 @@
         function renderMemory() {
             const box = $('memory-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.bookmark;
-            const htext = el('div'); htext.append(el('h2', null, 'Memory & Knowledge'),
+            const htext = el('div'); htext.append(el('h2', null, 'Memory and knowledge'),
                 el('p', null, 'What your copilot knows about your store. Learn your site once, and it captures facts, decisions, your preferences and proven learnings as you chat, then uses them in every answer. Edit or remove anything here.'));
             hero.append(badge, htext); box.append(hero);
             box.append(knowledgeCard());
@@ -2589,7 +2605,7 @@
             add.onclick = async () => {
                 const title = ti.value.trim(), content = bo.value.trim();
                 if (!title || !content) { addToast('Add a title and some details for the skill.'); return; }
-                add.disabled = true; add.textContent = 'Saving...';
+                add.disabled = true; add.textContent = 'Saving…';
                 const ok = await skillOp({ op: 'add', title: title, content: content });
                 if (ok) renderSkills(); else { add.disabled = false; add.textContent = 'Add skill'; }
             };
@@ -2613,8 +2629,8 @@
                 more.onclick = () => { const c = body.classList.toggle('clamped'); more.textContent = c ? 'Show more' : 'Show less'; };
                 card.append(more);
             }
-            const when = (s.updated || s.created || '').slice(0, 10);
-            if (when) card.append(el('div', 'sk-meta', 'Updated ' + when));
+            const when = s.updated || s.created;
+            if (when) card.append(el('div', 'sk-meta', 'Updated ' + fmtDate(when)));
             return card;
         }
         function skillEditor(s) {
@@ -2633,7 +2649,7 @@
             save.onclick = async () => {
                 const title = ti.value.trim(), content = bo.value.trim();
                 if (!title || !content) { addToast('A skill needs a title and some details.'); return; }
-                save.disabled = true; save.textContent = 'Saving...';
+                save.disabled = true; save.textContent = 'Saving…';
                 const ok = await skillOp({ op: 'update', id: s.id, title: title, content: content });
                 if (ok) { skillEditId = null; renderSkills(); } else { save.disabled = false; save.textContent = 'Save changes'; }
             };
@@ -2747,13 +2763,14 @@
                 return;
             }
             orders.forEach(o => {
-                const row = el('button', 'lbl-row' + (labelSel === o.id ? ' on' : ''));
+                const row = el('div', 'lbl-row' + (labelSel === o.id ? ' on' : ''));
+                row.setAttribute('role', 'button'); row.tabIndex = 0;
+                row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
                 row.append(el('div', 'lbl-num', orderNo(o)));
                 const who = el('div', 'lbl-who'); who.append(document.createTextNode(o.display_name));
                 who.append(el('span', 'sub', (o.is_company ? 'Company' : 'Customer') + '  ·  ' + o.items.length + (o.items.length === 1 ? ' item' : ' items')));
                 row.append(who);
-                const d = (o.created_at || '').slice(0, 10);
-                row.append(el('div', 'lbl-meta', d));
+                row.append(el('div', 'lbl-meta', fmtDate(o.created_at)));
                 const acts = el('div', 'lbl-actions');
                 const pr = el('button', 'btn'); pr.append(ico(I.printer), document.createTextNode('Print'));
                 pr.onclick = (e) => { e.stopPropagation(); printLabels([o]); };
@@ -2852,10 +2869,10 @@
             // stylesheet hides the Run gate, so printing an un-run tab yields a blank page.
             $('print-btn').style.display = (['overview', 'seo', 'keywords', 'products', 'customers'].indexOf(v) >= 0 && printableCache(v)) ? '' : 'none';
             if (v === 'overview') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadOverview(true); }
-            else if (v === 'seo') { act.append(ico(I.refresh), document.createTextNode('Re-audit')); act.className = 'btn'; act.onclick = () => loadSEO(true); }
-            else if (v === 'keywords') { act.append(ico(I.refresh), document.createTextNode('Re-run')); act.className = 'btn'; act.onclick = () => loadKeywords(true); }
+            else if (v === 'seo') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadSEO(true); }
+            else if (v === 'keywords') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadKeywords(true); }
             else if (v === 'products') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadProducts(true); }
-            else if (v === 'customers') { act.append(ico(I.refresh), document.createTextNode('Re-run')); act.className = 'btn'; act.onclick = () => loadCustomers(true); }
+            else if (v === 'customers') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadCustomers(true); }
             else if (v === 'chat') { act.append(ico(I.plus), document.createTextNode('New chat')); act.className = 'btn btn-primary'; act.onclick = () => newConvo(); }
             closeSidebar();
             // Tabs render cached results if present, otherwise an idle "Run" gate.
@@ -2873,6 +2890,11 @@
         /* ---------- responsive sidebar ---------- */
         function openSidebar() { $('sidebar').classList.add('open'); $('backdrop').classList.add('show'); }
         function closeSidebar() { $('sidebar').classList.remove('open'); $('backdrop').classList.remove('show'); }
+        document.querySelectorAll('.toggle').forEach(t => { t.setAttribute('role', 'switch'); t.tabIndex = 0; });
+        document.addEventListener('keydown', (e) => {
+            const t = e.target;
+            if (t && t.classList && t.classList.contains('toggle') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); t.click(); }
+        });
         $('menu-btn').onclick = openSidebar; $('backdrop').onclick = closeSidebar;
 
         /* ---------- settings (store profile) ---------- */
@@ -2998,6 +3020,7 @@
             api('/api/schedule', { config: { every_hours: parseInt(this.value, 10) || 168 } }).catch(() => {});
         };
         $('settings-modal').onclick = (e) => { if (e.target.id === 'settings-modal') closeSettings(); };
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('settings-modal').classList.contains('show')) closeSettings(); });
 
         /* ---------- wire up ---------- */
         document.querySelectorAll('.nav-item').forEach(n => n.onclick = () => setView(n.dataset.view));
@@ -3051,7 +3074,7 @@
         window.__demoSkills = function (list) { skills = list || []; $('nav-skills').click(); };
         window.__demoKnow = function (k) { knowledge = k; setView('memory'); renderMemory(); };
         window.__demoImpact = function (list) { impact = list; setView('memory'); renderMemory(); };
-        window.__demoProducts = function (pl) { productList = pl; setView('products'); renderProductList(); };
+        window.__demoProducts = function (pl) { productList = pl; productListAt = Date.now(); setView('products'); renderProductList(); };
         window.__demoCustomers = function (d, seg) { seg = seg || SEG_ALL; customersCache[seg] = { data: d, at: Date.now() }; customersSeg = seg; setView('customers'); };
         window.__demoCustomerTags = function (tags) { customerTags = tags || []; if ($('view-customers').classList.contains('active')) renderCustomers(customersSeg); };
         window.__demoCache = function (d) { applyCachedAnalysis(d); };
