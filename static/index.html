@@ -2653,6 +2653,12 @@
             }
         }
         function labelOrders() { return (labelsCache && labelsCache.data && labelsCache.data.orders) || []; }
+        // Shopify's `name` is the full order number as the admin shows it, including the
+        // "#" and any store prefix/suffix. Fall back to building it from order_number.
+        function orderNo(o) {
+            const n = String(o.name || '').trim();
+            return n || ('#' + o.order_number);
+        }
         function renderLabels() {
             const box = $('labels-content'); box.innerHTML = '';
             const data = labelsCache.data;
@@ -2681,7 +2687,7 @@
             }
             orders.forEach(o => {
                 const row = el('button', 'lbl-row' + (labelSel === o.id ? ' on' : ''));
-                row.append(el('div', 'lbl-num', String(o.order_number)));
+                row.append(el('div', 'lbl-num', orderNo(o)));
                 const who = el('div', 'lbl-who'); who.append(document.createTextNode(o.display_name));
                 who.append(el('span', 'sub', (o.is_company ? 'Company' : 'Customer') + '  ·  ' + o.items.length + (o.items.length === 1 ? ' item' : ' items')));
                 row.append(who);
@@ -2707,7 +2713,7 @@
         // Builds the label. This same markup is what gets printed.
         function labelSheet(o) {
             const s = el('div', 'label-sheet');
-            s.append(el('div', 'ls-num', 'Order Number: ' + o.order_number));
+            s.append(el('div', 'ls-num', 'Order Number: ' + orderNo(o)));
             const party = el('div', 'ls-party');
             party.append(el('span', 'k', (o.is_company ? 'Company: ' : 'Customer: ')), document.createTextNode(o.display_name));
             s.append(party);
