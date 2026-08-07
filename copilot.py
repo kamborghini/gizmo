@@ -2326,6 +2326,7 @@ def _shape_label_order(o: dict, names: dict) -> dict:
             "options": _line_options(li, names),
             "manufacturer": mfr or (entry["manufacturer"] if entry else ""),
             "model": model,
+            "glass_type": _item_prop(li, "Glass Type"),
             "production_size": (entry["production_size"] if (entry and not reason) else ""),
             "size_note": (entry["review"] if entry and entry["production_size"] and entry["review"] else ""),
             "review_reason": reason or "",
@@ -2372,6 +2373,48 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
     )
     return {"tag": tag, "days": days, "count": len(tagged),
             "orders": [_shape_label_order(o, names) for o in tagged]}
+
+
+async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
+    """Do recent orders' gobo items resolve to a production size? The last N orders
+    (any status, newest first), every Model run through the exact lookup the labels
+    print with, failures grouped by model + reason. A plain Shopify read, no AI."""
+    n = max(1, min(int(orders_count or 200), 250))
+    data = await _tool_json(registry, "shopify_list_orders",
+                            {"status": "any", "limit": n,
+                             "fields": "id,order_number,name,created_at,line_items"})
+    if not _ok(data):
+        # A throttled or failed fetch must never read as "everything matches".
+        return {"error": "Couldn't read your orders from Shopify. Try again in a moment."}
+    orders = (data.get("orders") or [])[:n]
+    items_seen = gobo_items = sized = no_model = 0
+    flagged: dict = {}
+    for o in orders:
+        oname = str(o.get("name") or "").strip() or ("#" + str(o.get("order_number") or ""))
+        for li in (o.get("line_items") or []):
+            items_seen += 1
+            mfr, model = _item_prop(li, "Manufacturer"), _item_prop(li, "Model")
+            if not model and not mfr:
+                # No gobo options at all: an accessory or plain product, not a miss.
+                no_model += 1
+                continue
+            gobo_items += 1
+            entry, reason = _gobo_lookup(mfr, model)
+            if not reason:
+                sized += 1
+                continue
+            key = (mfr, model, reason)
+            f = flagged.setdefault(key, {"manufacturer": mfr, "model": model or "(blank)",
+                                         "reason": reason, "count": 0, "orders": []})
+            f["count"] += 1
+            if oname not in f["orders"] and len(f["orders"]) < 3:
+                f["orders"].append(oname)
+    rows = sorted(flagged.values(), key=lambda r: -r["count"])[:100]
+    return {"orders_scanned": len(orders), "items_seen": items_seen,
+            "gobo_items": gobo_items, "sized": sized,
+            "flagged_items": gobo_items - sized, "skipped_no_model": no_model,
+            "pct": (round(sized * 100.0 / gobo_items, 1) if gobo_items else 100.0),
+            "flagged": rows}
 
 
 async def run_products_list(registry: dict, months_window: Optional[int] = None) -> dict:
@@ -3556,17 +3599,40 @@ def add_routes(mcp, registry: dict) -> None:
         tag = str(body.get("tag") or "").strip()[:60] or None
         try:
             days = int(body.get("days") or 0) or None
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             days = None
         try:
             order_id = int(body.get("order_id") or 0) or None
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             order_id = None
         try:
             return _json(await run_production_labels(registry, tag=tag, days=days, order_id=order_id))
         except Exception:
             logger.exception("Production labels failed")
             return _json({"error": "Couldn't load production orders. Check the server logs."}, 500)
+
+    @mcp.custom_route("/api/production-labels/coverage", methods=["POST"])
+    async def labels_coverage_route(request: Request):
+        # Size-list coverage over recent orders. Shopify read, no AI.
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        try:
+            n = int(body.get("orders") or 200)
+        except (TypeError, ValueError, OverflowError):
+            n = 200
+        try:
+            res = await run_label_coverage(registry, n)
+            return _json(res, 502 if res.get("error") else 200)
+        except Exception:
+            logger.exception("Label coverage failed")
+            return _json({"error": "Couldn't check size coverage. Check the server logs."}, 500)
 
     _PRINT_ORIGINS = {"https://extensions.shopifycdn.com", "https://admin.shopify.com"}
 
@@ -3687,22 +3753,25 @@ def add_routes(mcp, registry: dict) -> None:
         for o in orders:
             items = []
             for it in o.get("items", []):
-                head = ("<div class='item'><span class='qty'>" + esc(str(it.get("quantity", 1))) + " x</span> "
-                        + esc(" ".join(v for v in [it.get("manufacturer", ""), it.get("model", "")] if v)
-                              or it.get("title", "")) + "</div>")
+                iname = esc(" ".join(v for v in [it.get("manufacturer", ""), it.get("model", "")] if v)
+                            or it.get("title", ""))
                 if it.get("review_reason"):
-                    body = ("<div class='flag'>CHECK: " + esc(it["review_reason"]) + "</div>"
+                    body = ("<div class='flag'><span class='fb'>CHECK</span>" + esc(it["review_reason"]) + "</div>"
                             + "<div class='ctx'>" + esc(it.get("title", "")) + "</div>")
                 else:
-                    body = "<div class='size'>Production Size: " + esc(it.get("production_size", "")) + " mm</div>"
+                    gt = (("<span class='gt'>&nbsp;&middot; " + esc(it["glass_type"]) + "</span>")
+                          if it.get("glass_type") else "")
+                    body = "<div class='size'>" + esc(it.get("production_size", "")) + "&nbsp;mm" + gt + "</div>"
                     if it.get("size_note"):
                         body += "<div class='ctx'>" + esc(it["size_note"]) + "</div>"
-                items.append("<li>" + head + body + "</li>")
-            party_k = "Company" if o.get("is_company") else "Customer"
+                items.append("<li class='it'><div class='iq'>" + esc(str(it.get("quantity", 1)))
+                             + "&thinsp;x</div><div class='ib'><div class='iname'>" + iname + "</div>"
+                             + body + "</div></li>")
             sheets.append(
-                "<div class='sheet'><div class='num'>Order Number: " + esc(str(o.get("name") or ("#" + str(o.get("order_number", ""))))) + "</div>"
-                + "<div class='party'><span class='k'>" + party_k + ":</span> " + esc(o.get("display_name", "")) + "</div>"
-                + "<div class='rule'></div><ul class='items'>" + "".join(items) + "</ul></div>")
+                "<div class='sheet'><div class='hd'><div class='num'>"
+                + esc(str(o.get("name") or ("#" + str(o.get("order_number", ""))))) + "</div>"
+                + "<div class='party'>" + esc(o.get("display_name", "")) + "</div></div>"
+                + "<ul class='items'>" + "".join(items) + "</ul></div>")
         if not sheets:
             return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>Those orders could not be found.</p>",
                                 headers=doc_headers)
@@ -3722,17 +3791,33 @@ def add_routes(mcp, registry: dict) -> None:
                ".sheet { width: " + str(w) + "mm; height: " + str(h) + "mm; padding: " + ("3.5mm 4mm" if compact else "5mm 5.5mm") + ";"
                " overflow: hidden; page-break-after: always; break-after: page; font-size: " + ("13px" if compact else "15px") + "; line-height: 1.22; }"
                ".sheet:last-child { page-break-after: auto; break-after: auto; }"
-               ".num { font-size: 1.32em; font-weight: 800; letter-spacing: -.02em; }"
-               ".party { font-size: .95em; font-weight: 700; margin-top: .2em; } .party .k { color: #444; font-weight: 600; }"
-               ".rule { border-top: 1px solid #bbb; margin: .45em 0 .4em; }"
-               "ul { list-style: none; } .item { font-size: .92em; font-weight: 700; padding-top: .2em; } .qty { font-weight: 800; }"
-               ".opts { padding-left: .8em; margin: .05em 0 .1em; } .opt { font-size: .82em; color: #222; padding: .06em 0; font-weight: 500; } .opt b { font-weight: 700; }"
-               ".size { font-size: 1.18em; font-weight: 800; margin: .12em 0 .3em; }"
-               ".flag { font-size: .95em; font-weight: 800; border: 2px solid #000; padding: .18em .4em; margin: .15em 0; display: inline-block; }"
-               ".ctx { font-size: .78em; color: #333; margin-bottom: .25em; }"
+               ".hd { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;"
+               " gap: 0 .7em; border-bottom: 2px solid #000; padding-bottom: .28em; }"
+               ".num { font-size: 1.5em; font-weight: 800; letter-spacing: -.02em; line-height: 1.05; white-space: nowrap; }"
+               ".party { font-size: .95em; font-weight: 700; text-align: right; min-width: 0; overflow-wrap: break-word; }"
+               "ul.items { list-style: none; margin-top: .3em; }"
+               ".it { display: grid; grid-template-columns: auto 1fr; gap: 0 .55em; padding-top: .34em;"
+               " page-break-inside: avoid; break-inside: avoid; }"
+               ".iq { font-size: .95em; font-weight: 800; padding-top: .1em; font-variant-numeric: tabular-nums;"
+               " min-width: 1.9em; text-align: right; }"
+               ".ib { min-width: 0; overflow-wrap: break-word; } .iname { font-size: .95em; font-weight: 700; line-height: 1.22; }"
+               ".size { font-size: 1.38em; font-weight: 900; letter-spacing: -.01em; margin-top: .04em; }"
+               ".size .gt { font-size: .6em; font-weight: 700; letter-spacing: 0; }"
+               # The CHECK badge stays plain black text in a black border box: printers strip
+               # backgrounds by default, and reversed type this small bleeds shut on thermal
+               # heads, so white-on-black here can print as nothing at all.
+               ".flag { font-size: .88em; font-weight: 700; border: 2px solid #000; padding: .16em .45em;"
+               " margin: .18em 0 .08em; display: inline-flex; align-items: baseline; gap: .35em; }"
+               ".flag .fb { font-weight: 900; letter-spacing: .05em; }"
+               ".ctx { font-size: .76em; color: #222; margin-top: .08em; }"
                + rot_css
                + "</style></head><body>"
                + ("".join("<div class='pw'>" + sh + "</div>" for sh in sheets) if portrait else "".join(sheets))
+               # Same shrink-to-fit as the app's preview: step the base font down until the
+               # whole order fits its label, so a long order clips nowhere on either path.
+               + "<script>document.querySelectorAll('.sheet').forEach(function(s){"
+               "var b=parseFloat(getComputedStyle(s).fontSize)||13,z=b,f=b*0.42;"
+               "while(s.scrollHeight>s.clientHeight&&z>f){z-=0.5;s.style.fontSize=z+'px';}});</script>"
                + "</body></html>")
         return HTMLResponse(doc, headers=doc_headers)
 
