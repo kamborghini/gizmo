@@ -8,18 +8,14 @@ export default async () => {
 
 function Extension() {
   const { data } = shopify;
-  const [src, setSrc] = useState(null);
-  // The panel is the only visible surface inside this sandbox, so it reports the
-  // exact state instead of a static message that can mask a silent failure.
+  const [baseUrl, setBaseUrl] = useState(null);
+  const [portrait, setPortrait] = useState(false);
   const [status, setStatus] = useState("starting");
 
   useEffect(() => {
     const sel = (data && data.selected) || [];
     const ids = sel.map((s) => s && s.id).filter(Boolean);
-    if (!ids.length) {
-      setStatus("no order was passed to this action (selected=" + JSON.stringify(sel).slice(0, 120) + ")");
-      return;
-    }
+    if (!ids.length) { setStatus("no order was passed to this action"); return; }
     setStatus("preparing " + ids.length + " label(s)");
     (async () => {
       try {
@@ -31,18 +27,30 @@ function Extension() {
         if (!res.ok) { setStatus("label service responded " + res.status); return; }
         const out = await res.json();
         if (!out.url) { setStatus("no document URL returned"); return; }
-        setSrc(out.url);
-        setStatus("document ready: " + out.url.slice(0, 90));
+        setBaseUrl(out.url);
+        setStatus("ready");
       } catch (e) {
-        setStatus("fetch failed: " + (e && e.message ? e.message : String(e)));
+        setStatus("failed: " + (e && e.message ? e.message : String(e)));
       }
     })();
   }, []);
 
+  const src = baseUrl ? baseUrl + (portrait ? "&orient=portrait" : "") : null;
+
   return (
     <s-admin-print-action src={src}>
       <s-stack direction="block" gap="base">
-        <s-text>Production label status: {status}</s-text>
+        <s-text>
+          {status === "ready"
+            ? "Production label ready. Use Print to send to your label printer."
+            : "Production label status: " + status}
+        </s-text>
+        <s-checkbox
+          checked={portrait}
+          onChange={(e) => setPortrait(!!(e && e.target && e.target.checked))}
+        >
+          Rotate 90 degrees (for printers that feed labels upright)
+        </s-checkbox>
       </s-stack>
     </s-admin-print-action>
   );

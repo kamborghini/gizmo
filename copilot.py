@@ -3564,8 +3564,15 @@ def add_routes(mcp, registry: dict) -> None:
                                 headers=doc_headers)
 
         compact = h <= 60
+        portrait = str(request.query_params.get("orient") or "") == "portrait"
+        page_w, page_h = (h, w) if portrait else (w, h)
+        rot_css = (".pw { width: " + str(page_w) + "mm; height: " + str(page_h) + "mm; overflow: hidden;"
+                   " page-break-after: always; break-after: page; }"
+                   ".pw:last-child { page-break-after: auto; break-after: auto; }"
+                   ".pw .sheet { transform: rotate(90deg) translateY(-" + str(h) + "mm); transform-origin: top left;"
+                   " page-break-after: auto; break-after: auto; }") if portrait else ""
         doc = ("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Production labels</title><style>"
-               "@page { size: " + str(w) + "mm " + str(h) + "mm; margin: 0; }"
+               "@page { size: " + str(page_w) + "mm " + str(page_h) + "mm; margin: 0; }"
                "* { box-sizing: border-box; margin: 0; padding: 0; }"
                "body { font-family: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; background: #fff; color: #000; }"
                ".sheet { width: " + str(w) + "mm; height: " + str(h) + "mm; padding: " + ("3.5mm 4mm" if compact else "5mm 5.5mm") + ";"
@@ -3576,7 +3583,10 @@ def add_routes(mcp, registry: dict) -> None:
                ".rule { border-top: 1px solid #bbb; margin: .45em 0 .4em; }"
                "ul { list-style: none; } .item { font-size: .92em; font-weight: 700; padding-top: .2em; } .qty { font-weight: 800; }"
                ".opts { padding-left: .8em; margin: .05em 0 .1em; } .opt { font-size: .82em; color: #222; padding: .06em 0; font-weight: 500; } .opt b { font-weight: 700; }"
-               "</style></head><body>" + "".join(sheets) + "</body></html>")
+               + rot_css
+               + "</style></head><body>"
+               + ("".join("<div class='pw'>" + sh + "</div>" for sh in sheets) if portrait else "".join(sheets))
+               + "</body></html>")
         return HTMLResponse(doc, headers=doc_headers)
 
     @mcp.custom_route("/api/products", methods=["POST"])
