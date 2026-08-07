@@ -2135,6 +2135,21 @@ def _variant_is_real(li: dict) -> bool:
     return bool(vt) and vt.lower() != "default title"
 
 
+_PRICE_SUFFIX_RE = re.compile(r"[\s\-|,·]*[\(\[]?\s*[+-]?\s*[£$€]\s*\d[\d,]*(?:\.\d+)?\s*[\)\]]?\s*$")
+
+
+def _strip_price(v) -> str:
+    """Drop a trailing price from an option value: the store's dropdowns price the
+    add-ons, so "Monochrome Glass - Original £85" reaches the order as one string.
+    A production label never shows prices."""
+    s = str(v or "").strip()
+    while True:
+        cut = _PRICE_SUFFIX_RE.sub("", s).strip()
+        if cut == s:
+            return s
+        s = cut
+
+
 def _line_options(li: dict, option_names: dict) -> list:
     """Selected options for a line item, as [{name, value}].
 
@@ -2145,7 +2160,7 @@ def _line_options(li: dict, option_names: dict) -> list:
     seen = set()
 
     def add(name: str, value: str) -> None:
-        name, value = str(name or "").strip(), str(value or "").strip()
+        name, value = str(name or "").strip(), _strip_price(value)
         if not value:
             return
         key = (name.lower(), value.lower())
@@ -2484,8 +2499,8 @@ def _shape_label_order(o: dict, names: dict) -> dict:
     domain = _order_email_domain(o)
     items = []
     for li in (o.get("line_items") or []):
-        mfr = _item_prop(li, "Manufacturer")
-        model = _item_prop(li, "Model")
+        mfr = _strip_price(_item_prop(li, "Manufacturer"))
+        model = _strip_price(_item_prop(li, "Model"))
         entry, reason = _gobo_lookup(mfr, model)
         dsize = _gobo_domain_size(mfr, model, entry, domain)
         items.append({
@@ -2495,7 +2510,7 @@ def _shape_label_order(o: dict, names: dict) -> dict:
             "options": _line_options(li, names),
             "manufacturer": mfr or (entry["manufacturer"] if entry else ""),
             "model": model,
-            "glass_type": _item_prop(li, "Glass Type"),
+            "glass_type": _strip_price(_item_prop(li, "Glass Type")),
             "production_size": dsize or (entry["production_size"] if (entry and not reason) else ""),
             "size_note": ("Size for this customer" if dsize
                           else (entry["review"] if entry and entry["production_size"] and entry["review"] else "")),
@@ -2564,7 +2579,8 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
         domain = _order_email_domain(o)
         for li in (o.get("line_items") or []):
             items_seen += 1
-            mfr, model = _item_prop(li, "Manufacturer"), _item_prop(li, "Model")
+            mfr = _strip_price(_item_prop(li, "Manufacturer"))
+            model = _strip_price(_item_prop(li, "Model"))
             if not model and not mfr:
                 # No gobo options at all: an accessory or plain product, not a miss.
                 no_model += 1
