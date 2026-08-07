@@ -358,7 +358,7 @@
         .lbl-who { flex: 1; min-width: 0; font-size: 13.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .lbl-who .sub { display: block; font-size: 11.5px; color: var(--ink-3); }
         .lbl-meta { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
-        @media (max-width: 720px) { .lbl-meta { display: none; } }  /* on phones the name matters more than the date */
+        @media (max-width: 720px) { .lbl-meta { display: none; } .lbl-actions .lbl-btn-txt { display: none; } .lbl-actions .btn { padding: 8px 9px; } }  /* on phones the name matters more than dates and button labels */
         .lbl-actions { display: flex; gap: 8px; align-items: center; }
         /* The label is sized to the real label stock, so the preview is what prints.
            All internal sizes are in em, so shrink-to-fit only has to change one
@@ -794,7 +794,6 @@
         const SV = (inner) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
         const I = {
             spark: SV('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>'),
-            play: SV('<polygon points="5 3 19 12 5 21 5 3"></polygon>'),
             grid: SV('<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>'),
             chat: SV('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>'),
             plus: SV('<line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>'),
@@ -824,6 +823,7 @@
             maximize: SV('<polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line>'),
             edit: SV('<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"></path>'),
             download: SV('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>'),
+            eye: SV('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>'),
             printer: SV('<polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect>'),
         };
         const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
@@ -1666,7 +1666,7 @@
             const card = el('div', 'run-gate');
             const ic = el('div', 'rg-ic'); ic.innerHTML = o.icon; card.append(ic);
             card.append(el('h2', null, o.title), el('p', null, o.desc));
-            const btn = el('button', 'btn btn-primary rg-btn'); btn.append(ico(I.play), document.createTextNode(o.cta)); btn.onclick = o.onRun;
+            const btn = el('button', 'btn btn-primary rg-btn'); btn.textContent = o.cta; btn.onclick = o.onRun;
             card.append(btn);
             if (o.note) card.append(el('div', 'rg-note', o.note));
             box.append(card);
@@ -2045,7 +2045,7 @@
                 el('p', null, comp
                     ? 'Analyze all customers and compare your sectors by retention, lifetime value and revenue, with a money-ranked plan.'
                     : ('Analyze the ' + seg + ' sector on its own: retention, lifetime value, segments, and a money-ranked plan for these customers.')));
-            const btn = el('button', 'btn btn-primary rg-btn'); btn.append(ico(I.play), document.createTextNode(comp ? 'Run comprehensive audit' : ('Run ' + seg + ' audit'))); btn.onclick = () => loadCustomers(true, seg);
+            const btn = el('button', 'btn btn-primary rg-btn'); btn.textContent = comp ? 'Run comprehensive audit' : ('Run ' + seg + ' audit'); btn.onclick = () => loadCustomers(true, seg);
             card.append(btn);
             card.append(el('div', 'rg-note', 'Uses AI credits only when you run it. Reads your Shopify customers and orders.'));
             return card;
@@ -2772,7 +2772,10 @@
                 row.append(who);
                 row.append(el('div', 'lbl-meta', fmtDate(o.created_at)));
                 const acts = el('div', 'lbl-actions');
-                const pr = el('button', 'btn'); pr.append(ico(I.printer), document.createTextNode('Print'));
+                const pv = el('button', 'btn'); pv.title = labelSel === o.id ? 'Hide label preview' : 'Preview label'; pv.append(ico(I.eye), el('span', 'lbl-btn-txt', labelSel === o.id ? 'Hide' : 'Preview'));
+                pv.onclick = (e) => { e.stopPropagation(); labelSel = (labelSel === o.id ? null : o.id); renderLabels(); };
+                acts.append(pv);
+                const pr = el('button', 'btn'); pr.title = 'Print label'; pr.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Print'));
                 pr.onclick = (e) => { e.stopPropagation(); printLabels([o]); };
                 acts.append(pr); row.append(acts);
                 row.onclick = () => { labelSel = (labelSel === o.id ? null : o.id); renderLabels(); };
