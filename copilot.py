@@ -2185,9 +2185,11 @@ async def _product_option_names(registry: dict, product_ids) -> dict:
 
 
 _gobo_cache = {"mtime": None, "by_mm": {}, "by_model": {}, "by_mm_loose": {}, "by_model_loose": {},
-               "by_mm_digit": {}, "by_model_digit": {}, "rows": []}
+               "by_mm_digit": {}, "by_model_digit": {}, "rows": [], "domain_rules": []}
 GOBO_ALIASES_PATH = os.environ.get("GOBO_ALIASES_PATH",
                                    os.path.join(os.path.dirname(__file__), "data", "gobo-aliases.csv"))
+GOBO_OVERRIDES_PATH = os.environ.get("GOBO_OVERRIDES_PATH",
+                                     os.path.join(os.path.dirname(__file__), "data", "gobo-overrides.csv"))
 
 
 def _norm_key(v) -> str:
@@ -2216,20 +2218,26 @@ def _word_run_in(needle: tuple, hay: tuple) -> bool:
 
 
 def _gobo_sizes() -> dict:
-    """Model -> production size lookup from the merchant's CSV, reloaded when it or
-    the aliases file changes. Multi-model cells ("VR8, VRX, VRXSR") index each
-    model. Keys map to LISTS because the sheet genuinely repeats some
-    (manufacturer, model) rows with different sizes; those must flag for review,
-    never pick-one. data/gobo-aliases.csv maps spellings the store's dropdowns use
-    ("40W/80W") onto sheet models ("40/80 Watt Range") and survives sheet updates."""
+    """Model -> production size lookup from the merchant's CSV, reloaded when it,
+    the aliases file or the overrides file changes. Multi-model cells ("VR8, VRX,
+    VRXSR") index each model. Keys map to LISTS because the sheet genuinely
+    repeats some (manufacturer, model) rows with different sizes; those must flag
+    for review, never pick-one. Two companion files survive sheet replacements:
+    data/gobo-aliases.csv maps spellings the store's dropdowns use ("40W/80W")
+    onto sheet models ("40/80 Watt Range"); data/gobo-overrides.csv carries the
+    merchant's rulings - fix a model's size (creating the row if the sheet lacks
+    it), drop a row entirely (size "exclude"), or set a size that applies only to
+    orders from one customer email domain."""
     try:
         mtime = os.path.getmtime(GOBO_SIZES_PATH)
     except OSError:
         return _gobo_cache
-    try:
-        mtime = (mtime, os.path.getmtime(GOBO_ALIASES_PATH))
-    except OSError:
-        mtime = (mtime, None)
+    def _mt(p):
+        try:
+            return os.path.getmtime(p)
+        except OSError:
+            return None
+    mtime = (mtime, _mt(GOBO_ALIASES_PATH), _mt(GOBO_OVERRIDES_PATH))
     if _gobo_cache["mtime"] == mtime:
         return _gobo_cache
     import csv as _csv
@@ -2252,6 +2260,29 @@ def _gobo_sizes() -> dict:
             by_mm_digit.setdefault((lm, dkey), []).append(entry)
             by_model_digit.setdefault(dkey, []).append(entry)
 
+    excludes, sets, domain_rules = set(), {}, []
+    try:
+        with open(GOBO_OVERRIDES_PATH, newline="", encoding="utf-8-sig") as fh:
+            for row in _csv.DictReader(fh):
+                mfr = str(row.get("Manufacturer") or "").strip()
+                model = str(row.get("Model") or "").strip()
+                domain = str(row.get("Customer Email Domain") or "").strip().lstrip("@").lower()
+                size = str(row.get("Production Size (mm)") or "").strip()
+                key = (_norm_key(mfr), _norm_key(model))
+                if not key[1] or not size:
+                    continue
+                if domain:
+                    domain_rules.append({"key": key, "domain": domain, "size": size,
+                                         "manufacturer": mfr, "model": model})
+                elif size.lower() == "exclude":
+                    excludes.add(key)
+                else:
+                    sets[key] = {"manufacturer": mfr, "model": model, "size": size}
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.exception("gobo overrides: failed to load %s", GOBO_OVERRIDES_PATH)
+
     try:
         with open(GOBO_SIZES_PATH, newline="", encoding="utf-8-sig") as fh:
             for row in _csv.DictReader(fh):
@@ -2264,10 +2295,23 @@ def _gobo_sizes() -> dict:
                 nm = _norm_key(entry["manufacturer"])
                 lm = _loose_key(entry["manufacturer"])
                 for model in entry["model"].split(","):
+                    key = (nm, _norm_key(model))
+                    if key in excludes:
+                        continue
+                    ruled = sets.get(key)
+                    if ruled:
+                        entry["production_size"] = ruled["size"]
+                        entry["review"] = ""
                     index_model(entry, nm, lm, model)
     except Exception:
         logger.exception("gobo sizes: failed to load %s", GOBO_SIZES_PATH)
         return _gobo_cache
+    # Rulings for models the sheet does not have become rows of their own.
+    for key, ruled in sets.items():
+        if key not in by_mm:
+            entry = {"manufacturer": ruled["manufacturer"], "model": ruled["model"],
+                     "production_size": ruled["size"], "review": ""}
+            index_model(entry, key[0], _loose_key(ruled["manufacturer"]), ruled["model"])
     try:
         with open(GOBO_ALIASES_PATH, newline="", encoding="utf-8-sig") as fh:
             for row in _csv.DictReader(fh):
@@ -2286,8 +2330,10 @@ def _gobo_sizes() -> dict:
         logger.exception("gobo aliases: failed to load %s", GOBO_ALIASES_PATH)
     _gobo_cache.update({"mtime": mtime, "by_mm": by_mm, "by_model": by_model,
                         "by_mm_loose": by_mm_loose, "by_model_loose": by_model_loose,
-                        "by_mm_digit": by_mm_digit, "by_model_digit": by_model_digit, "rows": rows})
-    logger.info("gobo sizes: loaded %d model keys from %s", len(by_model), GOBO_SIZES_PATH)
+                        "by_mm_digit": by_mm_digit, "by_model_digit": by_model_digit,
+                        "rows": rows, "domain_rules": domain_rules})
+    logger.info("gobo sizes: loaded %d model keys from %s (%d domain rules)",
+                len(by_model), GOBO_SIZES_PATH, len(domain_rules))
     return _gobo_cache
 
 
@@ -2384,8 +2430,12 @@ def _gobo_lookup(manufacturer: str, model: str):
         parts = [p for p in re.split(r"[,/]", raw) if p.strip()]
         if len(parts) > 1:
             resolved = []
-            for part in parts:
-                resolved.extend(_gobo_resolve_part(cache, nmfr, lmfr, part, notes) or [])
+            # "Rogue R2 / R3" means Rogue R3, not any maker's R3: later parts first
+            # try the first part's family words ("Rogue") in front of their own.
+            head = " ".join(_loose_key(parts[0]).split()[:-1])
+            for i, part in enumerate(parts):
+                got = _gobo_resolve_part(cache, nmfr, lmfr, head + " " + part, notes) if i and head else None
+                resolved.extend(got or _gobo_resolve_part(cache, nmfr, lmfr, part, notes) or [])
     if not resolved:
         if "ambiguous" in notes:
             return None, "Model matches more than one manufacturer in the size list"
@@ -2399,6 +2449,27 @@ def _gobo_lookup(manufacturer: str, model: str):
     return hit, None
 
 
+def _order_email_domain(o: dict) -> str:
+    email = str(o.get("email") or o.get("contact_email")
+                or (o.get("customer") or {}).get("email") or "")
+    return email.split("@")[-1].strip().lower() if "@" in email else ""
+
+
+def _gobo_domain_size(manufacturer: str, model: str, entry, domain: str):
+    """A size ruling that applies only to orders from one customer email domain
+    (e.g. Ayrton Diablo prints 25 for dbnaudile.co.uk, 25.5 for everyone else).
+    Matched against both the store-written model name and the resolved sheet row."""
+    if not domain:
+        return None
+    keys = {(_norm_key(manufacturer), _norm_key(model))}
+    if entry:
+        keys.add((_norm_key(entry["manufacturer"]), _norm_key(entry["model"])))
+    for r in _gobo_sizes()["domain_rules"]:
+        if r["domain"] == domain and r["key"] in keys:
+            return r["size"]
+    return None
+
+
 def _item_prop(li: dict, name: str) -> str:
     want = _norm_key(name)
     for p in (li.get("properties") or []):
@@ -2410,11 +2481,13 @@ def _item_prop(li: dict, name: str) -> str:
 def _shape_label_order(o: dict, names: dict) -> dict:
     """One order in the shape the label UI prints."""
     company, person = _label_party(o)
+    domain = _order_email_domain(o)
     items = []
     for li in (o.get("line_items") or []):
         mfr = _item_prop(li, "Manufacturer")
         model = _item_prop(li, "Model")
         entry, reason = _gobo_lookup(mfr, model)
+        dsize = _gobo_domain_size(mfr, model, entry, domain)
         items.append({
             "title": str(li.get("title") or li.get("name") or "Item").strip(),
             "quantity": int(li.get("quantity") or 1),
@@ -2423,9 +2496,10 @@ def _shape_label_order(o: dict, names: dict) -> dict:
             "manufacturer": mfr or (entry["manufacturer"] if entry else ""),
             "model": model,
             "glass_type": _item_prop(li, "Glass Type"),
-            "production_size": (entry["production_size"] if (entry and not reason) else ""),
-            "size_note": (entry["review"] if entry and entry["production_size"] and entry["review"] else ""),
-            "review_reason": reason or "",
+            "production_size": dsize or (entry["production_size"] if (entry and not reason) else ""),
+            "size_note": ("Size for this customer" if dsize
+                          else (entry["review"] if entry and entry["production_size"] and entry["review"] else "")),
+            "review_reason": "" if dsize else (reason or ""),
         })
     return {
         "id": o.get("id"),
@@ -2457,7 +2531,7 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
 
     tag = (tag or PRODUCTION_TAG).strip() or PRODUCTION_TAG
     days = max(1, min(int(days or PRODUCTION_DAYS), 730))
-    fields = ("id,order_number,name,created_at,tags,customer,billing_address,"
+    fields = ("id,order_number,name,created_at,tags,email,customer,billing_address,"
               "shipping_address,line_items,note")
     orders = await _paginate_orders(registry, days=days, fields=fields)
     tagged = [o for o in orders if _has_tag(o, tag)]
@@ -2478,7 +2552,7 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
     n = max(1, min(int(orders_count or 200), 250))
     data = await _tool_json(registry, "shopify_list_orders",
                             {"status": "any", "limit": n,
-                             "fields": "id,order_number,name,created_at,line_items"})
+                             "fields": "id,order_number,name,created_at,email,customer,line_items"})
     if not _ok(data):
         # A throttled or failed fetch must never read as "everything matches".
         return {"error": "Couldn't read your orders from Shopify. Try again in a moment."}
@@ -2487,6 +2561,7 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
     flagged: dict = {}
     for o in orders:
         oname = str(o.get("name") or "").strip() or ("#" + str(o.get("order_number") or ""))
+        domain = _order_email_domain(o)
         for li in (o.get("line_items") or []):
             items_seen += 1
             mfr, model = _item_prop(li, "Manufacturer"), _item_prop(li, "Model")
@@ -2496,6 +2571,8 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
                 continue
             gobo_items += 1
             entry, reason = _gobo_lookup(mfr, model)
+            if reason and _gobo_domain_size(mfr, model, entry, domain):
+                reason = None
             if not reason:
                 sized += 1
                 continue
