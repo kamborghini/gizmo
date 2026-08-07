@@ -4009,7 +4009,7 @@ def add_routes(mcp, registry: dict) -> None:
                " line-height: 1.22; }"
                ".sheet:last-child { page-break-after: auto; break-after: auto; }"
                ".hd { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;"
-               " gap: 0 .7em; border-bottom: 2px solid #000; padding-bottom: .28em; }"
+               " gap: 0 .7em; border-bottom: 1px solid #000; padding-bottom: .28em; }"
                ".num { font-size: 1.5em; font-weight: 800; letter-spacing: -.02em; line-height: 1.05; white-space: nowrap; }"
                ".party { font-size: .95em; font-weight: 700; text-align: right; min-width: 0; overflow-wrap: break-word; }"
                "ul.items { list-style: none; margin-top: .3em; }"
@@ -4031,7 +4031,7 @@ def add_routes(mcp, registry: dict) -> None:
                # pinning to the label's bottom edge. The QR keeps a fixed physical size:
                # shrink-to-fit scales the text, but below ~10mm a code stops scanning.
                ".rate { margin-top: .5em; padding-top: .35em; border-top: 1px solid #000;"
-               " display: flex; align-items: center; justify-content: center; gap: 2mm; }"
+               " display: flex; align-items: center; justify-content: flex-start; gap: 2mm; }"
                ".rate .qr { width: 13mm; height: 13mm; flex: none; }"
                ".rate .rt { font-size: .68em; font-weight: 500; text-align: left; }"
                ".rate .r1 { font-weight: 800; font-size: 1.06em; }"

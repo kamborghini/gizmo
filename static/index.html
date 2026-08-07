@@ -372,7 +372,7 @@
            Below it each item is a grid row (qty | detail) whose loudest line is the
            production size, because that is what the manufacturing team reads. */
         .label-sheet .ls-hd { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
-            gap: 0 .7em; border-bottom: 2px solid #000; padding-bottom: .28em; }
+            gap: 0 .7em; border-bottom: 1px solid #000; padding-bottom: .28em; }
         .label-sheet .ls-num { font-size: 1.5em; font-weight: 800; letter-spacing: -.02em; line-height: 1.05; white-space: nowrap; }
         .label-sheet .ls-party { font-size: .95em; font-weight: 700; text-align: right; min-width: 0; overflow-wrap: break-word; }
         .label-sheet ul { list-style: none; margin: .3em 0 0; padding: 0; }
@@ -394,7 +394,7 @@
            pinning to the label's bottom edge. The QR keeps a fixed physical size:
            shrink-to-fit scales the text, but a code below ~10mm stops scanning. */
         .label-sheet .ls-rate { margin-top: .5em; padding-top: .35em; border-top: 1px solid #000;
-            display: flex; align-items: center; justify-content: center; gap: 2mm; }
+            display: flex; align-items: center; justify-content: flex-start; gap: 2mm; }
         .label-sheet .ls-rate .qr { width: 13mm; height: 13mm; flex: none; }
         .label-sheet .ls-rt { font-size: .68em; font-weight: 500; text-align: left; }
         .label-sheet .ls-r1 { font-weight: 800; font-size: 1.06em; }
