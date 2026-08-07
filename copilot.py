@@ -3481,9 +3481,11 @@ def add_routes(mcp, registry: dict) -> None:
                     str(request.query_params.get("ids") or "")[:120],
                     "sig" if request.query_params.get("sig") else ("id_token" if request.query_params.get("id_token") else ("bearer" if request.headers.get("authorization") else "none")),
                     request.headers.get("origin"))
+        doc_headers = {**_API_HEADERS, "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store"}
+
         def deny(msg: str):
             return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>" + html.escape(msg) + "</p>",
-                                status_code=401, headers=_API_HEADERS)
+                                status_code=401, headers=doc_headers)
 
         # Auth, any of three ways: a short-lived HMAC-signed URL (minted by the sign
         # endpoint for the print-action extensions; the admin's preview frame carries
@@ -3520,7 +3522,7 @@ def add_routes(mcp, registry: dict) -> None:
         ids = list(dict.fromkeys(ids))[:50]
         if not ids:
             return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>No orders were selected.</p>",
-                                headers=_API_HEADERS)
+                                headers=doc_headers)
 
         sizes = {"4x2": (101.6, 50.8), "4x3": (101.6, 76.2), "4x6": (101.6, 152.4),
                  "2x4": (50.8, 101.6), "a4": (210, 297)}
@@ -3547,7 +3549,7 @@ def add_routes(mcp, registry: dict) -> None:
                 + "<div class='rule'></div><ul class='items'>" + "".join(items) + "</ul></div>")
         if not sheets:
             return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>Those orders could not be found.</p>",
-                                headers=_API_HEADERS)
+                                headers=doc_headers)
 
         compact = h <= 60
         doc = ("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Production labels</title><style>"
@@ -3563,8 +3565,7 @@ def add_routes(mcp, registry: dict) -> None:
                "ul { list-style: none; } .item { font-size: .92em; font-weight: 700; padding-top: .2em; } .qty { font-weight: 800; }"
                ".opts { padding-left: .8em; margin: .05em 0 .1em; } .opt { font-size: .82em; color: #222; padding: .06em 0; font-weight: 500; } .opt b { font-weight: 700; }"
                "</style></head><body>" + "".join(sheets) + "</body></html>")
-        headers = {**_API_HEADERS, "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store"}
-        return HTMLResponse(doc, headers=headers)
+        return HTMLResponse(doc, headers=doc_headers)
 
     @mcp.custom_route("/api/products", methods=["POST"])
     async def products_route(request: Request):

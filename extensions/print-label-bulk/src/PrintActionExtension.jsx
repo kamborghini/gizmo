@@ -29,9 +29,9 @@ function Extension() {
         if (!res.ok) throw new Error("label service responded " + res.status);
         const out = await res.json();
         if (!out.path && !out.url) throw new Error("no document URL returned");
-        // Prefer the app-relative path: the print preview resolves it against the
-        // app's URL, matching how Shopify's own print example loads documents.
-        setSrc(out.path || out.url);
+        // Absolute URL: the preview refused a relative path outright (observed:
+        // no request issued at all), and the app origin is CORS-open + frameable.
+        setSrc(out.url || out.path);
       } catch (e) {
         setError(e && e.message ? e.message : String(e));
       }
