@@ -42,7 +42,7 @@ import google_data
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 
 logger = logging.getLogger("shopify_mcp.copilot")
 
@@ -3830,6 +3830,21 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("Label coverage failed")
             return _json({"error": "Couldn't check size coverage. Check the server logs."}, 500)
 
+    _font_cache: dict = {}
+
+    @mcp.custom_route("/fonts/bricolage.woff2", methods=["GET"])
+    async def label_font(request: Request):
+        # The label typeface (Bricolage Grotesque, OFL). Public static bytes, no
+        # data and no auth, cached hard so the print frame gets it instantly.
+        if "woff2" not in _font_cache:
+            try:
+                with open(os.path.join(os.path.dirname(__file__), "data", "fonts", "bricolage.woff2"), "rb") as fh:
+                    _font_cache["woff2"] = fh.read()
+            except OSError:
+                return PlainTextResponse("Not found", status_code=404)
+        return Response(_font_cache["woff2"], media_type="font/woff2",
+                        headers={**_API_HEADERS, "Cache-Control": "public, max-age=31536000, immutable"})
+
     _PRINT_ORIGINS = {"https://extensions.shopifycdn.com", "https://admin.shopify.com"}
 
     def _print_cors(request: Request) -> dict:
@@ -3985,11 +4000,13 @@ def add_routes(mcp, registry: dict) -> None:
                    " page-break-after: auto; break-after: auto; }") if portrait else ""
         doc = ("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Production labels</title><style>"
                "@page { size: " + str(page_w) + "mm " + str(page_h) + "mm; margin: 0; }"
+               "@font-face { font-family: 'Bricolage Grotesque'; font-style: normal; font-weight: 200 800;"
+               " font-stretch: 75% 100%; font-display: block; src: url('/fonts/bricolage.woff2') format('woff2'); }"
                "* { box-sizing: border-box; margin: 0; padding: 0; }"
-               "body { font-family: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; background: #fff; color: #000; }"
+               "body { font-family: 'Bricolage Grotesque', -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; background: #fff; color: #000; }"
                ".sheet { width: " + str(w) + "mm; height: " + str(h) + "mm; padding: " + ("3.5mm 4mm" if compact else "5mm 5.5mm") + ";"
                " overflow: hidden; page-break-after: always; break-after: page; font-size: " + ("13px" if compact else "15px") + ";"
-               " line-height: 1.22; display: flex; flex-direction: column; }"
+               " line-height: 1.22; }"
                ".sheet:last-child { page-break-after: auto; break-after: auto; }"
                ".hd { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;"
                " gap: 0 .7em; border-bottom: 2px solid #000; padding-bottom: .28em; }"
@@ -4001,18 +4018,19 @@ def add_routes(mcp, registry: dict) -> None:
                ".iq { font-size: .95em; font-weight: 800; padding-top: .1em; font-variant-numeric: tabular-nums;"
                " min-width: 1.9em; text-align: right; }"
                ".ib { min-width: 0; overflow-wrap: break-word; } .iname { font-size: .95em; font-weight: 700; line-height: 1.22; }"
-               ".size { font-size: 1.38em; font-weight: 900; letter-spacing: -.01em; margin-top: .04em; }"
+               ".size { font-size: 1.38em; font-weight: 800; letter-spacing: -.01em; margin-top: .04em; }"
                ".size .gt { font-size: .6em; font-weight: 700; letter-spacing: 0; }"
                # The CHECK badge stays plain black text in a black border box: printers strip
                # backgrounds by default, and reversed type this small bleeds shut on thermal
                # heads, so white-on-black here can print as nothing at all.
                ".flag { font-size: .88em; font-weight: 700; border: 2px solid #000; padding: .16em .45em;"
                " margin: .18em 0 .08em; display: inline-flex; align-items: baseline; gap: .35em; }"
-               ".flag .fb { font-weight: 900; letter-spacing: .05em; }"
+               ".flag .fb { font-weight: 800; letter-spacing: .05em; }"
                ".ctx { font-size: .76em; color: #222; margin-top: .08em; }"
-               # The QR keeps a fixed physical size: shrink-to-fit scales the text, but a
-               # code below ~10mm stops scanning, so it must never shrink with the em.
-               ".rate { margin-top: auto; padding-top: .35em; border-top: 1px solid #000;"
+               # The strip follows the last item (rule directly beneath it), rather than
+               # pinning to the label's bottom edge. The QR keeps a fixed physical size:
+               # shrink-to-fit scales the text, but below ~10mm a code stops scanning.
+               ".rate { margin-top: .5em; padding-top: .35em; border-top: 1px solid #000;"
                " display: flex; align-items: center; justify-content: center; gap: 2mm; }"
                ".rate .qr { width: 13mm; height: 13mm; flex: none; }"
                ".rate .rt { font-size: .68em; font-weight: 500; text-align: left; }"
@@ -4022,10 +4040,14 @@ def add_routes(mcp, registry: dict) -> None:
                + "</style></head><body>"
                + ("".join("<div class='pw'>" + sh + "</div>" for sh in sheets) if portrait else "".join(sheets))
                # Same shrink-to-fit as the app's preview: step the base font down until the
-               # whole order fits its label, so a long order clips nowhere on either path.
-               + "<script>document.querySelectorAll('.sheet').forEach(function(s){"
-               "var b=parseFloat(getComputedStyle(s).fontSize)||13,z=b,f=b*0.42;"
-               "while(s.scrollHeight>s.clientHeight&&z>f){z-=0.5;s.style.fontSize=z+'px';}});</script>"
+               # whole order fits its label. Measured only after the label typeface has
+               # loaded (2s cap), or the metrics would be the fallback font's.
+               + "<script>(function(){function fit(){document.querySelectorAll('.sheet').forEach(function(s){"
+               "s.style.fontSize='';var b=parseFloat(getComputedStyle(s).fontSize)||13,z=b,f=b*0.42;"
+               "while(s.scrollHeight>s.clientHeight&&z>f){z-=0.5;s.style.fontSize=z+'px';}});}"
+               "fit();if(document.fonts&&document.fonts.load){Promise.race(["
+               "document.fonts.load(\"15px 'Bricolage Grotesque'\"),"
+               "new Promise(function(r){setTimeout(r,2000);})]).then(fit,fit);}})();</script>"
                + "</body></html>")
         return HTMLResponse(doc, headers=doc_headers)
 
