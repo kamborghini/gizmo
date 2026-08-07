@@ -3443,6 +3443,8 @@ def add_routes(mcp, registry: dict) -> None:
             return pre
         ok, _who = _authorize(request)
         if not ok:
+            logger.warning("print-labels sign: 401 (auth header present=%s, origin=%s)",
+                           bool(request.headers.get("authorization")), request.headers.get("origin"))
             return JSONResponse({"error": "Unauthorized"}, status_code=401, headers={**_API_HEADERS, **cors})
         body = await _read_json_capped(request)
         if body is None:
@@ -3458,9 +3460,11 @@ def add_routes(mcp, registry: dict) -> None:
                        f"{raw_ids}|{raw_size}|{exp}".encode(), hashlib.sha256).hexdigest()
         base = (APP_BASE_URL.rstrip("/") if APP_BASE_URL
                 else f"https://{request.headers.get('host', '')}")
-        url = (f"{base}/print/production-labels?ids={quote(raw_ids, safe='')}"
-               f"&size={raw_size}&exp={exp}&sig={sig}")
-        return JSONResponse({"url": url, "expires_in": 300}, headers={**_API_HEADERS, **cors})
+        path = (f"/print/production-labels?ids={quote(raw_ids, safe='')}"
+                f"&size={raw_size}&exp={exp}&sig={sig}")
+        logger.info("print-labels sign: ok ids=%s size=%s", raw_ids[:120], raw_size)
+        return JSONResponse({"url": base + path, "path": path, "expires_in": 300},
+                            headers={**_API_HEADERS, **cors})
 
     @mcp.custom_route("/print/production-labels", methods=["GET"])
     async def print_labels_doc(request: Request):
@@ -3473,6 +3477,10 @@ def add_routes(mcp, registry: dict) -> None:
         if pre:
             return pre
 
+        logger.info("print-labels doc: ids=%s auth=%s origin=%s",
+                    str(request.query_params.get("ids") or "")[:120],
+                    "sig" if request.query_params.get("sig") else ("id_token" if request.query_params.get("id_token") else ("bearer" if request.headers.get("authorization") else "none")),
+                    request.headers.get("origin"))
         def deny(msg: str):
             return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>" + html.escape(msg) + "</p>",
                                 status_code=401, headers=_API_HEADERS)

@@ -28,8 +28,10 @@ function Extension() {
         });
         if (!res.ok) throw new Error("label service responded " + res.status);
         const out = await res.json();
-        if (!out.url) throw new Error("no document URL returned");
-        setSrc(out.url);
+        if (!out.path && !out.url) throw new Error("no document URL returned");
+        // Prefer the app-relative path: the print preview resolves it against the
+        // app's URL, matching how Shopify's own print example loads documents.
+        setSrc(out.path || out.url);
       } catch (e) {
         setError(e && e.message ? e.message : String(e));
       }
