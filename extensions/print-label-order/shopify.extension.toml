@@ -10,3 +10,6 @@ description = "Preview and print the production label without leaving the order"
 [[extensions.targeting]]
 module = "./src/PrintActionExtension.jsx"
 target = "admin.order-details.print-action.render"
+
+[extensions.capabilities]
+network_access = true

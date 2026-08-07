@@ -10,3 +10,6 @@ description = "Preview and print the production label for every selected order a
 [[extensions.targeting]]
 module = "./src/PrintActionExtension.jsx"
 target = "admin.order-index.selection-print-action.render"
+
+[extensions.capabilities]
+network_access = true

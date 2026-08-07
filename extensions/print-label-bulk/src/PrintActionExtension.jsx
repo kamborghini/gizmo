@@ -2,8 +2,6 @@
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 
-const APP_URL = "https://gizmo-production-c8c1.up.railway.app";
-
 export default async () => {
   render(<Extension />, document.body);
 };
@@ -19,12 +17,13 @@ function Extension() {
     if (!ids.length) return;
     (async () => {
       try {
-        // The admin's preview frame carries no session, so trade the merchant's id
-        // token for a short-lived signed document URL the preview can load freely.
-        const token = await shopify.auth.idToken();
-        const res = await fetch(APP_URL + "/print/production-labels/sign", {
+        // Relative fetch: the extension runtime resolves it against the app's URL
+        // and attaches the Authorization header itself (documented behavior). The
+        // backend returns a short-lived signed URL the print preview can load
+        // without any session.
+        const res = await fetch("/print/production-labels/sign", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ids: ids.join(",") }),
         });
         if (!res.ok) throw new Error("label service responded " + res.status);
@@ -41,7 +40,7 @@ function Extension() {
     <s-admin-print-action src={src}>
       <s-stack direction="block" gap="base">
         {error ? (
-          <s-text>Could not prepare the label ({error}). Close this, refresh the page and try again.</s-text>
+          <s-text>Could not prepare the label ({error}). Please tell support exactly this message.</s-text>
         ) : (
           <s-text>
             {count > 1 ? count + " production labels ready." : "Production label ready."}{" "}
