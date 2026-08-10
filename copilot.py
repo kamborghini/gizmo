@@ -2867,7 +2867,8 @@ async def run_missing_production(registry: dict, tag: Optional[str] = None) -> d
     data = await _tool_json(registry, "shopify_list_orders",
                             {"status": "open", "limit": 100,
                              "fields": ("id,order_number,name,created_at,tags,cancelled_at,"
-                                        "fulfillment_status,financial_status,line_items")})
+                                        "fulfillment_status,financial_status,line_items,"
+                                        "customer,billing_address,shipping_address,note")})
     if not _ok(data):
         return {"error": "Couldn't read your orders from Shopify. Try again in a moment."}
     store = (SHOPIFY_STORE or "").split(".")[0]
@@ -2886,9 +2887,13 @@ async def run_missing_production(registry: dict, tag: Optional[str] = None) -> d
                 gobo += 1
         if not gobo:
             continue
+        company, person = _label_party(o)
+        proposal_url, _note = _extract_proposal(str(o.get("note") or "").strip())
         missing.append({
             "id": o.get("id"),
             "name": str(o.get("name") or "").strip() or ("#" + str(o.get("order_number") or "")),
+            "company": company or person or "",
+            "proposal_url": proposal_url,
             "created_at": o.get("created_at"),
             "gobo_items": gobo,
             "admin_url": (f"https://admin.shopify.com/store/{store}/orders/{o.get('id')}" if store else ""),
