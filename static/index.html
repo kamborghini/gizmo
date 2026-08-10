@@ -935,7 +935,7 @@
         $('nav-keywords').append(ico(I.tag), document.createTextNode('Keywords'));
         $('nav-products').append(ico(I.box), document.createTextNode('Products'));
         $('nav-customers').append(ico(I.users), document.createTextNode('Customers'));
-        $('nav-labels').append(ico(I.printer), document.createTextNode('Labels'));
+        $('nav-labels').append(ico(I.printer), document.createTextNode('Production Manager'));
         $('nav-memory').append(ico(I.bookmark), document.createTextNode('Memory'));
         $('nav-skills').append(ico(I.book), document.createTextNode('Skills'));
         $('nav-chat').append(ico(I.chat), document.createTextNode('Chat'));
@@ -2877,7 +2877,7 @@
             if (labelsCache && !force) { renderLabels(); return; }
             box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
-            const ht = el('div'); ht.append(el('h2', null, 'Production labels'), el('p', null, 'Finding orders tagged "' + LABEL_TAG + '"…'));
+            const ht = el('div'); ht.append(el('h2', null, 'Production Manager'), el('p', null, 'Finding orders tagged "' + LABEL_TAG + '"…'));
             hero.append(badge, ht); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Reading your Shopify orders…')); box.append(t);
             labelsLoading = true;
@@ -3057,7 +3057,7 @@
             const unmade = printable.filter(o => !prodStateOf(o).made_at);
             const shown = labelsFilter === 'unprinted' ? unprinted : labelsFilter === 'unmade' ? unmade : orders;
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
-            const ht = el('div'); ht.append(el('h2', null, 'Production labels'),
+            const ht = el('div'); ht.append(el('h2', null, 'Production Manager'),
                 el('p', null, 'Orders tagged "' + (data.tag || LABEL_TAG) + '". Select an order to preview its label, then print.'));
             hero.append(badge, ht);
             hero.append(el('div', 'ov-updated', freshLabel(labelsCache.at)));
@@ -3502,7 +3502,7 @@
         async function printFromAdminLink(orderId) {
             const box = $('labels-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
-            const ht = el('div'); ht.append(el('h2', null, 'Production labels'), el('p', null, 'Preparing the label for this order\u2026'));
+            const ht = el('div'); ht.append(el('h2', null, 'Production Manager'), el('p', null, 'Preparing the label for this order\u2026'));
             hero.append(badge, ht); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Fetching the order\u2026')); box.append(t);
             labelsLoading = true;
@@ -3564,7 +3564,7 @@
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
             ['overview', 'seo', 'keywords', 'products', 'customers', 'labels', 'memory', 'skills', 'chat'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', labels: 'Production labels', memory: 'Memory', skills: 'Skills' };
+            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', labels: 'Production Manager', memory: 'Memory', skills: 'Skills' };
             $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
             const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels') ? 'none' : '';
             // Only offer the PDF when there is actually a report to print: the print
