@@ -687,6 +687,56 @@ def _page_context_to_system(ctx) -> str:
 # made, then measure how they moved since. Proves whether advice worked.
 # ---------------------------------------------------------------------------
 
+PRODUCTION_STATE_PATH = os.environ.get("PRODUCTION_STATE_PATH", "/data/production_state.json")
+PRODUCTION_STATE_MAX = int(os.environ.get("PRODUCTION_STATE_MAX", "1000"))
+
+
+def _load_prod_state() -> dict:
+    try:
+        with open(PRODUCTION_STATE_PATH, "r", encoding="utf-8") as fh:
+            return json.load(fh).get("orders", {})
+    except Exception:
+        return {}
+
+
+def _write_prod_state(orders: dict) -> dict:
+    if len(orders) > PRODUCTION_STATE_MAX:
+        # Oldest-touched entries fall off; the live list only shows recent orders.
+        keep = sorted(orders.items(), key=lambda kv: str(kv[1].get("printed_at") or kv[1].get("made_at") or ""))
+        orders = dict(keep[-PRODUCTION_STATE_MAX:])
+    os.makedirs(os.path.dirname(PRODUCTION_STATE_PATH) or ".", exist_ok=True)
+    tmp = PRODUCTION_STATE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"orders": orders}, fh)
+    os.replace(tmp, PRODUCTION_STATE_PATH)
+    return orders
+
+
+def _mark_printed(order_ids: list) -> None:
+    """Best-effort: a failed stamp must never break a print."""
+    try:
+        state = _load_prod_state()
+        now = datetime.now(timezone.utc).isoformat()
+        for oid in order_ids:
+            entry = state.setdefault(str(oid), {})
+            entry["printed_at"] = now
+        _write_prod_state(state)
+    except Exception:
+        logger.exception("production state: printed stamp failed")
+
+
+def _mark_made(order_id, on: bool) -> dict:
+    state = _load_prod_state()
+    entry = state.setdefault(str(order_id), {})
+    if on:
+        entry["made_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        entry.pop("made_at", None)
+    if not entry:
+        state.pop(str(order_id), None)
+    return _write_prod_state(state)
+
+
 def _load_impact() -> list[dict]:
     try:
         with open(IMPACT_PATH, "r", encoding="utf-8") as fh:
@@ -2539,6 +2589,35 @@ def _item_model(li: dict, manufacturer: str) -> str:
     return fallback
 
 
+_EXPRESS_WORDS = ("next day", "next business day", "express", "24 hour", "24hr",
+                  "timed", "pre 10", "pre 12", "before 10", "before 12", "saturday")
+
+
+def _order_status(o: dict) -> str:
+    """What the workbench must know before making anything: cancelled and refunded
+    orders must never be built; fulfilled ones are probably stale tags."""
+    if o.get("cancelled_at"):
+        return "cancelled"
+    if str(o.get("financial_status") or "").lower() in ("refunded", "voided"):
+        return "refunded"
+    if str(o.get("fulfillment_status") or "").lower() == "fulfilled":
+        return "fulfilled"
+    return ""
+
+
+def _order_priority(o: dict) -> bool:
+    """True when the customer paid for speed: an additional shipping charge line
+    item, or an express-sounding shipping service."""
+    for li in (o.get("line_items") or []):
+        if _label_skip_item(str(li.get("title") or li.get("name") or "")):
+            return True
+    for sl in (o.get("shipping_lines") or []):
+        name = str(sl.get("title") or sl.get("code") or "").lower()
+        if any(w in name for w in _EXPRESS_WORDS):
+            return True
+    return False
+
+
 def _shape_label_order(o: dict, names: dict) -> dict:
     """One order in the shape the label UI prints."""
     company, person = _label_party(o)
@@ -2575,6 +2654,9 @@ def _shape_label_order(o: dict, names: dict) -> dict:
         "customer": person,
         "display_name": company or person or "Customer",
         "is_company": bool(company),
+        "status": _order_status(o),
+        "priority": _order_priority(o),
+        "note": str(o.get("note") or "").strip()[:500],
         "items": items,
     }
 
@@ -2591,13 +2673,16 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
                     "error_note": "Order not found."}
         names = await _product_option_names(
             registry, [li.get("product_id") for li in (o.get("line_items") or []) if _variant_is_real(li)])
-        return {"tag": PRODUCTION_TAG, "days": 0, "count": 1,
-                "orders": [_shape_label_order(o, names)], "single": True}
+        shaped = _shape_label_order(o, names)
+        return {"tag": PRODUCTION_TAG, "days": 0, "count": 1, "orders": [shaped],
+                "state": {str(shaped["id"]): _load_prod_state().get(str(shaped["id"]), {})},
+                "single": True}
 
     tag = (tag or PRODUCTION_TAG).strip() or PRODUCTION_TAG
     days = max(1, min(int(days or PRODUCTION_DAYS), 730))
     fields = ("id,order_number,name,created_at,tags,email,customer,billing_address,"
-              "shipping_address,line_items,note")
+              "shipping_address,line_items,note,cancelled_at,fulfillment_status,"
+              "financial_status,shipping_lines")
     orders = await _paginate_orders(registry, days=days, fields=fields)
     tagged = [o for o in orders if _has_tag(o, tag)]
     tagged.sort(key=lambda o: str(o.get("created_at") or ""), reverse=True)
@@ -2606,8 +2691,49 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
         registry,
         [li.get("product_id") for o in tagged for li in (o.get("line_items") or []) if _variant_is_real(li)],
     )
-    return {"tag": tag, "days": days, "count": len(tagged),
-            "orders": [_shape_label_order(o, names) for o in tagged]}
+    shaped = [_shape_label_order(o, names) for o in tagged]
+    state = _load_prod_state()
+    return {"tag": tag, "days": days, "count": len(tagged), "orders": shaped,
+            "state": {str(s["id"]): state[str(s["id"])] for s in shaped if str(s["id"]) in state}}
+
+
+async def run_missing_production(registry: dict, tag: Optional[str] = None) -> dict:
+    """Paid, unfulfilled, not-cancelled orders that contain gobo items but never
+    got the production tag: the ones that silently never reach the workbench.
+    A plain Shopify read, no AI."""
+    tag = (tag or PRODUCTION_TAG).strip() or PRODUCTION_TAG
+    data = await _tool_json(registry, "shopify_list_orders",
+                            {"status": "open", "limit": 100,
+                             "fields": ("id,order_number,name,created_at,tags,cancelled_at,"
+                                        "fulfillment_status,financial_status,line_items")})
+    if not _ok(data):
+        return {"error": "Couldn't read your orders from Shopify. Try again in a moment."}
+    store = (SHOPIFY_STORE or "").split(".")[0]
+    missing = []
+    for o in (data.get("orders") or []):
+        if _has_tag(o, tag) or _order_status(o):
+            continue
+        if str(o.get("financial_status") or "").lower() not in ("paid", "partially_paid", "authorized", "partially_refunded"):
+            continue
+        gobo = 0
+        for li in (o.get("line_items") or []):
+            if _label_skip_item(str(li.get("title") or li.get("name") or "")):
+                continue
+            mfr = _strip_price(_item_prop(li, "Manufacturer"))
+            if mfr or _item_model(li, mfr):
+                gobo += 1
+        if not gobo:
+            continue
+        missing.append({
+            "id": o.get("id"),
+            "name": str(o.get("name") or "").strip() or ("#" + str(o.get("order_number") or "")),
+            "created_at": o.get("created_at"),
+            "gobo_items": gobo,
+            "admin_url": (f"https://admin.shopify.com/store/{store}/orders/{o.get('id')}" if store else ""),
+        })
+    missing.sort(key=lambda m: str(m.get("created_at") or ""))
+    return {"tag": tag, "checked": len(data.get("orders") or []), "missing": missing[:20],
+            "missing_total": len(missing)}
 
 
 async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
@@ -3850,6 +3976,55 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("Production labels failed")
             return _json({"error": "Couldn't load production orders. Check the server logs."}, 500)
 
+    @mcp.custom_route("/api/production-state", methods=["POST"])
+    async def production_state_route(request: Request):
+        # Printed and made stamps per order. Local JSON on the volume, no AI.
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        op = str(body.get("op") or "")
+        try:
+            if op == "printed":
+                ids = [int(i) for i in (body.get("ids") or []) if str(i).strip().isdigit()][:100]
+                if ids:
+                    _mark_printed(ids)
+                return _json({"ok": True, "state": {str(i): _load_prod_state().get(str(i), {}) for i in ids}})
+            if op == "made":
+                oid = int(body.get("id") or 0)
+                if not oid:
+                    return _json({"error": "No order id given."}, 400)
+                state = _mark_made(oid, bool(body.get("on", True)))
+                return _json({"ok": True, "state": {str(oid): state.get(str(oid), {})}})
+            return _json({"error": "Unknown op."}, 400)
+        except Exception:
+            logger.exception("Production state update failed")
+            return _json({"error": "Couldn't update production state."}, 500)
+
+    @mcp.custom_route("/api/production-labels/missing", methods=["POST"])
+    async def labels_missing_route(request: Request):
+        # Paid gobo orders that never got the production tag. Shopify read, no AI.
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        try:
+            res = await run_missing_production(registry)
+            return _json(res, 502 if res.get("error") else 200)
+        except Exception:
+            logger.exception("Missing-production scan failed")
+            return _json({"error": "Couldn't check for untagged orders."}, 500)
+
     @mcp.custom_route("/api/production-labels/coverage", methods=["POST"])
     async def labels_coverage_route(request: Request):
         # Size-list coverage over recent orders. Shopify read, no AI.
@@ -3991,6 +4166,7 @@ def add_routes(mcp, registry: dict) -> None:
             m = re.search(r"(\d+)\s*$", part.strip())
             if m:
                 ids.append(int(m.group(1)))
+        requested = len(list(dict.fromkeys(ids)))
         ids = list(dict.fromkeys(ids))[:50]
         if not ids:
             return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>No orders were selected.</p>",
@@ -4002,6 +4178,9 @@ def add_routes(mcp, registry: dict) -> None:
 
         results = await asyncio.gather(*[run_production_labels(registry, order_id=i) for i in ids])
         orders = [r["orders"][0] for r in results if r.get("orders")]
+        # Rendering the print document IS the print moment for the admin print
+        # extensions; stamp these orders as printed (best-effort, never raises).
+        _mark_printed([o["id"] for o in orders if o.get("id")])
         esc = html.escape
         sheets = []
         for o in orders:
@@ -4028,17 +4207,28 @@ def add_routes(mcp, registry: dict) -> None:
                 if it.get("size_note"):
                     row += "<div class='ctx'>" + esc(it["size_note"]) + "</div>"
                 items.append(row + "</li>")
+            status = o.get("status") or ""
+            dead = ("<div class='dead'>DO NOT MAKE - " + esc(status.upper()) + "</div>"
+                    if status in ("cancelled", "refunded") else "")
+            pri = "<span class='pri'>PRIORITY</span>" if o.get("priority") else ""
+            note = (("<div class='onote'><b>Note:</b> " + esc(o["note"]) + "</div>")
+                    if o.get("note") else "")
             sheets.append(
-                "<div class='sheet'><div class='top'>"
+                "<div class='sheet'>" + dead + "<div class='top'>"
                 + "<div class='logo'>" + _LABEL_LOGO_SVG + "</div>"
                 + "<div class='company'>" + esc(o.get("display_name", "")) + "</div>"
-                + "<div class='ono'>Order: " + esc(str(o.get("name") or ("#" + str(o.get("order_number", ""))))) + "</div></div>"
-                + "<ul class='items'>" + "".join(items) + "</ul>"
+                + "<div class='ono'>Order: " + esc(str(o.get("name") or ("#" + str(o.get("order_number", ""))))) + pri + "</div></div>"
+                + "<ul class='items'>" + "".join(items) + "</ul>" + note
                 + "<div class='rate'><div class='rt'><div class='r1'>&#9733;&#9733;&#9733;&#9733;&#9733; 5 Star Service</div>"
                 + "<div class='r2'>Leave us a review on <b>Trustpilot</b></div></div></div></div>")
         if not sheets:
             return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>Those orders could not be found.</p>",
                                 headers=doc_headers)
+        if requested > len(ids):
+            # Never let a bulk print silently drop orders past the 50-order cap.
+            sheets.insert(0, ("<div class='sheet'><div class='dead'>ONLY " + str(len(ids)) + " OF "
+                              + str(requested) + " SELECTED ORDERS ARE IN THIS PRINT</div>"
+                              + "<div class='onote'>Print the rest in a second batch from the orders list.</div></div>"))
 
         compact = h <= 60
         portrait = str(request.query_params.get("orient") or "") == "portrait"
@@ -4080,6 +4270,13 @@ def add_routes(mcp, registry: dict) -> None:
                # Flagged rows may wrap so the reason stays readable.
                ".it.wrap { white-space: normal; overflow: visible; } .it.wrap .desc { overflow: visible; text-overflow: clip; }"
                ".ctx { font-size: .76em; color: #222; margin-top: .12em; }"
+               # A dead order must be unmissable at arm's length.
+               ".dead { border: 3px solid #000; font-size: 1.25em; font-weight: 800; letter-spacing: .04em;"
+               " text-align: center; padding: .35em .4em; margin-bottom: .7em; }"
+               ".pri { border: 2px solid #000; font-weight: 800; font-size: .78em; letter-spacing: .05em;"
+               " padding: .1em .5em; margin-left: .7em; border-radius: 2px; }"
+               ".onote { font-size: .82em; color: #111; margin-top: .55em; overflow-wrap: break-word; }"
+               ".onote b { font-weight: 800; }"
                # The strip follows the last item rather than pinning to the label's bottom edge.
                ".rate { margin-top: .6em; padding-top: .35em; border-top: 1px solid #ddd;"
                " display: flex; align-items: center; justify-content: flex-start; }"
