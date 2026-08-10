@@ -1037,6 +1037,27 @@ def _log_usage(kind: str, model: str, usage) -> None:
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump({"events": events}, fh)
         os.replace(tmp, USAGE_PATH)
+        # Monthly rollup survives the event log trimming itself: the pricing
+        # dataset must not evaporate at USAGE_MAX.
+        rollup_path = os.path.join(os.path.dirname(USAGE_PATH) or ".", "usage_rollup.json")
+        try:
+            with open(rollup_path, "r", encoding="utf-8") as fh:
+                roll = json.load(fh) or {}
+        except Exception:
+            roll = {}
+        mk = rec["at"][:7]
+        m = roll.setdefault(mk, {"runs": 0, "in": 0, "out": 0, "cost": 0.0, "by_kind": {}})
+        m["runs"] += 1
+        m["in"] += inp
+        m["out"] += out
+        m["cost"] = round(m["cost"] + rec["cost"], 6)
+        k = m["by_kind"].setdefault(kind, {"runs": 0, "cost": 0.0})
+        k["runs"] += 1
+        k["cost"] = round(k["cost"] + rec["cost"], 6)
+        tmp2 = rollup_path + ".tmp"
+        with open(tmp2, "w", encoding="utf-8") as fh:
+            json.dump(roll, fh)
+        os.replace(tmp2, rollup_path)
     except Exception:
         logger.exception("usage log failed")
 
@@ -1074,9 +1095,18 @@ def _spend_guard() -> None:
 
 
 async def _xcreate(client, **kwargs):
-    """Wrapper around messages.create that enforces the daily spend cap and logs
-    token usage + cost per call."""
+    """Wrapper around messages.create that enforces the daily spend cap, logs
+    token usage + cost per call, and turns on prompt caching for every call:
+    the big system prompt (profile + memory + skills + store knowledge) and the
+    tool schemas are identical across the many rounds of a chat loop, so caching
+    them stops the same tokens being bought again on every round."""
     _spend_guard()
+    system = kwargs.get("system")
+    if isinstance(system, str) and len(system) > 2048:
+        kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+    tools = kwargs.get("tools")
+    if isinstance(tools, list) and tools and isinstance(tools[-1], dict) and "cache_control" not in tools[-1]:
+        kwargs["tools"] = tools[:-1] + [{**tools[-1], "cache_control": {"type": "ephemeral"}}]
     resp = await getattr(client.messages, "create")(**kwargs)
     _log_usage(_ai_kind.get("ai"), kwargs.get("model", ""), getattr(resp, "usage", None))
     return resp
@@ -2325,7 +2355,7 @@ def _gobo_sizes() -> dict:
             by_mm_digit.setdefault((lm, dkey), []).append(entry)
             by_model_digit.setdefault(dkey, []).append(entry)
 
-    excludes, sets, domain_rules = set(), {}, []
+    excludes, sets, domain_rules, dead_aliases = set(), {}, [], 0
     try:
         with open(GOBO_OVERRIDES_PATH, newline="", encoding="utf-8-sig") as fh:
             for row in _csv.DictReader(fh):
@@ -2388,15 +2418,23 @@ def _gobo_sizes() -> dict:
                 for entry in hits:
                     index_model(entry, _norm_key(mfr), _loose_key(mfr), store)
                 if not hits:
+                    dead_aliases += 1
                     logger.warning("gobo aliases: %r -> %r matches nothing in the size list", store, target)
     except FileNotFoundError:
         pass
     except Exception:
         logger.exception("gobo aliases: failed to load %s", GOBO_ALIASES_PATH)
+    try:
+        sheet_at = datetime.fromtimestamp(os.path.getmtime(GOBO_SIZES_PATH), timezone.utc).isoformat()
+    except OSError:
+        sheet_at = None
     _gobo_cache.update({"mtime": mtime, "by_mm": by_mm, "by_model": by_model,
                         "by_mm_loose": by_mm_loose, "by_model_loose": by_model_loose,
                         "by_mm_digit": by_mm_digit, "by_model_digit": by_model_digit,
-                        "rows": rows, "domain_rules": domain_rules})
+                        "rows": rows, "domain_rules": domain_rules,
+                        "health": {"models": len(by_model), "dead_aliases": dead_aliases,
+                                   "overrides": len(sets) + len(excludes) + len(domain_rules),
+                                   "sheet_at": sheet_at}})
     logger.info("gobo sizes: loaded %d model keys from %s (%d domain rules)",
                 len(by_model), GOBO_SIZES_PATH, len(domain_rules))
     return _gobo_cache
@@ -3375,6 +3413,50 @@ def _add_alerts(items: list) -> list:
     return _write_alerts(alerts)
 
 
+RESEND_API_KEY   = os.environ.get("RESEND_API_KEY", "")
+ALERT_EMAIL_TO   = os.environ.get("ALERT_EMAIL_TO", "")
+ALERT_EMAIL_FROM = os.environ.get("ALERT_EMAIL_FROM", "Store Copilot <onboarding@resend.dev>")
+WATCH_PATH       = os.environ.get("WATCH_PATH", "/data/watch.json")
+
+
+async def _send_alert_email(subject: str, lines: list) -> bool:
+    """Alerts that only render inside the app are invisible until someone opens it;
+    with a Resend key set, they also reach an inbox. Best-effort, never raises."""
+    if not (RESEND_API_KEY and ALERT_EMAIL_TO):
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=15) as cx:
+            r = await cx.post("https://api.resend.com/emails",
+                              headers={"Authorization": "Bearer " + RESEND_API_KEY},
+                              json={"from": ALERT_EMAIL_FROM, "to": [ALERT_EMAIL_TO],
+                                    "subject": subject, "text": "\n".join(lines)})
+        if r.status_code >= 300:
+            logger.warning("alert email rejected: %s %s", r.status_code, r.text[:200])
+        return r.status_code < 300
+    except Exception:
+        logger.exception("alert email failed")
+        return False
+
+
+def _load_watch() -> dict:
+    try:
+        with open(WATCH_PATH, "r", encoding="utf-8") as fh:
+            return json.load(fh) or {}
+    except Exception:
+        return {}
+
+
+def _save_watch(state: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(WATCH_PATH) or ".", exist_ok=True)
+        tmp = WATCH_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(state, fh)
+        os.replace(tmp, WATCH_PATH)
+    except Exception:
+        logger.exception("watch state write failed")
+
+
 def _update_alert(aid: str, status: str) -> list:
     alerts = _load_alerts()
     if status == "delete":
@@ -3388,6 +3470,39 @@ def _update_alert(aid: str, status: str) -> list:
 async def _run_scheduled_audits(registry: dict) -> list:
     """Re-run the audits server-side (no session needed) and record notable metric
     moves as alerts. Returns the new alerts. Never raises."""
+    # Gate: when the store's headline numbers have not moved since the last
+    # scheduled run, skip the paid rewrite of four identical reports. A real run
+    # still happens at least every 14 days regardless.
+    try:
+        snap = await _impact_snapshot(registry)
+        state = _load_watch()
+        prev, prev_at = state.get("sched_snapshot") or {}, state.get("sched_snapshot_at")
+        fresh = False
+        if prev_at:
+            try:
+                fresh = (datetime.now(timezone.utc) - datetime.fromisoformat(prev_at)).days < 14
+            except Exception:
+                fresh = False
+
+        def _close(a, b):
+            try:
+                a, b = float(a), float(b)
+            except (TypeError, ValueError):
+                return a == b
+            return abs(a - b) / max(abs(a), abs(b), 1.0) < 0.01
+
+        if snap and prev and fresh and all(_close(snap.get(k), prev.get(k)) for k in set(prev) | set(snap)):
+            cfg = _load_schedule()
+            cfg["last_run"] = datetime.now(timezone.utc).isoformat()
+            _save_schedule(cfg, _internal=True)
+            logger.info("scheduler: headline metrics unchanged; skipped paid audits")
+            return []
+        if snap:
+            state["sched_snapshot"] = snap
+            state["sched_snapshot_at"] = datetime.now(timezone.utc).isoformat()
+            _save_watch(state)
+    except Exception:
+        logger.exception("scheduler gate failed; running audits anyway")
     extra = (_profile_to_system(_load_profile()) + _memory_to_system()
              + _knowledge_to_system() + _skills_to_system())
     threshold = _load_schedule().get("threshold_pct", 15)
@@ -3414,19 +3529,88 @@ async def _run_scheduled_audits(registry: dict) -> list:
     _save_schedule(cfg, _internal=True)
     if found:
         _add_alerts(found)
+        await _send_alert_email(
+            "Store Copilot: " + str(len(found)) + (" change alert" if len(found) == 1 else " change alerts"),
+            [f"{a['tab_label']}: {a['metric']} moved {a['pct']}% ({a['prev']} -> {a['cur']})" for a in found]
+            + ["", "Open the app for details."])
     logger.info("scheduler: ran audits, %d alert(s)", len(found))
     return found
 
 
 _scheduler_started = False
+_watch_last_tick = 0.0
+
+
+async def _watchdog_tick(registry: dict) -> bool:
+    """Hourly, independent of the paid schedule: probe the Shopify connection and
+    keep the size-list coverage fresh. Returns True when Shopify is reachable.
+    Never raises."""
+    global _watch_last_tick
+    now = time.time()
+    if now - _watch_last_tick < 3600:
+        return not _load_watch().get("shopify_down")
+    _watch_last_tick = now
+    state = _load_watch()
+    try:
+        shop = await _tool_json(registry, "shopify_get_shop", {})
+        up = _ok(shop) and bool(shop.get("name"))
+        fails = 0 if up else int(state.get("probe_fails") or 0) + 1
+        state["probe_fails"] = fails
+        if not up and fails == 3 and not state.get("shopify_down"):
+            # Three consecutive hourly failures: this is an outage, not a blip.
+            state["shopify_down"] = datetime.now(timezone.utc).isoformat()
+            _add_alerts([{"tab": "settings", "tab_label": "Connections",
+                          "metric": "Shopify connection is failing; data may be stale", "pct": None}])
+            await _send_alert_email("Store Copilot: Shopify connection is failing",
+                                    ["The app has not been able to read your store for 3 hours.",
+                                     "Data and labels may be stale, and scheduled audits are paused",
+                                     "until the connection recovers (this usually means the access",
+                                     "token was rotated or Shopify had an outage)."])
+        if up and state.get("shopify_down"):
+            state.pop("shopify_down", None)
+            await _send_alert_email("Store Copilot: Shopify connection recovered",
+                                    ["Reads are working again; scheduled audits resume."])
+        # Weekly size-list coverage: catch a new model going unmatched before a
+        # CHECK label surprises the workbench.
+        last_cov = state.get("coverage_at")
+        due = True
+        if last_cov:
+            try:
+                due = (datetime.now(timezone.utc) - datetime.fromisoformat(last_cov)).days >= 7
+            except Exception:
+                due = True
+        if up and due:
+            cov = await run_label_coverage(registry, 200)
+            if not cov.get("error"):
+                keys = sorted(f"{f['manufacturer']}|{f['model']}|{f['reason']}" for f in cov.get("flagged", []))
+                prev = set(state.get("coverage_flagged") or [])
+                fresh = [k for k in keys if k not in prev]
+                state["coverage_at"] = datetime.now(timezone.utc).isoformat()
+                state["coverage_flagged"] = keys
+                state["coverage_pct"] = cov.get("pct")
+                if fresh and prev:   # first-ever run just sets the baseline quietly
+                    _add_alerts([{"tab": "labels", "tab_label": "Labels",
+                                  "metric": "New model not matching the size list: " + k.split("|")[1], "pct": None}
+                                 for k in fresh[:5]])
+                    await _send_alert_email("Store Copilot: new models missing from the size list",
+                                            [k.replace("|", " / ") for k in fresh]
+                                            + ["", "Open the Labels tab and run Size check for details."])
+        _save_watch(state)
+        return up or fails < 3
+    except Exception:
+        logger.exception("watchdog tick failed")
+        return True
 
 
 async def _scheduler_loop(registry: dict) -> None:
     await asyncio.sleep(60)  # let the app settle after boot
     while True:
         try:
+            shopify_up = await _watchdog_tick(registry)
             cfg = _load_schedule()
-            if cfg.get("enabled") and ANTHROPIC_API_KEY:
+            if not shopify_up:
+                logger.warning("scheduler: Shopify unreachable; skipping paid audits this tick")
+            elif cfg.get("enabled") and ANTHROPIC_API_KEY:
                 last = cfg.get("last_run")
                 due = True
                 if last:
@@ -3447,6 +3631,23 @@ async def _scheduler_loop(registry: dict) -> None:
                     await _run_scheduled_audits(registry)
         except Exception:
             logger.exception("scheduler loop error")
+            try:
+                state = _load_watch()
+                last = state.get("error_email_at")
+                stale = True
+                if last:
+                    try:
+                        stale = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() > 86400
+                    except Exception:
+                        stale = True
+                if stale:   # at most one failure email a day, not one per tick
+                    state["error_email_at"] = datetime.now(timezone.utc).isoformat()
+                    _save_watch(state)
+                    await _send_alert_email("Store Copilot: background scheduler hit an error",
+                                            ["The automatic refresh loop errored; it will keep retrying.",
+                                             "If alerts go quiet for days, check the Railway logs."])
+            except Exception:
+                pass
         await asyncio.sleep(SCHEDULE_CHECK_SECS)
 
 
@@ -3976,6 +4177,48 @@ def add_routes(mcp, registry: dict) -> None:
             logger.exception("Production labels failed")
             return _json({"error": "Couldn't load production orders. Check the server logs."}, 500)
 
+    @mcp.custom_route("/api/backup", methods=["POST"])
+    async def backup_route(request: Request):
+        """Everything the app has learned lives as files on one volume; this hands
+        the merchant a zip of it. JSON and CSV only, fonts and code excluded."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        import io, zipfile
+        data_dir = os.path.dirname(SCHEDULE_PATH) or "/data"
+        repo_data = os.path.join(os.path.dirname(__file__), "data")
+        buf = io.BytesIO()
+        added = 0
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for root in dict.fromkeys([data_dir, repo_data]):
+                try:
+                    names = sorted(os.listdir(root))
+                except OSError:
+                    continue
+                for n in names:
+                    p = os.path.join(root, n)
+                    if not os.path.isfile(p) or not n.lower().endswith((".json", ".csv", ".bak")):
+                        continue
+                    try:
+                        if os.path.getsize(p) > 10 * 1024 * 1024:
+                            continue
+                        z.write(p, os.path.basename(root) + "/" + n)
+                        added += 1
+                    except OSError:
+                        continue
+        if not added:
+            return _json({"error": "Nothing to back up yet."}, 404)
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return Response(buf.getvalue(), media_type="application/zip",
+                        headers={**_API_HEADERS,
+                                 "Content-Disposition": f"attachment; filename=store-copilot-backup-{stamp}.zip"})
+
     @mcp.custom_route("/api/production-state", methods=["POST"])
     async def production_state_route(request: Request):
         # Printed and made stamps per order. Local JSON on the volume, no AI.
@@ -4483,8 +4726,24 @@ def add_routes(mcp, registry: dict) -> None:
                 shop_ok, shop_name, currency = True, shop.get("name"), shop.get("currency")
         except Exception:
             pass
+        # Volume sentinel: prove the data disk is writable, or nothing persists.
+        vol_ok, vol_detail = True, ""
+        try:
+            probe = os.path.join(os.path.dirname(SCHEDULE_PATH) or ".", ".probe")
+            with open(probe, "w", encoding="utf-8") as fh:
+                fh.write("ok")
+            os.remove(probe)
+        except Exception as e:
+            vol_ok, vol_detail = False, str(e)[:200]
+        watch = _load_watch()
+        health = _gobo_sizes().get("health") or {}
         return _json({
-            "shopify": {"ok": shop_ok, "name": shop_name, "currency": currency},
+            "shopify": {"ok": shop_ok, "name": shop_name, "currency": currency,
+                        "down_since": watch.get("shopify_down")},
             "ai": {"ok": bool(ANTHROPIC_API_KEY)},
             "google": google_data.status(),
+            "volume": {"ok": vol_ok, "detail": vol_detail},
+            "email_alerts": {"ok": bool(RESEND_API_KEY and ALERT_EMAIL_TO)},
+            "size_list": health,
+            "coverage": {"at": watch.get("coverage_at"), "pct": watch.get("coverage_pct")},
         })

@@ -3242,6 +3242,43 @@
             // Google Ads (CPC) rides on GA4
             host.append(connRow('Google Ads (CPC)', g.ga4_ready ? 'mid' : 'off',
                 g.ga4_ready ? 'Link Google Ads to your GA4 property to see paid CPC and ROAS.' : 'Needs GA4 connected, then a Google Ads link in GA4.'));
+            // Data volume
+            host.append(connRow('Data storage', s.volume && s.volume.ok ? 'on' : 'off',
+                s.volume && s.volume.ok ? 'The data disk is healthy. Back it up below now and then.'
+                    : 'The data disk is NOT writable: nothing new is being saved. ' + ((s.volume && s.volume.detail) || '')));
+            // Email alerts
+            host.append(connRow('Email alerts', s.email_alerts && s.email_alerts.ok ? 'on' : 'mid',
+                s.email_alerts && s.email_alerts.ok ? 'Alerts and failures also reach your inbox.'
+                    : 'Only shown inside the app. Set RESEND_API_KEY and ALERT_EMAIL_TO on Railway to get them by email.'));
+            // Size list health
+            const sl = s.size_list || {};
+            if (sl.models) {
+                host.append(connRow('Gobo size list', sl.dead_aliases ? 'mid' : 'on',
+                    sl.models + ' models' + (sl.overrides ? ' · ' + sl.overrides + ' rulings' : '')
+                    + (sl.sheet_at ? ' · sheet from ' + fmtDate(sl.sheet_at) : '')
+                    + (sl.dead_aliases ? ' · ' + sl.dead_aliases + ' alias(es) no longer match and need attention' : '')
+                    + (s.coverage && s.coverage.pct != null ? ' · last auto check ' + s.coverage.pct + '%' : '')));
+            }
+            const bk = el('button', 'btn'); bk.style.marginTop = '10px';
+            bk.append(ico(I.download), document.createTextNode('Download backup'));
+            bk.title = 'A zip of everything the app has learned: rulings, aliases, state, usage.';
+            bk.onclick = async () => {
+                bk.disabled = true;
+                try {
+                    const res = await fetch('/api/backup', { method: 'POST',
+                        headers: Object.assign({ 'Content-Type': 'application/json' }, await authHeaders()),
+                        body: '{}' });
+                    if (!res.ok) throw new Error('Backup failed (' + res.status + ')');
+                    const blob = await res.blob();
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'store-copilot-backup.zip';
+                    document.body.append(a); a.click(); a.remove();
+                    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+                } catch (e) { addToast(e.message || 'Backup failed'); }
+                bk.disabled = false;
+            };
+            host.append(bk);
         }
         function openSettings() {
             $('pf-voice').value = profile.brand_voice || '';
