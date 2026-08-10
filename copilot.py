@@ -4659,8 +4659,7 @@ def add_routes(mcp, registry: dict) -> None:
                     # Flagged rows may wrap: the reason must be readable, never ellipsized.
                     items.append("<li class='row'><div class='it wrap'><span class='iqs'>" + qty + "x</span>"
                                  + "<span class='chip fl'>CHECK</span><span class='desc'>"
-                                 + esc(it["review_reason"]) + " &middot; &quot;" + esc(it.get("title", "")) + "&quot;"
-                                 + "</span></div></li>")
+                                 + esc(it["review_reason"]) + "</span></div></li>")
                     continue
                 size = esc(it.get("production_size", ""))
                 chip = ("<span class='chip'>" + esc(it["glass_type"]) + "</span>") if it.get("glass_type") else ""

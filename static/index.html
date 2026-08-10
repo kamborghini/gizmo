@@ -3224,7 +3224,7 @@
                     // Flagged rows may wrap: the reason must be readable, never ellipsized.
                     row.append(el('span', 'ls-iqs', it.quantity + 'x'));
                     row.append(el('span', 'ls-chip fl', 'CHECK'));
-                    row.append(el('span', 'ls-desc', it.review_reason + ' \u00b7 "' + (it.title || '') + '"'));
+                    row.append(el('span', 'ls-desc', it.review_reason));
                     li.append(row);
                 } else {
                     row.append(el('span', 'ls-iqs',
