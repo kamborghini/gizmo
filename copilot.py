@@ -2635,8 +2635,43 @@ def _item_model(li: dict, manufacturer: str) -> str:
     return fallback
 
 
-_EXPRESS_WORDS = ("next day", "next business day", "express", "24 hour", "24hr",
-                  "timed", "pre 10", "pre 12", "before 10", "before 12", "saturday")
+def _parse_due_date(v):
+    """A customer-typed deadline as a date, or None. The store's option sets write
+    "13 August 2026" (Date Required) and "30-08-2026" (Wedding Date); this is a UK
+    store, so numeric dates are ALWAYS day-first, never American month-first."""
+    s = re.sub(r"\s+", " ", str(v or "").strip())
+    if not s:
+        return None
+    for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y", "%d %B %Y", "%d %b %Y",
+                "%d %B %y", "%d %b %y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _order_due(o: dict):
+    """The order's completion deadline, from the dates the customer already gave:
+    each item's "Date Required" (the explicit deadline) or, failing that, its
+    "Wedding Date" (the gobo must exist by the wedding). The earliest date across
+    the order's items wins. Returns a date or None."""
+    dues = []
+    for li in (o.get("line_items") or []):
+        if _label_skip_item(str(li.get("title") or li.get("name") or "")):
+            continue
+        d = _parse_due_date(_item_prop(li, "Date Required")) or _parse_due_date(_item_prop(li, "Wedding Date"))
+        if d:
+            dues.append(d)
+    return min(dues) if dues else None
+
+
+def _fmt_due(d) -> str:
+    """"13 Aug", with the year only when it is not this year."""
+    if not d:
+        return ""
+    out = f"{d.day} {d.strftime('%b')}"
+    return out if d.year == datetime.now(timezone.utc).year else out + f" {d.year}"
 
 
 def _order_status(o: dict) -> str:
@@ -2651,23 +2686,13 @@ def _order_status(o: dict) -> str:
     return ""
 
 
-def _order_priority(o: dict) -> bool:
-    """True when the customer paid for speed: an additional shipping charge line
-    item, or an express-sounding shipping service."""
-    for li in (o.get("line_items") or []):
-        if _label_skip_item(str(li.get("title") or li.get("name") or "")):
-            return True
-    for sl in (o.get("shipping_lines") or []):
-        name = str(sl.get("title") or sl.get("code") or "").lower()
-        if any(w in name for w in _EXPRESS_WORDS):
-            return True
-    return False
 
 
 def _shape_label_order(o: dict, names: dict) -> dict:
     """One order in the shape the label UI prints."""
     company, person = _label_party(o)
     domain = _order_email_domain(o)
+    due = _order_due(o)
     items = []
     for li in (o.get("line_items") or []):
         if _label_skip_item(str(li.get("title") or li.get("name") or "")):
@@ -2701,7 +2726,9 @@ def _shape_label_order(o: dict, names: dict) -> dict:
         "display_name": company or person or "Customer",
         "is_company": bool(company),
         "status": _order_status(o),
-        "priority": _order_priority(o),
+        "due": (due.isoformat() if due else ""),
+        "due_label": _fmt_due(due),
+        "due_soon": bool(due and (due - datetime.now(timezone.utc).date()).days <= 2),
         "note": str(o.get("note") or "").strip()[:500],
         "customer_id": (o.get("customer") or {}).get("id"),
         "items": items,
@@ -4648,7 +4675,10 @@ def add_routes(mcp, registry: dict) -> None:
             status = o.get("status") or ""
             dead = ("<div class='dead'>DO NOT MAKE - " + esc(status.upper()) + "</div>"
                     if status in ("cancelled", "refunded") else "")
-            pri = "<span class='pri'>PRIORITY</span>" if o.get("priority") else ""
+            # Deadline the customer gave, always visible when known; only its
+            # emphasis changes as it gets close. Never a word about importance.
+            pri = (("<span class='due" + (" soon" if o.get("due_soon") else "") + "'>Required by: "
+                    + esc(o["due_label"]) + "</span>") if o.get("due_label") else "")
             note = (("<div class='onote'><b>Note:</b> " + esc(o["note"]) + "</div>")
                     if o.get("note") else "")
             sheets.append(
@@ -4711,8 +4741,9 @@ def add_routes(mcp, registry: dict) -> None:
                # A dead order must be unmissable at arm's length.
                ".dead { border: 3px solid #000; font-size: 1.25em; font-weight: 800; letter-spacing: .04em;"
                " text-align: center; padding: .35em .4em; margin-bottom: .7em; }"
-               ".pri { border: 2px solid #000; font-weight: 800; font-size: .78em; letter-spacing: .05em;"
-               " padding: .1em .5em; margin-left: .7em; border-radius: 2px; }"
+               ".due { font-size: .78em; font-weight: 600; color: #333; margin-left: .7em; }"
+               ".due.soon { color: #000; font-weight: 800; border: 1px solid #000;"
+               " padding: .1em .5em; border-radius: 2px; }"
                ".onote { font-size: .82em; color: #111; margin-top: .55em; overflow-wrap: break-word; }"
                ".onote b { font-weight: 800; }"
                # The strip follows the last item rather than pinning to the label's bottom edge.

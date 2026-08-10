@@ -429,8 +429,9 @@
         .miss-open:hover { text-decoration: underline; }
         .label-sheet .ls-dead { border: 3px solid #000; font-size: 1.25em; font-weight: 800; letter-spacing: .04em;
             text-align: center; padding: .35em .4em; margin-bottom: .7em; }
-        .label-sheet .ls-pri { border: 2px solid #000; font-weight: 800; font-size: .78em; letter-spacing: .05em;
-            padding: .1em .5em; margin-left: .7em; border-radius: 2px; }
+        .label-sheet .ls-due { font-size: .78em; font-weight: 600; color: #333; margin-left: .7em; }
+        .label-sheet .ls-due.soon { color: #000; font-weight: 800; border: 1px solid #000;
+            padding: .1em .5em; border-radius: 2px; }
         .label-sheet .ls-onote { font-size: .82em; color: #111; margin-top: .55em; overflow-wrap: break-word; }
         .label-sheet .ls-onote b { font-weight: 800; }
         .cov-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -3076,7 +3077,10 @@
                 const nameLine = el('span', 'lbl-nameline');
                 nameLine.append(document.createTextNode(o.display_name));
                 if (o.status) nameLine.append(el('span', 'lbl-chip bad', o.status.toUpperCase()));
-                if (o.priority && !o.status) nameLine.append(el('span', 'lbl-chip warn', 'PRIORITY'));
+                if (o.due_soon && !o.status) {
+                    const overdue = o.due && (new Date(o.due + 'T00:00:00') - Date.now() < -86400000);
+                    nameLine.append(el('span', 'lbl-chip ' + (overdue ? 'bad' : 'warn'), 'DUE ' + (o.due_label || '').toUpperCase()));
+                }
                 if (!o.status && !st.made_at && ageDays(o.created_at) >= 4) nameLine.append(el('span', 'lbl-chip warn', ageDays(o.created_at) + 'd'));
                 if (o.note) nameLine.append(el('span', 'lbl-chip note', 'NOTE'));
                 if (st.made_at) nameLine.append(el('span', 'lbl-chip made', 'MADE'));
@@ -3209,7 +3213,7 @@
             const top = el('div', 'ls-top');
             const lg = el('div', 'ls-logo'); lg.innerHTML = LABEL_LOGO;   // trusted static markup
             const ono = el('div', 'ls-ono', 'Order: ' + orderNo(o));
-            if (o.priority) ono.append(el('span', 'ls-pri', 'PRIORITY'));
+            if (o.due_label) ono.append(el('span', 'ls-due' + (o.due_soon ? ' soon' : ''), 'Required by: ' + o.due_label));
             top.append(lg, el('div', 'ls-company', o.display_name), ono);
             s.append(top);
             const ul = el('ul');
