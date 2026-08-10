@@ -2916,9 +2916,11 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
                     u = unresolved.setdefault(str(o.get("name") or ""), 0)
                     unresolved[str(o.get("name") or "")] = u + qty
                     continue
-                key = (it["production_size"], it.get("glass_type") or "")
-                r = rows.setdefault(key, {"size": it["production_size"],
-                                          "glass": it.get("glass_type") or "", "qty": 0})
+                # Original vs Copy is the same physical blank: group stock by the
+                # glass family ("Mono - Original" and "Mono - Copy" -> "Mono").
+                family = re.split(r"\s+-\s+", it.get("glass_type") or "")[0].strip()
+                key = (it["production_size"], family)
+                r = rows.setdefault(key, {"size": it["production_size"], "glass": family, "qty": 0})
                 r["qty"] += qty
     out_rows = sorted(rows.values(), key=lambda r: (-float(r["size"]), r["glass"]))
     return {"date": day.isoformat(), "orders": len(orders_in), "order_names": orders_in[:60],
