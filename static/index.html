@@ -3144,7 +3144,10 @@
                     nameLine.append(pc);
                 }
                 who.append(nameLine);
-                who.append(el('span', 'sub', (o.is_company ? 'Company' : 'Customer') + '  ·  ' + o.items.length + (o.items.length === 1 ? ' item' : ' items')));
+                const pcs = (o.items || []).reduce((s, it) => s + (it.quantity || 1), 0);
+                who.append(el('span', 'sub', (o.is_company ? 'Company' : 'Customer') + '  ·  '
+                    + o.items.length + (o.items.length === 1 ? ' item' : ' items')
+                    + '  ·  ' + pcs + (pcs === 1 ? ' pc' : ' pcs')));
                 row.append(who);
                 row.append(el('div', 'lbl-meta', fmtDate(o.created_at)));
                 const acts = el('div', 'lbl-actions');
