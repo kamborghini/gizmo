@@ -2512,6 +2512,11 @@ def _short_glass(v) -> str:
 _GENERIC_TITLES = {"create your own gobo"}
 
 
+def _label_skip_item(title: str) -> bool:
+    """Line items that are charges, not things to build: never on a label."""
+    return _norm_key(title).startswith("additional shipping charge")
+
+
 def _item_model(li: dict, manufacturer: str) -> str:
     """The item's model, wherever the store's option sets put it: a plain "Model"
     property, or a per-manufacturer dropdown like "American DJ Models: Ikon
@@ -2540,6 +2545,8 @@ def _shape_label_order(o: dict, names: dict) -> dict:
     domain = _order_email_domain(o)
     items = []
     for li in (o.get("line_items") or []):
+        if _label_skip_item(str(li.get("title") or li.get("name") or "")):
+            continue
         mfr = _strip_price(_item_prop(li, "Manufacturer"))
         model = _strip_price(_item_model(li, mfr))
         entry, reason = _gobo_lookup(mfr, model)
