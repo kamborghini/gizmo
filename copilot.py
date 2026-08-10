@@ -2613,6 +2613,29 @@ def _label_skip_item(title: str) -> bool:
     return _norm_key(title).startswith("additional shipping charge")
 
 
+def _item_glass(li: dict) -> str:
+    """Glass type for the label: the Glass Type property when present, else
+    derived from the SKU or variant, where the store's option sets encode it
+    (e.g. SKU "Create your own gobo-Monochrome Glass-copy")."""
+    v = _item_prop(li, "Glass Type")
+    if v:
+        return _short_glass(v)
+    hay = (str(li.get("sku") or "") + " " + str(li.get("variant_title") or "")).lower()
+    if "monochrome" in hay or re.search(r"\bmono\b", hay):
+        fam = "Mono"
+    elif "colour" in hay or "color" in hay:
+        fam = "Colour"
+    elif "heavy matted" in hay or re.search(r"\bhm\b", hay):
+        fam = "HM"
+    else:
+        return ""
+    if "copy" in hay:
+        return fam + " - Copy"
+    if "original" in hay:
+        return fam + " - Original"
+    return fam
+
+
 def _item_model(li: dict, manufacturer: str) -> str:
     """The item's model, wherever the store's option sets put it: a plain "Model"
     property, or a per-manufacturer dropdown like "American DJ Models: Ikon
@@ -2774,7 +2797,7 @@ def _shape_label_order(o: dict, names: dict) -> dict:
             "options": _line_options(li, names),
             "manufacturer": mfr or (entry["manufacturer"] if entry else ""),
             "model": model,
-            "glass_type": _short_glass(_item_prop(li, "Glass Type")),
+            "glass_type": _item_glass(li),
             "production_size": dsize or (entry["production_size"] if (entry and not reason) else ""),
             "size_note": ("Size for this customer" if dsize
                           else (entry["review"] if entry and entry["production_size"] and entry["review"] else "")),
@@ -2918,7 +2941,7 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
                     continue
                 # Original vs Copy is the same physical blank: group stock by the
                 # glass family ("Mono - Original" and "Mono - Copy" -> "Mono").
-                family = re.split(r"\s+-\s+", it.get("glass_type") or "")[0].strip()
+                family = re.split(r"\s+-\s+", it.get("glass_type") or "")[0].strip() or "(type not recorded)"
                 key = (it["production_size"], family)
                 r = rows.setdefault(key, {"size": it["production_size"], "glass": family, "qty": 0})
                 r["qty"] += qty
