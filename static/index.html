@@ -410,6 +410,7 @@
         .lbl-chip.note { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--border-2); }
         .lbl-chip.made { background: rgba(34,197,94,.13); color: #4ade80; border: 1px solid rgba(34,197,94,.35); }
         .lbl-row.stale { opacity: .6; }
+        .lbl-hist { font-size: 12px; color: var(--ink-2); margin: 0 0 8px; }
         .lbl-filts { display: flex; gap: 4px; background: var(--bg-2); border: 1px solid var(--border-2);
             border-radius: var(--r-sm); padding: 3px; }
         .lbl-filt { background: transparent; border: 0; color: var(--ink-3); font: inherit; font-size: 12px;
@@ -441,6 +442,23 @@
         /* Off-screen staging area: it must have real layout (not display:none) so the
            shrink-to-fit measurement is accurate before printing. */
         #label-print { position: absolute; left: -10000px; top: 0; }
+        /* Day sheet: one A4 cut list for the bench. */
+        .day-sheet { background: #fff; color: #000; width: 186mm; padding: 2mm;
+            font-family: 'Bricolage Grotesque', -apple-system, sans-serif; }
+        .day-sheet h1 { font-size: 22px; font-weight: 800; letter-spacing: -.02em; margin: 0; }
+        .day-sheet .ds-meta { font-size: 13px; color: #333; margin: 4px 0 14px; }
+        .day-sheet .ds-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .day-sheet .ds-table th { text-align: left; border-bottom: 2px solid #111; padding: 6px 8px;
+            font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+        .day-sheet .ds-table td { border-bottom: 1px solid #ddd; padding: 8px; }
+        .day-sheet .ds-size { font-weight: 800; font-size: 16px; }
+        .day-sheet .ds-qty { font-weight: 800; }
+        .day-sheet .ds-tick { width: 60px; }
+        .day-sheet td.ds-tick::after { content: ''; display: inline-block; width: 16px; height: 16px;
+            border: 2px solid #111; border-radius: 3px; }
+        .day-sheet .ds-flag { margin-top: 12px; border: 2px solid #000; padding: 8px 10px;
+            font-weight: 700; font-size: 13px; }
+        .day-sheet .ds-orders { margin-top: 14px; font-size: 12px; color: #333; }
         @media print {
             /* Label mode prints ONLY the label sheets, one per physical label. */
             body.printing-label #app { display: none !important; }
@@ -2118,7 +2136,84 @@
         }
         function showCustomersView() {
             loadCustomerTags();
+            loadRadar();
             renderCustomers(customersSeg);
+        }
+        /* Trade radar: overdue repeat accounts + untagged likely-B2B customers.
+           A plain Shopify read (no AI), so it loads itself on tab open. */
+        let radarCache = null;   // { data, at } | 'busy' | null
+        async function loadRadar() {
+            if (radarCache === 'busy') return;
+            if (radarCache) { paintRadar(); return; }
+            radarCache = 'busy';
+            try {
+                const data = await api('/api/reorder-radar', {});
+                radarCache = { data, at: Date.now() };
+            } catch (e) { radarCache = null; return; }
+            paintRadar();
+        }
+        function paintRadar() {
+            const slot = $('trade-radar-slot');
+            if (!slot || !radarCache || radarCache === 'busy') return;
+            slot.innerHTML = '';
+            slot.append(radarCard(radarCache.data));
+        }
+        function radarCard(d) {
+            const card = el('div', 'card'); card.style.margin = '0 0 16px';
+            const head = el('div', 'cov-head');
+            head.append(el('h3', null, 'Trade radar'));
+            head.append(el('span', 'cov-line', 'From your orders and customer list. No AI credits used.'));
+            card.append(head);
+            const od = d.overdue || [];
+            card.append(el('div', 'section-title', 'Overdue repeat accounts (' + od.length + ')'));
+            if (!od.length) {
+                card.append(el('div', 'cov-line', 'Nobody with a reorder rhythm is overdue right now.'));
+            } else {
+                const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = '8px';
+                const tb = el('table', 'ktable');
+                tb.innerHTML = '<thead><tr><th>Account</th><th>Orders</th><th>Usually every</th><th>Last order</th><th>Overdue by</th><th>Last bought</th><th></th></tr></thead>';
+                const tbody = el('tbody');
+                od.forEach(r => {
+                    const tr = el('tr');
+                    tr.append(el('td', 'kw', r.name));
+                    tr.append(el('td', 'num', String(r.orders)));
+                    tr.append(el('td', 'num', r.median_days + 'd'));
+                    tr.append(el('td', null, (r.last_order || '') + (r.last_at ? ' · ' + fmtDate(r.last_at) : '')));
+                    tr.append(el('td', 'num', r.overdue_by + 'd'));
+                    tr.append(el('td', null, (r.last_items || []).join(', ')));
+                    const tdm = el('td');
+                    if (r.email) {
+                        const a = el('a', 'miss-open', 'Email');
+                        a.href = 'mailto:' + encodeURIComponent(r.email)
+                            + '?subject=' + encodeURIComponent('Ready for your next gobos?');
+                        tdm.append(a);
+                    }
+                    tr.append(tdm);
+                    tbody.append(tr);
+                });
+                tb.append(tbody); wrap.append(tb); card.append(wrap);
+            }
+            const bb = d.untagged_b2b || [];
+            card.append(el('div', 'section-title', 'Untagged likely-trade customers (' + bb.length + ')'));
+            if (!bb.length) {
+                card.append(el('div', 'cov-line', 'Every likely-trade customer already carries a sector tag.'));
+            } else {
+                card.append(el('div', 'cov-line', 'Tag these in Shopify and the sector analytics will see the whole trade side.'));
+                const wrap2 = el('div', 'ktable-wrap'); wrap2.style.marginTop = '8px';
+                const tb2 = el('table', 'ktable');
+                tb2.innerHTML = '<thead><tr><th>Customer</th><th>Orders</th><th>Lifetime spend</th><th>Why flagged</th></tr></thead>';
+                const tbody2 = el('tbody');
+                bb.forEach(r => {
+                    const tr = el('tr');
+                    tr.append(el('td', 'kw', r.name));
+                    tr.append(el('td', 'num', String(r.orders)));
+                    tr.append(el('td', 'num', r.spent ? r.spent.toFixed(0) : '0'));
+                    tr.append(el('td', null, r.reason));
+                    tbody2.append(tr);
+                });
+                tb2.append(tbody2); wrap2.append(tb2); card.append(wrap2);
+            }
+            return card;
         }
         let customersLoading = null;   // sector currently being analyzed (guards stale renders)
         async function loadCustomers(force, seg) {
@@ -2182,6 +2277,7 @@
             customersSeg = seg;
             const box = $('customers-content'); box.innerHTML = '';
             box.append(sectorBar());
+            const rslot = el('div'); rslot.id = 'trade-radar-slot'; box.append(rslot); paintRadar();
             const cached = customersCache[seg];
             if (!cached) { box.append(customerGate(seg)); return; }
             const data = cached.data; const s = data.structured || {}; const cur = data.currency || '';
@@ -2836,6 +2932,25 @@
             });
             return wrap;
         }
+        /* "Repeat customer" line above the label preview, fetched once per customer. */
+        const labelHistCache = {};
+        function histText(d) {
+            if (!d || !d.count || d.count < 2) return 'First order from this customer.';
+            const prev = (d.recent || [])[1];
+            return 'Repeat customer: ' + d.count + ' orders'
+                + (prev ? ' · previous ' + prev.name + ' (' + fmtDate(prev.created_at) + ')' : '');
+        }
+        function histLine(o) {
+            const h = el('div', 'lbl-hist');
+            const cached = labelHistCache[o.customer_id];
+            if (cached) { h.textContent = histText(cached); return h; }
+            h.textContent = 'Checking order history…';
+            api('/api/customer-history', { customer_id: o.customer_id }).then(d => {
+                labelHistCache[o.customer_id] = d;
+                if (h.isConnected) h.textContent = histText(d);
+            }).catch(() => { if (h.isConnected) h.remove(); });
+            return h;
+        }
         function ageDays(iso) {
             const t = Date.parse(iso || '');
             return isNaN(t) ? 0 : Math.floor((Date.now() - t) / 86400000);
@@ -2910,6 +3025,34 @@
             cov.title = 'Run the last 200 orders through the size list and report any model that fails to match';
             cov.onclick = runCoverage;
             bar.append(cov);
+            const day = el('button', 'btn'); day.append(ico(I.grid), document.createTextNode('Day sheet'));
+            day.title = 'Print one A4 cut list of everything not yet made';
+            day.onclick = printDaySheet;
+            bar.append(day);
+            const upBtn = el('button', 'btn'); upBtn.append(ico(I.plus), document.createTextNode('Update size list'));
+            upBtn.title = 'Replace the gobo size sheet with a new CSV export. The current one is kept as a backup.';
+            const fileIn = document.createElement('input');
+            fileIn.type = 'file'; fileIn.accept = '.csv,text/csv'; fileIn.style.display = 'none';
+            upBtn.onclick = () => fileIn.click();
+            fileIn.onchange = async () => {
+                const f = fileIn.files && fileIn.files[0];
+                fileIn.value = '';
+                if (!f) return;
+                if (f.size > 2 * 1024 * 1024) { addToast('That file is over 2 MB.'); return; }
+                const text = await f.text();
+                if (!confirm('Replace the size list with "' + f.name + '"? The current sheet is kept as a backup and a size check runs after.')) return;
+                upBtn.disabled = true;
+                try {
+                    const r = await api('/api/gobo-sizes/upload', { csv: text });
+                    addToast('Size list updated: ' + r.models_after + ' models (was ' + r.models_before + ')'
+                        + (r.dead_aliases ? '. ' + r.dead_aliases + ' alias(es) need attention.' : '.'));
+                    labelsCache = null;
+                    loadLabels(true);
+                    runCoverage();
+                } catch (e) { addToast(e.message || 'Upload failed'); }
+                upBtn.disabled = false;
+            };
+            bar.append(upBtn, fileIn);
             bar.append(el('div', 'lbl-count', data.single ? 'Opened from the order page. Refresh shows the full production list.' : (orders.length + (orders.length === 1 ? ' order' : ' orders') + ' in production')));
             box.append(bar);
             if (labelsMissing && labelsMissing.data && (labelsMissing.data.missing || []).length) box.append(missingStrip());
@@ -2965,6 +3108,7 @@
                 box.append(row);
                 if (labelSel === o.id) {
                     const wrap = el('div'); wrap.style.margin = '4px 0 16px';
+                    if (o.customer_id) wrap.append(histLine(o));
                     const sheet = labelSheet(o);
                     wrap.append(sheet);
                     const note = el('div', 'lbl-preview-note'); wrap.append(note);
@@ -3104,6 +3248,55 @@
             rate.append(rt);
             s.append(rate);
             return s;
+        }
+        /* One A4 cut list of everything live and not yet made: sizes and glass
+           types summed across the queue, with tick boxes for the bench. */
+        function printDaySheet() {
+            const orders = labelOrders().filter(o => !o.status && !prodStateOf(o).made_at);
+            if (!orders.length) { addToast('Nothing to make: every live order is marked made.'); return; }
+            const agg = {};
+            let flagged = 0;
+            orders.forEach(o => (o.items || []).forEach(it => {
+                if (it.review_reason || !it.production_size) { flagged += it.quantity || 1; return; }
+                const key = it.production_size + '|' + (it.glass_type || '');
+                const a = agg[key] = agg[key] || { size: it.production_size, glass: it.glass_type || '', qty: 0 };
+                a.qty += it.quantity || 1;
+            }));
+            const rows = Object.values(agg).sort((a, b) => parseFloat(b.size) - parseFloat(a.size));
+            const box = $('label-print'); box.innerHTML = '';
+            const ds = el('div', 'day-sheet');
+            ds.append(el('h1', null, 'Production day sheet'));
+            ds.append(el('div', 'ds-meta', new Date().toLocaleDateString('en-GB',
+                { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+                + ' · ' + orders.length + (orders.length === 1 ? ' order' : ' orders') + ' in the queue'));
+            const tb = el('table', 'ds-table');
+            tb.innerHTML = '<thead><tr><th>Size</th><th>Glass</th><th>Qty</th><th>Done</th></tr></thead>';
+            const tbody = el('tbody');
+            rows.forEach(r => {
+                const tr = el('tr');
+                tr.append(el('td', 'ds-size', r.size + 'mm'), el('td', null, r.glass),
+                          el('td', 'ds-qty', String(r.qty)), el('td', 'ds-tick', ''));
+                tbody.append(tr);
+            });
+            tb.append(tbody); ds.append(tb);
+            if (flagged) ds.append(el('div', 'ds-flag', flagged + (flagged === 1 ? ' item is' : ' items are')
+                + ' CHECK-flagged and not in this list. Resolve them on the Labels tab first.'));
+            ds.append(el('div', 'ds-orders', 'Orders: ' + orders.map(o => orderNo(o)).join('   ')));
+            box.append(ds);
+            let rule = $('label-page-rule');
+            if (!rule) { rule = document.createElement('style'); rule.id = 'label-page-rule'; document.head.append(rule); }
+            rule.textContent = '@page { size: A4; margin: 12mm; }';
+            const seq = ++printSeq;
+            document.body.classList.add('printing-label');
+            const cleanup = () => {
+                if (seq !== printSeq) return;
+                document.body.classList.remove('printing-label');
+                box.innerHTML = '';
+                const r = $('label-page-rule');
+                if (r && r.parentNode) r.parentNode.removeChild(r);
+            };
+            if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
+            setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);
         }
         let printSeq = 0;
         async function printFromAdminLink(orderId) {

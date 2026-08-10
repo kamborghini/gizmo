@@ -2285,6 +2285,13 @@ GOBO_ALIASES_PATH = os.environ.get("GOBO_ALIASES_PATH",
                                    os.path.join(os.path.dirname(__file__), "data", "gobo-aliases.csv"))
 GOBO_OVERRIDES_PATH = os.environ.get("GOBO_OVERRIDES_PATH",
                                      os.path.join(os.path.dirname(__file__), "data", "gobo-overrides.csv"))
+GOBO_SIZES_LIVE = os.environ.get("GOBO_SIZES_LIVE", "/data/gobo-sizes.csv")
+
+
+def _sizes_path() -> str:
+    """The size sheet the app reads: an uploaded copy on the data volume wins;
+    the repo file remains the fallback (and the fresh-deploy seed)."""
+    return GOBO_SIZES_LIVE if os.path.isfile(GOBO_SIZES_LIVE) else GOBO_SIZES_PATH
 
 
 def _norm_key(v) -> str:
@@ -2324,7 +2331,8 @@ def _gobo_sizes() -> dict:
     it), drop a row entirely (size "exclude"), or set a size that applies only to
     orders from one customer email domain."""
     try:
-        mtime = os.path.getmtime(GOBO_SIZES_PATH)
+        sizes_path = _sizes_path()
+        mtime = os.path.getmtime(sizes_path)
     except OSError:
         return _gobo_cache
     def _mt(p):
@@ -2332,7 +2340,7 @@ def _gobo_sizes() -> dict:
             return os.path.getmtime(p)
         except OSError:
             return None
-    mtime = (mtime, _mt(GOBO_ALIASES_PATH), _mt(GOBO_OVERRIDES_PATH))
+    mtime = (sizes_path, mtime, _mt(GOBO_ALIASES_PATH), _mt(GOBO_OVERRIDES_PATH))
     if _gobo_cache["mtime"] == mtime:
         return _gobo_cache
     import csv as _csv
@@ -2379,7 +2387,7 @@ def _gobo_sizes() -> dict:
         logger.exception("gobo overrides: failed to load %s", GOBO_OVERRIDES_PATH)
 
     try:
-        with open(GOBO_SIZES_PATH, newline="", encoding="utf-8-sig") as fh:
+        with open(sizes_path, newline="", encoding="utf-8-sig") as fh:
             for row in _csv.DictReader(fh):
                 entry = {
                     "manufacturer": str(row.get("Manufacturer") or "").strip(),
@@ -2399,7 +2407,7 @@ def _gobo_sizes() -> dict:
                         entry["review"] = ""
                     index_model(entry, nm, lm, model)
     except Exception:
-        logger.exception("gobo sizes: failed to load %s", GOBO_SIZES_PATH)
+        logger.exception("gobo sizes: failed to load %s", sizes_path)
         return _gobo_cache
     # Rulings for models the sheet does not have become rows of their own.
     for key, ruled in sets.items():
@@ -2425,7 +2433,7 @@ def _gobo_sizes() -> dict:
     except Exception:
         logger.exception("gobo aliases: failed to load %s", GOBO_ALIASES_PATH)
     try:
-        sheet_at = datetime.fromtimestamp(os.path.getmtime(GOBO_SIZES_PATH), timezone.utc).isoformat()
+        sheet_at = datetime.fromtimestamp(os.path.getmtime(sizes_path), timezone.utc).isoformat()
     except OSError:
         sheet_at = None
     _gobo_cache.update({"mtime": mtime, "by_mm": by_mm, "by_model": by_model,
@@ -2436,7 +2444,7 @@ def _gobo_sizes() -> dict:
                                    "overrides": len(sets) + len(excludes) + len(domain_rules),
                                    "sheet_at": sheet_at}})
     logger.info("gobo sizes: loaded %d model keys from %s (%d domain rules)",
-                len(by_model), GOBO_SIZES_PATH, len(domain_rules))
+                len(by_model), sizes_path, len(domain_rules))
     return _gobo_cache
 
 
@@ -2695,6 +2703,7 @@ def _shape_label_order(o: dict, names: dict) -> dict:
         "status": _order_status(o),
         "priority": _order_priority(o),
         "note": str(o.get("note") or "").strip()[:500],
+        "customer_id": (o.get("customer") or {}).get("id"),
         "items": items,
     }
 
@@ -2902,7 +2911,7 @@ async def run_products_list(registry: dict, months_window: Optional[int] = None)
 # ---------------------------------------------------------------------------
 
 async def _paginate_customers(registry: dict, max_pages: int = ORDER_PAGE_CAP) -> list:
-    fields = "id,first_name,last_name,email,orders_count,total_spent,created_at,updated_at,state,tags"
+    fields = "id,first_name,last_name,email,orders_count,total_spent,created_at,updated_at,state,tags,default_address"
     out: list = []
     since_id, pages = 0, 0
     while pages < max_pages:
@@ -2916,6 +2925,88 @@ async def _paginate_customers(registry: dict, max_pages: int = ORDER_PAGE_CAP) -
             break
         since_id = max((c.get("id") or 0) for c in batch)
     return out
+
+
+async def run_reorder_radar(registry: dict) -> dict:
+    """Two lists from data the app already reads, no AI. (1) Overdue repeat
+    accounts: customers with a rhythm of orders whose next one has not arrived;
+    what they bought last makes the nudge concrete. (2) Untagged likely-B2B
+    customers, so the sector analytics see the whole trade side."""
+    orders, customers = await asyncio.gather(
+        _paginate_orders(registry, days=540, fields="id,name,created_at,customer,line_items"),
+        _paginate_customers(registry))
+    if not isinstance(orders, list):
+        orders = []
+    cust_by_id = {c.get("id"): c for c in customers if c.get("id")}
+    hist: dict = {}
+    for o in orders:
+        cid = (o.get("customer") or {}).get("id")
+        if cid:
+            hist.setdefault(cid, []).append(o)
+    now = datetime.now(timezone.utc)
+    overdue = []
+    for cid, os_ in hist.items():
+        if len(os_) < 2:
+            continue
+        os_.sort(key=lambda o: str(o.get("created_at") or ""))
+        dates = []
+        for o in os_:
+            try:
+                d = datetime.fromisoformat(str(o.get("created_at")).replace("Z", "+00:00"))
+                dates.append(d if d.tzinfo else d.replace(tzinfo=timezone.utc))
+            except Exception:
+                pass
+        if len(dates) < 2:
+            continue
+        gaps = sorted(max(1, (b - a).days) for a, b in zip(dates, dates[1:]))
+        med = gaps[len(gaps) // 2]
+        if med < 14 or med > 400:
+            continue   # no meaningful rhythm to be overdue against
+        since = (now - dates[-1]).days
+        if since < med * 1.5:
+            continue
+        lasto = os_[-1]
+        last_items = []
+        for li in (lasto.get("line_items") or []):
+            title = str(li.get("title") or "").strip()
+            if _label_skip_item(title):
+                continue
+            mfr = _strip_price(_item_prop(li, "Manufacturer"))
+            model = _strip_price(_item_model(li, mfr))
+            last_items.append(" ".join(x for x in [mfr, model] if x) or title)
+            if len(last_items) >= 3:
+                break
+        c = cust_by_id.get(cid, {})
+        comp = str((c.get("default_address") or {}).get("company") or "").strip()
+        person = (str(c.get("first_name") or "").strip() + " " + str(c.get("last_name") or "").strip()).strip()
+        overdue.append({
+            "name": comp or person or str(c.get("email") or "Customer"),
+            "email": str(c.get("email") or ""),
+            "orders": len(os_), "median_days": med, "days_since": since,
+            "overdue_by": since - med,
+            "last_order": str(lasto.get("name") or ""), "last_at": lasto.get("created_at"),
+            "last_items": last_items,
+        })
+    overdue.sort(key=lambda r: -r["overdue_by"])
+    b2b = []
+    for c in customers:
+        if _customer_tags(c):
+            continue
+        comp = str((c.get("default_address") or {}).get("company") or "").strip()
+        oc = int(c.get("orders_count") or 0)
+        if not comp and oc < 3:
+            continue
+        person = (str(c.get("first_name") or "").strip() + " " + str(c.get("last_name") or "").strip()).strip()
+        try:
+            spent = float(c.get("total_spent") or 0)
+        except (TypeError, ValueError):
+            spent = 0.0
+        b2b.append({"name": comp or person or str(c.get("email") or "Customer"),
+                    "email": str(c.get("email") or ""), "orders": oc, "spent": spent,
+                    "reason": ("Company name on file" if comp else str(oc) + " orders, never tagged")})
+    b2b.sort(key=lambda r: -r["spent"])
+    return {"overdue": overdue[:25], "untagged_b2b": b2b[:20],
+            "customers_seen": len(customers), "orders_seen": len(orders)}
 
 
 def _customer_tags(c) -> list:
@@ -3301,7 +3392,7 @@ def _window_ok(bucket: list[float], limit: int, now: float) -> bool:
     return True
 
 
-def _pre_checks(request: Request, ai: bool = False) -> Optional[JSONResponse]:
+def _pre_checks(request: Request, ai: bool = False, max_body: Optional[int] = None) -> Optional[JSONResponse]:
     """Rate-limit (per-client + global for AI endpoints) and reject oversized bodies."""
     now = time.monotonic()
     if len(_rl_hits) > 5000:  # guard the dict from unbounded growth
@@ -3311,12 +3402,12 @@ def _pre_checks(request: Request, ai: bool = False) -> Optional[JSONResponse]:
     if ai and not _window_ok(_rl_global, RATE_MAX_GLOBAL, now):
         return _json({"error": "The assistant is busy right now. Please try again shortly."}, 429)
     cl = request.headers.get("content-length", "")
-    if cl.isdigit() and int(cl) > MAX_BODY_BYTES:
+    if cl.isdigit() and int(cl) > (max_body or MAX_BODY_BYTES):
         return _json({"error": "Request too large."}, 413)
     return None
 
 
-async def _read_json_capped(request: Request) -> Optional[dict]:
+async def _read_json_capped(request: Request, cap: Optional[int] = None) -> Optional[dict]:
     """Read + parse the JSON body, enforcing MAX_BODY_BYTES on the bytes ACTUALLY
     read (not just the Content-Length header). Returns {} for empty/invalid bodies,
     or None if the body exceeds the cap (the caller should answer 413). This bounds
@@ -3325,7 +3416,7 @@ async def _read_json_capped(request: Request) -> Optional[dict]:
     try:
         async for chunk in request.stream():
             total += len(chunk)
-            if total > MAX_BODY_BYTES:
+            if total > (cap or MAX_BODY_BYTES):
                 return None
             chunks.append(chunk)
     except Exception:
@@ -4176,6 +4267,110 @@ def add_routes(mcp, registry: dict) -> None:
         except Exception:
             logger.exception("Production labels failed")
             return _json({"error": "Couldn't load production orders. Check the server logs."}, 500)
+
+    @mcp.custom_route("/api/gobo-sizes/upload", methods=["POST"])
+    async def gobo_sizes_upload_route(request: Request):
+        """Self-serve size sheet update: validate the CSV hard, keep a .bak of the
+        previous sheet, and report the before/after so a bad file can't quietly
+        wipe the size list."""
+        big = 2 * 1024 * 1024
+        pre = _pre_checks(request, max_body=big)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request, cap=big)
+        if body is None:
+            return _json({"error": "That file is too large (2 MB cap)."}, 413)
+        text = str(body.get("csv") or "")
+        if not text.strip():
+            return _json({"error": "No CSV content received."}, 400)
+        import csv as _csv
+        import io as _io
+        try:
+            rows = list(_csv.DictReader(_io.StringIO(text.lstrip("﻿"))))
+        except Exception:
+            return _json({"error": "That file does not parse as a CSV."}, 400)
+        headers = set(rows[0].keys()) if rows else set()
+        need = {"Manufacturer", "Model", "Closest Production Size (mm)"}
+        if not need.issubset(headers):
+            return _json({"error": "The CSV is missing required columns: "
+                          + ", ".join(sorted(need - headers))
+                          + ". Export the sheet with the same columns as before."}, 400)
+        model_rows = sum(1 for r in rows if str(r.get("Model") or "").strip())
+        before = (_gobo_sizes().get("health") or {}).get("models") or 0
+        if model_rows < 50 or model_rows < before * 0.5:
+            return _json({"error": f"That file only has {model_rows} model rows; the current sheet has "
+                          f"{before}. Refusing to replace it. If this shrink is intentional, "
+                          "send the file to your developer instead."}, 400)
+        try:
+            os.makedirs(os.path.dirname(GOBO_SIZES_LIVE) or ".", exist_ok=True)
+            if os.path.isfile(GOBO_SIZES_LIVE):
+                import shutil
+                shutil.copyfile(GOBO_SIZES_LIVE, GOBO_SIZES_LIVE + ".bak")
+            tmp = GOBO_SIZES_LIVE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            os.replace(tmp, GOBO_SIZES_LIVE)
+        except Exception:
+            logger.exception("size sheet write failed")
+            return _json({"error": "Couldn't save the new sheet to the data volume."}, 500)
+        health = _gobo_sizes().get("health") or {}
+        logger.info("gobo sizes: sheet replaced via upload (%d csv rows, %s model keys)",
+                    len(rows), health.get("models"))
+        return _json({"ok": True, "rows": len(rows),
+                      "models_before": before, "models_after": health.get("models"),
+                      "dead_aliases": health.get("dead_aliases", 0)})
+
+    @mcp.custom_route("/api/reorder-radar", methods=["POST"])
+    async def reorder_radar_route(request: Request):
+        # Overdue repeat accounts + untagged trade customers. Shopify read, no AI.
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        try:
+            return _json(await run_reorder_radar(registry))
+        except Exception:
+            logger.exception("Reorder radar failed")
+            return _json({"error": "Couldn't build the trade radar."}, 500)
+
+    @mcp.custom_route("/api/customer-history", methods=["POST"])
+    async def customer_history_route(request: Request):
+        # How many times this label's customer has ordered before. Read-only.
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        try:
+            cid = int(body.get("customer_id") or 0)
+        except (TypeError, ValueError, OverflowError):
+            cid = 0
+        if not cid:
+            return _json({"error": "No customer id given."}, 400)
+        try:
+            data = await _tool_json(registry, "shopify_get_customer_orders",
+                                    {"customer_id": cid, "limit": 50, "status": "any"})
+            if not _ok(data):
+                return _json({"error": "Couldn't read that customer's orders."}, 502)
+            orders = sorted((data.get("orders") or []), key=lambda o: str(o.get("created_at") or ""), reverse=True)
+            return _json({"count": len(orders),
+                          "recent": [{"name": o.get("name"), "created_at": o.get("created_at")}
+                                     for o in orders[:3]]})
+        except Exception:
+            logger.exception("Customer history failed")
+            return _json({"error": "Couldn't read customer history."}, 500)
 
     @mcp.custom_route("/api/backup", methods=["POST"])
     async def backup_route(request: Request):
