@@ -699,10 +699,32 @@ def _load_prod_state() -> dict:
         return {}
 
 
+PRODUCTION_ARCHIVE_PATH = os.environ.get(
+    "PRODUCTION_ARCHIVE_PATH",
+    os.path.join(os.path.dirname(PRODUCTION_STATE_PATH) or ".", "production_state_archive.jsonl"))
+
+
 def _write_prod_state(orders: dict) -> dict:
     if len(orders) > PRODUCTION_STATE_MAX:
-        # Oldest-touched entries fall off; the live list only shows recent orders.
-        keep = sorted(orders.items(), key=lambda kv: str(kv[1].get("printed_at") or kv[1].get("made_at") or ""))
+        # Evict the least-recently-touched entries. Sort by the NEWEST stamp so an
+        # order printed months ago but made yesterday is treated as recent, not
+        # stale. Any evicted entry that carries a made_at is archived first, so the
+        # per-day stock-usage HISTORY it feeds survives the eviction.
+        def newest(kv):
+            e = kv[1]
+            return max(str(e.get("printed_at") or ""), str(e.get("made_at") or ""))
+        keep = sorted(orders.items(), key=newest)
+        evicted = keep[:-PRODUCTION_STATE_MAX]
+        archive = [{"order_id": oid, "made_at": e["made_at"]}
+                   for oid, e in evicted if e.get("made_at")]
+        if archive:
+            try:
+                os.makedirs(os.path.dirname(PRODUCTION_ARCHIVE_PATH) or ".", exist_ok=True)
+                with open(PRODUCTION_ARCHIVE_PATH, "a", encoding="utf-8") as fh:
+                    for rec in archive:
+                        fh.write(json.dumps(rec) + "\n")
+            except Exception:
+                logger.exception("production archive append failed")
         orders = dict(keep[-PRODUCTION_STATE_MAX:])
     os.makedirs(os.path.dirname(PRODUCTION_STATE_PATH) or ".", exist_ok=True)
     tmp = PRODUCTION_STATE_PATH + ".tmp"
@@ -710,6 +732,30 @@ def _write_prod_state(orders: dict) -> dict:
         json.dump({"orders": orders}, fh)
     os.replace(tmp, PRODUCTION_STATE_PATH)
     return orders
+
+
+def _archived_made(order_ids_wanted: set) -> dict:
+    """{order_id: made_at} for archived (evicted) made stamps, so stock-usage
+    history for a past day still finds orders that fell out of the live state."""
+    out: dict = {}
+    try:
+        with open(PRODUCTION_ARCHIVE_PATH, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                oid, ma = str(rec.get("order_id") or ""), rec.get("made_at")
+                if oid and ma:
+                    out[oid] = ma   # last write wins (a re-made order)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.exception("production archive read failed")
+    return out
 
 
 def _mark_printed(order_ids: list) -> None:
@@ -2127,16 +2173,25 @@ def _month_axis(months: int) -> list:
 
 
 async def _paginate_orders(registry: dict, days: int, max_pages: int = ORDER_PAGE_CAP,
-                           fields: str = "id,created_at,total_price,line_items") -> list:
+                           fields: str = "id,created_at,total_price,line_items",
+                           meta: Optional[dict] = None) -> list:
     """Page through orders created in the last `days`, ascending by id (since_id),
-    capped at max_pages * 250 to stay responsive. Pulls only the requested fields."""
+    capped at max_pages * 250. Pulls only the requested fields. When `meta` is
+    given it is filled with {"failed": bool, "truncated": bool} so money/AR callers
+    can tell a throttled or capped fetch apart from a genuinely complete one
+    (a swallowed failure must never read as "nothing owed")."""
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     out: list = []
     since_id, pages = 0, 0
+    failed = truncated = False
     while pages < max_pages:
-        batch = (await _tool_json(registry, "shopify_list_orders",
-                                  {"status": "any", "created_at_min": since, "limit": 250,
-                                   "since_id": since_id, "fields": fields})).get("orders", [])
+        res = await _tool_json(registry, "shopify_list_orders",
+                               {"status": "any", "created_at_min": since, "limit": 250,
+                                "since_id": since_id, "fields": fields})
+        if not _ok(res):
+            failed = True
+            break
+        batch = res.get("orders", [])
         if not batch:
             break
         out += batch
@@ -2144,6 +2199,10 @@ async def _paginate_orders(registry: dict, days: int, max_pages: int = ORDER_PAG
         if len(batch) < 250:
             break
         since_id = max((o.get("id") or 0) for o in batch)
+        if pages >= max_pages:
+            truncated = True   # more pages existed than the cap allows
+    if meta is not None:
+        meta["failed"], meta["truncated"] = failed, truncated
     return out
 
 
@@ -2403,9 +2462,14 @@ def _gobo_sizes() -> dict:
                         continue
                     ruled = sets.get(key)
                     if ruled:
-                        entry["production_size"] = ruled["size"]
-                        entry["review"] = ""
-                    index_model(entry, nm, lm, model)
+                        # A ruling on one model of a multi-model row must NOT mutate
+                        # the shared entry, or its siblings inherit the wrong size.
+                        e = dict(entry)
+                        e["production_size"] = ruled["size"]
+                        e["review"] = ""
+                        index_model(e, nm, lm, model)
+                    else:
+                        index_model(entry, nm, lm, model)
     except Exception:
         logger.exception("gobo sizes: failed to load %s", sizes_path)
         return _gobo_cache
@@ -2663,28 +2727,42 @@ MADE_TAG = os.environ.get("MADE_TAG", "PC")
 PROPOSAL_HOST = os.environ.get("PROPOSAL_HOST", "quote.projectedimage.com")
 _PROPOSAL_RE = re.compile(r"https://" + re.escape(PROPOSAL_HOST) + r"/proof/[A-Za-z0-9]+")
 _order_tag_writer = None
+_tag_locks: dict = {}
+
+
+def _tag_lock(order_id) -> "asyncio.Lock":
+    lock = _tag_locks.get(int(order_id))
+    if lock is None:
+        lock = _tag_locks[int(order_id)] = asyncio.Lock()
+    return lock
 
 
 async def _sync_order_tags(registry: dict, order_id, add=(), remove=()) -> tuple:
     """Move an order along the tag workflow (Unprocessed -> IP -> PC) without
     touching any other tag. Set-based, case-insensitive: re-running an action
     can never duplicate a tag or leave conflicting statuses. Dead orders
-    (cancelled, refunded, fulfilled) are left alone. Returns (ok, note)."""
+    (cancelled, refunded, fulfilled) are left alone. Returns (ok, note).
+
+    The GET-modify-PUT is serialized per order with a lock: without it, the SPA
+    stamp and the print doc's background sync (or two quick clicks) could both
+    read the same tag string and the second PUT would clobber the first
+    (e.g. dropping the just-added IP, or resurrecting Unprocessed)."""
     if _order_tag_writer is None:
         return False, "Tag updates are not enabled on this server."
     try:
-        o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-        if not _ok(o) or not o.get("id"):
-            return False, "Couldn't read the order to update its tags."
-        if _order_status(o):
-            return True, ""   # cancelled/refunded/fulfilled: tags stay as they are
-        cur = _order_tags(o)
-        drop = {_norm_key(t) for t in add} | {_norm_key(t) for t in remove}
-        new = [t for t in cur if _norm_key(t) not in drop] + list(add)
-        if {_norm_key(t) for t in new} == {_norm_key(t) for t in cur}:
-            return True, ""   # already in the right state: no write
-        await _order_tag_writer(int(order_id), ", ".join(new))
-        return True, ""
+        async with _tag_lock(order_id):
+            o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+            if not _ok(o) or not o.get("id"):
+                return False, "Couldn't read the order to update its tags."
+            if _order_status(o):
+                return True, ""   # cancelled/refunded/fulfilled: tags stay as they are
+            cur = _order_tags(o)
+            drop = {_norm_key(t) for t in add} | {_norm_key(t) for t in remove}
+            new = [t for t in cur if _norm_key(t) not in drop] + list(add)
+            if {_norm_key(t) for t in new} == {_norm_key(t) for t in cur}:
+                return True, ""   # already in the right state: no write
+            await _order_tag_writer(int(order_id), ", ".join(new))
+            return True, ""
     except httpx.HTTPStatusError as e:
         if e.response is not None and e.response.status_code in (401, 403):
             logger.warning("order tag update refused (%s): the access token lacks write_orders",
@@ -2961,9 +3039,12 @@ async def run_liability(registry: dict) -> dict:
     fields = ("id,order_number,name,created_at,tags,customer,email,total_price,"
               "total_outstanding,financial_status,currency,cancelled_at,payment_terms,"
               "billing_address,shipping_address")
-    orders = await _paginate_orders(registry, days=730, fields=fields)
-    if not isinstance(orders, list):
-        return {"error": "Couldn't read your orders from Shopify. Try again in a moment."}
+    meta: dict = {}
+    orders = await _paginate_orders(registry, days=730, fields=fields, meta=meta)
+    if meta.get("failed"):
+        # A throttled or errored page must never read as money not owed.
+        return {"error": "Couldn't read all your orders from Shopify just now (it may be busy). "
+                "The figures would be incomplete, so nothing is shown. Try again in a moment."}
     store = (SHOPIFY_STORE or "").split(".")[0]
     rows, stale, currency = [], [], ""
     for o in orders:
@@ -3062,6 +3143,7 @@ async def run_liability(registry: dict) -> dict:
         "customers": cust_rows,
         "stale_tagged": stale[:20],
         "default_terms": LIABILITY_DEFAULT_TERMS,
+        "truncated": bool(meta.get("truncated")),
     }
 
 
@@ -3078,25 +3160,31 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
         return {"error": "Pick a valid date."}
     start = datetime.combine(day, datetime.min.time(), tzinfo=tz)
     end = start + timedelta(days=1)
+    # Live state plus the archive of evicted made stamps, so a past day still
+    # sees orders that fell out of the capped live state.
+    stamps = {oid: e.get("made_at") for oid, e in _load_prod_state().items() if e.get("made_at")}
+    for oid, ma in _archived_made(set()).items():
+        stamps.setdefault(oid, ma)
     made_ids = []
-    for oid, entry in _load_prod_state().items():
-        raw = entry.get("made_at")
-        if not raw:
-            continue
+    for oid, raw in stamps.items():
         try:
             made = datetime.fromisoformat(raw)
             if made.tzinfo is None:
                 made = made.replace(tzinfo=timezone.utc)
-        except ValueError:
+        except (ValueError, TypeError):
             continue
         if start <= made.astimezone(tz) < end:
             made_ids.append(int(oid))
     made_ids = made_ids[:150]
-    fetched = await asyncio.gather(*[run_production_labels(registry, order_id=i) for i in made_ids])
+    fetched = await asyncio.gather(*[run_production_labels(registry, order_id=i)
+                                     for i in made_ids], return_exceptions=True)
     rows: dict = {}
     unresolved: dict = {}
-    orders_in, pieces = [], 0
+    orders_in, pieces, fetch_failed = [], 0, 0
     for res in fetched:
+        if not isinstance(res, dict) or not res.get("orders"):
+            fetch_failed += 1   # a made order whose fetch was throttled/failed
+            continue
         for o in (res.get("orders") or []):
             orders_in.append(str(o.get("name") or ""))
             for it in o.get("items", []):
@@ -3114,7 +3202,7 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
                 r["qty"] += qty
     out_rows = sorted(rows.values(), key=lambda r: (-float(r["size"]), r["glass"]))
     return {"date": day.isoformat(), "orders": len(orders_in), "order_names": orders_in[:60],
-            "pieces": pieces, "rows": out_rows,
+            "pieces": pieces, "rows": out_rows, "fetch_failed": fetch_failed,
             "unresolved": [{"name": k, "qty": v} for k, v in sorted(unresolved.items())]}
 
 
@@ -3245,13 +3333,19 @@ async def run_products_list(registry: dict, months_window: Optional[int] = None)
 # Customers & retention analytics (from Shopify customers + orders)
 # ---------------------------------------------------------------------------
 
-async def _paginate_customers(registry: dict, max_pages: int = ORDER_PAGE_CAP) -> list:
+async def _paginate_customers(registry: dict, max_pages: int = ORDER_PAGE_CAP,
+                              meta: Optional[dict] = None) -> list:
     fields = "id,first_name,last_name,email,orders_count,total_spent,created_at,updated_at,state,tags,default_address"
     out: list = []
     since_id, pages = 0, 0
+    failed = truncated = False
     while pages < max_pages:
-        batch = (await _tool_json(registry, "shopify_list_customers",
-                                  {"limit": 250, "since_id": since_id, "fields": fields})).get("customers", [])
+        res = await _tool_json(registry, "shopify_list_customers",
+                               {"limit": 250, "since_id": since_id, "fields": fields})
+        if not _ok(res):
+            failed = True
+            break
+        batch = res.get("customers", [])
         if not batch:
             break
         out += batch
@@ -3259,6 +3353,10 @@ async def _paginate_customers(registry: dict, max_pages: int = ORDER_PAGE_CAP) -
         if len(batch) < 250:
             break
         since_id = max((c.get("id") or 0) for c in batch)
+        if pages >= max_pages:
+            truncated = True
+    if meta is not None:
+        meta["failed"], meta["truncated"] = failed, truncated
     return out
 
 
@@ -3267,9 +3365,13 @@ async def run_reorder_radar(registry: dict) -> dict:
     accounts: customers with a rhythm of orders whose next one has not arrived;
     what they bought last makes the nudge concrete. (2) Untagged likely-B2B
     customers, so the sector analytics see the whole trade side."""
+    om, cm = {}, {}
     orders, customers = await asyncio.gather(
-        _paginate_orders(registry, days=540, fields="id,name,created_at,customer,line_items"),
-        _paginate_customers(registry))
+        _paginate_orders(registry, days=540, fields="id,name,created_at,customer,line_items", meta=om),
+        _paginate_customers(registry, meta=cm))
+    if om.get("failed") or cm.get("failed"):
+        return {"error": "Couldn't read all your orders and customers from Shopify just now. "
+                "The radar would be incomplete, so it is not shown. Try again in a moment."}
     if not isinstance(orders, list):
         orders = []
     cust_by_id = {c.get("id"): c for c in customers if c.get("id")}
@@ -3341,7 +3443,8 @@ async def run_reorder_radar(registry: dict) -> dict:
                     "reason": ("Company name on file" if comp else str(oc) + " orders, never tagged")})
     b2b.sort(key=lambda r: -r["spent"])
     return {"overdue": overdue[:25], "untagged_b2b": b2b[:20],
-            "customers_seen": len(customers), "orders_seen": len(orders)}
+            "customers_seen": len(customers), "orders_seen": len(orders),
+            "truncated": bool(om.get("truncated") or cm.get("truncated"))}
 
 
 def _customer_tags(c) -> list:
@@ -5038,8 +5141,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
                  "2x4": (50.8, 101.6), "a4": (210, 297)}
         w, h = sizes.get(str(request.query_params.get("size") or "4x6"), sizes["4x6"])
 
-        results = await asyncio.gather(*[run_production_labels(registry, order_id=i) for i in ids])
-        orders = [r["orders"][0] for r in results if r.get("orders")]
+        results = await asyncio.gather(*[run_production_labels(registry, order_id=i)
+                                         for i in ids], return_exceptions=True)
+        orders, got_ids = [], set()
+        for r in results:
+            if isinstance(r, dict) and r.get("orders"):
+                orders.append(r["orders"][0])
+                got_ids.add(r["orders"][0].get("id"))
+        dropped = [i for i in ids if i not in got_ids]
         # Rendering the print document IS the print moment for the admin print
         # extensions; stamp these orders as printed (best-effort, never raises)
         # and move their tags along in the background so the document itself
@@ -5094,6 +5203,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
         if not sheets:
             return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>Those orders could not be found.</p>",
                                 headers=doc_headers)
+        if dropped:
+            # A throttled or failed fetch must never silently vanish an order from
+            # a batch print: lead with a loud sheet naming the missing ones.
+            names = ", ".join("#" + str(i) for i in dropped[:20])
+            sheets.insert(0, ("<div class='sheet'><div class='dead'>" + str(len(dropped))
+                              + " SELECTED ORDER(S) COULD NOT BE LOADED</div>"
+                              + "<div class='onote'>Shopify may have been busy. Reprint these from the orders "
+                              + "list: " + esc(names) + "</div></div>"))
         if requested > len(ids):
             # Never let a bulk print silently drop orders past the 50-order cap.
             sheets.insert(0, ("<div class='sheet'><div class='dead'>ONLY " + str(len(ids)) + " OF "
@@ -5228,7 +5345,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
         try:
-            customers = await _paginate_customers(registry)
+            cm: dict = {}
+            customers = await _paginate_customers(registry, meta=cm)
+            if cm.get("failed") and not customers:
+                return _json({"error": "Couldn't read your customers from Shopify just now."}, 502)
             return _json({"tags": _detect_sector_tags(customers), "total": len(customers)})
         except Exception:
             logger.exception("customer-tags failed")

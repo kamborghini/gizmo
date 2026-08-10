@@ -3219,14 +3219,22 @@
                 .catch(() => {});
         }
         async function toggleMade(o) {
-            const on = !prodStateOf(o).made_at;
+            const prev = prodStateOf(o).made_at || null;   // remember, so a failed write can be undone
+            const on = !prev;
             setProdState(o.id, { made_at: on ? new Date().toISOString() : null });
             if (!on) { const st = prodStateOf(o); delete st.made_at; }
             renderLabels();
             try {
                 const r = await api('/api/production-state', { op: 'made', id: o.id, on });
                 if (r && r.tag_note) addToast(r.tag_note);
-            } catch (e) {}
+            } catch (e) {
+                // The server did not record it: put the row back as it was so the
+                // list, the filters and the day sheet do not lie.
+                setProdState(o.id, { made_at: prev });
+                if (!prev) { const st = prodStateOf(o); delete st.made_at; }
+                renderLabels();
+                addToast('Could not mark that order. Please try again.');
+            }
         }
         /* Paid gobo orders that never got the production tag: they would otherwise
            never reach the workbench. Fetched after the list, shown as a strip. */
@@ -3702,6 +3710,9 @@
                         out.append(el('div', 'cov-note', uq + (uq === 1 ? ' pc' : ' pcs')
                             + ' had no resolved size (' + d.unresolved.map(u => u.name).join(', ')
                             + ') and are not counted above.'));
+                    }
+                    if (d.fetch_failed) {
+                        out.append(el('div', 'cov-note', d.fetch_failed + ' made order(s) could not be loaded from Shopify (it may be busy) and are missing from this total. Try again shortly.'));
                     }
                     pr.disabled = !d.rows.length;
                 } catch (e) {

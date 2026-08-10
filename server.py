@@ -229,6 +229,15 @@ async def _headers() -> dict:
     }
 
 
+# The app's own routes fire bursts of concurrent Shopify reads (bulk print,
+# stock usage, the liability sweep). Shopify's REST bucket leaks ~2/s, so an
+# unbounded burst guarantees 429s. Cap in-flight requests and retry throttled
+# or transient failures with backoff, so a busy moment slows down instead of
+# silently dropping data.
+_shopify_gate = asyncio.Semaphore(int(os.environ.get("SHOPIFY_MAX_CONCURRENCY", "4")))
+_RETRY_STATUS = {429, 500, 502, 503, 504}
+
+
 async def _request(
     method: str,
     path: str,
@@ -237,7 +246,8 @@ async def _request(
     _retried: bool = False,
 ) -> dict:
     """Central HTTP helper — every API call flows through here.
-    Auto-retries once on 401 when using OAuth credentials.
+    Retries once on 401 (OAuth refresh), and up to 3 times with backoff on
+    429/5xx/timeout so throttling and transient errors don't surface as data loss.
     """
     if not SHOPIFY_STORE:
         raise RuntimeError(
@@ -246,26 +256,49 @@ async def _request(
         )
 
     url     = f"{_base_url()}/{path}"
-    headers = await _headers()
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.request(
-            method, url,
-            headers=headers,
-            params=params,
-            json=body,
-            timeout=30.0,
-        )
+    async with _shopify_gate:
+        for attempt in range(4):
+            headers = await _headers()
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.request(
+                        method, url,
+                        headers=headers,
+                        params=params,
+                        json=body,
+                        timeout=30.0,
+                    )
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                if attempt >= 3:
+                    raise
+                await asyncio.sleep(min(2 ** attempt, 8))
+                logger.warning("Shopify %s %s: %s — retry %d", method, path, type(e).__name__, attempt + 1)
+                continue
 
-        if resp.status_code == 401 and not _retried and token_manager._use_client_credentials:
-            logger.warning("Got 401 — refreshing token and retrying...")
-            await token_manager.force_refresh()
-            return await _request(method, path, params=params, body=body, _retried=True)
+            if resp.status_code == 401 and not _retried and token_manager._use_client_credentials:
+                logger.warning("Got 401 — refreshing token and retrying...")
+                await token_manager.force_refresh()
+                return await _request(method, path, params=params, body=body, _retried=True)
 
-        resp.raise_for_status()
-        if resp.status_code == 204:
-            return {}
-        return resp.json()
+            if resp.status_code in _RETRY_STATUS and attempt < 3:
+                # Respect Retry-After on 429; otherwise exponential backoff.
+                try:
+                    wait = float(resp.headers.get("Retry-After", ""))
+                except ValueError:
+                    wait = min(2 ** attempt, 8)
+                logger.warning("Shopify %s %s: %d — backing off %.1fs (retry %d)",
+                               method, path, resp.status_code, wait, attempt + 1)
+                await asyncio.sleep(max(0.5, wait))
+                continue
+
+            resp.raise_for_status()
+            if resp.status_code == 204:
+                return {}
+            return resp.json()
+    # Exhausted retries on a retryable status: surface it, don't return empty.
+    resp.raise_for_status()
+    return {}
 
 
 def _error(e: Exception) -> str:
