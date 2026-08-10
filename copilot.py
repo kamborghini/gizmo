@@ -4653,6 +4653,35 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
             logger.exception("Stock usage failed")
             return _json({"error": "Couldn't build the stock usage list."}, 500)
 
+    @mcp.custom_route("/api/production-labels/queue", methods=["POST"])
+    async def labels_queue_route(request: Request):
+        # One-click intake from the missed-orders strip: tag the order into
+        # production through the same guarded writer the print path uses.
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        try:
+            oid = int(body.get("order_id") or 0)
+        except (TypeError, ValueError, OverflowError):
+            oid = 0
+        if not oid:
+            return _json({"error": "No order id given."}, 400)
+        try:
+            okd, note = await _sync_order_tags(registry, oid,
+                                               add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG])
+            if not okd:
+                return _json({"error": note or "Couldn't tag the order."}, 502)
+            return _json({"ok": True})
+        except Exception:
+            logger.exception("Queue tagging failed")
+            return _json({"error": "Couldn't tag the order."}, 500)
+
     @mcp.custom_route("/api/production-labels/missing", methods=["POST"])
     async def labels_missing_route(request: Request):
         # Paid gobo orders that never got the production tag. Shopify read, no AI.
