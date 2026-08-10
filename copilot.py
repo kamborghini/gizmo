@@ -2903,7 +2903,13 @@ async def run_missing_production(registry: dict, tag: Optional[str] = None) -> d
             "missing_total": len(missing)}
 
 
-LIABILITY_TAG = os.environ.get("LIABILITY_TAG", "Purchase order unpaid")
+LIABILITY_TAGS = [t.strip() for t in os.environ.get(
+    "LIABILITY_TAGS", "Purchase order unpaid, Bank transfer unpaid, Procurement unpaid").split(",") if t.strip()]
+
+
+def _liability_channel(tag: str) -> str:
+    """Short payment-channel label from the tag: "Bank transfer unpaid" -> "Bank transfer"."""
+    return re.sub(r"\s+unpaid$", "", tag, flags=re.I).strip() or tag
 LIABILITY_DEFAULT_TERMS = int(os.environ.get("LIABILITY_DEFAULT_TERMS", "30"))
 LIABILITY_DUE_SOON_DAYS = int(os.environ.get("LIABILITY_DUE_SOON_DAYS", "7"))
 _TERMS_TAG_RE = re.compile(r"\bnet[\s-]*(\d{1,3})\b", re.I)
@@ -2961,7 +2967,8 @@ async def run_liability(registry: dict) -> dict:
     store = (SHOPIFY_STORE or "").split(".")[0]
     rows, stale, currency = [], [], ""
     for o in orders:
-        if not _has_tag(o, LIABILITY_TAG) or o.get("cancelled_at"):
+        matched = [t for t in LIABILITY_TAGS if _has_tag(o, t)]
+        if not matched or o.get("cancelled_at"):
             continue
         currency = currency or str(o.get("currency") or "")
         try:
@@ -3012,6 +3019,8 @@ async def run_liability(registry: dict) -> dict:
             "days_over": max(0, days_over),
             "days_to_due": (max(0, (due - today).days) if due else 0),
             "status": status, "bucket": bucket,
+            "channel": _liability_channel(matched[0]),
+            "channels": [_liability_channel(t) for t in matched],
             "tags": _order_tags(o),
         })
     # Customer roll-up.
@@ -3037,8 +3046,11 @@ async def run_liability(registry: dict) -> dict:
     for r in rows:
         k = r["bucket"] if r["status"] == "overdue" else ("due_soon" if r["status"] == "due_soon" else "within")
         buckets[k] = round(buckets[k] + r["outstanding"], 2)
+    channels: dict = {}
+    for r in rows:
+        channels[r["channel"]] = round(channels.get(r["channel"], 0.0) + r["outstanding"], 2)
     return {
-        "tag": LIABILITY_TAG, "currency": currency or "GBP",
+        "tags": LIABILITY_TAGS, "channels": channels, "currency": currency or "GBP",
         "total": round(sum(r["outstanding"] for r in rows), 2),
         "orders": len(rows),
         "within": round(buckets["within"] + buckets["due_soon"], 2),

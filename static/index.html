@@ -2855,7 +2855,7 @@
         /* ---------- liability / accounts receivable ---------- */
         let liabilityCache = null;   // { data, at }
         let liaOpen = null;          // expanded customer key
-        const liaF = { q: '', status: 'all', terms: 'all', from: '', to: '' };
+        const liaF = { q: '', status: 'all', terms: 'all', channel: 'all', from: '', to: '', dateField: 'created_at', min: '', sort: 'overdue' };
         function liaMoney(n, cur, dp) {
             const sym = { GBP: '\u00a3', USD: '$', EUR: '\u20ac' }[cur] || (cur + ' ');
             return sym + Number(n || 0).toLocaleString('en-GB',
@@ -2907,8 +2907,11 @@
                 if (liaF.terms === 'assumed' && r.terms_source !== 'assumed') return false;
                 if (liaF.terms !== 'assumed' && r.terms !== liaF.terms) return false;
             }
-            if (liaF.from && r.created_at && r.created_at < liaF.from) return false;
-            if (liaF.to && r.created_at && r.created_at > liaF.to) return false;
+            if (liaF.channel !== 'all' && (r.channels || [r.channel]).indexOf(liaF.channel) < 0) return false;
+            if (liaF.min && !(r.outstanding >= parseFloat(liaF.min))) return false;
+            const dv = liaF.dateField === 'due' ? r.due : r.created_at;
+            if (liaF.from && dv && dv < liaF.from) return false;
+            if (liaF.to && dv && dv > liaF.to) return false;
             if (liaF.q) {
                 const q = liaF.q.toLowerCase();
                 if (r.customer.toLowerCase().indexOf(q) < 0 && r.name.toLowerCase().indexOf(q) < 0) return false;
@@ -2921,8 +2924,9 @@
             const cur = d.currency;
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.spark;
             const ht = el('div'); ht.append(el('h2', null, 'Liability'),
-                el('p', null, 'Credit extended to customers, from orders tagged "' + d.tag
-                    + '". Terms come from the order itself, then a Net tag on the customer, otherwise Net '
+                el('p', null, 'Credit extended to customers, from orders tagged '
+                    + (d.tags || []).map(t => '"' + t + '"').join(', ')
+                    + '. Terms come from the order itself, then a Net tag on the customer, otherwise Net '
                     + d.default_terms + ' is assumed and marked.'));
             hero.append(badge, ht);
             hero.append(el('div', 'ov-updated', freshLabel(liabilityCache.at)));
@@ -2969,8 +2973,7 @@
                 const s = el('div', 'miss-strip');
                 const head = el('div', 'miss-head');
                 head.append(ico(I.warning), el('b', null, 'Paid but still tagged'),
-                    el('span', 'miss-sub', d.stale_tagged.length + ' settled order(s) still carry the "' + d.tag
-                        + '" tag and are excluded from the totals. Untag them in Shopify.'));
+                    el('span', 'miss-sub', d.stale_tagged.length + ' settled order(s) still carry an unpaid tag and are excluded from the totals. Untag them in Shopify.'));
                 s.append(head);
                 d.stale_tagged.forEach(m => {
                     const row = el('div', 'miss-row');
@@ -3000,24 +3003,71 @@
             topts.forEach(([v2, l2]) => { const o2 = el('option', null, l2); o2.value = v2; if (liaF.terms === v2) o2.selected = true; tsel.append(o2); });
             tsel.onchange = () => { liaF.terms = tsel.value; paint(); };
             bar2.append(tsel);
+            const chans = Object.keys(d.channels || {}).sort();
+            if (chans.length > 1) {
+                const csel = el('select', 'lbl-size');
+                [['all', 'All channels']].concat(chans.map(c2 => [c2, c2])).forEach(([v2, l2]) => {
+                    const o2 = el('option', null, l2); o2.value = v2; if (liaF.channel === v2) o2.selected = true; csel.append(o2);
+                });
+                csel.title = 'Payment channel, from the unpaid tag';
+                csel.onchange = () => { liaF.channel = csel.value; paint(); };
+                bar2.append(csel);
+            }
+            const dfield = el('select', 'lbl-size');
+            [['created_at', 'Ordered'], ['due', 'Due']].forEach(([v2, l2]) => {
+                const o2 = el('option', null, l2); o2.value = v2; if (liaF.dateField === v2) o2.selected = true; dfield.append(o2);
+            });
+            dfield.title = 'Which date the range below filters';
+            dfield.onchange = () => { liaF.dateField = dfield.value; paint(); };
             const df = document.createElement('input'); df.type = 'date'; df.className = 'lbl-size';
-            df.title = 'Orders placed on or after'; df.value = liaF.from || '';
+            df.title = 'On or after'; df.value = liaF.from || '';
             df.onchange = () => { liaF.from = df.value; paint(); };
             const dt2 = document.createElement('input'); dt2.type = 'date'; dt2.className = 'lbl-size';
-            dt2.title = 'Orders placed on or before'; dt2.value = liaF.to || '';
+            dt2.title = 'On or before'; dt2.value = liaF.to || '';
             dt2.onchange = () => { liaF.to = dt2.value; paint(); };
-            bar2.append(el('span', 'cov-line', 'Ordered'), df, el('span', 'cov-line', 'to'), dt2);
+            bar2.append(dfield, df, el('span', 'cov-line', 'to'), dt2);
+            const minIn = document.createElement('input');
+            minIn.type = 'number'; minIn.min = '0'; minIn.step = '50'; minIn.placeholder = 'Min owed';
+            minIn.className = 'lbl-size'; minIn.style.width = '96px'; minIn.value = liaF.min;
+            minIn.title = 'Only show orders owing at least this much';
+            minIn.oninput = () => { liaF.min = minIn.value; paint(); };
+            bar2.append(minIn);
+            const ssel = el('select', 'lbl-size');
+            [['overdue', 'Sort: most overdue'], ['total', 'Sort: total owed'], ['oldest', 'Sort: oldest debt'], ['name', 'Sort: name']]
+                .forEach(([v2, l2]) => { const o2 = el('option', null, l2); o2.value = v2; if (liaF.sort === v2) o2.selected = true; ssel.append(o2); });
+            ssel.onchange = () => { liaF.sort = ssel.value; paint(); };
+            bar2.append(ssel);
+            const clr = el('button', 'btn'); clr.append(document.createTextNode('Clear'));
+            clr.title = 'Reset every filter';
+            clr.onclick = () => { Object.assign(liaF, { q: '', status: 'all', terms: 'all', channel: 'all', from: '', to: '', min: '' }); renderLiability(); };
+            bar2.append(clr);
             box.append(bar2);
 
             const host = el('div'); box.append(host);
             function paint() {
                 host.innerHTML = '';
-                const custs = d.customers
+                let custs = d.customers
                     .map(c => ({ c, rows: c.orders.filter(liaOrderPasses) }))
                     .filter(x => x.rows.length);
+                const sorters = {
+                    overdue: (a, b) => b.c.overdue - a.c.overdue || b.c.total - a.c.total,
+                    total: (a, b) => b.c.total - a.c.total,
+                    oldest: (a, b) => b.c.oldest_days - a.c.oldest_days,
+                    name: (a, b) => a.c.name.localeCompare(b.c.name),
+                };
+                custs.sort(sorters[liaF.sort] || sorters.overdue);
+                const active = liaF.q || liaF.status !== 'all' || liaF.terms !== 'all'
+                    || liaF.channel !== 'all' || liaF.from || liaF.to || liaF.min;
+                if (active) {
+                    const frows = custs.reduce((a2, x) => a2.concat(x.rows), []);
+                    const fsum = frows.reduce((s2, r2) => s2 + r2.outstanding, 0);
+                    host.append(el('div', 'cov-line', 'Filtered: ' + frows.length
+                        + (frows.length === 1 ? ' order' : ' orders') + ' · ' + liaMoney(fsum, cur, 0)
+                        + ' outstanding · ' + custs.length + (custs.length === 1 ? ' customer' : ' customers')));
+                }
                 if (!custs.length) {
                     host.append(el('div', 'empty', d.total > 0 ? 'Nothing matches these filters.'
-                        : 'No orders currently carry the "' + d.tag + '" tag. Nothing is owed.'));
+                        : 'No orders currently carry an unpaid tag. Nothing is owed.'));
                     return;
                 }
                 custs.forEach(({ c, rows }) => {
@@ -3041,7 +3091,7 @@
                         const wrap = el('div', 'ktable-wrap'); wrap.style.margin = '4px 0 16px';
                         const tb = el('table', 'ktable');
                         tb.innerHTML = '<thead><tr><th>Order</th><th>Order date</th><th>Due</th><th class="num">Value</th>'
-                            + '<th class="num">Paid</th><th class="num">Outstanding</th><th>Terms</th><th>Status</th><th></th></tr></thead>';
+                            + '<th class="num">Paid</th><th class="num">Outstanding</th><th>Terms</th><th>Channel</th><th>Status</th><th></th></tr></thead>';
                         const tbody = el('tbody');
                         rows.forEach(r => {
                             const tr = el('tr');
@@ -3054,6 +3104,7 @@
                             tr.append(out);
                             tr.append(el('td', null, r.terms + (r.terms_source === 'assumed' ? ' (assumed)'
                                 : r.terms_source === 'customer' ? ' (tag)' : '')));
+                            tr.append(el('td', null, (r.channels || [r.channel]).join(', ')));
                             const tds = el('td'); tds.append(liaChip(r)); tr.append(tds);
                             const tda = el('td');
                             if (r.admin_url) { const a = el('a', 'miss-open', 'Open'); a.href = r.admin_url; a.target = '_top'; tda.append(a); }
