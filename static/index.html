@@ -3174,6 +3174,7 @@
         // While an order fetch owns #labels-content, nothing else may repaint it:
         // a coverage result landing mid-refresh would resurrect the stale list.
         let labelsLoading = false;
+        let labelsReq = 0;
         async function loadLabels(force) {
             const box = $('labels-content');
             if (labelsCache && !force) { renderLabels(); return; }
@@ -3183,13 +3184,16 @@
             hero.append(badge, ht); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Reading your Shopify orders…')); box.append(t);
             labelsLoading = true;
+            const rq = ++labelsReq;   // only the newest fetch may commit its result
             try {
                 const data = await api('/api/production-labels', { tag: LABEL_TAG });
+                if (rq !== labelsReq) return;   // a newer load started; drop this stale response
                 labelsCache = { data, at: Date.now() };
                 labelsLoading = false;
                 renderLabels();
                 loadMissing();   // untagged-order check rides along, non-blocking
             } catch (e) {
+                if (rq !== labelsReq) return;
                 labelsLoading = false;
                 box.innerHTML = ''; box.append(hero);
                 const er = el('div', 'msg error'); er.append(el('div', 'bubble', e.message || String(e))); box.append(er);
@@ -3213,10 +3217,20 @@
             const ids = orders.map(o => o.id).filter(Boolean);
             if (!ids.length) return;
             const now = new Date().toISOString();
-            ids.forEach(id => setProdState(id, { printed_at: now }));
+            const prev = {};
+            ids.forEach(id => { prev[id] = prodStateOf({ id: id }).printed_at || null; setProdState(id, { printed_at: now }); });
             api('/api/production-state', { op: 'printed', ids })
-                .then(r => { if (r && r.tag_note) addToast(r.tag_note); })
-                .catch(() => {});
+                .then(r => {
+                    if (r && r.tag_note) addToast(r.tag_note);
+                    if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
+                })
+                .catch(() => {
+                    // The stamp did not persist: undo the local one so a reload does
+                    // not think these were printed (and re-tag stays consistent).
+                    ids.forEach(id => setProdState(id, { printed_at: prev[id] }));
+                    addToast('Printed, but the app could not record it. It may reappear as unprinted.');
+                    if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
+                });
         }
         async function toggleMade(o) {
             const prev = prodStateOf(o).made_at || null;   // remember, so a failed write can be undone
@@ -3363,6 +3377,7 @@
             return n || ('#' + o.order_number);
         }
         function renderLabels() {
+            if (!labelsCache) return;   // e.g. a coverage callback after the cache was cleared for a reload
             const box = $('labels-content'); box.innerHTML = '';
             const data = labelsCache.data;
             let orders = labelOrders().slice();
@@ -3551,16 +3566,17 @@
         let labelsCoverage = null;   // 'busy' | { data, at } | { error, at }
         async function runCoverage() {
             if (labelsCoverage === 'busy') return;
-            labelsCoverage = 'busy'; renderLabels();
+            labelsCoverage = 'busy';
+            // Only repaint now if an order fetch does not own the view (mirrors the
+            // final repaint): after an upload the cache is null and reloading.
+            if (!labelsLoading && labelsCache) renderLabels();
             try {
                 const data = await api('/api/production-labels/coverage', { orders: 200 });
                 labelsCoverage = { data, at: Date.now() };
             } catch (e) {
                 labelsCoverage = { error: e.message || String(e), at: Date.now() };
             }
-            // If an order fetch owns the view, it repaints when it finishes and the
-            // coverage card rides along; repainting now would show a stale list.
-            if (!labelsLoading) renderLabels();
+            if (!labelsLoading && labelsCache) renderLabels();
         }
         window.__demoCoverage = d => { labelsCoverage = { data: d, at: Date.now() }; if (labelsCache) renderLabels(); };
         function coverageCard() {
@@ -3681,12 +3697,14 @@
             bar.append(pr);
             body.append(bar);
             const out = el('div'); body.append(out);
-            let current = null;
+            let current = null, usageReq = 0;
             async function load() {
                 out.innerHTML = ''; pr.disabled = true; current = null;
                 const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Adding up the day…')); out.append(t);
+                const rq = ++usageReq;   // rapid date changes: only the latest may render
                 try {
                     const d = await api('/api/stock-usage', { date: dt.value });
+                    if (rq !== usageReq) return;
                     current = d;
                     out.innerHTML = '';
                     out.append(el('div', 'cov-line', d.orders + (d.orders === 1 ? ' order' : ' orders')
@@ -3716,6 +3734,7 @@
                     }
                     pr.disabled = !d.rows.length;
                 } catch (e) {
+                    if (rq !== usageReq) return;
                     out.innerHTML = '';
                     out.append(el('div', 'cov-line', e.message || 'Could not load.'));
                 }
@@ -3855,14 +3874,16 @@
             rule.textContent = '@page { size: ' + d.w + 'mm ' + d.h + 'mm; margin: 0; }';
             // Staged off-screen with real layout so each label can be measured and fitted.
             const sheets = orders.map(o => { const s = labelSheet(o); box.append(s); return s; });
+            let stamped = false;
             const cleanup = () => {
                 if (seq !== printSeq) return;   // a newer print took over; leave it alone
                 document.body.classList.remove('printing-label');
                 box.innerHTML = '';
                 const r = $('label-page-rule');
                 if (r && r.parentNode) r.parentNode.removeChild(r);
-                // Printed badges appear once the dialog is out of the way.
-                if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
+                // Stamp printed only after the dialog is out of the way (not before it
+                // opens), and only once. stampPrinted repaints when the write settles.
+                if (!stamped) { stamped = true; stampPrinted(orders); }
             };
             // The label typeface must be in before measuring or printing (2s cap), or
             // the fit runs against fallback metrics and the printout differs.
@@ -3873,7 +3894,6 @@
             fontReady.then(() => {
                 if (seq !== printSeq) return;
                 sheets.forEach(fitLabel);
-                stampPrinted(orders);
                 document.body.classList.add('printing-label');
                 if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
                 setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);

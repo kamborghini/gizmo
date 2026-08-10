@@ -4833,22 +4833,29 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
         import io, zipfile
         data_dir = os.path.dirname(SCHEDULE_PATH) or "/data"
         repo_data = os.path.join(os.path.dirname(__file__), "data")
+        # Never export credentials, and give the two roots distinct prefixes so the
+        # repo-seed sheet cannot shadow the live uploaded one on restore.
+        secret = os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json"))
         buf = io.BytesIO()
         added = 0
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-            for root in dict.fromkeys([data_dir, repo_data]):
+            for root, prefix in ((data_dir, "volume"), (repo_data, "repo-data")):
+                if not os.path.isdir(root):
+                    continue
                 try:
                     names = sorted(os.listdir(root))
                 except OSError:
                     continue
                 for n in names:
+                    if n == secret:
+                        continue
                     p = os.path.join(root, n)
                     if not os.path.isfile(p) or not n.lower().endswith((".json", ".csv", ".bak")):
                         continue
                     try:
                         if os.path.getsize(p) > 10 * 1024 * 1024:
                             continue
-                        z.write(p, os.path.basename(root) + "/" + n)
+                        z.write(p, prefix + "/" + n)
                         added += 1
                     except OSError:
                         continue
