@@ -414,7 +414,9 @@
         .lbl-row.stale { opacity: .6; }
         .lbl-hist { font-size: 12px; color: var(--ink-2); margin: 0 0 8px; }
         .proof-modal { max-width: 1080px; width: 94vw; }
-        .proof-body { padding: 0 !important; }
+        /* The iframe scrolls its own content; the body must not reserve a
+           scrollbar gutter (Safari's persistent scrollbars showed as a gap). */
+        .proof-body { padding: 0 !important; overflow: hidden !important; }
         .proof-frame { display: block; width: 100%; height: min(76vh, 820px); border: 0;
             border-radius: 0 0 var(--r) var(--r); background: #fff; }
         .proof-ext { margin-left: auto; margin-right: 12px; font-size: 12.5px; color: var(--accent);
