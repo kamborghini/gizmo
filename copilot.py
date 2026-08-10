@@ -2635,6 +2635,69 @@ def _item_model(li: dict, manufacturer: str) -> str:
     return fallback
 
 
+UNPROCESSED_TAG = os.environ.get("UNPROCESSED_TAG", "Unprocessed")
+MADE_TAG = os.environ.get("MADE_TAG", "PC")
+PROPOSAL_HOST = os.environ.get("PROPOSAL_HOST", "quote.projectedimage.com")
+_PROPOSAL_RE = re.compile(r"https://" + re.escape(PROPOSAL_HOST) + r"/proof/[A-Za-z0-9]+")
+_order_tag_writer = None
+
+
+async def _sync_order_tags(registry: dict, order_id, add=(), remove=()) -> tuple:
+    """Move an order along the tag workflow (Unprocessed -> IP -> PC) without
+    touching any other tag. Set-based, case-insensitive: re-running an action
+    can never duplicate a tag or leave conflicting statuses. Dead orders
+    (cancelled, refunded, fulfilled) are left alone. Returns (ok, note)."""
+    if _order_tag_writer is None:
+        return False, "Tag updates are not enabled on this server."
+    try:
+        o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+        if not _ok(o) or not o.get("id"):
+            return False, "Couldn't read the order to update its tags."
+        if _order_status(o):
+            return True, ""   # cancelled/refunded/fulfilled: tags stay as they are
+        cur = _order_tags(o)
+        drop = {_norm_key(t) for t in add} | {_norm_key(t) for t in remove}
+        new = [t for t in cur if _norm_key(t) not in drop] + list(add)
+        if {_norm_key(t) for t in new} == {_norm_key(t) for t in cur}:
+            return True, ""   # already in the right state: no write
+        await _order_tag_writer(int(order_id), ", ".join(new))
+        return True, ""
+    except httpx.HTTPStatusError as e:
+        if e.response is not None and e.response.status_code in (401, 403):
+            logger.warning("order tag update refused (%s): the access token lacks write_orders",
+                           e.response.status_code)
+            return False, ("Tags couldn't update: the app's access token doesn't have the "
+                           "write_orders permission yet.")
+        logger.exception("order tag update failed")
+        return False, "Tags couldn't update: Shopify refused the change."
+    except Exception:
+        logger.exception("order tag update failed")
+        return False, "Tags couldn't update. Check the server logs."
+
+
+async def _sync_tags_bg(registry: dict, order_ids: list, add=(), remove=()) -> None:
+    """Background tag sync for the admin print extensions: the print document
+    must render immediately, the tag writes follow. Never raises."""
+    for oid in order_ids:
+        try:
+            await _sync_order_tags(registry, oid, add=add, remove=remove)
+        except Exception:
+            logger.exception("background tag sync failed for order %s", oid)
+
+
+def _extract_proposal(note: str) -> tuple:
+    """(proposal_url, note_without_it). Only the store's own quote domain is ever
+    recognized: an arbitrary URL in a customer note must never become a clickable
+    embed. The label prints the cleaned note; the URL becomes the Preview button."""
+    m = _PROPOSAL_RE.search(note or "")
+    if not m:
+        return "", (note or "")
+    cleaned = (note or "").replace(m.group(0), "")
+    cleaned = re.sub(r"Proposal link:\s*", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return m.group(0), cleaned
+
+
 def _parse_due_date(v):
     """A customer-typed deadline as a date, or None. The store's option sets write
     "13 August 2026" (Date Required) and "30-08-2026" (Wedding Date); this is a UK
@@ -2693,6 +2756,7 @@ def _shape_label_order(o: dict, names: dict) -> dict:
     company, person = _label_party(o)
     domain = _order_email_domain(o)
     due = _order_due(o)
+    proposal_url, note_clean = _extract_proposal(str(o.get("note") or "").strip())
     items = []
     for li in (o.get("line_items") or []):
         if _label_skip_item(str(li.get("title") or li.get("name") or "")):
@@ -2729,7 +2793,8 @@ def _shape_label_order(o: dict, names: dict) -> dict:
         "due": (due.isoformat() if due else ""),
         "due_label": _fmt_due(due),
         "due_soon": bool(due and (due - datetime.now(timezone.utc).date()).days <= 2),
-        "note": str(o.get("note") or "").strip()[:500],
+        "proposal_url": proposal_url,
+        "note": note_clean[:500],
         "customer_id": (o.get("customer") or {}).get("id"),
         "items": items,
     }
@@ -3786,7 +3851,12 @@ def _ensure_scheduler(registry: dict) -> None:
 # Route registration (mounted onto the existing FastMCP app)
 # ---------------------------------------------------------------------------
 
-def add_routes(mcp, registry: dict) -> None:
+def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
+    # The ONE write capability the server hands over. It never joins any tool
+    # registry: the AI can read the store, only the app's own print and Mark
+    # made actions can touch tags.
+    global _order_tag_writer
+    _order_tag_writer = order_tag_writer
     # Shopify tools + live SEO tools + Google data tools (the last only if configured)
     chat_registry = {**registry, **_build_seo_tools(registry), **_build_google_tools()}
     tools = _build_tools(chat_registry)
@@ -4459,13 +4529,28 @@ def add_routes(mcp, registry: dict) -> None:
                 ids = [int(i) for i in (body.get("ids") or []) if str(i).strip().isdigit()][:100]
                 if ids:
                     _mark_printed(ids)
-                return _json({"ok": True, "state": {str(i): _load_prod_state().get(str(i), {}) for i in ids}})
+                # Printing moves the order into production: Unprocessed -> IP.
+                notes = []
+                for oid in ids:
+                    okd, note = await _sync_order_tags(registry, oid,
+                                                       add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG])
+                    if not okd and note:
+                        notes.append(note)
+                return _json({"ok": True, "state": {str(i): _load_prod_state().get(str(i), {}) for i in ids},
+                              "tag_note": (notes[0] if notes else "")})
             if op == "made":
                 oid = int(body.get("id") or 0)
                 if not oid:
                     return _json({"error": "No order id given."}, 400)
-                state = _mark_made(oid, bool(body.get("on", True)))
-                return _json({"ok": True, "state": {str(oid): state.get(str(oid), {})}})
+                on = bool(body.get("on", True))
+                state = _mark_made(oid, on)
+                # Made moves it out of production: IP -> PC (and back if unticked).
+                if on:
+                    okd, note = await _sync_order_tags(registry, oid, add=[MADE_TAG], remove=[PRODUCTION_TAG])
+                else:
+                    okd, note = await _sync_order_tags(registry, oid, add=[PRODUCTION_TAG], remove=[MADE_TAG])
+                return _json({"ok": True, "state": {str(oid): state.get(str(oid), {})},
+                              "tag_note": ("" if okd else note)})
             return _json({"error": "Unknown op."}, 400)
         except Exception:
             logger.exception("Production state update failed")
@@ -4644,8 +4729,14 @@ def add_routes(mcp, registry: dict) -> None:
         results = await asyncio.gather(*[run_production_labels(registry, order_id=i) for i in ids])
         orders = [r["orders"][0] for r in results if r.get("orders")]
         # Rendering the print document IS the print moment for the admin print
-        # extensions; stamp these orders as printed (best-effort, never raises).
-        _mark_printed([o["id"] for o in orders if o.get("id")])
+        # extensions; stamp these orders as printed (best-effort, never raises)
+        # and move their tags along in the background so the document itself
+        # renders without waiting on Shopify writes.
+        printed_ids = [o["id"] for o in orders if o.get("id")]
+        _mark_printed(printed_ids)
+        if printed_ids:
+            asyncio.get_running_loop().create_task(
+                _sync_tags_bg(registry, printed_ids, add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG]))
         esc = html.escape
         sheets = []
         for o in orders:
@@ -4727,7 +4818,7 @@ def add_routes(mcp, registry: dict) -> None:
                ".row:last-child { border-bottom: none; }"
                ".it { display: flex; align-items: baseline; gap: .7em; font-size: .9em;"
                " white-space: nowrap; overflow: hidden; }"
-               ".iqs { font-weight: 700; flex: none; font-variant-numeric: tabular-nums; }"
+               ".iqs { font-weight: 700; flex: none; font-variant-numeric: tabular-nums; min-width: 5.6em; }"
                # Chips stay plain black outlines: printers strip backgrounds by default and
                # tiny reversed type bleeds shut on thermal heads.
                ".chip { font-size: .85em; font-weight: 600; letter-spacing: .03em; text-transform: uppercase;"
@@ -4736,16 +4827,17 @@ def add_routes(mcp, registry: dict) -> None:
                ".desc { color: #333; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }"
                # Flagged rows may wrap so the reason stays readable.
                ".it.wrap { white-space: normal; overflow: visible; } .it.wrap .desc { overflow: visible; text-overflow: clip; }"
-               ".ctx { font-size: .76em; color: #222; margin-top: .12em; }"
+               ".ctx { font-size: .78em; color: #222; margin-top: .12em; padding-left: 1.6em; }"
                # A dead order must be unmissable at arm's length.
-               ".dead { border: 3px solid #000; font-size: 1.25em; font-weight: 800; letter-spacing: .04em;"
+               ".dead { border: 3px solid #000; font-size: 1.68em; font-weight: 800; letter-spacing: .04em;"
                " text-align: center; padding: .35em .4em; margin-bottom: .7em; }"
-               ".due { font-size: .78em; font-weight: 600; color: #333; margin-left: .7em; }"
-               ".due.soon { color: #000; font-weight: 800; border: 1px solid #000;"
-               " padding: .1em .5em; border-radius: 2px; }"
-               ".onote { font-size: .82em; color: #111; margin-top: .55em; overflow-wrap: break-word; }"
+               ".due { font-size: .85em; font-weight: 600; color: #333; margin-left: .7em; }"
+               ".due.soon { color: #000; font-weight: 800; border: 2px solid #000;"
+               " padding: .08em .55em; border-radius: 2px; }"
+               ".onote { font-size: .9em; font-weight: 500; color: #111; margin-top: .55em; overflow-wrap: break-word; }"
                ".onote b { font-weight: 800; }"
                # The strip follows the last item rather than pinning to the label's bottom edge.
+               ".sheet.shed .rate { display: none; }"
                ".rate { margin-top: .6em; padding-top: .35em; border-top: 1px solid #ddd;"
                " display: flex; align-items: center; justify-content: flex-start; }"
                ".rate .rt { font-size: .68em; font-weight: 500; text-align: left; }"
@@ -4758,8 +4850,11 @@ def add_routes(mcp, registry: dict) -> None:
                # whole order fits its label. Measured only after the label typeface has
                # loaded (2s cap), or the metrics would be the fallback font's.
                + "<script>(function(){function fit(){document.querySelectorAll('.sheet').forEach(function(s){"
-               "s.style.fontSize='';var b=parseFloat(getComputedStyle(s).fontSize)||13,z=b,f=b*0.42;"
-               "while(s.scrollHeight>s.clientHeight&&z>f){z-=0.5;s.style.fontSize=z+'px';}});}"
+               "s.style.fontSize='';s.classList.remove('shed');"
+               "var b=parseFloat(getComputedStyle(s).fontSize)||13,z=b,soft=b*0.75,f=b*0.6;"
+               "while(s.scrollHeight>s.clientHeight&&z>soft){z-=0.5;s.style.fontSize=z+'px';}"
+               "if(s.scrollHeight>s.clientHeight){s.classList.add('shed');"
+               "while(s.scrollHeight>s.clientHeight&&z>f){z-=0.5;s.style.fontSize=z+'px';}}});}"
                "fit();if(document.fonts&&document.fonts.load){Promise.race(["
                "document.fonts.load(\"15px 'Bricolage Grotesque'\"),"
                "new Promise(function(r){setTimeout(r,2000);})]).then(fit,fit);}})();</script>"

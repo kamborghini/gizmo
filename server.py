@@ -999,9 +999,17 @@ COPILOT_TOOLS = {
     "shopify_list_webhooks":         (shopify_list_webhooks,         ListWebhooksInput),
 }
 
+async def update_order_tags(order_id: int, tags: str) -> dict:
+    """Replace an order's tag string. Deliberately NOT in COPILOT_TOOLS: the AI
+    chat must stay read-only. Only the app's own print/made button paths call
+    this, via the writer handed to copilot.add_routes below."""
+    return await _request("PUT", f"orders/{order_id}.json",
+                          body={"order": {"id": int(order_id), "tags": tags}})
+
+
 try:
     import copilot
-    copilot.add_routes(mcp, COPILOT_TOOLS)
+    copilot.add_routes(mcp, COPILOT_TOOLS, order_tag_writer=update_order_tags)
 except Exception as e:
     logger.error(f"Store Copilot disabled (chat UI unavailable): {e}")
 

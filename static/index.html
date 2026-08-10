@@ -360,14 +360,15 @@
         .lbl-meta { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
         @media (max-width: 720px) { .lbl-meta { display: none; } .lbl-actions .lbl-btn-txt { display: none; } .lbl-actions .btn { padding: 8px 9px; } }  /* on phones the name matters more than dates and button labels */
         .lbl-actions { display: flex; gap: 8px; align-items: center; }
-        /* The label is sized to the real label stock, so the preview is what prints.
+        /* The label is sized to the real label stock and shares the print document's
+           line-height and font stack exactly, so the preview is what prints.
            All internal sizes are in em, so shrink-to-fit only has to change one
            font-size on .label-sheet and the whole label scales with it. */
         @font-face { font-family: 'Bricolage Grotesque'; font-style: normal; font-weight: 200 800;
             font-stretch: 75% 100%; font-display: block; src: url('/fonts/bricolage.woff2') format('woff2'); }
         .label-sheet { background: #fff; color: #000; border: 1px solid var(--border-2); border-radius: 6px;
-            box-sizing: border-box; padding: 5mm 5.5mm; overflow: hidden; font-size: 15px; line-height: 1.25;
-            width: 100mm; height: 150mm; font-family: 'Bricolage Grotesque', 'Plus Jakarta Sans', -apple-system, sans-serif; }
+            box-sizing: border-box; padding: 5mm 5.5mm; overflow: hidden; font-size: 15px; line-height: 1.22;
+            width: 100mm; height: 150mm; font-family: 'Bricolage Grotesque', -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; }
         /* The merchant's own design: logo over a big company name and a quiet
            "Order:" line closed by a heavy 2px rule, then one-line item rows of
            bold qty+size, an outlined glass-type chip, and the quoted artwork
@@ -384,14 +385,15 @@
         .label-sheet .ls-row:last-child { border-bottom: none; }
         .label-sheet .ls-it { display: flex; align-items: baseline; gap: .7em; font-size: .9em;
             white-space: nowrap; overflow: hidden; }
-        .label-sheet .ls-iqs { font-weight: 700; flex: none; font-variant-numeric: tabular-nums; }
+        .label-sheet .ls-iqs { font-weight: 700; flex: none; font-variant-numeric: tabular-nums; min-width: 5.6em; }
         .label-sheet .ls-chip { font-size: .85em; font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
             padding: .08em .55em; border: 1px solid #111; border-radius: 2px; flex: none; }
         .label-sheet .ls-chip.fl { border-width: 2px; font-weight: 800; }
         .label-sheet .ls-desc { color: #333; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
         .label-sheet .ls-it.wrap { white-space: normal; overflow: visible; }
         .label-sheet .ls-it.wrap .ls-desc { overflow: visible; text-overflow: clip; }
-        .label-sheet .ls-ctx { font-size: .76em; color: #222; margin-top: .12em; }
+        .label-sheet .ls-ctx { font-size: .78em; color: #222; margin-top: .12em; padding-left: 1.6em; }
+        .label-sheet.shed .ls-rate { display: none; }
         /* Customer strip: follows the last item, rule directly beneath it. */
         .label-sheet .ls-rate { margin-top: .6em; padding-top: .35em; border-top: 1px solid #ddd;
             display: flex; align-items: center; justify-content: flex-start; }
@@ -399,7 +401,7 @@
         .label-sheet .ls-r1 { font-weight: 800; font-size: 1.06em; }
         .label-sheet .ls-rate b { font-weight: 800; }
         /* Short stock (4 x 2 and similar): tighter padding, everything else scales by em. */
-        .label-sheet.compact { padding: 3.5mm 4mm; font-size: 13px; line-height: 1.2; }
+        .label-sheet.compact { padding: 3.5mm 4mm; font-size: 13px; }
         .lbl-size { background: var(--bg-2); border: 1px solid var(--border-2); border-radius: var(--r-sm); color: var(--ink);
             font: inherit; font-size: 12.5px; padding: 7px 10px; }
         .lbl-nameline { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
@@ -411,6 +413,13 @@
         .lbl-chip.made { background: rgba(34,197,94,.13); color: #4ade80; border: 1px solid rgba(34,197,94,.35); }
         .lbl-row.stale { opacity: .6; }
         .lbl-hist { font-size: 12px; color: var(--ink-2); margin: 0 0 8px; }
+        .proof-modal { max-width: 1080px; width: 94vw; }
+        .proof-body { padding: 0 !important; }
+        .proof-frame { display: block; width: 100%; height: min(76vh, 820px); border: 0;
+            border-radius: 0 0 var(--r) var(--r); background: #fff; }
+        .proof-ext { margin-left: auto; margin-right: 12px; font-size: 12.5px; color: var(--accent);
+            text-decoration: none; font-weight: 600; }
+        .proof-ext:hover { text-decoration: underline; }
         .lbl-filts { display: flex; gap: 4px; background: var(--bg-2); border: 1px solid var(--border-2);
             border-radius: var(--r-sm); padding: 3px; }
         .lbl-filt { background: transparent; border: 0; color: var(--ink-3); font: inherit; font-size: 12px;
@@ -427,12 +436,12 @@
         .miss-row b { color: var(--ink); font-variant-numeric: tabular-nums; }
         .miss-open { color: var(--accent); text-decoration: none; font-weight: 600; margin-left: auto; }
         .miss-open:hover { text-decoration: underline; }
-        .label-sheet .ls-dead { border: 3px solid #000; font-size: 1.25em; font-weight: 800; letter-spacing: .04em;
+        .label-sheet .ls-dead { border: 3px solid #000; font-size: 1.68em; font-weight: 800; letter-spacing: .04em;
             text-align: center; padding: .35em .4em; margin-bottom: .7em; }
-        .label-sheet .ls-due { font-size: .78em; font-weight: 600; color: #333; margin-left: .7em; }
-        .label-sheet .ls-due.soon { color: #000; font-weight: 800; border: 1px solid #000;
-            padding: .1em .5em; border-radius: 2px; }
-        .label-sheet .ls-onote { font-size: .82em; color: #111; margin-top: .55em; overflow-wrap: break-word; }
+        .label-sheet .ls-due { font-size: .85em; font-weight: 600; color: #333; margin-left: .7em; }
+        .label-sheet .ls-due.soon { color: #000; font-weight: 800; border: 2px solid #000;
+            padding: .08em .55em; border-radius: 2px; }
+        .label-sheet .ls-onote { font-size: .9em; font-weight: 500; color: #111; margin-top: .55em; overflow-wrap: break-word; }
         .label-sheet .ls-onote b { font-weight: 800; }
         .cov-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
         .cov-head h3 { font-size: 14px; font-weight: 700; }
@@ -2833,12 +2842,21 @@
         // in em, so changing this one font-size scales the entire label proportionally.
         function fitLabel(sheet) {
             sheet.style.fontSize = '';
+            sheet.classList.remove('shed');
             const base = parseFloat(getComputedStyle(sheet).fontSize) || 15;
             let size = base;
-            const floor = base * 0.42;
-            while (sheet.scrollHeight > sheet.clientHeight && size > floor) {
+            const soft = base * 0.75, floor = base * 0.6;
+            while (sheet.scrollHeight > sheet.clientHeight && size > soft) {
                 size -= 0.5;
                 sheet.style.fontSize = size + 'px';
+            }
+            if (sheet.scrollHeight > sheet.clientHeight) {
+                // The review strip goes before legibility does.
+                sheet.classList.add('shed');
+                while (sheet.scrollHeight > sheet.clientHeight && size > floor) {
+                    size -= 0.5;
+                    sheet.style.fontSize = size + 'px';
+                }
             }
             return Math.round(size / base * 100);
         }
@@ -2890,15 +2908,19 @@
             if (!ids.length) return;
             const now = new Date().toISOString();
             ids.forEach(id => setProdState(id, { printed_at: now }));
-            api('/api/production-state', { op: 'printed', ids }).catch(() => {});
+            api('/api/production-state', { op: 'printed', ids })
+                .then(r => { if (r && r.tag_note) addToast(r.tag_note); })
+                .catch(() => {});
         }
         async function toggleMade(o) {
             const on = !prodStateOf(o).made_at;
             setProdState(o.id, { made_at: on ? new Date().toISOString() : null });
             if (!on) { const st = prodStateOf(o); delete st.made_at; }
             renderLabels();
-            try { await api('/api/production-state', { op: 'made', id: o.id, on }); }
-            catch (e) {}
+            try {
+                const r = await api('/api/production-state', { op: 'made', id: o.id, on });
+                if (r && r.tag_note) addToast(r.tag_note);
+            } catch (e) {}
         }
         /* Paid gobo orders that never got the production tag: they would otherwise
            never reach the workbench. Fetched after the list, shown as a strip. */
@@ -2932,6 +2954,36 @@
                 wrap.append(row);
             });
             return wrap;
+        }
+        /* Proposal/proof preview: the store's own quote page, embedded so the
+           team can eyeball the artwork without leaving the order list. */
+        function openProposal(o) {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal cmodal proof-modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, 'Proof · ' + orderNo(o)));
+            const ext = el('a', 'proof-ext', 'Open in new tab');
+            ext.href = o.proposal_url; ext.target = '_blank'; ext.rel = 'noopener';
+            head.append(ext);
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
+            const body = el('div', 'modal-body proof-body');
+            const fr = document.createElement('iframe');
+            fr.className = 'proof-frame';
+            fr.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups');
+            fr.src = o.proposal_url;
+            fr.title = 'Proposal proof';
+            body.append(fr);
+            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+            const prev = document.activeElement;
+            const close = () => {
+                overlay.remove(); document.removeEventListener('keydown', esc);
+                if (prev && prev.focus) prev.focus();   // back to where they were
+            };
+            function esc(e) { if (e.key === 'Escape') close(); }
+            x.onclick = close;
+            overlay.onclick = (e) => { if (e.target === overlay) close(); };
+            document.addEventListener('keydown', esc);
+            x.focus();
         }
         /* "Repeat customer" line above the label preview, fetched once per customer. */
         const labelHistCache = {};
@@ -3097,6 +3149,12 @@
                 const pv = el('button', 'btn'); pv.title = labelSel === o.id ? 'Hide label preview' : 'Preview label'; pv.append(ico(I.eye), el('span', 'lbl-btn-txt', labelSel === o.id ? 'Hide' : 'Preview'));
                 pv.onclick = (e) => { e.stopPropagation(); labelSel = (labelSel === o.id ? null : o.id); renderLabels(); };
                 acts.append(pv);
+                if (o.proposal_url) {
+                    const pf = el('button', 'btn'); pf.title = 'Preview the proposal proof';
+                    pf.append(ico(I.globe), el('span', 'lbl-btn-txt', 'Proof'));
+                    pf.onclick = (e) => { e.stopPropagation(); openProposal(o); };
+                    acts.append(pf);
+                }
                 const pr = el('button', 'btn'); pr.title = 'Print label'; pr.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Print'));
                 pr.onclick = (e) => { e.stopPropagation(); printLabels([o]); };
                 acts.append(pr);
