@@ -2898,6 +2898,156 @@ async def run_missing_production(registry: dict, tag: Optional[str] = None) -> d
             "missing_total": len(missing)}
 
 
+LIABILITY_TAG = os.environ.get("LIABILITY_TAG", "Purchase order unpaid")
+LIABILITY_DEFAULT_TERMS = int(os.environ.get("LIABILITY_DEFAULT_TERMS", "30"))
+LIABILITY_DUE_SOON_DAYS = int(os.environ.get("LIABILITY_DUE_SOON_DAYS", "7"))
+_TERMS_TAG_RE = re.compile(r"\bnet[\s-]*(\d{1,3})\b", re.I)
+
+
+def _liability_terms(o: dict):
+    """(days, label, source, due_date) for one unpaid order. Precedence is
+    explicit so terms are never silently invented: (1) Shopify's own payment
+    terms on the order, including the exact due date when a schedule exists;
+    (2) a Net-N tag on the customer; (3) the shop default, marked "assumed"."""
+    created = None
+    try:
+        created = datetime.fromisoformat(str(o.get("created_at")).replace("Z", "+00:00")).date()
+    except (TypeError, ValueError):
+        pass
+    pt = o.get("payment_terms")
+    if isinstance(pt, dict):
+        label = str(pt.get("payment_terms_name") or "").strip()
+        days = pt.get("due_in_days")
+        due = None
+        for sched in (pt.get("payment_schedules") or []):
+            raw = sched.get("due_at")
+            if raw:
+                try:
+                    due = datetime.fromisoformat(str(raw).replace("Z", "+00:00")).date()
+                    break
+                except ValueError:
+                    pass
+        if due is None and days is not None and created:
+            due = created + timedelta(days=int(days))
+        if due is not None:
+            return (int(days) if days is not None else None,
+                    label or (f"Net {days}" if days is not None else "Terms"), "order", due)
+    tags = str((o.get("customer") or {}).get("tags") or "")
+    m = _TERMS_TAG_RE.search(tags)
+    if m and created:
+        n = int(m.group(1))
+        return n, f"Net {n}", "customer", created + timedelta(days=n)
+    n = LIABILITY_DEFAULT_TERMS
+    return n, f"Net {n}", "assumed", (created + timedelta(days=n)) if created else None
+
+
+async def run_liability(registry: dict) -> dict:
+    """Accounts receivable from orders tagged "Purchase order unpaid": what each
+    credit customer owes, whether it is inside their payment terms, and which
+    debts need chasing first. Plain Shopify read, no AI."""
+    from zoneinfo import ZoneInfo
+    today = datetime.now(ZoneInfo("Europe/London")).date()
+    fields = ("id,order_number,name,created_at,tags,customer,email,total_price,"
+              "total_outstanding,financial_status,currency,cancelled_at,payment_terms,"
+              "billing_address,shipping_address")
+    orders = await _paginate_orders(registry, days=730, fields=fields)
+    if not isinstance(orders, list):
+        return {"error": "Couldn't read your orders from Shopify. Try again in a moment."}
+    store = (SHOPIFY_STORE or "").split(".")[0]
+    rows, stale, currency = [], [], ""
+    for o in orders:
+        if not _has_tag(o, LIABILITY_TAG) or o.get("cancelled_at"):
+            continue
+        currency = currency or str(o.get("currency") or "")
+        try:
+            total = float(o.get("total_price") or 0)
+        except (TypeError, ValueError):
+            total = 0.0
+        raw_out = o.get("total_outstanding")
+        try:
+            outstanding = float(raw_out) if raw_out is not None else total
+        except (TypeError, ValueError):
+            outstanding = total
+        name = str(o.get("name") or "").strip() or ("#" + str(o.get("order_number") or ""))
+        admin_url = (f"https://admin.shopify.com/store/{store}/orders/{o.get('id')}" if store else "")
+        fin = str(o.get("financial_status") or "").lower()
+        if fin in ("paid", "refunded", "voided") or outstanding <= 0.005:
+            # Settled but still tagged: a hygiene problem, not a liability.
+            stale.append({"name": name, "admin_url": admin_url})
+            continue
+        days, label, source, due = _liability_terms(o)
+        company, person = _label_party(o)
+        cust = (o.get("customer") or {})
+        created = None
+        try:
+            created = datetime.fromisoformat(str(o.get("created_at")).replace("Z", "+00:00")).date()
+        except (TypeError, ValueError):
+            pass
+        days_over = (today - due).days if due else 0
+        if due is None:
+            status, bucket = "within", ""
+        elif days_over > 0:
+            status = "overdue"
+            bucket = ("1-7" if days_over <= 7 else "8-30" if days_over <= 30
+                      else "31-60" if days_over <= 60 else "60+")
+        elif (due - today).days <= LIABILITY_DUE_SOON_DAYS:
+            status, bucket = "due_soon", ""
+        else:
+            status, bucket = "within", ""
+        rows.append({
+            "id": o.get("id"), "name": name, "admin_url": admin_url,
+            "customer": company or person or "Customer",
+            "customer_key": str(cust.get("id") or company or person or name),
+            "created_at": (created.isoformat() if created else ""),
+            "age_days": ((today - created).days if created else 0),
+            "value": round(total, 2), "paid": round(max(0.0, total - outstanding), 2),
+            "outstanding": round(outstanding, 2),
+            "terms": label, "terms_source": source,
+            "due": (due.isoformat() if due else ""),
+            "days_over": max(0, days_over),
+            "days_to_due": (max(0, (due - today).days) if due else 0),
+            "status": status, "bucket": bucket,
+            "tags": _order_tags(o),
+        })
+    # Customer roll-up.
+    customers: dict = {}
+    for r in rows:
+        c = customers.setdefault(r["customer_key"], {
+            "name": r["customer"], "total": 0.0, "within": 0.0, "due_soon": 0.0,
+            "overdue": 0.0, "oldest_days": 0, "terms": set(), "assumed": False, "orders": []})
+        c["total"] = round(c["total"] + r["outstanding"], 2)
+        key = "overdue" if r["status"] == "overdue" else ("due_soon" if r["status"] == "due_soon" else "within")
+        c[key] = round(c[key] + r["outstanding"], 2)
+        c["oldest_days"] = max(c["oldest_days"], r["age_days"])
+        c["terms"].add(r["terms"])
+        c["assumed"] = c["assumed"] or r["terms_source"] == "assumed"
+        c["orders"].append(r)
+    cust_rows = []
+    for c in customers.values():
+        c["orders"].sort(key=lambda r: (r["due"] or "9999"))
+        c["terms"] = (sorted(c["terms"])[0] if len(c["terms"]) == 1 else "Mixed")
+        cust_rows.append(c)
+    cust_rows.sort(key=lambda c: (-c["overdue"], -c["total"]))
+    buckets = {"within": 0.0, "due_soon": 0.0, "1-7": 0.0, "8-30": 0.0, "31-60": 0.0, "60+": 0.0}
+    for r in rows:
+        k = r["bucket"] if r["status"] == "overdue" else ("due_soon" if r["status"] == "due_soon" else "within")
+        buckets[k] = round(buckets[k] + r["outstanding"], 2)
+    return {
+        "tag": LIABILITY_TAG, "currency": currency or "GBP",
+        "total": round(sum(r["outstanding"] for r in rows), 2),
+        "orders": len(rows),
+        "within": round(buckets["within"] + buckets["due_soon"], 2),
+        "due_soon": buckets["due_soon"],
+        "overdue": round(buckets["1-7"] + buckets["8-30"] + buckets["31-60"] + buckets["60+"], 2),
+        "overdue_orders": sum(1 for r in rows if r["status"] == "overdue"),
+        "oldest_days": max((r["age_days"] for r in rows), default=0),
+        "buckets": buckets,
+        "customers": cust_rows,
+        "stale_tagged": stale[:20],
+        "default_terms": LIABILITY_DEFAULT_TERMS,
+    }
+
+
 async def run_stock_usage(registry: dict, date_str: str) -> dict:
     """Estimated stock used on one day: every order whose Mark made stamp falls
     inside the selected day (UK time), its items resolved through the same size
@@ -4633,6 +4783,25 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
         except Exception:
             logger.exception("Production state update failed")
             return _json({"error": "Couldn't update production state."}, 500)
+
+    @mcp.custom_route("/api/liability", methods=["POST"])
+    async def liability_route(request: Request):
+        # Accounts receivable overview. Shopify read, no AI.
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        try:
+            res = await run_liability(registry)
+            return _json(res, 502 if res.get("error") else 200)
+        except Exception:
+            logger.exception("Liability failed")
+            return _json({"error": "Couldn't build the liability view."}, 500)
 
     @mcp.custom_route("/api/stock-usage", methods=["POST"])
     async def stock_usage_route(request: Request):

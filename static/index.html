@@ -446,6 +446,34 @@
             padding: .08em .55em; border-radius: 2px; }
         .label-sheet .ls-onote { font-size: .9em; font-weight: 500; color: #111; margin-top: .55em; overflow-wrap: break-word; }
         .label-sheet .ls-onote b { font-weight: 800; }
+        /* liability / accounts receivable */
+        .lia-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+        .lia-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm);
+            padding: 13px 15px; box-shadow: var(--hair); }
+        .lia-k { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); }
+        .lia-v { font-size: 21px; font-weight: 800; letter-spacing: -.02em; margin-top: 4px; font-variant-numeric: tabular-nums; }
+        .lia-card.ok .lia-v { color: var(--win); }
+        .lia-card.warn .lia-v { color: #fbbf24; }
+        .lia-card.bad .lia-v { color: #f87171; }
+        .lia-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--surface-2);
+            border: 1px solid var(--border-2); margin-bottom: 8px; }
+        .lia-seg.within { background: rgba(34,197,94,.55); }
+        .lia-seg.soon { background: rgba(245,158,11,.6); }
+        .lia-seg.o1 { background: rgba(239,68,68,.35); }
+        .lia-seg.o2 { background: rgba(239,68,68,.55); }
+        .lia-seg.o3 { background: rgba(239,68,68,.75); }
+        .lia-seg.o4 { background: rgba(239,68,68,.95); }
+        .lia-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 11.5px; color: var(--ink-2); margin-bottom: 16px; }
+        .lia-leg-item { display: inline-flex; align-items: center; gap: 6px; }
+        .lia-dot { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+        .lia-dot.within { background: rgba(34,197,94,.55); }
+        .lia-dot.soon { background: rgba(245,158,11,.6); }
+        .lia-dot.o1 { background: rgba(239,68,68,.35); }
+        .lia-dot.o2 { background: rgba(239,68,68,.55); }
+        .lia-dot.o3 { background: rgba(239,68,68,.75); }
+        .lia-dot.o4 { background: rgba(239,68,68,.95); }
+        .lia-name { font-size: 14px; font-weight: 700; min-width: 150px; }
+        .lbl-chip.deep { background: rgba(239,68,68,.3); color: #fecaca; border-color: rgba(239,68,68,.6); }
         .cov-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
         .cov-head h3 { font-size: 14px; font-weight: 700; }
         .cov-line { font-size: 13px; color: var(--ink-2); margin-top: 6px; }
@@ -716,6 +744,7 @@
                 <button class="nav-item" data-view="keywords" id="nav-keywords"></button>
                 <button class="nav-item" data-view="products" id="nav-products"></button>
                 <button class="nav-item" data-view="customers" id="nav-customers"></button>
+                <button class="nav-item" data-view="liability" id="nav-liability"></button>
                 <button class="nav-item" data-view="labels" id="nav-labels"></button>
                 <button class="nav-item" data-view="memory" id="nav-memory"></button>
                 <button class="nav-item" data-view="skills" id="nav-skills"></button>
@@ -763,6 +792,11 @@
             <!-- Customers -->
             <section class="view" id="view-customers">
                 <div class="scroll"><div class="ov-wrap" id="customers-content"></div></div>
+            </section>
+
+            <!-- Liability / accounts receivable -->
+            <section class="view" id="view-liability">
+                <div class="scroll"><div class="ov-wrap" id="liability-content"></div></div>
             </section>
 
             <!-- Production labels -->
@@ -935,6 +969,7 @@
         $('nav-keywords').append(ico(I.tag), document.createTextNode('Keywords'));
         $('nav-products').append(ico(I.box), document.createTextNode('Products'));
         $('nav-customers').append(ico(I.users), document.createTextNode('Customers'));
+        $('nav-liability').append(ico(I.spark), document.createTextNode('Liability'));
         $('nav-labels').append(ico(I.printer), document.createTextNode('Production Manager'));
         $('nav-memory').append(ico(I.bookmark), document.createTextNode('Memory'));
         $('nav-skills').append(ico(I.book), document.createTextNode('Skills'));
@@ -2816,6 +2851,221 @@
             return card;
         }
 
+        /* ---------- liability / accounts receivable ---------- */
+        let liabilityCache = null;   // { data, at }
+        let liaOpen = null;          // expanded customer key
+        const liaF = { q: '', status: 'all', terms: 'all', from: '', to: '' };
+        function liaMoney(n, cur, dp) {
+            const sym = { GBP: '\u00a3', USD: '$', EUR: '\u20ac' }[cur] || (cur + ' ');
+            return sym + Number(n || 0).toLocaleString('en-GB',
+                { minimumFractionDigits: dp === 0 ? 0 : 2, maximumFractionDigits: dp === 0 ? 0 : 2 });
+        }
+        function showLiabilityView() {
+            if (liabilityCache) { renderLiability(); return; }
+            loadLiability(true);
+        }
+        async function loadLiability(force) {
+            const box = $('liability-content');
+            if (liabilityCache && !force) { renderLiability(); return; }
+            box.innerHTML = '';
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.spark;
+            const ht = el('div'); ht.append(el('h2', null, 'Liability'),
+                el('p', null, 'Reading unpaid purchase orders\u2026'));
+            hero.append(badge, ht); box.append(hero);
+            const t = el('div', 'thinking'); t.style.marginTop = '8px';
+            t.append(loader(), el('span', null, 'Checking up to two years of orders. No AI credits used\u2026'));
+            box.append(t);
+            try {
+                const data = await api('/api/liability', {});
+                liabilityCache = { data, at: Date.now() };
+                renderLiability();
+            } catch (e) {
+                box.innerHTML = ''; box.append(hero);
+                const er = el('div', 'msg error'); er.append(el('div', 'bubble', e.message || String(e))); box.append(er);
+                ht.children[1].textContent = 'Could not load the liability view.';
+            }
+        }
+        function liaChip(r) {
+            if (r.status === 'overdue') {
+                const c = el('span', 'lbl-chip bad' + (r.bucket === '60+' || r.bucket === '31-60' ? ' deep' : ''),
+                    'OVERDUE ' + r.days_over + 'D');
+                c.title = 'Due ' + fmtDate(r.due);
+                return c;
+            }
+            if (r.status === 'due_soon') return el('span', 'lbl-chip warn', 'DUE IN ' + r.days_to_due + 'D');
+            return el('span', 'lbl-chip made', 'WITHIN TERMS');
+        }
+        function liaOrderPasses(r) {
+            if (liaF.status !== 'all') {
+                if (liaF.status === 'overdue' && r.status !== 'overdue') return false;
+                if (liaF.status === 'within' && r.status !== 'within') return false;
+                if (liaF.status === 'due_soon' && r.status !== 'due_soon') return false;
+                if (['1-7', '8-30', '31-60', '60+'].indexOf(liaF.status) >= 0 && r.bucket !== liaF.status) return false;
+            }
+            if (liaF.terms !== 'all') {
+                if (liaF.terms === 'assumed' && r.terms_source !== 'assumed') return false;
+                if (liaF.terms !== 'assumed' && r.terms !== liaF.terms) return false;
+            }
+            if (liaF.from && r.created_at && r.created_at < liaF.from) return false;
+            if (liaF.to && r.created_at && r.created_at > liaF.to) return false;
+            if (liaF.q) {
+                const q = liaF.q.toLowerCase();
+                if (r.customer.toLowerCase().indexOf(q) < 0 && r.name.toLowerCase().indexOf(q) < 0) return false;
+            }
+            return true;
+        }
+        function renderLiability() {
+            const box = $('liability-content'); box.innerHTML = '';
+            const d = liabilityCache.data;
+            const cur = d.currency;
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.spark;
+            const ht = el('div'); ht.append(el('h2', null, 'Liability'),
+                el('p', null, 'Credit extended to customers, from orders tagged "' + d.tag
+                    + '". Terms come from the order itself, then a Net tag on the customer, otherwise Net '
+                    + d.default_terms + ' is assumed and marked.'));
+            hero.append(badge, ht);
+            hero.append(el('div', 'ov-updated', freshLabel(liabilityCache.at)));
+            box.append(hero);
+
+            // Summary cards.
+            const grid = el('div', 'lia-grid');
+            [['Total outstanding', liaMoney(d.total, cur, 0), ''],
+             ['Within terms', liaMoney(d.within, cur, 0), 'ok'],
+             ['Due soon', liaMoney(d.due_soon, cur, 0), 'warn'],
+             ['Overdue', liaMoney(d.overdue, cur, 0), d.overdue > 0 ? 'bad' : 'ok'],
+             ['Overdue orders', String(d.overdue_orders), d.overdue_orders > 0 ? 'bad' : 'ok'],
+             ['Oldest debt', d.oldest_days + ' days', '']].forEach(([k, v, tone]) => {
+                const c = el('div', 'lia-card' + (tone ? ' ' + tone : ''));
+                c.append(el('div', 'lia-k', k), el('div', 'lia-v', v));
+                grid.append(c);
+            });
+            box.append(grid);
+
+            // Aged-debt bar: one glance says whether the book is healthy.
+            if (d.total > 0) {
+                const seq = [['within', 'Within terms', d.buckets['within']],
+                             ['soon', 'Due soon', d.buckets['due_soon']],
+                             ['o1', '1-7d over', d.buckets['1-7']],
+                             ['o2', '8-30d over', d.buckets['8-30']],
+                             ['o3', '31-60d over', d.buckets['31-60']],
+                             ['o4', '60d+ over', d.buckets['60+']]];
+                const bar = el('div', 'lia-bar');
+                const leg = el('div', 'lia-legend');
+                seq.forEach(([cls, lab, amt]) => {
+                    if (amt <= 0) return;
+                    const seg = el('div', 'lia-seg ' + cls);
+                    seg.style.width = (amt / d.total * 100) + '%';
+                    seg.title = lab + ': ' + liaMoney(amt, cur, 0);
+                    bar.append(seg);
+                    const li = el('span', 'lia-leg-item');
+                    li.append(el('span', 'lia-dot ' + cls), document.createTextNode(lab + ' ' + liaMoney(amt, cur, 0)));
+                    leg.append(li);
+                });
+                box.append(bar, leg);
+            }
+
+            if ((d.stale_tagged || []).length) {
+                const s = el('div', 'miss-strip');
+                const head = el('div', 'miss-head');
+                head.append(ico(I.warning), el('b', null, 'Paid but still tagged'),
+                    el('span', 'miss-sub', d.stale_tagged.length + ' settled order(s) still carry the "' + d.tag
+                        + '" tag and are excluded from the totals. Untag them in Shopify.'));
+                s.append(head);
+                d.stale_tagged.forEach(m => {
+                    const row = el('div', 'miss-row');
+                    row.append(el('b', null, m.name));
+                    if (m.admin_url) { const a = el('a', 'miss-open', 'Open order'); a.href = m.admin_url; a.target = '_top'; row.append(a); }
+                    s.append(row);
+                });
+                box.append(s);
+            }
+
+            // Filters.
+            const bar2 = el('div', 'lbl-toolbar');
+            const q = document.createElement('input');
+            q.type = 'search'; q.placeholder = 'Search customer or order\u2026'; q.className = 'lbl-size'; q.value = liaF.q;
+            q.oninput = () => { liaF.q = q.value.trim(); paint(); };
+            bar2.append(q);
+            const st = el('select', 'lbl-size');
+            [['all', 'All statuses'], ['within', 'Within terms'], ['due_soon', 'Due soon'], ['overdue', 'All overdue'],
+             ['1-7', '1-7d overdue'], ['8-30', '8-30d overdue'], ['31-60', '31-60d overdue'], ['60+', '60d+ overdue']]
+                .forEach(([v2, l2]) => { const o2 = el('option', null, l2); o2.value = v2; if (liaF.status === v2) o2.selected = true; st.append(o2); });
+            st.onchange = () => { liaF.status = st.value; paint(); };
+            bar2.append(st);
+            const tset = {};
+            d.customers.forEach(c => c.orders.forEach(r => { tset[r.terms] = 1; }));
+            const tsel = el('select', 'lbl-size');
+            const topts = [['all', 'All terms']].concat(Object.keys(tset).sort().map(t2 => [t2, t2])).concat([['assumed', 'Assumed terms only']]);
+            topts.forEach(([v2, l2]) => { const o2 = el('option', null, l2); o2.value = v2; if (liaF.terms === v2) o2.selected = true; tsel.append(o2); });
+            tsel.onchange = () => { liaF.terms = tsel.value; paint(); };
+            bar2.append(tsel);
+            const df = document.createElement('input'); df.type = 'date'; df.className = 'lbl-size';
+            df.title = 'Orders placed on or after'; df.value = liaF.from || '';
+            df.onchange = () => { liaF.from = df.value; paint(); };
+            const dt2 = document.createElement('input'); dt2.type = 'date'; dt2.className = 'lbl-size';
+            dt2.title = 'Orders placed on or before'; dt2.value = liaF.to || '';
+            dt2.onchange = () => { liaF.to = dt2.value; paint(); };
+            bar2.append(el('span', 'cov-line', 'Ordered'), df, el('span', 'cov-line', 'to'), dt2);
+            box.append(bar2);
+
+            const host = el('div'); box.append(host);
+            function paint() {
+                host.innerHTML = '';
+                const custs = d.customers
+                    .map(c => ({ c, rows: c.orders.filter(liaOrderPasses) }))
+                    .filter(x => x.rows.length);
+                if (!custs.length) {
+                    host.append(el('div', 'empty', d.total > 0 ? 'Nothing matches these filters.'
+                        : 'No orders currently carry the "' + d.tag + '" tag. Nothing is owed.'));
+                    return;
+                }
+                custs.forEach(({ c, rows }) => {
+                    const key = c.name;
+                    const row = el('div', 'lbl-row' + (liaOpen === key ? ' on' : ''));
+                    row.setAttribute('role', 'button'); row.tabIndex = 0;
+                    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
+                    row.append(el('div', 'lia-name', c.name));
+                    const mid = el('div', 'lbl-who');
+                    const line = el('span', 'lbl-nameline');
+                    line.append(el('b', null, liaMoney(c.total, cur, 0)));
+                    if (c.overdue > 0) line.append(el('span', 'lbl-chip bad', 'OVERDUE ' + liaMoney(c.overdue, cur, 0)));
+                    else line.append(el('span', 'lbl-chip made', 'WITHIN TERMS'));
+                    mid.append(line);
+                    mid.append(el('span', 'sub', rows.length + (rows.length === 1 ? ' order' : ' orders')
+                        + '  \u00b7  oldest ' + c.oldest_days + 'd  \u00b7  ' + c.terms + (c.assumed ? ' (assumed)' : '')));
+                    row.append(mid);
+                    row.onclick = () => { liaOpen = (liaOpen === key ? null : key); renderLiability(); };
+                    host.append(row);
+                    if (liaOpen === key) {
+                        const wrap = el('div', 'ktable-wrap'); wrap.style.margin = '4px 0 16px';
+                        const tb = el('table', 'ktable');
+                        tb.innerHTML = '<thead><tr><th>Order</th><th>Order date</th><th>Due</th><th class="num">Value</th>'
+                            + '<th class="num">Paid</th><th class="num">Outstanding</th><th>Terms</th><th>Status</th><th></th></tr></thead>';
+                        const tbody = el('tbody');
+                        rows.forEach(r => {
+                            const tr = el('tr');
+                            tr.append(el('td', 'kw', r.name));
+                            tr.append(el('td', null, fmtDate(r.created_at)));
+                            tr.append(el('td', null, r.due ? fmtDate(r.due) : 'unknown'));
+                            tr.append(el('td', 'num', liaMoney(r.value, cur)));
+                            tr.append(el('td', 'num', liaMoney(r.paid, cur)));
+                            const out = el('td', 'num', liaMoney(r.outstanding, cur)); out.style.fontWeight = '700';
+                            tr.append(out);
+                            tr.append(el('td', null, r.terms + (r.terms_source === 'assumed' ? ' (assumed)'
+                                : r.terms_source === 'customer' ? ' (tag)' : '')));
+                            const tds = el('td'); tds.append(liaChip(r)); tr.append(tds);
+                            const tda = el('td');
+                            if (r.admin_url) { const a = el('a', 'miss-open', 'Open'); a.href = r.admin_url; a.target = '_top'; tda.append(a); }
+                            tr.append(tda);
+                            tbody.append(tr);
+                        });
+                        tb.append(tbody); wrap.append(tb); host.append(wrap);
+                    }
+                });
+            }
+            paint();
+        }
+
         /* ---------- production labels ---------- */
         let labelsCache = null;      // { data, at }
         let labelSel = null;         // selected order id
@@ -3563,8 +3813,8 @@
         /* ---------- view switching ---------- */
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
-            ['overview', 'seo', 'keywords', 'products', 'customers', 'labels', 'memory', 'skills', 'chat'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', labels: 'Production Manager', memory: 'Memory', skills: 'Skills' };
+            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'labels', 'memory', 'skills', 'chat'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', labels: 'Production Manager', memory: 'Memory', skills: 'Skills' };
             $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
             const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels') ? 'none' : '';
             // Only offer the PDF when there is actually a report to print: the print
@@ -3575,6 +3825,7 @@
             else if (v === 'keywords') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadKeywords(true); }
             else if (v === 'products') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadProducts(true); }
             else if (v === 'customers') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadCustomers(true); }
+            else if (v === 'liability') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadLiability(true); }
             else if (v === 'chat') { act.append(ico(I.plus), document.createTextNode('New chat')); act.className = 'btn btn-primary'; act.onclick = () => newConvo(); }
             closeSidebar();
             // Tabs render cached results if present, otherwise an idle "Run" gate.
@@ -3584,6 +3835,7 @@
             if (v === 'customers') showCustomersView();
             if (v === 'keywords') showKeywordsView();
             if (v === 'products') showProductsView();
+            if (v === 'liability') showLiabilityView();
             if (v === 'labels') showLabelsView();
             if (v === 'memory') loadMemory();
             if (v === 'skills') loadSkills();
