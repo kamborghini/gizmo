@@ -2875,6 +2875,57 @@ async def run_missing_production(registry: dict, tag: Optional[str] = None) -> d
             "missing_total": len(missing)}
 
 
+async def run_stock_usage(registry: dict, date_str: str) -> dict:
+    """Estimated stock used on one day: every order whose Mark made stamp falls
+    inside the selected day (UK time), its items resolved through the same size
+    lookup the labels print with, summed by glass size + type. Items that don't
+    resolve are listed separately, never silently dropped. No AI."""
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Europe/London")
+    try:
+        day = datetime.strptime(str(date_str or ""), "%Y-%m-%d").date()
+    except ValueError:
+        return {"error": "Pick a valid date."}
+    start = datetime.combine(day, datetime.min.time(), tzinfo=tz)
+    end = start + timedelta(days=1)
+    made_ids = []
+    for oid, entry in _load_prod_state().items():
+        raw = entry.get("made_at")
+        if not raw:
+            continue
+        try:
+            made = datetime.fromisoformat(raw)
+            if made.tzinfo is None:
+                made = made.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if start <= made.astimezone(tz) < end:
+            made_ids.append(int(oid))
+    made_ids = made_ids[:150]
+    fetched = await asyncio.gather(*[run_production_labels(registry, order_id=i) for i in made_ids])
+    rows: dict = {}
+    unresolved: dict = {}
+    orders_in, pieces = [], 0
+    for res in fetched:
+        for o in (res.get("orders") or []):
+            orders_in.append(str(o.get("name") or ""))
+            for it in o.get("items", []):
+                qty = int(it.get("quantity") or 1)
+                pieces += qty
+                if it.get("review_reason") or not it.get("production_size"):
+                    u = unresolved.setdefault(str(o.get("name") or ""), 0)
+                    unresolved[str(o.get("name") or "")] = u + qty
+                    continue
+                key = (it["production_size"], it.get("glass_type") or "")
+                r = rows.setdefault(key, {"size": it["production_size"],
+                                          "glass": it.get("glass_type") or "", "qty": 0})
+                r["qty"] += qty
+    out_rows = sorted(rows.values(), key=lambda r: (-float(r["size"]), r["glass"]))
+    return {"date": day.isoformat(), "orders": len(orders_in), "order_names": orders_in[:60],
+            "pieces": pieces, "rows": out_rows,
+            "unresolved": [{"name": k, "qty": v} for k, v in sorted(unresolved.items())]}
+
+
 async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
     """Do recent orders' gobo items resolve to a production size? The last N orders
     (any status, newest first), every Model run through the exact lookup the labels
@@ -4557,6 +4608,25 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
         except Exception:
             logger.exception("Production state update failed")
             return _json({"error": "Couldn't update production state."}, 500)
+
+    @mcp.custom_route("/api/stock-usage", methods=["POST"])
+    async def stock_usage_route(request: Request):
+        # Glass blanks consumed by everything marked Made on one day. Read-only, no AI.
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        try:
+            res = await run_stock_usage(registry, str(body.get("date") or ""))
+            return _json(res, 400 if res.get("error") else 200)
+        except Exception:
+            logger.exception("Stock usage failed")
+            return _json({"error": "Couldn't build the stock usage list."}, 500)
 
     @mcp.custom_route("/api/production-labels/missing", methods=["POST"])
     async def labels_missing_route(request: Request):

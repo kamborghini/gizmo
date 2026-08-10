@@ -474,6 +474,7 @@
         @media print {
             /* Label mode prints ONLY the label sheets, one per physical label. */
             body.printing-label #app { display: none !important; }
+            body.printing-label .modal-overlay { display: none !important; }
             body.printing-label #label-print { position: static !important; left: auto !important; }
             body.printing-label .label-sheet { border: 0 !important; border-radius: 0 !important;
                 break-after: page; page-break-after: always; }
@@ -3084,6 +3085,10 @@
             day.title = 'Print one A4 cut list of everything not yet made';
             day.onclick = printDaySheet;
             bar.append(day);
+            const su = el('button', 'btn'); su.append(ico(I.box), document.createTextNode('Stock usage'));
+            su.title = 'Glass used by everything marked made on a chosen day';
+            su.onclick = openStockUsage;
+            bar.append(su);
             const upBtn = el('button', 'btn'); upBtn.append(ico(I.plus), document.createTextNode('Update size list'));
             upBtn.title = 'Replace the gobo size sheet with a new CSV export. The current one is kept as a backup.';
             const fileIn = document.createElement('input');
@@ -3315,6 +3320,110 @@
             rate.append(rt);
             s.append(rate);
             return s;
+        }
+        /* Estimated stock usage: glass blanks consumed by everything marked made
+           on a chosen day (UK time), summed by size and glass type. */
+        function openStockUsage() {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, 'Estimated stock usage'));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
+            const body = el('div', 'modal-body');
+            const bar = el('div', 'lbl-toolbar');
+            const dt = document.createElement('input');
+            dt.type = 'date'; dt.className = 'lbl-size';
+            dt.value = new Date().toLocaleDateString('en-CA');
+            bar.append(el('span', 'cov-line', 'Everything marked made on'), dt);
+            const pr = el('button', 'btn'); pr.append(ico(I.printer), document.createTextNode('Print'));
+            pr.disabled = true;
+            bar.append(pr);
+            body.append(bar);
+            const out = el('div'); body.append(out);
+            let current = null;
+            async function load() {
+                out.innerHTML = ''; pr.disabled = true; current = null;
+                const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Adding up the day…')); out.append(t);
+                try {
+                    const d = await api('/api/stock-usage', { date: dt.value });
+                    current = d;
+                    out.innerHTML = '';
+                    out.append(el('div', 'cov-line', d.orders + (d.orders === 1 ? ' order' : ' orders')
+                        + ' marked made · ' + d.pieces + (d.pieces === 1 ? ' pc' : ' pcs')));
+                    if (!d.rows.length && !d.unresolved.length) {
+                        out.append(el('div', 'empty', 'Nothing was marked made on this day.'));
+                        return;
+                    }
+                    const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = '10px';
+                    const tb = el('table', 'ktable');
+                    tb.innerHTML = '<thead><tr><th>Size</th><th>Glass</th><th class=\"num\">Pieces</th></tr></thead>';
+                    const tbody = el('tbody');
+                    d.rows.forEach(r => {
+                        const tr = el('tr');
+                        tr.append(el('td', 'kw', r.size + 'mm'), el('td', null, r.glass), el('td', 'num', String(r.qty)));
+                        tbody.append(tr);
+                    });
+                    tb.append(tbody); wrap.append(tb); out.append(wrap);
+                    if (d.unresolved.length) {
+                        const uq = d.unresolved.reduce((s, u) => s + u.qty, 0);
+                        out.append(el('div', 'cov-note', uq + (uq === 1 ? ' pc' : ' pcs')
+                            + ' had no resolved size (' + d.unresolved.map(u => u.name).join(', ')
+                            + ') and are not counted above.'));
+                    }
+                    pr.disabled = !d.rows.length;
+                } catch (e) {
+                    out.innerHTML = '';
+                    out.append(el('div', 'cov-line', e.message || 'Could not load.'));
+                }
+            }
+            pr.onclick = () => { if (current) printStockUsage(current); };
+            dt.onchange = load;
+            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+            const close = () => { overlay.remove(); document.removeEventListener('keydown', esc); };
+            function esc(e) { if (e.key === 'Escape') close(); }
+            x.onclick = close;
+            overlay.onclick = (e) => { if (e.target === overlay) close(); };
+            document.addEventListener('keydown', esc);
+            load();
+        }
+        function printStockUsage(d) {
+            const box = $('label-print'); box.innerHTML = '';
+            const ds = el('div', 'day-sheet');
+            ds.append(el('h1', null, 'Estimated stock usage'));
+            const nice = new Date(d.date + 'T12:00:00').toLocaleDateString('en-GB',
+                { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+            ds.append(el('div', 'ds-meta', nice + ' · ' + d.orders + (d.orders === 1 ? ' order' : ' orders')
+                + ' · ' + d.pieces + (d.pieces === 1 ? ' pc' : ' pcs')));
+            const tb = el('table', 'ds-table');
+            tb.innerHTML = '<thead><tr><th>Size</th><th>Glass</th><th>Pieces</th></tr></thead>';
+            const tbody = el('tbody');
+            d.rows.forEach(r => {
+                const tr = el('tr');
+                tr.append(el('td', 'ds-size', r.size + 'mm'), el('td', null, r.glass), el('td', 'ds-qty', String(r.qty)));
+                tbody.append(tr);
+            });
+            tb.append(tbody); ds.append(tb);
+            if (d.unresolved.length) {
+                const uq2 = d.unresolved.reduce((s, u) => s + u.qty, 0);
+                ds.append(el('div', 'ds-flag', uq2 + (uq2 === 1 ? ' pc' : ' pcs')
+                    + ' unresolved: ' + d.unresolved.map(u => u.name + ' (' + u.qty + ')').join(', ')));
+            }
+            ds.append(el('div', 'ds-orders', 'Orders: ' + (d.order_names || []).join('   ')));
+            box.append(ds);
+            let rule = $('label-page-rule');
+            if (!rule) { rule = document.createElement('style'); rule.id = 'label-page-rule'; document.head.append(rule); }
+            rule.textContent = '@page { size: A4; margin: 12mm; }';
+            const seq = ++printSeq;
+            document.body.classList.add('printing-label');
+            const cleanup = () => {
+                if (seq !== printSeq) return;
+                document.body.classList.remove('printing-label');
+                box.innerHTML = '';
+                const r = $('label-page-rule');
+                if (r && r.parentNode) r.parentNode.removeChild(r);
+            };
+            if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
+            setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);
         }
         /* One A4 cut list of everything live and not yet made: sizes and glass
            types summed across the queue, with tick boxes for the bench. */
