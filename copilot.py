@@ -3434,10 +3434,12 @@ def _frame_headers(request: Request) -> dict:
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' https://cdn.shopify.com https://*.shopify.com; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "font-src https://fonts.gstatic.com data:; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
         "img-src 'self' data: https:; "
         "connect-src 'self' https://*.shopify.com https://*.myshopify.com; "
-        "frame-src https://*.shopify.com; "
+        # The store's own quote domain is allowed so the Proof modal can embed
+        # proposal pages; nothing else may be framed.
+        f"frame-src https://*.shopify.com https://{PROPOSAL_HOST}; "
         "base-uri 'self'; form-action 'self'; object-src 'none'; "
         f"frame-ancestors {ancestors};"
     )
