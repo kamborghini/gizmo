@@ -1,37 +1,67 @@
 #!/usr/bin/env python3
 """
-World Options Ecommerce REST API connector - shipping: quote, book, label, track.
+World Options SOAP web service connector - shipping: quote, book, label, cancel.
 
 Isolated on purpose: every World-Options-specific request lives in this file and
 the rest of the app speaks our own normalized shapes, so the courier provider
-can be swapped by editing one module (see the TrueSpeed routing precedent).
+can be swapped by editing one module.
 
-Auth: one merchant API key, sent as the `X-AUTH-TOKEN` header on every call. The
-key comes from env WO_API_KEY, or is set at runtime via set_api_key() (the app
-persists it server-side, never echoes it back, and keeps it out of logs, URLs
-and backups).
+This talks to World Options' WCF SOAP web service (BasicHttpBinding, SOAP 1.1,
+document/literal) at http://service.worldoptions.co.uk:
+  * RateService.svc  / GetAllServicesAndRates  -> quote couriers (free)
+  * ShipmentService.svc / DoShipment           -> book a shipment (charges)
+  * VoidService.svc  / VoidShipment            -> cancel a shipment
 
-Base URL (live, UK): https://ecommerce.worldoptions.com
-Full contract notes: docs/worldoptions-api.md
+Auth is a per-request AuthenticationDetail block: MeterNumber (+ optional Key,
+Password) and a PluginCode. Credentials come from env or are set at runtime via
+set_credentials(); they are persisted server-side, never echoed, and kept out of
+logs, URLs and backups.
+
+Envelopes are built by hand (no zeep): the module stays async + dependency-free,
+and the WSDL's schema imports point at an internal host a WSDL parser could not
+resolve anyway. Full contract: docs/worldoptions-api.md.
 """
 import os
 import asyncio
 import logging
-from urllib.parse import quote as _urlquote
+from xml.sax.saxutils import escape as _xml_escape
+import xml.etree.ElementTree as ET
 
 import httpx
 
 logger = logging.getLogger("shopify_mcp.worldoptions")
 
-DEFAULT_BASE = "https://ecommerce.worldoptions.com"
+DEFAULT_BASE = "http://service.worldoptions.co.uk"
 
 _state = {
-    "api_key":  os.environ.get("WO_API_KEY", "").strip(),
+    "meter":    os.environ.get("WO_METER_NUMBER", "").strip(),
+    "key":      os.environ.get("WO_KEY", "").strip(),
+    "password": os.environ.get("WO_PASSWORD", "").strip(),
+    "plugin":   os.environ.get("WO_PLUGIN_CODE", "Web_Service").strip() or "Web_Service",
     "base_url": (os.environ.get("WO_BASE_URL", DEFAULT_BASE) or DEFAULT_BASE).rstrip("/"),
 }
-_gate = asyncio.Semaphore(4)          # be polite to WO's API
-_RETRY_STATUS = {429, 500, 502, 503, 504}
-_carrier_cache: dict = {"at": 0.0, "carriers": None}
+_gate = asyncio.Semaphore(4)
+
+# SOAP / DataContract namespaces. Element names take the namespace of the type
+# that DECLARES them (elementFormDefault=qualified), so a child of a type in
+# namespace X is emitted with X's prefix even if its own type lives elsewhere.
+NS = {
+    "s":   "http://schemas.xmlsoap.org/soap/envelope/",
+    "tem": "http://tempuri.org/",
+    "wo":  "http://schemas.datacontract.org/2004/07/WOWebServices",
+    "m":   "http://schemas.datacontract.org/2004/07/WOWebServices.Model",
+    "rs":  "http://schemas.datacontract.org/2004/07/WOWebServices.Model.wsRateShipmentDetails",
+    "sd":  "http://schemas.datacontract.org/2004/07/WOWebServices.Model.wsShippingDetails",
+    "g":   "http://schemas.datacontract.org/2004/07/WOModel.GlobalTypes",
+    "gt":  "http://schemas.datacontract.org/2004/07/WOWebServices.Model.wsGlobalTypes",
+    "lbl": "http://schemas.datacontract.org/2004/07/WOModel.ShippingLabel",
+}
+
+# Map a booking service code (wsServiceTypes) onto its carrier (wsServiceCompanyTypes),
+# used only as a fallback when the quote reply does not name the carrier itself.
+_CARRIERS = ["DHLPARCEL", "DHL", "FEDEX", "UPS", "TNT", "PALLETWAYS", "YODEL",
+             "DXEXPRESS", "HERMES", "DSV", "EXFREIGHT", "GLOBALTRANZ", "CITYSPRINT",
+             "EVRISEND", "EVRICORPORATE", "EVRI", "TUFFNELLS", "ROYALMAIL", "DPD"]
 
 
 class WorldOptionsError(Exception):
@@ -42,254 +72,381 @@ class WorldOptionsError(Exception):
 # Connection state
 # ---------------------------------------------------------------------------
 def configured() -> bool:
-    return bool(_state["api_key"])
+    return bool(_state["meter"] or _state["key"])
 
 
 def base_url() -> str:
     return _state["base_url"]
 
 
-def set_api_key(key) -> None:
-    """Set (or clear, with a falsy value) the X-AUTH-TOKEN key."""
-    _state["api_key"] = (key or "").strip()
+def set_credentials(meter=None, key=None, password=None, plugin=None) -> None:
+    """Set any provided credential (None leaves it unchanged; '' clears it)."""
+    if meter is not None:
+        _state["meter"] = (meter or "").strip()
+    if key is not None:
+        _state["key"] = (key or "").strip()
+    if password is not None:
+        _state["password"] = (password or "").strip()
+    if plugin is not None:
+        _state["plugin"] = (plugin or "").strip() or "Web_Service"
 
 
 def set_base_url(url) -> None:
     _state["base_url"] = ((url or DEFAULT_BASE).strip() or DEFAULT_BASE).rstrip("/")
 
 
-def key_last4() -> str:
-    k = _state["api_key"]
-    return k[-4:] if len(k) >= 4 else ("set" if k else "")
+def meter_last4() -> str:
+    v = _state["meter"] or _state["key"]
+    return v[-4:] if len(v) >= 4 else ("set" if v else "")
+
+
+def plugin_code() -> str:
+    return _state["plugin"]
+
+
+def has_key() -> bool:
+    return bool(_state["key"])
+
+
+def has_password() -> bool:
+    return bool(_state["password"])
+
+
+# ---------------------------------------------------------------------------
+# XML building
+# ---------------------------------------------------------------------------
+def _t(prefix: str, name: str, value) -> str:
+    """One element `<prefix:name>escaped</prefix:name>`, or '' when value is blank."""
+    if value is None or value == "":
+        return ""
+    return f"<{prefix}:{name}>{_xml_escape(str(value))}</{prefix}:{name}>"
+
+
+def _b(prefix: str, name: str, value: bool) -> str:
+    return f"<{prefix}:{name}>{'true' if value else 'false'}</{prefix}:{name}>"
+
+
+def _num(v) -> str:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return "0"
+    return str(int(f)) if f == int(f) else repr(f)
+
+
+def _auth_block() -> str:
+    # wsAuthenticationDetail children, alphabetical: Key, MeterNumber, Password, PluginCode.
+    return ("<wo:AuthenticationDetail>"
+            + _t("m", "Key", _state["key"])
+            + _t("m", "MeterNumber", _state["meter"])
+            + _t("m", "Password", _state["password"])
+            + _t("m", "PluginCode", _state["plugin"] or "Web_Service")
+            + "</wo:AuthenticationDetail>")
+
+
+def _envelope(inner: str) -> str:
+    decls = " ".join(f'xmlns:{p}="{u}"' for p, u in NS.items())
+    return ('<?xml version="1.0" encoding="utf-8"?>'
+            f'<s:Envelope {decls}><s:Header/><s:Body>{inner}</s:Body></s:Envelope>')
+
+
+# ---------------------------------------------------------------------------
+# XML parsing (namespace-agnostic: match by local name)
+# ---------------------------------------------------------------------------
+def _local(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+
+def _find(elem, name):
+    if elem is None:
+        return None
+    for e in elem.iter():
+        if _local(e.tag) == name:
+            return e
+    return None
+
+
+def _findall_direct(elem, name):
+    """Immediate-child-ish search: all descendants with the local name (WCF trees
+    are shallow enough that this is unambiguous for our reply shapes)."""
+    return [e for e in (elem.iter() if elem is not None else []) if _local(e.tag) == name]
+
+
+def _text(elem, name, default=""):
+    e = _find(elem, name)
+    return (e.text or default) if e is not None else default
 
 
 # ---------------------------------------------------------------------------
 # HTTP
 # ---------------------------------------------------------------------------
-def _extract_message(resp: httpx.Response) -> str:
-    """Pull the human-readable reason out of an API Platform / Symfony error."""
-    try:
-        data = resp.json()
-    except Exception:
-        return (resp.text or "")[:300]
-    if isinstance(data, dict):
-        for key in ("detail", "hydra:description", "message", "title", "error"):
-            v = data.get(key)
-            if isinstance(v, str) and v.strip():
-                return v.strip()[:400]
-        viol = data.get("violations")
-        if isinstance(viol, list) and viol:
-            parts = []
-            for x in viol:
-                if isinstance(x, dict):
-                    parts.append(f"{x.get('propertyPath', '')}: {x.get('message', '')}".strip(": "))
-            if parts:
-                return ("; ".join(parts))[:400]
-    return (resp.text or "")[:300]
-
-
-async def _request(method: str, path: str, body=None, params=None) -> dict:
-    if not _state["api_key"]:
-        raise WorldOptionsError("World Options is not connected. Add your API key in Settings.")
-    url = _state["base_url"] + path
-    headers = {"X-AUTH-TOKEN": _state["api_key"], "Accept": "application/json"}
+async def _soap_call(service: str, action: str, inner: str) -> ET.Element:
+    if not configured():
+        raise WorldOptionsError("World Options is not connected. Add your Meter Number in Settings.")
+    url = f"{_state['base_url']}/{service}.svc"
+    headers = {"Content-Type": "text/xml; charset=utf-8", "SOAPAction": f'"{action}"'}
+    payload = _envelope(inner).encode("utf-8")
     async with _gate:
         last_exc = None
         for attempt in range(3):
             try:
                 async with httpx.AsyncClient() as client:
-                    resp = await client.request(method, url, headers=headers,
-                                                params=params, json=body, timeout=30.0)
+                    resp = await client.post(url, content=payload, headers=headers, timeout=45.0)
             except (httpx.TimeoutException, httpx.TransportError) as e:
                 last_exc = e
                 if attempt >= 2:
                     break
                 await asyncio.sleep(min(2 ** attempt, 6))
                 continue
-            if resp.status_code in _RETRY_STATUS and attempt < 2:
-                await asyncio.sleep(min(2 ** attempt, 6))
-                continue
-            return _handle(resp)
+            return _parse(resp)
     raise WorldOptionsError(
         f"Could not reach World Options ({type(last_exc).__name__ if last_exc else 'network error'}). "
         "Try again in a moment.")
 
 
-def _handle(resp: httpx.Response) -> dict:
-    sc = resp.status_code
-    if sc in (401, 403):
-        raise WorldOptionsError(
-            "World Options rejected the API key (unauthorized). Check the key in Settings.")
-    if sc >= 400:
-        raise WorldOptionsError(f"World Options error {sc}: {_extract_message(resp)}")
-    if sc == 204 or not resp.content:
-        return {}
+def _parse(resp: httpx.Response) -> ET.Element:
     try:
-        return resp.json()
+        root = ET.fromstring(resp.content)
     except Exception:
-        return {}
+        raise WorldOptionsError(f"World Options returned an unreadable response (HTTP {resp.status_code}).")
+    fault = _find(root, "Fault")
+    if fault is not None:
+        reason = _text(fault, "Text") or _text(fault, "faultstring") or "SOAP fault"
+        raise WorldOptionsError(f"World Options rejected the request: {reason}"[:400])
+    if resp.status_code >= 400:
+        raise WorldOptionsError(f"World Options error (HTTP {resp.status_code}).")
+    return root
+
+
+def _reply_status(reply, context: str):
+    """Raise on a FAILED reply, carrying WO's Message. Returns the (message, notif)."""
+    notif = (_text(reply, "NotificationtType") or "").strip().upper()
+    msg = _text(reply, "Message").strip()
+    if notif == "FAILED":
+        raise WorldOptionsError(msg or f"World Options could not {context}.")
+    return msg, notif
 
 
 # ---------------------------------------------------------------------------
-# Address + normalization helpers
+# Normalization helpers
 # ---------------------------------------------------------------------------
-def _addr(a: dict) -> dict:
-    """Our internal address dict -> the World Options address block."""
-    a = a or {}
-    return {
-        "name":      str(a.get("name") or "")[:70],
-        "company":   str(a.get("company") or "")[:70],
-        "firstname": str(a.get("firstname") or "")[:50],
-        "lastname":  str(a.get("lastname") or "")[:50],
-        "street":    str(a.get("street") or "")[:120],
-        "postcode":  str(a.get("postcode") or "")[:20],
-        "city":      str(a.get("city") or "")[:60],
-        "state":     str(a.get("state") or "")[:60],
-        "country":   str(a.get("country") or "")[:2].upper(),
-        "phone":     str(a.get("phone") or "")[:30],
-        "email":     str(a.get("email") or "")[:120],
-    }
+def _carrier_from(service_code: str, quote_service_type: str) -> str:
+    qt = (quote_service_type or "").strip().upper()
+    if qt:
+        return qt
+    up = (service_code or "").upper()
+    for c in _CARRIERS:
+        if up.startswith(c):
+            return c
+    return ""
 
 
-def _box(b: dict) -> dict:
-    return {
-        "width":  float(b.get("width") or 0),
-        "length": float(b.get("length") or 0),
-        "depth":  float(b.get("depth") or 0),
-        "weight": float(b.get("weight") or 0),
-    }
-
-
-def _normalize_rate(data: dict, fallback_currency: str) -> dict:
-    """Flatten a Rate resource's grouped priced options into one sorted list.
-
-    A single POST /api/rates returns ONE Rate (top-level `id`) carrying several
-    groups of priced carrier+service options; the caller books with the Rate id
-    plus the chosen option's `carrier_id` (the RateCarrier id)."""
-    rate_id = data.get("id")
-    options = []
-    for group_key in ("webservicesRates", "internalRates", "customRates", "backupRates"):
-        for grp in (data.get(group_key) or []):
-            for cs in (grp.get("carriersServices") or []):
-                svc = cs.get("carrierService") or {}
-                carrier = svc.get("carrier") or {}
-                cur = cs.get("currency") or {}
-                amount = cs.get("amount")
-                options.append({
-                    "rate_id":      rate_id,
-                    "carrier_id":   cs.get("id"),          # RateCarrier id - the booking selector
-                    # The underlying Carrier resource id, kept so that if WO's shipment
-                    # `carrier` field turns out to mean the Carrier id (not the RateCarrier
-                    # id), book() can switch selectors by changing one line.
-                    "wo_carrier_id": carrier.get("id"),
-                    "carrier_name": carrier.get("name") or svc.get("name") or "",
-                    "carrier_code": carrier.get("code") or "",
-                    "service_name": svc.get("name") or "",
-                    "service_code": svc.get("code") or "",
-                    "amount":       (float(amount) if amount is not None else None),
-                    "currency":     cur.get("code") or fallback_currency,
-                    "delivery":     str(cs.get("delivery") or ""),
-                    "package":      str(cs.get("package") or ""),
-                    "group":        group_key,
-                    "drop_off":     cs.get("dropOffPoint") or [],
-                })
-    options.sort(key=lambda o: (o["amount"] is None, o["amount"] if o["amount"] is not None else 0))
-    return {"rate_id": rate_id, "options": options}
-
-
-def _classify_labels(labels) -> list:
-    """shippingLabels[] can be URLs or base64 PDF blobs; hand the UI a typed list."""
-    out = []
-    for lb in (labels or []):
-        s = str(lb or "").strip()
-        if not s:
-            continue
-        low = s.lower()
-        if low.startswith("http://") or low.startswith("https://"):
-            out.append({"type": "url", "value": s})
-        elif low.startswith("data:"):
-            out.append({"type": "dataurl", "value": s})
-        else:
-            # Assume a base64-encoded PDF (the common WO shape for label blobs).
-            out.append({"type": "base64pdf", "value": s})
-    return out
-
-
-def _normalize_shipment(data: dict) -> dict:
-    svc = data.get("carrierService") or {}
-    carrier = svc.get("carrier") or {}
-    cur = data.get("currency") or {}
-    amount = data.get("shippingAmount")
-    return {
-        "shipment_id":     data.get("id"),
-        "tracking_number": str(data.get("trackingNumber") or ""),
-        "amount":          (float(amount) if amount is not None else None),
-        "currency":        cur.get("code") or "",
-        "carrier_name":    carrier.get("name") or svc.get("name") or "",
-        "carrier_code":    carrier.get("code") or "",
-        "service_name":    svc.get("name") or "",
-        "service_code":    svc.get("code") or "",
-        "labels":          _classify_labels(data.get("shippingLabels")),
-        "canceled":        bool(data.get("canceled")),
-        "invoice":         bool(data.get("invoice")),
-        "location_id":     str(data.get("locationId") or ""),
-    }
+def _dec(v):
+    try:
+        return round(float(v), 2)
+    except (TypeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------
 # Public operations
 # ---------------------------------------------------------------------------
-async def validate() -> dict:
-    """Confirm the key works and return light account context for Settings."""
-    data = await _request("GET", "/api/customers/info")
-    return data if isinstance(data, dict) else {}
-
-
-async def carriers(force: bool = False) -> list:
-    """Cached list of the account's carriers (reference data; rarely changes)."""
-    import time
-    now = time.monotonic()
-    if not force and _carrier_cache["carriers"] is not None and (now - _carrier_cache["at"]) < 3600:
-        return _carrier_cache["carriers"]
-    data = await _request("GET", "/api/carriers")
-    items = data if isinstance(data, list) else (data.get("hydra:member") or data.get("member") or [])
-    out = [{"id": c.get("id"), "name": c.get("name"), "code": c.get("code")} for c in items]
-    _carrier_cache.update({"at": now, "carriers": out})
-    return out
-
-
 async def quote(origin: dict, destination: dict, boxes: list,
                 currency: str = "GBP", residential: bool = False) -> dict:
-    """Free, read-only price check. Returns {rate_id, options[]}."""
-    body = {
-        "origin":      _addr(origin),
-        "destination": _addr(destination),
-        "boxes":       [_box(b) for b in (boxes or [])],
-        "currency":    (currency or "GBP")[:3].upper(),
-        "residental":  bool(residential),   # WO's own field spelling
-        "packing":     False,               # we send our own boxes; don't repack
+    """Free, read-only price check across all carriers. Returns {options[]}."""
+    o, d = origin or {}, destination or {}
+    pkgs = ""
+    for i, b in enumerate(boxes or [], start=1):
+        pkgs += ("<rs:wsShippingDetails.PackageDetail>"
+                 + _t("rs", "Breadth", _num(b.get("width")))
+                 + _t("rs", "CustomValue", "0")
+                 + _t("rs", "Height", _num(b.get("depth")))
+                 + _t("rs", "ItemNumber", str(i))
+                 + _t("rs", "Length", _num(b.get("length")))
+                 + _t("rs", "Weight", _num(b.get("weight")))
+                 + "</rs:wsShippingDetails.PackageDetail>")
+    inner = (
+        "<tem:GetAllServicesAndRates><tem:request>"
+        + _auth_block()
+        # RecipientDetails (wsDeliveryDetail), alpha
+        + "<wo:RecipientDetails>"
+        + _t("m", "DeliveryCity", d.get("city"))
+        + _t("m", "DeliveryCountryCode", (d.get("country") or "").upper())
+        + _t("m", "DeliveryPostCode", d.get("postcode"))
+        + _t("m", "DeliveryState", d.get("state"))
+        + _b("m", "IsResidential", bool(residential))
+        + "</wo:RecipientDetails>"
+        # SenderDetails (wsCollectionDetail), alpha
+        + "<wo:SenderDetails>"
+        + _t("m", "CollectionCity", o.get("city"))
+        + _t("m", "CollectionCountryCode", (o.get("country") or "").upper())
+        + _t("m", "CollectionCountryState", o.get("state"))
+        + _t("m", "CollectionPostCode", o.get("postcode"))
+        + "</wo:SenderDetails>"
+        # ShippingDetails (wsShippingDetails), alpha (only fields we set)
+        + "<wo:ShippingDetails>"
+        + f"<rs:PackageDetails>{pkgs}</rs:PackageDetails>"
+        + _t("rs", "ServiceName", "ALL")
+        + _t("rs", "ServiceTypeName", "ALL")
+        + "</wo:ShippingDetails>"
+        + "</tem:request></tem:GetAllServicesAndRates>"
+    )
+    root = await _soap_call("RateService", "http://tempuri.org/IRateService/GetAllServicesAndRates", inner)
+    reply = _find(root, "GetAllServicesAndRatesResult")
+    if reply is None:
+        raise WorldOptionsError("World Options returned no rate result.")
+    _reply_status(reply, "price this shipment")
+    cur = (currency or "GBP")[:3].upper()
+    options = []
+    for opt in _findall_direct(reply, "wsAvailableServicesAndRates"):
+        qd = _find(opt, "wsQuoteDetails")
+        amount = _dec(_text(qd, "TotalNetCharge")) if qd is not None else None
+        service_code = _text(opt, "wsServiceTypeCode")
+        carrier = _carrier_from(service_code, _text(qd, "ServiceType") if qd is not None else "")
+        options.append({
+            "service_type_code": service_code,
+            "service_code":      _text(opt, "wsServiceCode"),
+            "package_type_code": _text(opt, "wsPackageTypeCode"),
+            "carrier_name":      carrier,
+            "service_name":      _text(opt, "wsServiceTypeName") or service_code,
+            "amount":            amount,
+            "currency":          cur,
+            "delivery":          _text(opt, "wsDeliveryDateTime"),
+            "pickup":            _text(opt, "wsPickupDateTime"),
+        })
+    options.sort(key=lambda x: (x["amount"] is None, x["amount"] if x["amount"] is not None else 0))
+    return {"options": options, "currency": cur}
+
+
+def _recipient_block(d: dict) -> str:
+    # wsRecipient, alpha: Address1,Address2,Address3,City,Company,Country_Code,Email,
+    # Fax,Name,Phone,PhoneDialCode,Postalcode,Residential,State_Code
+    name = d.get("name") or " ".join(x for x in [d.get("firstname"), d.get("lastname")] if x).strip()
+    return ("<wo:RecipientsDetails>"
+            + _t("m", "Address1", d.get("street"))
+            + _t("m", "City", d.get("city"))
+            + _t("m", "Company", d.get("company"))
+            + _t("m", "Country_Code", (d.get("country") or "").upper())
+            + _t("m", "Email", d.get("email"))
+            + _t("m", "Name", name or d.get("company"))
+            + _t("m", "Phone", d.get("phone"))
+            + _t("m", "Postalcode", d.get("postcode"))
+            + _b("m", "Residential", not (d.get("company") or "").strip())
+            + _t("m", "State_Code", d.get("state"))
+            + "</wo:RecipientsDetails>")
+
+
+def _sender_block(o: dict) -> str:
+    # wsSender, alpha: Address1,Address2,Address3,City,Company,CountryCode,Email,
+    # Name,Phone,PhoneDialCode,PostalCode,State
+    name = o.get("name") or " ".join(x for x in [o.get("firstname"), o.get("lastname")] if x).strip()
+    return ("<wo:SendersDetails>"
+            + _t("m", "Address1", o.get("street"))
+            + _t("m", "City", o.get("city"))
+            + _t("m", "Company", o.get("company"))
+            + _t("m", "CountryCode", (o.get("country") or "").upper())
+            + _t("m", "Email", o.get("email"))
+            + _t("m", "Name", name or o.get("company"))
+            + _t("m", "Phone", o.get("phone"))
+            + _t("m", "PostalCode", o.get("postcode"))
+            + _t("m", "State", o.get("state"))
+            + "</wo:SendersDetails>")
+
+
+def _classify_label(lbl: ET.Element) -> dict:
+    url = _text(lbl, "LabelURL").strip()
+    if url:
+        return {"type": "url", "value": url}
+    img = _text(lbl, "Image").strip()
+    if img:
+        lt = (_text(lbl, "LabelType") or "").upper()
+        kind = "base64pdf" if "PDF" in lt or not lt else ("base64png" if "PNG" in lt else "base64pdf")
+        return {"type": kind, "value": img}
+    return {}
+
+
+async def book(option: dict, origin: dict, destination: dict, boxes: list,
+               currency: str = "GBP", reference: str = "") -> dict:
+    """Book (and CHARGE) the chosen quote option. Returns tracking + labels."""
+    option = option or {}
+    service_code = option.get("service_type_code") or ""
+    carrier = (option.get("carrier_name") or _carrier_from(service_code, "")).upper()
+    pkg_type = option.get("package_type_code") or ""
+    cur = (currency or "GBP")[:3].upper()
+    pkgs = ""
+    for i, b in enumerate(boxes or [], start=1):
+        pkgs += ("<sd:wsShippingDetail.PackageDetail>"
+                 + _t("sd", "Breadth", _num(b.get("width")))
+                 + _t("sd", "CustomValue", "0")
+                 + _t("sd", "Height", _num(b.get("depth")))
+                 + _t("sd", "ItemNumber", str(i))
+                 + _t("sd", "Length", _num(b.get("length")))
+                 + _t("sd", "Wt", _num(b.get("weight")))
+                 + "</sd:wsShippingDetail.PackageDetail>")
+    # ShippingDetail (wsShippingDetail), alpha, only fields we set:
+    # CollectionType, Currency, CustomerReference, PackageDetails, PackageTypeCode,
+    # ServiceType, ServiceTypeCode
+    shipping = ("<wo:ShippingDetail>"
+                + _t("sd", "CollectionType", "Regular")
+                + _t("sd", "Currency", cur)
+                + _t("sd", "CustomerReference", (reference or "")[:40])
+                + f"<sd:PackageDetails>{pkgs}</sd:PackageDetails>"
+                + _t("sd", "PackageTypeCode", pkg_type)
+                + _t("sd", "ServiceType", carrier)
+                + _t("sd", "ServiceTypeCode", service_code)
+                + "</wo:ShippingDetail>")
+    # ShipmentBookingRequest, alpha: AdditionalShipmentDetail, AuthenticationDetail,
+    # BillingDetail, RecipientsDetails, SendersDetails, ShippingDetail
+    inner = ("<tem:DoShipment><tem:shipment>"
+             + _auth_block()
+             + _recipient_block(destination or {})
+             + _sender_block(origin or {})
+             + shipping
+             + "</tem:shipment></tem:DoShipment>")
+    root = await _soap_call("ShipmentService", "http://tempuri.org/IShipmentService/DoShipment", inner)
+    reply = _find(root, "DoShipmentResult")
+    if reply is None:
+        raise WorldOptionsError("World Options returned no booking result.")
+    msg, _notif = _reply_status(reply, "book this shipment")
+    tracking = _text(reply, "MasterTrackingNo").strip()
+    labels = [c for c in (_classify_label(l) for l in _findall_direct(reply, "ShippingLabel")) if c]
+    return {
+        "tracking_number": tracking,
+        "carrier_name":    carrier,
+        "service_name":    option.get("service_name") or service_code,
+        "service_code":    service_code,
+        "amount":          _dec(option.get("amount")),
+        "currency":        cur,
+        "labels":          labels,
+        "warning":         _text(reply, "Warning").strip(),
+        "message":         msg,
+        "collection_date": _text(reply, "CollectionDateNumber").strip(),
     }
-    data = await _request("POST", "/api/rates", body=body)
-    return _normalize_rate(data if isinstance(data, dict) else {}, body["currency"])
-
-
-async def book(rate_id, carrier_id, wo_order_id=None) -> dict:
-    """Book (and CHARGE) a shipment for a rate + chosen carrier option.
-    Returns a normalized shipment with tracking + labels."""
-    body = {"rate": int(rate_id), "carrier": int(carrier_id)}
-    if wo_order_id is not None:
-        body["order"] = int(wo_order_id)
-    data = await _request("POST", "/api/shipments", body=body)
-    return _normalize_shipment(data if isinstance(data, dict) else {})
-
-
-async def track(tracking_number: str) -> dict:
-    tn = _urlquote(str(tracking_number), safe="")
-    data = await _request("GET", f"/api/shipments/{tn}/get")
-    return _normalize_shipment(data if isinstance(data, dict) else {})
 
 
 async def cancel(tracking_number: str) -> dict:
-    tn = _urlquote(str(tracking_number), safe="")
-    data = await _request("PATCH", f"/api/shipments/{tn}/cancel")
-    return _normalize_shipment(data if isinstance(data, dict) else {})
+    inner = ("<tem:VoidShipment><tem:request>"
+             + _auth_block()
+             + _t("wo", "TrackingNumber", tracking_number)
+             + "</tem:request></tem:VoidShipment>")
+    root = await _soap_call("VoidService", "http://tempuri.org/IVoidService/VoidShipment", inner)
+    reply = _find(root, "VoidShipmentResult")
+    if reply is None:
+        raise WorldOptionsError("World Options returned no cancellation result.")
+    msg, _notif = _reply_status(reply, "cancel this shipment")
+    return {"canceled": True, "message": msg}
+
+
+async def validate() -> dict:
+    """Confirm the credentials work by pricing a tiny domestic test parcel.
+    Read-only; never books. Returns {ok, message}."""
+    try:
+        res = await quote(
+            {"city": "Manchester", "postcode": "M1 1AA", "country": "GB"},
+            {"city": "London", "postcode": "EC1A 1BB", "country": "GB"},
+            [{"width": 20, "length": 15, "depth": 10, "weight": 1.0}],
+            currency="GBP", residential=True)
+        n = len(res.get("options") or [])
+        return {"ok": True, "message": f"{n} service(s) available on a test quote."}
+    except WorldOptionsError as e:
+        return {"ok": False, "message": str(e)}

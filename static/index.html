@@ -4071,10 +4071,11 @@
             const quoteWrap = el('div'); quoteWrap.style.marginTop = '12px';
             body.append(quoteBtn, quoteWrap);
 
-            let quote = null, chosen = null;
+            let quote = null, chosen = null, lastBox = null;
             quoteBtn.onclick = async () => {
                 const box = { width: parseFloat(wF.input.value), length: parseFloat(lF.input.value), depth: parseFloat(dF.input.value), weight: parseFloat(wtF.input.value) };
                 if (!(box.width > 0 && box.length > 0 && box.depth > 0 && box.weight > 0)) { addToast('Enter a box size and weight above zero.'); return; }
+                lastBox = box;
                 quoteBtn.disabled = true; quoteWrap.innerHTML = '';
                 const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Asking World Options for prices…')); quoteWrap.append(t);
                 try { quote = await api('/api/dispatch/quote', { order_id: o.id, box }); chosen = null; renderOptions(); }
@@ -4120,8 +4121,7 @@
                     book.disabled = true; book.textContent = 'Booking…';
                     try {
                         const res = await api('/api/dispatch/book', {
-                            order_id: o.id, rate_id: quote.rate_id, carrier_id: chosen.carrier_id,
-                            expected: { amount: chosen.amount, currency: chosen.currency }, notify: nb.checked
+                            order_id: o.id, option: chosen, box: lastBox, notify: nb.checked
                         });
                         setDispatchState(o.id, res.dispatch || {});
                         renderResult(res);
@@ -4161,7 +4161,7 @@
                 const rp = el('button', 'btn'); rp.append(ico(I.printer), document.createTextNode('Reprint label'));
                 rp.onclick = async () => {
                     rp.disabled = true;
-                    try { const r = await api('/api/dispatch/track', { tracking_number: d.tracking_number }); labelButtons(body, (r.shipment || {}).labels); }
+                    try { const r = await api('/api/dispatch/label', { order_id: o.id }); labelButtons(body, r.labels); }
                     catch (e) { addToast(e.message || 'Could not fetch the label'); }
                     rp.disabled = false;
                 };
@@ -4204,25 +4204,46 @@
             catch (e) { body.innerHTML = ''; body.append(errBubble(e.message || 'Could not load')); return; }
             body.innerHTML = '';
 
-            // Connection
+            // Connection (World Options SOAP web service)
             body.append(el('div', 'section-title', 'World Options connection'));
+            const fromEnv = !!cfg.creds_from_env;
             const cstat = el('div', 'setting-sub');
-            cstat.textContent = cfg.connected ? ('Connected' + (cfg.key_last4 ? ' (key ending ' + cfg.key_last4 + ')' : '')) : 'Not connected yet.';
+            cstat.textContent = cfg.connected
+                ? ('Connected' + (cfg.meter_last4 ? ' (meter ending ' + cfg.meter_last4 + ')' : ''))
+                : 'Not connected yet. Enter the details World Options gave you.';
             body.append(cstat);
-            const keyIn = document.createElement('input');
-            keyIn.type = 'password'; keyIn.className = 'pf-input'; keyIn.placeholder = cfg.connected ? 'Enter a new key to replace the saved one' : 'Paste your World Options API key';
-            keyIn.autocomplete = 'off';
-            if (cfg.key_from_env) { keyIn.disabled = true; keyIn.placeholder = 'Set on the server (WO_API_KEY)'; }
-            body.append(el('label', 'field-label', 'API key (X-AUTH-TOKEN)'), keyIn);
-            const testBtn = el('button', 'btn'); testBtn.style.marginTop = '8px'; testBtn.append(ico(I.check), document.createTextNode('Save key & test connection'));
+            body.append(el('p', 'field-help', 'From your World Options web service setup. The Meter Number is required; add the Key and Password if you were given them.'));
+            const credIn = {};
+            [['meter_number', 'Meter Number', 'text', cfg.connected ? 'Saved' : 'e.g. 1234567'],
+             ['key', 'Key', 'password', cfg.has_key ? 'Saved (enter to replace)' : 'Web service key'],
+             ['password', 'Password', 'password', cfg.has_password ? 'Saved (enter to replace)' : 'Web service password']
+            ].forEach(([k, lab, type, ph]) => {
+                const inp = document.createElement('input');
+                inp.type = type; inp.className = 'pf-input'; inp.autocomplete = 'off'; inp.placeholder = fromEnv ? 'Set on the server' : ph;
+                if (fromEnv) inp.disabled = true;
+                body.append(el('label', 'field-label', lab), inp);
+                credIn[k] = inp;
+            });
+            const pluginRow = el('label', 'disp-fld'); pluginRow.style.marginTop = '8px';
+            pluginRow.append(el('span', 'disp-fld-lab', 'Plugin code'));
+            const pluginIn = document.createElement('input'); pluginIn.type = 'text'; pluginIn.className = 'disp-num';
+            pluginIn.value = cfg.plugin_code || 'Web_Service'; if (fromEnv) pluginIn.disabled = false;
+            pluginRow.append(pluginIn); body.append(pluginRow);
+            const testBtn = el('button', 'btn'); testBtn.style.marginTop = '10px'; testBtn.append(ico(I.check), document.createTextNode('Save & test connection'));
             const testOut = el('span', 'setting-sub'); testOut.style.marginLeft = '10px';
-            if (cfg.key_from_env) testBtn.disabled = true;
             testBtn.onclick = async () => {
                 testBtn.disabled = true; testOut.textContent = 'Testing…';
                 try {
-                    if (keyIn.value.trim()) { await api('/api/shipping/config', { op: 'set', api_key: keyIn.value.trim() }); keyIn.value = ''; }
+                    const payload = { op: 'set', plugin_code: pluginIn.value.trim() || 'Web_Service' };
+                    if (!fromEnv) {
+                        if (credIn.meter_number.value.trim()) payload.meter_number = credIn.meter_number.value.trim();
+                        if (credIn.key.value.trim()) payload.key = credIn.key.value.trim();
+                        if (credIn.password.value.trim()) payload.password = credIn.password.value.trim();
+                    }
+                    await api('/api/shipping/config', payload);
+                    credIn.key.value = ''; credIn.password.value = '';
                     const r = await api('/api/shipping/validate', {});
-                    if (r.ok) { testOut.textContent = 'Connected' + (r.account ? ' · ' + r.account : ''); cstat.textContent = 'Connected'; shippingCfg = null; }
+                    if (r.ok) { testOut.textContent = 'Connected · ' + (r.message || 'credentials accepted'); cstat.textContent = 'Connected'; shippingCfg = null; }
                     else testOut.textContent = r.error || 'Could not connect.';
                 } catch (e) { testOut.textContent = e.message || 'Could not connect.'; }
                 testBtn.disabled = false;
@@ -4285,9 +4306,14 @@
                 const clean = boxes.filter(b => b.name && b.width > 0 && b.length > 0 && b.depth > 0 && b.weight > 0);
                 saveB.disabled = true;
                 try {
-                    const payload = { op: 'set', origin: origin, notify_customer: notifyCb.checked };
+                    const payload = { op: 'set', origin: origin, notify_customer: notifyCb.checked,
+                        plugin_code: pluginIn.value.trim() || 'Web_Service' };
                     if (clean.length) payload.boxes = clean;
-                    if (keyIn.value.trim() && !cfg.key_from_env) payload.api_key = keyIn.value.trim();
+                    if (!fromEnv) {
+                        if (credIn.meter_number.value.trim()) payload.meter_number = credIn.meter_number.value.trim();
+                        if (credIn.key.value.trim()) payload.key = credIn.key.value.trim();
+                        if (credIn.password.value.trim()) payload.password = credIn.password.value.trim();
+                    }
                     const r = await api('/api/shipping/config', payload);
                     shippingCfg = r.config || null;
                     addToast('Shipping settings saved.');

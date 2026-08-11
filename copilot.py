@@ -729,14 +729,18 @@ def _store_writable(path: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Shipping / dispatch (World Options) — settings, secret, and per-order state.
-# The courier API itself lives in worldoptions.py; this holds the merchant's
-# origin address, box presets and preferences, the API key (persisted apart from
-# everything the backup zip touches), and a record of what was dispatched.
+# Shipping / dispatch (World Options SOAP web service) — settings, credentials
+# and per-order state. The SOAP client lives in worldoptions.py; this holds the
+# merchant's origin address, box presets and preferences, the World Options
+# credentials (persisted apart from everything the backup zip touches), and a
+# record of what was dispatched.
 # ---------------------------------------------------------------------------
 SHIPPING_PATH       = os.environ.get("SHIPPING_PATH", "/data/shipping.json")
 WO_SECRET_PATH      = os.environ.get("WO_SECRET_PATH", "/data/wo_secret.json")
 DISPATCH_STATE_PATH = os.environ.get("DISPATCH_STATE_PATH", "/data/dispatch_state.json")
+DISPATCH_LABELS_DIR = os.environ.get(
+    "DISPATCH_LABELS_DIR",
+    os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".", "dispatch_labels"))
 DISPATCH_STATE_MAX  = int(os.environ.get("DISPATCH_STATE_MAX", "2000"))
 DISPATCHED_TAG      = os.environ.get("DISPATCHED_TAG", "Dispatched")
 
@@ -751,8 +755,11 @@ _SHIPPING_DEFAULT = {
     "default_box_id": "small",
     "notify_customer": True,
     "currency": "GBP",
+    "plugin_code": "Web_Service",
     "base_url": (worldoptions.DEFAULT_BASE if worldoptions else ""),
 }
+# Which credentials come from the environment (authoritative; never shadowed on disk).
+_WO_ENV = {"meter": "WO_METER_NUMBER", "key": "WO_KEY", "password": "WO_PASSWORD"}
 
 
 def _load_shipping() -> dict:
@@ -779,23 +786,38 @@ def _save_shipping(cfg: dict) -> dict:
     return keep
 
 
-def _load_wo_key() -> str:
-    """The persisted X-AUTH-TOKEN. An env WO_API_KEY always wins over the disk copy."""
-    env = os.environ.get("WO_API_KEY", "").strip()
-    if env:
-        return env
-    return str(_load_json_store(WO_SECRET_PATH, "key", "") or "").strip()
+def _wo_env_creds() -> dict:
+    return {k: os.environ.get(env, "").strip() for k, env in _WO_ENV.items()}
 
 
-def _save_wo_key(key: str) -> bool:
-    if os.environ.get("WO_API_KEY", "").strip():
-        return False   # env-provided key is authoritative; never shadow it on disk
+def _load_wo_creds() -> dict:
+    """The World Options SOAP credentials. Env vars always win over the disk copy,
+    per credential."""
+    disk = _load_json_store(WO_SECRET_PATH, None, {})
+    disk = disk if isinstance(disk, dict) else {}
+    env = _wo_env_creds()
+    return {k: (env[k] or str(disk.get(k) or "").strip()) for k in _WO_ENV}
+
+
+def _wo_creds_from_env() -> bool:
+    return any(_wo_env_creds().values())
+
+
+def _save_wo_creds(meter=None, key=None, password=None) -> bool:
+    """Persist any provided credential (None = leave as-is). Never shadows an
+    env-provided value."""
     if not _store_writable(WO_SECRET_PATH):
         return False
+    disk = _load_json_store(WO_SECRET_PATH, None, {})
+    disk = disk if isinstance(disk, dict) else {}
+    env = _wo_env_creds()
+    for name, val in (("meter", meter), ("key", key), ("password", password)):
+        if val is not None and not env[name]:
+            disk[name] = str(val).strip()
     os.makedirs(os.path.dirname(WO_SECRET_PATH) or ".", exist_ok=True)
     tmp = WO_SECRET_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"key": (key or "").strip()}, fh)
+        json.dump(disk, fh)
     os.replace(tmp, WO_SECRET_PATH)
     try:
         os.chmod(WO_SECRET_PATH, 0o600)
@@ -805,18 +827,42 @@ def _save_wo_key(key: str) -> bool:
 
 
 def _wo_boot() -> None:
-    """Push the persisted key + base URL into the worldoptions client at startup."""
+    """Push the persisted credentials + plugin + base URL into the worldoptions
+    client at startup."""
     if not worldoptions:
         return
     try:
-        key = _load_wo_key()
-        if key:
-            worldoptions.set_api_key(key)
-        base = (_load_shipping().get("base_url") or "").strip()
+        c = _load_wo_creds()
+        cfg = _load_shipping()
+        worldoptions.set_credentials(meter=c["meter"], key=c["key"], password=c["password"],
+                                     plugin=cfg.get("plugin_code") or "Web_Service")
+        base = (cfg.get("base_url") or "").strip()
         if base:
             worldoptions.set_base_url(base)
     except Exception:
         logger.exception("world options boot failed")
+
+
+# Booked labels can be big base64 blobs; keep them out of the small state file,
+# one JSON per order, so reprinting after a reload still works (the SOAP API has
+# no fetch-by-tracking service).
+def _save_dispatch_labels(order_id, labels: list) -> None:
+    try:
+        os.makedirs(DISPATCH_LABELS_DIR, exist_ok=True)
+        tmp = os.path.join(DISPATCH_LABELS_DIR, f"{int(order_id)}.json.tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"labels": labels or []}, fh)
+        os.replace(tmp, os.path.join(DISPATCH_LABELS_DIR, f"{int(order_id)}.json"))
+    except Exception:
+        logger.exception("saving dispatch labels failed for order %s", order_id)
+
+
+def _load_dispatch_labels(order_id) -> list:
+    try:
+        with open(os.path.join(DISPATCH_LABELS_DIR, f"{int(order_id)}.json"), "r", encoding="utf-8") as fh:
+            return (json.load(fh) or {}).get("labels") or []
+    except (FileNotFoundError, ValueError, OSError):
+        return []
 
 
 def _load_dispatch() -> dict:
@@ -3200,17 +3246,25 @@ def _addr_ready(a: dict) -> str:
     return ("Missing " + ", ".join(missing)) if missing else ""
 
 
+def _clean_box(box: dict):
+    """Validated single box, or (None, error)."""
+    try:
+        b = {"width": float(box.get("width") or 0), "length": float(box.get("length") or 0),
+             "depth": float(box.get("depth") or 0), "weight": float(box.get("weight") or 0)}
+    except (TypeError, ValueError):
+        return None, "Box dimensions and weight must be numbers."
+    if min(b["width"], b["length"], b["depth"]) <= 0 or b["weight"] <= 0:
+        return None, "Enter a box size (width, length, depth) and weight above zero."
+    return b, ""
+
+
 async def run_dispatch_quote(registry: dict, order_id, box: dict) -> dict:
     """Price couriers for one order to its shipping address. Free / read-only."""
     if not worldoptions or not worldoptions.configured():
-        return {"error": "World Options is not connected. Add your API key in Settings."}
-    try:
-        w = float(box.get("width") or 0); l = float(box.get("length") or 0)
-        dp = float(box.get("depth") or 0); wt = float(box.get("weight") or 0)
-    except (TypeError, ValueError):
-        return {"error": "Box dimensions and weight must be numbers."}
-    if min(w, l, dp) <= 0 or wt <= 0:
-        return {"error": "Enter a box size (width, length, depth) and weight above zero."}
+        return {"error": "World Options is not connected. Add your credentials in Settings."}
+    b, err = _clean_box(box)
+    if err:
+        return {"error": err}
 
     o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
     if not _ok(o) or not o.get("id"):
@@ -3230,9 +3284,8 @@ async def run_dispatch_quote(registry: dict, order_id, box: dict) -> dict:
     cfg = _load_shipping()
     currency = (o.get("currency") or cfg.get("currency") or "GBP")
     residential = not str(dest.get("company") or "").strip()
-    boxes = [{"width": w, "length": l, "depth": dp, "weight": wt}]
     try:
-        res = await worldoptions.quote(origin, dest, boxes, currency=currency, residential=residential)
+        res = await worldoptions.quote(origin, dest, [b], currency=currency, residential=residential)
     except worldoptions.WorldOptionsError as e:
         return {"error": str(e)}
     except Exception:
@@ -3241,36 +3294,45 @@ async def run_dispatch_quote(registry: dict, order_id, box: dict) -> dict:
     if not res.get("options"):
         return {"error": "World Options returned no courier options for this address and parcel."}
     return {
-        "rate_id": res.get("rate_id"),
         "options": res["options"],
-        "currency": currency,
+        "currency": res.get("currency") or currency,
         "destination": {"name": dest.get("company") or " ".join(
             x for x in [dest.get("firstname"), dest.get("lastname")] if x).strip() or dest.get("name"),
             "city": dest.get("city"), "postcode": dest.get("postcode"), "country": dest.get("country")},
-        "weight": wt,
+        "weight": b["weight"],
     }
 
 
-async def run_dispatch_book(registry: dict, order_id, rate_id, carrier_id,
-                            expected: Optional[dict] = None, notify: Optional[bool] = None) -> dict:
+async def run_dispatch_book(registry: dict, order_id, option: dict, box: dict,
+                            notify: Optional[bool] = None) -> dict:
     """Book the chosen courier option (this CHARGES the World Options account),
     then move the order's tag to Dispatched and create the Shopify fulfillment
     with tracking. Returns everything the UI needs to confirm what happened."""
     if not worldoptions or not worldoptions.configured():
-        return {"error": "World Options is not connected. Add your API key in Settings."}
-    try:
-        rate_id = int(rate_id); carrier_id = int(carrier_id)
-    except (TypeError, ValueError):
+        return {"error": "World Options is not connected. Add your credentials in Settings."}
+    if not isinstance(option, dict) or not option.get("service_type_code"):
         return {"error": "A courier option must be selected before booking."}
+    b, err = _clean_box(box)
+    if err:
+        return {"error": err}
 
     o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
     if not _ok(o) or not o.get("id"):
         return {"error": "Order not found."}
     if _order_status(o) == "cancelled":
         return {"error": "This order is cancelled; it should not be dispatched."}
+    dest = _ship_to(o)
+    if _addr_ready(dest):
+        return {"error": "This order's shipping address is incomplete; fix it in Shopify first."}
+    origin = await _origin_address(registry)
+    if _addr_ready(origin):
+        return {"error": "Your dispatch (origin) address is incomplete. Set it under Settings, Shipping."}
+    cfg = _load_shipping()
+    currency = (o.get("currency") or cfg.get("currency") or "GBP")
+    reference = str(o.get("name") or o.get("order_number") or order_id)
 
     try:
-        shipment = await worldoptions.book(rate_id, carrier_id)
+        shipment = await worldoptions.book(option, origin, dest, [b], currency=currency, reference=reference)
     except worldoptions.WorldOptionsError as e:
         return {"error": str(e)}
     except Exception:
@@ -3281,18 +3343,6 @@ async def run_dispatch_book(registry: dict, order_id, rate_id, carrier_id,
         return {"error": "World Options accepted the request but returned no tracking number. "
                          "Check your World Options portal before retrying so you are not charged twice."}
 
-    # Guard against booking a different service/price than the merchant confirmed.
-    warning = ""
-    if isinstance(expected, dict) and expected.get("amount") is not None and shipment.get("amount") is not None:
-        try:
-            if abs(float(shipment["amount"]) - float(expected["amount"])) > 0.011:
-                warning = (f"Booked price {shipment['amount']} {shipment.get('currency','')} differs from the "
-                           f"{expected['amount']} {expected.get('currency','')} you selected. Review the shipment "
-                           "in your World Options portal.")
-        except (TypeError, ValueError):
-            pass
-
-    cfg = _load_shipping()
     do_notify = cfg.get("notify_customer", True) if notify is None else bool(notify)
 
     # Tag first (order still open), then fulfill (which marks it fulfilled).
@@ -3314,9 +3364,10 @@ async def run_dispatch_book(registry: dict, order_id, rate_id, carrier_id,
                            "detail": "Shopify fulfillment failed after booking; the label is still valid. "
                                      "You can fulfill the order manually in Shopify."}
 
+    # Labels off to their own file; the state row stays small and reprint survives a reload.
+    _save_dispatch_labels(int(order_id), shipment.get("labels") or [])
     entry = {
         "tracking_number": shipment["tracking_number"],
-        "shipment_id": shipment.get("shipment_id"),
         "carrier_name": shipment.get("carrier_name"),
         "service_name": shipment.get("service_name"),
         "amount": shipment.get("amount"),
@@ -3324,6 +3375,7 @@ async def run_dispatch_book(registry: dict, order_id, rate_id, carrier_id,
         "dispatched_at": datetime.now(timezone.utc).isoformat(),
         "fulfilled": bool(fulfillment.get("ok")),
         "notified": bool(do_notify and fulfillment.get("ok")),
+        "has_label": bool(shipment.get("labels")),
     }
     _record_dispatch(int(order_id), entry)
 
@@ -3333,7 +3385,7 @@ async def run_dispatch_book(registry: dict, order_id, rate_id, carrier_id,
         "fulfillment": fulfillment,
         "tag": {"ok": tag_ok, "note": tag_note},
         "notified": entry["notified"],
-        "warning": warning,
+        "warning": shipment.get("warning") or "",
         "dispatch": entry,
     }
 
@@ -5405,17 +5457,20 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # write actions live entirely outside the AI tool registry.
     # -----------------------------------------------------------------------
     def _shipping_public(cfg: dict) -> dict:
-        """Config for the UI: everything EXCEPT the API key (never echoed)."""
+        """Config for the UI: everything EXCEPT the credentials (never echoed)."""
         return {
             "origin": cfg.get("origin") or {},
             "boxes": cfg.get("boxes") or [],
             "default_box_id": cfg.get("default_box_id") or "",
             "notify_customer": bool(cfg.get("notify_customer", True)),
             "currency": cfg.get("currency") or "GBP",
+            "plugin_code": cfg.get("plugin_code") or "Web_Service",
             "base_url": cfg.get("base_url") or "",
             "connected": bool(worldoptions and worldoptions.configured()),
-            "key_last4": (worldoptions.key_last4() if worldoptions else ""),
-            "key_from_env": bool(os.environ.get("WO_API_KEY", "").strip()),
+            "meter_last4": (worldoptions.meter_last4() if worldoptions else ""),
+            "has_key": bool(worldoptions and worldoptions.has_key()),
+            "has_password": bool(worldoptions and worldoptions.has_password()),
+            "creds_from_env": _wo_creds_from_env(),
             "available": bool(worldoptions),
         }
 
@@ -5473,27 +5528,34 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             cfg["notify_customer"] = bool(body.get("notify_customer"))
         if body.get("currency"):
             cfg["currency"] = str(body.get("currency"))[:3].upper()
+        if body.get("plugin_code"):
+            cfg["plugin_code"] = str(body.get("plugin_code")).strip()[:40] or "Web_Service"
         if body.get("base_url"):
             base = str(body.get("base_url")).strip()[:200]
-            if base.startswith("https://"):
+            if base.startswith("http://") or base.startswith("https://"):
                 cfg["base_url"] = base.rstrip("/")
                 if worldoptions:
                     worldoptions.set_base_url(cfg["base_url"])
         _save_shipping(cfg)
-        # API key: only when a non-empty value is sent, and only when not env-managed.
-        if "api_key" in body and worldoptions:
-            key = str(body.get("api_key") or "").strip()
-            if key:
-                if os.environ.get("WO_API_KEY", "").strip():
-                    return _json({"error": "The API key is set on the server (WO_API_KEY) and can't "
-                                           "be changed from here."}, 400)
-                _save_wo_key(key)
-                worldoptions.set_api_key(key)
+        # Credentials: only persist non-empty values, and only when not env-managed.
+        if worldoptions and any(k in body for k in ("meter_number", "key", "password")):
+            if _wo_creds_from_env():
+                return _json({"error": "World Options credentials are set on the server (WO_METER_NUMBER "
+                                       "etc.) and can't be changed from here."}, 400)
+            meter = body.get("meter_number"); key = body.get("key"); pw = body.get("password")
+            meter = str(meter).strip() if isinstance(meter, str) and meter.strip() else None
+            key = str(key).strip() if isinstance(key, str) and key.strip() else None
+            pw = str(pw).strip() if isinstance(pw, str) and pw.strip() else None
+            if meter or key or pw:
+                _save_wo_creds(meter=meter, key=key, password=pw)
+        if worldoptions:
+            _wo_boot()   # re-push creds + plugin + base into the client
         return _json({"config": _shipping_public(_load_shipping()), "ok": True})
 
     @mcp.custom_route("/api/shipping/validate", methods=["POST"])
     async def shipping_validate_route(request: Request):
-        """Confirm the World Options key works (read-only; never charges)."""
+        """Confirm the World Options credentials work by pricing a tiny test parcel
+        (read-only; never charges)."""
         pre = _pre_checks(request)
         if pre:
             return pre
@@ -5504,15 +5566,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if body is None:
             return _json({"error": "Request too large."}, 413)
         if not worldoptions or not worldoptions.configured():
-            return _json({"ok": False, "error": "No API key set."}, 200)
+            return _json({"ok": False, "error": "No credentials set."}, 200)
         try:
-            info = await worldoptions.validate()
-            name = ""
-            if isinstance(info, dict):
-                name = info.get("name") or info.get("company") or info.get("email") or ""
-            return _json({"ok": True, "account": name})
-        except worldoptions.WorldOptionsError as e:
-            return _json({"ok": False, "error": str(e)}, 200)
+            res = await worldoptions.validate()
+            return _json({"ok": bool(res.get("ok")), "message": res.get("message") or "",
+                          "error": ("" if res.get("ok") else res.get("message") or "")})
         except Exception:
             logger.exception("shipping validate failed")
             return _json({"ok": False, "error": "Couldn't reach World Options."}, 200)
@@ -5561,21 +5619,22 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             oid = 0
         if not oid:
             return _json({"error": "No order id given."}, 400)
-        expected = body.get("expected") if isinstance(body.get("expected"), dict) else None
+        option = body.get("option") if isinstance(body.get("option"), dict) else {}
+        box = body.get("box") if isinstance(body.get("box"), dict) else {}
         notify = body.get("notify")
         notify = None if notify is None else bool(notify)
         try:
-            res = await run_dispatch_book(registry, oid, body.get("rate_id"),
-                                          body.get("carrier_id"), expected=expected, notify=notify)
+            res = await run_dispatch_book(registry, oid, option, box, notify=notify)
             return _json(res, 400 if res.get("error") else 200)
         except Exception:
             logger.exception("dispatch book route failed")
             return _json({"error": "The booking failed. Check the server logs before retrying."}, 500)
 
-    @mcp.custom_route("/api/dispatch/track", methods=["POST"])
-    async def dispatch_track_route(request: Request):
-        """Fetch a booked shipment (status + labels) by tracking number. Read-only;
-        used to reprint a label for an already-dispatched order."""
+    @mcp.custom_route("/api/dispatch/label", methods=["POST"])
+    async def dispatch_label_route(request: Request):
+        """Return the stored label(s) for an already-dispatched order (reprint).
+        Read-only; the SOAP API has no fetch-by-tracking service, so labels are
+        kept from the booking."""
         pre = _pre_checks(request)
         if pre:
             return pre
@@ -5585,18 +5644,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
-        if not worldoptions or not worldoptions.configured():
-            return _json({"error": "World Options is not connected."}, 400)
-        tn = str(body.get("tracking_number") or "").strip()
-        if not tn:
-            return _json({"error": "No tracking number given."}, 400)
         try:
-            return _json({"ok": True, "shipment": await worldoptions.track(tn)})
-        except worldoptions.WorldOptionsError as e:
-            return _json({"error": str(e)}, 400)
-        except Exception:
-            logger.exception("dispatch track failed")
-            return _json({"error": "Couldn't fetch the shipment."}, 500)
+            oid = int(body.get("order_id") or 0)
+        except (TypeError, ValueError, OverflowError):
+            oid = 0
+        if not oid:
+            return _json({"error": "No order id given."}, 400)
+        labels = _load_dispatch_labels(oid)
+        if not labels:
+            return _json({"error": "No stored label for this order. It may have been dispatched "
+                                   "before labels were saved, or on another device."}, 404)
+        return _json({"ok": True, "labels": labels})
 
     @mcp.custom_route("/api/dispatch/cancel", methods=["POST"])
     async def dispatch_cancel_route(request: Request):
