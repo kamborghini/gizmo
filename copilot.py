@@ -758,9 +758,22 @@ _SHIPPING_DEFAULT = {
     "plugin_code": "Web_Service",
     "ready_time": "",    # collection window sent with every booking (HH:MM)
     "close_time": "",
+    # Collection arrangement: explicit, because omitting it makes WO assume a NEW
+    # collection is wanted on every booking (wrong for daily-collection accounts).
+    "collection_option": "I_Need_To_Book_A_Collection",
     "base_url": (worldoptions.DEFAULT_BASE if worldoptions else ""),
 }
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+# The only currencies World Options' contract accepts; anything else falls back.
+_WO_CURRENCIES = {"GBP", "USD", "EUR", "CAD", "AUD", "NZD", "SGD"}
+
+
+def _wo_currency(order_currency, cfg: dict) -> str:
+    c = str(order_currency or "").strip().upper()
+    if c in _WO_CURRENCIES:
+        return c
+    c2 = str(cfg.get("currency") or "").strip().upper()
+    return c2 if c2 in _WO_CURRENCIES else "GBP"
 # Which credentials come from the environment (authoritative; never shadowed on disk).
 _WO_ENV = {"meter": "WO_METER_NUMBER", "key": "WO_KEY", "password": "WO_PASSWORD"}
 
@@ -3300,7 +3313,7 @@ async def run_dispatch_quote(registry: dict, order_id, box: dict) -> dict:
         return {"error": f"Your dispatch (origin) address is incomplete. {why}. "
                          "Set it under Settings, Shipping."}
     cfg = _load_shipping()
-    currency = (o.get("currency") or cfg.get("currency") or "GBP")
+    currency = _wo_currency(o.get("currency"), cfg)
     residential = not str(dest.get("company") or "").strip()
     try:
         res = await worldoptions.quote(origin, dest, [b], currency=currency, residential=residential)
@@ -3318,6 +3331,11 @@ async def run_dispatch_quote(registry: dict, order_id, box: dict) -> dict:
             x for x in [dest.get("firstname"), dest.get("lastname")] if x).strip() or dest.get("name"),
             "city": dest.get("city"), "postcode": dest.get("postcode"), "country": dest.get("country")},
         "weight": b["weight"],
+        # International orders need customs data the app does not send yet; the UI
+        # shows this as a warning so nothing ships silently without paperwork.
+        "international": (str(dest.get("country") or "").upper() not in ("GB", "")),
+        "currency_note": ("" if str(o.get("currency") or "").upper() in (currency, "")
+                          else f"Quoted in {currency}; the order was paid in {o.get('currency')}."),
     }
 
 
@@ -3346,13 +3364,14 @@ async def run_dispatch_book(registry: dict, order_id, option: dict, box: dict,
     if _addr_ready(origin):
         return {"error": "Your dispatch (origin) address is incomplete. Set it under Settings, Shipping."}
     cfg = _load_shipping()
-    currency = (o.get("currency") or cfg.get("currency") or "GBP")
+    currency = _wo_currency(o.get("currency"), cfg)
     reference = str(o.get("name") or o.get("order_number") or order_id)
 
     try:
         shipment = await worldoptions.book(option, origin, dest, [b], currency=currency, reference=reference,
                                            ready_time=str(cfg.get("ready_time") or ""),
-                                           close_time=str(cfg.get("close_time") or ""))
+                                           close_time=str(cfg.get("close_time") or ""),
+                                           collection_option=str(cfg.get("collection_option") or ""))
     except worldoptions.WorldOptionsError as e:
         return {"error": str(e)}
     except Exception:
@@ -3374,7 +3393,9 @@ async def run_dispatch_book(registry: dict, order_id, option: dict, box: dict,
             fulfillment = await _fulfillment_writer(
                 int(order_id),
                 tracking_number=shipment["tracking_number"],
-                tracking_company=shipment.get("carrier_name") or "",
+                # Shopify only auto-links tracking in the customer email for carrier
+                # names it recognizes; WO's enum codes (ROYALMAIL, EVRISEND) are not.
+                tracking_company=worldoptions.shopify_carrier(shipment.get("carrier_name") or ""),
                 tracking_url=None,
                 notify_customer=do_notify,
             )
@@ -5487,6 +5508,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             "plugin_code": cfg.get("plugin_code") or "Web_Service",
             "ready_time": cfg.get("ready_time") or "",
             "close_time": cfg.get("close_time") or "",
+            "collection_option": cfg.get("collection_option") or "I_Need_To_Book_A_Collection",
+            "collection_options": (worldoptions.COLLECTION_OPTIONS if worldoptions else []),
             "base_url": cfg.get("base_url") or "",
             "connected": bool(worldoptions and worldoptions.configured()),
             "meter_last4": (worldoptions.meter_last4() if worldoptions else ""),
@@ -5558,6 +5581,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if str(cfg.get("ready_time") or "") and str(cfg.get("close_time") or "") \
                 and cfg["ready_time"] >= cfg["close_time"]:
             return _json({"error": "The collection ready time must be before the close time."}, 400)
+        if body.get("collection_option"):
+            co = str(body.get("collection_option")).strip()
+            if worldoptions and co not in worldoptions.COLLECTION_OPTIONS:
+                return _json({"error": "Unknown collection arrangement."}, 400)
+            cfg["collection_option"] = co
         if body.get("currency"):
             cfg["currency"] = str(body.get("currency"))[:3].upper()
         if body.get("plugin_code"):

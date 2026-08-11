@@ -3585,14 +3585,16 @@
             }
             shown.forEach(o => {
                 const st = prodStateOf(o);
-                const row = el('div', 'lbl-row' + (labelSel === o.id ? ' on' : '') + (o.status || st.made_at ? ' stale' : ''));
+                // In the Dispatched queue "fulfilled" is the expected state, not staleness.
+                const staleStatus = dispatched && o.status === 'fulfilled' ? '' : o.status;
+                const row = el('div', 'lbl-row' + (labelSel === o.id ? ' on' : '') + (staleStatus || (st.made_at && !dispatched) ? ' stale' : ''));
                 row.setAttribute('role', 'button'); row.tabIndex = 0;
                 row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
                 row.append(el('div', 'lbl-num', orderNo(o)));
                 const who = el('div', 'lbl-who');
                 const nameLine = el('span', 'lbl-nameline');
                 nameLine.append(document.createTextNode(o.display_name));
-                if (o.status) nameLine.append(el('span', 'lbl-chip bad', o.status.toUpperCase()));
+                if (staleStatus) nameLine.append(el('span', 'lbl-chip bad', staleStatus.toUpperCase()));
                 if (o.due_soon && !o.status) {
                     const overdue = o.due && (new Date(o.due + 'T00:00:00') - Date.now() < -86400000);
                     nameLine.append(el('span', 'lbl-chip ' + (overdue ? 'bad' : 'warn'), 'DUE ' + (o.due_label || '').toUpperCase()));
@@ -4087,6 +4089,10 @@
                 quoteWrap.innerHTML = '';
                 const opts = (quote && quote.options) || [];
                 if (!opts.length) { quoteWrap.append(el('div', 'empty', 'No courier options came back for this parcel and address.')); return; }
+                if (quote.international) {
+                    quoteWrap.append(el('div', 'disp-warn', 'International order: the app does not send customs information yet (contents, values, EORI). The courier may hold the parcel or World Options may reject the booking. For now, book international shipments in the World Options portal where customs forms can be completed.'));
+                }
+                if (quote.currency_note) quoteWrap.append(el('div', 'sub', quote.currency_note));
                 quoteWrap.append(el('div', 'disp-subhead', opts.length + ' option' + (opts.length === 1 ? '' : 's') + ' · cheapest first'));
                 const list = el('div', 'disp-opts');
                 opts.forEach((op, i) => {
@@ -4291,6 +4297,22 @@
             closeIn.value = cfg.close_time || ''; closeF.append(closeIn);
             timeGrid.append(readyF, closeF);
             body.append(timeGrid);
+            const coF = el('label', 'disp-fld'); coF.style.marginTop = '8px';
+            coF.append(el('span', 'disp-fld-lab', 'Collection arrangement'));
+            const coSel = el('select', 'psel');
+            const CO_LABELS = {
+                'I_Need_To_Book_A_Collection': 'Book a collection for each dispatch',
+                'I_Have_Daily_Collection': 'We have a daily collection already',
+                'I_Already_Have_Collection_Scheduled': 'A collection is already scheduled',
+                'I_Am_Going_To_Drop_Off_My_Packages': 'We drop parcels off ourselves',
+            };
+            (cfg.collection_options || Object.keys(CO_LABELS)).forEach(k => {
+                const opt = el('option', null, CO_LABELS[k] || k); opt.value = k;
+                if (k === (cfg.collection_option || 'I_Need_To_Book_A_Collection')) opt.selected = true;
+                coSel.append(opt);
+            });
+            coF.append(coSel); body.append(coF);
+            body.append(el('p', 'field-help', 'Tells the courier whether to send a driver for each booking or that pickup is already covered. Picking the wrong one can double-book collections.'));
 
             // Box presets
             body.append(el('div', 'section-title', 'Box presets'));
@@ -4329,7 +4351,8 @@
                 try {
                     const payload = { op: 'set', origin: origin, notify_customer: notifyCb.checked,
                         plugin_code: pluginIn.value.trim() || 'Web_Service',
-                        ready_time: readyIn.value || '', close_time: closeIn.value || '' };
+                        ready_time: readyIn.value || '', close_time: closeIn.value || '',
+                        collection_option: coSel.value };
                     if (clean.length) payload.boxes = clean;
                     if (!fromEnv) {
                         if (credIn.meter_number.value.trim()) payload.meter_number = credIn.meter_number.value.trim();

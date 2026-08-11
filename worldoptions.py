@@ -66,6 +66,33 @@ _CARRIERS = ["DHLPARCEL", "DHL", "FEDEX", "UPS", "TNT", "PALLETWAYS", "YODEL",
              "DXEXPRESS", "HERMES", "DSV", "EXFREIGHT", "GLOBALTRANZ", "CITYSPRINT",
              "EVRISEND", "EVRICORPORATE", "EVRI", "TUFFNELLS", "ROYALMAIL", "DPD"]
 
+# WO's carrier enum -> the carrier names Shopify recognizes. Shopify only builds a
+# working tracking link in the customer's shipping email when tracking_company is
+# one of its known names; "ROYALMAIL" or "EVRISEND" would leave the email linkless.
+SHOPIFY_CARRIER_NAMES = {
+    "ROYALMAIL": "Royal Mail", "DPD": "DPD", "EVRISEND": "Evri", "EVRICORPORATE": "Evri",
+    "EVRI": "Evri", "HERMES": "Evri", "UPS": "UPS", "FEDEX": "FedEx", "TNT": "TNT",
+    "DHL": "DHL Express", "DHLPARCEL": "DHL", "YODEL": "Yodel", "CITYSPRINT": "CitySprint",
+    "DXEXPRESS": "DX", "TUFFNELLS": "Tuffnells", "PALLETWAYS": "Palletways", "DSV": "DSV",
+}
+
+
+def shopify_carrier(carrier_code: str) -> str:
+    """A Shopify-recognizable tracking company for a WO carrier enum value."""
+    up = (carrier_code or "").strip().upper()
+    return SHOPIFY_CARRIER_NAMES.get(up, (carrier_code or "").strip())
+
+
+# Collection arrangements the merchant can declare (CollectionOptionTypes enum).
+# When the element is omitted WCF assumes the FIRST value (book a new collection),
+# which double-books for accounts that already have a daily driver.
+COLLECTION_OPTIONS = [
+    "I_Need_To_Book_A_Collection",
+    "I_Have_Daily_Collection",
+    "I_Already_Have_Collection_Scheduled",
+    "I_Am_Going_To_Drop_Off_My_Packages",
+]
+
 
 class WorldOptionsError(Exception):
     """Carries World Options' own message so the UI can show the real cause."""
@@ -403,9 +430,11 @@ def _classify_label(lbl: ET.Element) -> dict:
 
 async def book(option: dict, origin: dict, destination: dict, boxes: list,
                currency: str = "GBP", reference: str = "",
-               ready_time: str = "", close_time: str = "") -> dict:
+               ready_time: str = "", close_time: str = "",
+               collection_option: str = "") -> dict:
     """Book (and CHARGE) the chosen quote option. Returns tracking + labels.
-    ready_time/close_time (HH:MM) describe the collection window; sent in the
+    ready_time/close_time (HH:MM) describe the collection window and
+    collection_option the arrangement (COLLECTION_OPTIONS); sent in the
     booking's BillingDetail when set."""
     option = option or {}
     service_code = option.get("service_type_code") or ""
@@ -434,13 +463,17 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
                 + _t("sd", "ServiceType", carrier)
                 + _t("sd", "ServiceTypeCode", service_code)
                 + "</wo:ShippingDetail>")
-    # BillingDetail (wsBillingDetail) carries the collection window. Children
-    # alphabetical: CloseTime before ReadyTime. ReadyDate is deliberately not
-    # sent (optional; its date format is undocumented, so WO defaults it).
+    # BillingDetail (wsBillingDetail) carries the collection window + arrangement.
+    # Children alphabetical: CloseTime, CollectionOptions, ReadyTime. ReadyDate is
+    # deliberately not sent (optional; its date format is undocumented, WO defaults it).
+    co = (collection_option or "").strip()
+    if co and co not in COLLECTION_OPTIONS:
+        co = ""
     billing = ""
-    if ready_time or close_time:
+    if ready_time or close_time or co:
         billing = ("<wo:BillingDetail>"
                    + _t("wo", "CloseTime", close_time)
+                   + _t("wo", "CollectionOptions", co)
                    + _t("wo", "ReadyTime", ready_time)
                    + "</wo:BillingDetail>")
     # ShipmentBookingRequest, alpha: AdditionalShipmentDetail, AuthenticationDetail,
