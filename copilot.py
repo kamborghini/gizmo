@@ -3058,6 +3058,107 @@ async def _dispatch_move_tags(registry: dict, order_id) -> tuple:
         remove=(UNPROCESSED_TAG, PRODUCTION_TAG, MADE_TAG))
 
 
+async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = None) -> dict:
+    """The single gate for telling Shopify (and the customer) an order shipped.
+
+    Booking a courier label is preparation, not shipping: the gobo may not be
+    made yet. So fulfilment fires only when BOTH are true - the order is marked
+    made AND a live label is booked - triggered by whichever happens last.
+    Idempotent: an already-fulfilled order is a no-op.
+
+    Returns {fulfilled, reason, detail, notified, tag_note}."""
+    oid = int(order_id)
+    entry = dict(_load_dispatch().get(str(oid)) or {})
+    made = bool((_load_prod_state().get(str(oid)) or {}).get("made_at"))
+    tracking = str(entry.get("tracking_number") or "").strip()
+
+    if entry.get("fulfilled"):
+        return {"fulfilled": True, "reason": "already", "notified": bool(entry.get("notified")),
+                "detail": "", "tag_note": ""}
+    if not tracking or entry.get("canceled"):
+        return {"fulfilled": False, "reason": "no_label", "notified": False,
+                "detail": "No courier label is booked for this order yet.", "tag_note": ""}
+    if not made:
+        return {"fulfilled": False, "reason": "not_made", "notified": False,
+                "detail": "Label booked. Shopify is fulfilled and the customer emailed "
+                          "when you mark this order made.", "tag_note": ""}
+
+    do_notify = entry.get("notify", True) if notify is None else bool(notify)
+    # Tag BEFORE fulfilling: _sync_order_tags deliberately skips orders Shopify
+    # reports as cancelled/refunded/fulfilled, so a tag written afterwards would
+    # be silently dropped and the order would never reach the Dispatched queue.
+    tag_ok, tag_note = await _dispatch_move_tags(registry, oid)
+    fulfillment = {"ok": False, "reason": "not_attempted"}
+    if _fulfillment_writer is not None:
+        try:
+            fulfillment = await _fulfillment_writer(
+                oid,
+                tracking_number=tracking,
+                # Shopify only auto-links tracking in the customer email for carrier
+                # names it recognizes; WO's enum codes (ROYALMAIL, EVRISEND) are not.
+                tracking_company=(worldoptions.shopify_carrier(entry.get("carrier_name") or "")
+                                  if worldoptions else (entry.get("carrier_name") or "")),
+                tracking_url=None,
+                notify_customer=do_notify,
+            )
+        except Exception:
+            logger.exception("fulfillment failed for order %s", oid)
+            fulfillment = {"ok": False, "reason": "error",
+                           "detail": "Shopify fulfillment failed; the label is still valid. "
+                                     "You can fulfill the order manually in Shopify."}
+
+    if tag_ok:
+        tag_note = ""
+    if not fulfillment.get("ok"):
+        # Put the order back where it was: it has not shipped after all.
+        try:
+            await _sync_order_tags(registry, oid, add=(MADE_TAG,), remove=(DISPATCHED_TAG,))
+        except Exception:
+            logger.exception("tag revert after failed fulfillment failed for order %s", oid)
+    if fulfillment.get("ok"):
+        d = _load_dispatch()
+        e = d.get(str(oid)) or entry
+        e.update({"fulfilled": True, "fulfillment_id": fulfillment.get("fulfillment_id"),
+                  "notified": bool(do_notify), "fulfilled_at": datetime.now(timezone.utc).isoformat()})
+        d[str(oid)] = e
+        _write_dispatch(d)
+    return {"fulfilled": bool(fulfillment.get("ok")),
+            "reason": fulfillment.get("reason") or ("ok" if fulfillment.get("ok") else "error"),
+            "detail": fulfillment.get("detail") or "",
+            "notified": bool(do_notify and fulfillment.get("ok")),
+            "tag_note": tag_note}
+
+
+async def _unfulfill_dispatch(registry: dict, order_id) -> str:
+    """Undo a fulfilment when an order is un-marked made (it is not shipped after
+    all). Cancels the Shopify fulfilment so the customer is not left holding live
+    tracking. Returns a note for the UI."""
+    oid = int(order_id)
+    d = _load_dispatch()
+    entry = d.get(str(oid)) or {}
+    if not entry.get("fulfilled"):
+        return ""
+    note = ""
+    fid = entry.get("fulfillment_id")
+    if fid and _fulfillment_canceler is not None:
+        try:
+            fc = await _fulfillment_canceler(int(fid))
+            note = ("" if fc.get("ok") else
+                    "The order is still marked fulfilled in Shopify (" + (fc.get("detail") or "")
+                    + "). Cancel that fulfillment in Shopify so the customer is not left with "
+                      "tracking for something that has not shipped.")
+        except Exception:
+            logger.exception("fulfillment cancel failed for order %s", oid)
+            note = ("The order is still marked fulfilled in Shopify. Cancel that fulfillment "
+                    "there so the customer is not left with tracking for an unshipped order.")
+    entry["fulfilled"] = False
+    entry["notified"] = False
+    entry.pop("fulfillment_id", None)
+    d[str(oid)] = entry
+    _write_dispatch(d)
+    return note
+
+
 def _extract_proposal(note: str) -> tuple:
     """(proposal_url, note_without_it). Only the store's own quote domain is ever
     recognized: an arbitrary URL in a customer note must never become a clickable
@@ -3595,27 +3696,6 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
 
     do_notify = cfg.get("notify_customer", True) if notify is None else bool(notify)
 
-    # Tag first (order still open), then fulfill (which marks it fulfilled).
-    tag_ok, tag_note = await _dispatch_move_tags(registry, int(order_id))
-
-    fulfillment = {"ok": False, "reason": "not_attempted"}
-    if _fulfillment_writer is not None:
-        try:
-            fulfillment = await _fulfillment_writer(
-                int(order_id),
-                tracking_number=shipment["tracking_number"],
-                # Shopify only auto-links tracking in the customer email for carrier
-                # names it recognizes; WO's enum codes (ROYALMAIL, EVRISEND) are not.
-                tracking_company=worldoptions.shopify_carrier(shipment.get("carrier_name") or ""),
-                tracking_url=None,
-                notify_customer=do_notify,
-            )
-        except Exception:
-            logger.exception("fulfillment after dispatch failed for order %s", order_id)
-            fulfillment = {"ok": False, "reason": "error",
-                           "detail": "Shopify fulfillment failed after booking; the label is still valid. "
-                                     "You can fulfill the order manually in Shopify."}
-
     # Labels off to their own file; the state row stays small and reprint survives a reload.
     _save_dispatch_labels(int(order_id), shipment.get("labels") or [])
     entry = {
@@ -3625,10 +3705,11 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
         "amount": shipment.get("amount"),
         "currency": shipment.get("currency"),
         "dispatched_at": datetime.now(timezone.utc).isoformat(),
-        "fulfilled": bool(fulfillment.get("ok")),
-        # Kept so cancelling the shipment can also cancel the Shopify fulfillment.
-        "fulfillment_id": fulfillment.get("fulfillment_id"),
-        "notified": bool(do_notify and fulfillment.get("ok")),
+        "fulfilled": False,
+        # The merchant's email choice is made HERE but used when the order is
+        # marked made, which is when Shopify is actually told it shipped.
+        "notify": do_notify,
+        "notified": False,
         "has_label": bool(shipment.get("labels")),
         "collection_date": shipment.get("collection_date") or "",
         "insured": insurance or "",
@@ -3637,12 +3718,20 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
     }
     _record_dispatch(int(order_id), entry)
 
+    # Booking a label is preparation, not shipping: fulfilment waits until the
+    # order is ALSO marked made. If it already is, this fulfils right now.
+    ready = await _fulfill_if_ready(registry, int(order_id), notify=do_notify)
+    entry = _load_dispatch().get(str(int(order_id))) or entry
+    fulfillment = ({"ok": True, "fulfillment_id": entry.get("fulfillment_id")} if ready["fulfilled"]
+                   else {"ok": False, "reason": ready["reason"], "detail": ready["detail"]})
+
     return {
         "ok": True,
         "shipment": shipment,          # includes labels[] for printing now
         "fulfillment": fulfillment,
-        "tag": {"ok": tag_ok, "note": tag_note},
-        "notified": entry["notified"],
+        "tag": {"ok": not ready["tag_note"], "note": ready["tag_note"]},
+        "notified": bool(ready["notified"]),
+        "awaiting_made": (ready["reason"] == "not_made"),
         "warning": shipment.get("warning") or "",
         "dispatch": entry,
         "dropoff_shop": dropoff_shop,
@@ -5640,12 +5729,30 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     return _json({"error": "No order id given."}, 400)
                 on = bool(body.get("on", True))
                 state = _mark_made(oid, on)
-                # Made moves it out of production: IP -> PC (and back if unticked).
+                # Made is the moment an order actually ships: if a courier label is
+                # already booked, THIS is what fulfils Shopify and emails tracking.
+                ship_note, fulfilled, notified = "", False, False
                 if on:
-                    okd, note = await _sync_order_tags(registry, oid, add=[MADE_TAG], remove=[PRODUCTION_TAG])
+                    ready = await _fulfill_if_ready(registry, oid)
+                    fulfilled, notified = ready["fulfilled"], ready["notified"]
+                    if fulfilled:
+                        # _fulfill_if_ready already moved the tags to Dispatched.
+                        okd, note = True, ready["tag_note"]
+                        ship_note = ("Fulfilled in Shopify with the booked tracking"
+                                     + (" and the customer was emailed." if notified else "."))
+                    else:
+                        okd, note = await _sync_order_tags(registry, oid, add=[MADE_TAG],
+                                                           remove=[PRODUCTION_TAG])
+                        if ready["reason"] not in ("no_label",):
+                            ship_note = ready["detail"]
                 else:
-                    okd, note = await _sync_order_tags(registry, oid, add=[PRODUCTION_TAG], remove=[MADE_TAG])
+                    ship_note = await _unfulfill_dispatch(registry, oid)
+                    okd, note = await _sync_order_tags(registry, oid, add=[PRODUCTION_TAG],
+                                                       remove=[MADE_TAG, DISPATCHED_TAG])
                 return _json({"ok": True, "state": {str(oid): state.get(str(oid), {})},
+                              "dispatch": {str(oid): _load_dispatch().get(str(oid), {})},
+                              "fulfilled": fulfilled, "notified": notified,
+                              "ship_note": ship_note,
                               "tag_note": ("" if okd else note)})
             return _json({"error": "Unknown op."}, 400)
         except Exception:

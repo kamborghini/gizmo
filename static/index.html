@@ -404,7 +404,9 @@
         .label-sheet.compact { padding: 3.5mm 4mm; font-size: 13px; }
         .lbl-size { background: var(--bg-2); border: 1px solid var(--border-2); border-radius: var(--r-sm); color: var(--ink);
             font: inherit; font-size: 12.5px; padding: 7px 10px; }
-        .lbl-nameline { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+        .lbl-nameline { display: flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; }
+        /* The customer name gives way first; status chips must never be cut in half. */
+        .lbl-nameline > .lbl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
         .lbl-chip { font-size: 9.5px; font-weight: 800; letter-spacing: .06em; padding: 2px 7px;
             border-radius: 4px; flex: none; }
         .lbl-chip.bad { background: rgba(239,68,68,.14); color: #f87171; border: 1px solid rgba(239,68,68,.35); }
@@ -462,6 +464,9 @@
         .disp-warn { font-size: 12.5px; color: #fbbf24; background: rgba(245,158,11,.08);
             border: 1px solid rgba(245,158,11,.3); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
         .disp-ok-line { font-size: 12.5px; color: #4ade80; margin: 8px 0; }
+        .disp-await { font-size: 12.5px; color: var(--ink-2); background: var(--bg-2);
+            border: 1px solid var(--border-2); border-left: 3px solid var(--accent);
+            border-radius: 8px; padding: 9px 11px; margin: 8px 0; }
         .disp-notice { text-align: center; padding: 16px 0; }
         .disp-notice p { color: var(--ink-2); margin-bottom: 12px; }
         .disp-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
@@ -3323,6 +3328,11 @@
             renderLabels();
             try {
                 const r = await api('/api/production-state', { op: 'made', id: o.id, on });
+                if (r && r.dispatch && labelsCache && labelsCache.data) {
+                    labelsCache.data.dispatch = Object.assign({}, labelsCache.data.dispatch || {}, r.dispatch);
+                    renderLabels();
+                }
+                if (r && r.ship_note) addToast(r.ship_note);
                 if (r && r.tag_note) addToast(r.tag_note);
             } catch (e) {
                 // The server did not record it: put the row back as it was so the
@@ -3598,7 +3608,7 @@
                 row.append(el('div', 'lbl-num', orderNo(o)));
                 const who = el('div', 'lbl-who');
                 const nameLine = el('span', 'lbl-nameline');
-                nameLine.append(document.createTextNode(o.display_name));
+                nameLine.append(el('span', 'lbl-name', o.display_name));
                 if (staleStatus) nameLine.append(el('span', 'lbl-chip bad', staleStatus.toUpperCase()));
                 if (o.due_soon && !o.status) {
                     const overdue = o.due && (new Date(o.due + 'T00:00:00') - Date.now() < -86400000);
@@ -3608,9 +3618,14 @@
                 if (o.note) nameLine.append(el('span', 'lbl-chip note', 'NOTE'));
                 const dsp = dispatchStateOf(o);
                 if (dsp.tracking_number) {
-                    const dc = el('span', 'lbl-chip ' + (dsp.canceled ? 'bad' : 'made'), dsp.canceled ? 'CANCELLED' : 'DISPATCHED');
+                    // A booked label is preparation: the order only counts as dispatched
+                    // once it is made, which is what fulfils Shopify.
+                    const booked = !dsp.fulfilled && !dsp.canceled;
+                    const dc = el('span', 'lbl-chip ' + (dsp.canceled ? 'bad' : booked ? 'note' : 'made'),
+                        dsp.canceled ? 'CANCELLED' : booked ? 'BOOKED' : 'DISPATCHED');
                     dc.title = carrierService(dsp.carrier_name, dsp.service_name)
-                        + ' · ' + dsp.tracking_number + (dsp.dispatched_at ? ' · ' + fmtDate(dsp.dispatched_at) : '');
+                        + ' · ' + dsp.tracking_number + (dsp.dispatched_at ? ' · ' + fmtDate(dsp.dispatched_at) : '')
+                        + (booked ? '. Mark this order made to fulfil it in Shopify and email the customer.' : '');
                     nameLine.append(dc);
                 }
                 if (st.made_at && !dsp.tracking_number) nameLine.append(el('span', 'lbl-chip made', 'MADE'));
@@ -4277,7 +4292,7 @@
                 if (!chosen) return;
                 const notifyWrap = el('label', 'disp-notify');
                 const nb = document.createElement('input'); nb.type = 'checkbox'; nb.checked = cfg.notify_customer !== false;
-                notifyWrap.append(nb, el('span', null, ' Email the customer their tracking (the order is marked fulfilled in Shopify either way)'));
+                notifyWrap.append(nb, el('span', null, ' Email the customer their tracking when this order is marked made'));
                 conf.append(notifyWrap);
                 if (cfg.ready_time || cfg.close_time) {
                     conf.append(el('div', 'sub', 'Collection window: '
@@ -4349,7 +4364,10 @@
                 if (res.international) body.append(el('div', 'sub', 'Customs declaration sent; World Options generates the commercial invoice.'));
                 if (res.contact_note) body.append(el('div', 'disp-warn', res.contact_note));
                 const f = res.fulfillment || {};
-                if (f.ok) body.append(el('div', 'disp-ok-line', res.notified ? 'Order marked fulfilled in Shopify and the customer was emailed tracking.' : 'Order marked fulfilled in Shopify.'));
+                if (res.awaiting_made) {
+                    body.append(el('div', 'disp-await', 'Not shipped yet. Shopify stays unfulfilled and the customer is not emailed until you mark this order made.'));
+                }
+                else if (f.ok) body.append(el('div', 'disp-ok-line', res.notified ? 'Order marked fulfilled in Shopify and the customer was emailed tracking.' : 'Order marked fulfilled in Shopify.'));
                 else if (f.reason === 'permission') body.append(el('div', 'disp-warn', 'Booked, but the app could not mark the order fulfilled (missing the write_fulfillments permission). Fulfil it manually in Shopify, or grant the permission and it will work next time.'));
                 else if (f.reason === 'nothing_to_fulfill') body.append(el('div', 'sub', 'Shopify had nothing left to fulfil for this order.'));
                 else if (f.reason && f.reason !== 'not_attempted') body.append(el('div', 'disp-warn', f.detail || 'Shopify fulfillment could not be completed.'));
