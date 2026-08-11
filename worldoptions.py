@@ -211,6 +211,25 @@ async def _soap_call(service: str, action: str, inner: str) -> ET.Element:
         "Try again in a moment.")
 
 
+def _friendly_fault(reason: str) -> str:
+    """Translate World Options' auth exceptions into merchant-readable guidance.
+    Their backend exchanges the web service Key + Password for an OAuth access
+    token, so the OAuth error names say exactly what is wrong: invalid_request =
+    credentials missing from the login, invalid_client = credentials wrong."""
+    low = (reason or "").lower()
+    if "access token" in low and "invalid_request" in low:
+        return ("World Options needs your web service Key and Password as well as the Meter "
+                "Number; the login went out without them. Add them in Shipping settings. If you "
+                "don't have a Key and Password, ask World Options for your web service (API) "
+                "credentials.")
+    if "invalid_client" in low:
+        return ("World Options rejected the web service Key and Password. Double-check both in "
+                "Shipping settings, or ask World Options to confirm your web service credentials.")
+    if "woauthenticationexception" in low:
+        return "World Options could not log you in: " + (reason or "")[:250]
+    return ("World Options rejected the request: " + (reason or "SOAP fault"))[:400]
+
+
 def _parse(resp: httpx.Response, url: str = "") -> ET.Element:
     # A 404 (or other non-fault error) usually means the wrong endpoint, not a real
     # SOAP reply. Say so, and name the host so a misconfiguration is obvious.
@@ -226,7 +245,7 @@ def _parse(resp: httpx.Response, url: str = "") -> ET.Element:
     fault = _find(root, "Fault")
     if fault is not None:
         reason = _text(fault, "Text") or _text(fault, "faultstring") or "SOAP fault"
-        raise WorldOptionsError(f"World Options rejected the request: {reason}"[:400])
+        raise WorldOptionsError(_friendly_fault(reason))
     if resp.status_code >= 400:
         raise WorldOptionsError(f"World Options error (HTTP {resp.status_code}).")
     return root
@@ -237,6 +256,9 @@ def _reply_status(reply, context: str):
     notif = (_text(reply, "NotificationtType") or "").strip().upper()
     msg = _text(reply, "Message").strip()
     if notif == "FAILED":
+        low = msg.lower()
+        if "access token" in low or "authenticationexception" in low or "invalid_client" in low:
+            raise WorldOptionsError(_friendly_fault(msg))
         raise WorldOptionsError(msg or f"World Options could not {context}.")
     return msg, notif
 
