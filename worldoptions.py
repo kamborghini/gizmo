@@ -402,8 +402,11 @@ def _classify_label(lbl: ET.Element) -> dict:
 
 
 async def book(option: dict, origin: dict, destination: dict, boxes: list,
-               currency: str = "GBP", reference: str = "") -> dict:
-    """Book (and CHARGE) the chosen quote option. Returns tracking + labels."""
+               currency: str = "GBP", reference: str = "",
+               ready_time: str = "", close_time: str = "") -> dict:
+    """Book (and CHARGE) the chosen quote option. Returns tracking + labels.
+    ready_time/close_time (HH:MM) describe the collection window; sent in the
+    booking's BillingDetail when set."""
     option = option or {}
     service_code = option.get("service_type_code") or ""
     carrier = (option.get("carrier_name") or _carrier_from(service_code, "")).upper()
@@ -431,10 +434,20 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
                 + _t("sd", "ServiceType", carrier)
                 + _t("sd", "ServiceTypeCode", service_code)
                 + "</wo:ShippingDetail>")
+    # BillingDetail (wsBillingDetail) carries the collection window. Children
+    # alphabetical: CloseTime before ReadyTime. ReadyDate is deliberately not
+    # sent (optional; its date format is undocumented, so WO defaults it).
+    billing = ""
+    if ready_time or close_time:
+        billing = ("<wo:BillingDetail>"
+                   + _t("wo", "CloseTime", close_time)
+                   + _t("wo", "ReadyTime", ready_time)
+                   + "</wo:BillingDetail>")
     # ShipmentBookingRequest, alpha: AdditionalShipmentDetail, AuthenticationDetail,
     # BillingDetail, RecipientsDetails, SendersDetails, ShippingDetail
     inner = ("<tem:DoShipment><tem:shipment>"
              + _auth_block()
+             + billing
              + _recipient_block(destination or {})
              + _sender_block(origin or {})
              + shipping

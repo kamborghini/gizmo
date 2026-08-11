@@ -756,8 +756,11 @@ _SHIPPING_DEFAULT = {
     "notify_customer": True,
     "currency": "GBP",
     "plugin_code": "Web_Service",
+    "ready_time": "",    # collection window sent with every booking (HH:MM)
+    "close_time": "",
     "base_url": (worldoptions.DEFAULT_BASE if worldoptions else ""),
 }
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 # Which credentials come from the environment (authoritative; never shadowed on disk).
 _WO_ENV = {"meter": "WO_METER_NUMBER", "key": "WO_KEY", "password": "WO_PASSWORD"}
 
@@ -3347,7 +3350,9 @@ async def run_dispatch_book(registry: dict, order_id, option: dict, box: dict,
     reference = str(o.get("name") or o.get("order_number") or order_id)
 
     try:
-        shipment = await worldoptions.book(option, origin, dest, [b], currency=currency, reference=reference)
+        shipment = await worldoptions.book(option, origin, dest, [b], currency=currency, reference=reference,
+                                           ready_time=str(cfg.get("ready_time") or ""),
+                                           close_time=str(cfg.get("close_time") or ""))
     except worldoptions.WorldOptionsError as e:
         return {"error": str(e)}
     except Exception:
@@ -5480,6 +5485,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             "notify_customer": bool(cfg.get("notify_customer", True)),
             "currency": cfg.get("currency") or "GBP",
             "plugin_code": cfg.get("plugin_code") or "Web_Service",
+            "ready_time": cfg.get("ready_time") or "",
+            "close_time": cfg.get("close_time") or "",
             "base_url": cfg.get("base_url") or "",
             "connected": bool(worldoptions and worldoptions.configured()),
             "meter_last4": (worldoptions.meter_last4() if worldoptions else ""),
@@ -5541,6 +5548,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             cfg["default_box_id"] = str(body.get("default_box_id") or "")[:40]
         if "notify_customer" in body:
             cfg["notify_customer"] = bool(body.get("notify_customer"))
+        for tkey in ("ready_time", "close_time"):
+            if tkey in body:
+                tv = str(body.get(tkey) or "").strip()
+                if tv and not _TIME_RE.match(tv):
+                    return _json({"error": "Collection times must be in 24-hour HH:MM form, "
+                                           "e.g. 14:00."}, 400)
+                cfg[tkey] = tv
+        if str(cfg.get("ready_time") or "") and str(cfg.get("close_time") or "") \
+                and cfg["ready_time"] >= cfg["close_time"]:
+            return _json({"error": "The collection ready time must be before the close time."}, 400)
         if body.get("currency"):
             cfg["currency"] = str(body.get("currency"))[:3].upper()
         if body.get("plugin_code"):

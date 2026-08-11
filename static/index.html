@@ -4112,6 +4112,15 @@
                 const nb = document.createElement('input'); nb.type = 'checkbox'; nb.checked = cfg.notify_customer !== false;
                 notifyWrap.append(nb, el('span', null, ' Mark the order fulfilled in Shopify and email the customer tracking'));
                 conf.append(notifyWrap);
+                if (cfg.ready_time || cfg.close_time) {
+                    conf.append(el('div', 'sub', 'Collection window: '
+                        + (cfg.ready_time ? 'ready from ' + cfg.ready_time : '')
+                        + (cfg.ready_time && cfg.close_time ? ', ' : '')
+                        + (cfg.close_time ? 'closes at ' + cfg.close_time : '')
+                        + '. Change it in Shipping settings.'));
+                } else {
+                    conf.append(el('div', 'sub', 'No collection window set; the courier gets no ready or close time. Set one in Shipping settings.'));
+                }
                 conf.append(el('div', 'disp-charge', 'Booking charges your World Options account.'));
                 const book = el('button', 'btn btn-primary disp-book');
                 const setLabel = () => { book.innerHTML = ''; book.append(ico(I.truck), document.createTextNode('Book & dispatch · ' + fmtPrice(chosen.amount, chosen.currency))); };
@@ -4264,12 +4273,24 @@
             });
             body.append(originGrid);
 
-            // Notify toggle
+            // Notify toggle + collection window
             body.append(el('div', 'section-title', 'Options'));
             const notifyWrap = el('label', 'disp-notify');
             const notifyCb = document.createElement('input'); notifyCb.type = 'checkbox'; notifyCb.checked = cfg.notify_customer !== false;
             notifyWrap.append(notifyCb, el('span', null, ' Email the customer tracking when an order is dispatched (default)'));
             body.append(notifyWrap);
+            body.append(el('p', 'field-help', 'Collection window: when the courier can pick up from you. Sent with every booking.'));
+            const timeGrid = el('div', 'disp-dims'); timeGrid.style.gridTemplateColumns = '1fr 1fr';
+            const readyF = el('label', 'disp-fld');
+            readyF.append(el('span', 'disp-fld-lab', 'Ready from'));
+            const readyIn = document.createElement('input'); readyIn.type = 'time'; readyIn.className = 'disp-num';
+            readyIn.value = cfg.ready_time || ''; readyF.append(readyIn);
+            const closeF = el('label', 'disp-fld');
+            closeF.append(el('span', 'disp-fld-lab', 'Closes at'));
+            const closeIn = document.createElement('input'); closeIn.type = 'time'; closeIn.className = 'disp-num';
+            closeIn.value = cfg.close_time || ''; closeF.append(closeIn);
+            timeGrid.append(readyF, closeF);
+            body.append(timeGrid);
 
             // Box presets
             body.append(el('div', 'section-title', 'Box presets'));
@@ -4307,7 +4328,8 @@
                 saveB.disabled = true;
                 try {
                     const payload = { op: 'set', origin: origin, notify_customer: notifyCb.checked,
-                        plugin_code: pluginIn.value.trim() || 'Web_Service' };
+                        plugin_code: pluginIn.value.trim() || 'Web_Service',
+                        ready_time: readyIn.value || '', close_time: closeIn.value || '' };
                     if (clean.length) payload.boxes = clean;
                     if (!fromEnv) {
                         if (credIn.meter_number.value.trim()) payload.meter_number = credIn.meter_number.value.trim();
