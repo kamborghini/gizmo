@@ -761,6 +761,13 @@ _SHIPPING_DEFAULT = {
     # Collection arrangement: explicit, because omitting it makes WO assume a NEW
     # collection is wanted on every booking (wrong for daily-collection accounts).
     "collection_option": "I_Need_To_Book_A_Collection",
+    # International / customs (used only for non-GB destinations)
+    "eori": "",
+    "vat_number": "",
+    "default_hs_code": "",
+    "export_reason": "Sale",
+    "duties_payor": "Duties_To_Be_Paid_By_Receiver",
+    "trade_term": "",
     "base_url": (worldoptions.DEFAULT_BASE if worldoptions else ""),
 }
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -3152,8 +3159,8 @@ async def _origin_address(registry: dict) -> dict:
     """Our shop's dispatch origin: the saved Settings address, else the Shopify
     shop address as a sensible default."""
     o = dict(_load_shipping().get("origin") or {})
-    if o.get("street") and o.get("postcode") and o.get("country"):
-        return o
+    # Always merge per-field with the Shopify shop record: a saved origin that
+    # lacks phone/email must not lose the shop's (bookings REQUIRE both).
     try:
         shop = await _tool_json(registry, "shopify_get_shop", {})
     except Exception:
@@ -3202,6 +3209,7 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None) -> di
             "manufacturer": mfr or (entry["manufacturer"] if entry else ""),
             "model": model,
             "glass_type": _item_glass(li),
+            "price": str(li.get("price") or ""),
             "production_size": dsize or (entry["production_size"] if (entry and not reason) else ""),
             "size_note": ("Size for this customer" if dsize
                           else (entry["review"] if entry and entry["production_size"] and entry["review"] else "")),
@@ -3228,6 +3236,12 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None) -> di
         "ship_to": _ship_to(o),
         "weight_hint": _order_weight_kg(o),
         "currency": o.get("currency") or o.get("presentment_currency") or "",
+        # Total goods value: customs totals, declared values and insurance prefill.
+        "goods_value": round(sum(
+            (float(li.get("price") or 0) * int(li.get("quantity") or 1))
+            for li in (o.get("line_items") or [])
+            if not _label_skip_item(str(li.get("title") or li.get("name") or ""))
+            and str(li.get("price") or "").replace(".", "", 1).isdigit()), 2),
         # What the customer paid for delivery, so the courier pick is not blind.
         "shipping_paid": (lambda sl: ({"title": str(sl[0].get("title") or ""),
                                        "price": str(sl[0].get("price") or "")}
@@ -3302,13 +3316,57 @@ def _clean_box(box: dict):
     return b, ""
 
 
-async def run_dispatch_quote(registry: dict, order_id, box: dict) -> dict:
+def _clean_parcel_list(body: dict):
+    """The request's parcels: a boxes[] list, or the legacy single box. Returns
+    (boxes, error). Capped at 15 parcels per shipment."""
+    raw = body.get("boxes")
+    if not isinstance(raw, list) or not raw:
+        raw = [body.get("box") if isinstance(body.get("box"), dict) else {}]
+    if len(raw) > 15:
+        return None, "A shipment can carry at most 15 boxes."
+    out = []
+    for i, rb in enumerate(raw, start=1):
+        b, err = _clean_box(rb if isinstance(rb, dict) else {})
+        if err:
+            return None, (f"Box {i}: {err}" if len(raw) > 1 else err)
+        out.append(b)
+    return out, ""
+
+
+def _insurance_amount(body: dict):
+    """The requested insurance cover as a string amount, '' when none."""
+    v = body.get("insurance")
+    try:
+        f = float(v or 0)
+    except (TypeError, ValueError):
+        return ""
+    return ("%.2f" % f) if f > 0 else ""
+
+
+def _spread_value(boxes: list, total: float) -> list:
+    """Declared value split across the parcels (customs + insurance basis)."""
+    if not boxes or not total or total <= 0:
+        return boxes
+    per = round(float(total) / len(boxes), 2)
+    for b in boxes:
+        b["custom_value"] = per
+    return boxes
+
+
+def _goods_summary(o: dict) -> str:
+    titles = []
+    for li in (o.get("line_items") or []):
+        t = str(li.get("title") or li.get("name") or "").strip()
+        if t and not _label_skip_item(t) and t not in titles:
+            titles.append(t)
+    return ("; ".join(titles))[:100] or "Custom glass gobos"
+
+
+async def run_dispatch_quote(registry: dict, order_id, boxes: list,
+                             insurance: str = "") -> dict:
     """Price couriers for one order to its shipping address. Free / read-only."""
     if not worldoptions or not worldoptions.configured():
         return {"error": "World Options is not connected. Add your credentials in Settings."}
-    b, err = _clean_box(box)
-    if err:
-        return {"error": err}
 
     o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
     if not _ok(o) or not o.get("id"):
@@ -3331,8 +3389,21 @@ async def run_dispatch_quote(registry: dict, order_id, box: dict) -> dict:
     cfg = _load_shipping()
     currency = _wo_currency(o.get("currency"), cfg)
     residential = not str(dest.get("company") or "").strip()
+    dropoff = (cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages")
+    # Declared value rides on every parcel (customs + insurance + liability basis).
+    goods_value = 0.0
     try:
-        res = await worldoptions.quote(origin, dest, [b], currency=currency, residential=residential)
+        goods_value = round(sum(
+            (float(li.get("price") or 0) * int(li.get("quantity") or 1))
+            for li in (o.get("line_items") or [])
+            if not _label_skip_item(str(li.get("title") or li.get("name") or ""))), 2)
+    except (TypeError, ValueError):
+        goods_value = 0.0
+    boxes = _spread_value([dict(b) for b in boxes], goods_value)
+    try:
+        res = await worldoptions.quote(origin, dest, boxes, currency=currency,
+                                       residential=residential, insurance=insurance,
+                                       collection_dropoff=dropoff)
     except worldoptions.WorldOptionsError as e:
         return {"error": str(e)}
     except Exception:
@@ -3346,7 +3417,13 @@ async def run_dispatch_quote(registry: dict, order_id, box: dict) -> dict:
         "destination": {"name": dest.get("company") or " ".join(
             x for x in [dest.get("firstname"), dest.get("lastname")] if x).strip() or dest.get("name"),
             "city": dest.get("city"), "postcode": dest.get("postcode"), "country": dest.get("country")},
-        "weight": b["weight"],
+        "weight": round(sum(b["weight"] for b in boxes), 3),
+        "boxes": len(boxes),
+        "goods_value": goods_value,
+        "insurance": insurance,
+        "dropoff": dropoff,
+        "has_eori": bool(cfg.get("eori")),
+        "default_hs_code": cfg.get("default_hs_code") or "",
         # International orders need customs data the app does not send yet; the UI
         # shows this as a warning so nothing ships silently without paperwork.
         "international": (str(dest.get("country") or "").upper() not in ("GB", "")),
@@ -3355,8 +3432,10 @@ async def run_dispatch_quote(registry: dict, order_id, box: dict) -> dict:
     }
 
 
-async def run_dispatch_book(registry: dict, order_id, option: dict, box: dict,
-                            notify: Optional[bool] = None, force: bool = False) -> dict:
+async def run_dispatch_book(registry: dict, order_id, option: dict, boxes: list,
+                            notify: Optional[bool] = None, force: bool = False,
+                            insurance: str = "", signature: str = "",
+                            customs_body: Optional[dict] = None) -> dict:
     """Book the chosen courier option (this CHARGES the World Options account),
     then move the order's tag to Dispatched and create the Shopify fulfillment
     with tracking. Returns everything the UI needs to confirm what happened.
@@ -3369,15 +3448,14 @@ async def run_dispatch_book(registry: dict, order_id, option: dict, box: dict,
         return {"error": "World Options is not connected. Add your credentials in Settings."}
     if not isinstance(option, dict) or not option.get("service_type_code"):
         return {"error": "A courier option must be selected before booking."}
-    b, err = _clean_box(box)
-    if err:
-        return {"error": err}
     async with _dispatch_lock(order_id):
-        return await _dispatch_book_locked(registry, order_id, option, b, notify, force)
+        return await _dispatch_book_locked(registry, order_id, option, boxes, notify, force,
+                                           insurance, signature, customs_body)
 
 
-async def _dispatch_book_locked(registry: dict, order_id, option: dict, b: dict,
-                                notify, force: bool) -> dict:
+async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: list,
+                                notify, force: bool, insurance: str, signature: str,
+                                customs_body: Optional[dict]) -> dict:
     existing = _load_dispatch().get(str(order_id)) or {}
     if existing.get("tracking_number") and not existing.get("canceled"):
         return {"error": "This order was already dispatched: "
@@ -3408,11 +3486,93 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, b: dict,
     currency = _wo_currency(o.get("currency"), cfg)
     reference = str(o.get("name") or o.get("order_number") or order_id)
 
+    # World Options validates that BOTH ends carry a phone and an email before it
+    # will book. The origin must be complete (it is the merchant's own address);
+    # a missing customer phone/email falls back to the shop's, with a note.
+    contact_note = ""
+    if not str(origin.get("phone") or "").strip() or not str(origin.get("email") or "").strip():
+        return {"error": "World Options requires a phone number and email for the collection "
+                         "address. Add them to your dispatch address under Shipping settings."}
+    fell_back = []
+    if not str(dest.get("phone") or "").strip():
+        dest["phone"] = origin.get("phone")
+        fell_back.append("phone")
+    if not str(dest.get("email") or "").strip():
+        dest["email"] = origin.get("email")
+        fell_back.append("email")
+    if fell_back:
+        contact_note = ("The customer's order has no " + " or ".join(fell_back)
+                        + ", so your shop's was sent as the delivery contact. Courier delivery "
+                          "updates will come to you, not the customer.")
+
+    # Declared value on every parcel; also the customs total.
     try:
-        shipment = await worldoptions.book(option, origin, dest, [b], currency=currency, reference=reference,
+        goods_value = round(sum(
+            (float(li.get("price") or 0) * int(li.get("quantity") or 1))
+            for li in (o.get("line_items") or [])
+            if not _label_skip_item(str(li.get("title") or li.get("name") or ""))), 2)
+    except (TypeError, ValueError):
+        goods_value = 0.0
+    boxes = _spread_value([dict(bx) for bx in boxes], goods_value)
+
+    # International: the customs dossier is REQUIRED, assembled from settings
+    # (EORI, VAT, export defaults) + the per-shipment goods lines from the UI.
+    international = str(dest.get("country") or "").upper() not in ("GB", "")
+    customs = None
+    if international:
+        if not str(cfg.get("eori") or "").strip():
+            return {"error": "International orders need your EORI number. Add it under "
+                             "Shipping settings, International, then try again."}
+        lines = (customs_body or {}).get("lines") if isinstance(customs_body, dict) else None
+        goods = []
+        for g in (lines or []):
+            if not isinstance(g, dict):
+                continue
+            try:
+                q = int(float(g.get("quantity") or 0))
+                up = float(g.get("unit_price") or 0)
+            except (TypeError, ValueError):
+                continue
+            desc = str(g.get("description") or "").strip()
+            if not desc or q <= 0 or up < 0:
+                continue
+            goods.append({"description": desc, "quantity": q, "unit_price": round(up, 2),
+                          "weight": g.get("weight") or "",
+                          "hs": str(g.get("hs") or cfg.get("default_hs_code") or "").strip(),
+                          "country": str(g.get("country") or "GB").strip()})
+        if not goods:
+            return {"error": "International orders need at least one customs goods line "
+                             "(what it is, how many, unit value). Fill in the customs "
+                             "section before booking."}
+        total = round(sum(g["quantity"] * g["unit_price"] for g in goods), 2)
+        customs = {
+            "eori": cfg.get("eori"), "vat": cfg.get("vat_number"),
+            "invoice_type": "Help_Me_Generate",
+            "export_reason": cfg.get("export_reason") or "Sale",
+            "duties_payor": cfg.get("duties_payor") or "Duties_To_Be_Paid_By_Receiver",
+            "trade_term": cfg.get("trade_term") or "",
+            "invoice_number": reference,
+            "receiver_tax_id": str((customs_body or {}).get("receiver_tax_id") or "")[:40],
+            "receiver_company_number": str((customs_body or {}).get("receiver_company_number") or "")[:40],
+            "goods": goods, "total_value": total,
+        }
+
+    # Parcel-shop drop-off: when the merchant drops off, book against the
+    # option's nearest offered shop.
+    dropoff_shop = None
+    if cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages":
+        shops = option.get("shops") or []
+        if shops and isinstance(shops[0], dict):
+            dropoff_shop = shops[0]
+
+    try:
+        shipment = await worldoptions.book(option, origin, dest, boxes, currency=currency, reference=reference,
                                            ready_time=str(cfg.get("ready_time") or ""),
                                            close_time=str(cfg.get("close_time") or ""),
-                                           collection_option=str(cfg.get("collection_option") or ""))
+                                           collection_option=str(cfg.get("collection_option") or ""),
+                                           insurance=insurance, signature=signature,
+                                           dropoff_shop=dropoff_shop, customs=customs,
+                                           description=_goods_summary(o))
     except worldoptions.WorldOptionsError as e:
         return {"error": str(e)}
     except Exception:
@@ -3461,6 +3621,9 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, b: dict,
         "notified": bool(do_notify and fulfillment.get("ok")),
         "has_label": bool(shipment.get("labels")),
         "collection_date": shipment.get("collection_date") or "",
+        "insured": insurance or "",
+        "international": international,
+        "dropoff": (dropoff_shop or {}).get("name") or "",
     }
     _record_dispatch(int(order_id), entry)
 
@@ -3472,6 +3635,10 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, b: dict,
         "notified": entry["notified"],
         "warning": shipment.get("warning") or "",
         "dispatch": entry,
+        "dropoff_shop": dropoff_shop,
+        "insured": insurance,
+        "international": international,
+        "contact_note": contact_note,
     }
 
 
@@ -5556,6 +5723,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             "close_time": cfg.get("close_time") or "",
             "collection_option": cfg.get("collection_option") or "I_Need_To_Book_A_Collection",
             "collection_options": (worldoptions.COLLECTION_OPTIONS if worldoptions else []),
+            "eori": cfg.get("eori") or "",
+            "vat_number": cfg.get("vat_number") or "",
+            "default_hs_code": cfg.get("default_hs_code") or "",
+            "export_reason": cfg.get("export_reason") or "Sale",
+            "export_reasons": (worldoptions.EXPORT_REASONS if worldoptions else []),
+            "duties_payor": cfg.get("duties_payor") or "Duties_To_Be_Paid_By_Receiver",
+            "duties_payors": (worldoptions.DUTIES_PAYORS if worldoptions else []),
+            "trade_term": cfg.get("trade_term") or "",
+            "signature_options": (worldoptions.SIGNATURE_OPTIONS if worldoptions else {}),
             "base_url": cfg.get("base_url") or "",
             "connected": bool(worldoptions and worldoptions.configured()),
             "meter_last4": (worldoptions.meter_last4() if worldoptions else ""),
@@ -5632,6 +5808,19 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if worldoptions and co not in worldoptions.COLLECTION_OPTIONS:
                 return _json({"error": "Unknown collection arrangement."}, 400)
             cfg["collection_option"] = co
+        for skey, cap in (("eori", 30), ("vat_number", 30), ("default_hs_code", 20), ("trade_term", 20)):
+            if skey in body:
+                cfg[skey] = str(body.get(skey) or "").strip()[:cap]
+        if body.get("export_reason"):
+            er = str(body.get("export_reason")).strip()
+            if worldoptions and er not in worldoptions.EXPORT_REASONS:
+                return _json({"error": "Unknown export reason."}, 400)
+            cfg["export_reason"] = er
+        if body.get("duties_payor"):
+            dp = str(body.get("duties_payor")).strip()
+            if worldoptions and dp not in worldoptions.DUTIES_PAYORS:
+                return _json({"error": "Unknown duties choice."}, 400)
+            cfg["duties_payor"] = dp
         if body.get("currency"):
             cfg["currency"] = str(body.get("currency"))[:3].upper()
         if body.get("plugin_code"):
@@ -5699,9 +5888,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             oid = 0
         if not oid:
             return _json({"error": "No order id given."}, 400)
-        box = body.get("box") if isinstance(body.get("box"), dict) else {}
+        boxes, perr = _clean_parcel_list(body)
+        if perr:
+            return _json({"error": perr}, 400)
         try:
-            res = await run_dispatch_quote(registry, oid, box)
+            res = await run_dispatch_quote(registry, oid, boxes, insurance=_insurance_amount(body))
             return _json(res, 400 if res.get("error") else 200)
         except Exception:
             logger.exception("dispatch quote route failed")
@@ -5726,12 +5917,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not oid:
             return _json({"error": "No order id given."}, 400)
         option = body.get("option") if isinstance(body.get("option"), dict) else {}
-        box = body.get("box") if isinstance(body.get("box"), dict) else {}
+        boxes, perr = _clean_parcel_list(body)
+        if perr:
+            return _json({"error": perr}, 400)
         notify = body.get("notify")
         notify = None if notify is None else bool(notify)
+        customs_body = body.get("customs") if isinstance(body.get("customs"), dict) else None
         try:
-            res = await run_dispatch_book(registry, oid, option, box, notify=notify,
-                                          force=bool(body.get("force")))
+            res = await run_dispatch_book(registry, oid, option, boxes, notify=notify,
+                                          force=bool(body.get("force")),
+                                          insurance=_insurance_amount(body),
+                                          signature=str(body.get("signature") or "")[:60],
+                                          customs_body=customs_body)
             return _json(res, 400 if res.get("error") else 200)
         except Exception:
             logger.exception("dispatch book route failed")

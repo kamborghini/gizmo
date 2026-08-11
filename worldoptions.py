@@ -58,6 +58,7 @@ NS = {
     "g":   "http://schemas.datacontract.org/2004/07/WOModel.GlobalTypes",
     "gt":  "http://schemas.datacontract.org/2004/07/WOWebServices.Model.wsGlobalTypes",
     "lbl": "http://schemas.datacontract.org/2004/07/WOModel.ShippingLabel",
+    "ad":  "http://schemas.datacontract.org/2004/07/WOModel.AddlShipmentDetails",
 }
 
 # Map a booking service code (wsServiceTypes) onto its carrier (wsServiceCompanyTypes),
@@ -93,6 +94,34 @@ COLLECTION_OPTIONS = [
     "I_Already_Have_Collection_Scheduled",
     "I_Am_Going_To_Drop_Off_My_Packages",
 ]
+
+
+# Per-carrier signature services (wsSignatureTypes enum, grouped by the carrier
+# whose bookings may carry them). Sent only when the merchant picks one.
+SIGNATURE_OPTIONS = {
+    "FEDEX":     ["Fedex_No_Signature_Required", "Fedex_InDirect", "Fedex_Direct", "Fedex_Adult"],
+    "UPS":       ["UPS_Signature_Required", "UPS_Adult"],
+    "DHL":       ["DHL_No_Signature_Required", "DHL_Direct", "DHL_Adult", "DHL_Leave_With_Neighbour"],
+    "DHLPARCEL": ["DHLParcel_Signature_Required", "DHLParcel_Delivery_To_Neighbour", "DHLParcel_Leave_Safe"],
+}
+EXPORT_REASONS = ["Sale", "Sample", "Gift", "Repair", "Exhibition", "Personal_Effects", "Return", "Other"]
+DUTIES_PAYORS = ["Duties_To_Be_Paid_By_Receiver", "Duties_To_Be_Paid_By_Sender", "Duties_To_Be_Paid_By_Third_Party"]
+INVOICE_TYPES = ["Help_Me_Generate", "I_Already_Have_One", "Upload_your_own_PDF_invoice"]
+
+# wsQuoteDetail decimal fields that are genuine price components (for the
+# per-option breakdown). Everything else in that type is metadata.
+_BREAKDOWN_SKIP = {"TotalNetCharge"}
+_BREAKDOWN_META = {"DHLLocalProductCode", "DeliveryDateTime", "ServiceSurchargeCode", "ServiceType",
+                   "ServiceTypeMode", "ServiceTypeName", "TransportationType", "serviceId",
+                   "IfGenericRates", "IsNetMinimumDiscount", "isOwnAccountRate", "ResellerMarkupPercentage"}
+
+
+def _pretty_charge(name: str) -> str:
+    """FuelSurcharge -> 'Fuel surcharge'."""
+    import re as _re
+    s = _re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)
+    s = s.replace("V A T", "VAT").replace("A U ", "AU ").replace("B F P O", "BFPO")
+    return s[:1].upper() + s[1:].lower().replace("vat", "VAT").replace("bfpo", "BFPO")
 
 
 class WorldOptionsError(Exception):
@@ -262,8 +291,9 @@ def _friendly_fault(reason: str) -> str:
     if "invalid_client" in low:
         return ("World Options rejected the web service Key and Password. Double-check both in "
                 "Shipping settings, or ask World Options to confirm your web service credentials.")
-    if "woauthenticationexception" in low:
-        return "World Options could not log you in: " + (reason or "")[:250]
+    if "woauthenticationexception" in low or "authentication failed" in low:
+        return ("World Options could not log you in. Check the Meter Number, Key and "
+                "Password in Shipping settings.")
     return ("World Options rejected the request: " + (reason or "SOAP fault"))[:400]
 
 
@@ -281,6 +311,13 @@ def _parse(resp: httpx.Response, url: str = "") -> ET.Element:
         raise WorldOptionsError(f"World Options returned an unreadable response (HTTP {resp.status_code}).")
     fault = _find(root, "Fault")
     if fault is not None:
+        # Enterprise Library validation faults carry the real reasons in the
+        # detail block ("Please provide phone for collection", ...).
+        details = [(_text(vd, "Message") or "").strip()
+                   for vd in _findall_direct(fault, "ValidationDetail")]
+        details = [d for d in details if d]
+        if details:
+            raise WorldOptionsError("World Options needs more information: " + " ".join(details))
         reason = _text(fault, "Text") or _text(fault, "faultstring") or "SOAP fault"
         raise WorldOptionsError(_friendly_fault(reason))
     if resp.status_code >= 400:
@@ -294,7 +331,8 @@ def _reply_status(reply, context: str):
     msg = _text(reply, "Message").strip()
     if notif == "FAILED":
         low = msg.lower()
-        if "access token" in low or "authenticationexception" in low or "invalid_client" in low:
+        if ("access token" in low or "authenticationexception" in low
+                or "invalid_client" in low or "authentication failed" in low):
             raise WorldOptionsError(_friendly_fault(msg))
         raise WorldOptionsError(msg or f"World Options could not {context}.")
     return msg, notif
@@ -324,15 +362,23 @@ def _dec(v):
 # ---------------------------------------------------------------------------
 # Public operations
 # ---------------------------------------------------------------------------
+def _pkg_value(box: dict) -> str:
+    v = box.get("custom_value")
+    return _num(v) if v else "0"
+
+
 async def quote(origin: dict, destination: dict, boxes: list,
-                currency: str = "GBP", residential: bool = False) -> dict:
-    """Free, read-only price check across all carriers. Returns {options[]}."""
+                currency: str = "GBP", residential: bool = False,
+                insurance: str = "", collection_dropoff: bool = False) -> dict:
+    """Free, read-only price check across all carriers. Returns {options[]}.
+    insurance = the cover amount to include in pricing; collection_dropoff asks
+    for tariffs where the merchant drops the parcel at a shop."""
     o, d = origin or {}, destination or {}
     pkgs = ""
     for i, b in enumerate(boxes or [], start=1):
         pkgs += ("<rs:wsShippingDetails.PackageDetail>"
                  + _t("rs", "Breadth", _num(b.get("width")))
-                 + _t("rs", "CustomValue", "0")
+                 + _t("rs", "CustomValue", _pkg_value(b))
                  + _t("rs", "Height", _num(b.get("depth")))
                  + _t("rs", "ItemNumber", str(i))
                  + _t("rs", "Length", _num(b.get("length")))
@@ -356,8 +402,10 @@ async def quote(origin: dict, destination: dict, boxes: list,
         + _t("m", "CollectionCountryState", o.get("state"))
         + _t("m", "CollectionPostCode", o.get("postcode"))
         + "</wo:SenderDetails>"
-        # ShippingDetails (wsShippingDetails), alpha (only fields we set)
+        # ShippingDetails (wsShippingDetails), XSD sequence order
         + "<wo:ShippingDetails>"
+        + _t("rs", "Insurance", insurance)
+        + (_b("rs", "IsCollectionDropoffRequired", True) if collection_dropoff else "")
         + f"<rs:PackageDetails>{pkgs}</rs:PackageDetails>"
         + _t("rs", "ServiceName", "ALL")
         + _t("rs", "ServiceTypeName", "ALL")
@@ -376,6 +424,30 @@ async def quote(origin: dict, destination: dict, boxes: list,
         amount = _dec(_text(qd, "TotalNetCharge")) if qd is not None else None
         service_code = _text(opt, "wsServiceTypeCode")
         carrier = _carrier_from(service_code, _text(qd, "ServiceType") if qd is not None else "")
+        # Non-zero price components -> a human breakdown, largest first.
+        breakdown = []
+        if qd is not None:
+            for ch in list(qd):
+                name = _local(ch.tag)
+                if name in _BREAKDOWN_SKIP or name in _BREAKDOWN_META:
+                    continue
+                v = _dec(ch.text)
+                if v:
+                    breakdown.append({"label": _pretty_charge(name), "amount": v})
+            breakdown.sort(key=lambda x: -abs(x["amount"]))
+        # Drop-off shops offered for this service (nearest first, capped).
+        shops = []
+        for shop in _findall_direct(_find(opt, "wsCollectionDropOffShops"), "wsDropOffShop")[:3]:
+            shops.append({
+                "id":       _text(shop, "ParcelShopNumber"),
+                "name":     _text(shop, "Description"),
+                "street":   (_text(shop, "HouseNo") + " " + _text(shop, "Street")).strip(),
+                "city":     _text(shop, "City"),
+                "postcode": _text(shop, "PostCode"),
+                "distance": (_text(shop, "Distance") + " " + _text(shop, "DistanceUnit")).strip(),
+                "lat":      _text(shop, "Latitude"),
+                "lng":      _text(shop, "Longitude"),
+            })
         options.append({
             "service_type_code": service_code,
             "service_code":      _text(opt, "wsServiceCode"),
@@ -386,6 +458,8 @@ async def quote(origin: dict, destination: dict, boxes: list,
             "currency":          cur,
             "delivery":          _text(opt, "wsDeliveryDateTime"),
             "pickup":            _text(opt, "wsPickupDateTime"),
+            "breakdown":         breakdown[:8],
+            "shops":             shops,
         })
     options.sort(key=lambda x: (x["amount"] is None, x["amount"] if x["amount"] is not None else 0))
     return {"options": options, "currency": cur}
@@ -438,14 +512,52 @@ def _classify_label(lbl: ET.Element) -> dict:
     return {}
 
 
+def _customs_block(customs: dict) -> str:
+    """The AdditionalShipmentDetail (customs dossier) for an international booking.
+    Children in the XSD sequence order; goods lines likewise."""
+    if not customs:
+        return ""
+    goods = ""
+    for i, g in enumerate(customs.get("goods") or [], start=1):
+        goods += ("<ad:wsAddlShipmentDetail.GoodsDetail>"
+                  + _t("ad", "CountryCode", (g.get("country") or "GB").upper())
+                  + _t("ad", "Description", str(g.get("description") or "")[:100])
+                  + _t("ad", "HTSNumber", str(g.get("hs") or "")[:20])
+                  + _t("ad", "ItemNumber", str(i))
+                  + _t("ad", "Quantity", _num(g.get("quantity")))
+                  + _t("ad", "UnitPrice", _num(g.get("unit_price")))
+                  + _t("ad", "Wt", _num(g.get("weight")))
+                  + "</ad:wsAddlShipmentDetail.GoodsDetail>")
+    total = customs.get("total_value")
+    return ("<wo:AdditionalShipmentDetail>"
+            + _t("ad", "AdditionalComments", str(customs.get("comments") or "")[:200])
+            + _t("ad", "CommercialInvoiceType",
+                 customs.get("invoice_type") if customs.get("invoice_type") in INVOICE_TYPES else "Help_Me_Generate")
+            + _t("ad", "EORINumber", str(customs.get("eori") or "")[:30])
+            + _t("ad", "ExportReason",
+                 customs.get("export_reason") if customs.get("export_reason") in EXPORT_REASONS else "Sale")
+            + _t("ad", "ExportType", "Permanent")
+            + (f"<ad:GoodsDetails>{goods}</ad:GoodsDetails>" if goods else "")
+            + _t("ad", "InvoiceNumber", str(customs.get("invoice_number") or "")[:40])
+            + _b("ad", "IsPaperLess", True)
+            + _t("ad", "ReceiverCompanyNumber", str(customs.get("receiver_company_number") or "")[:40])
+            + _t("ad", "ReceiverTaxId", str(customs.get("receiver_tax_id") or "")[:40])
+            + (_t("ad", "TotalCustomValue", _num(total)) if total else "")
+            + _t("ad", "TradeTerm", str(customs.get("trade_term") or "")[:20])
+            + "</wo:AdditionalShipmentDetail>")
+
+
 async def book(option: dict, origin: dict, destination: dict, boxes: list,
                currency: str = "GBP", reference: str = "",
                ready_time: str = "", close_time: str = "",
-               collection_option: str = "") -> dict:
+               collection_option: str = "", insurance: str = "",
+               signature: str = "", dropoff_shop: dict = None,
+               customs: dict = None, description: str = "") -> dict:
     """Book (and CHARGE) the chosen quote option. Returns tracking + labels.
-    ready_time/close_time (HH:MM) describe the collection window and
-    collection_option the arrangement (COLLECTION_OPTIONS); sent in the
-    booking's BillingDetail when set."""
+    ready_time/close_time/collection_option describe the collection; insurance
+    is the cover amount; signature a SIGNATURE_OPTIONS value; dropoff_shop the
+    parcel shop when the merchant drops off; customs the international dossier
+    (see _customs_block); description a short contents summary."""
     option = option or {}
     service_code = option.get("service_type_code") or ""
     carrier = (option.get("carrier_name") or _carrier_from(service_code, "")).upper()
@@ -455,40 +567,62 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
     for i, b in enumerate(boxes or [], start=1):
         pkgs += ("<sd:wsShippingDetail.PackageDetail>"
                  + _t("sd", "Breadth", _num(b.get("width")))
-                 + _t("sd", "CustomValue", "0")
+                 + _t("sd", "CustomValue", _pkg_value(b))
                  + _t("sd", "Height", _num(b.get("depth")))
                  + _t("sd", "ItemNumber", str(i))
                  + _t("sd", "Length", _num(b.get("length")))
                  + _t("sd", "Wt", _num(b.get("weight")))
                  + "</sd:wsShippingDetail.PackageDetail>")
-    # ShippingDetail (wsShippingDetail), alpha, only fields we set:
-    # CollectionType, Currency, CustomerReference, PackageDetails, PackageTypeCode,
-    # ServiceType, ServiceTypeCode
+    # ShippingDetail (wsShippingDetail) in the XSD sequence order.
+    shop = dropoff_shop or {}
+    dropoff = ""
+    if shop:
+        dropoff = ("<sd:CollectionDropOffInfo>"
+                   + _t("sd", "City", shop.get("city"))
+                   + _t("sd", "Description", shop.get("name"))
+                   + _t("sd", "DropOffId", shop.get("id"))
+                   + _t("sd", "PostCode", shop.get("postcode"))
+                   + _t("sd", "Street", shop.get("street"))
+                   + "</sd:CollectionDropOffInfo>")
     shipping = ("<wo:ShippingDetail>"
+                + dropoff
                 + _t("sd", "CollectionType", "Regular")
                 + _t("sd", "Currency", cur)
                 + _t("sd", "CustomerReference", (reference or "")[:40])
+                + _t("sd", "Description", (description or "")[:100])
+                + _t("sd", "Insurance", insurance)
+                + (_b("sd", "IsCollectionDropoffRequired", True) if shop else "")
                 + f"<sd:PackageDetails>{pkgs}</sd:PackageDetails>"
                 + _t("sd", "PackageTypeCode", pkg_type)
+                + _t("sd", "SenderVatNo", str((customs or {}).get("vat") or "")[:30])
                 + _t("sd", "ServiceType", carrier)
                 + _t("sd", "ServiceTypeCode", service_code)
                 + "</wo:ShippingDetail>")
-    # BillingDetail (wsBillingDetail) carries the collection window + arrangement.
-    # Children alphabetical: CloseTime, CollectionOptions, ReadyTime. ReadyDate is
-    # deliberately not sent (optional; its date format is undocumented, WO defaults it).
+    # BillingDetail (wsBillingDetail): collection window + arrangement + delivery
+    # signature + duties election, in the XSD sequence order. ReadyDate is
+    # deliberately not sent (optional; its date format is undocumented).
     co = (collection_option or "").strip()
     if co and co not in COLLECTION_OPTIONS:
         co = ""
+    sig = (signature or "").strip()
+    if sig and sig not in sum(SIGNATURE_OPTIONS.values(), []):
+        sig = ""
+    duties = str((customs or {}).get("duties_payor") or "").strip()
+    if duties and duties not in DUTIES_PAYORS:
+        duties = ""
     billing = ""
-    if ready_time or close_time or co:
+    if ready_time or close_time or co or sig or duties:
         billing = ("<wo:BillingDetail>"
                    + _t("wo", "CloseTime", close_time)
                    + _t("wo", "CollectionOptions", co)
+                   + _t("wo", "DeliverySignatureType", sig)
+                   + _t("wo", "DutiesPayor", duties)
                    + _t("wo", "ReadyTime", ready_time)
                    + "</wo:BillingDetail>")
-    # ShipmentBookingRequest, alpha: AdditionalShipmentDetail, AuthenticationDetail,
-    # BillingDetail, RecipientsDetails, SendersDetails, ShippingDetail
+    # ShipmentBookingRequest in the XSD sequence order: AdditionalShipmentDetail,
+    # AuthenticationDetail, BillingDetail, RecipientsDetails, SendersDetails, ShippingDetail
     inner = ("<tem:DoShipment><tem:shipment>"
+             + _customs_block(customs or {})
              + _auth_block()
              + billing
              + _recipient_block(destination or {})

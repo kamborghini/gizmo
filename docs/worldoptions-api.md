@@ -57,3 +57,26 @@ Request `VoidRequest{AuthenticationDetail, TrackingNumber}` -> `VoidReply{Messag
 - `NotificationtType == "FAILED"` (their spelling) means the call was rejected; `Message` carries why.
 - Hand-rolled envelopes (no zeep) so the module stays async + dependency-free; the XSD imports point at
   an internal host zeep couldn't resolve anyway. Confine everything to `worldoptions.py`.
+
+## Booking hard requirements (learned from live ValidationFault probing)
+- BOTH sender and recipient need Phone AND Email or DoShipment rejects with an
+  EnterpriseLibrary ValidationFault ("Please provide phone for collection", ...).
+  The fault's reasons live in the fault DETAIL (ValidationDetail/Message), not the
+  faultstring - _parse extracts them. The app preflights: origin must carry both
+  (settings error otherwise); a missing customer phone/email falls back to the
+  shop's with a warning note.
+- Full capability envelope (customs AdditionalShipmentDetail first + multi-box +
+  Insurance + DeliverySignatureType + collection window) verified against the
+  live service: deserializes + passes validation, fails only on dummy credentials
+  ("Customer authentication failed").
+
+## Capabilities in the app (2026-08-11)
+- Customs: AdditionalShipmentDetail (EORI/goods HTS lines/invoice Help_Me_Generate/
+  export reason/duties payor/trade term/receiver tax id), required for non-GB.
+- Multi-parcel: boxes[] end to end (cap 15), declared value spread per box.
+- Insurance: quote + booking Insurance amount.
+- Drop-off: IsCollectionDropoffRequired on quotes when the merchant's collection
+  arrangement is drop-off; nearest wsCollectionDropOffShop booked as
+  CollectionDropOffInfo and shown in the UI.
+- Signatures: per-carrier DeliverySignatureType (SIGNATURE_OPTIONS).
+- Quote breakdown: non-zero wsQuoteDetail charges parsed + shown per option.

@@ -470,6 +470,11 @@
         .disp-boxdim { width: 62px; flex: none; }
         .disp-savebar { display: flex; justify-content: flex-end; margin-top: 18px;
             border-top: 1px solid var(--border-2); padding-top: 14px; }
+        .disp-customs { border: 1px solid var(--border-2); background: var(--bg-2);
+            border-radius: var(--r-sm); padding: 12px 14px; margin: 10px 0; }
+        .disp-breakdown { font-size: 12px; margin-top: 3px; }
+        .disp-breakdown summary { cursor: pointer; color: var(--ink-3); font-weight: 600; }
+        .disp-breakdown[open] summary { color: var(--ink-2); }
         @media (max-width: 560px) { .disp-dims { grid-template-columns: repeat(2, 1fr); } .disp-origin { grid-template-columns: 1fr; } }
         .lbl-filts { display: flex; gap: 4px; background: var(--bg-2); border: 1px solid var(--border-2);
             border-radius: var(--r-sm); padding: 3px; }
@@ -4048,55 +4053,157 @@
                 body.append(el('div', 'disp-warn', 'This order is missing part of its shipping address. Fix it in Shopify, then reopen.'));
             }
 
-            const boxes = cfg.boxes || [];
-            const boxSel = el('select', 'psel');
-            boxes.forEach(b => { const opt = el('option', null, b.name + ' (' + b.width + 'x' + b.length + 'x' + b.depth + 'cm)'); opt.value = b.id; boxSel.append(opt); });
-            boxSel.append((function () { const o2 = el('option', null, 'Custom size'); o2.value = '__custom'; return o2; })());
-            const boxRow = el('div', 'disp-boxrow');
-            boxRow.append(el('span', 'disp-fld-lab', 'Box'), boxSel);
-            body.append(boxRow);
+            const presets = cfg.boxes || [];
+            const defaultPreset = (cfg.default_box_id && presets.find(b => b.id === cfg.default_box_id)) || presets[0] || null;
+            const isIntl = ((dest.country || '').toUpperCase() && (dest.country || '').toUpperCase() !== 'GB');
 
-            const wF = numField('Width (cm)'), lF = numField('Length (cm)'), dF = numField('Depth (cm)'), wtF = numField('Weight (kg)');
-            let weightTouched = false;
-            wtF.input.addEventListener('input', () => { weightTouched = true; });
-            function applyBox(id) {
-                const b = boxes.find(x => x.id === id);
-                if (!b) return;
-                wF.input.value = b.width; lF.input.value = b.length; dF.input.value = b.depth;
-                if (!weightTouched) wtF.input.value = (o.weight_hint && o.weight_hint > 0) ? o.weight_hint : b.weight;
+            // ---- parcels: one row each, add/remove ----
+            const boxHostD = el('div');
+            body.append(el('div', 'disp-subhead', 'Parcels'), boxHostD);
+            const boxRows = [];
+            function addBoxRow(preset) {
+                const rowb = el('div', 'disp-boxedit');
+                const sel = el('select', 'psel'); sel.style.maxWidth = '170px';
+                presets.forEach(b => { const opt = el('option', null, b.name); opt.value = b.id; sel.append(opt); });
+                const cust = el('option', null, 'Custom'); cust.value = '__custom'; sel.append(cust);
+                const ins = {};
+                [['width', 'W'], ['length', 'L'], ['depth', 'D'], ['weight', 'kg']].forEach(([k, ph]) => {
+                    const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.step = '0.1';
+                    inp.className = 'disp-num disp-boxdim'; inp.placeholder = ph; inp.title = ph === 'kg' ? 'Weight (kg)' : ph + ' (cm)';
+                    ins[k] = inp;
+                });
+                const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove this parcel';
+                rm.onclick = () => { const i = boxRows.indexOf(row); if (i >= 0) boxRows.splice(i, 1); rowb.remove(); };
+                const row = { el: rowb, sel, ins };
+                function applyPreset(id) {
+                    const b = presets.find(x => x.id === id);
+                    if (!b) return;
+                    ins.width.value = b.width; ins.length.value = b.length; ins.depth.value = b.depth;
+                    if (!ins.weight.value) ins.weight.value = (boxRows.length === 0 && o.weight_hint > 0) ? o.weight_hint : b.weight;
+                }
+                sel.onchange = () => applyPreset(sel.value);
+                rowb.append(sel, ins.width, ins.length, ins.depth, ins.weight, rm);
+                if (preset) { sel.value = preset.id; applyPreset(preset.id); }
+                boxRows.push(row);
+                boxHostD.append(rowb);
             }
-            const chosenDefault = (cfg.default_box_id && boxes.find(b => b.id === cfg.default_box_id)) ? cfg.default_box_id : (boxes[0] && boxes[0].id) || '__custom';
-            boxSel.value = chosenDefault; applyBox(chosenDefault);
-            boxSel.onchange = () => applyBox(boxSel.value);
-            const dims = el('div', 'disp-dims');
-            dims.append(wF, lF, dF, wtF);
-            body.append(dims);
+            addBoxRow(defaultPreset);
+            const addBoxBtn = el('button', 'btn'); addBoxBtn.append(ico(I.plus), document.createTextNode('Add a box'));
+            addBoxBtn.title = 'Multi-parcel shipment: every box travels on the same booking';
+            addBoxBtn.onclick = () => addBoxRow(defaultPreset);
+            body.append(addBoxBtn);
 
-            const quoteBtn = el('button', 'btn btn-primary'); quoteBtn.style.marginTop = '4px';
+            // ---- insurance ----
+            const insWrap = el('label', 'disp-notify');
+            const insCb = document.createElement('input'); insCb.type = 'checkbox';
+            const insAmt = document.createElement('input'); insAmt.type = 'number'; insAmt.min = '0'; insAmt.step = '1';
+            insAmt.className = 'disp-num'; insAmt.style.width = '110px'; insAmt.style.marginLeft = '8px';
+            insAmt.value = (o.goods_value && o.goods_value > 0) ? Math.ceil(o.goods_value) : '';
+            insAmt.disabled = true;
+            insCb.onchange = () => { insAmt.disabled = !insCb.checked; };
+            insWrap.append(insCb, el('span', null, ' Insure this shipment for'), insAmt);
+            body.append(insWrap);
+
+            function collectBoxes() {
+                const out = [];
+                for (const r of boxRows) {
+                    const b = { width: parseFloat(r.ins.width.value), length: parseFloat(r.ins.length.value),
+                                depth: parseFloat(r.ins.depth.value), weight: parseFloat(r.ins.weight.value) };
+                    if (!(b.width > 0 && b.length > 0 && b.depth > 0 && b.weight > 0)) return null;
+                    out.push(b);
+                }
+                return out.length ? out : null;
+            }
+            function insuranceAmount() {
+                return insCb.checked && parseFloat(insAmt.value) > 0 ? parseFloat(insAmt.value) : 0;
+            }
+
+            const quoteBtn = el('button', 'btn btn-primary'); quoteBtn.style.marginTop = '10px';
             quoteBtn.append(ico(I.truck), document.createTextNode('Get courier quotes'));
             const quoteWrap = el('div'); quoteWrap.style.marginTop = '12px';
             body.append(quoteBtn, quoteWrap);
 
-            let quote = null, chosen = null, lastBox = null;
+            let quote = null, chosen = null, lastBoxes = null;
             quoteBtn.onclick = async () => {
-                const box = { width: parseFloat(wF.input.value), length: parseFloat(lF.input.value), depth: parseFloat(dF.input.value), weight: parseFloat(wtF.input.value) };
-                if (!(box.width > 0 && box.length > 0 && box.depth > 0 && box.weight > 0)) { addToast('Enter a box size and weight above zero.'); return; }
-                lastBox = box;
+                const bx = collectBoxes();
+                if (!bx) { addToast('Every parcel needs a size (width, length, depth) and weight above zero.'); return; }
+                lastBoxes = bx;
                 quoteBtn.disabled = true; quoteWrap.innerHTML = '';
                 const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Asking World Options for prices…')); quoteWrap.append(t);
-                try { quote = await api('/api/dispatch/quote', { order_id: o.id, box }); chosen = null; renderOptions(); }
+                try { quote = await api('/api/dispatch/quote', { order_id: o.id, boxes: bx, insurance: insuranceAmount() }); chosen = null; renderOptions(); }
                 catch (e) { quoteWrap.innerHTML = ''; quoteWrap.append(errBubble(e.message || 'Could not get quotes')); }
                 quoteBtn.disabled = false;
             };
+
+            // ---- customs (international only) ----
+            const customsLines = [];
+            let recvTaxIn = null;
+            function customsCard() {
+                const card = el('div', 'disp-customs');
+                card.append(el('div', 'disp-subhead', 'Customs declaration (international)'));
+                if (!quote.has_eori) {
+                    card.append(el('div', 'disp-warn', 'Your EORI number is missing. Add it under Shipping settings, International, then re-quote. International bookings cannot go without it.'));
+                }
+                card.append(el('p', 'field-help', 'What is in the parcel, for the customs paperwork. World Options generates the commercial invoice from these lines.'));
+                const linesHost = el('div');
+                customsLines.length = 0;
+                function addLine(pre) {
+                    const rowc = el('div', 'disp-boxedit');
+                    const dIn = document.createElement('input'); dIn.type = 'text'; dIn.className = 'disp-num'; dIn.placeholder = 'Description'; dIn.style.flex = '2 1 auto';
+                    const qIn = document.createElement('input'); qIn.type = 'number'; qIn.min = '1'; qIn.step = '1'; qIn.className = 'disp-num disp-boxdim'; qIn.placeholder = 'Qty';
+                    const pIn = document.createElement('input'); pIn.type = 'number'; pIn.min = '0'; pIn.step = '0.01'; pIn.className = 'disp-num disp-boxdim'; pIn.placeholder = 'Unit £';
+                    const hIn = document.createElement('input'); hIn.type = 'text'; hIn.className = 'disp-num disp-boxdim'; hIn.placeholder = 'HS code'; hIn.style.width = '90px';
+                    if (pre) { dIn.value = pre.description || ''; qIn.value = pre.quantity || 1; pIn.value = pre.unit_price || ''; hIn.value = pre.hs || ''; }
+                    const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove line';
+                    const line = { dIn, qIn, pIn, hIn };
+                    rm.onclick = () => { const i = customsLines.indexOf(line); if (i >= 0) customsLines.splice(i, 1); rowc.remove(); };
+                    rowc.append(dIn, qIn, pIn, hIn, rm);
+                    customsLines.push(line);
+                    linesHost.append(rowc);
+                }
+                (o.items || []).forEach(it => addLine({
+                    description: (it.artwork || it.title || 'Custom glass gobo'),
+                    quantity: it.quantity || 1,
+                    unit_price: parseFloat(it.price) || '',
+                    hs: quote.default_hs_code || ''
+                }));
+                if (!customsLines.length) addLine({ description: 'Custom glass gobo', quantity: 1, hs: quote.default_hs_code || '' });
+                card.append(linesHost);
+                const addL = el('button', 'btn'); addL.append(ico(I.plus), document.createTextNode('Add line'));
+                addL.onclick = () => addLine(null);
+                card.append(addL);
+                const rt = el('label', 'disp-fld'); rt.style.marginTop = '8px';
+                rt.append(el('span', 'disp-fld-lab', "Receiver's tax / VAT id (optional, helps clearance)"));
+                recvTaxIn = document.createElement('input'); recvTaxIn.type = 'text'; recvTaxIn.className = 'disp-num';
+                rt.append(recvTaxIn); card.append(rt);
+                return card;
+            }
+            function collectCustoms() {
+                if (!quote || !quote.international) return null;
+                const lines = [];
+                for (const l of customsLines) {
+                    const d = l.dIn.value.trim(), q = parseInt(l.qIn.value, 10), p = parseFloat(l.pIn.value);
+                    if (!d || !(q > 0) || !(p >= 0) || isNaN(p)) continue;
+                    lines.push({ description: d, quantity: q, unit_price: p, hs: l.hIn.value.trim(), country: 'GB' });
+                }
+                return { lines, receiver_tax_id: recvTaxIn ? recvTaxIn.value.trim() : '' };
+            }
+            function customsProblem() {
+                if (!quote || !quote.international) return '';
+                if (!quote.has_eori) return 'Add your EORI number in Shipping settings first.';
+                const cst = collectCustoms();
+                if (!cst.lines.length) return 'Fill in at least one customs line: description, quantity and unit value.';
+                return '';
+            }
 
             function renderOptions() {
                 quoteWrap.innerHTML = '';
                 const opts = (quote && quote.options) || [];
                 if (!opts.length) { quoteWrap.append(el('div', 'empty', 'No courier options came back for this parcel and address.')); return; }
-                if (quote.international) {
-                    quoteWrap.append(el('div', 'disp-warn', 'International order: the app does not send customs information yet (contents, values, EORI). The courier may hold the parcel or World Options may reject the booking. For now, book international shipments in the World Options portal where customs forms can be completed.'));
-                }
                 if (quote.currency_note) quoteWrap.append(el('div', 'sub', quote.currency_note));
+                if (quote.insurance) quoteWrap.append(el('div', 'sub', 'Prices include insurance cover for ' + fmtPrice(parseFloat(quote.insurance), quote.currency) + '.'));
+                if (quote.dropoff) quoteWrap.append(el('div', 'sub', 'Drop-off tariffs: you take the parcel to the shop shown on the option.'));
+                if (quote.international) quoteWrap.append(customsCard());
                 quoteWrap.append(el('div', 'disp-subhead', opts.length + ' option' + (opts.length === 1 ? '' : 's') + ' · cheapest first'));
                 const list = el('div', 'disp-opts');
                 opts.forEach((op, i) => {
@@ -4107,6 +4214,19 @@
                     const mid = el('div', 'disp-opt-mid');
                     mid.append(el('div', 'disp-opt-carrier', op.carrier_name + (op.service_name ? ' · ' + op.service_name : '')));
                     if (op.delivery) mid.append(el('div', 'sub', op.delivery + (op.pickup ? ' | pickup ' + op.pickup : '')));
+                    if (op.shops && op.shops.length) {
+                        const s0 = op.shops[0];
+                        mid.append(el('div', 'sub', 'Drop off: ' + [s0.name, s0.street, s0.postcode].filter(Boolean).join(', ')
+                            + (s0.distance ? ' (' + s0.distance + ')' : '')));
+                    }
+                    if (op.breakdown && op.breakdown.length) {
+                        const det = document.createElement('details'); det.className = 'disp-breakdown';
+                        const sum = document.createElement('summary'); sum.textContent = 'Price details';
+                        det.append(sum);
+                        op.breakdown.forEach(bd => det.append(el('div', 'sub', bd.label + ': ' + fmtPrice(bd.amount, op.currency))));
+                        det.onclick = (e) => e.stopPropagation();
+                        mid.append(det);
+                    }
                     rowl.append(mid);
                     rowl.append(el('div', 'disp-opt-price', fmtPrice(op.amount, op.currency)));
                     list.append(rowl);
@@ -4131,16 +4251,34 @@
                 } else {
                     conf.append(el('div', 'sub', 'No collection window set; the courier gets no ready or close time. Set one in Shipping settings.'));
                 }
+                // Signature-on-delivery, when the chosen carrier offers options.
+                const sigGroups = (cfg.signature_options || {});
+                const sigVals = sigGroups[(chosen.carrier_name || '').toUpperCase()] || [];
+                let sigSel = null;
+                if (sigVals.length) {
+                    const sigF = el('label', 'disp-fld'); sigF.style.margin = '6px 0';
+                    sigF.append(el('span', 'disp-fld-lab', 'Delivery signature'));
+                    sigSel = el('select', 'psel');
+                    const d0 = el('option', null, 'Courier default'); d0.value = ''; sigSel.append(d0);
+                    sigVals.forEach(v => {
+                        const lab = v.replace(/^[^_]+_/, '').replace(/_/g, ' ');
+                        const op2 = el('option', null, lab); op2.value = v; sigSel.append(op2);
+                    });
+                    sigF.append(sigSel); conf.append(sigF);
+                }
                 conf.append(el('div', 'disp-charge', 'Booking charges your World Options account.'));
                 const book = el('button', 'btn btn-primary disp-book');
-                if (quote.international) { book.disabled = true; book.title = 'International bookings need customs paperwork the app cannot send yet; book this one in the World Options portal.'; }
                 const setLabel = () => { book.innerHTML = ''; book.append(ico(I.truck), document.createTextNode('Book & dispatch · ' + fmtPrice(chosen.amount, chosen.currency))); };
                 setLabel();
                 book.onclick = async () => {
+                    const cprob = customsProblem();
+                    if (cprob) { addToast(cprob); return; }
                     if (!confirm('Book ' + chosen.carrier_name + (chosen.service_name ? ' ' + chosen.service_name : '') + ' for ' + fmtPrice(chosen.amount, chosen.currency) + '? This charges your World Options account.')) return;
                     book.disabled = true; book.textContent = 'Booking…';
                     const doBook = (force) => api('/api/dispatch/book', {
-                        order_id: o.id, option: chosen, box: lastBox, notify: nb.checked, force: !!force
+                        order_id: o.id, option: chosen, boxes: lastBoxes, notify: nb.checked, force: !!force,
+                        insurance: insuranceAmount(), signature: sigSel ? sigSel.value : '',
+                        customs: quote.international ? collectCustoms() : null
                     });
                     try {
                         let res;
@@ -4169,6 +4307,10 @@
                 if (s.amount != null) body.append(el('div', 'sub', 'Quoted ' + fmtPrice(s.amount, s.currency) + '. Your World Options invoice shows the final charge.'));
                 if (res.warning) body.append(el('div', 'disp-warn', res.warning));
                 if (s.collection_date) body.append(el('div', 'sub', 'Collection reference: ' + s.collection_date));
+                if (res.insured) body.append(el('div', 'sub', 'Insured for ' + fmtPrice(parseFloat(res.insured), s.currency) + '.'));
+                if (res.dropoff_shop) body.append(el('div', 'disp-warn', 'Drop the parcel at: ' + [res.dropoff_shop.name, res.dropoff_shop.street, res.dropoff_shop.city, res.dropoff_shop.postcode].filter(Boolean).join(', ') + '. The courier will NOT collect from you.'));
+                if (res.international) body.append(el('div', 'sub', 'Customs declaration sent; World Options generates the commercial invoice.'));
+                if (res.contact_note) body.append(el('div', 'disp-warn', res.contact_note));
                 const f = res.fulfillment || {};
                 if (f.ok) body.append(el('div', 'disp-ok-line', res.notified ? 'Order marked fulfilled in Shopify and the customer was emailed tracking.' : 'Order marked fulfilled in Shopify.'));
                 else if (f.reason === 'permission') body.append(el('div', 'disp-warn', 'Booked, but the app could not mark the order fulfilled (missing the write_fulfillments permission). Fulfil it manually in Shopify, or grant the permission and it will work next time.'));
@@ -4328,6 +4470,27 @@
             });
             coF.append(coSel); body.append(coF);
             body.append(el('p', 'field-help', 'Tells the courier whether to send a driver for each booking or that pickup is already covered. Picking the wrong one can double-book collections.'));
+            body.append(el('div', 'section-title', 'International (customs)'));
+            body.append(el('p', 'field-help', 'Used automatically when an order ships outside the UK. Your EORI number is required for exports; get one at gov.uk if you do not have one.'));
+            const intlIn = {};
+            [['eori', 'EORI number (e.g. GB123456789000)'], ['vat_number', 'VAT number (optional)'],
+             ['default_hs_code', 'Default HS / commodity code (optional, e.g. 70200080)'], ['trade_term', 'Trade term (optional, e.g. DAP)']].forEach(([k, lab]) => {
+                const w = el('label', 'disp-fld'); w.style.marginTop = '6px';
+                w.append(el('span', 'disp-fld-lab', lab));
+                const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'disp-num'; inp.value = cfg[k] || '';
+                w.append(inp); intlIn[k] = inp; body.append(w);
+            });
+            const erF = el('label', 'disp-fld'); erF.style.marginTop = '6px';
+            erF.append(el('span', 'disp-fld-lab', 'Reason for export'));
+            const erSel = el('select', 'psel');
+            (cfg.export_reasons || ['Sale']).forEach(v => { const op3 = el('option', null, v.replace(/_/g, ' ')); op3.value = v; if (v === (cfg.export_reason || 'Sale')) op3.selected = true; erSel.append(op3); });
+            erF.append(erSel); body.append(erF);
+            const dpF = el('label', 'disp-fld'); dpF.style.marginTop = '6px';
+            dpF.append(el('span', 'disp-fld-lab', 'Who pays import duties'));
+            const dpSel = el('select', 'psel');
+            const DP_LABELS = { 'Duties_To_Be_Paid_By_Receiver': 'The customer (receiver) pays duties', 'Duties_To_Be_Paid_By_Sender': 'We (the sender) pay duties', 'Duties_To_Be_Paid_By_Third_Party': 'A third party pays duties' };
+            (cfg.duties_payors || Object.keys(DP_LABELS)).forEach(v => { const op4 = el('option', null, DP_LABELS[v] || v); op4.value = v; if (v === (cfg.duties_payor || 'Duties_To_Be_Paid_By_Receiver')) op4.selected = true; dpSel.append(op4); });
+            dpF.append(dpSel); body.append(dpF);
 
             // Box presets
             body.append(el('div', 'section-title', 'Box presets'));
@@ -4367,7 +4530,10 @@
                     const payload = { op: 'set', origin: origin, notify_customer: notifyCb.checked,
                         plugin_code: pluginIn.value.trim() || 'Web_Service',
                         ready_time: readyIn.value || '', close_time: closeIn.value || '',
-                        collection_option: coSel.value };
+                        collection_option: coSel.value,
+                        eori: intlIn.eori.value.trim(), vat_number: intlIn.vat_number.value.trim(),
+                        default_hs_code: intlIn.default_hs_code.value.trim(), trade_term: intlIn.trade_term.value.trim(),
+                        export_reason: erSel.value, duties_payor: dpSel.value };
                     if (clean.length) payload.boxes = clean;
                     if (!fromEnv) {
                         if (credIn.meter_number.value.trim()) payload.meter_number = credIn.meter_number.value.trim();
