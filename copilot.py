@@ -536,12 +536,8 @@ _ANALYSIS_KINDS = ("overview", "seo", "keywords", "customers")
 
 
 def _load_analysis_cache() -> dict:
-    try:
-        with open(ANALYSIS_CACHE_PATH, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-            return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    data = _load_json_store(ANALYSIS_CACHE_PATH, None, {})
+    return data if isinstance(data, dict) else {}
 
 
 def _parse_num(v):
@@ -610,6 +606,8 @@ def _save_analysis(kind: str, result: dict) -> dict:
             logger.warning("analysis cache: %s result too large (%d bytes); not caching", kind, len(blob))
             return result
         cache[kind] = {"result": json.loads(blob), "at": datetime.now(timezone.utc).isoformat(), "snapshot": snap}
+        if not _store_writable(ANALYSIS_CACHE_PATH):
+            return result
         os.makedirs(os.path.dirname(ANALYSIS_CACHE_PATH) or ".", exist_ok=True)
         tmp = ANALYSIS_CACHE_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -642,6 +640,8 @@ def _save_customer_segment(seg_key: str, result: dict) -> dict:
         if len(segs) > 24:  # keep the most recently refreshed sectors
             segs = dict(sorted(segs.items(), key=lambda kv: kv[1].get("at", ""), reverse=True)[:24])
         cache["customers_segments"] = segs
+        if not _store_writable(ANALYSIS_CACHE_PATH):
+            return result
         os.makedirs(os.path.dirname(ANALYSIS_CACHE_PATH) or ".", exist_ok=True)
         tmp = ANALYSIS_CACHE_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -691,12 +691,41 @@ PRODUCTION_STATE_PATH = os.environ.get("PRODUCTION_STATE_PATH", "/data/productio
 PRODUCTION_STATE_MAX = int(os.environ.get("PRODUCTION_STATE_MAX", "1000"))
 
 
-def _load_prod_state() -> dict:
+# A store that fails to PARSE (as opposed to not existing) must never be
+# overwritten: loaders would hand back an empty default and the next write
+# would persist the wipe. Unreadable stores pause their writers instead,
+# and /api/status lists them so the problem is visible in Settings.
+_poisoned_stores: set = set()
+
+
+def _load_json_store(path: str, key, default):
     try:
-        with open(PRODUCTION_STATE_PATH, "r", encoding="utf-8") as fh:
-            return json.load(fh).get("orders", {})
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        _poisoned_stores.discard(path)
+        if key is None:
+            return data if isinstance(data, (dict, list)) else default
+        return data.get(key, default) if isinstance(data, dict) else default
+    except FileNotFoundError:
+        _poisoned_stores.discard(path)
+        return default
     except Exception:
-        return {}
+        if path not in _poisoned_stores:
+            logger.exception("store unreadable: %s. Writes to it are paused so the "
+                             "broken file is preserved for repair.", path)
+        _poisoned_stores.add(path)
+        return default
+
+
+def _store_writable(path: str) -> bool:
+    if path in _poisoned_stores:
+        logger.error("refusing to overwrite unreadable store %s", path)
+        return False
+    return True
+
+
+def _load_prod_state() -> dict:
+    return _load_json_store(PRODUCTION_STATE_PATH, "orders", {})
 
 
 PRODUCTION_ARCHIVE_PATH = os.environ.get(
@@ -705,6 +734,8 @@ PRODUCTION_ARCHIVE_PATH = os.environ.get(
 
 
 def _write_prod_state(orders: dict) -> dict:
+    if not _store_writable(PRODUCTION_STATE_PATH):
+        return orders
     if len(orders) > PRODUCTION_STATE_MAX:
         # Evict the least-recently-touched entries. Sort by the NEWEST stamp so an
         # order printed months ago but made yesterday is treated as recent, not
@@ -758,17 +789,22 @@ def _archived_made(order_ids_wanted: set) -> dict:
     return out
 
 
-def _mark_printed(order_ids: list) -> None:
-    """Best-effort: a failed stamp must never break a print."""
+def _mark_printed(order_ids: list) -> bool:
+    """Best-effort: a failed stamp must never break a print. Returns whether the
+    stamp actually persisted so callers can say so."""
     try:
         state = _load_prod_state()
+        if not _store_writable(PRODUCTION_STATE_PATH):
+            return False
         now = datetime.now(timezone.utc).isoformat()
         for oid in order_ids:
             entry = state.setdefault(str(oid), {})
             entry["printed_at"] = now
         _write_prod_state(state)
+        return True
     except Exception:
         logger.exception("production state: printed stamp failed")
+        return False
 
 
 def _mark_made(order_id, on: bool) -> dict:
@@ -784,14 +820,12 @@ def _mark_made(order_id, on: bool) -> dict:
 
 
 def _load_impact() -> list[dict]:
-    try:
-        with open(IMPACT_PATH, "r", encoding="utf-8") as fh:
-            return json.load(fh).get("items", [])
-    except Exception:
-        return []
+    return _load_json_store(IMPACT_PATH, "items", [])
 
 
 def _write_impact(items: list[dict]) -> list[dict]:
+    if not _store_writable(IMPACT_PATH):
+        return items[:IMPACT_MAX]
     os.makedirs(os.path.dirname(IMPACT_PATH) or ".", exist_ok=True)
     tmp = IMPACT_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -1071,11 +1105,9 @@ def _log_usage(kind: str, model: str, usage) -> None:
                "cost": _price_for(model, inp, out, cr, cw)}
         _spend_today()                      # ensure the day bucket is current
         _spend["cost"] += rec["cost"]       # keep the daily cap in sync without re-reading
-        try:
-            with open(USAGE_PATH, "r", encoding="utf-8") as fh:
-                events = json.load(fh).get("events", [])
-        except Exception:
-            events = []
+        events = _load_json_store(USAGE_PATH, "events", [])
+        if not _store_writable(USAGE_PATH):
+            return
         events.append(rec)
         events = events[-USAGE_MAX:]
         os.makedirs(os.path.dirname(USAGE_PATH) or ".", exist_ok=True)
@@ -1086,11 +1118,11 @@ def _log_usage(kind: str, model: str, usage) -> None:
         # Monthly rollup survives the event log trimming itself: the pricing
         # dataset must not evaporate at USAGE_MAX.
         rollup_path = os.path.join(os.path.dirname(USAGE_PATH) or ".", "usage_rollup.json")
-        try:
-            with open(rollup_path, "r", encoding="utf-8") as fh:
-                roll = json.load(fh) or {}
-        except Exception:
+        roll = _load_json_store(rollup_path, None, {})
+        if not isinstance(roll, dict):
             roll = {}
+        if not _store_writable(rollup_path):
+            return
         mk = rec["at"][:7]
         m = roll.setdefault(mk, {"runs": 0, "in": 0, "out": 0, "cost": 0.0, "by_kind": {}})
         m["runs"] += 1
@@ -2585,7 +2617,7 @@ def _gobo_resolve_part(cache: dict, nmfr: str, lmfr: str, part: str, notes: set)
     return None
 
 
-def _gobo_lookup(manufacturer: str, model: str):
+def _gobo_lookup(manufacturer: str, model: str, cache: Optional[dict] = None):
     """(entry, review_reason). The store's Model values can bundle several models
     ("ESPRITE, iESPRITE (Not iESPRITE LTL WB)", "Ikon LED / Ikon IR") and spell
     them differently from the sheet ("Source Four (B Size)" vs "Source Four
@@ -2594,7 +2626,7 @@ def _gobo_lookup(manufacturer: str, model: str):
     stripped forms and word-run containment. Never guesses: parts that match
     different sizes, duplicate sheet rows with different sizes, ambiguity and
     misses all come back as review reasons instead of a size."""
-    cache = _gobo_sizes()
+    cache = cache or _gobo_sizes()
     raw = str(model or "").strip()
     if not raw:
         return None, "No model specified on this item"
@@ -2635,7 +2667,7 @@ def _order_email_domain(o: dict) -> str:
     return email.split("@")[-1].strip().lower() if "@" in email else ""
 
 
-def _gobo_domain_size(manufacturer: str, model: str, entry, domain: str):
+def _gobo_domain_size(manufacturer: str, model: str, entry, domain: str, cache: Optional[dict] = None):
     """A size ruling that applies only to orders from one customer email domain
     (e.g. Ayrton Diablo prints 25 for dbnaudile.co.uk, 25.5 for everyone else).
     Matched against both the store-written model name and the resolved sheet row."""
@@ -2644,7 +2676,7 @@ def _gobo_domain_size(manufacturer: str, model: str, entry, domain: str):
     keys = {(_norm_key(manufacturer), _norm_key(model))}
     if entry:
         keys.add((_norm_key(entry["manufacturer"]), _norm_key(entry["model"])))
-    for r in _gobo_sizes()["domain_rules"]:
+    for r in (cache or _gobo_sizes())["domain_rules"]:
         if r["domain"] == domain and r["key"] in keys:
             return r["size"]
     return None
@@ -2778,12 +2810,29 @@ async def _sync_order_tags(registry: dict, order_id, add=(), remove=()) -> tuple
 
 async def _sync_tags_bg(registry: dict, order_ids: list, add=(), remove=()) -> None:
     """Background tag sync for the admin print extensions: the print document
-    must render immediately, the tag writes follow. Never raises."""
+    must render immediately, the tag writes follow. Paced to respect Shopify's
+    write bucket, failures logged and retried once. Never raises."""
+    failed = []
     for oid in order_ids:
         try:
-            await _sync_order_tags(registry, oid, add=add, remove=remove)
+            okd, note = await _sync_order_tags(registry, oid, add=add, remove=remove)
+            if not okd:
+                logger.warning("background tag sync refused for order %s: %s", oid, note)
+                failed.append(oid)
         except Exception:
             logger.exception("background tag sync failed for order %s", oid)
+            failed.append(oid)
+        await asyncio.sleep(0.6)
+    if failed:
+        await asyncio.sleep(10)   # let a throttling burst clear, then one retry round
+        for oid in failed:
+            try:
+                okd, note = await _sync_order_tags(registry, oid, add=add, remove=remove)
+                if not okd:
+                    logger.error("tag sync still failing for order %s after retry: %s", oid, note)
+            except Exception:
+                logger.exception("tag sync retry failed for order %s", oid)
+            await asyncio.sleep(0.6)
 
 
 def _extract_proposal(note: str) -> tuple:
@@ -2852,11 +2901,12 @@ def _order_status(o: dict) -> str:
 
 
 
-def _shape_label_order(o: dict, names: dict) -> dict:
+def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None) -> dict:
     """One order in the shape the label UI prints."""
     company, person = _label_party(o)
     domain = _order_email_domain(o)
     due = _order_due(o)
+    cache = cache or _gobo_sizes()   # one sheet snapshot for the whole order
     proposal_url, note_clean = _extract_proposal(str(o.get("note") or "").strip())
     items = []
     for li in (o.get("line_items") or []):
@@ -2864,8 +2914,8 @@ def _shape_label_order(o: dict, names: dict) -> dict:
             continue
         mfr = _strip_price(_item_prop(li, "Manufacturer"))
         model = _strip_price(_item_model(li, mfr))
-        entry, reason = _gobo_lookup(mfr, model)
-        dsize = _gobo_domain_size(mfr, model, entry, domain)
+        entry, reason = _gobo_lookup(mfr, model, cache=cache)
+        dsize = _gobo_domain_size(mfr, model, entry, domain, cache=cache)
         title = str(li.get("title") or li.get("name") or "Item").strip()
         items.append({
             "title": title,
@@ -2913,7 +2963,7 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
                     "error_note": "Order not found."}
         names = await _product_option_names(
             registry, [li.get("product_id") for li in (o.get("line_items") or []) if _variant_is_real(li)])
-        shaped = _shape_label_order(o, names)
+        shaped = _shape_label_order(o, names, cache=_gobo_sizes())
         return {"tag": PRODUCTION_TAG, "days": 0, "count": 1, "orders": [shaped],
                 "state": {str(shaped["id"]): _load_prod_state().get(str(shaped["id"]), {})},
                 "single": True}
@@ -2931,7 +2981,8 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
         registry,
         [li.get("product_id") for o in tagged for li in (o.get("line_items") or []) if _variant_is_real(li)],
     )
-    shaped = [_shape_label_order(o, names) for o in tagged]
+    sheet = _gobo_sizes()   # one snapshot for the whole list
+    shaped = [_shape_label_order(o, names, cache=sheet) for o in tagged]
     state = _load_prod_state()
     return {"tag": tag, "days": days, "count": len(tagged), "orders": shaped,
             "state": {str(s["id"]): state[str(s["id"])] for s in shaped if str(s["id"]) in state}}
@@ -3218,6 +3269,7 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
         # A throttled or failed fetch must never read as "everything matches".
         return {"error": "Couldn't read your orders from Shopify. Try again in a moment."}
     orders = (data.get("orders") or [])[:n]
+    sheet = _gobo_sizes()   # one snapshot for the whole scan
     items_seen = gobo_items = sized = no_model = 0
     flagged: dict = {}
     for o in orders:
@@ -3232,8 +3284,8 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
                 no_model += 1
                 continue
             gobo_items += 1
-            entry, reason = _gobo_lookup(mfr, model)
-            if reason and _gobo_domain_size(mfr, model, entry, domain):
+            entry, reason = _gobo_lookup(mfr, model, cache=sheet)
+            if reason and _gobo_domain_size(mfr, model, entry, domain, cache=sheet):
                 reason = None
             if not reason:
                 sized += 1
@@ -3881,11 +3933,8 @@ _SCHEDULE_DEFAULT = {"enabled": False, "every_hours": 168, "threshold_pct": 15, 
 
 
 def _load_schedule() -> dict:
-    try:
-        with open(SCHEDULE_PATH, "r", encoding="utf-8") as fh:
-            return {**_SCHEDULE_DEFAULT, **(json.load(fh) or {})}
-    except Exception:
-        return dict(_SCHEDULE_DEFAULT)
+    data = _load_json_store(SCHEDULE_PATH, None, {})
+    return {**_SCHEDULE_DEFAULT, **(data if isinstance(data, dict) else {})}
 
 
 def _save_schedule(cfg: dict, _internal: bool = False) -> dict:
@@ -3911,6 +3960,8 @@ def _save_schedule(cfg: dict, _internal: bool = False) -> dict:
     # to make every tick look "due", which would run paid audits every check interval.
     if _internal and "last_run" in cfg:
         cur["last_run"] = cfg["last_run"]
+    if not _store_writable(SCHEDULE_PATH):
+        return cur
     os.makedirs(os.path.dirname(SCHEDULE_PATH) or ".", exist_ok=True)
     tmp = SCHEDULE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -3920,14 +3971,12 @@ def _save_schedule(cfg: dict, _internal: bool = False) -> dict:
 
 
 def _load_alerts() -> list:
-    try:
-        with open(ALERTS_PATH, "r", encoding="utf-8") as fh:
-            return json.load(fh).get("alerts", [])
-    except Exception:
-        return []
+    return _load_json_store(ALERTS_PATH, "alerts", [])
 
 
 def _write_alerts(alerts: list) -> list:
+    if not _store_writable(ALERTS_PATH):
+        return alerts[:ALERTS_MAX]
     os.makedirs(os.path.dirname(ALERTS_PATH) or ".", exist_ok=True)
     tmp = ALERTS_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -3970,14 +4019,12 @@ async def _send_alert_email(subject: str, lines: list) -> bool:
 
 
 def _load_watch() -> dict:
-    try:
-        with open(WATCH_PATH, "r", encoding="utf-8") as fh:
-            return json.load(fh) or {}
-    except Exception:
-        return {}
+    return _load_json_store(WATCH_PATH, None, {}) or {}
 
 
 def _save_watch(state: dict) -> None:
+    if not _store_writable(WATCH_PATH):
+        return
     try:
         os.makedirs(os.path.dirname(WATCH_PATH) or ".", exist_ok=True)
         tmp = WATCH_PATH + ".tmp"
@@ -4623,13 +4670,21 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
         if body is None:
             return _json({"error": "Request too large."}, 413)
         op = body.get("op") or "list"
-        items = _load_impact()
         try:
+            # Snapshots take seconds; take them BEFORE loading the list so the
+            # load-mutate-write has no await inside it to lose concurrent changes.
+            snap = cur = None
+            if op == "add":
+                if not (body.get("text") or "").strip():
+                    return _json({"error": "Nothing to track."}, 400)
+                snap = await _impact_snapshot(registry)
+            elif op == "conclude" and body.get("id"):
+                cur = await _impact_snapshot(registry)
+            items = _load_impact()
             if op == "add":
                 text = (body.get("text") or "").strip()[:300]
                 if not text:
                     return _json({"error": "Nothing to track."}, 400)
-                snap = await _impact_snapshot(registry)
                 items.insert(0, {"id": secrets.token_hex(5), "text": text,
                                  "source": str(body.get("source") or "copilot")[:24],
                                  "baseline": snap, "started_at": snap["at"], "status": "tracking"})
@@ -4637,7 +4692,6 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
             elif op == "delete" and body.get("id"):
                 items = _write_impact([x for x in items if x.get("id") != body["id"]])
             elif op == "conclude" and body.get("id"):
-                cur = await _impact_snapshot(registry)
                 for x in items:
                     if x.get("id") == body["id"] and x.get("status") != "concluded":
                         x["status"] = "concluded"
@@ -4752,8 +4806,20 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
         try:
             os.makedirs(os.path.dirname(GOBO_SIZES_LIVE) or ".", exist_ok=True)
             if os.path.isfile(GOBO_SIZES_LIVE):
+                # Dated generations, atomically written, newest five kept: one bad
+                # upload can never destroy the only recovery copy.
                 import shutil
-                shutil.copyfile(GOBO_SIZES_LIVE, GOBO_SIZES_LIVE + ".bak")
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+                btmp = GOBO_SIZES_LIVE + ".bak.tmp"
+                shutil.copyfile(GOBO_SIZES_LIVE, btmp)
+                os.replace(btmp, f"{GOBO_SIZES_LIVE}.{stamp}.bak")
+                baks = sorted(f for f in os.listdir(os.path.dirname(GOBO_SIZES_LIVE) or ".")
+                              if f.startswith(os.path.basename(GOBO_SIZES_LIVE) + ".") and f.endswith(".bak"))
+                for stale_bak in baks[:-5]:
+                    try:
+                        os.remove(os.path.join(os.path.dirname(GOBO_SIZES_LIVE) or ".", stale_bak))
+                    except OSError:
+                        pass
             tmp = GOBO_SIZES_LIVE + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
                 fh.write(text)
@@ -4882,8 +4948,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
         try:
             if op == "printed":
                 ids = [int(i) for i in (body.get("ids") or []) if str(i).strip().isdigit()][:100]
-                if ids:
-                    _mark_printed(ids)
+                stamped = _mark_printed(ids) if ids else True
                 # Printing moves the order into production: Unprocessed -> IP.
                 notes = []
                 for oid in ids:
@@ -4892,7 +4957,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
                     if not okd and note:
                         notes.append(note)
                 return _json({"ok": True, "state": {str(i): _load_prod_state().get(str(i), {}) for i in ids},
-                              "tag_note": (notes[0] if notes else "")})
+                              "tag_note": (notes[0] if notes else ""),
+                              "state_note": ("" if stamped else "Printed stamps couldn't be saved; "
+                                             "the list may show these as unprinted after a reload.")})
             if op == "made":
                 oid = int(body.get("id") or 0)
                 if not oid:
@@ -5501,7 +5568,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
                         "down_since": watch.get("shopify_down")},
             "ai": {"ok": bool(ANTHROPIC_API_KEY)},
             "google": google_data.status(),
-            "volume": {"ok": vol_ok, "detail": vol_detail},
+            "volume": {"ok": vol_ok, "detail": vol_detail,
+                       "poisoned": sorted(os.path.basename(p) for p in _poisoned_stores)},
             "email_alerts": {"ok": bool(RESEND_API_KEY and ALERT_EMAIL_TO)},
             "size_list": health,
             "coverage": {"at": watch.get("coverage_at"), "pct": watch.get("coverage_pct")},

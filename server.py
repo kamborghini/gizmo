@@ -1058,6 +1058,9 @@ if __name__ == "__main__":
         app.add_middleware(MCPAuthMiddleware)
         if not MCP_BEARER_TOKEN:
             logger.warning("SECURITY: MCP_BEARER_TOKEN not set — /mcp is locked (returns 503).")
-        uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
+        # access_log off: uvicorn's access lines print full query strings, which for
+        # this app include live session tokens and signed print URLs. Route handlers
+        # already log every meaningful request without secrets.
+        uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info", access_log=False)
     else:
         mcp.run(transport=MCP_TRANSPORT)

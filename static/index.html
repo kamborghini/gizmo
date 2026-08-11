@@ -2998,12 +2998,15 @@
             bar2.append(st);
             const tset = {};
             d.customers.forEach(c => c.orders.forEach(r => { tset[r.terms] = 1; }));
+            if (liaF.terms !== 'all' && liaF.terms !== 'assumed' && !tset[liaF.terms]) liaF.terms = 'all';
             const tsel = el('select', 'lbl-size');
             const topts = [['all', 'All terms']].concat(Object.keys(tset).sort().map(t2 => [t2, t2])).concat([['assumed', 'Assumed terms only']]);
             topts.forEach(([v2, l2]) => { const o2 = el('option', null, l2); o2.value = v2; if (liaF.terms === v2) o2.selected = true; tsel.append(o2); });
             tsel.onchange = () => { liaF.terms = tsel.value; paint(); };
             bar2.append(tsel);
             const chans = Object.keys(d.channels || {}).sort();
+            // A stale selection whose option no longer exists would filter invisibly.
+            if (liaF.channel !== 'all' && chans.indexOf(liaF.channel) < 0) liaF.channel = 'all';
             if (chans.length > 1) {
                 const csel = el('select', 'lbl-size');
                 [['all', 'All channels']].concat(chans.map(c2 => [c2, c2])).forEach(([v2, l2]) => {
@@ -3166,8 +3169,10 @@
             }
             return Math.round(size / base * 100);
         }
+        let skipLabelsAutoLoad = false;   // set by the admin deep link, which fetches its own order
         function showLabelsView() {
             // A plain Shopify read with no AI cost: load straight away, no gate.
+            if (skipLabelsAutoLoad) { skipLabelsAutoLoad = false; return; }
             if (labelsCache) { renderLabels(); return; }
             loadLabels(true);
         }
@@ -3222,6 +3227,7 @@
             api('/api/production-state', { op: 'printed', ids })
                 .then(r => {
                     if (r && r.tag_note) addToast(r.tag_note);
+                    if (r && r.state_note) addToast(r.state_note);
                     if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
                 })
                 .catch(() => {
@@ -4137,6 +4143,7 @@
         const bootQP = new URLSearchParams(location.search);
         const bootLabels = bootQP.get('view') === 'labels';
         const bootOrderId = bootLabels ? parseInt(bootQP.get('id') || '0', 10) : 0;
+        if (bootOrderId) skipLabelsAutoLoad = true;   // the deep link fetch owns the view
         renderSidebar(); renderChat(); setView(bootLabels ? 'labels' : 'overview');
         if (bootOrderId) printFromAdminLink(bootOrderId);
         loadProfile();  // pull the saved store profile from the server (for the Settings modal)
