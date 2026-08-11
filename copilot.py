@@ -3237,11 +3237,7 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None) -> di
         "weight_hint": _order_weight_kg(o),
         "currency": o.get("currency") or o.get("presentment_currency") or "",
         # Total goods value: customs totals, declared values and insurance prefill.
-        "goods_value": round(sum(
-            (float(li.get("price") or 0) * int(li.get("quantity") or 1))
-            for li in (o.get("line_items") or [])
-            if not _label_skip_item(str(li.get("title") or li.get("name") or ""))
-            and str(li.get("price") or "").replace(".", "", 1).isdigit()), 2),
+        "goods_value": _order_goods_value(o),
         # What the customer paid for delivery, so the courier pick is not blind.
         "shipping_paid": (lambda sl: ({"title": str(sl[0].get("title") or ""),
                                        "price": str(sl[0].get("price") or "")}
@@ -3343,13 +3339,29 @@ def _insurance_amount(body: dict):
     return ("%.2f" % f) if f > 0 else ""
 
 
+def _order_goods_value(o: dict) -> float:
+    """Sum of price*qty across real items; a single unparsable price skips that
+    LINE, never zeroes the whole order."""
+    total = 0.0
+    for li in (o.get("line_items") or []):
+        if _label_skip_item(str(li.get("title") or li.get("name") or "")):
+            continue
+        try:
+            total += float(li.get("price") or 0) * int(li.get("quantity") or 1)
+        except (TypeError, ValueError):
+            continue
+    return round(total, 2)
+
+
 def _spread_value(boxes: list, total: float) -> list:
-    """Declared value split across the parcels (customs + insurance basis)."""
+    """Declared value split across the parcels (customs + insurance basis).
+    The rounding remainder lands on the last box so the sum equals the total."""
     if not boxes or not total or total <= 0:
         return boxes
     per = round(float(total) / len(boxes), 2)
-    for b in boxes:
+    for b in boxes[:-1]:
         b["custom_value"] = per
+    boxes[-1]["custom_value"] = round(float(total) - per * (len(boxes) - 1), 2)
     return boxes
 
 
@@ -3391,14 +3403,7 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
     residential = not str(dest.get("company") or "").strip()
     dropoff = (cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages")
     # Declared value rides on every parcel (customs + insurance + liability basis).
-    goods_value = 0.0
-    try:
-        goods_value = round(sum(
-            (float(li.get("price") or 0) * int(li.get("quantity") or 1))
-            for li in (o.get("line_items") or [])
-            if not _label_skip_item(str(li.get("title") or li.get("name") or ""))), 2)
-    except (TypeError, ValueError):
-        goods_value = 0.0
+    goods_value = _order_goods_value(o)
     boxes = _spread_value([dict(b) for b in boxes], goods_value)
     try:
         res = await worldoptions.quote(origin, dest, boxes, currency=currency,
@@ -3424,8 +3429,8 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         "dropoff": dropoff,
         "has_eori": bool(cfg.get("eori")),
         "default_hs_code": cfg.get("default_hs_code") or "",
-        # International orders need customs data the app does not send yet; the UI
-        # shows this as a warning so nothing ships silently without paperwork.
+        # Drives the customs-declaration card in the UI; booking refuses an
+        # international shipment without an EORI and complete goods lines.
         "international": (str(dest.get("country") or "").upper() not in ("GB", "")),
         "currency_note": ("" if str(o.get("currency") or "").upper() in (currency, "")
                           else f"Quoted in {currency}; the order was paid in {o.get('currency')}."),
@@ -3505,14 +3510,9 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
                         + ", so your shop's was sent as the delivery contact. Courier delivery "
                           "updates will come to you, not the customer.")
 
-    # Declared value on every parcel; also the customs total.
-    try:
-        goods_value = round(sum(
-            (float(li.get("price") or 0) * int(li.get("quantity") or 1))
-            for li in (o.get("line_items") or [])
-            if not _label_skip_item(str(li.get("title") or li.get("name") or ""))), 2)
-    except (TypeError, ValueError):
-        goods_value = 0.0
+    # Declared value on every parcel; the customs goods total overrides it below
+    # for international shipments so the invoice and the boxes always agree.
+    goods_value = _order_goods_value(o)
     boxes = _spread_value([dict(bx) for bx in boxes], goods_value)
 
     # International: the customs dossier is REQUIRED, assembled from settings
@@ -3545,6 +3545,16 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
                              "(what it is, how many, unit value). Fill in the customs "
                              "section before booking."}
         total = round(sum(g["quantity"] * g["unit_price"] for g in goods), 2)
+        # The dossier total is the single source of truth: re-spread the boxes so
+        # the per-parcel declared values sum to the invoice total, and give each
+        # goods line its weight share (WO rejects nothing, but 0 kg lines make
+        # customs paperwork look wrong).
+        boxes = _spread_value(boxes, total)
+        total_weight = round(sum(float(bx.get("weight") or 0) for bx in boxes), 3)
+        total_qty = sum(g["quantity"] for g in goods) or 1
+        for g in goods:
+            if not g.get("weight"):
+                g["weight"] = round(total_weight * g["quantity"] / total_qty, 3)
         customs = {
             "eori": cfg.get("eori"), "vat": cfg.get("vat_number"),
             "invoice_type": "Help_Me_Generate",
@@ -3657,7 +3667,10 @@ async def run_missing_production(registry: dict, tag: Optional[str] = None) -> d
     store = (SHOPIFY_STORE or "").split(".")[0]
     missing = []
     for o in (data.get("orders") or []):
-        if _has_tag(o, tag) or _order_status(o):
+        # Skip anything anywhere in the workflow: in production (IP), made (PC),
+        # or dispatched. Only orders that never entered it are "missing".
+        if _has_tag(o, tag) or _has_tag(o, MADE_TAG) or _has_tag(o, DISPATCHED_TAG) \
+                or _order_status(o):
             continue
         if str(o.get("financial_status") or "").lower() not in ("paid", "partially_paid", "authorized", "partially_refunded"):
             continue
@@ -5719,6 +5732,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             "notify_customer": bool(cfg.get("notify_customer", True)),
             "currency": cfg.get("currency") or "GBP",
             "plugin_code": cfg.get("plugin_code") or "Web_Service",
+            "plugin_codes": (worldoptions.PLUGIN_CODES if worldoptions else []),
             "ready_time": cfg.get("ready_time") or "",
             "close_time": cfg.get("close_time") or "",
             "collection_option": cfg.get("collection_option") or "I_Need_To_Book_A_Collection",
@@ -5824,7 +5838,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if body.get("currency"):
             cfg["currency"] = str(body.get("currency"))[:3].upper()
         if body.get("plugin_code"):
-            cfg["plugin_code"] = str(body.get("plugin_code")).strip()[:40] or "Web_Service"
+            pcv = str(body.get("plugin_code")).strip()
+            if worldoptions and pcv not in worldoptions.PLUGIN_CODES:
+                return _json({"error": "Unknown plugin code."}, 400)
+            cfg["plugin_code"] = pcv or "Web_Service"
         if body.get("base_url"):
             base = str(body.get("base_url")).strip()[:200]
             if base.startswith("http://") or base.startswith("https://"):

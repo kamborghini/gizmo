@@ -61,11 +61,44 @@ NS = {
     "ad":  "http://schemas.datacontract.org/2004/07/WOModel.AddlShipmentDetails",
 }
 
-# Map a booking service code (wsServiceTypes) onto its carrier (wsServiceCompanyTypes),
-# used only as a fallback when the quote reply does not name the carrier itself.
+# The EXACT wsServiceCompanyTypes enum members (case-sensitive: WCF's serializer
+# rejects 'PALLETWAYS'/'EXFREIGHT'). Booking must only ever emit these literals.
+SERVICE_COMPANY_ENUM = ["ALL", "DHL", "FEDEX", "UPS", "TNT", "Palletways", "YODEL",
+                        "DHLPARCEL", "DXEXPRESS", "HERMES", "DSV", "EXFreight",
+                        "GLOBALTRANZ", "CITYSPRINT", "EVRISEND", "EVRICORPORATE",
+                        "TUFFNELLS", "ROYALMAIL", "DPD"]
+_CANON_CARRIER = {v.upper(): v for v in SERVICE_COMPANY_ENUM}
+
+
+def canonical_carrier(code: str) -> str:
+    """The exact enum literal for a carrier, '' when it is not a member."""
+    return _CANON_CARRIER.get((code or "").strip().upper(), "")
+
+
+# Map a booking service code (wsServiceTypes) onto its carrier, used only as a
+# fallback when the quote reply does not name the carrier itself. Prefix EVRI
+# maps to EVRISEND (bare 'EVRI' is not an enum member).
 _CARRIERS = ["DHLPARCEL", "DHL", "FEDEX", "UPS", "TNT", "PALLETWAYS", "YODEL",
              "DXEXPRESS", "HERMES", "DSV", "EXFREIGHT", "GLOBALTRANZ", "CITYSPRINT",
              "EVRISEND", "EVRICORPORATE", "EVRI", "TUFFNELLS", "ROYALMAIL", "DPD"]
+_PREFIX_TO_ENUM = {"EVRI": "EVRISEND", "PALLETWAYS": "Palletways", "EXFREIGHT": "EXFreight"}
+
+# The booking wsPackageTypes enum (wo_xsd6). The QUOTE reply's wsPackageTypeCode is a
+# plain string that can carry rate-only values (Any_Document, EX_LTL, ...) which the
+# booking enum rejects; anything not in this list is omitted from the booking.
+PACKAGE_TYPES_ENUM = {
+    "Fedex_Box", "Fedex_Envelope", "Fedex_Pak", "Fedex_Your_Packaging",
+    "UPS_My_Packaging", "UPS_Envelope", "DHL_Document", "DHL_NonDocument",
+    "YODEL_NonDocument", "YODEL_Document", "TNT_NonDocument", "TNT_Document",
+    "TNT_LTL", "UKMAIL_NonDocument", "DXExpress_Parcel", "Hermes_Parcel",
+    "DSV_LTL", "EXF_LTL", "EXF_FCL", "GlobalTranz_LTL", "CitySprint_Parcel",
+    "Evri_Parcel", "Tuffnells_Parcel", "Tuffnells_Pallet", "RoyalMail_Parcel",
+    "DPD_Parcel",
+}
+
+# PluginWebServiceCode enum (wo_xsd4): a typo here bricks every request.
+PLUGIN_CODES = ["Web_Service", "Magento", "WooCommerce_2_1_12", "WooCommerce_2_2_2",
+                "CS_Kart", "Open_Cart", "Shopify", "Wix", "PrestaShop", "Portal"]
 
 # WO's carrier enum -> the carrier names Shopify recognizes. Shopify only builds a
 # working tracking link in the customer's shipping email when tracking_company is
@@ -117,11 +150,17 @@ _BREAKDOWN_META = {"DHLLocalProductCode", "DeliveryDateTime", "ServiceSurchargeC
 
 
 def _pretty_charge(name: str) -> str:
-    """FuelSurcharge -> 'Fuel surcharge'."""
+    """FuelSurcharge -> 'Fuel surcharge'; VATCharge -> 'VAT charge' (acronyms kept)."""
     import re as _re
     s = _re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)
-    s = s.replace("V A T", "VAT").replace("A U ", "AU ").replace("B F P O", "BFPO")
-    return s[:1].upper() + s[1:].lower().replace("vat", "VAT").replace("bfpo", "BFPO")
+    s = _re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", s)
+    words = []
+    for i, w in enumerate(s.split()):
+        if w.isupper() and len(w) > 1:
+            words.append(w)                       # VAT, BFPO, AU stay as acronyms
+        else:
+            words.append(w.capitalize() if i == 0 else w.lower())
+    return " ".join(words)
 
 
 class WorldOptionsError(Exception):
@@ -260,6 +299,17 @@ async def _soap_call(service: str, action: str, inner: str, retryable: bool = Tr
             try:
                 async with httpx.AsyncClient(follow_redirects=True) as client:
                     resp = await client.post(url, content=payload, headers=headers, timeout=45.0)
+            except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+                # Connection never opened: nothing reached World Options, safe to say so
+                # (and safe to retry even for bookings).
+                last_exc = e
+                if attempt >= attempts - 1 and retryable:
+                    break
+                if not retryable:
+                    raise WorldOptionsError(
+                        "Could not connect to World Options; nothing was booked. Try again in a moment.")
+                await asyncio.sleep(min(2 ** attempt, 6))
+                continue
             except (httpx.TimeoutException, httpx.TransportError) as e:
                 last_exc = e
                 if attempt >= attempts - 1:
@@ -342,13 +392,13 @@ def _reply_status(reply, context: str):
 # Normalization helpers
 # ---------------------------------------------------------------------------
 def _carrier_from(service_code: str, quote_service_type: str) -> str:
-    qt = (quote_service_type or "").strip().upper()
+    qt = (quote_service_type or "").strip()
     if qt:
-        return qt
+        return canonical_carrier(qt) or qt.upper()
     up = (service_code or "").upper()
-    for c in _CARRIERS:
-        if up.startswith(c):
-            return c
+    for cr in _CARRIERS:
+        if up.startswith(cr):
+            return _PREFIX_TO_ENUM.get(cr) or canonical_carrier(cr) or cr
     return ""
 
 
@@ -507,8 +557,13 @@ def _classify_label(lbl: ET.Element) -> dict:
     img = _text(lbl, "Image").strip()
     if img:
         lt = (_text(lbl, "LabelType") or "").upper()
-        kind = "base64pdf" if "PDF" in lt or not lt else ("base64png" if "PNG" in lt else "base64pdf")
-        return {"type": kind, "value": img}
+        if "PNG" in lt:
+            kind = "base64png"
+        elif "PDF" in lt or not lt:
+            kind = "base64pdf"
+        else:
+            kind = "base64bin"    # ZPL and friends: downloadable, never a fake PDF
+        return {"type": kind, "value": img, "label_type": lt}
     return {}
 
 
@@ -536,7 +591,9 @@ def _customs_block(customs: dict) -> str:
             + _t("ad", "EORINumber", str(customs.get("eori") or "")[:30])
             + _t("ad", "ExportReason",
                  customs.get("export_reason") if customs.get("export_reason") in EXPORT_REASONS else "Sale")
-            + _t("ad", "ExportType", "Permanent")
+            + _t("ad", "ExportType",
+                 {"Repair": "Temporary", "Exhibition": "Temporary",
+                  "Return": "Re_export"}.get(customs.get("export_reason") or "", "Permanent"))
             + (f"<ad:GoodsDetails>{goods}</ad:GoodsDetails>" if goods else "")
             + _t("ad", "InvoiceNumber", str(customs.get("invoice_number") or "")[:40])
             + _b("ad", "IsPaperLess", True)
@@ -560,8 +617,13 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
     (see _customs_block); description a short contents summary."""
     option = option or {}
     service_code = option.get("service_type_code") or ""
-    carrier = (option.get("carrier_name") or _carrier_from(service_code, "")).upper()
+    # Emit ONLY exact enum literals: WCF faults on case or membership mismatches,
+    # and both elements are optional, so an unknown value is omitted instead.
+    carrier = canonical_carrier(option.get("carrier_name") or "") \
+        or canonical_carrier(_carrier_from(service_code, ""))
     pkg_type = option.get("package_type_code") or ""
+    if pkg_type not in PACKAGE_TYPES_ENUM:
+        pkg_type = ""
     cur = (currency or "GBP")[:3].upper()
     pkgs = ""
     for i, b in enumerate(boxes or [], start=1):
@@ -605,7 +667,7 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
     if co and co not in COLLECTION_OPTIONS:
         co = ""
     sig = (signature or "").strip()
-    if sig and sig not in sum(SIGNATURE_OPTIONS.values(), []):
+    if sig and sig not in SIGNATURE_OPTIONS.get(carrier.upper(), []):
         sig = ""
     duties = str((customs or {}).get("duties_payor") or "").strip()
     if duties and duties not in DUTIES_PAYORS:

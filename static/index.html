@@ -3609,7 +3609,7 @@
                 const dsp = dispatchStateOf(o);
                 if (dsp.tracking_number) {
                     const dc = el('span', 'lbl-chip ' + (dsp.canceled ? 'bad' : 'made'), dsp.canceled ? 'CANCELLED' : 'DISPATCHED');
-                    dc.title = (dsp.carrier_name || 'Courier') + (dsp.service_name ? ' ' + dsp.service_name : '')
+                    dc.title = carrierService(dsp.carrier_name, dsp.service_name)
                         + ' · ' + dsp.tracking_number + (dsp.dispatched_at ? ' · ' + fmtDate(dsp.dispatched_at) : '');
                     nameLine.append(dc);
                 }
@@ -3963,6 +3963,18 @@
 
         /* ---------- dispatch (World Options) ---------- */
         function errBubble(msg) { const w = el('div', 'msg error'); w.append(el('div', 'bubble', msg)); return w; }
+        // WO's carrier enum codes -> names a human reads (EVRISEND, ROYALMAIL...).
+        const CARRIER_LABELS = { ROYALMAIL: 'Royal Mail', DPD: 'DPD', EVRISEND: 'Evri', EVRICORPORATE: 'Evri',
+            EVRI: 'Evri', HERMES: 'Evri', UPS: 'UPS', FEDEX: 'FedEx', TNT: 'TNT', DHL: 'DHL', DHLPARCEL: 'DHL Parcel',
+            YODEL: 'Yodel', CITYSPRINT: 'CitySprint', DXEXPRESS: 'DX', TUFFNELLS: 'Tuffnells', PALLETWAYS: 'Palletways', DSV: 'DSV' };
+        function carrierLabel(code) { return CARRIER_LABELS[String(code || '').toUpperCase()] || code || 'Courier'; }
+        // "UPS" + "UPS Express" -> "UPS Express" (no stutter); "EVRISEND" + "Evri ParcelShop" -> "Evri ParcelShop".
+        function carrierService(code, service) {
+            const c = carrierLabel(code), s = String(service || '').trim();
+            if (!s) return c;
+            if (s.toLowerCase().startsWith(c.toLowerCase()) || s.toLowerCase().startsWith(String(code || '').toLowerCase())) return s;
+            return c + ' ' + s;
+        }
         function setDispatchState(id, entry) {
             if (!labelsCache || !labelsCache.data) return;
             const d = labelsCache.data.dispatch = labelsCache.data.dispatch || {};
@@ -3983,14 +3995,25 @@
         function openLabel(l) {
             try {
                 if (l.type === 'url' || l.type === 'dataurl') { window.open(l.value, '_blank', 'noopener'); return; }
-                if (l.type === 'base64pdf') {
+                const MIME = { base64pdf: 'application/pdf', base64png: 'image/png', base64bin: 'application/octet-stream' };
+                const mime = MIME[l.type];
+                if (mime) {
                     const bin = atob(l.value.replace(/\s+/g, ''));
                     const buf = new Uint8Array(bin.length);
                     for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-                    const url = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
-                    window.open(url, '_blank', 'noopener');
+                    const url = URL.createObjectURL(new Blob([buf], { type: mime }));
+                    if (l.type === 'base64bin') {
+                        // ZPL etc: not viewable, download it for the thermal printer.
+                        const a = document.createElement('a'); a.href = url;
+                        a.download = 'shipping-label.' + ((l.label_type || 'zpl').toLowerCase());
+                        document.body.append(a); a.click(); a.remove();
+                    } else {
+                        window.open(url, '_blank', 'noopener');
+                    }
                     setTimeout(() => URL.revokeObjectURL(url), 60000);
+                    return;
                 }
+                addToast('This label format could not be opened; download it from your World Options portal.');
             } catch (e) { addToast('Could not open the label.'); }
         }
         function labelButtons(host, labels) {
@@ -4055,7 +4078,19 @@
 
             const presets = cfg.boxes || [];
             const defaultPreset = (cfg.default_box_id && presets.find(b => b.id === cfg.default_box_id)) || presets[0] || null;
-            const isIntl = ((dest.country || '').toUpperCase() && (dest.country || '').toUpperCase() !== 'GB');
+
+            // A quote is only valid for the parcels + insurance it was priced with.
+            // Any change to those clears the rendered options so a re-quote is forced,
+            // and freezes what actually gets booked (lastBoxes / lastInsurance).
+            let quote = null, chosen = null, lastBoxes = null, lastInsurance = 0, quoteWrap = null;
+            function staleQuote() {
+                if (!quote && !chosen) return;
+                quote = null; chosen = null;
+                if (quoteWrap) {
+                    quoteWrap.innerHTML = '';
+                    quoteWrap.append(el('div', 'disp-warn', 'Parcels or insurance changed since the last quote. Press "Get courier quotes" again to reprice before booking.'));
+                }
+            }
 
             // ---- parcels: one row each, add/remove ----
             const boxHostD = el('div');
@@ -4070,10 +4105,11 @@
                 [['width', 'W'], ['length', 'L'], ['depth', 'D'], ['weight', 'kg']].forEach(([k, ph]) => {
                     const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.step = '0.1';
                     inp.className = 'disp-num disp-boxdim'; inp.placeholder = ph; inp.title = ph === 'kg' ? 'Weight (kg)' : ph + ' (cm)';
+                    inp.oninput = staleQuote;
                     ins[k] = inp;
                 });
                 const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove this parcel';
-                rm.onclick = () => { const i = boxRows.indexOf(row); if (i >= 0) boxRows.splice(i, 1); rowb.remove(); };
+                rm.onclick = () => { const i = boxRows.indexOf(row); if (i >= 0) boxRows.splice(i, 1); rowb.remove(); staleQuote(); };
                 const row = { el: rowb, sel, ins };
                 function applyPreset(id) {
                     const b = presets.find(x => x.id === id);
@@ -4081,7 +4117,7 @@
                     ins.width.value = b.width; ins.length.value = b.length; ins.depth.value = b.depth;
                     if (!ins.weight.value) ins.weight.value = (boxRows.length === 0 && o.weight_hint > 0) ? o.weight_hint : b.weight;
                 }
-                sel.onchange = () => applyPreset(sel.value);
+                sel.onchange = () => { applyPreset(sel.value); staleQuote(); };
                 rowb.append(sel, ins.width, ins.length, ins.depth, ins.weight, rm);
                 if (preset) { sel.value = preset.id; applyPreset(preset.id); }
                 boxRows.push(row);
@@ -4090,7 +4126,7 @@
             addBoxRow(defaultPreset);
             const addBoxBtn = el('button', 'btn'); addBoxBtn.append(ico(I.plus), document.createTextNode('Add a box'));
             addBoxBtn.title = 'Multi-parcel shipment: every box travels on the same booking';
-            addBoxBtn.onclick = () => addBoxRow(defaultPreset);
+            addBoxBtn.onclick = () => { addBoxRow(defaultPreset); staleQuote(); };
             body.append(addBoxBtn);
 
             // ---- insurance ----
@@ -4100,8 +4136,9 @@
             insAmt.className = 'disp-num'; insAmt.style.width = '110px'; insAmt.style.marginLeft = '8px';
             insAmt.value = (o.goods_value && o.goods_value > 0) ? Math.ceil(o.goods_value) : '';
             insAmt.disabled = true;
-            insCb.onchange = () => { insAmt.disabled = !insCb.checked; };
-            insWrap.append(insCb, el('span', null, ' Insure this shipment for'), insAmt);
+            insCb.onchange = () => { insAmt.disabled = !insCb.checked; staleQuote(); };
+            insAmt.oninput = staleQuote;
+            insWrap.append(insCb, el('span', null, ' Insure this shipment for £'), insAmt);
             body.append(insWrap);
 
             function collectBoxes() {
@@ -4120,17 +4157,17 @@
 
             const quoteBtn = el('button', 'btn btn-primary'); quoteBtn.style.marginTop = '10px';
             quoteBtn.append(ico(I.truck), document.createTextNode('Get courier quotes'));
-            const quoteWrap = el('div'); quoteWrap.style.marginTop = '12px';
+            quoteWrap = el('div'); quoteWrap.style.marginTop = '12px';
             body.append(quoteBtn, quoteWrap);
 
-            let quote = null, chosen = null, lastBoxes = null;
             quoteBtn.onclick = async () => {
                 const bx = collectBoxes();
                 if (!bx) { addToast('Every parcel needs a size (width, length, depth) and weight above zero.'); return; }
                 lastBoxes = bx;
+                lastInsurance = insuranceAmount();   // book exactly what we priced
                 quoteBtn.disabled = true; quoteWrap.innerHTML = '';
                 const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Asking World Options for prices…')); quoteWrap.append(t);
-                try { quote = await api('/api/dispatch/quote', { order_id: o.id, boxes: bx, insurance: insuranceAmount() }); chosen = null; renderOptions(); }
+                try { quote = await api('/api/dispatch/quote', { order_id: o.id, boxes: bx, insurance: lastInsurance }); chosen = null; renderOptions(); }
                 catch (e) { quoteWrap.innerHTML = ''; quoteWrap.append(errBubble(e.message || 'Could not get quotes')); }
                 quoteBtn.disabled = false;
             };
@@ -4212,8 +4249,8 @@
                     rb.onchange = () => { chosen = op; list.querySelectorAll('.disp-opt').forEach(e => e.classList.remove('on')); rowl.classList.add('on'); renderConfirm(); };
                     rowl.append(rb);
                     const mid = el('div', 'disp-opt-mid');
-                    mid.append(el('div', 'disp-opt-carrier', op.carrier_name + (op.service_name ? ' · ' + op.service_name : '')));
-                    if (op.delivery) mid.append(el('div', 'sub', op.delivery + (op.pickup ? ' | pickup ' + op.pickup : '')));
+                    mid.append(el('div', 'disp-opt-carrier', carrierService(op.carrier_name, op.service_name)));
+                    if (op.delivery) mid.append(el('div', 'sub', op.delivery + (op.pickup ? ', pickup ' + op.pickup : '')));
                     if (op.shops && op.shops.length) {
                         const s0 = op.shops[0];
                         mid.append(el('div', 'sub', 'Drop off: ' + [s0.name, s0.street, s0.postcode].filter(Boolean).join(', ')
@@ -4273,11 +4310,11 @@
                 book.onclick = async () => {
                     const cprob = customsProblem();
                     if (cprob) { addToast(cprob); return; }
-                    if (!confirm('Book ' + chosen.carrier_name + (chosen.service_name ? ' ' + chosen.service_name : '') + ' for ' + fmtPrice(chosen.amount, chosen.currency) + '? This charges your World Options account.')) return;
+                    if (!confirm('Book ' + carrierService(chosen.carrier_name, chosen.service_name) + ' for ' + fmtPrice(chosen.amount, chosen.currency) + '? This charges your World Options account.')) return;
                     book.disabled = true; book.textContent = 'Booking…';
                     const doBook = (force) => api('/api/dispatch/book', {
                         order_id: o.id, option: chosen, boxes: lastBoxes, notify: nb.checked, force: !!force,
-                        insurance: insuranceAmount(), signature: sigSel ? sigSel.value : '',
+                        insurance: lastInsurance, signature: sigSel ? sigSel.value : '',
                         customs: quote.international ? collectCustoms() : null
                     });
                     try {
@@ -4301,7 +4338,7 @@
                 body.innerHTML = '';
                 const s = res.shipment || {};
                 const okBar = el('div', 'disp-result-head');
-                okBar.append(ico(I.check), el('span', null, 'Dispatched with ' + (s.carrier_name || 'courier') + (s.service_name ? ' ' + s.service_name : '')));
+                okBar.append(ico(I.check), el('span', null, 'Dispatched with ' + carrierService(s.carrier_name, s.service_name)));
                 body.append(okBar);
                 const tb = el('div', 'disp-track'); tb.append(el('span', null, 'Tracking '), el('b', null, s.tracking_number || '(pending)')); body.append(tb);
                 if (s.amount != null) body.append(el('div', 'sub', 'Quoted ' + fmtPrice(s.amount, s.currency) + '. Your World Options invoice shows the final charge.'));
@@ -4324,7 +4361,7 @@
 
             function renderShipmentSummary(d) {
                 body.innerHTML = '';
-                (function(){ var h = el('div', 'disp-result-head'); h.append(ico(I.check), el('span', null, 'Dispatched with ' + (d.carrier_name || 'courier') + (d.service_name ? ' ' + d.service_name : ''))); body.append(h); })();
+                (function(){ var h = el('div', 'disp-result-head'); h.append(ico(I.check), el('span', null, 'Dispatched with ' + carrierService(d.carrier_name, d.service_name))); body.append(h); })();
                 const tb = el('div', 'disp-track'); tb.append(el('span', null, 'Tracking '), el('b', null, d.tracking_number || '')); body.append(tb);
                 if (d.amount != null) body.append(el('div', 'sub', 'Quoted ' + fmtPrice(d.amount, d.currency)));
                 if (d.dispatched_at) body.append(el('div', 'sub', 'Dispatched ' + fmtDate(d.dispatched_at)));
@@ -4396,9 +4433,13 @@
                 credIn[k] = inp;
             });
             const pluginRow = el('label', 'disp-fld'); pluginRow.style.marginTop = '8px';
-            pluginRow.append(el('span', 'disp-fld-lab', 'Plugin code'));
-            const pluginIn = document.createElement('input'); pluginIn.type = 'text'; pluginIn.className = 'disp-num';
-            pluginIn.value = cfg.plugin_code || 'Web_Service'; if (fromEnv) pluginIn.disabled = false;
+            pluginRow.append(el('span', 'disp-fld-lab', 'Plugin code (leave as Web_Service unless told otherwise)'));
+            const pluginIn = el('select', 'psel');
+            (cfg.plugin_codes || ['Web_Service']).forEach(v => {
+                const op = el('option', null, v); op.value = v;
+                if (v === (cfg.plugin_code || 'Web_Service')) op.selected = true;
+                pluginIn.append(op);
+            });
             pluginRow.append(pluginIn); body.append(pluginRow);
             const testBtn = el('button', 'btn'); testBtn.style.marginTop = '10px'; testBtn.append(ico(I.check), document.createTextNode('Save & test connection'));
             const testOut = el('span', 'setting-sub'); testOut.style.marginLeft = '10px';
