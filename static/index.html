@@ -402,8 +402,12 @@
         .label-sheet .ls-rate b { font-weight: 800; }
         /* Short stock (4 x 2 and similar): tighter padding, everything else scales by em. */
         .label-sheet.compact { padding: 3.5mm 4mm; font-size: 13px; }
-        .lbl-size { background: var(--bg-2); border: 1px solid var(--border-2); border-radius: var(--r-sm); color: var(--ink);
-            font: inherit; font-size: 12.5px; padding: 7px 10px; }
+        /* Sits in the same toolbar as .btn, so it matches .btn metrics exactly:
+           it read as a squashed "thin" control when it had its own padding. */
+        .lbl-size { background: var(--surface-2); border: 1px solid var(--border-2); border-radius: var(--r-sm);
+            color: var(--ink); font: inherit; font-size: 13px; font-weight: 550; padding: 8px 14px;
+            line-height: 1.35; box-shadow: var(--hair); cursor: pointer; transition: all .14s; }
+        .lbl-size:hover { background: var(--surface-3); border-color: var(--border-3); }
         .lbl-nameline { display: flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; }
         /* The customer name gives way first; status chips must never be cut in half. */
         .lbl-nameline > .lbl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -445,13 +449,52 @@
             color: var(--ink); font: inherit; font-size: 13px; padding: 7px 9px; width: 100%; }
         .disp-num:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
         .disp-subhead { font-size: 12px; color: var(--ink-3); font-weight: 600; margin-bottom: 6px; }
-        .disp-opts { display: flex; flex-direction: column; gap: 6px; }
-        .disp-opt { display: flex; align-items: center; gap: 11px; padding: 10px 12px; cursor: pointer;
-            background: var(--bg-2); border: 1px solid var(--border-2); border-radius: 10px; }
-        .disp-opt.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-        .disp-opt-mid { flex: 1 1 auto; min-width: 0; }
-        .disp-opt-carrier { font-weight: 600; font-size: 13.5px; }
-        .disp-opt-price { font-weight: 800; font-size: 14px; white-space: nowrap; }
+        /* Courier quote card: two hard rails - a carrier mark on the left and a
+           right-aligned price - so 8+ options can be raked, not read. Detail
+           (drop-off address, price breakdown) is revealed only on selection. */
+        .disp-opts { display: flex; flex-direction: column; gap: 5px; }
+        .disp-opt { position: relative; display: grid;
+            grid-template-columns: 34px minmax(0, 1fr) auto;
+            column-gap: 11px; row-gap: 1px; align-items: center;
+            padding: 9px 12px 9px 11px; cursor: pointer; overflow: hidden;
+            background: var(--bg-2); border: 1px solid var(--border-2); border-radius: 10px;
+            transition: background .14s, border-color .14s; }
+        /* Selection spine: still legible when the card scrolls under the header. */
+        .disp-opt::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+            background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform .14s; }
+        .disp-opt:hover { background: var(--surface); border-color: var(--border-3); }
+        .disp-opt.on { background: var(--surface-2); border-color: var(--accent);
+            box-shadow: 0 0 0 1px var(--accent-line), var(--hair); }
+        .disp-opt.on::before { transform: scaleX(1); }
+        .disp-opt:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+        .disp-opt > input[type=radio] { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+        .disp-opt-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+        /* Colour stands in for carrier logos we have no assets for. */
+        .disp-opt-mark { grid-row: 1 / span 2; align-self: center;
+            width: 34px; height: 34px; border-radius: var(--r-xs); display: grid; place-items: center;
+            font-size: 9.5px; font-weight: 800; letter-spacing: .02em; line-height: 1;
+            background: var(--mk-bg, var(--surface-3)); color: var(--mk, var(--ink-2));
+            border: 1px solid var(--border-2); box-shadow: var(--hair); }
+        .disp-opt-top { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+        /* Same rule as .lbl-nameline: the name gives way, chips are never cut in half. */
+        .disp-opt-carrier { font-weight: 600; font-size: 13.5px; color: var(--ink);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+        .disp-opt-code { font-size: 10.5px; font-weight: 600; color: var(--ink-3); flex: none; }
+        .disp-opt-price { grid-column: 3; grid-row: 1; justify-self: end;
+            font-weight: 800; font-size: 15px; letter-spacing: -.02em; white-space: nowrap; color: var(--ink); }
+        .disp-opt-when { grid-column: 2; grid-row: 2; font-size: 11.5px; min-width: 0;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .disp-opt-when .d { color: var(--ink); font-weight: 600; }
+        .disp-opt-when .t { color: var(--ink-2); }
+        .disp-opt-when .p { color: var(--ink-3); }
+        .disp-opt-delta { grid-column: 3; grid-row: 2; justify-self: end;
+            font-size: 11px; font-weight: 600; color: var(--ink-3); white-space: nowrap; }
+        .disp-opt-more { grid-column: 2 / -1; grid-row: 3; display: none;
+            margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--border); }
+        .disp-opt.on .disp-opt-more { display: block; }
+        .disp-opt-shop { font-size: 11.5px; color: var(--ink-2); }
+        .disp-opt-shop b { color: var(--ink); font-weight: 600; }
+        @media (prefers-reduced-motion: reduce) { .disp-opt, .disp-opt::before { transition: none; } }
         .disp-confirm { margin-top: 12px; }
         .disp-notify { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; color: var(--ink-2);
             padding: 8px 0; cursor: pointer; }
@@ -3204,7 +3247,11 @@
         // Shipping prices need pennies; the store money helper rounds to whole units.
         function fmtPrice(n, cur) {
             if (n == null || isNaN(n)) return '';
-            return Number(n).toFixed(2) + (cur ? (' ' + cur) : '');
+            const v = Number(n).toFixed(2);
+            // Symbol-first for the merchant's own currency so the column aligns on
+            // the decimal point; a foreign currency keeps its ISO code.
+            if (!cur || cur === 'GBP') return '\u00a3' + v;
+            return v + ' ' + cur;
         }
         // Physical label stock. The sheet is rendered at these exact dimensions, so the
         // on-screen preview is a true representation of what comes out of the printer.
@@ -3982,12 +4029,37 @@
         const CARRIER_LABELS = { ROYALMAIL: 'Royal Mail', DPD: 'DPD', EVRISEND: 'Evri', EVRICORPORATE: 'Evri',
             EVRI: 'Evri', HERMES: 'Evri', UPS: 'UPS', FEDEX: 'FedEx', TNT: 'TNT', DHL: 'DHL', DHLPARCEL: 'DHL Parcel',
             YODEL: 'Yodel', CITYSPRINT: 'CitySprint', DXEXPRESS: 'DX', TUFFNELLS: 'Tuffnells', PALLETWAYS: 'Palletways', DSV: 'DSV' };
-        function carrierLabel(code) { return CARRIER_LABELS[String(code || '').toUpperCase()] || code || 'Courier'; }
-        // "UPS" + "UPS Express" -> "UPS Express" (no stutter); "EVRISEND" + "Evri ParcelShop" -> "Evri ParcelShop".
+        function carrierLabel(code) { return CARRIER_LABELS[String(code || '').toUpperCase()] || code || ''; }
+        // [short mark, ink, tint]. Colour is the only pre-attentive channel available
+        // without logo assets; 12% tint keeps 20 rows a rail rather than a rainbow.
+        const CARRIER_MARKS = {
+            ROYALMAIL: ['RM', '#ef5a4c', 'rgba(239,90,76,.12)'],
+            EVRISEND: ['EVRI', '#4fd1c5', 'rgba(79,209,197,.12)'],
+            EVRICORPORATE: ['EVRI', '#4fd1c5', 'rgba(79,209,197,.12)'],
+            EVRI: ['EVRI', '#4fd1c5', 'rgba(79,209,197,.12)'],
+            HERMES: ['EVRI', '#4fd1c5', 'rgba(79,209,197,.12)'],
+            DHL: ['DHL', '#f5c542', 'rgba(245,197,66,.12)'],
+            DHLPARCEL: ['DHL', '#f5c542', 'rgba(245,197,66,.12)'],
+            UPS: ['UPS', '#c9a227', 'rgba(201,162,39,.12)'],
+            DPD: ['DPD', '#e05b6a', 'rgba(224,91,106,.12)'],
+            FEDEX: ['FDX', '#ff7a45', 'rgba(255,122,69,.12)'],
+            TNT: ['TNT', '#ff8a3d', 'rgba(255,138,61,.12)'],
+            YODEL: ['YDL', '#8fb8e0', 'rgba(143,184,224,.12)'],
+            DXEXPRESS: ['DX', '#9aa3b6', 'rgba(154,163,182,.12)'],
+            CITYSPRINT: ['CS', '#9aa3b6', 'rgba(154,163,182,.12)'],
+            TUFFNELLS: ['TUF', '#9aa3b6', 'rgba(154,163,182,.12)'],
+            PALLETWAYS: ['PW', '#9aa3b6', 'rgba(154,163,182,.12)'],
+            DSV: ['DSV', '#9aa3b6', 'rgba(154,163,182,.12)'] };
+        // "UPS" + "UPS Express" -> "UPS Express" (no stutter). An unknown carrier
+        // yields the service alone rather than inventing one.
         function carrierService(code, service) {
             const c = carrierLabel(code), s = String(service || '').trim();
-            if (!s) return c;
-            if (s.toLowerCase().startsWith(c.toLowerCase()) || s.toLowerCase().startsWith(String(code || '').toLowerCase())) return s;
+            if (!s) return c || 'Courier';
+            if (!c) return s;
+            const low = s.toLowerCase();
+            if (low.startsWith(c.toLowerCase())) return s;
+            const raw = String(code || '').trim().toLowerCase();
+            if (raw && low.startsWith(raw)) return s;
             return c + ' ' + s;
         }
         function setDispatchState(id, entry) {
@@ -4258,29 +4330,71 @@
                 if (quote.international) quoteWrap.append(customsCard());
                 quoteWrap.append(el('div', 'disp-subhead', opts.length + ' option' + (opts.length === 1 ? '' : 's') + ' · cheapest first'));
                 const list = el('div', 'disp-opts');
+                const cheapest = Math.min.apply(null, opts.map(o => Number(o.amount) || Infinity));
                 opts.forEach((op, i) => {
                     const rowl = el('label', 'disp-opt');
                     const rb = document.createElement('input'); rb.type = 'radio'; rb.name = 'disp-opt'; rb.value = i;
                     rb.onchange = () => { chosen = op; list.querySelectorAll('.disp-opt').forEach(e => e.classList.remove('on')); rowl.classList.add('on'); renderConfirm(); };
                     rowl.append(rb);
-                    const mid = el('div', 'disp-opt-mid');
-                    mid.append(el('div', 'disp-opt-carrier', carrierService(op.carrier_name, op.service_name)));
-                    if (op.delivery) mid.append(el('div', 'sub', op.delivery + (op.pickup ? ', pickup ' + op.pickup : '')));
-                    if (op.shops && op.shops.length) {
-                        const s0 = op.shops[0];
-                        mid.append(el('div', 'sub', 'Drop off: ' + [s0.name, s0.street, s0.postcode].filter(Boolean).join(', ')
-                            + (s0.distance ? ' (' + s0.distance + ')' : '')));
-                    }
-                    if (op.breakdown && op.breakdown.length) {
-                        const det = document.createElement('details'); det.className = 'disp-breakdown';
-                        const sum = document.createElement('summary'); sum.textContent = 'Price details';
-                        det.append(sum);
-                        op.breakdown.forEach(bd => det.append(el('div', 'sub', bd.label + ': ' + fmtPrice(bd.amount, op.currency))));
-                        det.onclick = (e) => e.stopPropagation();
-                        mid.append(det);
-                    }
-                    rowl.append(mid);
+
+                    // Left rail: a coloured carrier mark stands in for the logo.
+                    const mk = CARRIER_MARKS[String(op.carrier_name || '').toUpperCase()];
+                    const mark = el('span', 'disp-opt-mark', mk ? mk[0] : '\u2014');
+                    mark.setAttribute('aria-hidden', 'true');
+                    if (mk) { mark.style.setProperty('--mk', mk[1]); mark.style.setProperty('--mk-bg', mk[2]); }
+                    else if (op.carrier_label) mark.textContent = op.carrier_label.slice(0, 4).toUpperCase();
+                    rowl.append(mark);
+
+                    const drop = !!(op.shops && op.shops.length);
+                    const top = el('div', 'disp-opt-top');
+                    top.append(el('span', 'disp-opt-sr', (op.carrier_label || '') + ' '));
+                    top.append(el('span', 'disp-opt-carrier',
+                        op.service_name || op.carrier_label || 'Courier service'));
+                    if (op.product_code) top.append(el('span', 'disp-opt-code', op.product_code));
+                    if (Number(op.amount) === cheapest) top.append(el('span', 'lbl-chip made', 'CHEAPEST'));
+                    if (drop) top.append(el('span', 'lbl-chip note', 'DROP-OFF'));
+                    rowl.append(top);
                     rowl.append(el('div', 'disp-opt-price', fmtPrice(op.amount, op.currency)));
+
+                    // The promise: arrival first, collection deadline last (clipped first).
+                    const when = el('div', 'disp-opt-when');
+                    if (op.delivery_date) {
+                        when.append(el('span', 'd', op.delivery_date));
+                        if (op.delivery_time) when.append(el('span', 't', ' ' + op.delivery_time));
+                    } else {
+                        when.append(el('span', 't', 'Delivery date not quoted'));
+                    }
+                    if (op.pickup_time || op.pickup_date) {
+                        const w = (drop ? 'drop off by ' : 'collect ') + (op.pickup_time || op.pickup_date);
+                        when.append(el('span', 'p', '  \u00b7  ' + w));
+                    }
+                    rowl.append(when);
+                    if (Number(op.amount) > cheapest) {
+                        rowl.append(el('div', 'disp-opt-delta', '+' + fmtPrice(op.amount - cheapest, op.currency)));
+                    }
+
+                    // Detail belongs to the chosen option only: row height is what
+                    // decides whether 8 options can be compared without scrolling.
+                    const shop = drop ? op.shops[0] : null;
+                    if (shop || (op.breakdown && op.breakdown.length)) {
+                        const more = el('div', 'disp-opt-more');
+                        if (shop) {
+                            const s = el('div', 'disp-opt-shop');
+                            s.append(el('b', null, 'Drop off at ' + (shop.name || 'parcel shop')));
+                            s.append(document.createTextNode('  \u2014  ' + [shop.street, shop.postcode].filter(Boolean).join(', ')
+                                + (shop.distance ? ' (' + shop.distance + ')' : '')));
+                            more.append(s);
+                        }
+                        if (op.breakdown && op.breakdown.length) {
+                            const det = document.createElement('details'); det.className = 'disp-breakdown';
+                            const sum = document.createElement('summary'); sum.textContent = 'Price details';
+                            det.append(sum);
+                            op.breakdown.forEach(bd => det.append(el('div', 'sub', bd.label + ': ' + fmtPrice(bd.amount, op.currency))));
+                            det.onclick = (e) => e.stopPropagation();
+                            more.append(det);
+                        }
+                        rowl.append(more);
+                    }
                     list.append(rowl);
                 });
                 quoteWrap.append(list);

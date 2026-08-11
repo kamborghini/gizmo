@@ -22,8 +22,11 @@ and the WSDL's schema imports point at an internal host a WSDL parser could not
 resolve anyway. Full contract: docs/worldoptions-api.md.
 """
 import os
+import re
+import html as _htmllib
 import asyncio
 import logging
+from datetime import datetime, timezone
 from xml.sax.saxutils import escape as _xml_escape
 import xml.etree.ElementTree as ET
 
@@ -115,6 +118,88 @@ def shopify_carrier(carrier_code: str) -> str:
     """A Shopify-recognizable tracking company for a WO carrier enum value."""
     up = (carrier_code or "").strip().upper()
     return SHOPIFY_CARRIER_NAMES.get(up, (carrier_code or "").strip())
+
+
+# How a carrier should READ on screen (distinct from the booking enum and from
+# the Shopify tracking-company name).
+CARRIER_DISPLAY = {
+    "ROYALMAIL": "Royal Mail", "DPD": "DPD", "EVRISEND": "Evri", "EVRICORPORATE": "Evri",
+    "HERMES": "Evri", "UPS": "UPS", "FEDEX": "FedEx", "TNT": "TNT", "DHL": "DHL",
+    "DHLPARCEL": "DHL Parcel", "YODEL": "Yodel", "CITYSPRINT": "CitySprint",
+    "DXEXPRESS": "DX", "TUFFNELLS": "Tuffnells", "PALLETWAYS": "Palletways",
+    "DSV": "DSV", "EXFREIGHT": "EXFreight", "GLOBALTRANZ": "GlobalTranz",
+}
+
+
+def carrier_display(code: str) -> str:
+    return CARRIER_DISPLAY.get((code or "").strip().upper(), (code or "").strip())
+
+
+# World Options puts DISPLAY HTML inside data fields ("Wed, 12 Aug 2026<br/>End of
+# business day"), so every string off the wire is cleaned before it reaches the UI.
+_TAG_RE = re.compile(r"<[^>]*>")
+_WS_RE = re.compile(r"\s+")
+
+
+def _wo_lines(s: str) -> list:
+    """Split a WO string on its embedded tags into clean text lines."""
+    text = _htmllib.unescape(str(s or ""))
+    return [_WS_RE.sub(" ", p).strip(" ,;|") for p in _TAG_RE.split(text) if p and p.strip(" ,;|")]
+
+
+def _tidy_time(s: str) -> str:
+    """'15:00 PM' -> '15:00' (WO tacks a meridiem onto 24-hour times)."""
+    t = (s or "").strip()
+    m = re.match(r"^(\d{1,2}):(\d{2})\s*([AaPp])\.?[Mm]\.?$", t)
+    if m and int(m.group(1)) > 12:
+        return f"{m.group(1)}:{m.group(2)}"
+    return t
+
+
+def _tidy_date(s: str) -> str:
+    """'Wed, 12 Aug 2026' -> 'Wed 12 Aug' (the year only when it is not this one)."""
+    d = _WS_RE.sub(" ", (s or "").replace(",", " ")).strip()
+    year = str(datetime.now(timezone.utc).year)
+    if d.endswith(" " + year):
+        d = d[: -(len(year) + 1)].strip()
+    return d
+
+
+_CODE_PREFIX_RE = re.compile(r"^\s*(\d{1,3})[\s.:-]+")
+# Carrier names as they appear inside service names, longest/most specific first.
+_CARRIER_WORDS = [
+    (r"royal\s*mail", "ROYALMAIL"), (r"dhl\s*parcel", "DHLPARCEL"), (r"\bdhl\b", "DHL"),
+    (r"\bups\b", "UPS"), (r"fedex|federal\s*express", "FEDEX"), (r"\btnt\b", "TNT"),
+    (r"\bdpd\b", "DPD"), (r"\bevri\b|hermes", "EVRISEND"), (r"yodel", "YODEL"),
+    (r"citysprint", "CITYSPRINT"), (r"palletways", "PALLETWAYS"), (r"tuffnells", "TUFFNELLS"),
+    (r"globaltranz", "GLOBALTRANZ"), (r"\bdsv\b", "DSV"), (r"\bdx\b", "DXEXPRESS"),
+]
+
+
+def carrier_from_text(*texts) -> str:
+    """Find a carrier named inside any WO string (their service names carry it:
+    '03 DHL Domestic Express'). Returns the enum value, or ''."""
+    blob = " ".join(str(t or "") for t in texts).lower()
+    for pat, enum in _CARRIER_WORDS:
+        if re.search(pat, blob):
+            return enum
+    return ""
+
+
+def _split_service_name(name: str, carrier_code: str) -> tuple:
+    """'03 DHL Domestic Express' + DHL -> ('03', 'Domestic Express').
+    Strips WO's leading product code and the carrier word the chip already shows."""
+    raw = _WS_RE.sub(" ", str(name or "")).strip()
+    code = ""
+    m = _CODE_PREFIX_RE.match(raw)
+    if m:
+        code, raw = m.group(1), raw[m.end():].strip()
+    label = carrier_display(carrier_code)
+    for word in filter(None, {label, carrier_code, (carrier_code or "").title()}):
+        if raw.lower().startswith(word.lower() + " "):
+            raw = raw[len(word):].strip()
+            break
+    return code, raw
 
 
 # Collection arrangements the merchant can declare (CollectionOptionTypes enum).
@@ -498,20 +583,44 @@ async def quote(origin: dict, destination: dict, boxes: list,
                 "lat":      _text(shop, "Latitude"),
                 "lng":      _text(shop, "Longitude"),
             })
+        # WO's own carrier field first; failing that, the carrier named inside the
+        # service text ("03 DHL Domestic Express" is all we get on some accounts).
+        ws_service_code = _text(opt, "wsServiceCode")
+        raw_name = _text(opt, "wsServiceTypeName") or service_code
+        if not carrier:
+            carrier = carrier_from_text(raw_name, service_code, ws_service_code)
+        product_code, nice_name = _split_service_name(raw_name, carrier)
+        deliv = _wo_lines(_text(opt, "wsDeliveryDateTime"))
+        pick = _wo_lines(_text(opt, "wsPickupDateTime"))
         options.append({
             "service_type_code": service_code,
-            "service_code":      _text(opt, "wsServiceCode"),
+            "service_code":      ws_service_code,
             "package_type_code": _text(opt, "wsPackageTypeCode"),
-            "carrier_name":      carrier,
-            "service_name":      _text(opt, "wsServiceTypeName") or service_code,
+            "carrier_name":      carrier,                      # enum, used to book
+            "carrier_label":     carrier_display(carrier),     # what the merchant reads
+            "service_name":      nice_name or raw_name,
+            "service_full":      raw_name,
+            "product_code":      product_code,
             "amount":            amount,
             "currency":          cur,
-            "delivery":          _text(opt, "wsDeliveryDateTime"),
-            "pickup":            _text(opt, "wsPickupDateTime"),
+            "delivery_date":     _tidy_date(deliv[0] if deliv else ""),
+            "delivery_time":     _tidy_time(deliv[1] if len(deliv) > 1 else ""),
+            "pickup_date":       _tidy_date(pick[0] if pick else ""),
+            "pickup_time":       _tidy_time(pick[1] if len(pick) > 1 else ""),
             "breakdown":         breakdown[:8],
             "shops":             shops,
         })
     options.sort(key=lambda x: (x["amount"] is None, x["amount"] if x["amount"] is not None else 0))
+    # Diagnostics: WO accounts differ in which fields they populate. If a quote
+    # comes back without a carrier or without the code we book with, say so once
+    # here rather than let it surface as a mystery later.
+    blind = [o["service_full"] for o in options if not o["carrier_name"]]
+    if blind:
+        logger.info("world options: no carrier resolved for %d service(s): %s",
+                    len(blind), "; ".join(blind[:6]))
+    if any(not o["service_type_code"] for o in options):
+        logger.warning("world options: quote options with an EMPTY wsServiceTypeCode - "
+                       "booking those would send no service code.")
     return {"options": options, "currency": cur}
 
 
