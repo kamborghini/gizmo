@@ -422,6 +422,55 @@
         .proof-ext { margin-left: auto; margin-right: 12px; font-size: 12.5px; color: var(--accent);
             text-decoration: none; font-weight: 600; }
         .proof-ext:hover { text-decoration: underline; }
+        /* ---- production lifecycle segments + dispatch ---- */
+        .lbl-seg { display: inline-flex; gap: 3px; background: var(--bg-2); border: 1px solid var(--border-2);
+            border-radius: var(--r-sm); padding: 3px; margin-bottom: 14px; }
+        .lbl-segbtn { background: transparent; border: 0; color: var(--ink-3); font: inherit; font-size: 12.5px;
+            font-weight: 600; padding: 6px 14px; border-radius: 6px; cursor: pointer; }
+        .lbl-segbtn.on { background: var(--surface); color: var(--ink); box-shadow: var(--hair); }
+        .lbl-segbtn:hover { color: var(--ink); }
+        .disp-modal { max-width: 560px; width: 94vw; }
+        .disp-dest { padding: 10px 12px; background: var(--bg-2); border: 1px solid var(--border-2);
+            border-radius: var(--r-sm); margin-bottom: 14px; }
+        .disp-dest-name { font-weight: 700; font-size: 14px; }
+        .disp-boxrow { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .disp-boxrow .psel { max-width: 320px; }
+        .disp-dims { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 4px; }
+        .disp-origin { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .disp-fld { display: flex; flex-direction: column; gap: 3px; }
+        .disp-fld-lab { font-size: 11.5px; color: var(--ink-3); font-weight: 600; }
+        .disp-num { background: var(--bg-2); border: 1px solid var(--border-2); border-radius: 8px;
+            color: var(--ink); font: inherit; font-size: 13px; padding: 7px 9px; width: 100%; }
+        .disp-num:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+        .disp-subhead { font-size: 12px; color: var(--ink-3); font-weight: 600; margin-bottom: 6px; }
+        .disp-opts { display: flex; flex-direction: column; gap: 6px; }
+        .disp-opt { display: flex; align-items: center; gap: 11px; padding: 10px 12px; cursor: pointer;
+            background: var(--bg-2); border: 1px solid var(--border-2); border-radius: 10px; }
+        .disp-opt.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+        .disp-opt-mid { flex: 1 1 auto; min-width: 0; }
+        .disp-opt-carrier { font-weight: 600; font-size: 13.5px; }
+        .disp-opt-price { font-weight: 800; font-size: 14px; white-space: nowrap; }
+        .disp-confirm { margin-top: 12px; }
+        .disp-notify { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; color: var(--ink-2);
+            padding: 8px 0; cursor: pointer; }
+        .disp-charge { font-size: 12px; color: var(--warn); margin: 4px 0 10px; }
+        .disp-book { width: 100%; justify-content: center; }
+        .disp-result-head { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; margin-bottom: 10px; }
+        .disp-result-head svg { width: 18px; height: 18px; color: #4ade80; flex: none; }
+        .disp-track { font-size: 14px; margin-bottom: 4px; }
+        .disp-track b { font-family: ui-monospace, Menlo, monospace; }
+        .disp-warn { font-size: 12.5px; color: #fbbf24; background: rgba(245,158,11,.08);
+            border: 1px solid rgba(245,158,11,.3); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+        .disp-ok-line { font-size: 12.5px; color: #4ade80; margin: 8px 0; }
+        .disp-notice { text-align: center; padding: 16px 0; }
+        .disp-notice p { color: var(--ink-2); margin-bottom: 12px; }
+        .disp-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+        .disp-boxedit { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+        .disp-boxname { flex: 1 1 auto; }
+        .disp-boxdim { width: 62px; flex: none; }
+        .disp-savebar { display: flex; justify-content: flex-end; margin-top: 18px;
+            border-top: 1px solid var(--border-2); padding-top: 14px; }
+        @media (max-width: 560px) { .disp-dims { grid-template-columns: repeat(2, 1fr); } .disp-origin { grid-template-columns: 1fr; } }
         .lbl-filts { display: flex; gap: 4px; background: var(--bg-2); border: 1px solid var(--border-2);
             border-radius: var(--r-sm); padding: 3px; }
         .lbl-filt { background: transparent; border: 0; color: var(--ink-3); font: inherit; font-size: 12px;
@@ -933,6 +982,7 @@
             users: SV('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>'),
             rotate: SV('<polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>'),
             box: SV('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line>'),
+            truck: SV('<rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle>'),
             chevLeft: SV('<polyline points="15 18 9 12 15 6"></polyline>'),
             settings: SV('<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>'),
             x: SV('<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>'),
@@ -3125,6 +3175,27 @@
         let labelsCache = null;      // { data, at }
         let labelSel = null;         // selected order id
         const LABEL_TAG = 'IP';
+        // The production lifecycle, as tag-filtered queues. Making an order moves it
+        // IP -> PC (Mark made); dispatching moves it PC -> Dispatched.
+        const QUEUE = [['make', 'To make', 'IP'], ['ship', 'To ship', 'PC'], ['dispatched', 'Dispatched', 'Dispatched']];
+        let queueMode = 'make';
+        function queueTag() { const q = QUEUE.find(x => x[0] === queueMode); return q ? q[2] : LABEL_TAG; }
+        function dispatchStateOf(o) {
+            const d = labelsCache && labelsCache.data && labelsCache.data.dispatch;
+            return (d && d[String(o.id)]) || {};
+        }
+        let shippingCfg = null;      // cached /api/shipping/config
+        async function ensureShippingCfg(force) {
+            if (shippingCfg && !force) return shippingCfg;
+            const r = await api('/api/shipping/config', { op: 'get' });
+            shippingCfg = r.config || {};
+            return shippingCfg;
+        }
+        // Shipping prices need pennies; the store money helper rounds to whole units.
+        function fmtPrice(n, cur) {
+            if (n == null || isNaN(n)) return '';
+            return Number(n).toFixed(2) + (cur ? (' ' + cur) : '');
+        }
         // Physical label stock. The sheet is rendered at these exact dimensions, so the
         // on-screen preview is a true representation of what comes out of the printer.
         const LABEL_SIZES = {
@@ -3185,18 +3256,19 @@
             if (labelsCache && !force) { renderLabels(); return; }
             box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
-            const ht = el('div'); ht.append(el('h2', null, 'Production Manager'), el('p', null, 'Finding orders tagged "' + LABEL_TAG + '"…'));
+            const ht = el('div'); ht.append(el('h2', null, 'Production Manager'), el('p', null, 'Finding orders tagged "' + queueTag() + '"…'));
             hero.append(badge, ht); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Reading your Shopify orders…')); box.append(t);
             labelsLoading = true;
             const rq = ++labelsReq;   // only the newest fetch may commit its result
             try {
-                const data = await api('/api/production-labels', { tag: LABEL_TAG });
+                const data = await api('/api/production-labels', { tag: queueTag() });
                 if (rq !== labelsReq) return;   // a newer load started; drop this stale response
                 labelsCache = { data, at: Date.now() };
                 labelsLoading = false;
                 renderLabels();
-                loadMissing();   // untagged-order check rides along, non-blocking
+                if (queueMode === 'make') loadMissing();   // untagged-order check rides along, non-blocking
+                else { labelsMissing = null; }
             } catch (e) {
                 if (rq !== labelsReq) return;
                 labelsLoading = false;
@@ -3394,12 +3466,25 @@
             const unprinted = printable.filter(o => !prodStateOf(o).printed_at);
             const unmade = printable.filter(o => !prodStateOf(o).made_at);
             const shown = labelsFilter === 'unprinted' ? unprinted : labelsFilter === 'unmade' ? unmade : orders;
+            const dispatched = queueMode === 'dispatched';
+            const shipMode = queueMode === 'ship';
+            const heroCopy = dispatched ? 'Orders already dispatched. Select one to reprint its label or view tracking.'
+                : shipMode ? 'Orders marked made and ready to ship. Select one to dispatch a courier.'
+                : 'Orders tagged "' + (data.tag || LABEL_TAG) + '". Select an order to preview its label, then print.';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
-            const ht = el('div'); ht.append(el('h2', null, 'Production Manager'),
-                el('p', null, 'Orders tagged "' + (data.tag || LABEL_TAG) + '". Select an order to preview its label, then print.'));
+            const ht = el('div'); ht.append(el('h2', null, 'Production Manager'), el('p', null, heroCopy));
             hero.append(badge, ht);
             hero.append(el('div', 'ov-updated', freshLabel(labelsCache.at)));
             box.append(hero);
+
+            // Lifecycle queue: To make -> To ship -> Dispatched.
+            const seg = el('div', 'lbl-seg');
+            QUEUE.forEach(([k, lab]) => {
+                const b = el('button', 'lbl-segbtn' + (queueMode === k ? ' on' : ''), lab);
+                b.onclick = () => { if (queueMode === k) return; queueMode = k; labelsCache = null; labelSel = null; labelsFilter = 'all'; loadLabels(true); };
+                seg.append(b);
+            });
+            box.append(seg);
 
             const bar = el('div', 'lbl-toolbar');
             const reload = el('button', 'btn'); reload.append(ico(I.refresh), document.createTextNode('Refresh')); reload.onclick = () => loadLabels(true);
@@ -3415,13 +3500,15 @@
                 all.onclick = () => printLabels(printable);
                 bar.append(all);
             }
-            const filt = el('div', 'lbl-filts');
-            [['all', 'All'], ['unprinted', 'Unprinted (' + unprinted.length + ')'], ['unmade', 'Not made (' + unmade.length + ')']].forEach(([k, lab]) => {
-                const b = el('button', 'lbl-filt' + (labelsFilter === k ? ' on' : ''), lab);
-                b.onclick = () => { labelsFilter = k; renderLabels(); };
-                filt.append(b);
-            });
-            bar.append(filt);
+            if (!dispatched) {
+                const filt = el('div', 'lbl-filts');
+                [['all', 'All'], ['unprinted', 'Unprinted (' + unprinted.length + ')'], ['unmade', 'Not made (' + unmade.length + ')']].forEach(([k, lab]) => {
+                    const b = el('button', 'lbl-filt' + (labelsFilter === k ? ' on' : ''), lab);
+                    b.onclick = () => { labelsFilter = k; renderLabels(); };
+                    filt.append(b);
+                });
+                bar.append(filt);
+            }
             const oldf = el('button', 'btn' + (labelsOldest ? ' on' : ''));
             oldf.append(ico(I.up), document.createTextNode(labelsOldest ? 'Oldest first' : 'Newest first'));
             oldf.title = 'Flip the queue order';
@@ -3475,13 +3562,21 @@
                 upBtn.disabled = false;
             };
             bar.append(upBtn, fileIn);
-            bar.append(el('div', 'lbl-count', data.single ? 'Opened from the order page. Refresh shows the full production list.' : (orders.length + (orders.length === 1 ? ' order' : ' orders') + ' in production')));
+            const shipBtn = el('button', 'btn'); shipBtn.append(ico(I.truck || I.box), document.createTextNode('Shipping settings'));
+            shipBtn.title = 'Connect World Options and set your dispatch address, boxes and options';
+            shipBtn.onclick = openShippingSettings;
+            bar.append(shipBtn);
+            bar.append(el('div', 'lbl-count', data.single ? 'Opened from the order page. Refresh shows the full production list.'
+                : (orders.length + (orders.length === 1 ? ' order' : ' orders') + (dispatched ? ' dispatched' : shipMode ? ' ready to ship' : ' in production'))));
             box.append(bar);
             if (labelsMissing && labelsMissing.data && (labelsMissing.data.missing || []).length) box.append(missingStrip());
             if (labelsCoverage) box.append(coverageCard());
 
             if (!orders.length) {
-                box.append(el('div', 'empty', 'No orders are currently tagged "' + (data.tag || LABEL_TAG) + '". Add that tag to an order in Shopify and refresh.'));
+                const emptyCopy = dispatched ? 'No orders have been dispatched yet. Dispatch one from the "To ship" queue.'
+                    : queueMode === 'ship' ? 'Nothing is ready to ship. Mark orders made in "To make" to move them here.'
+                    : 'No orders are currently tagged "' + (data.tag || LABEL_TAG) + '". Add that tag to an order in Shopify and refresh.';
+                box.append(el('div', 'empty', emptyCopy));
                 return;
             }
             if (!shown.length) {
@@ -3504,8 +3599,15 @@
                 }
                 if (!o.status && !st.made_at && ageDays(o.created_at) >= 4) nameLine.append(el('span', 'lbl-chip warn', ageDays(o.created_at) + 'd'));
                 if (o.note) nameLine.append(el('span', 'lbl-chip note', 'NOTE'));
-                if (st.made_at) nameLine.append(el('span', 'lbl-chip made', 'MADE'));
-                else if (st.printed_at) {
+                const dsp = dispatchStateOf(o);
+                if (dsp.tracking_number) {
+                    const dc = el('span', 'lbl-chip ' + (dsp.canceled ? 'bad' : 'made'), dsp.canceled ? 'CANCELLED' : 'DISPATCHED');
+                    dc.title = (dsp.carrier_name || 'Courier') + (dsp.service_name ? ' ' + dsp.service_name : '')
+                        + ' · ' + dsp.tracking_number + (dsp.dispatched_at ? ' · ' + fmtDate(dsp.dispatched_at) : '');
+                    nameLine.append(dc);
+                }
+                if (st.made_at && !dsp.tracking_number) nameLine.append(el('span', 'lbl-chip made', 'MADE'));
+                else if (st.printed_at && !dsp.tracking_number) {
                     const pc = el('span', 'lbl-chip note', 'PRINTED');
                     pc.title = 'Printed ' + fmtDate(st.printed_at);
                     nameLine.append(pc);
@@ -3530,6 +3632,14 @@
                 const pr = el('button', 'btn'); pr.title = 'Print label'; pr.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Print'));
                 pr.onclick = (e) => { e.stopPropagation(); printLabels([o]); };
                 acts.append(pr);
+                if (o.status !== 'cancelled') {
+                    const dispatched = !!dsp.tracking_number && !dsp.canceled;
+                    const db = el('button', 'btn' + (dispatched ? ' on' : (queueMode === 'ship' ? ' btn-primary' : '')));
+                    db.title = dispatched ? 'View shipment / reprint label' : 'Dispatch a courier for this order';
+                    db.append(ico(I.truck), el('span', 'lbl-btn-txt', dispatched ? 'Shipment' : 'Dispatch'));
+                    db.onclick = (e) => { e.stopPropagation(); openDispatch(o); };
+                    acts.append(db);
+                }
                 if (!o.status) {
                     const mk = el('button', 'btn' + (st.made_at ? ' on' : ''));
                     mk.title = st.made_at ? 'Made ' + fmtDate(st.made_at) + '. Click to unmark.' : 'Mark this order as made';
@@ -3843,6 +3953,351 @@
             if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
             setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);
         }
+
+        /* ---------- dispatch (World Options) ---------- */
+        function errBubble(msg) { const w = el('div', 'msg error'); w.append(el('div', 'bubble', msg)); return w; }
+        function setDispatchState(id, entry) {
+            if (!labelsCache || !labelsCache.data) return;
+            const d = labelsCache.data.dispatch = labelsCache.data.dispatch || {};
+            d[String(id)] = Object.assign({}, d[String(id)] || {}, entry);
+        }
+        // A labelled numeric field for the box editor.
+        function numField(lab, val) {
+            const wrap = el('label', 'disp-fld');
+            wrap.append(el('span', 'disp-fld-lab', lab));
+            const inp = document.createElement('input');
+            inp.type = 'number'; inp.min = '0'; inp.step = '0.1'; inp.className = 'disp-num';
+            if (val != null) inp.value = val;
+            wrap.append(inp);
+            wrap.input = inp;
+            return wrap;
+        }
+        // Open each courier label: a URL in a new tab, a base64/dataurl PDF as a blob.
+        function openLabel(l) {
+            try {
+                if (l.type === 'url' || l.type === 'dataurl') { window.open(l.value, '_blank', 'noopener'); return; }
+                if (l.type === 'base64pdf') {
+                    const bin = atob(l.value.replace(/\s+/g, ''));
+                    const buf = new Uint8Array(bin.length);
+                    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+                    const url = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
+                    window.open(url, '_blank', 'noopener');
+                    setTimeout(() => URL.revokeObjectURL(url), 60000);
+                }
+            } catch (e) { addToast('Could not open the label.'); }
+        }
+        function labelButtons(host, labels) {
+            labels = labels || [];
+            if (!labels.length) { host.append(el('div', 'sub', 'No label was returned; check your World Options portal.')); return; }
+            const row = el('div', 'disp-actions');
+            labels.forEach((l, i) => {
+                const b = el('button', 'btn btn-primary');
+                b.append(ico(I.printer), document.createTextNode(labels.length > 1 ? ('Label ' + (i + 1)) : 'Print label'));
+                b.onclick = () => openLabel(l);
+                row.append(b);
+            });
+            host.append(row);
+        }
+
+        async function openDispatch(o) {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal disp-modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, 'Dispatch · ' + orderNo(o)));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
+            const body = el('div', 'modal-body');
+            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+            const prev = document.activeElement;
+            const close = () => { overlay.remove(); document.removeEventListener('keydown', esc); if (prev && prev.focus) prev.focus(); };
+            function esc(e) { if (e.key === 'Escape') close(); }
+            x.onclick = close;
+            overlay.onclick = (e) => { if (e.target === overlay) close(); };
+            document.addEventListener('keydown', esc);
+            x.focus();
+
+            const existing = dispatchStateOf(o);
+            if (existing.tracking_number && !existing.canceled) { renderShipmentSummary(existing); return; }
+
+            const load = el('div', 'thinking'); load.append(loader(), el('span', null, 'Loading shipping settings…')); body.append(load);
+            let cfg;
+            try { cfg = await ensureShippingCfg(); }
+            catch (e) { body.innerHTML = ''; body.append(errBubble(e.message || 'Could not load settings')); return; }
+            body.innerHTML = '';
+            if (!cfg.available) { body.append(el('div', 'empty', 'Shipping is not available on this server.')); return; }
+            if (!cfg.connected) {
+                const m = el('div', 'disp-notice');
+                m.append(el('p', null, 'World Options is not connected yet. Add your API key to start dispatching couriers.'));
+                const b = el('button', 'btn btn-primary'); b.append(ico(I.truck), document.createTextNode('Open shipping settings'));
+                b.onclick = () => { close(); openShippingSettings(); };
+                m.append(b); body.append(m); return;
+            }
+
+            const dest = o.ship_to || {};
+            const destName = dest.company || [dest.firstname, dest.lastname].filter(Boolean).join(' ') || dest.name || o.display_name;
+            const dsum = el('div', 'disp-dest');
+            dsum.append(el('div', 'disp-dest-name', destName));
+            dsum.append(el('div', 'sub', [dest.street, dest.city, dest.postcode, dest.country].filter(Boolean).join(', ') || 'No address on file'));
+            body.append(dsum);
+            if (!dest.street || !dest.postcode || !dest.country) {
+                body.append(el('div', 'disp-warn', 'This order is missing part of its shipping address. Fix it in Shopify, then reopen.'));
+            }
+
+            const boxes = cfg.boxes || [];
+            const boxSel = el('select', 'psel');
+            boxes.forEach(b => { const opt = el('option', null, b.name + ' (' + b.width + 'x' + b.length + 'x' + b.depth + 'cm)'); opt.value = b.id; boxSel.append(opt); });
+            boxSel.append((function () { const o2 = el('option', null, 'Custom size'); o2.value = '__custom'; return o2; })());
+            const boxRow = el('div', 'disp-boxrow');
+            boxRow.append(el('span', 'disp-fld-lab', 'Box'), boxSel);
+            body.append(boxRow);
+
+            const wF = numField('Width (cm)'), lF = numField('Length (cm)'), dF = numField('Depth (cm)'), wtF = numField('Weight (kg)');
+            let weightTouched = false;
+            wtF.input.addEventListener('input', () => { weightTouched = true; });
+            function applyBox(id) {
+                const b = boxes.find(x => x.id === id);
+                if (!b) return;
+                wF.input.value = b.width; lF.input.value = b.length; dF.input.value = b.depth;
+                if (!weightTouched) wtF.input.value = (o.weight_hint && o.weight_hint > 0) ? o.weight_hint : b.weight;
+            }
+            const chosenDefault = (cfg.default_box_id && boxes.find(b => b.id === cfg.default_box_id)) ? cfg.default_box_id : (boxes[0] && boxes[0].id) || '__custom';
+            boxSel.value = chosenDefault; applyBox(chosenDefault);
+            boxSel.onchange = () => applyBox(boxSel.value);
+            const dims = el('div', 'disp-dims');
+            dims.append(wF, lF, dF, wtF);
+            body.append(dims);
+
+            const quoteBtn = el('button', 'btn btn-primary'); quoteBtn.style.marginTop = '4px';
+            quoteBtn.append(ico(I.truck), document.createTextNode('Get courier quotes'));
+            const quoteWrap = el('div'); quoteWrap.style.marginTop = '12px';
+            body.append(quoteBtn, quoteWrap);
+
+            let quote = null, chosen = null;
+            quoteBtn.onclick = async () => {
+                const box = { width: parseFloat(wF.input.value), length: parseFloat(lF.input.value), depth: parseFloat(dF.input.value), weight: parseFloat(wtF.input.value) };
+                if (!(box.width > 0 && box.length > 0 && box.depth > 0 && box.weight > 0)) { addToast('Enter a box size and weight above zero.'); return; }
+                quoteBtn.disabled = true; quoteWrap.innerHTML = '';
+                const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Asking World Options for prices…')); quoteWrap.append(t);
+                try { quote = await api('/api/dispatch/quote', { order_id: o.id, box }); chosen = null; renderOptions(); }
+                catch (e) { quoteWrap.innerHTML = ''; quoteWrap.append(errBubble(e.message || 'Could not get quotes')); }
+                quoteBtn.disabled = false;
+            };
+
+            function renderOptions() {
+                quoteWrap.innerHTML = '';
+                const opts = (quote && quote.options) || [];
+                if (!opts.length) { quoteWrap.append(el('div', 'empty', 'No courier options came back for this parcel and address.')); return; }
+                quoteWrap.append(el('div', 'disp-subhead', opts.length + ' option' + (opts.length === 1 ? '' : 's') + ' · cheapest first'));
+                const list = el('div', 'disp-opts');
+                opts.forEach((op, i) => {
+                    const rowl = el('label', 'disp-opt');
+                    const rb = document.createElement('input'); rb.type = 'radio'; rb.name = 'disp-opt'; rb.value = i;
+                    rb.onchange = () => { chosen = op; list.querySelectorAll('.disp-opt').forEach(e => e.classList.remove('on')); rowl.classList.add('on'); renderConfirm(); };
+                    rowl.append(rb);
+                    const mid = el('div', 'disp-opt-mid');
+                    mid.append(el('div', 'disp-opt-carrier', op.carrier_name + (op.service_name ? ' · ' + op.service_name : '')));
+                    if (op.delivery) mid.append(el('div', 'sub', op.delivery));
+                    rowl.append(mid);
+                    rowl.append(el('div', 'disp-opt-price', fmtPrice(op.amount, op.currency)));
+                    list.append(rowl);
+                });
+                quoteWrap.append(list);
+                quoteWrap.append((function () { const c = el('div', 'disp-confirm'); c.id = 'disp-confirm'; return c; })());
+            }
+
+            function renderConfirm() {
+                const conf = quoteWrap.querySelector('#disp-confirm'); if (!conf) return; conf.innerHTML = '';
+                if (!chosen) return;
+                const notifyWrap = el('label', 'disp-notify');
+                const nb = document.createElement('input'); nb.type = 'checkbox'; nb.checked = cfg.notify_customer !== false;
+                notifyWrap.append(nb, el('span', null, ' Mark the order fulfilled in Shopify and email the customer tracking'));
+                conf.append(notifyWrap);
+                conf.append(el('div', 'disp-charge', 'Booking charges your World Options account.'));
+                const book = el('button', 'btn btn-primary disp-book');
+                const setLabel = () => { book.innerHTML = ''; book.append(ico(I.truck), document.createTextNode('Book & dispatch · ' + fmtPrice(chosen.amount, chosen.currency))); };
+                setLabel();
+                book.onclick = async () => {
+                    if (!confirm('Book ' + chosen.carrier_name + (chosen.service_name ? ' ' + chosen.service_name : '') + ' for ' + fmtPrice(chosen.amount, chosen.currency) + '? This charges your World Options account.')) return;
+                    book.disabled = true; book.textContent = 'Booking…';
+                    try {
+                        const res = await api('/api/dispatch/book', {
+                            order_id: o.id, rate_id: quote.rate_id, carrier_id: chosen.carrier_id,
+                            expected: { amount: chosen.amount, currency: chosen.currency }, notify: nb.checked
+                        });
+                        setDispatchState(o.id, res.dispatch || {});
+                        renderResult(res);
+                        if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
+                    } catch (e) { book.disabled = false; setLabel(); addToast(e.message || 'Booking failed'); }
+                };
+                conf.append(book);
+            }
+
+            function renderResult(res) {
+                body.innerHTML = '';
+                const s = res.shipment || {};
+                const okBar = el('div', 'disp-result-head');
+                okBar.append(ico(I.check), el('span', null, 'Dispatched with ' + (s.carrier_name || 'courier') + (s.service_name ? ' ' + s.service_name : '')));
+                body.append(okBar);
+                const tb = el('div', 'disp-track'); tb.append(el('span', null, 'Tracking '), el('b', null, s.tracking_number || '(pending)')); body.append(tb);
+                if (s.amount != null) body.append(el('div', 'sub', 'Charged ' + fmtPrice(s.amount, s.currency)));
+                if (res.warning) body.append(el('div', 'disp-warn', res.warning));
+                const f = res.fulfillment || {};
+                if (f.ok) body.append(el('div', 'disp-ok-line', res.notified ? 'Order marked fulfilled in Shopify and the customer was emailed tracking.' : 'Order marked fulfilled in Shopify.'));
+                else if (f.reason === 'permission') body.append(el('div', 'disp-warn', 'Booked, but the app could not mark the order fulfilled (missing the write_fulfillments permission). Fulfil it manually in Shopify, or grant the permission and it will work next time.'));
+                else if (f.reason === 'nothing_to_fulfill') body.append(el('div', 'sub', 'Shopify had nothing left to fulfil for this order.'));
+                else if (f.reason && f.reason !== 'not_attempted') body.append(el('div', 'disp-warn', f.detail || 'Shopify fulfillment could not be completed.'));
+                if (res.tag && !res.tag.ok && res.tag.note) body.append(el('div', 'disp-warn', res.tag.note));
+                labelButtons(body, s.labels);
+                const done = el('button', 'btn'); done.style.marginTop = '14px'; done.textContent = 'Done'; done.onclick = close;
+                body.append(done);
+            }
+
+            function renderShipmentSummary(d) {
+                body.innerHTML = '';
+                (function(){ var h = el('div', 'disp-result-head'); h.append(ico(I.check), el('span', null, 'Dispatched with ' + (d.carrier_name || 'courier') + (d.service_name ? ' ' + d.service_name : ''))); body.append(h); })();
+                const tb = el('div', 'disp-track'); tb.append(el('span', null, 'Tracking '), el('b', null, d.tracking_number || '')); body.append(tb);
+                if (d.amount != null) body.append(el('div', 'sub', 'Charged ' + fmtPrice(d.amount, d.currency)));
+                if (d.dispatched_at) body.append(el('div', 'sub', 'Dispatched ' + fmtDate(d.dispatched_at)));
+                const bar = el('div', 'disp-actions');
+                const rp = el('button', 'btn'); rp.append(ico(I.printer), document.createTextNode('Reprint label'));
+                rp.onclick = async () => {
+                    rp.disabled = true;
+                    try { const r = await api('/api/dispatch/track', { tracking_number: d.tracking_number }); labelButtons(body, (r.shipment || {}).labels); }
+                    catch (e) { addToast(e.message || 'Could not fetch the label'); }
+                    rp.disabled = false;
+                };
+                bar.append(rp);
+                const cancel = el('button', 'btn'); cancel.append(ico(I.x), document.createTextNode('Cancel shipment'));
+                cancel.onclick = async () => {
+                    if (!confirm('Cancel this shipment at World Options? You may still be charged depending on the courier.')) return;
+                    cancel.disabled = true;
+                    try {
+                        await api('/api/dispatch/cancel', { order_id: o.id, tracking_number: d.tracking_number });
+                        setDispatchState(o.id, { canceled: true });
+                        addToast('Shipment cancelled.');
+                        if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
+                        close();
+                    } catch (e) { cancel.disabled = false; addToast(e.message || 'Could not cancel'); }
+                };
+                bar.append(cancel);
+                body.append(bar);
+            }
+        }
+
+        async function openShippingSettings() {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal disp-modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, 'Shipping settings'));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
+            const body = el('div', 'modal-body');
+            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+            const prev = document.activeElement;
+            const close = () => { overlay.remove(); document.removeEventListener('keydown', esc); if (prev && prev.focus) prev.focus(); };
+            function esc(e) { if (e.key === 'Escape') close(); }
+            x.onclick = close;
+            overlay.onclick = (e) => { if (e.target === overlay) close(); };
+            document.addEventListener('keydown', esc);
+
+            const load = el('div', 'thinking'); load.append(loader(), el('span', null, 'Loading…')); body.append(load);
+            let cfg;
+            try { cfg = await ensureShippingCfg(true); }
+            catch (e) { body.innerHTML = ''; body.append(errBubble(e.message || 'Could not load')); return; }
+            body.innerHTML = '';
+
+            // Connection
+            body.append(el('div', 'section-title', 'World Options connection'));
+            const cstat = el('div', 'setting-sub');
+            cstat.textContent = cfg.connected ? ('Connected' + (cfg.key_last4 ? ' (key ending ' + cfg.key_last4 + ')' : '')) : 'Not connected yet.';
+            body.append(cstat);
+            const keyIn = document.createElement('input');
+            keyIn.type = 'password'; keyIn.className = 'pf-input'; keyIn.placeholder = cfg.connected ? 'Enter a new key to replace the saved one' : 'Paste your World Options API key';
+            keyIn.autocomplete = 'off';
+            if (cfg.key_from_env) { keyIn.disabled = true; keyIn.placeholder = 'Set on the server (WO_API_KEY)'; }
+            body.append(el('label', 'field-label', 'API key (X-AUTH-TOKEN)'), keyIn);
+            const testBtn = el('button', 'btn'); testBtn.style.marginTop = '8px'; testBtn.append(ico(I.check), document.createTextNode('Save key & test connection'));
+            const testOut = el('span', 'setting-sub'); testOut.style.marginLeft = '10px';
+            if (cfg.key_from_env) testBtn.disabled = true;
+            testBtn.onclick = async () => {
+                testBtn.disabled = true; testOut.textContent = 'Testing…';
+                try {
+                    if (keyIn.value.trim()) { await api('/api/shipping/config', { op: 'set', api_key: keyIn.value.trim() }); keyIn.value = ''; }
+                    const r = await api('/api/shipping/validate', {});
+                    if (r.ok) { testOut.textContent = 'Connected' + (r.account ? ' · ' + r.account : ''); cstat.textContent = 'Connected'; shippingCfg = null; }
+                    else testOut.textContent = r.error || 'Could not connect.';
+                } catch (e) { testOut.textContent = e.message || 'Could not connect.'; }
+                testBtn.disabled = false;
+            };
+            const testRow = el('div'); testRow.append(testBtn, testOut); body.append(testRow);
+
+            // Origin address
+            body.append(el('div', 'section-title', 'Dispatch (origin) address'));
+            body.append(el('p', 'field-help', 'Where parcels ship from. Left blank, your Shopify store address is used.'));
+            const o = cfg.origin || {};
+            const of = {};
+            const originGrid = el('div', 'disp-origin');
+            [['company', 'Company'], ['name', 'Contact name'], ['street', 'Street'], ['city', 'City'], ['state', 'County / state'], ['postcode', 'Postcode'], ['country', 'Country (2-letter, e.g. GB)'], ['phone', 'Phone'], ['email', 'Email']].forEach(([k, lab]) => {
+                const w = el('label', 'disp-fld');
+                w.append(el('span', 'disp-fld-lab', lab));
+                const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'disp-num'; inp.value = o[k] || '';
+                w.append(inp); of[k] = inp; originGrid.append(w);
+            });
+            body.append(originGrid);
+
+            // Notify toggle
+            body.append(el('div', 'section-title', 'Options'));
+            const notifyWrap = el('label', 'disp-notify');
+            const notifyCb = document.createElement('input'); notifyCb.type = 'checkbox'; notifyCb.checked = cfg.notify_customer !== false;
+            notifyWrap.append(notifyCb, el('span', null, ' Email the customer tracking when an order is dispatched (default)'));
+            body.append(notifyWrap);
+
+            // Box presets
+            body.append(el('div', 'section-title', 'Box presets'));
+            body.append(el('p', 'field-help', 'The parcel sizes you offer when dispatching. Dimensions in cm, weight in kg.'));
+            const boxHost = el('div'); body.append(boxHost);
+            let boxes = (cfg.boxes || []).map(b => Object.assign({}, b));
+            function renderBoxes() {
+                boxHost.innerHTML = '';
+                boxes.forEach((b, i) => {
+                    const rowb = el('div', 'disp-boxedit');
+                    const nm = document.createElement('input'); nm.type = 'text'; nm.className = 'disp-num disp-boxname'; nm.value = b.name || ''; nm.placeholder = 'Name';
+                    nm.oninput = () => b.name = nm.value;
+                    rowb.append(nm);
+                    [['width', 'W'], ['length', 'L'], ['depth', 'D'], ['weight', 'kg']].forEach(([k, ph]) => {
+                        const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.step = '0.1'; inp.className = 'disp-num disp-boxdim'; inp.value = b[k]; inp.placeholder = ph;
+                        inp.oninput = () => b[k] = parseFloat(inp.value) || 0;
+                        rowb.append(inp);
+                    });
+                    const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove';
+                    rm.onclick = () => { boxes.splice(i, 1); renderBoxes(); };
+                    rowb.append(rm);
+                    boxHost.append(rowb);
+                });
+                const add = el('button', 'btn'); add.style.marginTop = '6px'; add.append(ico(I.plus), document.createTextNode('Add box'));
+                add.onclick = () => { boxes.push({ id: 'box' + (boxes.length + 1) + '_' + Date.now(), name: 'New box', width: 20, length: 15, depth: 10, weight: 0.5 }); renderBoxes(); };
+                boxHost.append(add);
+            }
+            renderBoxes();
+
+            const foot = el('div', 'disp-savebar');
+            const saveB = el('button', 'btn btn-primary'); saveB.textContent = 'Save shipping settings';
+            saveB.onclick = async () => {
+                const origin = {}; Object.keys(of).forEach(k => origin[k] = of[k].value.trim());
+                const clean = boxes.filter(b => b.name && b.width > 0 && b.length > 0 && b.depth > 0 && b.weight > 0);
+                saveB.disabled = true;
+                try {
+                    const payload = { op: 'set', origin: origin, notify_customer: notifyCb.checked };
+                    if (clean.length) payload.boxes = clean;
+                    if (keyIn.value.trim() && !cfg.key_from_env) payload.api_key = keyIn.value.trim();
+                    const r = await api('/api/shipping/config', payload);
+                    shippingCfg = r.config || null;
+                    addToast('Shipping settings saved.');
+                    close();
+                } catch (e) { saveB.disabled = false; addToast(e.message || 'Could not save'); }
+            };
+            foot.append(saveB);
+            body.append(foot);
+        }
+
         let printSeq = 0;
         async function printFromAdminLink(orderId) {
             const box = $('labels-content'); box.innerHTML = '';
@@ -3991,6 +4446,18 @@
             host.append(connRow('Email alerts', s.email_alerts && s.email_alerts.ok ? 'on' : 'mid',
                 s.email_alerts && s.email_alerts.ok ? 'Alerts and failures also reach your inbox.'
                     : 'Only shown inside the app. Set RESEND_API_KEY and ALERT_EMAIL_TO on Railway to get them by email.'));
+            // Shipping (World Options)
+            const sh = s.shipping || {};
+            const shRow = connRow('Shipping (World Options)', sh.ok ? 'on' : sh.available ? 'mid' : 'off',
+                sh.ok ? ('Connected. Dispatch couriers from the Production Manager.' + (sh.fulfillment ? '' : ' Fulfillment writer is not wired.'))
+                    : sh.available ? 'Add your World Options API key to dispatch couriers.' : 'Not available on this server.');
+            if (sh.available) {
+                const mng = el('button', 'g-badge mid'); mng.style.cursor = 'pointer'; mng.style.border = '0';
+                mng.textContent = sh.ok ? 'Manage' : 'Set up';
+                mng.onclick = () => { $('settings-modal').classList.remove('show'); openShippingSettings(); };
+                shRow.replaceChild(mng, shRow.lastChild);
+            }
+            host.append(shRow);
             // Size list health
             const sl = s.size_list || {};
             if (sl.models) {
@@ -4171,6 +4638,8 @@
         window.__demoCustomerTags = function (tags) { customerTags = tags || []; if ($('view-customers').classList.contains('active')) renderCustomers(customersSeg); };
         window.__demoCache = function (d) { applyCachedAnalysis(d); };
         window.__demoAdminLink = function (id) { setView('labels'); printFromAdminLink(id); };
+        window.__demoLabels = function (data) { labelsCache = { data: data, at: Date.now() }; labelsMissing = null; setView('labels'); renderLabels(); };
+        window.__demoShipping = function (cfg) { shippingCfg = cfg; };
         window.__demoAlerts = function (list) { alerts = list || []; if (overviewCache) renderOverview(overviewCache); };
         window.__demoChatData = function (du) { const c = active(); if (c && c.turns.length) { c.turns[c.turns.length - 1].data_used = du; renderChat(); } };
         window.__demoProductDetail = function (d) { setView('products'); renderProductDetail(d); };

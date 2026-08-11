@@ -39,6 +39,10 @@ import anthropic
 import httpx
 import jwt
 import google_data
+try:
+    import worldoptions
+except Exception:                     # keep the app booting if the connector is unavailable
+    worldoptions = None
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import Request
@@ -722,6 +726,121 @@ def _store_writable(path: str) -> bool:
         logger.error("refusing to overwrite unreadable store %s", path)
         return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# Shipping / dispatch (World Options) — settings, secret, and per-order state.
+# The courier API itself lives in worldoptions.py; this holds the merchant's
+# origin address, box presets and preferences, the API key (persisted apart from
+# everything the backup zip touches), and a record of what was dispatched.
+# ---------------------------------------------------------------------------
+SHIPPING_PATH       = os.environ.get("SHIPPING_PATH", "/data/shipping.json")
+WO_SECRET_PATH      = os.environ.get("WO_SECRET_PATH", "/data/wo_secret.json")
+DISPATCH_STATE_PATH = os.environ.get("DISPATCH_STATE_PATH", "/data/dispatch_state.json")
+DISPATCH_STATE_MAX  = int(os.environ.get("DISPATCH_STATE_MAX", "2000"))
+DISPATCHED_TAG      = os.environ.get("DISPATCHED_TAG", "Dispatched")
+
+_DEFAULT_BOXES = [
+    {"id": "small",  "name": "Small gobo box", "width": 20, "length": 15, "depth": 8,  "weight": 0.5},
+    {"id": "medium", "name": "Medium box",     "width": 30, "length": 22, "depth": 15, "weight": 1.0},
+    {"id": "large",  "name": "Large box",      "width": 45, "length": 35, "depth": 25, "weight": 3.0},
+]
+_SHIPPING_DEFAULT = {
+    "origin": {},
+    "boxes": _DEFAULT_BOXES,
+    "default_box_id": "small",
+    "notify_customer": True,
+    "currency": "GBP",
+    "base_url": (worldoptions.DEFAULT_BASE if worldoptions else ""),
+}
+
+
+def _load_shipping() -> dict:
+    data = _load_json_store(SHIPPING_PATH, None, {})
+    out = {k: v for k, v in _SHIPPING_DEFAULT.items()}
+    if isinstance(data, dict):
+        for k in _SHIPPING_DEFAULT:
+            if k in data and data[k] is not None:
+                out[k] = data[k]
+    if not out.get("boxes"):
+        out["boxes"] = [dict(b) for b in _DEFAULT_BOXES]
+    return out
+
+
+def _save_shipping(cfg: dict) -> dict:
+    if not _store_writable(SHIPPING_PATH):
+        return cfg
+    keep = {k: cfg.get(k, _SHIPPING_DEFAULT[k]) for k in _SHIPPING_DEFAULT}
+    os.makedirs(os.path.dirname(SHIPPING_PATH) or ".", exist_ok=True)
+    tmp = SHIPPING_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(keep, fh)
+    os.replace(tmp, SHIPPING_PATH)
+    return keep
+
+
+def _load_wo_key() -> str:
+    """The persisted X-AUTH-TOKEN. An env WO_API_KEY always wins over the disk copy."""
+    env = os.environ.get("WO_API_KEY", "").strip()
+    if env:
+        return env
+    return str(_load_json_store(WO_SECRET_PATH, "key", "") or "").strip()
+
+
+def _save_wo_key(key: str) -> bool:
+    if os.environ.get("WO_API_KEY", "").strip():
+        return False   # env-provided key is authoritative; never shadow it on disk
+    if not _store_writable(WO_SECRET_PATH):
+        return False
+    os.makedirs(os.path.dirname(WO_SECRET_PATH) or ".", exist_ok=True)
+    tmp = WO_SECRET_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"key": (key or "").strip()}, fh)
+    os.replace(tmp, WO_SECRET_PATH)
+    try:
+        os.chmod(WO_SECRET_PATH, 0o600)
+    except OSError:
+        pass
+    return True
+
+
+def _wo_boot() -> None:
+    """Push the persisted key + base URL into the worldoptions client at startup."""
+    if not worldoptions:
+        return
+    try:
+        key = _load_wo_key()
+        if key:
+            worldoptions.set_api_key(key)
+        base = (_load_shipping().get("base_url") or "").strip()
+        if base:
+            worldoptions.set_base_url(base)
+    except Exception:
+        logger.exception("world options boot failed")
+
+
+def _load_dispatch() -> dict:
+    return _load_json_store(DISPATCH_STATE_PATH, "orders", {})
+
+
+def _write_dispatch(orders: dict) -> dict:
+    if not _store_writable(DISPATCH_STATE_PATH):
+        return orders
+    if len(orders) > DISPATCH_STATE_MAX:
+        keep = sorted(orders.items(), key=lambda kv: str(kv[1].get("dispatched_at") or ""))
+        orders = dict(keep[-DISPATCH_STATE_MAX:])
+    os.makedirs(os.path.dirname(DISPATCH_STATE_PATH) or ".", exist_ok=True)
+    tmp = DISPATCH_STATE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"orders": orders}, fh)
+    os.replace(tmp, DISPATCH_STATE_PATH)
+    return orders
+
+
+def _record_dispatch(order_id, entry: dict) -> dict:
+    d = _load_dispatch()
+    d[str(order_id)] = entry
+    return _write_dispatch(d)
 
 
 def _load_prod_state() -> dict:
@@ -2759,6 +2878,7 @@ MADE_TAG = os.environ.get("MADE_TAG", "PC")
 PROPOSAL_HOST = os.environ.get("PROPOSAL_HOST", "quote.projectedimage.com")
 _PROPOSAL_RE = re.compile(r"https://" + re.escape(PROPOSAL_HOST) + r"/proof/[A-Za-z0-9]+")
 _order_tag_writer = None
+_fulfillment_writer = None
 _tag_locks: dict = {}
 
 
@@ -2835,6 +2955,16 @@ async def _sync_tags_bg(registry: dict, order_ids: list, add=(), remove=()) -> N
             await asyncio.sleep(0.6)
 
 
+async def _dispatch_move_tags(registry: dict, order_id) -> tuple:
+    """Move an order onto the Dispatched tag: add Dispatched, drop the workflow
+    tags (Unprocessed / IP / PC). Called while the order is still unfulfilled so
+    the write is not skipped as a 'dead' order. Returns (ok, note)."""
+    return await _sync_order_tags(
+        registry, order_id,
+        add=(DISPATCHED_TAG,),
+        remove=(UNPROCESSED_TAG, PRODUCTION_TAG, MADE_TAG))
+
+
 def _extract_proposal(note: str) -> tuple:
     """(proposal_url, note_without_it). Only the store's own quote domain is ever
     recognized: an arbitrary URL in a customer note must never become a clickable
@@ -2899,6 +3029,66 @@ def _order_status(o: dict) -> str:
     return ""
 
 
+def _ship_to(o: dict) -> dict:
+    """The order's delivery address in our internal address shape (for a quote)."""
+    a = o.get("shipping_address") or o.get("billing_address") or {}
+    cust = o.get("customer") or {}
+    street = " ".join(x for x in [str(a.get("address1") or "").strip(),
+                                  str(a.get("address2") or "").strip()] if x)
+    return {
+        "name":      a.get("name") or "",
+        "company":   a.get("company") or "",
+        "firstname": a.get("first_name") or cust.get("first_name") or "",
+        "lastname":  a.get("last_name") or cust.get("last_name") or "",
+        "street":    street,
+        "postcode":  a.get("zip") or "",
+        "city":      a.get("city") or "",
+        "state":     a.get("province_code") or a.get("province") or "",
+        "country":   a.get("country_code") or "",
+        "phone":     a.get("phone") or o.get("phone") or cust.get("phone") or "",
+        "email":     o.get("email") or cust.get("email") or "",
+    }
+
+
+def _order_weight_kg(o: dict) -> float:
+    """Best-effort parcel weight from Shopify per-item grams (0 when not recorded)."""
+    grams = 0.0
+    for li in (o.get("line_items") or []):
+        if _label_skip_item(str(li.get("title") or li.get("name") or "")):
+            continue
+        g = li.get("grams")
+        if g:
+            grams += float(g) * float(li.get("quantity") or 1)
+    return round(grams / 1000.0, 3) if grams else 0.0
+
+
+async def _origin_address(registry: dict) -> dict:
+    """Our shop's dispatch origin: the saved Settings address, else the Shopify
+    shop address as a sensible default."""
+    o = dict(_load_shipping().get("origin") or {})
+    if o.get("street") and o.get("postcode") and o.get("country"):
+        return o
+    try:
+        shop = await _tool_json(registry, "shopify_get_shop", {})
+    except Exception:
+        shop = {}
+    shop = shop if isinstance(shop, dict) else {}
+    shop_street = " ".join(x for x in [str(shop.get("address1") or "").strip(),
+                                       str(shop.get("address2") or "").strip()] if x)
+    return {
+        "name":      o.get("name") or shop.get("name") or "",
+        "company":   o.get("company") or shop.get("name") or "",
+        "firstname": o.get("firstname") or "",
+        "lastname":  o.get("lastname") or "",
+        "street":    o.get("street") or shop_street,
+        "postcode":  o.get("postcode") or shop.get("zip") or "",
+        "city":      o.get("city") or shop.get("city") or "",
+        "state":     o.get("state") or shop.get("province_code") or shop.get("province") or "",
+        "country":   o.get("country") or shop.get("country_code") or "",
+        "phone":     o.get("phone") or shop.get("phone") or "",
+        "email":     o.get("email") or shop.get("email") or "",
+    }
+
 
 
 def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None) -> dict:
@@ -2948,6 +3138,10 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None) -> di
         "note": note_clean[:500],
         "customer_id": (o.get("customer") or {}).get("id"),
         "items": items,
+        # For the Dispatch flow (World Options): where it ships and a weight hint.
+        "ship_to": _ship_to(o),
+        "weight_hint": _order_weight_kg(o),
+        "currency": o.get("currency") or o.get("presentment_currency") or "",
     }
 
 
@@ -2964,8 +3158,10 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
         names = await _product_option_names(
             registry, [li.get("product_id") for li in (o.get("line_items") or []) if _variant_is_real(li)])
         shaped = _shape_label_order(o, names, cache=_gobo_sizes())
+        oid = str(shaped["id"])
         return {"tag": PRODUCTION_TAG, "days": 0, "count": 1, "orders": [shaped],
-                "state": {str(shaped["id"]): _load_prod_state().get(str(shaped["id"]), {})},
+                "state": {oid: _load_prod_state().get(oid, {})},
+                "dispatch": {oid: _load_dispatch().get(oid, {})},
                 "single": True}
 
     tag = (tag or PRODUCTION_TAG).strip() or PRODUCTION_TAG
@@ -2984,8 +3180,162 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
     sheet = _gobo_sizes()   # one snapshot for the whole list
     shaped = [_shape_label_order(o, names, cache=sheet) for o in tagged]
     state = _load_prod_state()
+    disp = _load_dispatch()
     return {"tag": tag, "days": days, "count": len(tagged), "orders": shaped,
-            "state": {str(s["id"]): state[str(s["id"])] for s in shaped if str(s["id"]) in state}}
+            "state": {str(s["id"]): state[str(s["id"])] for s in shaped if str(s["id"]) in state},
+            "dispatch": {str(s["id"]): disp[str(s["id"])] for s in shaped if str(s["id"]) in disp}}
+
+
+# ---------------------------------------------------------------------------
+# Dispatch (World Options): quote couriers, then book + fulfill + tag.
+# Quoting is free and read-only; only booking spends money, and it is gated
+# behind an explicit merchant confirm in the UI.
+# ---------------------------------------------------------------------------
+def _addr_ready(a: dict) -> str:
+    """'' if a destination address can be quoted, else why not."""
+    a = a or {}
+    missing = [lbl for key, lbl in (("street", "street"), ("city", "city"),
+                                    ("postcode", "postcode"), ("country", "country"))
+               if not str(a.get(key) or "").strip()]
+    return ("Missing " + ", ".join(missing)) if missing else ""
+
+
+async def run_dispatch_quote(registry: dict, order_id, box: dict) -> dict:
+    """Price couriers for one order to its shipping address. Free / read-only."""
+    if not worldoptions or not worldoptions.configured():
+        return {"error": "World Options is not connected. Add your API key in Settings."}
+    try:
+        w = float(box.get("width") or 0); l = float(box.get("length") or 0)
+        dp = float(box.get("depth") or 0); wt = float(box.get("weight") or 0)
+    except (TypeError, ValueError):
+        return {"error": "Box dimensions and weight must be numbers."}
+    if min(w, l, dp) <= 0 or wt <= 0:
+        return {"error": "Enter a box size (width, length, depth) and weight above zero."}
+
+    o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+    if not _ok(o) or not o.get("id"):
+        return {"error": "Order not found."}
+    if _order_status(o) == "cancelled":
+        return {"error": "This order is cancelled; it should not be dispatched."}
+    dest = _ship_to(o)
+    why = _addr_ready(dest)
+    if why:
+        return {"error": f"This order's shipping address can't be quoted. {why}. "
+                         "Fix the address in Shopify, then try again."}
+    origin = await _origin_address(registry)
+    why = _addr_ready(origin)
+    if why:
+        return {"error": f"Your dispatch (origin) address is incomplete. {why}. "
+                         "Set it under Settings, Shipping."}
+    cfg = _load_shipping()
+    currency = (o.get("currency") or cfg.get("currency") or "GBP")
+    residential = not str(dest.get("company") or "").strip()
+    boxes = [{"width": w, "length": l, "depth": dp, "weight": wt}]
+    try:
+        res = await worldoptions.quote(origin, dest, boxes, currency=currency, residential=residential)
+    except worldoptions.WorldOptionsError as e:
+        return {"error": str(e)}
+    except Exception:
+        logger.exception("dispatch quote failed")
+        return {"error": "Couldn't get courier quotes. Check the server logs."}
+    if not res.get("options"):
+        return {"error": "World Options returned no courier options for this address and parcel."}
+    return {
+        "rate_id": res.get("rate_id"),
+        "options": res["options"],
+        "currency": currency,
+        "destination": {"name": dest.get("company") or " ".join(
+            x for x in [dest.get("firstname"), dest.get("lastname")] if x).strip() or dest.get("name"),
+            "city": dest.get("city"), "postcode": dest.get("postcode"), "country": dest.get("country")},
+        "weight": wt,
+    }
+
+
+async def run_dispatch_book(registry: dict, order_id, rate_id, carrier_id,
+                            expected: Optional[dict] = None, notify: Optional[bool] = None) -> dict:
+    """Book the chosen courier option (this CHARGES the World Options account),
+    then move the order's tag to Dispatched and create the Shopify fulfillment
+    with tracking. Returns everything the UI needs to confirm what happened."""
+    if not worldoptions or not worldoptions.configured():
+        return {"error": "World Options is not connected. Add your API key in Settings."}
+    try:
+        rate_id = int(rate_id); carrier_id = int(carrier_id)
+    except (TypeError, ValueError):
+        return {"error": "A courier option must be selected before booking."}
+
+    o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+    if not _ok(o) or not o.get("id"):
+        return {"error": "Order not found."}
+    if _order_status(o) == "cancelled":
+        return {"error": "This order is cancelled; it should not be dispatched."}
+
+    try:
+        shipment = await worldoptions.book(rate_id, carrier_id)
+    except worldoptions.WorldOptionsError as e:
+        return {"error": str(e)}
+    except Exception:
+        logger.exception("dispatch booking failed")
+        return {"error": "The booking failed at World Options. Check the server logs; "
+                         "no charge is confirmed until a tracking number comes back."}
+    if not shipment.get("tracking_number"):
+        return {"error": "World Options accepted the request but returned no tracking number. "
+                         "Check your World Options portal before retrying so you are not charged twice."}
+
+    # Guard against booking a different service/price than the merchant confirmed.
+    warning = ""
+    if isinstance(expected, dict) and expected.get("amount") is not None and shipment.get("amount") is not None:
+        try:
+            if abs(float(shipment["amount"]) - float(expected["amount"])) > 0.011:
+                warning = (f"Booked price {shipment['amount']} {shipment.get('currency','')} differs from the "
+                           f"{expected['amount']} {expected.get('currency','')} you selected. Review the shipment "
+                           "in your World Options portal.")
+        except (TypeError, ValueError):
+            pass
+
+    cfg = _load_shipping()
+    do_notify = cfg.get("notify_customer", True) if notify is None else bool(notify)
+
+    # Tag first (order still open), then fulfill (which marks it fulfilled).
+    tag_ok, tag_note = await _dispatch_move_tags(registry, int(order_id))
+
+    fulfillment = {"ok": False, "reason": "not_attempted"}
+    if _fulfillment_writer is not None:
+        try:
+            fulfillment = await _fulfillment_writer(
+                int(order_id),
+                tracking_number=shipment["tracking_number"],
+                tracking_company=shipment.get("carrier_name") or "",
+                tracking_url=None,
+                notify_customer=do_notify,
+            )
+        except Exception:
+            logger.exception("fulfillment after dispatch failed for order %s", order_id)
+            fulfillment = {"ok": False, "reason": "error",
+                           "detail": "Shopify fulfillment failed after booking; the label is still valid. "
+                                     "You can fulfill the order manually in Shopify."}
+
+    entry = {
+        "tracking_number": shipment["tracking_number"],
+        "shipment_id": shipment.get("shipment_id"),
+        "carrier_name": shipment.get("carrier_name"),
+        "service_name": shipment.get("service_name"),
+        "amount": shipment.get("amount"),
+        "currency": shipment.get("currency"),
+        "dispatched_at": datetime.now(timezone.utc).isoformat(),
+        "fulfilled": bool(fulfillment.get("ok")),
+        "notified": bool(do_notify and fulfillment.get("ok")),
+    }
+    _record_dispatch(int(order_id), entry)
+
+    return {
+        "ok": True,
+        "shipment": shipment,          # includes labels[] for printing now
+        "fulfillment": fulfillment,
+        "tag": {"ok": tag_ok, "note": tag_note},
+        "notified": entry["notified"],
+        "warning": warning,
+        "dispatch": entry,
+    }
 
 
 async def run_missing_production(registry: dict, tag: Optional[str] = None) -> dict:
@@ -4246,12 +4596,14 @@ def _ensure_scheduler(registry: dict) -> None:
 # Route registration (mounted onto the existing FastMCP app)
 # ---------------------------------------------------------------------------
 
-def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
-    # The ONE write capability the server hands over. It never joins any tool
-    # registry: the AI can read the store, only the app's own print and Mark
-    # made actions can touch tags.
-    global _order_tag_writer
+def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=None) -> None:
+    # The write capabilities the server hands over. Neither ever joins any tool
+    # registry: the AI can read the store; only the app's own print / Mark made /
+    # Dispatch actions can touch tags or create a fulfillment.
+    global _order_tag_writer, _fulfillment_writer
     _order_tag_writer = order_tag_writer
+    _fulfillment_writer = fulfillment_writer
+    _wo_boot()
     # Shopify tools + live SEO tools + Google data tools (the last only if configured)
     chat_registry = {**registry, **_build_seo_tools(registry), **_build_google_tools()}
     tools = _build_tools(chat_registry)
@@ -4901,7 +5253,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
         repo_data = os.path.join(os.path.dirname(__file__), "data")
         # Never export credentials, and give the two roots distinct prefixes so the
         # repo-seed sheet cannot shadow the live uploaded one on restore.
-        secret = os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json"))
+        secrets_excluded = {
+            os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
+            os.path.basename(WO_SECRET_PATH),
+        }
         buf = io.BytesIO()
         added = 0
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -4913,7 +5268,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
                 except OSError:
                     continue
                 for n in names:
-                    if n == secret:
+                    if n in secrets_excluded:
                         continue
                     p = os.path.join(root, n)
                     if not os.path.isfile(p) or not n.lower().endswith((".json", ".csv", ".bak")):
@@ -5044,6 +5399,239 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
         except Exception:
             logger.exception("Queue tagging failed")
             return _json({"error": "Couldn't tag the order."}, 500)
+
+    # -----------------------------------------------------------------------
+    # Shipping settings + Dispatch (World Options). The courier API key and
+    # write actions live entirely outside the AI tool registry.
+    # -----------------------------------------------------------------------
+    def _shipping_public(cfg: dict) -> dict:
+        """Config for the UI: everything EXCEPT the API key (never echoed)."""
+        return {
+            "origin": cfg.get("origin") or {},
+            "boxes": cfg.get("boxes") or [],
+            "default_box_id": cfg.get("default_box_id") or "",
+            "notify_customer": bool(cfg.get("notify_customer", True)),
+            "currency": cfg.get("currency") or "GBP",
+            "base_url": cfg.get("base_url") or "",
+            "connected": bool(worldoptions and worldoptions.configured()),
+            "key_last4": (worldoptions.key_last4() if worldoptions else ""),
+            "key_from_env": bool(os.environ.get("WO_API_KEY", "").strip()),
+            "available": bool(worldoptions),
+        }
+
+    def _clean_boxes(raw) -> list:
+        out = []
+        for b in (raw or [])[:24]:
+            if not isinstance(b, dict):
+                continue
+            try:
+                box = {
+                    "id": str(b.get("id") or "")[:40] or ("box%d" % (len(out) + 1)),
+                    "name": str(b.get("name") or "Box")[:60],
+                    "width": round(float(b.get("width") or 0), 2),
+                    "length": round(float(b.get("length") or 0), 2),
+                    "depth": round(float(b.get("depth") or 0), 2),
+                    "weight": round(float(b.get("weight") or 0), 3),
+                }
+            except (TypeError, ValueError):
+                continue
+            out.append(box)
+        return out
+
+    def _clean_origin(raw) -> dict:
+        raw = raw if isinstance(raw, dict) else {}
+        keys = ("name", "company", "firstname", "lastname", "street",
+                "postcode", "city", "state", "country", "phone", "email")
+        return {k: str(raw.get(k) or "").strip()[:120] for k in keys}
+
+    @mcp.custom_route("/api/shipping/config", methods=["POST"])
+    async def shipping_config_route(request: Request):
+        """Get or set shipping settings. The API key is write-only: it is saved
+        server-side and never returned; the UI only ever sees connected + last4."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        op = str(body.get("op") or "get").lower()
+        if op != "set":
+            return _json({"config": _shipping_public(_load_shipping())})
+        cfg = _load_shipping()
+        if "origin" in body:
+            cfg["origin"] = _clean_origin(body.get("origin"))
+        if "boxes" in body:
+            cleaned = _clean_boxes(body.get("boxes"))
+            if cleaned:
+                cfg["boxes"] = cleaned
+        if "default_box_id" in body:
+            cfg["default_box_id"] = str(body.get("default_box_id") or "")[:40]
+        if "notify_customer" in body:
+            cfg["notify_customer"] = bool(body.get("notify_customer"))
+        if body.get("currency"):
+            cfg["currency"] = str(body.get("currency"))[:3].upper()
+        if body.get("base_url"):
+            base = str(body.get("base_url")).strip()[:200]
+            if base.startswith("https://"):
+                cfg["base_url"] = base.rstrip("/")
+                if worldoptions:
+                    worldoptions.set_base_url(cfg["base_url"])
+        _save_shipping(cfg)
+        # API key: only when a non-empty value is sent, and only when not env-managed.
+        if "api_key" in body and worldoptions:
+            key = str(body.get("api_key") or "").strip()
+            if key:
+                if os.environ.get("WO_API_KEY", "").strip():
+                    return _json({"error": "The API key is set on the server (WO_API_KEY) and can't "
+                                           "be changed from here."}, 400)
+                _save_wo_key(key)
+                worldoptions.set_api_key(key)
+        return _json({"config": _shipping_public(_load_shipping()), "ok": True})
+
+    @mcp.custom_route("/api/shipping/validate", methods=["POST"])
+    async def shipping_validate_route(request: Request):
+        """Confirm the World Options key works (read-only; never charges)."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        if not worldoptions or not worldoptions.configured():
+            return _json({"ok": False, "error": "No API key set."}, 200)
+        try:
+            info = await worldoptions.validate()
+            name = ""
+            if isinstance(info, dict):
+                name = info.get("name") or info.get("company") or info.get("email") or ""
+            return _json({"ok": True, "account": name})
+        except worldoptions.WorldOptionsError as e:
+            return _json({"ok": False, "error": str(e)}, 200)
+        except Exception:
+            logger.exception("shipping validate failed")
+            return _json({"ok": False, "error": "Couldn't reach World Options."}, 200)
+
+    @mcp.custom_route("/api/dispatch/quote", methods=["POST"])
+    async def dispatch_quote_route(request: Request):
+        """Price couriers for one order. Free / read-only, no charge."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        try:
+            oid = int(body.get("order_id") or 0)
+        except (TypeError, ValueError, OverflowError):
+            oid = 0
+        if not oid:
+            return _json({"error": "No order id given."}, 400)
+        box = body.get("box") if isinstance(body.get("box"), dict) else {}
+        try:
+            res = await run_dispatch_quote(registry, oid, box)
+            return _json(res, 400 if res.get("error") else 200)
+        except Exception:
+            logger.exception("dispatch quote route failed")
+            return _json({"error": "Couldn't get courier quotes."}, 500)
+
+    @mcp.custom_route("/api/dispatch/book", methods=["POST"])
+    async def dispatch_book_route(request: Request):
+        """Book the chosen courier (CHARGES the WO account), fulfill + tag."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        try:
+            oid = int(body.get("order_id") or 0)
+        except (TypeError, ValueError, OverflowError):
+            oid = 0
+        if not oid:
+            return _json({"error": "No order id given."}, 400)
+        expected = body.get("expected") if isinstance(body.get("expected"), dict) else None
+        notify = body.get("notify")
+        notify = None if notify is None else bool(notify)
+        try:
+            res = await run_dispatch_book(registry, oid, body.get("rate_id"),
+                                          body.get("carrier_id"), expected=expected, notify=notify)
+            return _json(res, 400 if res.get("error") else 200)
+        except Exception:
+            logger.exception("dispatch book route failed")
+            return _json({"error": "The booking failed. Check the server logs before retrying."}, 500)
+
+    @mcp.custom_route("/api/dispatch/track", methods=["POST"])
+    async def dispatch_track_route(request: Request):
+        """Fetch a booked shipment (status + labels) by tracking number. Read-only;
+        used to reprint a label for an already-dispatched order."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        if not worldoptions or not worldoptions.configured():
+            return _json({"error": "World Options is not connected."}, 400)
+        tn = str(body.get("tracking_number") or "").strip()
+        if not tn:
+            return _json({"error": "No tracking number given."}, 400)
+        try:
+            return _json({"ok": True, "shipment": await worldoptions.track(tn)})
+        except worldoptions.WorldOptionsError as e:
+            return _json({"error": str(e)}, 400)
+        except Exception:
+            logger.exception("dispatch track failed")
+            return _json({"error": "Couldn't fetch the shipment."}, 500)
+
+    @mcp.custom_route("/api/dispatch/cancel", methods=["POST"])
+    async def dispatch_cancel_route(request: Request):
+        """Cancel a booked shipment at World Options (best-effort)."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        if not worldoptions or not worldoptions.configured():
+            return _json({"error": "World Options is not connected."}, 400)
+        tn = str(body.get("tracking_number") or "").strip()
+        if not tn:
+            return _json({"error": "No tracking number given."}, 400)
+        try:
+            res = await worldoptions.cancel(tn)
+        except worldoptions.WorldOptionsError as e:
+            return _json({"error": str(e)}, 400)
+        except Exception:
+            logger.exception("dispatch cancel failed")
+            return _json({"error": "Couldn't cancel the shipment."}, 500)
+        try:
+            oid = int(body.get("order_id") or 0)
+        except (TypeError, ValueError, OverflowError):
+            oid = 0
+        if oid:
+            d = _load_dispatch()
+            if str(oid) in d:
+                d[str(oid)]["canceled"] = True
+                _write_dispatch(d)
+        return _json({"ok": True, "shipment": res})
 
     @mcp.custom_route("/api/production-labels/missing", methods=["POST"])
     async def labels_missing_route(request: Request):
@@ -5568,6 +6156,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None) -> None:
                         "down_since": watch.get("shopify_down")},
             "ai": {"ok": bool(ANTHROPIC_API_KEY)},
             "google": google_data.status(),
+            "shipping": {"ok": bool(worldoptions and worldoptions.configured()),
+                         "available": bool(worldoptions),
+                         "fulfillment": bool(_fulfillment_writer is not None)},
             "volume": {"ok": vol_ok, "detail": vol_detail,
                        "poisoned": sorted(os.path.basename(p) for p in _poisoned_stores)},
             "email_alerts": {"ok": bool(RESEND_API_KEY and ALERT_EMAIL_TO)},

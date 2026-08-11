@@ -1040,9 +1040,71 @@ async def update_order_tags(order_id: int, tags: str) -> dict:
                           body={"order": {"id": int(order_id), "tags": tags}})
 
 
+async def create_order_fulfillment(
+    order_id: int,
+    tracking_number: Optional[str] = None,
+    tracking_company: Optional[str] = None,
+    tracking_url: Optional[str] = None,
+    notify_customer: bool = True,
+) -> dict:
+    """Mark an order shipped via the modern fulfillment-orders flow (the legacy
+    orders/{id}/fulfillments.json endpoint is gone). Fulfils every open/in-progress
+    fulfillment order in full and attaches tracking. Returns a small status dict;
+    never raises for the expected "nothing to fulfill" / "no permission" cases so
+    the dispatch flow can report them cleanly.
+
+    Deliberately NOT in COPILOT_TOOLS — the AI chat stays read-only; only the app's
+    own Dispatch button reaches this, via the writer handed to copilot.add_routes."""
+    try:
+        fo = await _request("GET", f"orders/{order_id}/fulfillment_orders.json")
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code if e.response is not None else 0
+        if code in (401, 403):
+            return {"ok": False, "reason": "permission",
+                    "detail": "The access token is missing fulfillment permissions "
+                              "(read/write merchant-managed fulfillment orders + write_fulfillments)."}
+        raise
+    orders = fo.get("fulfillment_orders", []) or []
+    # Only fulfillment orders we can actually action now.
+    groups = [{"fulfillment_order_id": f["id"]}
+              for f in orders
+              if f.get("status") in ("open", "in_progress", "scheduled")
+              and f.get("id")]
+    if not groups:
+        return {"ok": False, "reason": "nothing_to_fulfill",
+                "detail": "Shopify has no open items to fulfill for this order "
+                          "(it may already be fulfilled)."}
+    tracking_info = {}
+    if tracking_number:
+        tracking_info["number"] = tracking_number
+    if tracking_company:
+        tracking_info["company"] = tracking_company
+    if tracking_url:
+        tracking_info["url"] = tracking_url
+    body = {"fulfillment": {
+        "line_items_by_fulfillment_order": groups,
+        "notify_customer": bool(notify_customer),
+    }}
+    if tracking_info:
+        body["fulfillment"]["tracking_info"] = tracking_info
+    try:
+        data = await _request("POST", "fulfillments.json", body=body)
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code if e.response is not None else 0
+        if code in (401, 403):
+            return {"ok": False, "reason": "permission",
+                    "detail": "The access token can read fulfillment orders but cannot create "
+                              "fulfillments (needs write_fulfillments)."}
+        raise
+    f = data.get("fulfillment", data)
+    return {"ok": True, "fulfillment_id": f.get("id"), "status": f.get("status")}
+
+
 try:
     import copilot
-    copilot.add_routes(mcp, COPILOT_TOOLS, order_tag_writer=update_order_tags)
+    copilot.add_routes(mcp, COPILOT_TOOLS,
+                       order_tag_writer=update_order_tags,
+                       fulfillment_writer=create_order_fulfillment)
 except Exception as e:
     logger.error(f"Store Copilot disabled (chat UI unavailable): {e}")
 
