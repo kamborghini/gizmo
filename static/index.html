@@ -4039,6 +4039,10 @@
             const dsum = el('div', 'disp-dest');
             dsum.append(el('div', 'disp-dest-name', destName));
             dsum.append(el('div', 'sub', [dest.street, dest.city, dest.postcode, dest.country].filter(Boolean).join(', ') || 'No address on file'));
+            if (o.shipping_paid && (o.shipping_paid.title || o.shipping_paid.price)) {
+                dsum.append(el('div', 'sub', 'Customer paid for delivery: ' + (o.shipping_paid.title || 'shipping')
+                    + (o.shipping_paid.price ? ', ' + fmtPrice(parseFloat(o.shipping_paid.price), o.currency || '') : '')));
+            }
             body.append(dsum);
             if (!dest.street || !dest.postcode || !dest.country) {
                 body.append(el('div', 'disp-warn', 'This order is missing part of its shipping address. Fix it in Shopify, then reopen.'));
@@ -4102,7 +4106,7 @@
                     rowl.append(rb);
                     const mid = el('div', 'disp-opt-mid');
                     mid.append(el('div', 'disp-opt-carrier', op.carrier_name + (op.service_name ? ' · ' + op.service_name : '')));
-                    if (op.delivery) mid.append(el('div', 'sub', op.delivery));
+                    if (op.delivery) mid.append(el('div', 'sub', op.delivery + (op.pickup ? ' | pickup ' + op.pickup : '')));
                     rowl.append(mid);
                     rowl.append(el('div', 'disp-opt-price', fmtPrice(op.amount, op.currency)));
                     list.append(rowl);
@@ -4116,7 +4120,7 @@
                 if (!chosen) return;
                 const notifyWrap = el('label', 'disp-notify');
                 const nb = document.createElement('input'); nb.type = 'checkbox'; nb.checked = cfg.notify_customer !== false;
-                notifyWrap.append(nb, el('span', null, ' Mark the order fulfilled in Shopify and email the customer tracking'));
+                notifyWrap.append(nb, el('span', null, ' Email the customer their tracking (the order is marked fulfilled in Shopify either way)'));
                 conf.append(notifyWrap);
                 if (cfg.ready_time || cfg.close_time) {
                     conf.append(el('div', 'sub', 'Collection window: '
@@ -4129,15 +4133,24 @@
                 }
                 conf.append(el('div', 'disp-charge', 'Booking charges your World Options account.'));
                 const book = el('button', 'btn btn-primary disp-book');
+                if (quote.international) { book.disabled = true; book.title = 'International bookings need customs paperwork the app cannot send yet; book this one in the World Options portal.'; }
                 const setLabel = () => { book.innerHTML = ''; book.append(ico(I.truck), document.createTextNode('Book & dispatch · ' + fmtPrice(chosen.amount, chosen.currency))); };
                 setLabel();
                 book.onclick = async () => {
                     if (!confirm('Book ' + chosen.carrier_name + (chosen.service_name ? ' ' + chosen.service_name : '') + ' for ' + fmtPrice(chosen.amount, chosen.currency) + '? This charges your World Options account.')) return;
                     book.disabled = true; book.textContent = 'Booking…';
+                    const doBook = (force) => api('/api/dispatch/book', {
+                        order_id: o.id, option: chosen, box: lastBox, notify: nb.checked, force: !!force
+                    });
                     try {
-                        const res = await api('/api/dispatch/book', {
-                            order_id: o.id, option: chosen, box: lastBox, notify: nb.checked
-                        });
+                        let res;
+                        try { res = await doBook(false); }
+                        catch (e) {
+                            // Shopify already shows the order fulfilled: ask, then retry once.
+                            if (!/retry with the confirmation/.test(e.message || '')) throw e;
+                            if (!confirm('Shopify already shows this order as fulfilled (it may have shipped). Book a courier anyway?')) { book.disabled = false; setLabel(); return; }
+                            res = await doBook(true);
+                        }
                         setDispatchState(o.id, res.dispatch || {});
                         renderResult(res);
                         if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
@@ -4153,8 +4166,9 @@
                 okBar.append(ico(I.check), el('span', null, 'Dispatched with ' + (s.carrier_name || 'courier') + (s.service_name ? ' ' + s.service_name : '')));
                 body.append(okBar);
                 const tb = el('div', 'disp-track'); tb.append(el('span', null, 'Tracking '), el('b', null, s.tracking_number || '(pending)')); body.append(tb);
-                if (s.amount != null) body.append(el('div', 'sub', 'Charged ' + fmtPrice(s.amount, s.currency)));
+                if (s.amount != null) body.append(el('div', 'sub', 'Quoted ' + fmtPrice(s.amount, s.currency) + '. Your World Options invoice shows the final charge.'));
                 if (res.warning) body.append(el('div', 'disp-warn', res.warning));
+                if (s.collection_date) body.append(el('div', 'sub', 'Collection reference: ' + s.collection_date));
                 const f = res.fulfillment || {};
                 if (f.ok) body.append(el('div', 'disp-ok-line', res.notified ? 'Order marked fulfilled in Shopify and the customer was emailed tracking.' : 'Order marked fulfilled in Shopify.'));
                 else if (f.reason === 'permission') body.append(el('div', 'disp-warn', 'Booked, but the app could not mark the order fulfilled (missing the write_fulfillments permission). Fulfil it manually in Shopify, or grant the permission and it will work next time.'));
@@ -4170,7 +4184,7 @@
                 body.innerHTML = '';
                 (function(){ var h = el('div', 'disp-result-head'); h.append(ico(I.check), el('span', null, 'Dispatched with ' + (d.carrier_name || 'courier') + (d.service_name ? ' ' + d.service_name : ''))); body.append(h); })();
                 const tb = el('div', 'disp-track'); tb.append(el('span', null, 'Tracking '), el('b', null, d.tracking_number || '')); body.append(tb);
-                if (d.amount != null) body.append(el('div', 'sub', 'Charged ' + fmtPrice(d.amount, d.currency)));
+                if (d.amount != null) body.append(el('div', 'sub', 'Quoted ' + fmtPrice(d.amount, d.currency)));
                 if (d.dispatched_at) body.append(el('div', 'sub', 'Dispatched ' + fmtDate(d.dispatched_at)));
                 const bar = el('div', 'disp-actions');
                 const rp = el('button', 'btn'); rp.append(ico(I.printer), document.createTextNode('Reprint label'));
@@ -4186,9 +4200,9 @@
                     if (!confirm('Cancel this shipment at World Options? You may still be charged depending on the courier.')) return;
                     cancel.disabled = true;
                     try {
-                        await api('/api/dispatch/cancel', { order_id: o.id, tracking_number: d.tracking_number });
+                        const cr = await api('/api/dispatch/cancel', { order_id: o.id, tracking_number: d.tracking_number });
                         setDispatchState(o.id, { canceled: true });
-                        addToast('Shipment cancelled.');
+                        addToast(cr && cr.note ? ('Shipment cancelled. ' + cr.note) : 'Shipment cancelled.');
                         if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
                         close();
                     } catch (e) { cancel.disabled = false; addToast(e.message || 'Could not cancel'); }
@@ -4302,6 +4316,7 @@
             const coSel = el('select', 'psel');
             const CO_LABELS = {
                 'I_Need_To_Book_A_Collection': 'Book a collection for each dispatch',
+                'I_Need_To_Book_A_Collection_For_Next_Day': 'Book a collection for the next day',
                 'I_Have_Daily_Collection': 'We have a daily collection already',
                 'I_Already_Have_Collection_Scheduled': 'A collection is already scheduled',
                 'I_Am_Going_To_Drop_Off_My_Packages': 'We drop parcels off ourselves',

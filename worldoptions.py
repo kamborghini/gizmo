@@ -88,6 +88,7 @@ def shopify_carrier(carrier_code: str) -> str:
 # which double-books for accounts that already have a daily driver.
 COLLECTION_OPTIONS = [
     "I_Need_To_Book_A_Collection",
+    "I_Need_To_Book_A_Collection_For_Next_Day",
     "I_Have_Daily_Collection",
     "I_Already_Have_Collection_Scheduled",
     "I_Am_Going_To_Drop_Off_My_Packages",
@@ -214,25 +215,34 @@ def _text(elem, name, default=""):
 # ---------------------------------------------------------------------------
 # HTTP
 # ---------------------------------------------------------------------------
-async def _soap_call(service: str, action: str, inner: str) -> ET.Element:
+async def _soap_call(service: str, action: str, inner: str, retryable: bool = True) -> ET.Element:
+    """retryable=False for operations that SPEND MONEY (DoShipment): a timed-out
+    booking may have succeeded server-side, so auto-retrying could charge twice.
+    Those surface the error and let the merchant check before trying again."""
     if not configured():
         raise WorldOptionsError("World Options is not connected. Add your Meter Number in Settings.")
     url = f"{_state['base_url']}/{service}.svc"
     headers = {"Content-Type": "text/xml; charset=utf-8", "SOAPAction": f'"{action}"'}
     payload = _envelope(inner).encode("utf-8")
+    attempts = 3 if retryable else 1
     async with _gate:
         last_exc = None
-        for attempt in range(3):
+        for attempt in range(attempts):
             try:
                 async with httpx.AsyncClient(follow_redirects=True) as client:
                     resp = await client.post(url, content=payload, headers=headers, timeout=45.0)
             except (httpx.TimeoutException, httpx.TransportError) as e:
                 last_exc = e
-                if attempt >= 2:
+                if attempt >= attempts - 1:
                     break
                 await asyncio.sleep(min(2 ** attempt, 6))
                 continue
             return _parse(resp, url)
+    if not retryable:
+        raise WorldOptionsError(
+            "The booking request did not get a reply from World Options. It MAY still have gone "
+            "through: check your World Options portal for a new shipment before booking again, "
+            "or you could be charged twice.")
     raise WorldOptionsError(
         f"Could not reach World Options ({type(last_exc).__name__ if last_exc else 'network error'}). "
         "Try again in a moment.")
@@ -485,7 +495,8 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
              + _sender_block(origin or {})
              + shipping
              + "</tem:shipment></tem:DoShipment>")
-    root = await _soap_call("ShipmentService", "http://tempuri.org/IShipmentService/DoShipment", inner)
+    root = await _soap_call("ShipmentService", "http://tempuri.org/IShipmentService/DoShipment", inner,
+                            retryable=False)
     reply = _find(root, "DoShipmentResult")
     if reply is None:
         raise WorldOptionsError("World Options returned no booking result.")

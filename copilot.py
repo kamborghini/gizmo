@@ -2956,7 +2956,16 @@ PROPOSAL_HOST = os.environ.get("PROPOSAL_HOST", "quote.projectedimage.com")
 _PROPOSAL_RE = re.compile(r"https://" + re.escape(PROPOSAL_HOST) + r"/proof/[A-Za-z0-9]+")
 _order_tag_writer = None
 _fulfillment_writer = None
+_fulfillment_canceler = None
 _tag_locks: dict = {}
+_dispatch_locks: dict = {}
+
+
+def _dispatch_lock(order_id) -> "asyncio.Lock":
+    lock = _dispatch_locks.get(int(order_id))
+    if lock is None:
+        lock = _dispatch_locks[int(order_id)] = asyncio.Lock()
+    return lock
 
 
 def _tag_lock(order_id) -> "asyncio.Lock":
@@ -3219,6 +3228,10 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None) -> di
         "ship_to": _ship_to(o),
         "weight_hint": _order_weight_kg(o),
         "currency": o.get("currency") or o.get("presentment_currency") or "",
+        # What the customer paid for delivery, so the courier pick is not blind.
+        "shipping_paid": (lambda sl: ({"title": str(sl[0].get("title") or ""),
+                                       "price": str(sl[0].get("price") or "")}
+                                      if sl else None))(o.get("shipping_lines") or []),
     }
 
 
@@ -3302,6 +3315,9 @@ async def run_dispatch_quote(registry: dict, order_id, box: dict) -> dict:
         return {"error": "Order not found."}
     if _order_status(o) == "cancelled":
         return {"error": "This order is cancelled; it should not be dispatched."}
+    if _order_status(o) == "refunded":
+        return {"error": "This order was refunded; dispatching it would ship goods the "
+                         "customer has been paid back for."}
     dest = _ship_to(o)
     why = _addr_ready(dest)
     if why:
@@ -3340,10 +3356,15 @@ async def run_dispatch_quote(registry: dict, order_id, box: dict) -> dict:
 
 
 async def run_dispatch_book(registry: dict, order_id, option: dict, box: dict,
-                            notify: Optional[bool] = None) -> dict:
+                            notify: Optional[bool] = None, force: bool = False) -> dict:
     """Book the chosen courier option (this CHARGES the World Options account),
     then move the order's tag to Dispatched and create the Shopify fulfillment
-    with tracking. Returns everything the UI needs to confirm what happened."""
+    with tracking. Returns everything the UI needs to confirm what happened.
+
+    Guards, because this spends money: serialized per order (two tabs cannot both
+    book), an order with a live dispatch record is refused outright (cancel the
+    shipment first), refunded orders are refused, and an order Shopify already
+    shows fulfilled needs force=True (it looks already shipped)."""
     if not worldoptions or not worldoptions.configured():
         return {"error": "World Options is not connected. Add your credentials in Settings."}
     if not isinstance(option, dict) or not option.get("service_type_code"):
@@ -3351,12 +3372,32 @@ async def run_dispatch_book(registry: dict, order_id, option: dict, box: dict,
     b, err = _clean_box(box)
     if err:
         return {"error": err}
+    async with _dispatch_lock(order_id):
+        return await _dispatch_book_locked(registry, order_id, option, b, notify, force)
+
+
+async def _dispatch_book_locked(registry: dict, order_id, option: dict, b: dict,
+                                notify, force: bool) -> dict:
+    existing = _load_dispatch().get(str(order_id)) or {}
+    if existing.get("tracking_number") and not existing.get("canceled"):
+        return {"error": "This order was already dispatched: "
+                         + (existing.get("carrier_name") or "courier") + " tracking "
+                         + existing.get("tracking_number", "")
+                         + ". Cancel that shipment first if you need to rebook."}
 
     o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
     if not _ok(o) or not o.get("id"):
         return {"error": "Order not found."}
     if _order_status(o) == "cancelled":
         return {"error": "This order is cancelled; it should not be dispatched."}
+    if _order_status(o) == "refunded":
+        return {"error": "This order was refunded; dispatching it would ship goods the "
+                         "customer has been paid back for."}
+    if _order_status(o) == "fulfilled" and not existing.get("canceled") and not force:
+        return {"error": "Shopify shows this order as already fulfilled, which usually means "
+                         "it has shipped. If you are sure, book it from the World Options "
+                         "portal, or retry with the confirmation.",
+                "needs_force": True}
     dest = _ship_to(o)
     if _addr_ready(dest):
         return {"error": "This order's shipping address is incomplete; fix it in Shopify first."}
@@ -3415,8 +3456,11 @@ async def run_dispatch_book(registry: dict, order_id, option: dict, box: dict,
         "currency": shipment.get("currency"),
         "dispatched_at": datetime.now(timezone.utc).isoformat(),
         "fulfilled": bool(fulfillment.get("ok")),
+        # Kept so cancelling the shipment can also cancel the Shopify fulfillment.
+        "fulfillment_id": fulfillment.get("fulfillment_id"),
         "notified": bool(do_notify and fulfillment.get("ok")),
         "has_label": bool(shipment.get("labels")),
+        "collection_date": shipment.get("collection_date") or "",
     }
     _record_dispatch(int(order_id), entry)
 
@@ -4689,13 +4733,15 @@ def _ensure_scheduler(registry: dict) -> None:
 # Route registration (mounted onto the existing FastMCP app)
 # ---------------------------------------------------------------------------
 
-def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=None) -> None:
-    # The write capabilities the server hands over. Neither ever joins any tool
-    # registry: the AI can read the store; only the app's own print / Mark made /
-    # Dispatch actions can touch tags or create a fulfillment.
-    global _order_tag_writer, _fulfillment_writer
+def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=None,
+               fulfillment_canceler=None) -> None:
+    # The write capabilities the server hands over. None of them ever joins any
+    # tool registry: the AI can read the store; only the app's own print / Mark
+    # made / Dispatch actions can touch tags or fulfillments.
+    global _order_tag_writer, _fulfillment_writer, _fulfillment_canceler
     _order_tag_writer = order_tag_writer
     _fulfillment_writer = fulfillment_writer
+    _fulfillment_canceler = fulfillment_canceler
     _wo_boot()
     # Shopify tools + live SEO tools + Google data tools (the last only if configured)
     chat_registry = {**registry, **_build_seo_tools(registry), **_build_google_tools()}
@@ -5684,7 +5730,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         notify = body.get("notify")
         notify = None if notify is None else bool(notify)
         try:
-            res = await run_dispatch_book(registry, oid, option, box, notify=notify)
+            res = await run_dispatch_book(registry, oid, option, box, notify=notify,
+                                          force=bool(body.get("force")))
             return _json(res, 400 if res.get("error") else 200)
         except Exception:
             logger.exception("dispatch book route failed")
@@ -5744,12 +5791,39 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             oid = int(body.get("order_id") or 0)
         except (TypeError, ValueError, OverflowError):
             oid = 0
+        note = ""
         if oid:
             d = _load_dispatch()
-            if str(oid) in d:
-                d[str(oid)]["canceled"] = True
-                _write_dispatch(d)
-        return _json({"ok": True, "shipment": res})
+            entry = d.get(str(oid)) or {}
+            entry["canceled"] = True
+            d[str(oid)] = entry
+            _write_dispatch(d)
+            # Undo what the booking did in Shopify, so the customer is not left
+            # with dead tracking and the order can be re-dispatched cleanly.
+            fid = entry.get("fulfillment_id")
+            if fid and _fulfillment_canceler is not None:
+                try:
+                    fc = await _fulfillment_canceler(int(fid))
+                    if fc.get("ok"):
+                        note = ("The Shopify fulfillment was cancelled too; re-dispatching "
+                                "will re-fulfill with the new tracking.")
+                    else:
+                        note = ("Shipment cancelled, but the Shopify fulfillment could not be undone ("
+                                + (fc.get("detail") or "unknown reason")
+                                + "). Cancel it in Shopify so the customer's tracking is not left dead.")
+                except Exception:
+                    logger.exception("fulfillment cancel failed for order %s", oid)
+                    note = ("Shipment cancelled, but the Shopify fulfillment could not be undone. "
+                            "Cancel it in Shopify so the customer's tracking is not left dead.")
+            elif entry.get("fulfilled"):
+                note = ("Shipment cancelled. The order is still marked fulfilled in Shopify; "
+                        "cancel that fulfillment in Shopify so the tracking is not left dead.")
+            # Put the order back in the To ship queue.
+            try:
+                await _sync_order_tags(registry, oid, add=(MADE_TAG,), remove=(DISPATCHED_TAG,))
+            except Exception:
+                logger.exception("tag revert after cancel failed for order %s", oid)
+        return _json({"ok": True, "shipment": res, "note": note})
 
     @mcp.custom_route("/api/production-labels/missing", methods=["POST"])
     async def labels_missing_route(request: Request):

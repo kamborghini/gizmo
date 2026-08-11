@@ -1100,11 +1100,29 @@ async def create_order_fulfillment(
     return {"ok": True, "fulfillment_id": f.get("id"), "status": f.get("status")}
 
 
+async def cancel_order_fulfillment(fulfillment_id: int) -> dict:
+    """Cancel a fulfillment (used when a dispatched shipment is voided, so the
+    customer is not left holding dead tracking). Same rules as the other writers:
+    NOT in COPILOT_TOOLS, reachable only from the app's own Cancel action."""
+    try:
+        await _request("POST", f"fulfillments/{int(fulfillment_id)}/cancel.json")
+        return {"ok": True}
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code if e.response is not None else 0
+        if code in (401, 403):
+            return {"ok": False, "detail": "The access token cannot cancel fulfillments "
+                                           "(needs write_fulfillments)."}
+        return {"ok": False, "detail": f"Shopify refused the fulfillment cancel ({code})."}
+    except Exception as e:
+        return {"ok": False, "detail": f"Fulfillment cancel failed: {type(e).__name__}"}
+
+
 try:
     import copilot
     copilot.add_routes(mcp, COPILOT_TOOLS,
                        order_tag_writer=update_order_tags,
-                       fulfillment_writer=create_order_fulfillment)
+                       fulfillment_writer=create_order_fulfillment,
+                       fulfillment_canceler=cancel_order_fulfillment)
 except Exception as e:
     logger.error(f"Store Copilot disabled (chat UI unavailable): {e}")
 
