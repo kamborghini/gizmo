@@ -31,7 +31,10 @@ import httpx
 
 logger = logging.getLogger("shopify_mcp.worldoptions")
 
-DEFAULT_BASE = "http://service.worldoptions.co.uk"
+DEFAULT_BASE = "https://service.worldoptions.co.uk"
+# The REST Ecommerce host is a different API; if it ever ends up configured as the
+# SOAP base (e.g. a value persisted by an earlier build) it must be rejected.
+_REST_HOST = "ecommerce.worldoptions.com"
 
 _state = {
     "meter":    os.environ.get("WO_METER_NUMBER", "").strip(),
@@ -92,7 +95,11 @@ def set_credentials(meter=None, key=None, password=None, plugin=None) -> None:
 
 
 def set_base_url(url) -> None:
-    _state["base_url"] = ((url or DEFAULT_BASE).strip() or DEFAULT_BASE).rstrip("/")
+    b = ((url or DEFAULT_BASE).strip() or DEFAULT_BASE).rstrip("/")
+    # Never point the SOAP client at the REST host (a stale value from an earlier build).
+    if _REST_HOST in b:
+        b = DEFAULT_BASE
+    _state["base_url"] = b
 
 
 def meter_last4() -> str:
@@ -190,7 +197,7 @@ async def _soap_call(service: str, action: str, inner: str) -> ET.Element:
         last_exc = None
         for attempt in range(3):
             try:
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(follow_redirects=True) as client:
                     resp = await client.post(url, content=payload, headers=headers, timeout=45.0)
             except (httpx.TimeoutException, httpx.TransportError) as e:
                 last_exc = e
@@ -198,13 +205,20 @@ async def _soap_call(service: str, action: str, inner: str) -> ET.Element:
                     break
                 await asyncio.sleep(min(2 ** attempt, 6))
                 continue
-            return _parse(resp)
+            return _parse(resp, url)
     raise WorldOptionsError(
         f"Could not reach World Options ({type(last_exc).__name__ if last_exc else 'network error'}). "
         "Try again in a moment.")
 
 
-def _parse(resp: httpx.Response) -> ET.Element:
+def _parse(resp: httpx.Response, url: str = "") -> ET.Element:
+    # A 404 (or other non-fault error) usually means the wrong endpoint, not a real
+    # SOAP reply. Say so, and name the host so a misconfiguration is obvious.
+    if resp.status_code == 404:
+        raise WorldOptionsError(
+            f"World Options did not recognise the service address ({url or _state['base_url']}). "
+            "This usually means the wrong web-service URL. Expected the shipping web service at "
+            f"{DEFAULT_BASE}.")
     try:
         root = ET.fromstring(resp.content)
     except Exception:

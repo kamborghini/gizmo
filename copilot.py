@@ -762,6 +762,16 @@ _SHIPPING_DEFAULT = {
 _WO_ENV = {"meter": "WO_METER_NUMBER", "key": "WO_KEY", "password": "WO_PASSWORD"}
 
 
+def _sane_base(b) -> str:
+    """A trustworthy SOAP base URL. Empty, or a stale REST host persisted by an
+    earlier build, both fall back to the SOAP default."""
+    default = worldoptions.DEFAULT_BASE if worldoptions else ""
+    b = str(b or "").strip().rstrip("/")
+    if not b or "ecommerce.worldoptions.com" in b:
+        return default
+    return b
+
+
 def _load_shipping() -> dict:
     data = _load_json_store(SHIPPING_PATH, None, {})
     out = {k: v for k, v in _SHIPPING_DEFAULT.items()}
@@ -771,6 +781,7 @@ def _load_shipping() -> dict:
                 out[k] = data[k]
     if not out.get("boxes"):
         out["boxes"] = [dict(b) for b in _DEFAULT_BOXES]
+    out["base_url"] = _sane_base(out.get("base_url"))
     return out
 
 
@@ -833,12 +844,16 @@ def _wo_boot() -> None:
         return
     try:
         c = _load_wo_creds()
-        cfg = _load_shipping()
+        stored = _load_json_store(SHIPPING_PATH, None, {})
+        cfg = _load_shipping()   # base already sanitized here
         worldoptions.set_credentials(meter=c["meter"], key=c["key"], password=c["password"],
                                      plugin=cfg.get("plugin_code") or "Web_Service")
-        base = (cfg.get("base_url") or "").strip()
-        if base:
-            worldoptions.set_base_url(base)
+        worldoptions.set_base_url(cfg.get("base_url") or worldoptions.DEFAULT_BASE)
+        # Self-heal: if a stale/wrong base URL is on disk, rewrite the corrected one
+        # so it does not keep tripping every request.
+        if isinstance(stored, dict) and stored.get("base_url") and \
+                _sane_base(stored.get("base_url")) != str(stored.get("base_url")).strip().rstrip("/"):
+            _save_shipping(cfg)
     except Exception:
         logger.exception("world options boot failed")
 
