@@ -461,7 +461,11 @@
             color: var(--ink); font: inherit; font-size: 13px; padding: 7px 9px; width: 100%; }
         .disp-num:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
         .disp-subhead { font-size: 12px; color: var(--ink-3); font-weight: 600; margin-bottom: 6px; }
-        /* Courier quote card: two hard rails - a carrier mark on the left and a
+        .disp-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+            margin: 0 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+        .disp-pick-name { font-weight: 700; color: var(--ink); }
+        .disp-pick-when { font-size: 12px; color: var(--ink-3); }
+        /* Courier quote card: two hard rails - the carrier's name on the left and a
            right-aligned price - so 8+ options can be raked, not read. Detail
            (drop-off address, price breakdown) is revealed only on selection. */
         .disp-opts { display: flex; flex-direction: column; gap: 5px; }
@@ -3827,9 +3831,13 @@
                     // A booked label is preparation: the order only counts as dispatched
                     // once it is made, which is what fulfils Shopify.
                     const booked = !dsp.fulfilled && !dsp.canceled;
+                    // The courier's name rides in the chip: on a tablet there is no
+                    // hover, so a tooltip is the same as not saying it at all.
+                    const who = dsp.carrier_label || carrierLabel(dsp.carrier_name || '');
+                    const state = dsp.canceled ? 'CANCELLED' : booked ? 'BOOKED' : 'DISPATCHED';
                     const dc = el('span', 'lbl-chip ' + (dsp.canceled ? 'bad' : booked ? 'note' : 'made'),
-                        dsp.canceled ? 'CANCELLED' : booked ? 'BOOKED' : 'DISPATCHED');
-                    dc.title = carrierService(dsp.carrier_name, dsp.service_name)
+                        who ? state + ' \u00b7 ' + who.toUpperCase() : state);
+                    dc.title = shipmentName(dsp)
                         + ' · ' + dsp.tracking_number + (dsp.dispatched_at ? ' · ' + fmtDate(dsp.dispatched_at) : '')
                         + (booked ? '. Mark this order made to fulfil it in Shopify and email the customer.' : '');
                     nameLine.append(dc);
@@ -4187,28 +4195,9 @@
         // WO's carrier enum codes -> names a human reads (EVRISEND, ROYALMAIL...).
         const CARRIER_LABELS = { ROYALMAIL: 'Royal Mail', DPD: 'DPD', EVRISEND: 'Evri', EVRICORPORATE: 'Evri',
             EVRI: 'Evri', HERMES: 'Evri', UPS: 'UPS', FEDEX: 'FedEx', TNT: 'TNT', DHL: 'DHL', DHLPARCEL: 'DHL Parcel',
-            YODEL: 'Yodel', CITYSPRINT: 'CitySprint', DXEXPRESS: 'DX', TUFFNELLS: 'Tuffnells', PALLETWAYS: 'Palletways', DSV: 'DSV' };
+            YODEL: 'Yodel', CITYSPRINT: 'CitySprint', DXEXPRESS: 'DX', TUFFNELLS: 'Tuffnells', PALLETWAYS: 'Palletways', DSV: 'DSV',
+            EXFREIGHT: 'EXFreight', GLOBALTRANZ: 'GlobalTranz', UKMAIL: 'UKMail' };
         function carrierLabel(code) { return CARRIER_LABELS[String(code || '').toUpperCase()] || code || ''; }
-        // [short mark, ink, tint]. Colour is the only pre-attentive channel available
-        // without logo assets; 12% tint keeps 20 rows a rail rather than a rainbow.
-        const CARRIER_MARKS = {
-            ROYALMAIL: ['RM', '#ef5a4c', 'rgba(239,90,76,.12)'],
-            EVRISEND: ['EVRI', '#4fd1c5', 'rgba(79,209,197,.12)'],
-            EVRICORPORATE: ['EVRI', '#4fd1c5', 'rgba(79,209,197,.12)'],
-            EVRI: ['EVRI', '#4fd1c5', 'rgba(79,209,197,.12)'],
-            HERMES: ['EVRI', '#4fd1c5', 'rgba(79,209,197,.12)'],
-            DHL: ['DHL', '#f5c542', 'rgba(245,197,66,.12)'],
-            DHLPARCEL: ['DHL', '#f5c542', 'rgba(245,197,66,.12)'],
-            UPS: ['UPS', '#c9a227', 'rgba(201,162,39,.12)'],
-            DPD: ['DPD', '#e05b6a', 'rgba(224,91,106,.12)'],
-            FEDEX: ['FDX', '#ff7a45', 'rgba(255,122,69,.12)'],
-            TNT: ['TNT', '#ff8a3d', 'rgba(255,138,61,.12)'],
-            YODEL: ['YDL', '#8fb8e0', 'rgba(143,184,224,.12)'],
-            DXEXPRESS: ['DX', '#9aa3b6', 'rgba(154,163,182,.12)'],
-            CITYSPRINT: ['CS', '#9aa3b6', 'rgba(154,163,182,.12)'],
-            TUFFNELLS: ['TUF', '#9aa3b6', 'rgba(154,163,182,.12)'],
-            PALLETWAYS: ['PW', '#9aa3b6', 'rgba(154,163,182,.12)'],
-            DSV: ['DSV', '#9aa3b6', 'rgba(154,163,182,.12)'] };
         // "UPS" + "UPS Express" -> "UPS Express" (no stutter). An unknown carrier
         // yields the service alone rather than inventing one.
         function carrierService(code, service) {
@@ -4220,6 +4209,27 @@
             const raw = String(code || '').trim().toLowerCase();
             if (raw && low.startsWith(raw)) return s;
             return c + ' ' + s;
+        }
+        // Naming a shipment is a money decision (the merchant confirms a charge from
+        // it) and a receipt, so it never resolves to nothing: with no carrier it says
+        // so and falls back to World Options' own code, which they can look up.
+        function optionName(op) {
+            if (!op) return 'this courier';
+            const named = carrierService(op.carrier_name, op.service_name);
+            if (op.carrier_name) return named;
+            const code = op.product_code || op.service_type_code || '';
+            return (op.service_name || 'Courier service')
+                + (code ? ' (carrier not named, World Options service ' + code + ')' : ' (carrier not named)');
+        }
+        // The same, for a booked shipment: it carries a stored label and its own codes.
+        function shipmentName(s) {
+            if (!s) return 'a courier';
+            const who = s.carrier_label || carrierLabel(s.carrier_name || '');
+            const svc = String(s.service_name || '').trim();
+            if (who) return carrierService(s.carrier_name, svc) === svc && !svc.toLowerCase().startsWith(who.toLowerCase())
+                ? (who + (svc ? ' ' + svc : '')) : (carrierService(s.carrier_name, svc) || who);
+            const code = s.product_code || s.service_code || '';
+            return (svc || 'a courier') + (code ? ' (carrier not named, World Options service ' + code + ')' : '');
         }
         function setDispatchState(id, entry) {
             if (!labelsCache || !labelsCache.data) return;
@@ -4662,7 +4672,8 @@
                         diagOut.innerHTML = '';
                         if (d.extra_found && d.extra_found.length) {
                             diagOut.append(el('div', 'disp-warn', 'These services only appear under different settings: '
-                                + d.extra_found.join(', ') + '. Send this to your developer and it can be turned on for every quote.'));
+                                + d.extra_found.map(x => (x.name || '') + ' (' + (x.code || '') + ')').join(', ')
+                                + '. Send this to your developer and it can be turned on for every quote.'));
                         } else {
                             diagOut.append(el('div', 'sub', 'No extra services appeared under any setting, so this really is everything World Options offers for this parcel and address.'));
                         }
@@ -4673,7 +4684,8 @@
                             det.append(sum);
                             if (r.error) det.append(el('div', 'sub', r.error));
                             r.services.forEach(s => det.append(el('div', 'sub',
-                                (s['new'] ? 'NEW  ' : '') + s.name + '  ' + fmtPrice(s.amount, s.currency)
+                                (s['new'] ? 'NEW  ' : '') + s.name + (s.code ? '  (' + s.code + ')' : '')
+                                + '  ' + fmtPrice(s.amount, s.currency)
                                 + (s.delivery ? '  ' + s.delivery : ''))));
                             diagOut.append(det);
                         });
@@ -4688,6 +4700,13 @@
             function renderConfirm() {
                 const conf = quoteWrap.querySelector('#disp-confirm'); if (!conf) return; conf.innerHTML = '';
                 if (!chosen) return;
+                // Restate the choice. The cards scroll away above this block, and the
+                // next click spends money.
+                const pick = el('div', 'disp-pick');
+                pick.append(el('span', 'disp-pick-name', optionName(chosen)));
+                const whenBits = [chosen.delivery_date, chosen.delivery_time].filter(Boolean).join(' ');
+                if (whenBits) pick.append(el('span', 'disp-pick-when', 'arrives ' + whenBits));
+                conf.append(pick);
                 const notifyWrap = el('label', 'disp-notify');
                 const nb = document.createElement('input'); nb.type = 'checkbox'; nb.checked = cfg.notify_customer !== false;
                 notifyWrap.append(nb, el('span', null, ' Email the customer their tracking when this order is marked made'));
@@ -4739,9 +4758,10 @@
                 book.onclick = async () => {
                     const cprob = customsProblem();
                     if (cprob) { addToast(cprob); return; }
-                    if (!await uiConfirm('Book ' + carrierService(chosen.carrier_name, chosen.service_name) + ' for ' + fmtPrice(chosen.amount, chosen.currency) + ' inc VAT?\n\nThis books the courier and charges your World Options account.', { title: 'Book this courier', okText: 'Book & dispatch' })) return;
+                    if (!await uiConfirm('Book ' + optionName(chosen) + ' for ' + fmtPrice(chosen.amount, chosen.currency) + ' inc VAT?\n\nThis books the courier and charges your World Options account.', { title: 'Book this courier', okText: 'Book & dispatch' })) return;
                     book.disabled = true; booking = true;
-                    book.textContent = 'Booking with ' + carrierLabel(chosen.carrier_name || '') + '… do not close this window';
+                    book.textContent = 'Booking with ' + (carrierLabel(chosen.carrier_name || '') || optionName(chosen))
+                        + '… do not close this window';
                     x.disabled = true; x.style.opacity = '.35';
                     const doBook = (force) => api('/api/dispatch/book', {
                         order_id: o.id, option: chosen, boxes: lastBoxes, notify: nb.checked, force: !!force,
@@ -4784,7 +4804,7 @@
                 body.innerHTML = '';
                 const s = res.shipment || {};
                 const okBar = el('div', 'disp-result-head');
-                okBar.append(ico(I.check), el('span', null, 'Dispatched with ' + carrierService(s.carrier_name, s.service_name)));
+                okBar.append(ico(I.check), el('span', null, 'Dispatched with ' + shipmentName(s)));
                 body.append(okBar);
                 const tb = el('div', 'disp-track'); tb.append(el('span', null, 'Tracking '), el('b', null, s.tracking_number || '(pending)')); body.append(tb);
                 if (s.amount != null) {
@@ -4816,7 +4836,7 @@
 
             function renderShipmentSummary(d) {
                 body.innerHTML = '';
-                (function(){ var h = el('div', 'disp-result-head'); h.append(ico(I.check), el('span', null, 'Dispatched with ' + carrierService(d.carrier_name, d.service_name))); body.append(h); })();
+                (function(){ var h = el('div', 'disp-result-head'); h.append(ico(I.check), el('span', null, 'Dispatched with ' + shipmentName(d))); body.append(h); })();
                 const tb = el('div', 'disp-track'); tb.append(el('span', null, 'Tracking '), el('b', null, d.tracking_number || '')); body.append(tb);
                 if (d.amount != null) body.append(el('div', 'sub', 'Quoted ' + fmtPrice(d.amount, d.currency)));
                 if (d.dispatched_at) body.append(el('div', 'sub', 'Dispatched ' + fmtDate(d.dispatched_at)));

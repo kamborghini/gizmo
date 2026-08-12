@@ -912,9 +912,14 @@ def _load_dispatch() -> dict:
     return _load_json_store(DISPATCH_STATE_PATH, "orders", {})
 
 
+class DispatchStoreUnwritable(RuntimeError):
+    """The dispatch record could not be saved. Raised rather than returned, because
+    a silent no-op here loses the only record that money was spent."""
+
+
 def _write_dispatch(orders: dict) -> dict:
     if not _store_writable(DISPATCH_STATE_PATH):
-        return orders
+        raise DispatchStoreUnwritable(DISPATCH_STATE_PATH)
     if len(orders) > DISPATCH_STATE_MAX:
         keep = sorted(orders.items(), key=lambda kv: str(kv[1].get("dispatched_at") or ""))
         orders = dict(keep[-DISPATCH_STATE_MAX:])
@@ -3126,7 +3131,14 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
         e.update({"fulfilled": True, "fulfillment_id": fulfillment.get("fulfillment_id"),
                   "notified": bool(do_notify), "fulfilled_at": datetime.now(timezone.utc).isoformat()})
         d[str(oid)] = e
-        _write_dispatch(d)
+        try:
+            _write_dispatch(d)
+        except DispatchStoreUnwritable:
+            logger.exception("order %s was fulfilled in Shopify but the dispatch "
+                             "record could not be updated", oid)
+            tag_note = ((tag_note + " ") if tag_note else "") + (
+                "Shopify has the fulfilment, but the app could not save its own copy. "
+                "It may still show this order as waiting.")
     return {"fulfilled": bool(fulfillment.get("ok")),
             "reason": fulfillment.get("reason") or ("ok" if fulfillment.get("ok") else "error"),
             "detail": fulfillment.get("detail") or "",
@@ -3160,7 +3172,12 @@ async def _unfulfill_dispatch(registry: dict, order_id) -> str:
     entry["notified"] = False
     entry.pop("fulfillment_id", None)
     d[str(oid)] = entry
-    _write_dispatch(d)
+    try:
+        _write_dispatch(d)
+    except DispatchStoreUnwritable:
+        logger.exception("could not clear the fulfilment record for order %s", oid)
+        note = ((note + " ") if note else "") + ("The app could not save this change, "
+                                                 "so it may still show as fulfilled.")
     return note
 
 
@@ -3674,7 +3691,8 @@ async def run_dispatch_diagnose(registry: dict, order_id, boxes: list) -> dict:
         if isinstance(res, Exception):
             rows.append({"label": label, "error": str(res)[:200], "services": []})
             continue
-        svcs = [{"name": (op.get("carrier_label") or "") + " " + (op.get("service_name") or ""),
+        svcs = [{"name": ((op.get("carrier_label") or "Carrier not named")
+                          + " " + (op.get("service_name") or "")).strip(),
                  "code": op.get("service_type_code") or "",
                  "delivery": " ".join(x for x in [op.get("delivery_date"), op.get("delivery_time")] if x),
                  "amount": op.get("amount"), "currency": op.get("currency")}
@@ -3685,7 +3703,12 @@ async def run_dispatch_diagnose(registry: dict, order_id, boxes: list) -> dict:
         for s in svcs:
             s["new"] = bool(rows) and s["code"] not in baseline
         rows.append({"label": label, "error": "", "services": svcs})
-    extra_found = sorted({s["code"] for r in rows for s in r["services"] if s.get("new")})
+    named = {}
+    for r in rows:
+        for s in r["services"]:
+            if s.get("new") and s["code"] not in named:
+                named[s["code"]] = s["name"]
+    extra_found = [{"code": k, "name": named[k]} for k in sorted(named)]
     return {"rows": rows, "extra_found": extra_found,
             "destination": dest.get("postcode"), "weight": round(sum(b["weight"] for b in boxes), 3)}
 
@@ -3714,11 +3737,21 @@ async def run_dispatch_book(registry: dict, order_id, option: dict, boxes: list,
 async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: list,
                                 notify, force: bool, insurance: str, signature: str,
                                 customs_body: Optional[dict]) -> dict:
-    existing = _load_dispatch().get(str(order_id)) or {}
+    book_store = _load_dispatch()
+    if DISPATCH_STATE_PATH in _poisoned_stores:
+        return {"error": "The dispatch record cannot be read, so there is no way to tell "
+                         "whether this order already has a label. Nothing was booked. "
+                         "Check World Options directly and ask your developer to repair "
+                         "the file before dispatching again."}
+    existing = book_store.get(str(order_id)) or {}
     if existing.get("tracking_number") and not existing.get("canceled"):
-        return {"error": "This order was already dispatched: "
-                         + (existing.get("carrier_name") or "courier") + " tracking "
-                         + existing.get("tracking_number", "")
+        who = (existing.get("carrier_label")
+               or worldoptions.carrier_display(existing.get("carrier_name") or "")
+               or existing.get("service_name") or "a courier")
+        svc = existing.get("service_name") or ""
+        return {"error": "This order was already dispatched: " + who
+                         + (" " + svc if svc and svc != who else "")
+                         + " tracking " + existing.get("tracking_number", "")
                          + ". Cancel that shipment first if you need to rebook."}
 
     o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
@@ -3848,6 +3881,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
                                            # The option's own signature wins: it is what the
                                            # displayed price was quoted under.
                                            signature=(option.get("signature_type") or signature),
+                                           quoted_signature=(option.get("signature_type") or ""),
                                            dropoff_shop=dropoff_shop, customs=customs,
                                            description=_goods_summary(o),
                                            delivery_shop=delivery_shop)
@@ -3873,7 +3907,14 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
     entry = {
         "tracking_number": shipment["tracking_number"],
         "carrier_name": shipment.get("carrier_name"),
+        # The readable name is stored beside the booking enum: the queue shows this
+        # weeks later, and re-deriving it needs the quote that is long gone.
+        "carrier_label": (shipment.get("carrier_label")
+                          or option.get("carrier_label")
+                          or worldoptions.carrier_display(shipment.get("carrier_name") or "")),
         "service_name": shipment.get("service_name"),
+        "service_code": option.get("service_type_code") or "",
+        "product_code": option.get("product_code") or "",
         "amount": shipment.get("amount"),
         "currency": shipment.get("currency"),
         "dispatched_at": datetime.now(timezone.utc).isoformat(),
@@ -6367,7 +6408,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             entry = d.get(str(oid)) or {}
             entry["canceled"] = True
             d[str(oid)] = entry
-            _write_dispatch(d)
+            try:
+                _write_dispatch(d)
+            except DispatchStoreUnwritable:
+                logger.exception("could not record the cancellation of order %s", oid)
             # Undo what the booking did in Shopify, so the customer is not left
             # with dead tracking and the order can be re-dispatched cleanly.
             fid = entry.get("fulfillment_id")

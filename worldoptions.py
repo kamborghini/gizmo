@@ -70,7 +70,9 @@ SERVICE_COMPANY_ENUM = ["ALL", "DHL", "FEDEX", "UPS", "TNT", "Palletways", "YODE
                         "DHLPARCEL", "DXEXPRESS", "HERMES", "DSV", "EXFreight",
                         "GLOBALTRANZ", "CITYSPRINT", "EVRISEND", "EVRICORPORATE",
                         "TUFFNELLS", "ROYALMAIL", "DPD"]
-_CANON_CARRIER = {v.upper(): v for v in SERVICE_COMPANY_ENUM}
+# "ALL" is a real enum member, but it means "any carrier" on a request and is never
+# an answer to "who is carrying this", so it is kept out of the resolution table.
+_CANON_CARRIER = {v.upper(): v for v in SERVICE_COMPANY_ENUM if v != "ALL"}
 
 
 def canonical_carrier(code: str) -> str:
@@ -89,6 +91,101 @@ _CARRIERS = ["DHLPARCEL", "DHL", "FEDEX", "UPS", "TNT", "PALLETWAYS", "YODEL",
 # is not in wsServiceCompanyTypes at all, so it stays a display-only label.
 _PREFIX_TO_ENUM = {"EVRI": "EVRISEND", "PALLETWAYS": "Palletways", "EXFREIGHT": "EXFreight",
                    "EXF_": "EXFreight", "DX_": "DXEXPRESS", "UKMAIL": "UKMAIL"}
+
+# The wsServiceTypes enum, verbatim from the booking WSDL (wo_xsd6). The quote
+# reply's wsServiceTypeCode is a plain xs:string, but booking's ServiceTypeCode is
+# TYPED to this enum, so a code outside this set cannot be booked at all. 145 of
+# the 146 members carry their carrier as a prefix ("UPS_Standard", "DHL_DOMESTIC_
+# EXPRESS", "RoyalMail_Tracked_24_Hours"), which is what makes the carrier knowable
+# from the service code alone rather than guessed.
+SERVICE_TYPES_ENUM = frozenset({
+    "ALL", "Fedex_International_First", "Fedex_International_Priority",
+    "Fedex_International_Priority_Freight", "FedEx_NextDay", "FedEx_10_AM", "FedEx_9_AM",
+    "FedEx_12_Noon", "Fedex_International_Priority_Express", "Fedex_International_Economy",
+    "Fedex_Regional_Economy", "Fedex_Regional_Economy_Freight",
+    "Fedex_International_Economy_Freight", "FedEx_First", "FedEx_Priority",
+    "FedEx_Priority_Express", "UPS_Express", "UPS_Standard", "UPS_Express_Saver",
+    "UPS_Express_AP", "UPS_Standard_AP", "UPS_Express_Saver_AP", "DHL_Worldwide_Express",
+    "DHL_ECONOMY_SELECT", "DHL_DOMESTIC_EXPRESS", "DHL_WORLDWIDE_EXPRESS_900",
+    "DHL_WORLDWIDE_EXPRESS_1200", "DHL_DOMESTIC_EXPRESS_900", "DHL_DOMESTIC_EXPRESS_1200",
+    "YODEL_EXPRESS_24", "YODEL_EXPRESS_48", "YODEL_EXPRESS_NI", "YODEL_PRIORITY_1000",
+    "YODEL_PRIORITY_1200", "YODEL_SATURDAY_1000", "YODEL_SATURDAY", "YODEL_EXPRESS_ISLE",
+    "YODEL_HOME_24", "YODEL_HOME_NI", "YODEL_HOME_24BT", "YODEL_HOME_48", "YODEL_HOME_72",
+    "YODEL_HOME_72_NI", "YODEL_HOME_SATURDAY", "YODEL_HOME_EXPRESS_ISLE",
+    "YODEL_HOME_PACKET_SERVICE", "TNT_Global_Express", "TNT_Economy_Express",
+    "TNT_Economy_Express_1200", "TNT_Next_Day_Delivery", "TNT_Next_Day_1200",
+    "TNT_Next_Day_1000", "TNT_Next_Day_0900", "TNT_Saturday_Delivery", "TNT_Saturday_1200",
+    "TNT_Saturday_1000", "TNT_Saturday_0900", "TNT_Global_Express_1200",
+    "TNT_Global_Express_1000", "TNT_Global_Express_0900", "TNT_AirFrieght_D2D",
+    "TNT_AirFrieght_D2A", "UKMail_Express_UK", "UKMail_Express_UK_AM",
+    "UKMail_Express_UK_1030AM", "UKMail_Express_UK_0900AM", "UKMail_Express_UK_Saturday",
+    "UKMail_Express_UK_Saturday_1030AM", "UKMail_Express_UK_Saturday_0900AM",
+    "UKMail_Express_UK_Bagit", "UKMail_Express_UK_AM_Bagit",
+    "UKMail_Express_UK_1030AM_Bagit", "UKMail_Express_UK_0900AM_Bagit",
+    "UKMail_Express_UK_Saturday_Bagit", "UKMail_European_Road",
+    "DXExpress_B2C_Next_Day_Business", "DXExpress_B2C_Next_Day_Business_Pre_12_PM",
+    "DXExpress_B2C_Saturday_Delivery", "DXExpress_B2C_Saturday_Pre_12",
+    "DXExpress_B2B_Next_Day_Home_Signature",
+    "DXExpress_B2B_Next_Day_Home_Signature_Pre_1PM",
+    "DXExpress_B2B_Saturday_Delivery_Signature", "DXExpress_B2B_Next_Day_Home_No_Signature",
+    "DXExpress_B2B_Saturday_Delivery_Home_No_Signature", "Hermes_Stated_Day_Sunday",
+    "Hermes_Next_Day_Service", "Hermes_Signature", "Hermes_Household_Signature",
+    "Hermes_UK48", "Hermes_UK24", "Hermes_Returns_Hermes", "Hermes_Parcel_Shop",
+    "Hermes_Courier_Collection_48", "Hermes_LL", "Hermes_SUN", "DSV_Domestic",
+    "DSV_Europe_By_Road", "EXFreight_Freight", "GlobalTranz_Freight",
+    "CitySprint_Priority_Bike", "CitySprint_Priority_Van", "CitySprint_Priority_Transit",
+    "CitySprint_PushBike", "CitySprint_Bike", "CitySprint_Small_Van",
+    "CitySprint_Large_Van", "Evri_CC_Ship_to_Door_DDP", "Evri_CC_Ship_to_Door_DDU",
+    "Evri_CC_Ship_to_Door_UK48", "Evri_CC_Ship_to_Shop_DDP", "Evri_CC_Ship_to_Shop_DDU",
+    "Evri_DI_ParcelShop_Returns_UK", "Evri_DI_Ship_to_Door_DDP", "Evri_DI_Ship_to_Door_DDU",
+    "Evri_DI_Ship_to_Door_UK_Light_and_Large", "Evri_DI_Ship_to_Door_UK_Sunday",
+    "Evri_DI_Ship_to_Door_UK24", "Evri_DI_Ship_to_Door_UK48", "Evri_DI_Ship_to_Shop_DDP",
+    "Evri_DI_Ship_to_Shop_DDU", "Evri_DI_Ship_to_Shop_UK", "Evri_DS_Ship_to_Door_UK24",
+    "Evri_DS_Ship_to_Door_UK48", "Evri_DS_Ship_to_Door_DDP", "Evri_DS_Ship_to_Door_DDU",
+    "Evri_DS_Ship_to_Shop_DDP", "Evri_DS_Ship_to_Shop_DDU", "Tuffnells_Next_Day_Service",
+    "Tuffnells_Next_Day_Before_Noon", "Tuffnells_Next_Day_Before_1030",
+    "Tuffnells_Next_Day_Before_0930", "Tuffnells_Saturday", "Tuffnells_Saturday_AM",
+    "RoyalMail_Tracked_24_Hours", "RoyalMail_Tracked_48_Hours",
+    "RoyalMail_Priority_Tracked_Signed", "RoyalMail_Priority_Tracked", "DPD_NextDay",
+    "DPD_NextDay_AM", "DPD_NextDay_Noon", "DPD_TwoDay", "DPD_Saturday", "DPD_Saturday_AM",
+    "DPD_Saturday_Noon", "DPD_Sunday", "DPD_Sunday_AM",
+})
+
+# Longest first, so DHLPARCEL is tested before DHL and EVRICORPORATE before EVRI.
+# UKMail runs 13 services but is NOT a wsServiceCompanyTypes member, so it can be
+# named on screen and never sent as a booking ServiceType.
+_SERVICE_PREFIXES = sorted(
+    [("EXFREIGHT", "EXFreight"), ("GLOBALTRANZ", "GLOBALTRANZ"), ("CITYSPRINT", "CITYSPRINT"),
+     ("EVRICORPORATE", "EVRICORPORATE"), ("DXEXPRESS", "DXEXPRESS"), ("ROYALMAIL", "ROYALMAIL"),
+     ("PALLETWAYS", "Palletways"), ("TUFFNELLS", "TUFFNELLS"), ("DHLPARCEL", "DHLPARCEL"),
+     ("UKMAIL", "UKMAIL"), ("HERMES", "HERMES"), ("EVRISEND", "EVRISEND"), ("YODEL", "YODEL"),
+     ("FEDEX", "FEDEX"), ("EVRI", "EVRISEND"), ("DHL", "DHL"), ("UPS", "UPS"),
+     ("TNT", "TNT"), ("DPD", "DPD"), ("DSV", "DSV")],
+    key=lambda p: -len(p[0]))
+
+
+def _squash(code: str) -> str:
+    """'UPS_Express_Saver' -> 'UPSEXPRESSSAVER'. Separators vary between the fields
+    World Options fills, so they are removed before any prefix is matched."""
+    return re.sub(r"[\s_\-./]+", "", (code or "")).upper()
+
+
+def _service_carrier(code: str) -> str:
+    """The carrier that runs a wsServiceTypes code, by its prefix."""
+    up = _squash(code)
+    for pre, enum in _SERVICE_PREFIXES:
+        if up.startswith(pre):
+            return enum
+    return ""
+
+
+# Every bookable service resolved to a carrier at import, so a code World Options
+# sends can be answered from a table instead of guessed at.
+SERVICE_CARRIER = {_squash(s): _service_carrier(s) for s in SERVICE_TYPES_ENUM if s != "ALL"}
+_unmapped = sorted(s for s in SERVICE_TYPES_ENUM if s != "ALL" and not SERVICE_CARRIER.get(_squash(s)))
+if _unmapped:  # a new carrier in a future WSDL: name it rather than show a blank
+    logger.warning("world options: %d service codes have no carrier prefix: %s",
+                   len(_unmapped), ", ".join(_unmapped[:8]))
 
 # The booking wsPackageTypes enum (wo_xsd6). The QUOTE reply's wsPackageTypeCode is a
 # plain string that can carry rate-only values (Any_Document, EX_LTL, ...) which the
@@ -115,13 +212,17 @@ SHOPIFY_CARRIER_NAMES = {
     "EVRI": "Evri", "HERMES": "Evri", "UPS": "UPS", "FEDEX": "FedEx", "TNT": "TNT",
     "DHL": "DHL Express", "DHLPARCEL": "DHL", "YODEL": "Yodel", "CITYSPRINT": "CitySprint",
     "DXEXPRESS": "DX", "TUFFNELLS": "Tuffnells", "PALLETWAYS": "Palletways", "DSV": "DSV",
+    "EXFREIGHT": "EXFreight", "GLOBALTRANZ": "GlobalTranz", "UKMAIL": "UK Mail",
 }
 
 
 def shopify_carrier(carrier_code: str) -> str:
-    """A Shopify-recognizable tracking company for a WO carrier enum value."""
+    """A Shopify-recognizable tracking company for a WO carrier enum value. Falls
+    back to the on-screen name rather than the raw enum: Shopify prints whatever it
+    is given in the customer's shipping email, and "EVRICORPORATE" is not a company
+    anyone has heard of."""
     up = (carrier_code or "").strip().upper()
-    return SHOPIFY_CARRIER_NAMES.get(up, (carrier_code or "").strip())
+    return SHOPIFY_CARRIER_NAMES.get(up) or carrier_display(carrier_code)
 
 
 # How a carrier should READ on screen (distinct from the booking enum and from
@@ -170,15 +271,20 @@ def _tidy_date(s: str) -> str:
     return d
 
 
-_CODE_PREFIX_RE = re.compile(r"^\s*(\d{1,3})[\s.:-]+")
+# "03 DHL Domestic Express" -> code 03. A ':' is NOT a separator here, or a
+# time-definite name like "12:00 Guaranteed" would lose its hour.
+_CODE_PREFIX_RE = re.compile(r"^\s*(\d{1,3})[\s.\-]+(?!\d)")
 # Carrier names as they appear inside service names, longest/most specific first.
+_L = r"(?<![a-z])%s(?![a-z])"
 _CARRIER_WORDS = [
-    (r"royal\s*mail", "ROYALMAIL"), (r"dhl\s*parcel", "DHLPARCEL"), (r"\bdhl\b", "DHL"),
-    (r"\bups\b", "UPS"), (r"fedex|federal\s*express", "FEDEX"), (r"\btnt\b", "TNT"),
-    (r"\bdpd\b", "DPD"), (r"\bevri\b|hermes", "EVRISEND"), (r"yodel", "YODEL"),
+    (r"royal\s*mail", "ROYALMAIL"), (r"dhl\s*parcel", "DHLPARCEL"), (_L % "dhl", "DHL"),
+    (_L % "ups", "UPS"), (r"fedex|federal\s*express", "FEDEX"), (_L % "tnt", "TNT"),
+    (_L % "dpd", "DPD"), (r"evri\s*corporate", "EVRICORPORATE"),
+    (_L % "evri", "EVRISEND"), (r"hermes", "HERMES"), (r"yodel", "YODEL"),
     (r"citysprint", "CITYSPRINT"), (r"palletways", "PALLETWAYS"), (r"tuffnells", "TUFFNELLS"),
-    (r"globaltranz", "GLOBALTRANZ"), (r"\bdsv\b", "DSV"), (r"\bdx\b", "DXEXPRESS"),
-    (r"uk\s*mail", "UKMAIL"), (r"exfreight|\bexf\b", "EXFreight"),
+    (r"globaltranz", "GLOBALTRANZ"), (_L % "dsv", "DSV"),
+    (r"dx\s*express", "DXEXPRESS"), (_L % "dx", "DXEXPRESS"),
+    (r"uk\s*mail", "UKMAIL"), (r"exfreight", "EXFreight"), (_L % "exf", "EXFreight"),
 ]
 
 
@@ -196,15 +302,17 @@ def carrier_from_text(*texts) -> str:
 def _split_service_name(name: str, carrier_code: str) -> tuple:
     """'03 DHL Domestic Express' + DHL -> ('03', 'Domestic Express').
     Strips WO's leading product code and the carrier word the chip already shows."""
-    raw = _WS_RE.sub(" ", str(name or "")).strip()
+    raw = _WS_RE.sub(" ", re.sub(r"_+", " ", str(name or ""))).strip()
     code = ""
     m = _CODE_PREFIX_RE.match(raw)
     if m:
         code, raw = m.group(1), raw[m.end():].strip()
     label = carrier_display(carrier_code)
-    for word in filter(None, {label, carrier_code, (carrier_code or "").title()}):
-        if raw.lower().startswith(word.lower() + " "):
-            raw = raw[len(word):].strip()
+    for word in sorted(filter(None, {label, carrier_code, (carrier_code or "").title()}),
+                       key=len, reverse=True):
+        low, w = raw.lower(), word.lower()
+        if low.startswith(w) and (len(raw) == len(w) or not raw[len(w)].isalnum()):
+            raw = raw[len(word):].strip(" -")
             break
     return code, raw
 
@@ -483,11 +591,18 @@ def _reply_status(reply, context: str):
 # ---------------------------------------------------------------------------
 # Normalization helpers
 # ---------------------------------------------------------------------------
+_CARRIERS_BY_LENGTH = sorted(_CARRIERS, key=len, reverse=True)
+
+
 def _prefix_carrier(code: str) -> str:
-    up = (code or "").upper()
-    for cr in _CARRIERS:
-        if up.startswith(cr):
-            return _PREFIX_TO_ENUM.get(cr) or canonical_carrier(cr) or cr
+    """The carrier a code starts with. Separators are removed first: World Options
+    writes the same carrier as DHL_Parcel, DHL-Parcel and DHLParcel across fields,
+    and a raw startswith would match those against the shorter DHL."""
+    up = _squash(code)
+    for cr in _CARRIERS_BY_LENGTH:
+        bare = cr.rstrip("_")
+        if up.startswith(bare):
+            return _PREFIX_TO_ENUM.get(cr) or _PREFIX_TO_ENUM.get(bare) or canonical_carrier(bare) or bare
     return ""
 
 
@@ -499,11 +614,23 @@ def _carrier_from(service_code: str, quote_service_type: str,
     (UPS_My_Packaging / DHL_NonDocument / Fedex_Your_Packaging always carry it),
     then any carrier word inside the service text."""
     qt = (quote_service_type or "").strip()
-    if qt:
-        return canonical_carrier(qt) or qt.upper()
+    if qt and qt.upper() != "ALL":
+        # Recognise it or ignore it. Passing an unrecognised string through made it
+        # the carrier name AND blocked every other signal, and it cannot be booked.
+        got = canonical_carrier(qt) or _prefix_carrier(qt) or carrier_from_text(qt)
+        if got:
+            return got
+    # The service code is definitive when it is a real wsServiceTypes member.
+    got = SERVICE_CARRIER.get(_squash(service_code))
+    if got:
+        return got
+    # Then the service name, which usually spells the carrier out. It is tried
+    # before the package type because packaging is not provenance: a DHL Parcel
+    # service can be quoted under a plain DHL_NonDocument box.
     return (_prefix_carrier(service_code)
+            or carrier_from_text(service_name)
             or _prefix_carrier(package_type_code)
-            or carrier_from_text(service_name, service_code, package_type_code))
+            or carrier_from_text(service_code, package_type_code))
 
 
 def _dec(v):
@@ -785,18 +912,31 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
                collection_option: str = "", insurance: str = "",
                signature: str = "", dropoff_shop: dict = None,
                customs: dict = None, description: str = "",
-               delivery_shop: dict = None) -> dict:
+               delivery_shop: dict = None, quoted_signature: str = "") -> dict:
     """Book (and CHARGE) the chosen quote option. Returns tracking + labels.
     ready_time/close_time/collection_option describe the collection; insurance
     is the cover amount; signature a SIGNATURE_OPTIONS value; dropoff_shop the
     parcel shop when the merchant drops off; customs the international dossier
     (see _customs_block); description a short contents summary."""
     option = option or {}
-    service_code = option.get("service_type_code") or ""
+    service_code = (option.get("service_type_code") or "").strip()
+    if service_code and service_code not in SERVICE_TYPES_ENUM:
+        near = _service_carrier(service_code)
+        raise WorldOptionsError(
+            "World Options does not recognise the service code " + service_code
+            + (" (" + carrier_display(near) + ")" if near else "")
+            + ". Get fresh quotes and pick the service again; nothing was booked.")
     # Emit ONLY exact enum literals: WCF faults on case or membership mismatches,
     # and both elements are optional, so an unknown value is omitted instead.
     carrier = canonical_carrier(option.get("carrier_name") or "") \
-        or canonical_carrier(_carrier_from(service_code, ""))
+        or canonical_carrier(_carrier_from(service_code, "",
+                                           option.get("package_type_code") or "",
+                                           option.get("service_full") or option.get("service_name") or ""))
+    if not carrier:
+        # Not fatal: ServiceTypeCode already pins the exact service, so World Options
+        # knows who runs it. Worth recording, because the merchant sees no name.
+        logger.info("world options: booking %s without a carrier; "
+                    "the service code alone identifies it", service_code or "(no code)")
     pkg_type = option.get("package_type_code") or ""
     if pkg_type not in PACKAGE_TYPES_ENUM:
         pkg_type = ""
@@ -858,11 +998,15 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
         co = ""
     sig = (signature or "").strip()
     if sig:
-        # A value carried over from the quote is honoured as-is (matching the price
-        # matters more than the wording being that carrier's own); a value the
-        # merchant picked by hand must belong to the carrier being booked.
-        allowed = set(SIGNATURE_OPTIONS.get(carrier.upper(), []))
-        if sig not in allowed and sig not in set(sum(SIGNATURE_OPTIONS.values(), [])):
+        # A value the price was quoted under is honoured as-is: matching the charge
+        # the merchant was shown matters more than the wording being that carrier's
+        # own. A value picked by hand must belong to the carrier being booked, or it
+        # would fault at WCF or silently buy a different service level.
+        if quoted_signature and sig == quoted_signature.strip():
+            pass
+        elif sig not in set(SIGNATURE_OPTIONS.get(carrier.upper(), [])):
+            logger.info("world options: dropping signature %r, not offered by %s",
+                        sig, carrier or "this carrier")
             sig = ""
     duties = str((customs or {}).get("duties_payor") or "").strip()
     if duties and duties not in DUTIES_PAYORS:
@@ -897,6 +1041,9 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
     return {
         "tracking_number": tracking,
         "carrier_name":    carrier,
+        # What the merchant reads. Stored with the dispatch so an order booked today
+        # still names its courier next week without re-deriving it.
+        "carrier_label":   carrier_display(carrier) or option.get("carrier_label") or "",
         "service_name":    option.get("service_name") or service_code,
         "service_code":    service_code,
         "amount":          _dec(option.get("amount")),
