@@ -3506,10 +3506,15 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
     # Declared value rides on every parcel (customs + insurance + liability basis).
     goods_value = _order_goods_value(o)
     boxes = _spread_value([dict(b) for b in boxes], goods_value)
+    # Declaring the wrong shipment mode hides whole service families (a UK-to-UK
+    # parcel quoted as an "Export" loses the domestic road services).
+    same_country = (str(origin.get("country") or "").upper()
+                    == str(dest.get("country") or "").upper())
+    mode = "Domestic" if same_country else "Export"
     try:
         res = await worldoptions.quote(origin, dest, boxes, currency=currency,
                                        residential=residential, insurance=insurance,
-                                       collection_dropoff=dropoff)
+                                       collection_dropoff=dropoff, shipment_mode=mode)
     except worldoptions.WorldOptionsError as e:
         return {"error": str(e)}
     except Exception:

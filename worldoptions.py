@@ -504,7 +504,8 @@ def _pkg_value(box: dict) -> str:
 
 async def quote(origin: dict, destination: dict, boxes: list,
                 currency: str = "GBP", residential: bool = False,
-                insurance: str = "", collection_dropoff: bool = False) -> dict:
+                insurance: str = "", collection_dropoff: bool = False,
+                shipment_mode: str = "") -> dict:
     """Free, read-only price check across all carriers. Returns {options[]}.
     insurance = the cover amount to include in pricing; collection_dropoff asks
     for tariffs where the merchant drops the parcel at a shop."""
@@ -537,13 +538,19 @@ async def quote(origin: dict, destination: dict, boxes: list,
         + _t("m", "CollectionCountryState", o.get("state"))
         + _t("m", "CollectionPostCode", o.get("postcode"))
         + "</wo:SenderDetails>"
-        # ShippingDetails (wsShippingDetails), XSD sequence order
+        # ShippingDetails (wsShippingDetails), XSD sequence order.
+        # PackageType and ShipmentType MUST be sent explicitly: WCF gives an
+        # omitted enum its FIRST member, which here means every parcel was quoted
+        # as a "Fedex_Box" on an "Export" shipment - that silently hides domestic
+        # road services such as UPS Standard.
         + "<wo:ShippingDetails>"
         + _t("rs", "Insurance", insurance)
         + (_b("rs", "IsCollectionDropoffRequired", True) if collection_dropoff else "")
         + f"<rs:PackageDetails>{pkgs}</rs:PackageDetails>"
+        + _t("rs", "PackageType", "Any_NonDocument")
         + _t("rs", "ServiceName", "ALL")
         + _t("rs", "ServiceTypeName", "ALL")
+        + _t("rs", "ShipmentType", shipment_mode or "Domestic")
         + "</wo:ShippingDetails>"
         + "</tem:request></tem:GetAllServicesAndRates>"
     )
@@ -561,12 +568,15 @@ async def quote(origin: dict, destination: dict, boxes: list,
         carrier = _carrier_from(service_code, _text(qd, "ServiceType") if qd is not None else "")
         # Non-zero price components -> a human breakdown, largest first.
         breakdown = []
+        vat = None
         if qd is not None:
             for ch in list(qd):
                 name = _local(ch.tag)
                 if name in _BREAKDOWN_SKIP or name in _BREAKDOWN_META:
                     continue
                 v = _dec(ch.text)
+                if name == "VATCharge":
+                    vat = v or 0.0
                 if v:
                     breakdown.append({"label": _pretty_charge(name), "amount": v})
             breakdown.sort(key=lambda x: -abs(x["amount"]))
@@ -601,7 +611,10 @@ async def quote(origin: dict, destination: dict, boxes: list,
             "service_name":      nice_name or raw_name,
             "service_full":      raw_name,
             "product_code":      product_code,
-            "amount":            amount,
+            "amount":            amount,                       # TotalNetCharge, VAT included
+            "vat":               vat,
+            "amount_ex_vat":     (None if amount is None else
+                                  round(amount - (vat or 0.0), 2)),
             "currency":          cur,
             "delivery_date":     _tidy_date(deliv[0] if deliv else ""),
             "delivery_time":     _tidy_time(deliv[1] if len(deliv) > 1 else ""),

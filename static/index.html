@@ -487,8 +487,10 @@
         .disp-opt-when .d { color: var(--ink); font-weight: 600; }
         .disp-opt-when .t { color: var(--ink-2); }
         .disp-opt-when .p { color: var(--ink-3); }
-        .disp-opt-delta { grid-column: 3; grid-row: 2; justify-self: end;
-            font-size: 11px; font-weight: 600; color: var(--ink-3); white-space: nowrap; }
+        .disp-opt-price { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
+        .disp-opt-price .p-inc { font-weight: 800; font-size: 15px; letter-spacing: -.02em; }
+        .disp-opt-price .p-ex { font-size: 10.5px; font-weight: 600; color: var(--ink-3); letter-spacing: 0; }
+        .disp-vat { font-size: 12px; color: var(--ink-2); margin: 2px 0 8px; font-variant-numeric: tabular-nums; }
         .disp-opt-more { grid-column: 2 / -1; grid-row: 3; display: none;
             margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--border); }
         .disp-opt.on .disp-opt-more { display: block; }
@@ -4354,7 +4356,12 @@
                     if (Number(op.amount) === cheapest) top.append(el('span', 'lbl-chip made', 'CHEAPEST'));
                     if (drop) top.append(el('span', 'lbl-chip note', 'DROP-OFF'));
                     rowl.append(top);
-                    rowl.append(el('div', 'disp-opt-price', fmtPrice(op.amount, op.currency)));
+                    const priceCell = el('div', 'disp-opt-price');
+                    priceCell.append(el('span', 'p-inc', fmtPrice(op.amount, op.currency)));
+                    if (op.amount_ex_vat != null && op.vat) {
+                        priceCell.append(el('span', 'p-ex', fmtPrice(op.amount_ex_vat, op.currency) + ' ex VAT'));
+                    }
+                    rowl.append(priceCell);
 
                     // The promise: arrival first, collection deadline last (clipped first).
                     const when = el('div', 'disp-opt-when');
@@ -4370,7 +4377,9 @@
                     }
                     rowl.append(when);
                     if (Number(op.amount) > cheapest) {
-                        rowl.append(el('div', 'disp-opt-delta', '+' + fmtPrice(op.amount - cheapest, op.currency)));
+                        const dl = el('span', 'p', '  ·  +' + fmtPrice(op.amount - cheapest, op.currency));
+                        dl.title = fmtPrice(op.amount - cheapest, op.currency) + ' more than the cheapest option';
+                        when.append(dl);
                     }
 
                     // Detail belongs to the chosen option only: row height is what
@@ -4434,7 +4443,12 @@
                 }
                 conf.append(el('div', 'disp-charge', 'Booking charges your World Options account.'));
                 const book = el('button', 'btn btn-primary disp-book');
-                const setLabel = () => { book.innerHTML = ''; book.append(ico(I.truck), document.createTextNode('Book & dispatch · ' + fmtPrice(chosen.amount, chosen.currency))); };
+                if (chosen.amount_ex_vat != null && chosen.vat) {
+                    conf.append(el('div', 'disp-vat', fmtPrice(chosen.amount_ex_vat, chosen.currency) + ' ex VAT'
+                        + '   +   ' + fmtPrice(chosen.vat, chosen.currency) + ' VAT'
+                        + '   =   ' + fmtPrice(chosen.amount, chosen.currency) + ' inc VAT'));
+                }
+                const setLabel = () => { book.innerHTML = ''; book.append(ico(I.truck), document.createTextNode('Book & dispatch · ' + fmtPrice(chosen.amount, chosen.currency) + ' inc VAT')); };
                 setLabel();
                 book.onclick = async () => {
                     const cprob = customsProblem();
@@ -4470,7 +4484,11 @@
                 okBar.append(ico(I.check), el('span', null, 'Dispatched with ' + carrierService(s.carrier_name, s.service_name)));
                 body.append(okBar);
                 const tb = el('div', 'disp-track'); tb.append(el('span', null, 'Tracking '), el('b', null, s.tracking_number || '(pending)')); body.append(tb);
-                if (s.amount != null) body.append(el('div', 'sub', 'Quoted ' + fmtPrice(s.amount, s.currency) + '. Your World Options invoice shows the final charge.'));
+                if (s.amount != null) {
+                    body.append(el('div', 'sub', 'Quoted ' + fmtPrice(s.amount, s.currency) + ' inc VAT'
+                        + (s.amount_ex_vat != null && s.vat ? ' (' + fmtPrice(s.amount_ex_vat, s.currency) + ' ex VAT)' : '')
+                        + '. Your World Options invoice shows the final charge.'));
+                }
                 if (res.warning) body.append(el('div', 'disp-warn', res.warning));
                 if (s.collection_date) body.append(el('div', 'sub', 'Collection reference: ' + s.collection_date));
                 if (res.insured) body.append(el('div', 'sub', 'Insured for ' + fmtPrice(parseFloat(res.insured), s.currency) + '.'));
