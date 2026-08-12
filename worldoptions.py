@@ -359,6 +359,16 @@ SIGNATURE_OPTIONS = {
     "DHL":       ["DHL_No_Signature_Required", "DHL_Direct", "DHL_Adult", "DHL_Leave_With_Neighbour"],
     "DHLPARCEL": ["DHLParcel_Signature_Required", "DHLParcel_Delivery_To_Neighbour", "DHLParcel_Leave_Safe"],
 }
+# Only FedEx and DHL have a "no signature" member in wsSignatureTypes. UPS has
+# none: its only choices are UPS_Signature_Required and UPS_Adult. So a cheaper
+# no-signature price can only be OFFERED, and only booked, for a carrier listed
+# here. Sending one carrier's literal on another's service is what "Value cannot
+# be null" was: the service looks up its own mapping, finds nothing, and throws.
+NO_SIGNATURE_BY_CARRIER = {
+    "FEDEX": "Fedex_No_Signature_Required",
+    "DHL":   "DHL_No_Signature_Required",
+}
+
 EXPORT_REASONS = ["Sale", "Sample", "Gift", "Repair", "Exhibition", "Personal_Effects", "Return", "Other"]
 DUTIES_PAYORS = ["Duties_To_Be_Paid_By_Receiver", "Duties_To_Be_Paid_By_Sender", "Duties_To_Be_Paid_By_Third_Party"]
 INVOICE_TYPES = ["Help_Me_Generate", "I_Already_Have_One", "Upload_your_own_PDF_invoice"]
@@ -386,7 +396,15 @@ def _pretty_charge(name: str) -> str:
 
 
 class WorldOptionsError(Exception):
-    """Carries World Options' own message so the UI can show the real cause."""
+    """Carries World Options' own message so the UI can show the real cause, plus
+    the request that caused it. The envelope is attached because their errors name
+    a .NET parameter, not a field, and without the request there is nothing to
+    match it against."""
+
+    def __init__(self, message, envelope: str = "", raw: str = ""):
+        super().__init__(message)
+        self.envelope = envelope        # redacted, safe to show the merchant
+        self.raw = raw                  # their fault text, verbatim
 
 
 # ---------------------------------------------------------------------------
@@ -488,13 +506,20 @@ def _num(v) -> str:
     return str(int(f)) if f == int(f) else repr(f)
 
 
-def _auth_block() -> str:
-    # wsAuthenticationDetail children, alphabetical: Key, MeterNumber, Password, PluginCode.
+def _auth_block(full: bool = False) -> str:
+    # wsAuthenticationDetail children, alphabetical: Key, MeterNumber, Password,
+    # PluginCode, SubUserKey, WebLeadCompanyName, WebLeadPostalCode.
+    # `full` sends the three trailing nillable strings as empty rather than omitting
+    # them (omitted = null on the server). Only booking sets it: quoting works as it
+    # is, and ShipmentService is different code from RateService.
     return ("<wo:AuthenticationDetail>"
             + _t("m", "Key", _state["key"])
             + _t("m", "MeterNumber", _state["meter"])
             + _t("m", "Password", _state["password"])
             + _t("m", "PluginCode", _state["plugin"] or "Web_Service")
+            + (_ts("m", "SubUserKey", "")
+               + _ts("m", "WebLeadCompanyName", "")
+               + _ts("m", "WebLeadPostalCode", "") if full else "")
             + "</wo:AuthenticationDetail>")
 
 
@@ -620,7 +645,7 @@ def _parse(resp: httpx.Response, url: str = "") -> ET.Element:
         if details:
             raise WorldOptionsError("World Options needs more information: " + " ".join(details))
         reason = _text(fault, "Text") or _text(fault, "faultstring") or "SOAP fault"
-        raise WorldOptionsError(_friendly_fault(reason))
+        raise WorldOptionsError(_friendly_fault(reason), raw=reason)
     if resp.status_code >= 400:
         raise WorldOptionsError(f"World Options error (HTTP {resp.status_code}).")
     return root
@@ -635,7 +660,7 @@ def _reply_status(reply, context: str):
         if ("access token" in low or "authenticationexception" in low
                 or "invalid_client" in low or "authentication failed" in low):
             raise WorldOptionsError(_friendly_fault(msg))
-        raise WorldOptionsError(msg or f"World Options could not {context}.")
+        raise WorldOptionsError(msg or f"World Options could not {context}.", raw=msg)
     return msg, notif
 
 
@@ -966,7 +991,7 @@ def _customs_block(customs: dict) -> str:
 
 async def book(option: dict, origin: dict, destination: dict, boxes: list,
                currency: str = "GBP", reference: str = "",
-               ready_time: str = "", close_time: str = "",
+               ready_time: str = "", close_time: str = "", ready_date: str = "",
                collection_option: str = "", insurance: str = "",
                signature: str = "", dropoff_shop: dict = None,
                customs: dict = None, description: str = "",
@@ -1081,17 +1106,14 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
     if co and co not in COLLECTION_OPTIONS:
         co = ""
     sig = (signature or "").strip()
-    if sig:
-        # A value the price was quoted under is honoured as-is: matching the charge
-        # the merchant was shown matters more than the wording being that carrier's
-        # own. A value picked by hand must belong to the carrier being booked, or it
-        # would fault at WCF or silently buy a different service level.
-        if quoted_signature and sig == quoted_signature.strip():
-            pass
-        elif sig not in set(SIGNATURE_OPTIONS.get(carrier.upper(), [])):
-            logger.info("world options: dropping signature %r, not offered by %s",
-                        sig, carrier or "this carrier")
-            sig = ""
+    if sig and sig not in set(SIGNATURE_OPTIONS.get((known or carrier).upper(), [])):
+        # Translate an intent quoted under another carrier's wording into this
+        # carrier's own, and drop it if this carrier has no equivalent.
+        want_none = "no_signature" in sig.lower()
+        swapped = NO_SIGNATURE_BY_CARRIER.get((known or carrier).upper(), "") if want_none else ""
+        logger.info("world options: signature %r is not %s's; using %r",
+                    sig, known or carrier or "this carrier", swapped or "their default")
+        sig = swapped
     duties = str((customs or {}).get("duties_payor") or "").strip()
     if duties and duties not in DUTIES_PAYORS:
         duties = ""
@@ -1106,19 +1128,22 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
                + _ts("wo", "CloseTime", close_time)
                + _t("wo", "CollectionOptions", co)
                + _t("wo", "DeliverySignatureType", sig)
+               + _ts("wo", "DutiesAccNumber", "")
                + _t("wo", "DutiesPayor", duties)
                + _ts("wo", "LocationDescription", "")
                + _ts("wo", "OtherEmailAddress", "")
                + _ts("wo", "PersonalMessage", "")
+               + _ts("wo", "ReadyDate", ready_date)
                + _ts("wo", "ReadyTime", ready_time)
                + _ts("wo", "RecipientEmailAddress", "")
+               + _ts("wo", "TransportationAccNumber", "")
                + _t("wo", "TransportationPayor", "Bill_To_Sender")
                + "</wo:BillingDetail>")
     # ShipmentBookingRequest in the XSD sequence order: AdditionalShipmentDetail,
     # AuthenticationDetail, BillingDetail, RecipientsDetails, SendersDetails, ShippingDetail
     inner = ("<tem:DoShipment><tem:shipment>"
              + _customs_block(customs or {})
-             + _auth_block()
+             + _auth_block(full=True)
              + billing
              + _recipient_block(destination or {})
              + _sender_block(origin or {})
@@ -1127,11 +1152,13 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
     try:
         root = await _soap_call("ShipmentService", "http://tempuri.org/IShipmentService/DoShipment", inner,
                             retryable=False)
-    except WorldOptionsError:
+    except WorldOptionsError as e:
         # The service rejected the request itself (rather than the data in it), so
-        # the envelope is the evidence. Logged once, with the credentials stripped,
-        # because the alternative is guessing against a live account that charges.
-        logger.error("world options: DoShipment rejected. Envelope sent:\n%s", _redacted(inner))
+        # the envelope IS the evidence. It goes into the exception as well as the
+        # log, because the person who needs it is standing at the dispatch desk.
+        e.envelope = _redacted(inner)
+        logger.error("world options: DoShipment rejected: %s\nEnvelope sent:\n%s",
+                     e, e.envelope)
         raise
     reply = _find(root, "DoShipmentResult")
     if reply is None:

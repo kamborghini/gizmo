@@ -908,6 +908,30 @@ def _load_dispatch_labels(order_id) -> list:
         return []
 
 
+WO_FAILURES_PATH = os.environ.get("WO_FAILURES_PATH", "/data/wo_failures.json")
+WO_FAILURES_MAX = 10
+
+
+def _record_wo_failure(tech: dict) -> None:
+    """Keep the last few rejected bookings on disk. Closing the window should not
+    destroy the only copy of why a dispatch would not go through."""
+    try:
+        rows = _load_json_store(WO_FAILURES_PATH, "failures", [])
+        rows = ([tech] + list(rows))[:WO_FAILURES_MAX]
+        if _store_writable(WO_FAILURES_PATH):
+            os.makedirs(os.path.dirname(WO_FAILURES_PATH) or ".", exist_ok=True)
+            tmp = WO_FAILURES_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"failures": rows}, fh)
+            os.replace(tmp, WO_FAILURES_PATH)
+    except Exception:
+        logger.exception("could not record the World Options failure")
+
+
+def _load_wo_failures() -> list:
+    return _load_json_store(WO_FAILURES_PATH, "failures", [])
+
+
 def _load_dispatch() -> dict:
     return _load_json_store(DISPATCH_STATE_PATH, "orders", {})
 
@@ -3599,8 +3623,16 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         base_amt = priced.get(code)
         if base_amt is None or amt >= base_amt - 0.005:
             continue
+        own = worldoptions.NO_SIGNATURE_BY_CARRIER.get(
+            (ns.get("carrier_name") or "").upper(), "")
+        if not own:
+            # UPS and the rest have no no-signature service at all, so this price
+            # cannot actually be bought. Showing it would be a saving that vanishes
+            # at the till, or a booking that fails.
+            continue
         ns = dict(ns)
         ns["no_signature"] = True
+        ns["signature_type"] = own
         ns["saves_vs_signed"] = round(base_amt - amt, 2)
         merged.append(ns)
 
@@ -3887,11 +3919,29 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
                                            description=_goods_summary(o),
                                            delivery_shop=delivery_shop)
     except worldoptions.WorldOptionsError as e:
-        return {"error": str(e)}
-    except Exception:
+        # Hand the evidence to the person standing at the desk. Their errors name a
+        # .NET parameter rather than a field, so the request is the only way to tell
+        # which field they meant, and waiting on a developer to read a server log is
+        # not a dispatch process.
+        out = {"error": str(e)}
+        tech = {}
+        if getattr(e, "raw", ""):
+            tech["reply"] = str(e.raw)[:2000]
+        if getattr(e, "envelope", ""):
+            tech["request"] = str(e.envelope)[:20000]
+        if tech:
+            tech["when"] = datetime.now(timezone.utc).isoformat()
+            tech["order"] = str(order_id)
+            out["tech"] = tech
+            _record_wo_failure(tech)
+        return out
+    except Exception as e:
         logger.exception("dispatch booking failed")
         return {"error": "The booking failed at World Options. Check the server logs; "
-                         "no charge is confirmed until a tracking number comes back."}
+                         "no charge is confirmed until a tracking number comes back.",
+                "tech": {"reply": repr(e)[:2000],
+                         "when": datetime.now(timezone.utc).isoformat(),
+                         "order": str(order_id)}}
     if not shipment.get("tracking_number"):
         return {"error": "World Options accepted the request but returned no tracking number. "
                          "Check your World Options portal before retrying so you are not charged twice."}

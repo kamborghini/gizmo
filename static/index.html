@@ -464,6 +464,16 @@
         .disp-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
             margin: 0 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
         .disp-pick-name { font-weight: 700; color: var(--ink); }
+        .disp-tech { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px;
+            padding: 9px 11px; background: var(--surface-2, rgba(255,255,255,.02)); }
+        .disp-tech > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+        .disp-tech-bar { display: flex; gap: 8px; margin: 9px 0 0; }
+        .disp-tech-h { font-size: 11px; font-weight: 700; color: var(--ink-3);
+            text-transform: uppercase; letter-spacing: .04em; margin: 11px 0 4px; }
+        .disp-tech-pre { margin: 0; padding: 8px 10px; border-radius: 7px; background: var(--bg);
+            border: 1px solid var(--line); font-size: 11px; line-height: 1.45;
+            white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-2); }
         .disp-pick-when { font-size: 12px; color: var(--ink-3); }
         /* Courier quote card: two hard rails - the carrier's name on the left and a
            right-aligned price - so 8+ options can be raked, not read. Detail
@@ -1207,7 +1217,12 @@
                 err.noReply = true;
                 throw err;
             }
-            if (data.error) throw new Error(data.error);
+            if (data.error) {
+                const err = new Error(data.error);
+                // The server may attach what it actually sent and what came back.
+                if (data.tech) err.tech = data.tech;
+                throw err;
+            }
             return data;
         }
 
@@ -4231,6 +4246,57 @@
             const code = s.product_code || s.service_code || '';
             return (svc || 'a courier') + (code ? ' (carrier not named, World Options service ' + code + ')' : '');
         }
+        // What we sent and what came back, copyable in one click. World Options'
+        // errors name a .NET parameter rather than a field, so the request itself is
+        // the only way to work out which field they meant.
+        function techPanel(tech) {
+            if (!tech) return null;
+            const det = document.createElement('details');
+            det.className = 'disp-tech';
+            const sum = document.createElement('summary');
+            sum.textContent = 'Technical details (send these to your developer)';
+            det.append(sum);
+            const bar = el('div', 'disp-tech-bar');
+            const copy = el('button', 'btn', 'Copy');
+            const text = () => [
+                'Order: ' + (tech.order || ''),
+                'When: ' + (tech.when || ''),
+                '',
+                'World Options replied:',
+                tech.reply || '(nothing)',
+                '',
+                'We sent:',
+                tech.request || '(the request was never sent)',
+            ].join('\n');
+            copy.onclick = async (ev) => {
+                ev.preventDefault();
+                try {
+                    await navigator.clipboard.writeText(text());
+                    copy.textContent = 'Copied';
+                    setTimeout(() => { copy.textContent = 'Copy'; }, 2000);
+                } catch (e) {
+                    // Clipboard is blocked in some embedded frames: select it instead
+                    // so the operator can copy by hand rather than be stuck.
+                    const pre = det.querySelector('pre');
+                    if (pre) {
+                        const r = document.createRange(); r.selectNodeContents(pre);
+                        const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+                    }
+                    copy.textContent = 'Press Cmd+C';
+                }
+            };
+            bar.append(copy);
+            det.append(bar);
+            if (tech.reply) {
+                det.append(el('div', 'disp-tech-h', 'World Options replied'));
+                det.append(el('pre', 'disp-tech-pre', tech.reply));
+            }
+            if (tech.request) {
+                det.append(el('div', 'disp-tech-h', 'We sent (your details and password removed)'));
+                det.append(el('pre', 'disp-tech-pre', tech.request));
+            }
+            return det;
+        }
         function setDispatchState(id, entry) {
             if (!labelsCache || !labelsCache.data) return;
             const d = labelsCache.data.dispatch = labelsCache.data.dispatch || {};
@@ -4788,6 +4854,8 @@
                         // charged: do not re-arm the button into a second charge.
                         const unknown = e.noReply || /MAY still|check this order|did not get a reply/i.test(msg);
                         toastError(msg);
+                        const tech = techPanel(e.tech);
+                        if (tech) { conf.querySelectorAll('.disp-tech').forEach(n => n.remove()); conf.append(tech); }
                         if (unknown) {
                             book.textContent = 'Check before booking again';
                             const warn = el('div', 'disp-warn', msg + ' Close this window, press Refresh, and look for a BOOKED chip on the order before trying again.');
