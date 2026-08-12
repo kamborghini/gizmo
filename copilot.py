@@ -3623,17 +3623,36 @@ async def _customs_items(registry: dict, o: dict) -> list:
         item = by_id.get(int(inv)) if inv else None
         cost = str((item or {}).get("cost") or "").strip()
         title = str(li.get("title") or "Item").strip()
+        low = title.lower()
+        is_gobo = "gobo" in low
         origin = str((item or {}).get("country_code_of_origin") or "").strip().upper()
         if not origin:
             # The merchant's blanket rule when Shopify does not say: projectors are
             # made in China, gobos (and everything else they make) in the UK.
-            origin = "CN" if "projector" in title.lower() else "GB"
+            origin = "CN" if "projector" in low else "GB"
+        hs = str((item or {}).get("harmonized_system_code") or "").strip()
+        if not hs and is_gobo:
+            # House rule: every gobo is 9002.20.000 (mounted optical filter glass).
+            hs = "9002.20.000"
+        price = str(li.get("price") or "")
+        # The declared value. Gobos are custom work, declared at their SALE value;
+        # stocked goods (projectors and the rest) at COST, falling back to sale
+        # when Shopify has no cost recorded, which the card points out.
+        if is_gobo:
+            unit_value, basis, needs_cost = price, "sale", False
+        elif cost:
+            unit_value, basis, needs_cost = cost, "cost", False
+        else:
+            unit_value, basis, needs_cost = price, "sale", True
         out.append({
             "title": title,
             "quantity": int(li.get("quantity") or 1),
-            "price": str(li.get("price") or ""),
+            "price": price,
             "cost": cost,
-            "hs_code": str((item or {}).get("harmonized_system_code") or "").strip(),
+            "unit_value": unit_value,
+            "value_basis": basis,
+            "needs_cost": needs_cost,
+            "hs_code": hs,
             "origin": origin,
         })
     return out

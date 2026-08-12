@@ -2040,7 +2040,15 @@ def t_customs_lines_carry_the_cost_price_and_the_products_own_hs_code():
         eq(proj["hs_code"], "9008.50.00", "the product's own HS code")
         eq(proj["origin"], "GB", "origin from Shopify")
         gobo = items[1]
-        eq(gobo["cost"], "", "no variant -> no cost; the UI falls back to sale price and says so")
+        eq(gobo["cost"], "", "no variant -> no cost")
+        # The house value rules: gobos are custom work declared at SALE value
+        # (no missing-cost warning for them); stocked goods at COST.
+        eq(gobo["unit_value"], "45.00", "a gobo is declared at its sale price")
+        eq(gobo["value_basis"], "sale", "and that is by design")
+        eq(gobo["needs_cost"], False, "so no missing-cost nag for a gobo")
+        eq(gobo["hs_code"], "9002.20.000", "every gobo is 9002.20.000")
+        eq(proj["unit_value"], "425.00", "a projector is declared at cost")
+        eq(proj["value_basis"], "cost", "explicitly")
         # Origin rules: Shopify's own value wins (the projector's inventory item
         # says GB here); with nothing in Shopify, the merchant's blanket rule
         # applies: projectors are made in China, gobos (everything else) in the UK.
@@ -2105,6 +2113,10 @@ def t_projectors_default_to_china_when_shopify_has_no_origin():
         items = r.json().get("customs_items") or []
         eq(items[0]["origin"], "CN", "a projector with no Shopify origin is China")
         eq(items[1]["origin"], "GB", "a gobo with no Shopify origin is the UK")
+        # A stocked product with no cost is the ONLY missing-cost flag.
+        eq(items[0]["needs_cost"], False, "projector has a cost, no flag")
+        eq(items[1]["needs_cost"], False, "gobo declares sale value by design, no flag")
+        eq(items[1]["hs_code"], "9002.20.000", "gobo HS filled even with none in Shopify")
     finally:
         copilot._tool_json = saved
 

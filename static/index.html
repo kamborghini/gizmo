@@ -436,7 +436,7 @@
             font-weight: 600; padding: 6px 14px; border-radius: 6px; cursor: pointer; }
         .lbl-segbtn.on { background: var(--surface); color: var(--ink); box-shadow: var(--hair); }
         .lbl-segbtn:hover { color: var(--ink); }
-        .disp-modal { max-width: 720px; width: 94vw; }
+        .modal.disp-modal { max-width: 720px; width: 94vw; }
         .disp-dest { padding: 11px 13px; background: var(--bg-2); border: 1px solid var(--border-2);
             border-radius: var(--r-sm); margin-bottom: 18px; }
         /* One rhythm down the form, and one height for every control in a row. */
@@ -4618,11 +4618,13 @@
                     // you, not what the customer paid.
                     let fellBack = [];
                     quote.customs_items.forEach(it => {
-                        if (!it.cost) fellBack.push(it.title);
+                        // Gobos are declared at SALE value by design, so only a
+                        // stocked product missing its cost is worth flagging.
+                        if (it.needs_cost) fellBack.push(it.title);
                         addLine({
                             description: it.title || 'Custom glass gobo',
                             quantity: it.quantity || 1,
-                            unit_price: parseFloat(it.cost || it.price) || '',
+                            unit_price: parseFloat(it.unit_value || it.cost || it.price) || '',
                             hs: it.hs_code || quote.default_hs_code || '',
                             origin: it.origin || ''
                         });
