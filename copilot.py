@@ -763,6 +763,9 @@ _SHIPPING_DEFAULT = {
     # Collection arrangement: explicit, because omitting it makes WO assume a NEW
     # collection is wanted on every booking (wrong for daily-collection accounts).
     "collection_option": "I_Need_To_Book_A_Collection",
+    # Shop-based services (customer collects, or we drop off) are hidden by
+    # default: this merchant ships to the door and has never used parcel shops.
+    "show_parcelshop": False,
     # International / customs (used only for non-GB destinations)
     "eori": "",
     "vat_number": "",
@@ -3519,12 +3522,19 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
                                         collection_dropoff=dropoff, shipment_mode=mode,
                                         delivery_dropoff=delivery_dropoff)
 
+    show_shop = bool(cfg.get("show_parcelshop", False))
     # Two quotes, in parallel: to the door, and to a pickup shop. The cheaper
-    # Access Point services (UPS_Express_Saver_AP and friends) are ONLY returned
-    # when the request asks to deliver to a shop, so a single quote hides them.
-    # Quoting is free; a failure on either side must not lose the other.
+    # Access Point services are ONLY returned when the request asks to deliver to
+    # a shop. Quoting is free; a failure on either side must not lose the other.
+    # Skipped entirely when shop services are hidden, so nothing is asked for
+    # that will not be shown.
     try:
-        door, point = await asyncio.gather(_q(False), _q(True), return_exceptions=True)
+        if show_shop:
+            door, point = await asyncio.gather(_q(False), _q(True), return_exceptions=True)
+        else:
+            door, point = await _q(False), {"options": []}
+    except worldoptions.WorldOptionsError as e:
+        return {"error": str(e)}
     except Exception:
         logger.exception("dispatch quote failed")
         return {"error": "Couldn't get courier quotes. Check the server logs."}
@@ -3549,6 +3559,16 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         if opt_row.get("service_type_code") and opt_row["service_type_code"] in seen:
             continue
         merged.append(opt_row)
+    if not show_shop:
+        # A shop service is any that delivers to a pickup point, or whose name
+        # says so (Evri ParcelShop and the like arrive as ordinary door quotes).
+        def _is_shop(x):
+            if x.get("delivery_dropoff"):
+                return True
+            blob = (str(x.get("service_full") or "") + " " + str(x.get("service_type_code") or "")).lower()
+            return ("parcelshop" in blob or "parcel shop" in blob
+                    or "access point" in blob or blob.endswith("_ap"))
+        merged = [x for x in merged if not _is_shop(x)]
     merged.sort(key=lambda x: (x.get("amount") is None, x.get("amount") or 0))
     res["options"] = merged
     if not res.get("options"):
@@ -3565,6 +3585,7 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         "goods_value": goods_value,
         "insurance": insurance,
         "dropoff": dropoff,
+        "show_parcelshop": show_shop,
         "has_eori": bool(cfg.get("eori")),
         "default_hs_code": cfg.get("default_hs_code") or "",
         # Drives the customs-declaration card in the UI; booking refuses an
@@ -3573,6 +3594,73 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         "currency_note": ("" if str(o.get("currency") or "").upper() in (currency, "")
                           else f"Quoted in {currency}; the order was paid in {o.get('currency')}."),
     }
+
+
+# Flag combinations tried when the merchant reports a service they expected but
+# cannot see. World Options' rate request is full of non-nillable enums whose
+# omitted value is their FIRST member, so a hidden service is nearly always a
+# flag we are sending implicitly rather than a fault at their end.
+_DIAGNOSE_VARIANTS = [
+    ("As the app quotes now", {}),
+    ("No signature required (FedEx wording)", {"signature_type": "Fedex_No_Signature_Required"}),
+    ("No signature required (DHL wording)", {"signature_type": "DHL_No_Signature_Required"}),
+    ("Asking UPS only", {"service_name": "UPS"}),
+    ("UPS packaging instead of a generic parcel", {"package_type": "UPS_My_Packaging"}),
+    ("Delivered to a pickup shop", {"delivery_dropoff": True}),
+]
+
+
+async def run_dispatch_diagnose(registry: dict, order_id, boxes: list) -> dict:
+    """Quote the same parcel several ways and report which services each way
+    returns. Read-only and free: it exists so a missing courier service can be
+    explained with evidence instead of guessed at."""
+    if not worldoptions or not worldoptions.configured():
+        return {"error": "World Options is not connected. Add your credentials in Settings."}
+    o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+    if not _ok(o) or not o.get("id"):
+        return {"error": "Order not found."}
+    dest = _ship_to(o)
+    if _addr_ready(dest):
+        return {"error": "This order's shipping address is incomplete, so it cannot be quoted."}
+    origin = await _origin_address(registry)
+    if _addr_ready(origin):
+        return {"error": "Your dispatch address is incomplete. Set it under Settings, Shipping."}
+    cfg = _load_shipping()
+    currency = _wo_currency(o.get("currency"), cfg)
+    same = (str(origin.get("country") or "").upper() == str(dest.get("country") or "").upper())
+    base = {
+        "currency": currency,
+        "residential": not str(dest.get("company") or "").strip(),
+        "shipment_mode": "Domestic" if same else "Export",
+        "collection_dropoff": cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages",
+    }
+    goods_value = _order_goods_value(o)
+
+    async def _run(extra):
+        bx = _spread_value([dict(b) for b in boxes], goods_value)
+        return await worldoptions.quote(origin, dest, bx, **base, **extra)
+
+    results = await asyncio.gather(*[_run(v[1]) for v in _DIAGNOSE_VARIANTS],
+                                   return_exceptions=True)
+    rows, baseline = [], set()
+    for (label, _flags), res in zip(_DIAGNOSE_VARIANTS, results):
+        if isinstance(res, Exception):
+            rows.append({"label": label, "error": str(res)[:200], "services": []})
+            continue
+        svcs = [{"name": (op.get("carrier_label") or "") + " " + (op.get("service_name") or ""),
+                 "code": op.get("service_type_code") or "",
+                 "delivery": " ".join(x for x in [op.get("delivery_date"), op.get("delivery_time")] if x),
+                 "amount": op.get("amount"), "currency": op.get("currency")}
+                for op in (res.get("options") or [])]
+        svcs.sort(key=lambda s: (s["amount"] is None, s["amount"] or 0))
+        if not rows:
+            baseline = {s["code"] for s in svcs}
+        for s in svcs:
+            s["new"] = bool(rows) and s["code"] not in baseline
+        rows.append({"label": label, "error": "", "services": svcs})
+    extra_found = sorted({s["code"] for r in rows for s in r["services"] if s.get("new")})
+    return {"rows": rows, "extra_found": extra_found,
+            "destination": dest.get("postcode"), "weight": round(sum(b["weight"] for b in boxes), 3)}
 
 
 async def run_dispatch_book(registry: dict, order_id, option: dict, boxes: list,
@@ -5940,6 +6028,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             "ready_time": cfg.get("ready_time") or "",
             "close_time": cfg.get("close_time") or "",
             "collection_option": cfg.get("collection_option") or "I_Need_To_Book_A_Collection",
+            "show_parcelshop": bool(cfg.get("show_parcelshop", False)),
             "collection_options": (worldoptions.COLLECTION_OPTIONS if worldoptions else []),
             "eori": cfg.get("eori") or "",
             "vat_number": cfg.get("vat_number") or "",
@@ -6011,6 +6100,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             cfg["default_box_id"] = str(body.get("default_box_id") or "")[:40]
         if "notify_customer" in body:
             cfg["notify_customer"] = bool(body.get("notify_customer"))
+        if "show_parcelshop" in body:
+            cfg["show_parcelshop"] = bool(body.get("show_parcelshop"))
         for tkey in ("ready_time", "close_time"):
             if tkey in body:
                 tv = str(body.get(tkey) or "").strip()
@@ -6118,6 +6209,35 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except Exception:
             logger.exception("dispatch quote route failed")
             return _json({"error": "Couldn't get courier quotes."}, 500)
+
+    @mcp.custom_route("/api/dispatch/diagnose", methods=["POST"])
+    async def dispatch_diagnose_route(request: Request):
+        """Why is a courier service missing? Quotes the same parcel several ways
+        and reports what each returns. Free and read-only."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        try:
+            oid = int(body.get("order_id") or 0)
+        except (TypeError, ValueError, OverflowError):
+            oid = 0
+        if not oid:
+            return _json({"error": "No order id given."}, 400)
+        boxes, perr = _clean_parcel_list(body)
+        if perr:
+            return _json({"error": perr}, 400)
+        try:
+            res = await run_dispatch_diagnose(registry, oid, boxes)
+            return _json(res, 400 if res.get("error") else 200)
+        except Exception:
+            logger.exception("dispatch diagnose failed")
+            return _json({"error": "Couldn't run the service check."}, 500)
 
     @mcp.custom_route("/api/dispatch/book", methods=["POST"])
     async def dispatch_book_route(request: Request):

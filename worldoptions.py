@@ -505,7 +505,9 @@ def _pkg_value(box: dict) -> str:
 async def quote(origin: dict, destination: dict, boxes: list,
                 currency: str = "GBP", residential: bool = False,
                 insurance: str = "", collection_dropoff: bool = False,
-                shipment_mode: str = "", delivery_dropoff: bool = False) -> dict:
+                shipment_mode: str = "", delivery_dropoff: bool = False,
+                signature_type: str = "", service_name: str = "ALL",
+                package_type: str = "Any_NonDocument") -> dict:
     """Free, read-only price check across all carriers. Returns {options[]}.
     insurance = the cover amount to include in pricing; collection_dropoff asks
     for tariffs where the merchant drops the parcel at a shop."""
@@ -550,10 +552,14 @@ async def quote(origin: dict, destination: dict, boxes: list,
         # when the quote asks to deliver to a pickup shop instead of the door.
         + (_b("rs", "IsDeliveryDropoffRequired", True) if delivery_dropoff else "")
         + f"<rs:PackageDetails>{pkgs}</rs:PackageDetails>"
-        + _t("rs", "PackageType", "Any_NonDocument")
-        + _t("rs", "ServiceName", "ALL")
+        + _t("rs", "PackageType", package_type or "Any_NonDocument")
+        + _t("rs", "ServiceName", service_name or "ALL")
         + _t("rs", "ServiceTypeName", "ALL")
         + _t("rs", "ShipmentType", shipment_mode or "Domestic")
+        # SignatureType is a non-nillable enum, so leaving it out means WCF picks
+        # its first member (Fedex_Adult). Sending an explicit value is the only
+        # way to say "no signature needed", which cheaper tiers may require.
+        + _t("rs", "SignatureType", signature_type)
         + "</wo:ShippingDetails>"
         + "</tem:request></tem:GetAllServicesAndRates>"
     )
