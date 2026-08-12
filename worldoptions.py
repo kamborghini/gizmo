@@ -974,6 +974,26 @@ def _label_url(url: str) -> str:
     return u if p.scheme in ("http", "https") and ok else ""
 
 
+async def label_link_report(url: str) -> dict:
+    """What a stored label link is and what it answers, for the evidence panel.
+    This exists because 'the label shows Not Found' is undiagnosable without it."""
+    raw = (url or "").strip()
+    u = _label_url(raw)
+    if not u:
+        return {"url": raw, "problem": "not a World Options address, refused to fetch"}
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            r = await client.get(u)
+        body = r.content or b""
+        looks = ("PDF" if body.startswith(b"%PDF") else
+                 "PNG" if body.startswith(b"\x89PNG") else
+                 "an HTML page" if body[:256].lstrip()[:1] == b"<" else
+                 "unknown bytes")
+        return {"url": u, "http": r.status_code, "bytes": len(body), "content": looks}
+    except Exception as e:
+        return {"url": u, "problem": str(e)[:200]}
+
+
 async def fetch_label(url: str) -> dict:
     """Download a LabelURL into an inline label. The link they return may be
     relative, short-lived, or unreachable from inside the admin iframe (a tab
@@ -991,10 +1011,10 @@ async def fetch_label(url: str) -> dict:
 
 
 def _classify_label(lbl: ET.Element) -> dict:
-    url = _text(lbl, "LabelURL").strip()
-    if url:
-        return {"type": "url", "value": url}
+    # The reply can carry the file AND a link. The bytes are the label; the link is
+    # a convenience that does not survive the admin iframe. Bytes first, always.
     img = _text(lbl, "Image").strip()
+    url = _text(lbl, "LabelURL").strip()
     if img:
         lt = (_text(lbl, "LabelType") or "").upper()
         if "PNG" in lt:
@@ -1003,7 +1023,12 @@ def _classify_label(lbl: ET.Element) -> dict:
             kind = "base64pdf"
         else:
             kind = "base64bin"    # ZPL and friends: downloadable, never a fake PDF
-        return {"type": kind, "value": img, "label_type": lt}
+        out = {"type": kind, "value": img, "label_type": lt}
+        if url:
+            out["source_url"] = url
+        return out
+    if url:
+        return {"type": "url", "value": url}
     return {}
 
 

@@ -6495,6 +6495,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                    "before labels were saved, or on another device."}, 404)
         # Self-heal: an order booked while labels were stored as LINKS gets the real
         # file downloaded on its next open, and the fix is saved back.
+        tech = None
         if any(isinstance(l, dict) and l.get("type") == "url" for l in labels):
             resolved = await _resolve_label_links(labels)
             if resolved != labels:
@@ -6503,7 +6504,24 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     _save_dispatch_labels(oid, labels)
                 except Exception:
                     logger.exception("could not save the resolved labels for order %s", oid)
-        return _json({"ok": True, "labels": labels})
+            still = [l for l in labels if isinstance(l, dict) and l.get("type") == "url"]
+            if still and worldoptions:
+                # The link would not download. Report what it is and what it answers,
+                # so the failure is readable at the desk instead of a mystery tab.
+                reports = []
+                for l in still[:3]:
+                    try:
+                        reports.append(await worldoptions.label_link_report(l.get("value")))
+                    except Exception as e:
+                        reports.append({"url": str(l.get("value"))[:300], "problem": repr(e)[:200]})
+                tech = {"reply": json.dumps(reports, indent=1)[:2000],
+                        "when": datetime.now(timezone.utc).isoformat(), "order": str(oid)}
+                logger.error("label link would not download for order %s: %s", oid, tech["reply"])
+                _record_wo_failure(tech)
+        out = {"ok": True, "labels": labels}
+        if tech:
+            out["tech"] = tech
+        return _json(out)
 
     @mcp.custom_route("/api/dispatch/cancel", methods=["POST"])
     async def dispatch_cancel_route(request: Request):

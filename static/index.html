@@ -4347,7 +4347,12 @@
                 // An https label URL is fine to hand to the admin. A blob: URL is NOT:
                 // App Bridge forwards window.open to admin.shopify.com, which cannot
                 // resolve a blob minted in this iframe, so it would open a blank tab.
-                if (l.type === 'url' || l.type === 'dataurl') { window.open(l.value, '_blank', 'noopener'); return; }
+                if (l.type === 'url') {
+                    toastError('This label is still a link at World Options and could not be downloaded. '
+                        + 'Press Reprint label to retry, or print it from your World Options portal.');
+                    return;
+                }
+                if (l.type === 'dataurl') { window.open(l.value, '_blank', 'noopener'); return; }
                 if (l.type === 'base64bin') { downloadLabel(l); return; }   // ZPL: not viewable
                 const url = labelBlobUrl(l);
                 if (!url) { toastError('This label format could not be opened; download it instead.'); return; }
@@ -4912,7 +4917,15 @@
                 const rp = el('button', 'btn'); rp.append(ico(I.printer), document.createTextNode('Reprint label'));
                 rp.onclick = async () => {
                     rp.disabled = true;
-                    try { const r = await api('/api/dispatch/label', { order_id: o.id }); labelButtons(body, r.labels); }
+                    try {
+                        const r = await api('/api/dispatch/label', { order_id: o.id });
+                        labelButtons(body, r.labels);
+                        if (r.tech) {
+                            toastError('The label could not be downloaded from World Options. The details below say exactly why.');
+                            body.querySelectorAll('.disp-tech').forEach(n => n.remove());
+                            const tp = techPanel(r.tech); if (tp) { tp.open = true; body.append(tp); }
+                        }
+                    }
                     catch (e) { addToast(e.message || 'Could not fetch the label'); }
                     rp.disabled = false;
                 };
