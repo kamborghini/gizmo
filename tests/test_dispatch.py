@@ -78,6 +78,11 @@ async def fake_canceler(fulfillment_id):
 copilot._fulfillment_canceler = fake_canceler
 def reset_dispatch():
     json.dump({"orders": {}}, open(SCRATCH + "/dispatch_state.json", "w"))
+    # The failure store accumulates across tests otherwise.
+    try:
+        os.remove(SCRATCH + "/wo_failures.json")
+    except FileNotFoundError:
+        pass
 def reset_prod():
     json.dump({"orders": {}}, open(SCRATCH + "/production_state.json", "w"))
 def mark_made(oid=12345, on=True):
@@ -2191,6 +2196,29 @@ def t_ship_to_carries_both_shopify_lines():
         "city": "Washington", "zip": "NE38 0LT", "country_code": "GB", "name": "A B"}})
     eq(shaped["street"], "Momentum Logistics Park", "line one")
     eq(shaped["street2"], "Unit 1 Ash Drive", "line two, separate")
+
+@test
+def t_a_failed_reply_still_carries_the_envelope():
+    # "Could not create SSL/TLS secure channel" came back as a FAILED reply, and
+    # the panel claimed the request was never sent. It was: their server answered.
+    reset_dispatch(); reset_prod()
+    FAILED_BOOK = """<Envelope><Body><DoShipmentResponse><DoShipmentResult>
+     <Message>The request was aborted: Could not create SSL/TLS secure channel.*|**|*1</Message>
+     <NotificationtType>FAILED</NotificationtType>
+    </DoShipmentResult></DoShipmentResponse></Body></Envelope>"""
+    async def failing(service, action, inner, retryable=True):
+        return ET.fromstring(FAILED_BOOK if service == "ShipmentService" else RATE_XML)
+    saved = worldoptions._soap_call; worldoptions._soap_call = failing
+    try:
+        r = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
+        body = r.json()
+        ok(body.get("error"), "the failure is reported")
+        tech = body.get("tech") or {}
+        ok("SSL/TLS" in (tech.get("reply") or ""), "their words verbatim")
+        ok(tech.get("request"), "the envelope IS captured for an answered failure")
+        eq(tech.get("sent"), True, "and it says the request was sent")
+    finally:
+        worldoptions._soap_call = saved
 
 # =========================== run ===========================================
 passed = failed = 0

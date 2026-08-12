@@ -1279,9 +1279,19 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
                      e, e.envelope)
         raise
     reply = _find(root, "DoShipmentResult")
-    if reply is None:
-        raise WorldOptionsError("World Options returned no booking result.")
-    msg, _notif = _reply_status(reply, "book this shipment")
+    try:
+        if reply is None:
+            raise WorldOptionsError("World Options returned no booking result.")
+        msg, _notif = _reply_status(reply, "book this shipment")
+    except WorldOptionsError as e:
+        # The request WAS sent and their server answered with an error, which is a
+        # different fact from a transport failure: the envelope still is the
+        # evidence, and the panel must never claim it was never sent.
+        e.envelope = _redacted(inner)
+        e.sent = True
+        logger.error("world options: DoShipment answered FAILED: %s\nEnvelope sent:\n%s",
+                     e, e.envelope)
+        raise
     tracking = _text(reply, "MasterTrackingNo").strip()
     raw_labels = _findall_direct(reply, "ShippingLabel")
     labels = [c for c in (_classify_label(l) for l in raw_labels) if c]

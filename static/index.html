@@ -4266,7 +4266,7 @@
                 tech.reply || '(nothing)',
                 '',
                 'We sent:',
-                tech.request || '(the request was never sent)',
+                tech.request || (tech.sent ? '(sent, but not captured)' : '(the request was never sent)'),
             ].join('\n');
             copy.onclick = async (ev) => {
                 ev.preventDefault();
@@ -4649,6 +4649,16 @@
                 const addL = el('button', 'btn'); addL.append(ico(I.plus), document.createTextNode('Add line'));
                 addL.onclick = () => addLine(null);
                 card.append(addL);
+                const zeroWarn = el('div', 'disp-warn'); zeroWarn.style.display = 'none';
+                zeroWarn.textContent = 'One or more lines have a unit value of 0. Customs treats zero-value goods '
+                    + 'as suspect and can hold the shipment; enter what each item sells for.';
+                card.append(zeroWarn);
+                const checkZeros = () => {
+                    const any = customsLines.some(l => l.dIn.value.trim() && !(parseFloat(l.pIn.value) > 0));
+                    zeroWarn.style.display = any ? '' : 'none';
+                };
+                card.addEventListener('input', checkZeros);
+                setTimeout(checkZeros, 0);
                 const rt = el('label', 'disp-fld'); rt.style.marginTop = '8px';
                 rt.append(el('span', 'disp-fld-lab', "Receiver's tax / VAT id (optional, helps clearance)"));
                 recvTaxIn = document.createElement('input'); recvTaxIn.type = 'text'; recvTaxIn.className = 'disp-num';

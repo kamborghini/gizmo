@@ -4113,6 +4113,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
         tech = {}
         if getattr(e, "raw", ""):
             tech["reply"] = str(e.raw)[:2000]
+        tech["sent"] = bool(getattr(e, "envelope", "")) or bool(getattr(e, "sent", False))
         if getattr(e, "envelope", ""):
             tech["request"] = str(e.envelope)[:20000]
         if tech:
