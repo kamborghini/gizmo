@@ -222,7 +222,11 @@ def shopify_carrier(carrier_code: str) -> str:
     is given in the customer's shipping email, and "EVRICORPORATE" is not a company
     anyone has heard of."""
     up = (carrier_code or "").strip().upper()
-    return SHOPIFY_CARRIER_NAMES.get(up) or carrier_display(carrier_code)
+    if up in SHOPIFY_CARRIER_NAMES:
+        return SHOPIFY_CARRIER_NAMES[up]
+    if up in CARRIER_DISPLAY:
+        return CARRIER_DISPLAY[up]
+    return ""
 
 
 # How a carrier should READ on screen (distinct from the booking enum and from
@@ -932,11 +936,16 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
         or canonical_carrier(_carrier_from(service_code, "",
                                            option.get("package_type_code") or "",
                                            option.get("service_full") or option.get("service_name") or ""))
+    # Who is carrying it, whether or not that carrier may be named on the request.
+    known = carrier or _carrier_from(service_code, "",
+                                     option.get("package_type_code") or "",
+                                     option.get("service_full") or option.get("service_name") or "")
     if not carrier:
         # Not fatal: ServiceTypeCode already pins the exact service, so World Options
-        # knows who runs it. Worth recording, because the merchant sees no name.
-        logger.info("world options: booking %s without a carrier; "
-                    "the service code alone identifies it", service_code or "(no code)")
+        # knows who runs it. Worth recording, because the request cannot name them.
+        logger.info("world options: booking %s without a ServiceType%s",
+                    service_code or "(no code)",
+                    " (" + known + " is not a bookable carrier enum member)" if known else "")
     pkg_type = option.get("package_type_code") or ""
     if pkg_type not in PACKAGE_TYPES_ENUM:
         pkg_type = ""
@@ -1041,9 +1050,12 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
     return {
         "tracking_number": tracking,
         "carrier_name":    carrier,
+        # Who is carrying it, for display and for Shopify's tracking company. Wider
+        # than carrier_name, which is only ever the literal the request may contain.
+        "carrier_known":   known,
         # What the merchant reads. Stored with the dispatch so an order booked today
         # still names its courier next week without re-deriving it.
-        "carrier_label":   carrier_display(carrier) or option.get("carrier_label") or "",
+        "carrier_label":   carrier_display(known) or option.get("carrier_label") or "",
         "service_name":    option.get("service_name") or service_code,
         "service_code":    service_code,
         "amount":          _dec(option.get("amount")),

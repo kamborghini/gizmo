@@ -3106,7 +3106,8 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
                 tracking_number=tracking,
                 # Shopify only auto-links tracking in the customer email for carrier
                 # names it recognizes; WO's enum codes (ROYALMAIL, EVRISEND) are not.
-                tracking_company=(worldoptions.shopify_carrier(entry.get("carrier_name") or "")
+                tracking_company=(worldoptions.shopify_carrier(entry.get("carrier_known")
+                                                               or entry.get("carrier_name") or "")
                                   if worldoptions else (entry.get("carrier_name") or "")),
                 tracking_url=None,
                 notify_customer=do_notify,
@@ -3907,6 +3908,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
     entry = {
         "tracking_number": shipment["tracking_number"],
         "carrier_name": shipment.get("carrier_name"),
+        "carrier_known": shipment.get("carrier_known") or shipment.get("carrier_name") or "",
         # The readable name is stored beside the booking enum: the queue shows this
         # weeks later, and re-deriving it needs the quote that is long gone.
         "carrier_label": (shipment.get("carrier_label")
