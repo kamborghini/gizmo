@@ -3768,6 +3768,46 @@ async def run_dispatch_book(registry: dict, order_id, option: dict, boxes: list,
                                            insurance, signature, customs_body)
 
 
+def _collection_ready(cfg: dict, now=None):
+    """When the parcel is actually ready for collection, as (dd/MM/yyyy, HH:mm).
+    World Options rejects a ready-from in the past ("Invalid Date, Parcel Ready
+    From"), so the settings window is a preference, not the answer: booking at
+    15:20 against a 14:00 window must say ready from 15:30, and booking after the
+    close (or on a weekend) must say the next working day at the window's start."""
+    now = now or datetime.now(ZoneInfo("Europe/London"))
+
+    def _hm(s, fallback):
+        m = re.match(r"^(\d{1,2}):(\d{2})$", str(s or "").strip())
+        return (int(m.group(1)), int(m.group(2))) if m else fallback
+
+    rh, rm = _hm(cfg.get("ready_time"), (9, 0))
+    ch, cm = _hm(cfg.get("close_time"), (17, 30))
+    ready = now.replace(hour=rh, minute=rm, second=0, microsecond=0)
+    close = now.replace(hour=ch, minute=cm, second=0, microsecond=0)
+    if ready >= close:  # nonsense window: fall back to a plain business day
+        ready = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        close = now.replace(hour=17, minute=30, second=0, microsecond=0)
+
+    candidate = ready
+    if now >= ready:
+        # Already past the window start: ready half an hour out, on a quarter hour.
+        bumped = now + timedelta(minutes=30)
+        minute = ((bumped.minute + 14) // 15) * 15
+        candidate = (bumped.replace(minute=0, second=0, microsecond=0)
+                     + timedelta(minutes=minute))
+    # Too late for a collection today (none left before close), or a weekend:
+    # the next working day, from the window start.
+    if candidate >= close or candidate.weekday() >= 5:
+        day = candidate if candidate.weekday() >= 5 or candidate < close else candidate
+        while True:
+            day = (day + timedelta(days=1)).replace(hour=rh, minute=rm,
+                                                    second=0, microsecond=0)
+            if day.weekday() < 5:
+                candidate = day
+                break
+    return candidate.strftime("%d/%m/%Y"), candidate.strftime("%H:%M")
+
+
 async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: list,
                                 notify, force: bool, insurance: str, signature: str,
                                 customs_body: Optional[dict]) -> dict:
@@ -3906,10 +3946,11 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
             return {"error": "This is a collect-from-shop service but World Options did not "
                              "return a shop for this address. Pick a to-the-door service instead."}
 
+    _ready_dmy, _ready_hm = _collection_ready(cfg)
     try:
         shipment = await worldoptions.book(option, origin, dest, boxes, currency=currency, reference=reference,
-                                           ready_time=str(cfg.get("ready_time") or ""),
-                                           ready_date=datetime.now(ZoneInfo("Europe/London")).strftime("%d/%m/%Y"),
+                                           ready_time=_ready_hm,
+                                           ready_date=_ready_dmy,
                                            close_time=str(cfg.get("close_time") or ""),
                                            collection_option=str(cfg.get("collection_option") or ""),
                                            insurance=insurance,
