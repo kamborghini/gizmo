@@ -3523,21 +3523,33 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
                                         delivery_dropoff=delivery_dropoff)
 
     show_shop = bool(cfg.get("show_parcelshop", False))
+    # World Options prices with a signature service implied unless one is named, so
+    # a second pass asking for no signature can come back cheaper. Both are shown
+    # and labelled, because "no signature" changes what the customer gets.
+    nosig_variant = "Fedex_No_Signature_Required"
     # Two quotes, in parallel: to the door, and to a pickup shop. The cheaper
     # Access Point services are ONLY returned when the request asks to deliver to
     # a shop. Quoting is free; a failure on either side must not lose the other.
     # Skipped entirely when shop services are hidden, so nothing is asked for
     # that will not be shown.
+    async def _q_nosig():
+        return await worldoptions.quote(origin, dest, boxes, currency=currency,
+                                        residential=residential, insurance=insurance,
+                                        collection_dropoff=dropoff, shipment_mode=mode,
+                                        signature_type=nosig_variant)
     try:
-        if show_shop:
-            door, point = await asyncio.gather(_q(False), _q(True), return_exceptions=True)
-        else:
-            door, point = await _q(False), {"options": []}
+        jobs = [_q(False), _q_nosig()] + ([_q(True)] if show_shop else [])
+        got = await asyncio.gather(*jobs, return_exceptions=True)
+        door, nosig = got[0], got[1]
+        point = got[2] if show_shop else {"options": []}
     except worldoptions.WorldOptionsError as e:
         return {"error": str(e)}
     except Exception:
         logger.exception("dispatch quote failed")
         return {"error": "Couldn't get courier quotes. Check the server logs."}
+    if isinstance(nosig, Exception):
+        logger.info("no-signature quote unavailable: %s", nosig)
+        nosig = {"options": []}
     if isinstance(door, Exception):
         if isinstance(point, Exception):
             err = door
@@ -3559,6 +3571,21 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         if opt_row.get("service_type_code") and opt_row["service_type_code"] in seen:
             continue
         merged.append(opt_row)
+    # A no-signature price only earns a row when it actually beats the normal one.
+    priced = {o.get("service_type_code"): o.get("amount") for o in merged
+              if o.get("service_type_code") and o.get("amount") is not None}
+    for ns in (nosig.get("options") or []):
+        code, amt = ns.get("service_type_code"), ns.get("amount")
+        if not code or amt is None:
+            continue
+        base_amt = priced.get(code)
+        if base_amt is None or amt >= base_amt - 0.005:
+            continue
+        ns = dict(ns)
+        ns["no_signature"] = True
+        ns["saves_vs_signed"] = round(base_amt - amt, 2)
+        merged.append(ns)
+
     if not show_shop:
         # A shop service is any that delivers to a pickup point, or whose name
         # says so (Evri ParcelShop and the like arrive as ordinary door quotes).
@@ -3817,7 +3844,10 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
                                            ready_time=str(cfg.get("ready_time") or ""),
                                            close_time=str(cfg.get("close_time") or ""),
                                            collection_option=str(cfg.get("collection_option") or ""),
-                                           insurance=insurance, signature=signature,
+                                           insurance=insurance,
+                                           # The option's own signature wins: it is what the
+                                           # displayed price was quoted under.
+                                           signature=(option.get("signature_type") or signature),
                                            dropoff_shop=dropoff_shop, customs=customs,
                                            description=_goods_summary(o),
                                            delivery_shop=delivery_shop)

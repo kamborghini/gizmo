@@ -646,6 +646,9 @@ async def quote(origin: dict, destination: dict, boxes: list,
             "pickup_time":       _tidy_time(pick[1] if len(pick) > 1 else ""),
             "breakdown":         breakdown[:8],
             "shops":             shops,
+            # The signature setting this price was quoted under. Booking must send
+            # the same one back or the charge will not match what was shown.
+            "signature_type":    signature_type or "",
             # True only when THIS option really goes to a shop: the request flag is
             # not proof, since a pickup-point quote also returns door services.
             "delivery_dropoff":  bool(delivery_shops) or service_code.upper().endswith("_AP"),
@@ -832,8 +835,13 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
     if co and co not in COLLECTION_OPTIONS:
         co = ""
     sig = (signature or "").strip()
-    if sig and sig not in SIGNATURE_OPTIONS.get(carrier.upper(), []):
-        sig = ""
+    if sig:
+        # A value carried over from the quote is honoured as-is (matching the price
+        # matters more than the wording being that carrier's own); a value the
+        # merchant picked by hand must belong to the carrier being booked.
+        allowed = set(SIGNATURE_OPTIONS.get(carrier.upper(), []))
+        if sig not in allowed and sig not in set(sum(SIGNATURE_OPTIONS.values(), [])):
+            sig = ""
     duties = str((customs or {}).get("duties_payor") or "").strip()
     if duties and duties not in DUTIES_PAYORS:
         duties = ""

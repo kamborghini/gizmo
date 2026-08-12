@@ -437,8 +437,19 @@
         .lbl-segbtn.on { background: var(--surface); color: var(--ink); box-shadow: var(--hair); }
         .lbl-segbtn:hover { color: var(--ink); }
         .disp-modal { max-width: 560px; width: 94vw; }
-        .disp-dest { padding: 10px 12px; background: var(--bg-2); border: 1px solid var(--border-2);
-            border-radius: var(--r-sm); margin-bottom: 14px; }
+        .disp-dest { padding: 11px 13px; background: var(--bg-2); border: 1px solid var(--border-2);
+            border-radius: var(--r-sm); margin-bottom: 18px; }
+        /* One rhythm down the form, and one height for every control in a row. */
+        .disp-modal .field-help { margin: 9px 0 0; }
+        .disp-boxedit { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+        .disp-boxedit > select, .disp-boxedit > input { height: 36px; box-sizing: border-box; }
+        .disp-boxedit > select.psel { min-width: 168px; padding: 7px 10px; font-size: 13px; }
+        .disp-boxedit .icon-btn { width: 30px; height: 30px; flex: none; }
+        .disp-addbox { margin-top: 8px; }
+        .disp-insure { display: flex; align-items: center; gap: 9px; margin: 18px 0 0;
+            font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+        .disp-insure input[type=number] { height: 36px; width: 112px; box-sizing: border-box; margin: 0; }
+        .disp-quote { margin-top: 16px; }
         .disp-dest-name { font-weight: 700; font-size: 14px; }
         .disp-boxrow { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
         .disp-boxrow .psel { max-width: 320px; }
@@ -455,9 +466,9 @@
            (drop-off address, price breakdown) is revealed only on selection. */
         .disp-opts { display: flex; flex-direction: column; gap: 5px; }
         .disp-opt { position: relative; display: grid;
-            grid-template-columns: 34px minmax(0, 1fr) auto;
-            column-gap: 11px; row-gap: 1px; align-items: center;
-            padding: 9px 12px 9px 11px; cursor: pointer; overflow: hidden;
+            grid-template-columns: minmax(0, 1fr) auto;
+            column-gap: 12px; row-gap: 2px; align-items: center;
+            padding: 10px 13px 10px 14px; cursor: pointer; overflow: hidden;
             background: var(--bg-2); border: 1px solid var(--border-2); border-radius: 10px;
             transition: background .14s, border-color .14s; }
         /* Selection spine: still legible when the card scrolls under the header. */
@@ -470,20 +481,15 @@
         .disp-opt:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
         .disp-opt > input[type=radio] { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
         .disp-opt-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-        /* Colour stands in for carrier logos we have no assets for. */
-        .disp-opt-mark { grid-row: 1 / span 2; align-self: center;
-            width: 34px; height: 34px; border-radius: var(--r-xs); display: grid; place-items: center;
-            font-size: 9.5px; font-weight: 800; letter-spacing: .02em; line-height: 1;
-            background: var(--mk-bg, var(--surface-3)); color: var(--mk, var(--ink-2));
-            border: 1px solid var(--border-2); box-shadow: var(--hair); }
-        .disp-opt-top { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+        .disp-opt-top { grid-column: 1; grid-row: 1; display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+        /* The courier's own name leads: a product code told the operator nothing. */
+        .disp-opt-prov { font-weight: 800; color: var(--ink); flex: none; }
         /* Same rule as .lbl-nameline: the name gives way, chips are never cut in half. */
         .disp-opt-carrier { font-weight: 600; font-size: 13.5px; color: var(--ink);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-        .disp-opt-code { font-size: 10.5px; font-weight: 600; color: var(--ink-3); flex: none; }
-        .disp-opt-price { grid-column: 3; grid-row: 1; justify-self: end;
+        .disp-opt-price { grid-column: 2; grid-row: 1; justify-self: end;
             font-weight: 800; font-size: 15px; letter-spacing: -.02em; white-space: nowrap; color: var(--ink); }
-        .disp-opt-when { grid-column: 2; grid-row: 2; font-size: 11.5px; min-width: 0;
+        .disp-opt-when { grid-column: 1; grid-row: 2; font-size: 11.5px; min-width: 0;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .disp-opt-when .d { color: var(--ink); font-weight: 600; }
         .disp-opt-when .t { color: var(--ink-2); }
@@ -492,7 +498,7 @@
         .disp-opt-price .p-inc { font-weight: 800; font-size: 15px; letter-spacing: -.02em; }
         .disp-opt-price .p-ex { font-size: 10.5px; font-weight: 600; color: var(--ink-3); letter-spacing: 0; }
         .disp-vat { font-size: 12px; color: var(--ink-2); margin: 2px 0 8px; font-variant-numeric: tabular-nums; }
-        .disp-opt-more { grid-column: 2 / -1; grid-row: 3; display: none;
+        .disp-opt-more { grid-column: 1 / -1; grid-row: 3; display: none;
             margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--border); }
         .disp-opt.on .disp-opt-more { display: block; }
         .disp-opt-shop { font-size: 11.5px; color: var(--ink-2); }
@@ -4409,22 +4415,22 @@
                 boxHostD.append(rowb);
             }
             addBoxRow(defaultPreset);
-            body.append(el('p', 'field-help', 'Sizes in cm, weight in kg. Weigh the packed box: couriers re-weigh on collection and bill the difference.'));
-            const addBoxBtn = el('button', 'btn'); addBoxBtn.append(ico(I.plus), document.createTextNode('Add a box'));
+            const sizeHelp = el('p', 'field-help', 'Sizes in cm, weight in kg. Weigh the packed box: couriers re-weigh on collection and bill the difference.');
+            const addBoxBtn = el('button', 'btn disp-addbox'); addBoxBtn.append(ico(I.plus), document.createTextNode('Add a box'));
             addBoxBtn.title = 'Multi-parcel shipment: every box travels on the same booking';
             addBoxBtn.onclick = () => { addBoxRow(defaultPreset); staleQuote(); };
-            body.append(addBoxBtn);
+            body.append(addBoxBtn, sizeHelp);
 
             // ---- insurance ----
-            const insWrap = el('label', 'disp-notify');
+            const insWrap = el('label', 'disp-insure');
             const insCb = document.createElement('input'); insCb.type = 'checkbox';
             const insAmt = document.createElement('input'); insAmt.type = 'number'; insAmt.min = '0'; insAmt.step = '1';
-            insAmt.className = 'disp-num'; insAmt.style.width = '110px'; insAmt.style.marginLeft = '8px';
+            insAmt.className = 'disp-num';
             insAmt.value = (o.goods_value && o.goods_value > 0) ? Math.ceil(o.goods_value) : '';
             insAmt.disabled = true;
             insCb.onchange = () => { insAmt.disabled = !insCb.checked; staleQuote(); };
             insAmt.oninput = staleQuote;
-            insWrap.append(insCb, el('span', null, ' Insure this shipment for £'), insAmt);
+            insWrap.append(insCb, el('span', null, 'Insure this shipment for £'), insAmt);
             body.append(insWrap);
 
             function collectBoxes() {
@@ -4441,7 +4447,7 @@
                 return insCb.checked && parseFloat(insAmt.value) > 0 ? parseFloat(insAmt.value) : 0;
             }
 
-            const quoteBtn = el('button', 'btn btn-primary'); quoteBtn.style.marginTop = '10px';
+            const quoteBtn = el('button', 'btn btn-primary disp-quote');
             quoteBtn.append(ico(I.truck), document.createTextNode('Get courier quotes'));
             quoteWrap = el('div'); quoteWrap.style.marginTop = '12px';
             body.append(quoteBtn, quoteWrap);
@@ -4553,22 +4559,21 @@
                     rb.onchange = () => { chosen = op; list.querySelectorAll('.disp-opt').forEach(e => e.classList.remove('on')); rowl.classList.add('on'); renderConfirm(); };
                     rowl.append(rb);
 
-                    // Left rail: a coloured carrier mark stands in for the logo.
-                    const mk = CARRIER_MARKS[String(op.carrier_name || '').toUpperCase()];
-                    const mark = el('span', 'disp-opt-mark', mk ? mk[0] : '?');
-                    mark.setAttribute('aria-hidden', 'true');
-                    if (mk) { mark.style.setProperty('--mk', mk[1]); mark.style.setProperty('--mk-bg', mk[2]); }
-                    else if (op.carrier_label) mark.textContent = op.carrier_label.slice(0, 4).toUpperCase();
-                    rowl.append(mark);
-
                     const drop = !!(op.shops && op.shops.length);
                     const top = el('div', 'disp-opt-top');
-                    top.append(el('span', 'disp-opt-sr', (op.carrier_label || '') + ' '));
+                    // The courier's name leads: the product code meant nothing to anyone.
+                    if (op.carrier_label) top.append(el('span', 'disp-opt-prov', op.carrier_label));
                     top.append(el('span', 'disp-opt-carrier',
-                        op.service_name || op.carrier_label || 'Courier service'));
-                    if (op.product_code) top.append(el('span', 'disp-opt-code', op.product_code));
+                        op.service_name || (op.carrier_label ? '' : 'Courier service')));
+                    if (op.product_code) rowl.title = (op.carrier_label ? op.carrier_label + ' ' : '')
+                        + (op.service_name || '') + ' (World Options service ' + op.product_code + ')';
                     if (Number(op.amount) === cheapest) top.append(el('span', 'lbl-chip made', 'CHEAPEST'));
                     if (drop) top.append(el('span', 'lbl-chip note', 'DROP-OFF'));
+                    if (op.no_signature) {
+                        const ns = el('span', 'lbl-chip note', 'NO SIGNATURE');
+                        ns.title = 'Cheaper, but nobody signs for it on delivery, so there is no proof of receipt';
+                        top.append(ns);
+                    }
                     // Not to the customer's door: they collect it from a shop.
                     if (op.delivery_dropoff) top.append(el('span', 'lbl-chip warn', 'COLLECT FROM SHOP'));
                     rowl.append(top);
@@ -4592,6 +4597,9 @@
                         when.append(el('span', 'p', '  \u00b7  ' + w));
                     }
                     rowl.append(when);
+                    if (op.no_signature && op.saves_vs_signed) {
+                        when.append(el('span', 'p', '  ·  saves ' + fmtPrice(op.saves_vs_signed, op.currency)));
+                    }
                     if (Number(op.amount) > cheapest) {
                         const dl = el('span', 'p', '  ·  +' + fmtPrice(op.amount - cheapest, op.currency));
                         dl.title = fmtPrice(op.amount - cheapest, op.currency) + ' more than the cheapest option';
@@ -4685,8 +4693,12 @@
                     conf.append(el('div', 'sub', 'No collection window set; the courier gets no ready or close time. Set one in Shipping settings.'));
                 }
                 // Signature-on-delivery, when the chosen carrier offers options.
+                if (chosen.no_signature) {
+                    conf.append(el('div', 'disp-warn', 'No signature is collected on delivery. '
+                        + 'Cheaper, but there is no proof the customer received it.'));
+                }
                 const sigGroups = (cfg.signature_options || {});
-                const sigVals = sigGroups[(chosen.carrier_name || '').toUpperCase()] || [];
+                const sigVals = chosen.no_signature ? [] : (sigGroups[(chosen.carrier_name || '').toUpperCase()] || []);
                 let sigSel = null;
                 if (sigVals.length) {
                     const sigF = el('label', 'disp-fld'); sigF.style.margin = '6px 0';
