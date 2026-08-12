@@ -4555,7 +4555,7 @@
 
                     // Left rail: a coloured carrier mark stands in for the logo.
                     const mk = CARRIER_MARKS[String(op.carrier_name || '').toUpperCase()];
-                    const mark = el('span', 'disp-opt-mark', mk ? mk[0] : '\u2014');
+                    const mark = el('span', 'disp-opt-mark', mk ? mk[0] : '?');
                     mark.setAttribute('aria-hidden', 'true');
                     if (mk) { mark.style.setProperty('--mk', mk[1]); mark.style.setProperty('--mk-bg', mk[2]); }
                     else if (op.carrier_label) mark.textContent = op.carrier_label.slice(0, 4).toUpperCase();
@@ -4607,13 +4607,13 @@
                         if (dshop) {
                             const ds = el('div', 'disp-opt-shop');
                             ds.append(el('b', null, 'Customer collects from ' + (dshop.name || 'a pickup shop')));
-                            ds.append(document.createTextNode('  —  ' + [dshop.street, dshop.city, dshop.postcode].filter(Boolean).join(', ')));
+                            ds.append(document.createTextNode(', ' + [dshop.street, dshop.city, dshop.postcode].filter(Boolean).join(', ')));
                             more.append(ds);
                         }
                         if (shop) {
                             const s = el('div', 'disp-opt-shop');
                             s.append(el('b', null, 'Drop off at ' + (shop.name || 'parcel shop')));
-                            s.append(document.createTextNode('  \u2014  ' + [shop.street, shop.postcode].filter(Boolean).join(', ')
+                            s.append(document.createTextNode(', ' + [shop.street, shop.postcode].filter(Boolean).join(', ')
                                 + (shop.distance ? ' (' + shop.distance + ')' : '')));
                             more.append(s);
                         }
