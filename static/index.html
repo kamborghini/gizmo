@@ -4354,6 +4354,30 @@
                 }
                 if (l.type === 'dataurl') { window.open(l.value, '_blank', 'noopener'); return; }
                 if (l.type === 'base64bin') { downloadLabel(l); return; }   // ZPL: not viewable
+                // A PDF cannot be printed from a hidden frame (the viewer prints
+                // blank inside the admin), so the server renders each page to an
+                // image and those print through the same path as production labels.
+                if (l.print_images && l.print_images.length) {
+                    const fr = document.createElement('iframe');
+                    fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0';
+                    const imgs = l.print_images.map(p =>
+                        '<img src="data:image/png;base64,' + p + '" style="width:100%;display:block;page-break-after:always">').join('');
+                    fr.srcdoc = '<!doctype html><html><head><style>@page{margin:0}body{margin:0}</style></head><body>'
+                        + imgs + '</body></html>';
+                    fr.onload = () => {
+                        const wait = () => {
+                            const d = fr.contentDocument;
+                            const pending = [...d.images].some(im => !im.complete);
+                            if (pending) { setTimeout(wait, 120); return; }
+                            try { fr.contentWindow.focus(); fr.contentWindow.print(); }
+                            catch (e) { toastError('Could not open the print dialog. Use Download instead.'); }
+                            setTimeout(() => fr.remove(), 60000);
+                        };
+                        wait();
+                    };
+                    document.body.append(fr);
+                    return;
+                }
                 const url = labelBlobUrl(l);
                 if (!url) { toastError('This label format could not be opened; download it instead.'); return; }
                 // Print in place from a hidden same-origin iframe.

@@ -890,6 +890,41 @@ def _wo_boot() -> None:
 # Booked labels can be big base64 blobs; keep them out of the small state file,
 # one JSON per order, so reprinting after a reload still works (the SOAP API has
 # no fetch-by-tracking service).
+def _pdf_print_images(b64pdf: str) -> list:
+    """Each page of a PDF label as a base64 PNG. Browsers cannot reliably print a
+    PDF from a hidden frame inside the admin (the viewer prints blank or not at
+    all), while an image in an HTML frame prints the same way the production
+    labels already do. Conversion failing is never fatal: Download still works."""
+    try:
+        import base64 as _b64
+        import io as _io
+        import pypdfium2 as _pdfium
+        doc = _pdfium.PdfDocument(_b64.b64decode(b64pdf))
+        out = []
+        for i in range(min(len(doc), 6)):     # a label sheet, not a document
+            pil = doc[i].render(scale=3.0).to_pil()   # ~216 dpi: crisp on thermal
+            buf = _io.BytesIO()
+            pil.save(buf, format="PNG")
+            out.append(_b64.b64encode(buf.getvalue()).decode("ascii"))
+        return out
+    except Exception:
+        logger.exception("label PDF could not be rendered for printing")
+        return []
+
+
+def _with_print_images(labels: list) -> list:
+    out = []
+    for lbl in labels:
+        if (isinstance(lbl, dict) and lbl.get("type") == "base64pdf"
+                and not lbl.get("print_images")):
+            imgs = _pdf_print_images(lbl.get("value") or "")
+            if imgs:
+                lbl = dict(lbl)
+                lbl["print_images"] = imgs
+        out.append(lbl)
+    return out
+
+
 async def _resolve_label_links(labels: list) -> list:
     """Swap every url-type label for its downloaded bytes. Their label links are
     unreliable from inside the admin (relative paths resolve against this app and
@@ -4018,6 +4053,10 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
     except Exception:
         logger.exception("label download failed after booking, order %s; keeping the links", order_id)
     try:
+        shipment["labels"] = _with_print_images(shipment.get("labels") or [])
+    except Exception:
+        logger.exception("label render failed after booking, order %s; Download still works", order_id)
+    try:
         _save_dispatch_labels(int(order_id), shipment.get("labels") or [])
     except Exception:
         logger.exception("saving labels failed after a successful booking, order %s", order_id)
@@ -6519,6 +6558,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         "when": datetime.now(timezone.utc).isoformat(), "order": str(oid)}
                 logger.error("label link would not download for order %s: %s", oid, tech["reply"])
                 _record_wo_failure(tech)
+        try:
+            withimgs = _with_print_images(labels)
+            if withimgs != labels:
+                labels = withimgs
+                _save_dispatch_labels(oid, labels)
+        except Exception:
+            logger.exception("label render on reprint failed for order %s", oid)
         out = {"ok": True, "labels": labels}
         if tech:
             out["tech"] = tech
