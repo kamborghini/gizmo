@@ -3513,17 +3513,47 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
     same_country = (str(origin.get("country") or "").upper()
                     == str(dest.get("country") or "").upper())
     mode = "Domestic" if same_country else "Export"
+    async def _q(delivery_dropoff: bool):
+        return await worldoptions.quote(origin, dest, boxes, currency=currency,
+                                        residential=residential, insurance=insurance,
+                                        collection_dropoff=dropoff, shipment_mode=mode,
+                                        delivery_dropoff=delivery_dropoff)
+
+    # Two quotes, in parallel: to the door, and to a pickup shop. The cheaper
+    # Access Point services (UPS_Express_Saver_AP and friends) are ONLY returned
+    # when the request asks to deliver to a shop, so a single quote hides them.
+    # Quoting is free; a failure on either side must not lose the other.
     try:
-        res = await worldoptions.quote(origin, dest, boxes, currency=currency,
-                                       residential=residential, insurance=insurance,
-                                       collection_dropoff=dropoff, shipment_mode=mode)
-    except worldoptions.WorldOptionsError as e:
-        return {"error": str(e)}
+        door, point = await asyncio.gather(_q(False), _q(True), return_exceptions=True)
     except Exception:
         logger.exception("dispatch quote failed")
         return {"error": "Couldn't get courier quotes. Check the server logs."}
+    if isinstance(door, Exception):
+        if isinstance(point, Exception):
+            err = door
+            if isinstance(err, worldoptions.WorldOptionsError):
+                return {"error": str(err)}
+            logger.exception("dispatch quote failed", exc_info=door)
+            return {"error": "Couldn't get courier quotes. Check the server logs."}
+        door = {"options": []}
+    if isinstance(point, Exception):
+        logger.info("pickup-point quote unavailable: %s", point)
+        point = {"options": []}
+
+    res = dict(door)
+    seen = {o.get("service_type_code") for o in (door.get("options") or [])}
+    merged = list(door.get("options") or [])
+    for opt_row in (point.get("options") or []):
+        # Keep only what the door quote could not offer, so the list does not
+        # double up with the same service twice.
+        if opt_row.get("service_type_code") and opt_row["service_type_code"] in seen:
+            continue
+        merged.append(opt_row)
+    merged.sort(key=lambda x: (x.get("amount") is None, x.get("amount") or 0))
+    res["options"] = merged
     if not res.get("options"):
-        return {"error": "World Options returned no courier options for this address and parcel."}
+        return {"error": "World Options returned no courier options for this address and parcel. "
+                         "Check the postcode and the parcel size, then try again."}
     return {
         "options": res["options"],
         "currency": res.get("currency") or currency,
@@ -3683,6 +3713,17 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
         if shops and isinstance(shops[0], dict):
             dropoff_shop = shops[0]
 
+    # An Access Point service delivers to a shop the customer collects from, so the
+    # chosen shop must travel with the booking.
+    delivery_shop = None
+    if option.get("delivery_dropoff"):
+        dshops = option.get("delivery_shops") or []
+        if dshops and isinstance(dshops[0], dict):
+            delivery_shop = dshops[0]
+        else:
+            return {"error": "This is a collect-from-shop service but World Options did not "
+                             "return a shop for this address. Pick a to-the-door service instead."}
+
     try:
         shipment = await worldoptions.book(option, origin, dest, boxes, currency=currency, reference=reference,
                                            ready_time=str(cfg.get("ready_time") or ""),
@@ -3690,7 +3731,8 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
                                            collection_option=str(cfg.get("collection_option") or ""),
                                            insurance=insurance, signature=signature,
                                            dropoff_shop=dropoff_shop, customs=customs,
-                                           description=_goods_summary(o))
+                                           description=_goods_summary(o),
+                                           delivery_shop=delivery_shop)
     except worldoptions.WorldOptionsError as e:
         return {"error": str(e)}
     except Exception:
@@ -3727,6 +3769,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
         "insured": insurance or "",
         "international": international,
         "dropoff": (dropoff_shop or {}).get("name") or "",
+        "delivery_shop": (delivery_shop or {}).get("name") or "",
     }
     book_note = ""
     try:
@@ -3759,6 +3802,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
         "warning": shipment.get("warning") or "",
         "dispatch": entry,
         "dropoff_shop": dropoff_shop,
+        "delivery_shop": delivery_shop,
         "insured": insurance,
         "international": international,
         "contact_note": contact_note,

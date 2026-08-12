@@ -505,7 +505,7 @@ def _pkg_value(box: dict) -> str:
 async def quote(origin: dict, destination: dict, boxes: list,
                 currency: str = "GBP", residential: bool = False,
                 insurance: str = "", collection_dropoff: bool = False,
-                shipment_mode: str = "") -> dict:
+                shipment_mode: str = "", delivery_dropoff: bool = False) -> dict:
     """Free, read-only price check across all carriers. Returns {options[]}.
     insurance = the cover amount to include in pricing; collection_dropoff asks
     for tariffs where the merchant drops the parcel at a shop."""
@@ -546,6 +546,9 @@ async def quote(origin: dict, destination: dict, boxes: list,
         + "<wo:ShippingDetails>"
         + _t("rs", "Insurance", insurance)
         + (_b("rs", "IsCollectionDropoffRequired", True) if collection_dropoff else "")
+        # Access Point services (UPS_Express_Saver_AP and friends) are only offered
+        # when the quote asks to deliver to a pickup shop instead of the door.
+        + (_b("rs", "IsDeliveryDropoffRequired", True) if delivery_dropoff else "")
         + f"<rs:PackageDetails>{pkgs}</rs:PackageDetails>"
         + _t("rs", "PackageType", "Any_NonDocument")
         + _t("rs", "ServiceName", "ALL")
@@ -580,6 +583,21 @@ async def quote(origin: dict, destination: dict, boxes: list,
                 if v:
                     breakdown.append({"label": _pretty_charge(name), "amount": v})
             breakdown.sort(key=lambda x: -abs(x["amount"]))
+        def _shops(container_name):
+            out = []
+            for shop in _findall_direct(_find(opt, container_name), "wsDropOffShop")[:3]:
+                out.append({
+                    "id":       _text(shop, "ParcelShopNumber"),
+                    "name":     _text(shop, "Description"),
+                    "street":   (_text(shop, "HouseNo") + " " + _text(shop, "Street")).strip(),
+                    "city":     _text(shop, "City"),
+                    "postcode": _text(shop, "PostCode"),
+                    "distance": (_text(shop, "Distance") + " " + _text(shop, "DistanceUnit")).strip(),
+                    "lat":      _text(shop, "Latitude"),
+                    "lng":      _text(shop, "Longitude"),
+                })
+            return out
+        delivery_shops = _shops("wsDeliveryDropOffShops")
         # Drop-off shops offered for this service (nearest first, capped).
         shops = []
         for shop in _findall_direct(_find(opt, "wsCollectionDropOffShops"), "wsDropOffShop")[:3]:
@@ -622,6 +640,10 @@ async def quote(origin: dict, destination: dict, boxes: list,
             "pickup_time":       _tidy_time(pick[1] if len(pick) > 1 else ""),
             "breakdown":         breakdown[:8],
             "shops":             shops,
+            # True only when THIS option really goes to a shop: the request flag is
+            # not proof, since a pickup-point quote also returns door services.
+            "delivery_dropoff":  bool(delivery_shops) or service_code.upper().endswith("_AP"),
+            "delivery_shops":    delivery_shops,
         })
     options.sort(key=lambda x: (x["amount"] is None, x["amount"] if x["amount"] is not None else 0))
     # Diagnostics: WO accounts differ in which fields they populate. If a quote
@@ -731,7 +753,8 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
                ready_time: str = "", close_time: str = "",
                collection_option: str = "", insurance: str = "",
                signature: str = "", dropoff_shop: dict = None,
-               customs: dict = None, description: str = "") -> dict:
+               customs: dict = None, description: str = "",
+               delivery_shop: dict = None) -> dict:
     """Book (and CHARGE) the chosen quote option. Returns tracking + labels.
     ready_time/close_time/collection_option describe the collection; insurance
     is the cover amount; signature a SIGNATURE_OPTIONS value; dropoff_shop the
@@ -768,14 +791,28 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
                    + _t("sd", "PostCode", shop.get("postcode"))
                    + _t("sd", "Street", shop.get("street"))
                    + "</sd:CollectionDropOffInfo>")
+    # An Access Point service delivers to a shop, so the shop must be named or the
+    # parcel has nowhere to go.
+    dshop = delivery_shop or {}
+    ddrop = ""
+    if dshop:
+        ddrop = ("<sd:DeliveryDropOffInfo>"
+                 + _t("sd", "City", dshop.get("city"))
+                 + _t("sd", "Description", dshop.get("name"))
+                 + _t("sd", "DropOffId", dshop.get("id"))
+                 + _t("sd", "PostCode", dshop.get("postcode"))
+                 + _t("sd", "Street", dshop.get("street"))
+                 + "</sd:DeliveryDropOffInfo>")
     shipping = ("<wo:ShippingDetail>"
                 + dropoff
                 + _t("sd", "CollectionType", "Regular")
                 + _t("sd", "Currency", cur)
                 + _t("sd", "CustomerReference", (reference or "")[:40])
+                + ddrop
                 + _t("sd", "Description", (description or "")[:100])
                 + _t("sd", "Insurance", insurance)
                 + (_b("sd", "IsCollectionDropoffRequired", True) if shop else "")
+                + (_b("sd", "IsDeliveryDropoffRequired", True) if dshop else "")
                 + f"<sd:PackageDetails>{pkgs}</sd:PackageDetails>"
                 + _t("sd", "PackageTypeCode", pkg_type)
                 + _t("sd", "SenderVatNo", str((customs or {}).get("vat") or "")[:30])

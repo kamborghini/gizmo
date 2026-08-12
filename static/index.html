@@ -4569,6 +4569,8 @@
                     if (op.product_code) top.append(el('span', 'disp-opt-code', op.product_code));
                     if (Number(op.amount) === cheapest) top.append(el('span', 'lbl-chip made', 'CHEAPEST'));
                     if (drop) top.append(el('span', 'lbl-chip note', 'DROP-OFF'));
+                    // Not to the customer's door: they collect it from a shop.
+                    if (op.delivery_dropoff) top.append(el('span', 'lbl-chip warn', 'COLLECT FROM SHOP'));
                     rowl.append(top);
                     const priceCell = el('div', 'disp-opt-price');
                     priceCell.append(el('span', 'p-inc', fmtPrice(op.amount, op.currency)));
@@ -4599,8 +4601,15 @@
                     // Detail belongs to the chosen option only: row height is what
                     // decides whether 8 options can be compared without scrolling.
                     const shop = drop ? op.shops[0] : null;
-                    if (shop || (op.breakdown && op.breakdown.length)) {
+                    if (shop || (op.delivery_shops && op.delivery_shops.length) || (op.breakdown && op.breakdown.length)) {
                         const more = el('div', 'disp-opt-more');
+                        const dshop = (op.delivery_shops || [])[0];
+                        if (dshop) {
+                            const ds = el('div', 'disp-opt-shop');
+                            ds.append(el('b', null, 'Customer collects from ' + (dshop.name || 'a pickup shop')));
+                            ds.append(document.createTextNode('  —  ' + [dshop.street, dshop.city, dshop.postcode].filter(Boolean).join(', ')));
+                            more.append(ds);
+                        }
                         if (shop) {
                             const s = el('div', 'disp-opt-shop');
                             s.append(el('b', null, 'Drop off at ' + (shop.name || 'parcel shop')));
@@ -4654,6 +4663,13 @@
                         const op2 = el('option', null, lab); op2.value = v; sigSel.append(op2);
                     });
                     sigF.append(sigSel); conf.append(sigF);
+                }
+                if (chosen.delivery_dropoff) {
+                    const ds = (chosen.delivery_shops || [])[0] || {};
+                    conf.append(el('div', 'disp-warn', 'This service does NOT deliver to the customer. '
+                        + 'It goes to ' + (ds.name || 'a pickup shop')
+                        + ([ds.street, ds.postcode].filter(Boolean).length ? ' (' + [ds.street, ds.postcode].filter(Boolean).join(', ') + ')' : '')
+                        + ' and the customer collects it. Only pick this if that is acceptable for this order.'));
                 }
                 conf.append(el('div', 'disp-charge', 'Booking charges your World Options account.'));
                 const book = el('button', 'btn btn-primary disp-book');
@@ -4723,6 +4739,7 @@
                 if (res.warning) body.append(el('div', 'disp-warn', res.warning));
                 if (s.collection_date) body.append(el('div', 'sub', 'Collection reference: ' + s.collection_date));
                 if (res.insured) body.append(el('div', 'sub', 'Insured for ' + fmtPrice(parseFloat(res.insured), s.currency) + '.'));
+                if (res.delivery_shop) body.append(el('div', 'disp-warn', 'The customer collects this from ' + res.delivery_shop + '. It is not delivered to their address.'));
                 if (res.dropoff_shop) body.append(el('div', 'disp-warn', 'Drop the parcel at: ' + [res.dropoff_shop.name, res.dropoff_shop.street, res.dropoff_shop.city, res.dropoff_shop.postcode].filter(Boolean).join(', ') + '. The courier will NOT collect from you.'));
                 if (res.international) body.append(el('div', 'sub', 'Customs declaration sent; World Options generates the commercial invoice.'));
                 if (res.contact_note) body.append(el('div', 'disp-warn', res.contact_note));
