@@ -187,6 +187,11 @@ if _unmapped:  # a new carrier in a future WSDL: name it rather than show a blan
     logger.warning("world options: %d service codes have no carrier prefix: %s",
                    len(_unmapped), ", ".join(_unmapped[:8]))
 
+# How the label should come back. Free text in the XSD with no enum to copy, so
+# this matches the LabelType the service itself reports on the reply. Overridable
+# without a deploy in case this account expects a different word.
+LABEL_DELIVERY = os.environ.get("WO_LABEL_DELIVERY", "PDF").strip()
+
 # The booking wsPackageTypes enum (wo_xsd6). The QUOTE reply's wsPackageTypeCode is a
 # plain string that can carry rate-only values (Any_Document, EX_LTL, ...) which the
 # booking enum rejects; anything not in this list is omitted from the booking.
@@ -198,6 +203,19 @@ PACKAGE_TYPES_ENUM = {
     "DSV_LTL", "EXF_LTL", "EXF_FCL", "GlobalTranz_LTL", "CitySprint_Parcel",
     "Evri_Parcel", "Tuffnells_Parcel", "Tuffnells_Pallet", "RoyalMail_Parcel",
     "DPD_Parcel",
+}
+
+# Each carrier's own "my packaging" member of wsPackageTypes, for when the quote
+# reply names a rate-only type that booking will not accept.
+CARRIER_PACKAGE_TYPE = {
+    "UPS": "UPS_My_Packaging", "FEDEX": "Fedex_Your_Packaging",
+    "DHL": "DHL_NonDocument", "DHLPARCEL": "DHL_NonDocument",
+    "YODEL": "YODEL_NonDocument", "TNT": "TNT_NonDocument",
+    "UKMAIL": "UKMAIL_NonDocument", "DXEXPRESS": "DXExpress_Parcel",
+    "HERMES": "Hermes_Parcel", "EVRISEND": "Evri_Parcel", "EVRICORPORATE": "Evri_Parcel",
+    "DSV": "DSV_LTL", "EXFREIGHT": "EXF_LTL", "GLOBALTRANZ": "GlobalTranz_LTL",
+    "CITYSPRINT": "CitySprint_Parcel", "TUFFNELLS": "Tuffnells_Parcel",
+    "ROYALMAIL": "RoyalMail_Parcel", "DPD": "DPD_Parcel",
 }
 
 # PluginWebServiceCode enum (wo_xsd4): a typo here bricks every request.
@@ -427,6 +445,22 @@ def _t(prefix: str, name: str, value) -> str:
     if value is None or value == "":
         return ""
     return f"<{prefix}:{name}>{_xml_escape(str(value))}</{prefix}:{name}>"
+
+
+_SECRET_EL_RE = re.compile(r"<(m|wo):(Key|Password|MeterNumber)>[^<]*</\1:\2>")
+
+
+def _redacted(xml: str) -> str:
+    """The envelope with the credentials removed, safe for a log."""
+    return _SECRET_EL_RE.sub(lambda m: f"<{m.group(1)}:{m.group(2)}>***</{m.group(1)}:{m.group(2)}>", xml)
+
+
+def _ts(prefix: str, name: str, value) -> str:
+    """Like _t, but ALWAYS emits the element, empty when there is no value. Use for
+    free-text fields the service reads unconditionally: a UK address routinely has
+    no county and a consumer has no company, and null is not the same as blank."""
+    v = "" if value is None else str(value)
+    return f"<{prefix}:{name}>{_xml_escape(v)}</{prefix}:{name}>"
 
 
 def _b(prefix: str, name: str, value: bool) -> str:
@@ -826,16 +860,16 @@ def _recipient_block(d: dict) -> str:
     # Fax,Name,Phone,PhoneDialCode,Postalcode,Residential,State_Code
     name = d.get("name") or " ".join(x for x in [d.get("firstname"), d.get("lastname")] if x).strip()
     return ("<wo:RecipientsDetails>"
-            + _t("m", "Address1", d.get("street"))
-            + _t("m", "City", d.get("city"))
-            + _t("m", "Company", d.get("company"))
-            + _t("m", "Country_Code", (d.get("country") or "").upper())
-            + _t("m", "Email", d.get("email"))
-            + _t("m", "Name", name or d.get("company"))
-            + _t("m", "Phone", d.get("phone"))
-            + _t("m", "Postalcode", d.get("postcode"))
+            + _ts("m", "Address1", d.get("street"))
+            + _ts("m", "City", d.get("city"))
+            + _ts("m", "Company", d.get("company"))
+            + _ts("m", "Country_Code", (d.get("country") or "").upper())
+            + _ts("m", "Email", d.get("email"))
+            + _ts("m", "Name", name or d.get("company"))
+            + _ts("m", "Phone", d.get("phone"))
+            + _ts("m", "Postalcode", d.get("postcode"))
             + _b("m", "Residential", not (d.get("company") or "").strip())
-            + _t("m", "State_Code", d.get("state"))
+            + _ts("m", "State_Code", d.get("state"))
             + "</wo:RecipientsDetails>")
 
 
@@ -844,15 +878,15 @@ def _sender_block(o: dict) -> str:
     # Name,Phone,PhoneDialCode,PostalCode,State
     name = o.get("name") or " ".join(x for x in [o.get("firstname"), o.get("lastname")] if x).strip()
     return ("<wo:SendersDetails>"
-            + _t("m", "Address1", o.get("street"))
-            + _t("m", "City", o.get("city"))
-            + _t("m", "Company", o.get("company"))
-            + _t("m", "CountryCode", (o.get("country") or "").upper())
-            + _t("m", "Email", o.get("email"))
-            + _t("m", "Name", name or o.get("company"))
-            + _t("m", "Phone", o.get("phone"))
-            + _t("m", "PostalCode", o.get("postcode"))
-            + _t("m", "State", o.get("state"))
+            + _ts("m", "Address1", o.get("street"))
+            + _ts("m", "City", o.get("city"))
+            + _ts("m", "Company", o.get("company"))
+            + _ts("m", "CountryCode", (o.get("country") or "").upper())
+            + _ts("m", "Email", o.get("email"))
+            + _ts("m", "Name", name or o.get("company"))
+            + _ts("m", "Phone", o.get("phone"))
+            + _ts("m", "PostalCode", o.get("postcode"))
+            + _ts("m", "State", o.get("state"))
             + "</wo:SendersDetails>")
 
 
@@ -948,7 +982,16 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
                     " (" + known + " is not a bookable carrier enum member)" if known else "")
     pkg_type = option.get("package_type_code") or ""
     if pkg_type not in PACKAGE_TYPES_ENUM:
-        pkg_type = ""
+        # PackageTypeCode is a non-nillable enum, so dropping it does NOT send
+        # nothing: WCF substitutes the enum's FIRST member, Fedex_Box, which is the
+        # wrong packaging on anyone else's booking. The quote reply legitimately
+        # carries rate-only values (Any_NonDocument and friends), so the carrier's
+        # own "my packaging" type is used instead of leaving it to the default.
+        pkg_type = CARRIER_PACKAGE_TYPE.get((known or carrier or "").upper(), "")
+        if not pkg_type:
+            logger.warning("world options: no bookable package type for carrier %r "
+                           "(quote said %r); WCF will default it",
+                           known or carrier, option.get("package_type_code"))
     cur = (currency or "GBP")[:3].upper()
     pkgs = ""
     for i, b in enumerate(boxes or [], start=1):
@@ -987,15 +1030,21 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
                 + dropoff
                 + _t("sd", "CollectionType", "Regular")
                 + _t("sd", "Currency", cur)
-                + _t("sd", "CustomerReference", (reference or "")[:40])
+                + _ts("sd", "CustomerReference", (reference or "")[:40])
                 + ddrop
-                + _t("sd", "Description", (description or "")[:100])
+                + _ts("sd", "Description", (description or "")[:100])
                 + _t("sd", "Insurance", insurance)
                 + (_b("sd", "IsCollectionDropoffRequired", True) if shop else "")
                 + (_b("sd", "IsDeliveryDropoffRequired", True) if dshop else "")
+                # XSD sequence positions 12 and 13. Both are free-text strings the
+                # service reads while building the label, and we were sending
+                # neither, so both arrived null. The label comes back inline in the
+                # reply (Image/LabelURL), which is what LABEL_DELIVERY names.
+                + _ts("sd", "LabelDeliveryMethod", LABEL_DELIVERY)
+                + _ts("sd", "NumberOfPiecesOnAllPallets", "")
                 + f"<sd:PackageDetails>{pkgs}</sd:PackageDetails>"
                 + _t("sd", "PackageTypeCode", pkg_type)
-                + _t("sd", "SenderVatNo", str((customs or {}).get("vat") or "")[:30])
+                + _ts("sd", "SenderVatNo", str((customs or {}).get("vat") or "")[:30])
                 + _t("sd", "ServiceType", carrier)
                 + _t("sd", "ServiceTypeCode", service_code)
                 + "</wo:ShippingDetail>")
@@ -1039,8 +1088,15 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
              + _sender_block(origin or {})
              + shipping
              + "</tem:shipment></tem:DoShipment>")
-    root = await _soap_call("ShipmentService", "http://tempuri.org/IShipmentService/DoShipment", inner,
+    try:
+        root = await _soap_call("ShipmentService", "http://tempuri.org/IShipmentService/DoShipment", inner,
                             retryable=False)
+    except WorldOptionsError:
+        # The service rejected the request itself (rather than the data in it), so
+        # the envelope is the evidence. Logged once, with the credentials stripped,
+        # because the alternative is guessing against a live account that charges.
+        logger.error("world options: DoShipment rejected. Envelope sent:\n%s", _redacted(inner))
+        raise
     reply = _find(root, "DoShipmentResult")
     if reply is None:
         raise WorldOptionsError("World Options returned no booking result.")
