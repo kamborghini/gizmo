@@ -82,9 +82,13 @@ def canonical_carrier(code: str) -> str:
 # fallback when the quote reply does not name the carrier itself. Prefix EVRI
 # maps to EVRISEND (bare 'EVRI' is not an enum member).
 _CARRIERS = ["DHLPARCEL", "DHL", "FEDEX", "UPS", "TNT", "PALLETWAYS", "YODEL",
-             "DXEXPRESS", "HERMES", "DSV", "EXFREIGHT", "GLOBALTRANZ", "CITYSPRINT",
-             "EVRISEND", "EVRICORPORATE", "EVRI", "TUFFNELLS", "ROYALMAIL", "DPD"]
-_PREFIX_TO_ENUM = {"EVRI": "EVRISEND", "PALLETWAYS": "Palletways", "EXFREIGHT": "EXFreight"}
+             "DXEXPRESS", "DX_", "HERMES", "DSV", "EXFREIGHT", "EXF_", "GLOBALTRANZ",
+             "CITYSPRINT", "EVRISEND", "EVRICORPORATE", "EVRI", "TUFFNELLS", "ROYALMAIL",
+             "DPD", "UKMAIL"]
+# Prefixes that are not themselves enum members map onto the one that is. UKMail
+# is not in wsServiceCompanyTypes at all, so it stays a display-only label.
+_PREFIX_TO_ENUM = {"EVRI": "EVRISEND", "PALLETWAYS": "Palletways", "EXFREIGHT": "EXFreight",
+                   "EXF_": "EXFreight", "DX_": "DXEXPRESS", "UKMAIL": "UKMAIL"}
 
 # The booking wsPackageTypes enum (wo_xsd6). The QUOTE reply's wsPackageTypeCode is a
 # plain string that can carry rate-only values (Any_Document, EX_LTL, ...) which the
@@ -128,6 +132,7 @@ CARRIER_DISPLAY = {
     "DHLPARCEL": "DHL Parcel", "YODEL": "Yodel", "CITYSPRINT": "CitySprint",
     "DXEXPRESS": "DX", "TUFFNELLS": "Tuffnells", "PALLETWAYS": "Palletways",
     "DSV": "DSV", "EXFREIGHT": "EXFreight", "GLOBALTRANZ": "GlobalTranz",
+    "UKMAIL": "UKMail", "EVRI": "Evri",
 }
 
 
@@ -173,6 +178,7 @@ _CARRIER_WORDS = [
     (r"\bdpd\b", "DPD"), (r"\bevri\b|hermes", "EVRISEND"), (r"yodel", "YODEL"),
     (r"citysprint", "CITYSPRINT"), (r"palletways", "PALLETWAYS"), (r"tuffnells", "TUFFNELLS"),
     (r"globaltranz", "GLOBALTRANZ"), (r"\bdsv\b", "DSV"), (r"\bdx\b", "DXEXPRESS"),
+    (r"uk\s*mail", "UKMAIL"), (r"exfreight|\bexf\b", "EXFreight"),
 ]
 
 
@@ -180,6 +186,7 @@ def carrier_from_text(*texts) -> str:
     """Find a carrier named inside any WO string (their service names carry it:
     '03 DHL Domestic Express'). Returns the enum value, or ''."""
     blob = " ".join(str(t or "") for t in texts).lower()
+    blob = re.sub(r"[_\-./]+", " ", blob)
     for pat, enum in _CARRIER_WORDS:
         if re.search(pat, blob):
             return enum
@@ -476,15 +483,27 @@ def _reply_status(reply, context: str):
 # ---------------------------------------------------------------------------
 # Normalization helpers
 # ---------------------------------------------------------------------------
-def _carrier_from(service_code: str, quote_service_type: str) -> str:
-    qt = (quote_service_type or "").strip()
-    if qt:
-        return canonical_carrier(qt) or qt.upper()
-    up = (service_code or "").upper()
+def _prefix_carrier(code: str) -> str:
+    up = (code or "").upper()
     for cr in _CARRIERS:
         if up.startswith(cr):
             return _PREFIX_TO_ENUM.get(cr) or canonical_carrier(cr) or cr
     return ""
+
+
+def _carrier_from(service_code: str, quote_service_type: str,
+                  package_type_code: str = "", service_name: str = "") -> str:
+    """Who is actually carrying it. World Options names the carrier in a different
+    field on every account, so each signal is tried in order of how much it can be
+    trusted: their own carrier field, the service code prefix, the package type
+    (UPS_My_Packaging / DHL_NonDocument / Fedex_Your_Packaging always carry it),
+    then any carrier word inside the service text."""
+    qt = (quote_service_type or "").strip()
+    if qt:
+        return canonical_carrier(qt) or qt.upper()
+    return (_prefix_carrier(service_code)
+            or _prefix_carrier(package_type_code)
+            or carrier_from_text(service_name, service_code, package_type_code))
 
 
 def _dec(v):
@@ -574,7 +593,10 @@ async def quote(origin: dict, destination: dict, boxes: list,
         qd = _find(opt, "wsQuoteDetails")
         amount = _dec(_text(qd, "TotalNetCharge")) if qd is not None else None
         service_code = _text(opt, "wsServiceTypeCode")
-        carrier = _carrier_from(service_code, _text(qd, "ServiceType") if qd is not None else "")
+        carrier = _carrier_from(service_code,
+                                _text(qd, "ServiceType") if qd is not None else "",
+                                _text(opt, "wsPackageTypeCode"),
+                                _text(opt, "wsServiceTypeName"))
         # Non-zero price components -> a human breakdown, largest first.
         breakdown = []
         vat = None

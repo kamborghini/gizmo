@@ -484,6 +484,7 @@
         .disp-opt-top { grid-column: 1; grid-row: 1; display: flex; align-items: baseline; gap: 6px; min-width: 0; }
         /* The courier's own name leads: a product code told the operator nothing. */
         .disp-opt-prov { font-weight: 800; color: var(--ink); flex: none; }
+        .disp-opt-prov.disp-opt-unknown { color: var(--warn, #d9a441); font-weight: 700; }
         /* Same rule as .lbl-nameline: the name gives way, chips are never cut in half. */
         .disp-opt-carrier { font-weight: 600; font-size: 13.5px; color: var(--ink);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -4562,10 +4563,18 @@
                     const drop = !!(op.shops && op.shops.length);
                     const top = el('div', 'disp-opt-top');
                     // The courier's name leads: the product code meant nothing to anyone.
-                    if (op.carrier_label) top.append(el('span', 'disp-opt-prov', op.carrier_label));
+                    // When World Options names no carrier the option must still be
+                    // identifiable, so it says so plainly and keeps their code on screen.
+                    const known = !!op.carrier_label;
+                    const lead = el('span', 'disp-opt-prov' + (known ? '' : ' disp-opt-unknown'),
+                        known ? op.carrier_label : 'Carrier not named');
+                    if (!known) lead.title = 'World Options did not say which courier runs this service. '
+                        + 'Their service code is ' + (op.product_code || op.service_type_code || 'not given') + '.';
+                    top.append(lead);
                     top.append(el('span', 'disp-opt-carrier',
-                        op.service_name || (op.carrier_label ? '' : 'Courier service')));
-                    if (op.product_code) rowl.title = (op.carrier_label ? op.carrier_label + ' ' : '')
+                        op.service_name || (known ? '' : 'Courier service')));
+                    if (!known && op.product_code) top.append(el('span', 'lbl-chip', op.product_code));
+                    if (op.product_code) rowl.title = (known ? op.carrier_label + ' ' : '')
                         + (op.service_name || '') + ' (World Options service ' + op.product_code + ')';
                     if (Number(op.amount) === cheapest) top.append(el('span', 'lbl-chip made', 'CHEAPEST'));
                     if (drop) top.append(el('span', 'lbl-chip note', 'DROP-OFF'));
