@@ -2041,6 +2041,11 @@ def t_customs_lines_carry_the_cost_price_and_the_products_own_hs_code():
         eq(proj["origin"], "GB", "origin from Shopify")
         gobo = items[1]
         eq(gobo["cost"], "", "no variant -> no cost; the UI falls back to sale price and says so")
+        # Origin rules: Shopify's own value wins (the projector's inventory item
+        # says GB here); with nothing in Shopify, the merchant's blanket rule
+        # applies: projectors are made in China, gobos (everything else) in the UK.
+        eq(proj["origin"], "GB", "Shopify origin wins when set")
+        eq(gobo["origin"], "GB", "a gobo with no Shopify origin is UK")
     finally:
         copilot._tool_json = saved
 
@@ -2068,6 +2073,40 @@ def t_every_tool_the_customs_lookup_uses_is_registered():
     # the customs card quietly falls back to sale prices. Pin the registration.
     for name in ("shopify_get_order", "shopify_get_variant", "shopify_get_inventory_items"):
         ok(name in server.COPILOT_TOOLS, name + " is in the registry copilot actually uses")
+
+@test
+def t_projectors_default_to_china_when_shopify_has_no_origin():
+    reset_dispatch(); reset_prod()
+    order = {"id": 12345, "name": "#12345", "currency": "GBP", "email": "c@x.co",
+             "shipping_address": {"first_name": "A", "last_name": "B", "address1": "1 Rue",
+                                  "city": "Paris", "zip": "75001", "country_code": "FR",
+                                  "phone": "0033", "name": "A B"},
+             "line_items": [
+                 {"id": 1, "title": "200 Watt LED Projector", "quantity": 1,
+                  "price": "780.00", "variant_id": 111},
+                 {"id": 2, "title": "Wedding Gobo 16", "quantity": 1,
+                  "price": "45.00", "variant_id": 222},
+             ]}
+    async def tools(registry, name, args):
+        if name == "shopify_get_order":
+            return order
+        if name == "shopify_get_variant":
+            return {"id": args["variant_id"], "inventory_item_id": 9000 + args["variant_id"]}
+        if name == "shopify_get_inventory_items":
+            # Shopify knows the cost but NOT the origin for either product.
+            return {"inventory_items": [
+                {"id": 9111, "cost": "425.00", "harmonized_system_code": "9008.50.00"},
+                {"id": 9222, "cost": "12.00", "harmonized_system_code": ""},
+            ]}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
+        items = r.json().get("customs_items") or []
+        eq(items[0]["origin"], "CN", "a projector with no Shopify origin is China")
+        eq(items[1]["origin"], "GB", "a gobo with no Shopify origin is the UK")
+    finally:
+        copilot._tool_json = saved
 
 # =========================== run ===========================================
 passed = failed = 0

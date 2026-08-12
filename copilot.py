@@ -3622,13 +3622,19 @@ async def _customs_items(registry: dict, o: dict) -> list:
     for li, inv in zip(lines, inv_ids):
         item = by_id.get(int(inv)) if inv else None
         cost = str((item or {}).get("cost") or "").strip()
+        title = str(li.get("title") or "Item").strip()
+        origin = str((item or {}).get("country_code_of_origin") or "").strip().upper()
+        if not origin:
+            # The merchant's blanket rule when Shopify does not say: projectors are
+            # made in China, gobos (and everything else they make) in the UK.
+            origin = "CN" if "projector" in title.lower() else "GB"
         out.append({
-            "title": str(li.get("title") or "Item").strip(),
+            "title": title,
             "quantity": int(li.get("quantity") or 1),
             "price": str(li.get("price") or ""),
             "cost": cost,
             "hs_code": str((item or {}).get("harmonized_system_code") or "").strip(),
-            "origin": str((item or {}).get("country_code_of_origin") or "").strip().upper(),
+            "origin": origin,
         })
     return out
 

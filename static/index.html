@@ -4597,11 +4597,16 @@
                     const qIn = document.createElement('input'); qIn.type = 'number'; qIn.min = '1'; qIn.step = '1'; qIn.className = 'disp-num disp-boxdim'; qIn.placeholder = 'Qty';
                     const pIn = document.createElement('input'); pIn.type = 'number'; pIn.min = '0'; pIn.step = '0.01'; pIn.className = 'disp-num disp-boxdim'; pIn.placeholder = 'Unit £';
                     const hIn = document.createElement('input'); hIn.type = 'text'; hIn.className = 'disp-num disp-boxdim'; hIn.placeholder = 'HS code'; hIn.style.width = '90px';
-                    if (pre) { dIn.value = pre.description || ''; qIn.value = pre.quantity || 1; pIn.value = pre.unit_price || ''; hIn.value = pre.hs || ''; }
+                    // Origin is ON the card: the commercial invoice needs it, and an
+                    // invisible wrong value is worse than a visible editable one.
+                    const oIn = document.createElement('input'); oIn.type = 'text'; oIn.className = 'disp-num disp-boxdim'; oIn.placeholder = 'Origin'; oIn.maxLength = 2; oIn.style.width = '58px';
+                    oIn.title = 'Country of origin (2 letters), where the item was MADE, for the commercial invoice';
+                    if (pre) { dIn.value = pre.description || ''; qIn.value = pre.quantity || 1; pIn.value = pre.unit_price || ''; hIn.value = pre.hs || ''; oIn.value = pre.origin || 'GB'; }
+                    else { oIn.value = 'GB'; }
                     const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove line';
-                    const line = { dIn, qIn, pIn, hIn, origin: (pre && pre.origin) || '' };
+                    const line = { dIn, qIn, pIn, hIn, oIn };
                     rm.onclick = () => { const i = customsLines.indexOf(line); if (i >= 0) customsLines.splice(i, 1); rowc.remove(); };
-                    rowc.append(dIn, qIn, pIn, hIn, rm);
+                    rowc.append(dIn, qIn, pIn, hIn, oIn, rm);
                     customsLines.push(line);
                     linesHost.append(rowc);
                 }
@@ -4656,7 +4661,7 @@
                     const d = l.dIn.value.trim(), q = parseInt(l.qIn.value, 10), p = parseFloat(l.pIn.value);
                     if (!d || !(q > 0) || !(p >= 0) || isNaN(p)) continue;
                     lines.push({ description: d, quantity: q, unit_price: p, hs: l.hIn.value.trim(),
-                                 country: (l.origin || 'GB') });
+                                 country: (l.oIn.value.trim().toUpperCase() || 'GB') });
                 }
                 return { lines, receiver_tax_id: recvTaxIn ? recvTaxIn.value.trim() : '' };
             }
