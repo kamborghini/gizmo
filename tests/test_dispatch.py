@@ -2061,6 +2061,14 @@ def t_domestic_quotes_do_not_pay_for_customs_lookups():
     finally:
         copilot._tool_json = real
 
+@test
+def t_every_tool_the_customs_lookup_uses_is_registered():
+    # _tool_json swallows a missing registry entry into {"_failed": True}, so a
+    # tool that exists in server.py but not in COPILOT_TOOLS fails SILENTLY and
+    # the customs card quietly falls back to sale prices. Pin the registration.
+    for name in ("shopify_get_order", "shopify_get_variant", "shopify_get_inventory_items"):
+        ok(name in server.COPILOT_TOOLS, name + " is in the registry copilot actually uses")
+
 # =========================== run ===========================================
 passed = failed = 0
 for fn in TESTS:

@@ -1067,6 +1067,8 @@ COPILOT_TOOLS = {
     "shopify_get_collection_products": (shopify_get_collection_products, GetCollectionProductsInput),
     "shopify_list_locations":        (shopify_list_locations,        ListInventoryLocationsInput),
     "shopify_get_inventory_levels":  (shopify_get_inventory_levels,  GetInventoryLevelsInput),
+    "shopify_get_variant":           (shopify_get_variant,           GetVariantInput),
+    "shopify_get_inventory_items":   (shopify_get_inventory_items,   GetInventoryItemsInput),
     "shopify_list_webhooks":         (shopify_list_webhooks,         ListWebhooksInput),
 }
 
