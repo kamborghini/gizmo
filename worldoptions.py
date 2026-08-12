@@ -1125,7 +1125,7 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
     # string arrives as null); the date and account-number fields stay omitted,
     # because "" would fail a parse that a null is more likely to skip.
     billing = ("<wo:BillingDetail>"
-               + _ts("wo", "CloseTime", close_time)
+               + _t("wo", "CloseTime", close_time)
                + _t("wo", "CollectionOptions", co)
                + _t("wo", "DeliverySignatureType", sig)
                + _ts("wo", "DutiesAccNumber", "")
@@ -1133,8 +1133,8 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
                + _ts("wo", "LocationDescription", "")
                + _ts("wo", "OtherEmailAddress", "")
                + _ts("wo", "PersonalMessage", "")
-               + _ts("wo", "ReadyDate", ready_date)
-               + _ts("wo", "ReadyTime", ready_time)
+               + _t("wo", "ReadyDate", ready_date)
+               + _t("wo", "ReadyTime", ready_time)
                + _ts("wo", "RecipientEmailAddress", "")
                + _ts("wo", "TransportationAccNumber", "")
                + _t("wo", "TransportationPayor", "Bill_To_Sender")
