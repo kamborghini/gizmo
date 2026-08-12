@@ -190,7 +190,7 @@ if _unmapped:  # a new carrier in a future WSDL: name it rather than show a blan
 # How the label should come back. Free text in the XSD with no enum to copy, so
 # this matches the LabelType the service itself reports on the reply. Overridable
 # without a deploy in case this account expects a different word.
-LABEL_DELIVERY = os.environ.get("WO_LABEL_DELIVERY", "PDF").strip()
+LABEL_DELIVERY = os.environ.get("WO_LABEL_DELIVERY", "").strip()
 
 # The booking wsPackageTypes enum (wo_xsd6). The QUOTE reply's wsPackageTypeCode is a
 # plain string that can carry rate-only values (Any_Document, EX_LTL, ...) which the
@@ -447,12 +447,25 @@ def _t(prefix: str, name: str, value) -> str:
     return f"<{prefix}:{name}>{_xml_escape(str(value))}</{prefix}:{name}>"
 
 
-_SECRET_EL_RE = re.compile(r"<(m|wo):(Key|Password|MeterNumber)>[^<]*</\1:\2>")
+# Credentials AND personal data: the envelope carries the customer's address,
+# phone, email and any tax identifiers, none of which belong in a log file. The
+# element names are kept so the shape of the request stays readable.
+_REDACT_EL_RE = re.compile(
+    r"<(m|wo|sd|ad):(Key|Password|MeterNumber|SubUserKey|Email|OtherEmailAddress"
+    r"|RecipientEmailAddress|Phone|PhoneDialCode|Fax|Address1|Address2|Address3"
+    r"|Name|Company|Postalcode|PostalCode|PostCode|EORINumber|ReceiverTaxId"
+    r"|ReceiverCompanyNumber|SenderVatNo|DutiesAccNumber|TransportationAccNumber"
+    r"|PersonalMessage)>([^<]*)</\1:\2>")
 
 
 def _redacted(xml: str) -> str:
-    """The envelope with the credentials removed, safe for a log."""
-    return _SECRET_EL_RE.sub(lambda m: f"<{m.group(1)}:{m.group(2)}>***</{m.group(1)}:{m.group(2)}>", xml)
+    """The envelope with credentials and personal data removed, safe for a log.
+    Blank values stay visibly blank: which fields were EMPTY is the whole point of
+    reading the thing."""
+    def sub(m):
+        body = "" if not m.group(3) else "***"
+        return f"<{m.group(1)}:{m.group(2)}>{body}</{m.group(1)}:{m.group(2)}>"
+    return _REDACT_EL_RE.sub(sub, xml)
 
 
 def _ts(prefix: str, name: str, value) -> str:
@@ -861,12 +874,16 @@ def _recipient_block(d: dict) -> str:
     name = d.get("name") or " ".join(x for x in [d.get("firstname"), d.get("lastname")] if x).strip()
     return ("<wo:RecipientsDetails>"
             + _ts("m", "Address1", d.get("street"))
+            + _ts("m", "Address2", d.get("street2"))
+            + _ts("m", "Address3", "")
             + _ts("m", "City", d.get("city"))
             + _ts("m", "Company", d.get("company"))
             + _ts("m", "Country_Code", (d.get("country") or "").upper())
             + _ts("m", "Email", d.get("email"))
+            + _ts("m", "Fax", "")
             + _ts("m", "Name", name or d.get("company"))
             + _ts("m", "Phone", d.get("phone"))
+            + _ts("m", "PhoneDialCode", "")
             + _ts("m", "Postalcode", d.get("postcode"))
             + _b("m", "Residential", not (d.get("company") or "").strip())
             + _ts("m", "State_Code", d.get("state"))
@@ -879,12 +896,15 @@ def _sender_block(o: dict) -> str:
     name = o.get("name") or " ".join(x for x in [o.get("firstname"), o.get("lastname")] if x).strip()
     return ("<wo:SendersDetails>"
             + _ts("m", "Address1", o.get("street"))
+            + _ts("m", "Address2", o.get("street2"))
+            + _ts("m", "Address3", "")
             + _ts("m", "City", o.get("city"))
             + _ts("m", "Company", o.get("company"))
             + _ts("m", "CountryCode", (o.get("country") or "").upper())
             + _ts("m", "Email", o.get("email"))
             + _ts("m", "Name", name or o.get("company"))
             + _ts("m", "Phone", o.get("phone"))
+            + _ts("m", "PhoneDialCode", "")
             + _ts("m", "PostalCode", o.get("postcode"))
             + _ts("m", "State", o.get("state"))
             + "</wo:SendersDetails>")
@@ -925,22 +945,22 @@ def _customs_block(customs: dict) -> str:
                   + "</ad:wsAddlShipmentDetail.GoodsDetail>")
     total = customs.get("total_value")
     return ("<wo:AdditionalShipmentDetail>"
-            + _t("ad", "AdditionalComments", str(customs.get("comments") or "")[:200])
+            + _ts("ad", "AdditionalComments", str(customs.get("comments") or "")[:200])
             + _t("ad", "CommercialInvoiceType",
                  customs.get("invoice_type") if customs.get("invoice_type") in INVOICE_TYPES else "Help_Me_Generate")
-            + _t("ad", "EORINumber", str(customs.get("eori") or "")[:30])
+            + _ts("ad", "EORINumber", str(customs.get("eori") or "")[:30])
             + _t("ad", "ExportReason",
                  customs.get("export_reason") if customs.get("export_reason") in EXPORT_REASONS else "Sale")
             + _t("ad", "ExportType",
                  {"Repair": "Temporary", "Exhibition": "Temporary",
                   "Return": "Re_export"}.get(customs.get("export_reason") or "", "Permanent"))
             + (f"<ad:GoodsDetails>{goods}</ad:GoodsDetails>" if goods else "")
-            + _t("ad", "InvoiceNumber", str(customs.get("invoice_number") or "")[:40])
+            + _ts("ad", "InvoiceNumber", str(customs.get("invoice_number") or "")[:40])
             + _b("ad", "IsPaperLess", True)
-            + _t("ad", "ReceiverCompanyNumber", str(customs.get("receiver_company_number") or "")[:40])
-            + _t("ad", "ReceiverTaxId", str(customs.get("receiver_tax_id") or "")[:40])
+            + _ts("ad", "ReceiverCompanyNumber", str(customs.get("receiver_company_number") or "")[:40])
+            + _ts("ad", "ReceiverTaxId", str(customs.get("receiver_tax_id") or "")[:40])
             + (_t("ad", "TotalCustomValue", _num(total)) if total else "")
-            + _t("ad", "TradeTerm", str(customs.get("trade_term") or "")[:20])
+            + _ts("ad", "TradeTerm", str(customs.get("trade_term") or "")[:20])
             + "</wo:AdditionalShipmentDetail>")
 
 
@@ -958,7 +978,10 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
     (see _customs_block); description a short contents summary."""
     option = option or {}
     service_code = (option.get("service_type_code") or "").strip()
-    if service_code and service_code not in SERVICE_TYPES_ENUM:
+    if not service_code:
+        raise WorldOptionsError("No courier service was chosen. Get fresh quotes and "
+                                "pick a service; nothing was booked.")
+    if service_code not in SERVICE_TYPES_ENUM:
         near = _service_carrier(service_code)
         raise WorldOptionsError(
             "World Options does not recognise the service code " + service_code
@@ -989,9 +1012,12 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
         # own "my packaging" type is used instead of leaving it to the default.
         pkg_type = CARRIER_PACKAGE_TYPE.get((known or carrier or "").upper(), "")
         if not pkg_type:
-            logger.warning("world options: no bookable package type for carrier %r "
-                           "(quote said %r); WCF will default it",
-                           known or carrier, option.get("package_type_code"))
+            raise WorldOptionsError(
+                "World Options quoted this service with packaging that cannot be booked ("
+                + (option.get("package_type_code") or "none given")
+                + ") and there is no known packaging for "
+                + (carrier_display(known or carrier) or "this carrier")
+                + ". Nothing was booked. Pick another service, or send this message on.")
     cur = (currency or "GBP")[:3].upper()
     pkgs = ""
     for i, b in enumerate(boxes or [], start=1):
@@ -1008,11 +1034,11 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
     dropoff = ""
     if shop:
         dropoff = ("<sd:CollectionDropOffInfo>"
-                   + _t("sd", "City", shop.get("city"))
-                   + _t("sd", "Description", shop.get("name"))
-                   + _t("sd", "DropOffId", shop.get("id"))
-                   + _t("sd", "PostCode", shop.get("postcode"))
-                   + _t("sd", "Street", shop.get("street"))
+                   + _ts("sd", "City", shop.get("city"))
+                   + _ts("sd", "Description", shop.get("name"))
+                   + _ts("sd", "DropOffId", shop.get("id"))
+                   + _ts("sd", "PostCode", shop.get("postcode"))
+                   + _ts("sd", "Street", shop.get("street"))
                    + "</sd:CollectionDropOffInfo>")
     # An Access Point service delivers to a shop, so the shop must be named or the
     # parcel has nowhere to go.
@@ -1020,11 +1046,11 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
     ddrop = ""
     if dshop:
         ddrop = ("<sd:DeliveryDropOffInfo>"
-                 + _t("sd", "City", dshop.get("city"))
-                 + _t("sd", "Description", dshop.get("name"))
-                 + _t("sd", "DropOffId", dshop.get("id"))
-                 + _t("sd", "PostCode", dshop.get("postcode"))
-                 + _t("sd", "Street", dshop.get("street"))
+                 + _ts("sd", "City", dshop.get("city"))
+                 + _ts("sd", "Description", dshop.get("name"))
+                 + _ts("sd", "DropOffId", dshop.get("id"))
+                 + _ts("sd", "PostCode", dshop.get("postcode"))
+                 + _ts("sd", "Street", dshop.get("street"))
                  + "</sd:DeliveryDropOffInfo>")
     shipping = ("<wo:ShippingDetail>"
                 + dropoff
@@ -1033,7 +1059,7 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
                 + _ts("sd", "CustomerReference", (reference or "")[:40])
                 + ddrop
                 + _ts("sd", "Description", (description or "")[:100])
-                + _t("sd", "Insurance", insurance)
+                + _t("sd", "Insurance", insurance or "0")
                 + (_b("sd", "IsCollectionDropoffRequired", True) if shop else "")
                 + (_b("sd", "IsDeliveryDropoffRequired", True) if dshop else "")
                 # XSD sequence positions 12 and 13. Both are free-text strings the
@@ -1041,7 +1067,7 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
                 # neither, so both arrived null. The label comes back inline in the
                 # reply (Image/LabelURL), which is what LABEL_DELIVERY names.
                 + _ts("sd", "LabelDeliveryMethod", LABEL_DELIVERY)
-                + _ts("sd", "NumberOfPiecesOnAllPallets", "")
+                + _ts("sd", "NumberOfPiecesOnAllPallets", str(len(boxes or [])))
                 + f"<sd:PackageDetails>{pkgs}</sd:PackageDetails>"
                 + _t("sd", "PackageTypeCode", pkg_type)
                 + _ts("sd", "SenderVatNo", str((customs or {}).get("vat") or "")[:30])
@@ -1069,15 +1095,25 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
     duties = str((customs or {}).get("duties_payor") or "").strip()
     if duties and duties not in DUTIES_PAYORS:
         duties = ""
-    billing = ""
-    if ready_time or close_time or co or sig or duties:
-        billing = ("<wo:BillingDetail>"
-                   + _t("wo", "CloseTime", close_time)
-                   + _t("wo", "CollectionOptions", co)
-                   + _t("wo", "DeliverySignatureType", sig)
-                   + _t("wo", "DutiesPayor", duties)
-                   + _t("wo", "ReadyTime", ready_time)
-                   + "</wo:BillingDetail>")
+    # BillingDetail is ALWAYS sent, because TransportationPayor lives here and its
+    # enum begins with Bill_To_Receiver: leaving the block out or leaving the field
+    # blank tells World Options to invoice the CUSTOMER for the carriage. The
+    # merchant's own account pays, so it is stated on every booking.
+    # Free-text children are emitted empty rather than dropped (a dropped nillable
+    # string arrives as null); the date and account-number fields stay omitted,
+    # because "" would fail a parse that a null is more likely to skip.
+    billing = ("<wo:BillingDetail>"
+               + _ts("wo", "CloseTime", close_time)
+               + _t("wo", "CollectionOptions", co)
+               + _t("wo", "DeliverySignatureType", sig)
+               + _t("wo", "DutiesPayor", duties)
+               + _ts("wo", "LocationDescription", "")
+               + _ts("wo", "OtherEmailAddress", "")
+               + _ts("wo", "PersonalMessage", "")
+               + _ts("wo", "ReadyTime", ready_time)
+               + _ts("wo", "RecipientEmailAddress", "")
+               + _t("wo", "TransportationPayor", "Bill_To_Sender")
+               + "</wo:BillingDetail>")
     # ShipmentBookingRequest in the XSD sequence order: AdditionalShipmentDetail,
     # AuthenticationDetail, BillingDetail, RecipientsDetails, SendersDetails, ShippingDetail
     inner = ("<tem:DoShipment><tem:shipment>"
