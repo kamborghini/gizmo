@@ -1245,8 +1245,21 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
         raise WorldOptionsError("World Options returned no booking result.")
     msg, _notif = _reply_status(reply, "book this shipment")
     tracking = _text(reply, "MasterTrackingNo").strip()
-    labels = [c for c in (_classify_label(l) for l in _findall_direct(reply, "ShippingLabel")) if c]
+    raw_labels = _findall_direct(reply, "ShippingLabel")
+    labels = [c for c in (_classify_label(l) for l in raw_labels) if c]
+    # The exact shape of what came back, kept with the shipment: whether the FILE
+    # was in the reply is the whole label question, and it must never again depend
+    # on somebody's memory of one booking.
+    label_report = [{
+        "image_bytes":  len(_text(l, "Image").strip()),
+        "image_length": _text(l, "ImageLength").strip(),
+        "label_type":   _text(l, "LabelType").strip(),
+        "thermal":      _text(l, "IsThermalPrint").strip(),
+        "url":          _text(l, "LabelURL").strip()[:200],
+    } for l in raw_labels]
+    logger.info("world options: booking %s label shape: %s", tracking, label_report)
     return {
+        "label_report":    label_report,
         "tracking_number": tracking,
         "carrier_name":    carrier,
         # Who is carrying it, for display and for Shopify's tracking company. Wider

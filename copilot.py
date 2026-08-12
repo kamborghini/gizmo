@@ -4042,6 +4042,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
         "notify": do_notify,
         "notified": False,
         "has_label": bool(shipment.get("labels")),
+        "label_report": shipment.get("label_report") or [],
         "collection_date": shipment.get("collection_date") or "",
         "insured": insurance or "",
         "international": international,
