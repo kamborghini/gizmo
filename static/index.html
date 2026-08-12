@@ -4342,6 +4342,35 @@
                 setTimeout(() => URL.revokeObjectURL(url), 60000);
             } catch (e) { toastError('Could not save the label. Use Download, or your World Options portal.'); }
         }
+        function printLabelImages(labels) {
+            const pages = [];
+            (labels || []).forEach(l => (l && l.print_images || []).forEach(p => pages.push(p)));
+            if (!pages.length) return false;
+            const fr = document.createElement('iframe');
+            fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0';
+            const dims = labelDims();
+            fr.srcdoc = '<!doctype html><html><head><style>'
+                + '@page{size:' + dims.w + 'mm ' + dims.h + 'mm;margin:0}'
+                + 'html,body{margin:0;padding:0}'
+                + 'img{display:block;width:' + dims.w + 'mm;height:' + dims.h + 'mm;'
+                + 'object-fit:contain;object-position:top left;page-break-after:always}'
+                + 'img:last-child{page-break-after:auto}'
+                + '</style></head><body>'
+                + pages.map(p => '<img src="data:image/png;base64,' + p + '">').join('')
+                + '</body></html>';
+            fr.onload = () => {
+                const wait = () => {
+                    const d = fr.contentDocument;
+                    if ([...d.images].some(im => !im.complete)) { setTimeout(wait, 120); return; }
+                    try { fr.contentWindow.focus(); fr.contentWindow.print(); }
+                    catch (e) { toastError('Could not open the print dialog.'); }
+                    setTimeout(() => fr.remove(), 60000);
+                };
+                wait();
+            };
+            document.body.append(fr);
+            return true;
+        }
         function openLabel(l) {
             try {
                 // An https label URL is fine to hand to the admin. A blob: URL is NOT:
@@ -4357,37 +4386,7 @@
                 // A PDF cannot be printed from a hidden frame (the viewer prints
                 // blank inside the admin), so the server renders each page to an
                 // image and those print through the same path as production labels.
-                if (l.print_images && l.print_images.length) {
-                    const fr = document.createElement('iframe');
-                    fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0';
-                    // The page is sized to the SAME label stock the production labels
-                    // print on (the toolbar preset), and the break-after stops before
-                    // the last image: a break after the final page printed a blank.
-                    const dims = labelDims();
-                    const imgs = l.print_images.map(p =>
-                        '<img src="data:image/png;base64,' + p + '">').join('');
-                    fr.srcdoc = '<!doctype html><html><head><style>'
-                        + '@page{size:' + dims.w + 'mm ' + dims.h + 'mm;margin:0}'
-                        + 'html,body{margin:0;padding:0}'
-                        + 'img{display:block;width:' + dims.w + 'mm;height:' + dims.h + 'mm;'
-                        + 'object-fit:contain;object-position:top left;page-break-after:always}'
-                        + 'img:last-child{page-break-after:auto}'
-                        + '</style></head><body>'
-                        + imgs + '</body></html>';
-                    fr.onload = () => {
-                        const wait = () => {
-                            const d = fr.contentDocument;
-                            const pending = [...d.images].some(im => !im.complete);
-                            if (pending) { setTimeout(wait, 120); return; }
-                            try { fr.contentWindow.focus(); fr.contentWindow.print(); }
-                            catch (e) { toastError('Could not open the print dialog. Use Download instead.'); }
-                            setTimeout(() => fr.remove(), 60000);
-                        };
-                        wait();
-                    };
-                    document.body.append(fr);
-                    return;
-                }
+                if (printLabelImages([l])) return;
                 const url = labelBlobUrl(l);
                 if (!url) { toastError('This label format could not be opened; download it instead.'); return; }
                 // Print in place from a hidden same-origin iframe.
@@ -4402,20 +4401,27 @@
                 document.body.append(fr);
             } catch (e) { toastError('Could not open the label. Use Download to save it instead.'); }
         }
-        function labelButtons(host, labels) {
+        function labelButtons(host, labels, verb) {
             labels = labels || [];
             if (!labels.length) { host.append(el('div', 'sub', 'No label was returned; check your World Options portal.')); return; }
             const row = el('div', 'disp-actions');
-            labels.forEach((l, i) => {
+            const printable = labels.filter(l => l && l.print_images && l.print_images.length);
+            if (printable.length) {
                 const b = el('button', 'btn btn-primary');
-                b.append(ico(I.printer), document.createTextNode(labels.length > 1 ? ('Print label ' + (i + 1)) : 'Print label'));
-                b.onclick = () => openLabel(l);
+                b.append(ico(I.printer), document.createTextNode(
+                    (verb || 'Print label') + (printable.length > 1 ? 's' : '')));
+                b.onclick = () => printLabelImages(printable);
                 row.append(b);
-                // Second route to the same file, so a print dialog that will not open
-                // can never leave a paid-for label unreachable.
+            }
+            // Download appears ONLY for a label the print path cannot handle
+            // (a ZPL file, or a PDF the server could not render), so a paid-for
+            // label is never stranded while the normal row stays one button.
+            labels.forEach((l, i) => {
+                if (l && l.print_images && l.print_images.length) return;
                 const d = el('button', 'btn');
-                d.append(ico(I.download), document.createTextNode('Download'));
-                d.title = 'Save the label file to this computer';
+                d.append(ico(I.download), document.createTextNode(
+                    labels.length > 1 ? ('Download label ' + (i + 1)) : 'Download label'));
+                d.title = 'This label cannot be printed in place; save the file and print it';
                 d.onclick = () => downloadLabel(l, labels.length > 1 ? i : 0);
                 row.append(d);
             });
@@ -4948,12 +4954,14 @@
                 if (d.amount != null) body.append(el('div', 'sub', 'Quoted ' + fmtPrice(d.amount, d.currency)));
                 if (d.dispatched_at) body.append(el('div', 'sub', 'Dispatched ' + fmtDate(d.dispatched_at)));
                 const bar = el('div', 'disp-actions');
-                const rp = el('button', 'btn'); rp.append(ico(I.printer), document.createTextNode('Reprint label'));
+                const rp = el('button', 'btn btn-primary'); rp.append(ico(I.printer), document.createTextNode('Reprint label'));
                 rp.onclick = async () => {
                     rp.disabled = true;
                     try {
                         const r = await api('/api/dispatch/label', { order_id: o.id });
-                        labelButtons(body, r.labels);
+                        // Straight to the print dialog; buttons only appear for
+                        // anything that cannot print in place.
+                        if (!printLabelImages(r.labels || [])) labelButtons(body, r.labels, 'Print label');
                         if (r.tech) {
                             toastError('The label could not be downloaded from World Options. The details below say exactly why.');
                             body.querySelectorAll('.disp-tech').forEach(n => n.remove());
