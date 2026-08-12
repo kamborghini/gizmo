@@ -5330,7 +5330,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # Also the scheduler's boot hook: the platform polls this, so auto-refresh
         # resumes after a redeploy without waiting for someone to open the app.
         _ensure_scheduler(registry)
-        return PlainTextResponse("ok")
+        # The running build's commit, so "is the deploy live" is an exact check
+        # against a hash rather than an inference from a 200. Railway sets the env.
+        sha = (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12]
+        return PlainTextResponse("ok " + sha if sha else "ok")
 
     @mcp.custom_route("/api/chat", methods=["POST"])
     async def chat(request: Request):
