@@ -4360,9 +4360,19 @@
                 if (l.print_images && l.print_images.length) {
                     const fr = document.createElement('iframe');
                     fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0';
+                    // The page is sized to the SAME label stock the production labels
+                    // print on (the toolbar preset), and the break-after stops before
+                    // the last image: a break after the final page printed a blank.
+                    const dims = labelDims();
                     const imgs = l.print_images.map(p =>
-                        '<img src="data:image/png;base64,' + p + '" style="width:100%;display:block;page-break-after:always">').join('');
-                    fr.srcdoc = '<!doctype html><html><head><style>@page{margin:0}body{margin:0}</style></head><body>'
+                        '<img src="data:image/png;base64,' + p + '">').join('');
+                    fr.srcdoc = '<!doctype html><html><head><style>'
+                        + '@page{size:' + dims.w + 'mm ' + dims.h + 'mm;margin:0}'
+                        + 'html,body{margin:0;padding:0}'
+                        + 'img{display:block;width:' + dims.w + 'mm;height:' + dims.h + 'mm;'
+                        + 'object-fit:contain;object-position:top left;page-break-after:always}'
+                        + 'img:last-child{page-break-after:auto}'
+                        + '</style></head><body>'
                         + imgs + '</body></html>';
                     fr.onload = () => {
                         const wait = () => {
