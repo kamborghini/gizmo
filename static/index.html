@@ -4333,7 +4333,13 @@
         // a download click, so this works even when opening a tab does not.
         function downloadLabel(l, i) {
             try {
-                if (l.type === 'url' || l.type === 'dataurl') { window.open(l.value, '_blank', 'noopener'); return; }
+                if (l.type === 'url') {
+                    // A WO link cannot be opened from inside the admin (a relative one
+                    // 404s against this app); the portal is the only place it works.
+                    toastError('This label only exists as a link at World Options; print it from your portal.');
+                    return;
+                }
+                if (l.type === 'dataurl') { window.open(l.value, '_blank', 'noopener'); return; }
                 const url = labelBlobUrl(l);
                 if (!url) { toastError('This label format cannot be saved; get it from your World Options portal.'); return; }
                 const a = document.createElement('a'); a.href = url;
@@ -4359,9 +4365,14 @@
                 + pages.map(p => '<img src="data:image/png;base64,' + p + '">').join('')
                 + '</body></html>';
             fr.onload = () => {
+                const started = Date.now();
                 const wait = () => {
                     const d = fr.contentDocument;
-                    if ([...d.images].some(im => !im.complete)) { setTimeout(wait, 120); return; }
+                    // Bounded: after 8s, print whatever loaded rather than never
+                    // printing and never saying why.
+                    if (Date.now() - started < 8000 && [...d.images].some(im => !im.complete)) {
+                        setTimeout(wait, 120); return;
+                    }
                     try { fr.contentWindow.focus(); fr.contentWindow.print(); }
                     catch (e) { toastError('Could not open the print dialog.'); }
                     setTimeout(() => fr.remove(), 60000);
@@ -4370,36 +4381,6 @@
             };
             document.body.append(fr);
             return true;
-        }
-        function openLabel(l) {
-            try {
-                // An https label URL is fine to hand to the admin. A blob: URL is NOT:
-                // App Bridge forwards window.open to admin.shopify.com, which cannot
-                // resolve a blob minted in this iframe, so it would open a blank tab.
-                if (l.type === 'url') {
-                    toastError('This label is still a link at World Options and could not be downloaded. '
-                        + 'Press Reprint label to retry, or print it from your World Options portal.');
-                    return;
-                }
-                if (l.type === 'dataurl') { window.open(l.value, '_blank', 'noopener'); return; }
-                if (l.type === 'base64bin') { downloadLabel(l); return; }   // ZPL: not viewable
-                // A PDF cannot be printed from a hidden frame (the viewer prints
-                // blank inside the admin), so the server renders each page to an
-                // image and those print through the same path as production labels.
-                if (printLabelImages([l])) return;
-                const url = labelBlobUrl(l);
-                if (!url) { toastError('This label format could not be opened; download it instead.'); return; }
-                // Print in place from a hidden same-origin iframe.
-                const fr = document.createElement('iframe');
-                fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0';
-                fr.onload = () => {
-                    try { fr.contentWindow.focus(); fr.contentWindow.print(); }
-                    catch (e) { toastError('Could not open the print dialog. Use Download to save the label.'); }
-                    setTimeout(() => { fr.remove(); URL.revokeObjectURL(url); }, 60000);
-                };
-                fr.src = url;
-                document.body.append(fr);
-            } catch (e) { toastError('Could not open the label. Use Download to save it instead.'); }
         }
         function labelButtons(host, labels, verb) {
             labels = labels || [];

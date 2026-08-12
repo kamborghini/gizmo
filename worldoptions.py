@@ -1002,7 +1002,7 @@ async def fetch_label(url: str) -> dict:
     u = _label_url(url)
     if not u:
         return {}
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
         r = await client.get(u)
         if r.status_code != 200:
             logger.info("world options: label url answered HTTP %s: %s", r.status_code, u)

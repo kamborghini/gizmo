@@ -18,6 +18,7 @@ Required env vars:
   SHOPIFY_API_KEY       App client ID. Enables App Bridge + session-token auth.
   SHOPIFY_API_SECRET    App client secret. Verifies session tokens.
 """
+import glob
 import os
 import re
 import html
@@ -944,6 +945,9 @@ async def _resolve_label_links(labels: list) -> list:
     return out
 
 
+DISPATCH_LABELS_MAX = int(os.environ.get("DISPATCH_LABELS_MAX", "400"))
+
+
 def _save_dispatch_labels(order_id, labels: list) -> None:
     try:
         os.makedirs(DISPATCH_LABELS_DIR, exist_ok=True)
@@ -951,6 +955,16 @@ def _save_dispatch_labels(order_id, labels: list) -> None:
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump({"labels": labels or []}, fh)
         os.replace(tmp, os.path.join(DISPATCH_LABELS_DIR, f"{int(order_id)}.json"))
+        # With print images a label file is ~1MB, and nothing ever pruned this
+        # directory. Oldest go first; a months-old label is in the courier's past
+        # anyway and its tracking number stays in the dispatch record.
+        files = sorted(glob.glob(os.path.join(DISPATCH_LABELS_DIR, "*.json")),
+                       key=os.path.getmtime)
+        for stale in files[:-DISPATCH_LABELS_MAX] if len(files) > DISPATCH_LABELS_MAX else []:
+            try:
+                os.remove(stale)
+            except OSError:
+                pass
     except Exception:
         logger.exception("saving dispatch labels failed for order %s", order_id)
 
