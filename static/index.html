@@ -408,6 +408,7 @@
             color: var(--ink); font: inherit; font-size: 13px; font-weight: 550; padding: 8px 14px;
             line-height: 1.35; box-shadow: var(--hair); cursor: pointer; transition: all .14s; }
         .lbl-size:hover { background: var(--surface-3); border-color: var(--border-3); }
+        .lbl-find { min-width: 190px; font-weight: 400; }
         .lbl-nameline { display: flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; }
         /* The customer name gives way first; status chips must never be cut in half. */
         .lbl-nameline > .lbl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -3427,6 +3428,7 @@
             st[String(id)] = Object.assign({}, st[String(id)] || {}, patch);
         }
         let labelsFilter = 'all';   // all | unprinted | unmade
+        let labelsSearch = '';      // client-side find within the loaded queue
         function stampPrinted(orders) {
             const ids = orders.map(o => o.id).filter(Boolean);
             if (!ids.length) return;
@@ -3435,9 +3437,12 @@
             ids.forEach(id => { prev[id] = prodStateOf({ id: id }).printed_at || null; setProdState(id, { printed_at: now }); });
             api('/api/production-state', { op: 'printed', ids })
                 .then(r => {
-                    if (r && r.tag_note) addToast(r.tag_note);
-                    if (r && r.state_note) addToast(r.state_note);
+                    if (r && r.tag_note) toastError(r.tag_note);
+                    if (r && r.state_note) toastError(r.state_note);
                     if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
+                    // The browser cannot tell us whether they actually printed, so
+                    // offer a way back: wrong label stock is a normal mistake.
+                    undoPrintBar(ids);
                 })
                 .catch(() => {
                     // The stamp did not persist: undo the local one so a reload does
@@ -3446,6 +3451,34 @@
                     addToast('Printed, but the app could not record it. It may reappear as unprinted.');
                     if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
                 });
+        }
+        // A print is stamped optimistically (the browser never reports whether the
+        // print dialog was confirmed or cancelled), so every stamp gets an undo.
+        function undoPrintBar(ids) {
+            let host = document.getElementById('toast-host');
+            if (!host) { host = el('div'); host.id = 'toast-host'; document.body.append(host); }
+            const t = el('div', 'toast');
+            t.append(el('div', 'toast-msg', 'Marked ' + ids.length + (ids.length === 1 ? ' order' : ' orders') + ' as printed.'));
+            const u = el('button', 'btn'); u.textContent = 'Undo';
+            u.onclick = async () => {
+                u.disabled = true;
+                try {
+                    const r = await api('/api/production-state', { op: 'unprinted', ids });
+                    ids.forEach(id => {
+                        const st = prodStateOf({ id: id }); if (st) delete st.printed_at;
+                    });
+                    if (r && r.tag_note) toastError(r.tag_note);
+                    renderLabels();
+                    addToast('Put back as not printed.');
+                } catch (e) { toastError(e.message || 'Could not undo that.'); }
+                t.remove();
+            };
+            t.append(u);
+            const x = el('button', 'toast-x'); x.innerHTML = I.x; x.title = 'Dismiss';
+            x.onclick = () => t.remove();
+            t.append(x);
+            host.append(t);
+            setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 320); }, 15000);
         }
         // Marking made can fulfil Shopify and email the customer, and the rows
         // re-order as soon as it lands - so a second click must never reach a
@@ -3625,7 +3658,12 @@
             const printable = orders.filter(o => !o.status);
             const unprinted = printable.filter(o => !prodStateOf(o).printed_at);
             const unmade = printable.filter(o => !prodStateOf(o).made_at);
-            const shown = labelsFilter === 'unprinted' ? unprinted : labelsFilter === 'unmade' ? unmade : orders;
+            let shown = labelsFilter === 'unprinted' ? unprinted : labelsFilter === 'unmade' ? unmade : orders;
+            if (labelsSearch) {
+                const q = labelsSearch.toLowerCase();
+                shown = shown.filter(o => (String(orderNo(o)) + ' ' + (o.display_name || '') + ' '
+                    + ((dispatchStateOf(o) || {}).tracking_number || '')).toLowerCase().indexOf(q) >= 0);
+            }
             const dispatched = queueMode === 'dispatched';
             const shipMode = queueMode === 'ship';
             const heroCopy = dispatched ? 'Orders already dispatched. Select one to reprint its label or view tracking.'
@@ -3669,6 +3707,20 @@
                 });
                 bar.append(filt);
             }
+            const find = document.createElement('input');
+            find.type = 'search'; find.className = 'lbl-size lbl-find';
+            find.placeholder = 'Find order or customer';
+            find.value = labelsSearch;
+            find.oninput = () => {
+                labelsSearch = find.value.trim();
+                clearTimeout(find._t);
+                find._t = setTimeout(() => {
+                    const at = find.selectionStart; renderLabels();
+                    const again = document.querySelector('.lbl-find');
+                    if (again) { again.focus(); try { again.setSelectionRange(at, at); } catch (e) {} }
+                }, 180);
+            };
+            bar.append(find);
             const oldf = el('button', 'btn' + (labelsOldest ? ' on' : ''));
             oldf.append(ico(I.up), document.createTextNode(labelsOldest ? 'Oldest first' : 'Newest first'));
             oldf.title = 'Flip the queue order';
@@ -3740,7 +3792,9 @@
                 return;
             }
             if (!shown.length) {
-                box.append(el('div', 'empty', labelsFilter === 'unprinted' ? 'Every live order has been printed.' : 'Every live order is marked made.'));
+                box.append(el('div', 'empty', labelsSearch
+                    ? ('Nothing in this queue matches "' + labelsSearch + '". Clear the search, or check another queue tab.')
+                    : (labelsFilter === 'unprinted' ? 'Every live order has been printed.' : 'Every live order is marked made.')));
                 return;
             }
             shown.forEach(o => {
@@ -4307,6 +4361,7 @@
             let quote = null, chosen = null, lastBoxes = null, lastInsurance = 0, quoteWrap = null;
             function staleQuote() {
                 if (!quote && !chosen) return;
+                stashCustoms();          // keep typed goods lines across the re-quote
                 quote = null; chosen = null;
                 if (quoteWrap) {
                     quoteWrap.innerHTML = '';
@@ -4404,8 +4459,20 @@
             };
 
             // ---- customs (international only) ----
+            // The card lives inside quoteWrap, which a re-quote clears, so typed
+            // goods lines are stashed here and seeded back rather than lost.
             const customsLines = [];
+            let customsSaved = null, recvTaxSaved = '';
             let recvTaxIn = null;
+            function stashCustoms() {
+                if (!customsLines.length) return;
+                const rows = customsLines.map(l => ({
+                    description: l.dIn.value, quantity: l.qIn.value,
+                    unit_price: l.pIn.value, hs: l.hIn.value }))
+                    .filter(r => (r.description || '').trim() || (r.unit_price || '').trim());
+                if (rows.length) customsSaved = rows;
+                if (recvTaxIn) recvTaxSaved = recvTaxIn.value;
+            }
             function customsCard() {
                 const card = el('div', 'disp-customs');
                 card.append(el('div', 'disp-subhead', 'Customs declaration (international)'));
@@ -4429,12 +4496,16 @@
                     customsLines.push(line);
                     linesHost.append(rowc);
                 }
-                (o.items || []).forEach(it => addLine({
-                    description: (it.artwork || it.title || 'Custom glass gobo'),
-                    quantity: it.quantity || 1,
-                    unit_price: parseFloat(it.price) || '',
-                    hs: quote.default_hs_code || ''
-                }));
+                if (customsSaved && customsSaved.length) {
+                    customsSaved.forEach(r => addLine(r));       // keep what they typed
+                } else {
+                    (o.items || []).forEach(it => addLine({
+                        description: (it.artwork || it.title || 'Custom glass gobo'),
+                        quantity: it.quantity || 1,
+                        unit_price: parseFloat(it.price) || '',
+                        hs: quote.default_hs_code || ''
+                    }));
+                }
                 if (!customsLines.length) addLine({ description: 'Custom glass gobo', quantity: 1, hs: quote.default_hs_code || '' });
                 card.append(linesHost);
                 const addL = el('button', 'btn'); addL.append(ico(I.plus), document.createTextNode('Add line'));
@@ -4443,6 +4514,7 @@
                 const rt = el('label', 'disp-fld'); rt.style.marginTop = '8px';
                 rt.append(el('span', 'disp-fld-lab', "Receiver's tax / VAT id (optional, helps clearance)"));
                 recvTaxIn = document.createElement('input'); recvTaxIn.type = 'text'; recvTaxIn.className = 'disp-num';
+                recvTaxIn.value = recvTaxSaved || '';
                 rt.append(recvTaxIn); card.append(rt);
                 return card;
             }
@@ -4596,7 +4668,9 @@
                     const cprob = customsProblem();
                     if (cprob) { addToast(cprob); return; }
                     if (!await uiConfirm('Book ' + carrierService(chosen.carrier_name, chosen.service_name) + ' for ' + fmtPrice(chosen.amount, chosen.currency) + ' inc VAT?\n\nThis books the courier and charges your World Options account.', { title: 'Book this courier', okText: 'Book & dispatch' })) return;
-                    book.disabled = true; book.textContent = 'Booking…'; booking = true;
+                    book.disabled = true; booking = true;
+                    book.textContent = 'Booking with ' + carrierLabel(chosen.carrier_name || '') + '… do not close this window';
+                    x.disabled = true; x.style.opacity = '.35';
                     const doBook = (force) => api('/api/dispatch/book', {
                         order_id: o.id, option: chosen, boxes: lastBoxes, notify: nb.checked, force: !!force,
                         insurance: lastInsurance, signature: sigSel ? sigSel.value : '',
@@ -4611,12 +4685,12 @@
                             if (!await uiConfirm('Shopify already shows this order as fulfilled, which usually means it has already shipped. Book a courier anyway?', { title: 'Order looks already shipped', okText: 'Book anyway' })) { book.disabled = false; setLabel(); return; }
                             res = await doBook(true);
                         }
-                        booking = false;
+                        booking = false; x.disabled = false; x.style.opacity = '';
                         setDispatchState(o.id, res.dispatch || {});
                         renderResult(res);
                         if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
                     } catch (e) {
-                        booking = false;
+                        booking = false; x.disabled = false; x.style.opacity = '';
                         const msg = String(e.message || 'Booking failed');
                         // If the outcome is unknown the courier MAY already be booked and
                         // charged: do not re-arm the button into a second charge.

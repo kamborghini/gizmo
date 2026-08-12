@@ -94,7 +94,9 @@ _API_HEADERS = {
 
 # --- Abuse / cost controls --------------------------------------------------
 RATE_WINDOW      = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))      # seconds
-RATE_MAX_CLIENT  = int(os.environ.get("RATE_LIMIT_PER_CLIENT", "30"))  # requests/window/client
+RATE_MAX_CLIENT  = int(os.environ.get("RATE_LIMIT_PER_CLIENT", "120"))  # requests/window/client
+# 30/min was reachable by one busy operator: a single order costs up to four
+# calls (history, quote, book, mark made) before any refresh or tab switch.
 RATE_MAX_GLOBAL  = int(os.environ.get("RATE_LIMIT_GLOBAL", "150"))     # AI requests/window (cost ceiling)
 MAX_BODY_BYTES   = int(os.environ.get("MAX_BODY_BYTES", str(256 * 1024)))  # 256 KB
 MAX_MESSAGES     = int(os.environ.get("MAX_MESSAGES", "100"))          # chat history length
@@ -4669,7 +4671,8 @@ def _pre_checks(request: Request, ai: bool = False, max_body: Optional[int] = No
     if len(_rl_hits) > 5000:  # guard the dict from unbounded growth
         _rl_hits.clear()
     if not _window_ok(_rl_hits.setdefault(_client_key(request), []), RATE_MAX_CLIENT, now):
-        return _json({"error": "Too many requests. Please slow down."}, 429)
+        return _json({"error": "Too many requests in the last minute. Wait about a minute "
+                               "and try again - nothing was booked or charged."}, 429)
     if ai and not _window_ok(_rl_global, RATE_MAX_GLOBAL, now):
         return _json({"error": "The assistant is busy right now. Please try again shortly."}, 429)
     cl = request.headers.get("content-length", "")
@@ -5746,6 +5749,29 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                               "tag_note": (notes[0] if notes else ""),
                               "state_note": ("" if stamped else "Printed stamps couldn't be saved; "
                                              "the list may show these as unprinted after a reload.")})
+            if op == "unprinted":
+                # Undo for a print that never happened (wrong stock loaded, dialog
+                # cancelled). Clears the stamp and puts the order back to Unprocessed.
+                ids = [int(i) for i in (body.get("ids") or []) if str(i).strip().isdigit()][:60]
+                if not ids:
+                    return _json({"error": "No orders given."}, 400)
+                state = _load_prod_state()
+                for oid in ids:
+                    entry = state.get(str(oid))
+                    if entry:
+                        entry.pop("printed_at", None)
+                        if not entry:
+                            state.pop(str(oid), None)
+                _write_prod_state(state)
+                notes = []
+                for oid in ids:
+                    okd, note = await _sync_order_tags(registry, oid,
+                                                       add=[UNPROCESSED_TAG], remove=[PRODUCTION_TAG])
+                    if not okd and note:
+                        notes.append(note)
+                return _json({"ok": True,
+                              "state": {str(i): _load_prod_state().get(str(i), {}) for i in ids},
+                              "tag_note": (notes[0] if notes else "")})
             if op == "made":
                 oid = int(body.get("id") or 0)
                 if not oid:
@@ -5759,10 +5785,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     ready = await _fulfill_if_ready(registry, oid)
                     fulfilled, notified = ready["fulfilled"], ready["notified"]
                     if fulfilled:
-                        # _fulfill_if_ready already moved the tags to Dispatched.
-                        okd, note = True, ready["tag_note"]
+                        # _fulfill_if_ready already moved the tags to Dispatched - unless
+                        # that write failed, which is exactly what must be reported.
+                        okd, note = (not ready["tag_note"]), ready["tag_note"]
                         ship_note = ("Fulfilled in Shopify with the booked tracking"
                                      + (" and the customer was emailed." if notified else "."))
+                        if not okd:
+                            ship_note += (" The Dispatched tag did not save, so this order will "
+                                          "keep showing in To make. Add the tag in Shopify.")
                     else:
                         okd, note = await _sync_order_tags(registry, oid, add=[MADE_TAG],
                                                            remove=[PRODUCTION_TAG])
