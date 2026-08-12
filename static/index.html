@@ -4451,7 +4451,7 @@
             const destName = dest.company || [dest.firstname, dest.lastname].filter(Boolean).join(' ') || dest.name || o.display_name;
             const dsum = el('div', 'disp-dest');
             dsum.append(el('div', 'disp-dest-name', destName));
-            dsum.append(el('div', 'sub', [dest.street, dest.city, dest.postcode, dest.country].filter(Boolean).join(', ') || 'No address on file'));
+            dsum.append(el('div', 'sub', [dest.street, dest.street2, dest.city, dest.postcode, dest.country].filter(Boolean).join(', ') || 'No address on file'));
             if (o.shipping_paid && (o.shipping_paid.title || o.shipping_paid.price)) {
                 dsum.append(el('div', 'sub', 'Customer paid for delivery: ' + (o.shipping_paid.title || 'shipping')
                     + (o.shipping_paid.price ? ', ' + fmtPrice(parseFloat(o.shipping_paid.price), o.currency || '') : '')));

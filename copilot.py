@@ -3343,14 +3343,15 @@ def _ship_to(o: dict) -> dict:
     """The order's delivery address in our internal address shape (for a quote)."""
     a = o.get("shipping_address") or o.get("billing_address") or {}
     cust = o.get("customer") or {}
-    street = " ".join(x for x in [str(a.get("address1") or "").strip(),
-                                  str(a.get("address2") or "").strip()] if x)
     return {
         "name":      a.get("name") or "",
         "company":   a.get("company") or "",
         "firstname": a.get("first_name") or cust.get("first_name") or "",
         "lastname":  a.get("last_name") or cust.get("last_name") or "",
-        "street":    street,
+        # Shopify's two lines STAY two lines: couriers cap each address line at 35
+        # characters, and joining them manufactured over-long lines from good data.
+        "street":    str(a.get("address1") or "").strip(),
+        "street2":   str(a.get("address2") or "").strip(),
         "postcode":  a.get("zip") or "",
         "city":      a.get("city") or "",
         "state":     a.get("province_code") or a.get("province") or "",
@@ -3383,14 +3384,14 @@ async def _origin_address(registry: dict) -> dict:
     except Exception:
         shop = {}
     shop = shop if isinstance(shop, dict) else {}
-    shop_street = " ".join(x for x in [str(shop.get("address1") or "").strip(),
-                                       str(shop.get("address2") or "").strip()] if x)
+
     return {
         "name":      o.get("name") or shop.get("name") or "",
         "company":   o.get("company") or shop.get("name") or "",
         "firstname": o.get("firstname") or "",
         "lastname":  o.get("lastname") or "",
-        "street":    o.get("street") or shop_street,
+        "street":    o.get("street") or str(shop.get("address1") or "").strip(),
+        "street2":   o.get("street2") or str(shop.get("address2") or "").strip(),
         "postcode":  o.get("postcode") or shop.get("zip") or "",
         "city":      o.get("city") or shop.get("city") or "",
         "state":     o.get("state") or shop.get("province_code") or shop.get("province") or "",

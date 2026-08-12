@@ -2154,6 +2154,44 @@ def t_gobo_projectors_are_projectors_not_gobos():
     finally:
         copilot._tool_json = saved
 
+@test
+def t_shopify_address_lines_stay_separate_and_within_the_courier_cap():
+    # Order 104240: "Momentum Logistics Park" and "Unit 1 Ash Drive" arrived as
+    # separate Shopify lines and were being merged into one over-long Address1.
+    # Couriers cap each line at 35 characters.
+    eq(worldoptions._address_lines("Momentum Logistics Park", "Unit 1 Ash Drive"),
+       ("Momentum Logistics Park", "Unit 1 Ash Drive", ""),
+       "two clean lines pass through untouched")
+    a1, a2, a3 = worldoptions._address_lines("Unit 1 Ash Drive Momentum Logistics Park", "")
+    ok(all(len(x) <= 35 for x in (a1, a2, a3)), "an over-long single line wraps within the cap")
+    eq((a1 + " " + a2).strip(), "Unit 1 Ash Drive Momentum Logistics Park", "no words lost")
+    # And it reaches the envelope as three real elements.
+    holder = {}
+    async def cap_call(service, action, inner, retryable=True):
+        holder["xml"] = inner
+        return ET.fromstring(BOOK_XML)
+    saved = worldoptions._soap_call; worldoptions._soap_call = cap_call
+    try:
+        d = {"name": "A", "street": "Momentum Logistics Park", "street2": "Unit 1 Ash Drive",
+             "city": "Washington", "postcode": "NE38 0LT", "country": "GB",
+             "phone": "1", "email": "a@b.c"}
+        run(worldoptions.book({"service_type_code": "UPS_Standard",
+                               "package_type_code": "UPS_My_Packaging", "carrier_name": "UPS"},
+                              d, d, [{"width": 1, "length": 1, "depth": 1, "weight": 1}]))
+        x = holder["xml"]
+        ok("<m:Address1>Momentum Logistics Park</m:Address1>" in x, "line one intact")
+        ok("<m:Address2>Unit 1 Ash Drive</m:Address2>" in x, "line two intact, NOT merged")
+    finally:
+        worldoptions._soap_call = saved
+
+@test
+def t_ship_to_carries_both_shopify_lines():
+    shaped = copilot._ship_to({"shipping_address": {
+        "address1": "Momentum Logistics Park", "address2": "Unit 1 Ash Drive",
+        "city": "Washington", "zip": "NE38 0LT", "country_code": "GB", "name": "A B"}})
+    eq(shaped["street"], "Momentum Logistics Park", "line one")
+    eq(shaped["street2"], "Unit 1 Ash Drive", "line two, separate")
+
 # =========================== run ===========================================
 passed = failed = 0
 for fn in TESTS:

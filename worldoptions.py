@@ -895,14 +895,51 @@ async def quote(origin: dict, destination: dict, boxes: list,
     return {"options": options, "currency": cur}
 
 
+ADDRESS_LINE_MAX = 35
+
+
+def _address_lines(street: str, street2: str = "") -> tuple:
+    """(Address1, Address2, Address3). The GIVEN line boundaries are preserved:
+    the sender chose them and they usually carry meaning (building, then unit).
+    Only a line over the couriers' 35-character cap is wrapped, at a word
+    boundary, spilling onto the next slot. A single unbreakable 36+ character
+    token is left whole for the courier rather than silently cut mid-word."""
+    out = []
+    for chunk in (street, street2):
+        text = " ".join(str(chunk or "").split())
+        if not text:
+            continue
+        if len(text) <= ADDRESS_LINE_MAX:
+            out.append(text)
+            continue
+        cur = ""
+        for w in text.split(" "):
+            trial = (cur + " " + w).strip()
+            if len(trial) <= ADDRESS_LINE_MAX or not cur:
+                cur = trial
+            else:
+                out.append(cur)
+                cur = w
+        if cur:
+            out.append(cur)
+    if len(out) > 3:
+        # More text than three capped lines hold: keep the head lines intact,
+        # join the tail onto line three and let the courier's validation speak.
+        out = [out[0], out[1], " ".join(out[2:])]
+    while len(out) < 3:
+        out.append("")
+    return out[0], out[1], out[2]
+
+
 def _recipient_block(d: dict) -> str:
     # wsRecipient, alpha: Address1,Address2,Address3,City,Company,Country_Code,Email,
     # Fax,Name,Phone,PhoneDialCode,Postalcode,Residential,State_Code
     name = d.get("name") or " ".join(x for x in [d.get("firstname"), d.get("lastname")] if x).strip()
+    a1, a2, a3 = _address_lines(d.get("street"), d.get("street2"))
     return ("<wo:RecipientsDetails>"
-            + _ts("m", "Address1", d.get("street"))
-            + _ts("m", "Address2", d.get("street2"))
-            + _ts("m", "Address3", "")
+            + _ts("m", "Address1", a1)
+            + _ts("m", "Address2", a2)
+            + _ts("m", "Address3", a3)
             + _ts("m", "City", d.get("city"))
             + _ts("m", "Company", d.get("company"))
             + _ts("m", "Country_Code", (d.get("country") or "").upper())
@@ -921,10 +958,11 @@ def _sender_block(o: dict) -> str:
     # wsSender, alpha: Address1,Address2,Address3,City,Company,CountryCode,Email,
     # Name,Phone,PhoneDialCode,PostalCode,State
     name = o.get("name") or " ".join(x for x in [o.get("firstname"), o.get("lastname")] if x).strip()
+    a1, a2, a3 = _address_lines(o.get("street"), o.get("street2"))
     return ("<wo:SendersDetails>"
-            + _ts("m", "Address1", o.get("street"))
-            + _ts("m", "Address2", o.get("street2"))
-            + _ts("m", "Address3", "")
+            + _ts("m", "Address1", a1)
+            + _ts("m", "Address2", a2)
+            + _ts("m", "Address3", a3)
             + _ts("m", "City", o.get("city"))
             + _ts("m", "Company", o.get("company"))
             + _ts("m", "CountryCode", (o.get("country") or "").upper())
