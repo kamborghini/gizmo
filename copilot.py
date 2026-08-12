@@ -31,6 +31,7 @@ import logging
 import secrets
 import ipaddress
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import contextvars
 from typing import Any, Callable, Optional
 from urllib.parse import urlparse, urljoin, quote
@@ -3908,6 +3909,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
     try:
         shipment = await worldoptions.book(option, origin, dest, boxes, currency=currency, reference=reference,
                                            ready_time=str(cfg.get("ready_time") or ""),
+                                           ready_date=datetime.now(ZoneInfo("Europe/London")).strftime("%d/%m/%Y"),
                                            close_time=str(cfg.get("close_time") or ""),
                                            collection_option=str(cfg.get("collection_option") or ""),
                                            insurance=insurance,
