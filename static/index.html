@@ -1570,9 +1570,10 @@
             body.append(builder(Object.assign({}, opts, { height: 360, noExpand: true })));
             modal.append(head, body); overlay.append(modal); document.body.append(overlay);
             const close = () => { overlay.remove(); document.removeEventListener('keydown', esc); };
-            function esc(e) { if (e.key === 'Escape') close(); }
+            function esc(e) { /* Escape deliberately does not close either: X only. */ }
             x.onclick = close;
-            overlay.onclick = (e) => { if (e.target === overlay) close(); };
+            // Backdrop clicks never close: a misclick must not wipe a filled form.
+            // The X is the only way out (user rule).
             document.addEventListener('keydown', esc);
         }
 
@@ -2872,7 +2873,8 @@
                 }
                 no.onclick = () => done(false);
                 yes.onclick = () => done(true);
-                overlay.onclick = (e) => { if (e.target === overlay) done(false); };
+                // A backdrop misclick must not silently answer Cancel; the buttons
+                // (or Escape/Enter, which are deliberate) are the only answers.
                 document.addEventListener('keydown', key);
                 yes.focus();
             });
@@ -3634,9 +3636,10 @@
                 overlay.remove(); document.removeEventListener('keydown', esc);
                 if (prev && prev.focus) prev.focus();   // back to where they were
             };
-            function esc(e) { if (e.key === 'Escape') close(); }
+            function esc(e) { /* Escape deliberately does not close either: X only. */ }
             x.onclick = close;
-            overlay.onclick = (e) => { if (e.target === overlay) close(); };
+            // Backdrop clicks never close: a misclick must not wipe a filled form.
+            // The X is the only way out (user rule).
             document.addEventListener('keydown', esc);
             x.focus();
         }
@@ -4110,9 +4113,10 @@
             dt.onchange = load;
             modal.append(head, body); overlay.append(modal); document.body.append(overlay);
             const close = () => { overlay.remove(); document.removeEventListener('keydown', esc); };
-            function esc(e) { if (e.key === 'Escape') close(); }
+            function esc(e) { /* Escape deliberately does not close either: X only. */ }
             x.onclick = close;
-            overlay.onclick = (e) => { if (e.target === overlay) close(); };
+            // Backdrop clicks never close: a misclick must not wipe a filled form.
+            // The X is the only way out (user rule).
             document.addEventListener('keydown', esc);
             load();
         }
@@ -4424,9 +4428,10 @@
                 overlay.remove(); document.removeEventListener('keydown', esc);
                 if (prev && prev.focus) prev.focus();
             };
-            function esc(e) { if (e.key === 'Escape') close(); }
+            function esc(e) { /* Escape deliberately does not close either: X only. */ }
             x.onclick = close;
-            overlay.onclick = (e) => { if (e.target === overlay) close(); };
+            // Backdrop clicks never close: a misclick must not wipe a filled form.
+            // The X is the only way out (user rule).
             document.addEventListener('keydown', esc);
             x.focus();
 
@@ -5020,9 +5025,10 @@
             modal.append(head, body); overlay.append(modal); document.body.append(overlay);
             const prev = document.activeElement;
             const close = () => { overlay.remove(); document.removeEventListener('keydown', esc); if (prev && prev.focus) prev.focus(); };
-            function esc(e) { if (e.key === 'Escape') close(); }
+            function esc(e) { /* Escape deliberately does not close either: X only. */ }
             x.onclick = close;
-            overlay.onclick = (e) => { if (e.target === overlay) close(); };
+            // Backdrop clicks never close: a misclick must not wipe a filled form.
+            // The X is the only way out (user rule).
             document.addEventListener('keydown', esc);
 
             const load = el('div', 'thinking'); load.append(loader(), el('span', null, 'Loading…')); body.append(load);
