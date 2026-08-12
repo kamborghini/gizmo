@@ -2010,7 +2010,7 @@ def t_customs_lines_carry_the_cost_price_and_the_products_own_hs_code():
                                   "city": "Paris", "zip": "75001", "country_code": "FR",
                                   "phone": "0033", "name": "A B"},
              "line_items": [
-                 {"id": 1, "title": "200 Watt Projector", "quantity": 1, "price": "780.00",
+                 {"id": 1, "title": "Projected Image 200 Watt Gobo Projector", "quantity": 1, "price": "780.00",
                   "variant_id": 111},
                  {"id": 2, "title": "Custom Gobo", "quantity": 2, "price": "45.00",
                   "variant_id": None},
@@ -2090,7 +2090,7 @@ def t_projectors_default_to_china_when_shopify_has_no_origin():
                                   "city": "Paris", "zip": "75001", "country_code": "FR",
                                   "phone": "0033", "name": "A B"},
              "line_items": [
-                 {"id": 1, "title": "200 Watt LED Projector", "quantity": 1,
+                 {"id": 1, "title": "Projected Image 200 Watt LED Gobo Projector", "quantity": 1,
                   "price": "780.00", "variant_id": 111},
                  {"id": 2, "title": "Wedding Gobo 16", "quantity": 1,
                   "price": "45.00", "variant_id": 222},
@@ -2117,6 +2117,40 @@ def t_projectors_default_to_china_when_shopify_has_no_origin():
         eq(items[0]["needs_cost"], False, "projector has a cost, no flag")
         eq(items[1]["needs_cost"], False, "gobo declares sale value by design, no flag")
         eq(items[1]["hs_code"], "9002.20.000", "gobo HS filled even with none in Shopify")
+    finally:
+        copilot._tool_json = saved
+
+@test
+def t_gobo_projectors_are_projectors_not_gobos():
+    # The regression the merchant caught live: projector products are NAMED
+    # "Projected Image ... Gobo Projector", so a naive "contains gobo" rule
+    # declared every projector at sale value. Projector wins the classification.
+    reset_dispatch(); reset_prod()
+    order = {"id": 12345, "name": "#12345", "currency": "GBP", "email": "c@x.co",
+             "shipping_address": {"first_name": "A", "last_name": "B", "address1": "1 Rue",
+                                  "city": "Paris", "zip": "75001", "country_code": "FR",
+                                  "phone": "0033", "name": "A B"},
+             "line_items": [
+                 {"id": 1, "title": "Projected Image 200 Watt Gobo Projector",
+                  "quantity": 1, "price": "780.00", "variant_id": 111},
+             ]}
+    async def tools(registry, name, args):
+        if name == "shopify_get_order":
+            return order
+        if name == "shopify_get_variant":
+            return {"id": 111, "inventory_item_id": 9111}
+        if name == "shopify_get_inventory_items":
+            return {"inventory_items": [{"id": 9111, "cost": "425.00",
+                                         "harmonized_system_code": "9008.50.00"}]}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
+        it = (r.json().get("customs_items") or [])[0]
+        eq(it["unit_value"], "425.00", "COST, despite the word Gobo in the name")
+        eq(it["value_basis"], "cost", "classified as a stocked product")
+        eq(it["hs_code"], "9008.50.00", "its own HS code, not the gobo blanket")
+        eq(it["origin"], "CN", "projector origin rule still applies")
     finally:
         copilot._tool_json = saved
 

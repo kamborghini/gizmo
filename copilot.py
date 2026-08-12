@@ -3624,7 +3624,12 @@ async def _customs_items(registry: dict, o: dict) -> list:
         cost = str((item or {}).get("cost") or "").strip()
         title = str(li.get("title") or "Item").strip()
         low = title.lower()
-        is_gobo = "gobo" in low
+        # The catalog's naming: projector products read "Projected Image ... Gobo
+        # Projector", so the word "gobo" appears in PROJECTOR names too. Projector
+        # wins the classification, or every projector would be declared at sale
+        # value under the gobo rule.
+        is_stocked = ("projector" in low) or ("projected image" in low)
+        is_gobo = ("gobo" in low) and not is_stocked
         origin = str((item or {}).get("country_code_of_origin") or "").strip().upper()
         if not origin:
             # The merchant's blanket rule when Shopify does not say: projectors are
