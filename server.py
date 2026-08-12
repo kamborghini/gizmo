@@ -855,6 +855,44 @@ async def shopify_get_inventory_levels(params: GetInventoryLevelsInput) -> str:
         return _error(e)
 
 
+class GetVariantInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    variant_id: int = Field(..., description="Product variant ID")
+
+
+@mcp.tool(
+    name="shopify_get_variant",
+    annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
+)
+async def shopify_get_variant(params: GetVariantInput) -> str:
+    """Retrieve a single product variant (includes its inventory_item_id)."""
+    try:
+        data = await _request("GET", f"variants/{params.variant_id}.json")
+        return _fmt(data.get("variant", data))
+    except Exception as e:
+        return _error(e)
+
+
+class GetInventoryItemsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ids: str = Field(..., min_length=1, description="Comma-separated inventory item IDs (max 100)")
+
+
+@mcp.tool(
+    name="shopify_get_inventory_items",
+    annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
+)
+async def shopify_get_inventory_items(params: GetInventoryItemsInput) -> str:
+    """Inventory items by id: unit cost, harmonized_system_code (customs HS) and
+    country_code_of_origin live here, not on the product."""
+    try:
+        data = await _request("GET", "inventory_items.json", params={"ids": params.ids, "limit": 100})
+        items = data.get("inventory_items", [])
+        return _fmt({"count": len(items), "inventory_items": items})
+    except Exception as e:
+        return _error(e)
+
+
 class SetInventoryLevelInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     inventory_item_id: int = Field(..., description="Inventory item ID")

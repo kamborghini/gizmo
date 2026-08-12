@@ -3591,6 +3591,48 @@ def _goods_summary(o: dict) -> str:
     return ("; ".join(titles))[:100] or "Custom glass gobos"
 
 
+async def _customs_items(registry: dict, o: dict) -> list:
+    """Per-line customs facts from Shopify: the HS code and the UNIT COST both live
+    on the variant's inventory item (not the product). Customs declares what the
+    goods are worth to the merchant, not what the customer paid, so the cost price
+    is the right value; the sale price is only a fallback when no cost is set."""
+    lines = [li for li in (o.get("line_items") or [])
+             if not _label_skip_item(str(li.get("title") or li.get("name") or ""))]
+
+    async def _inv_id(li):
+        vid = li.get("variant_id")
+        if not vid:
+            return None
+        v = await _tool_json(registry, "shopify_get_variant", {"variant_id": int(vid)})
+        return (v or {}).get("inventory_item_id")
+
+    inv_ids = await asyncio.gather(*[_inv_id(li) for li in lines], return_exceptions=True)
+    inv_ids = [i if not isinstance(i, Exception) else None for i in inv_ids]
+    by_id = {}
+    want = sorted({int(i) for i in inv_ids if i})
+    if want:
+        try:
+            res = await _tool_json(registry, "shopify_get_inventory_items",
+                                   {"ids": ",".join(str(i) for i in want[:100])})
+            for it in (res or {}).get("inventory_items") or []:
+                by_id[it.get("id")] = it
+        except Exception:
+            logger.exception("inventory items fetch failed; customs falls back to sale prices")
+    out = []
+    for li, inv in zip(lines, inv_ids):
+        item = by_id.get(int(inv)) if inv else None
+        cost = str((item or {}).get("cost") or "").strip()
+        out.append({
+            "title": str(li.get("title") or "Item").strip(),
+            "quantity": int(li.get("quantity") or 1),
+            "price": str(li.get("price") or ""),
+            "cost": cost,
+            "hs_code": str((item or {}).get("harmonized_system_code") or "").strip(),
+            "origin": str((item or {}).get("country_code_of_origin") or "").strip().upper(),
+        })
+    return out
+
+
 async def run_dispatch_quote(registry: dict, order_id, boxes: list,
                              insurance: str = "") -> dict:
     """Price couriers for one order to its shipping address. Free / read-only."""
@@ -3737,6 +3779,8 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         # Drives the customs-declaration card in the UI; booking refuses an
         # international shipment without an EORI and complete goods lines.
         "international": (str(dest.get("country") or "").upper() not in ("GB", "")),
+        "customs_items": (await _customs_items(registry, o)
+                          if str(dest.get("country") or "").upper() not in ("GB", "") else []),
         "currency_note": ("" if str(o.get("currency") or "").upper() in (currency, "")
                           else f"Quoted in {currency}; the order was paid in {o.get('currency')}."),
     }

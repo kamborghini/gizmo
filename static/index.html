@@ -436,7 +436,7 @@
             font-weight: 600; padding: 6px 14px; border-radius: 6px; cursor: pointer; }
         .lbl-segbtn.on { background: var(--surface); color: var(--ink); box-shadow: var(--hair); }
         .lbl-segbtn:hover { color: var(--ink); }
-        .disp-modal { max-width: 560px; width: 94vw; }
+        .disp-modal { max-width: 720px; width: 94vw; }
         .disp-dest { padding: 11px 13px; background: var(--bg-2); border: 1px solid var(--border-2);
             border-radius: var(--r-sm); margin-bottom: 18px; }
         /* One rhythm down the form, and one height for every control in a row. */
@@ -4599,7 +4599,7 @@
                     const hIn = document.createElement('input'); hIn.type = 'text'; hIn.className = 'disp-num disp-boxdim'; hIn.placeholder = 'HS code'; hIn.style.width = '90px';
                     if (pre) { dIn.value = pre.description || ''; qIn.value = pre.quantity || 1; pIn.value = pre.unit_price || ''; hIn.value = pre.hs || ''; }
                     const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove line';
-                    const line = { dIn, qIn, pIn, hIn };
+                    const line = { dIn, qIn, pIn, hIn, origin: (pre && pre.origin) || '' };
                     rm.onclick = () => { const i = customsLines.indexOf(line); if (i >= 0) customsLines.splice(i, 1); rowc.remove(); };
                     rowc.append(dIn, qIn, pIn, hIn, rm);
                     customsLines.push(line);
@@ -4607,6 +4607,28 @@
                 }
                 if (customsSaved && customsSaved.length) {
                     customsSaved.forEach(r => addLine(r));       // keep what they typed
+                } else if (quote.customs_items && quote.customs_items.length) {
+                    // Straight from Shopify: the HS code set on each product, and
+                    // the COST price. Customs declares what the goods are worth to
+                    // you, not what the customer paid.
+                    let fellBack = [];
+                    quote.customs_items.forEach(it => {
+                        if (!it.cost) fellBack.push(it.title);
+                        addLine({
+                            description: it.title || 'Custom glass gobo',
+                            quantity: it.quantity || 1,
+                            unit_price: parseFloat(it.cost || it.price) || '',
+                            hs: it.hs_code || quote.default_hs_code || '',
+                            origin: it.origin || ''
+                        });
+                    });
+                    if (fellBack.length) card.append(el('div', 'sub',
+                        'No cost price in Shopify for: ' + fellBack.join(', ')
+                        + '. The sale price is filled in instead; set the cost on the product to fix this.'));
+                    const noHs = quote.customs_items.filter(it => !it.hs_code).map(it => it.title);
+                    if (noHs.length && !quote.default_hs_code) card.append(el('div', 'sub',
+                        'No HS code in Shopify for: ' + noHs.join(', ')
+                        + '. Add it on the product (Customs information) so it fills in automatically.'));
                 } else {
                     (o.items || []).forEach(it => addLine({
                         description: (it.artwork || it.title || 'Custom glass gobo'),
@@ -4633,7 +4655,8 @@
                 for (const l of customsLines) {
                     const d = l.dIn.value.trim(), q = parseInt(l.qIn.value, 10), p = parseFloat(l.pIn.value);
                     if (!d || !(q > 0) || !(p >= 0) || isNaN(p)) continue;
-                    lines.push({ description: d, quantity: q, unit_price: p, hs: l.hIn.value.trim(), country: 'GB' });
+                    lines.push({ description: d, quantity: q, unit_price: p, hs: l.hIn.value.trim(),
+                                 country: (l.origin || 'GB') });
                 }
                 return { lines, receiver_tax_id: recvTaxIn ? recvTaxIn.value.trim() : '' };
             }

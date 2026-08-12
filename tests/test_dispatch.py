@@ -1998,6 +1998,69 @@ def t_reprint_attaches_print_images_and_saves_them():
     ok(r.json()["labels"][0].get("print_images"), "images served for printing")
     ok(copilot._load_dispatch_labels(779)[0].get("print_images"), "and saved back")
 
+@test
+def t_customs_lines_carry_the_cost_price_and_the_products_own_hs_code():
+    # The user's example: a 200 watt projector, cost 425.00, HS 9008.50.00. Both
+    # live on the variant's INVENTORY ITEM in Shopify, and customs declares what
+    # the goods are worth to the merchant, not what the customer paid.
+    reset_dispatch(); reset_prod()
+    order = {"id": 12345, "name": "#12345", "currency": "GBP", "email": "c@x.co",
+             "total_price": "780.00",
+             "shipping_address": {"first_name": "A", "last_name": "B", "address1": "1 Rue",
+                                  "city": "Paris", "zip": "75001", "country_code": "FR",
+                                  "phone": "0033", "name": "A B"},
+             "line_items": [
+                 {"id": 1, "title": "200 Watt Projector", "quantity": 1, "price": "780.00",
+                  "variant_id": 111},
+                 {"id": 2, "title": "Custom Gobo", "quantity": 2, "price": "45.00",
+                  "variant_id": None},
+             ]}
+    async def tools(registry, name, args):
+        if name == "shopify_get_order":
+            return order
+        if name == "shopify_get_variant":
+            eq(args["variant_id"], 111, "only the real variant is looked up")
+            return {"id": 111, "inventory_item_id": 9001}
+        if name == "shopify_get_inventory_items":
+            eq(args["ids"], "9001", "batched by inventory item id")
+            return {"inventory_items": [{"id": 9001, "cost": "425.00",
+                                         "harmonized_system_code": "9008.50.00",
+                                         "country_code_of_origin": "GB"}]}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
+        eq(r.status_code, 200, r.text)
+        body = r.json()
+        ok(body.get("international"), "France is international")
+        items = body.get("customs_items") or []
+        eq(len(items), 2, "every real line is present")
+        proj = items[0]
+        eq(proj["cost"], "425.00", "the COST price, not the 780.00 sale price")
+        eq(proj["hs_code"], "9008.50.00", "the product's own HS code")
+        eq(proj["origin"], "GB", "origin from Shopify")
+        gobo = items[1]
+        eq(gobo["cost"], "", "no variant -> no cost; the UI falls back to sale price and says so")
+    finally:
+        copilot._tool_json = saved
+
+@test
+def t_domestic_quotes_do_not_pay_for_customs_lookups():
+    reset_dispatch(); reset_prod()
+    called = []
+    real = copilot._tool_json
+    async def spy(registry, name, args):
+        called.append(name)
+        return await real(registry, name, args)
+    copilot._tool_json = spy
+    try:
+        r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
+        eq(r.status_code, 200, r.text)
+        eq(r.json().get("customs_items"), [], "no customs payload on a GB order")
+        ok("shopify_get_variant" not in called, "no variant reads for a domestic parcel")
+    finally:
+        copilot._tool_json = real
+
 # =========================== run ===========================================
 passed = failed = 0
 for fn in TESTS:
