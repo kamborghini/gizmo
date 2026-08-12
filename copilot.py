@@ -3911,6 +3911,37 @@ async def run_dispatch_book(registry: dict, order_id, option: dict, boxes: list,
                                            insurance, signature, customs_body)
 
 
+# Their infrastructure wobbles ("Could not create SSL/TLS secure channel"), and
+# a wobble at the desk costs a person a retry loop. One retry is safe ONLY when
+# nothing was booked: a connect failure that never reached them, or a reply that
+# ANSWERED with FAILED (their server processed and refused, creating nothing).
+# A post-send silence is never retried: the first booking may have succeeded.
+_WO_TRANSIENT_RE = re.compile(
+    r"ssl|tls|secure channel|timed?\s*out|temporar|try again|unavailable|"
+    r"service is busy|502|503|504", re.I)
+WO_RETRY_WAIT_SECS = int(os.environ.get("WO_RETRY_WAIT_SECS", "15"))
+
+
+async def _book_with_one_retry(*args, **kwargs):
+    try:
+        return await worldoptions.book(*args, **kwargs)
+    except worldoptions.WorldOptionsError as e:
+        never_reached = bool(getattr(e, "not_sent", False))
+        answered_failed = bool(getattr(e, "sent", False))
+        transient = bool(_WO_TRANSIENT_RE.search(str(getattr(e, "raw", "") or e)))
+        if never_reached or (answered_failed and transient):
+            logger.warning("world options booking failed (%s); retrying once in %ss: %s",
+                           "never reached them" if never_reached else "answered FAILED, transient",
+                           WO_RETRY_WAIT_SECS, e)
+            await asyncio.sleep(WO_RETRY_WAIT_SECS)
+            try:
+                return await worldoptions.book(*args, **kwargs)
+            except worldoptions.WorldOptionsError as e2:
+                e2.retried = True
+                raise
+        raise
+
+
 def _collection_ready(cfg: dict, now=None):
     """When the parcel is actually ready for collection, as (dd/MM/yyyy, HH:mm).
     World Options rejects a ready-from in the past ("Invalid Date, Parcel Ready
@@ -4091,7 +4122,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
 
     _ready_dmy, _ready_hm = _collection_ready(cfg)
     try:
-        shipment = await worldoptions.book(option, origin, dest, boxes, currency=currency, reference=reference,
+        shipment = await _book_with_one_retry(option, origin, dest, boxes, currency=currency, reference=reference,
                                            ready_time=_ready_hm,
                                            ready_date=_ready_dmy,
                                            close_time=str(cfg.get("close_time") or ""),
@@ -4109,7 +4140,10 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
         # .NET parameter rather than a field, so the request is the only way to tell
         # which field they meant, and waiting on a developer to read a server log is
         # not a dispatch process.
-        out = {"error": str(e)}
+        msg = str(e)
+        if getattr(e, "retried", False):
+            msg += " The app already retried once for you; if this keeps happening it is a World Options outage."
+        out = {"error": msg}
         tech = {}
         if getattr(e, "raw", ""):
             tech["reply"] = str(e.raw)[:2000]
@@ -4163,6 +4197,14 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
         "service_code": option.get("service_type_code") or "",
         "product_code": option.get("product_code") or "",
         "amount": shipment.get("amount"),
+        "amount_ex_vat": option.get("amount_ex_vat"),
+        # Who and what, so the end-of-day manifest reads without a Shopify join,
+        # and what the customer paid for delivery, so margin is one subtraction.
+        "order_name": str(o.get("name") or ("#" + str(order_id))),
+        "customer": (dest.get("company") or dest.get("name")
+                     or " ".join(x for x in [dest.get("firstname"), dest.get("lastname")] if x)),
+        "shipping_paid": (lambda sl: str(sl[0].get("price") or "") if sl else "")(
+            o.get("shipping_lines") or []),
         "currency": shipment.get("currency"),
         "dispatched_at": datetime.now(timezone.utc).isoformat(),
         "fulfilled": False,
@@ -6659,6 +6701,72 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if tech:
             out["tech"] = tech
         return _json(out)
+
+    @mcp.custom_route("/api/dispatch/manifest", methods=["POST"])
+    async def dispatch_manifest_route(request: Request):
+        """Everything booked on one day (Europe/London): the driver handover list
+        and the sheet to check the World Options invoice against. Read-only."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        okd, _who = _authorize(request)
+        if not okd:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        want = str((body or {}).get("date") or "").strip()
+        london = ZoneInfo("Europe/London")
+        if want:
+            try:
+                day = datetime.strptime(want, "%Y-%m-%d").date()
+            except ValueError:
+                return _json({"error": "Date must be YYYY-MM-DD."}, 400)
+        else:
+            day = datetime.now(london).date()
+        rows = []
+        for oid, e in _load_dispatch().items():
+            ts = str(e.get("dispatched_at") or "")
+            if not ts or not e.get("tracking_number"):
+                continue
+            try:
+                when = datetime.fromisoformat(ts)
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+            if when.astimezone(london).date() != day:
+                continue
+            rows.append({
+                "order_id": oid,
+                "order_name": e.get("order_name") or ("#" + str(oid)),
+                "customer": e.get("customer") or "",
+                "carrier": (e.get("carrier_label")
+                            or (worldoptions.carrier_display(e.get("carrier_name") or "")
+                                if worldoptions else "") or ""),
+                "service": e.get("service_name") or "",
+                "tracking": e.get("tracking_number") or "",
+                "collection_ref": e.get("collection_date") or "",
+                "amount": e.get("amount"),
+                "amount_ex_vat": e.get("amount_ex_vat"),
+                "shipping_paid": e.get("shipping_paid") or "",
+                "currency": e.get("currency") or "GBP",
+                "canceled": bool(e.get("canceled")),
+                "international": bool(e.get("international")),
+                "time": when.astimezone(london).strftime("%H:%M"),
+            })
+        rows.sort(key=lambda r: r["time"])
+        live = [r for r in rows if not r["canceled"]]
+
+        def _tot(key):
+            vals = [float(r[key]) for r in live
+                    if r.get(key) not in (None, "") and str(r[key]).replace(".", "", 1).replace("-", "", 1).isdigit()]
+            return round(sum(vals), 2) if vals else None
+        return _json({"ok": True, "date": day.isoformat(), "rows": rows,
+                      "totals": {"shipments": len(live),
+                                 "courier_inc_vat": _tot("amount"),
+                                 "courier_ex_vat": _tot("amount_ex_vat"),
+                                 "customer_paid": _tot("shipping_paid")}})
 
     @mcp.custom_route("/api/dispatch/cancel", methods=["POST"])
     async def dispatch_cancel_route(request: Request):

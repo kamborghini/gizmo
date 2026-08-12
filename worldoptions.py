@@ -584,8 +584,10 @@ async def _soap_call(service: str, action: str, inner: str, retryable: bool = Tr
                 if attempt >= attempts - 1 and retryable:
                     break
                 if not retryable:
-                    raise WorldOptionsError(
+                    err = WorldOptionsError(
                         "Could not connect to World Options; nothing was booked. Try again in a moment.")
+                    err.not_sent = True     # nothing reached them: retrying risks nothing
+                    raise err
                 await asyncio.sleep(min(2 ** attempt, 6))
                 continue
             except (httpx.TimeoutException, httpx.TransportError) as e:

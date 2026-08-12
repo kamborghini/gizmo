@@ -2220,6 +2220,95 @@ def t_a_failed_reply_still_carries_the_envelope():
     finally:
         worldoptions._soap_call = saved
 
+@test
+def t_a_transient_failed_reply_is_retried_exactly_once():
+    reset_dispatch(); reset_prod()
+    copilot.WO_RETRY_WAIT_SECS = 0          # no real sleeping in tests
+    SSL_FAIL = """<Envelope><Body><DoShipmentResponse><DoShipmentResult>
+     <Message>The request was aborted: Could not create SSL/TLS secure channel.*|**|*1</Message>
+     <NotificationtType>FAILED</NotificationtType>
+    </DoShipmentResult></DoShipmentResponse></Body></Envelope>"""
+    calls = {"n": 0}
+    async def flaky(service, action, inner, retryable=True):
+        if service != "ShipmentService":
+            return ET.fromstring(RATE_XML)
+        calls["n"] += 1
+        return ET.fromstring(SSL_FAIL if calls["n"] == 1 else BOOK_XML)
+    saved = worldoptions._soap_call; worldoptions._soap_call = flaky
+    try:
+        r = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
+        eq(r.status_code, 200, r.text)
+        ok(r.json().get("dispatch", {}).get("tracking_number") or r.json().get("tracking_number"),
+           "second attempt booked: " + r.text[:120])
+        eq(calls["n"], 2, "exactly one retry")
+    finally:
+        worldoptions._soap_call = saved
+
+@test
+def t_a_validation_failure_is_never_retried():
+    reset_dispatch(); reset_prod()
+    copilot.WO_RETRY_WAIT_SECS = 0
+    VAL_FAIL = """<Envelope><Body><DoShipmentResponse><DoShipmentResult>
+     <Message>Ready date should be in format - dd/MM/yyyy.</Message>
+     <NotificationtType>FAILED</NotificationtType>
+    </DoShipmentResult></DoShipmentResponse></Body></Envelope>"""
+    calls = {"n": 0}
+    async def refusing(service, action, inner, retryable=True):
+        if service != "ShipmentService":
+            return ET.fromstring(RATE_XML)
+        calls["n"] += 1
+        return ET.fromstring(VAL_FAIL)
+    saved = worldoptions._soap_call; worldoptions._soap_call = refusing
+    try:
+        r = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
+        ok(r.json().get("error"), "reported")
+        eq(calls["n"], 1, "a deterministic refusal is not retried")
+    finally:
+        worldoptions._soap_call = saved
+
+@test
+def t_a_post_send_silence_is_never_retried():
+    # The first attempt may have booked and charged; a retry could double-book.
+    reset_dispatch(); reset_prod()
+    copilot.WO_RETRY_WAIT_SECS = 0
+    calls = {"n": 0}
+    async def silent(service, action, inner, retryable=True):
+        if service != "ShipmentService":
+            return ET.fromstring(RATE_XML)
+        calls["n"] += 1
+        raise worldoptions.WorldOptionsError(
+            "World Options did not reply in time. The shipment MAY still have been "
+            "booked; check your World Options portal before trying again.")
+    saved = worldoptions._soap_call; worldoptions._soap_call = silent
+    try:
+        r = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
+        ok(r.json().get("error"), "reported")
+        eq(calls["n"], 1, "NEVER retried when the outcome is unknown")
+    finally:
+        worldoptions._soap_call = saved
+
+@test
+def t_manifest_lists_the_days_bookings_with_margin():
+    reset_dispatch(); reset_prod()
+    # Book one (the mock order carries Standard Delivery shipping paid).
+    r = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
+    eq(r.status_code, 200, r.text)
+    from datetime import datetime as dt
+    from zoneinfo import ZoneInfo
+    today = dt.now(ZoneInfo("Europe/London")).date().isoformat()
+    m = post("/api/dispatch/manifest", {"date": today}).json()
+    eq(len(m["rows"]), 1, "one booking today")
+    row = m["rows"][0]
+    ok(row["order_name"].startswith("#"), "order name stored with the entry: " + row["order_name"])
+    ok(row["tracking"], "tracking present")
+    eq(row["amount_ex_vat"], OPT.get("amount_ex_vat"), "ex VAT carried" if OPT.get("amount_ex_vat") else "no ex VAT on this option")
+    eq(m["totals"]["shipments"], 1, "counted")
+    # An empty day is an empty manifest, not an error.
+    e = post("/api/dispatch/manifest", {"date": "2001-01-01"}).json()
+    eq(e["rows"], [], "empty day")
+    b = post("/api/dispatch/manifest", {"date": "nonsense"})
+    eq(b.status_code, 400, "bad date refused plainly")
+
 # =========================== run ===========================================
 passed = failed = 0
 for fn in TESTS:

@@ -1,0 +1,14 @@
+# Admin link: adds "Dispatch with courier" to the More actions menu on every
+# order details page in the Shopify admin. Clicking it opens Store Copilot at
+# the Production Manager with this order's dispatch window already open, so
+# booking a courier is one click from the order itself. Shopify appends the
+# order's id to the url.
+[[extensions]]
+name = "Dispatch with courier"
+description = "Open Store Copilot and book a courier for this order"
+handle = "dispatch-order"
+type = "admin_link"
+
+[[extensions.targeting]]
+target = "admin.order-details.action.link"
+url = "/?view=labels&dispatch=1"

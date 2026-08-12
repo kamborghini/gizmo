@@ -3775,10 +3775,13 @@
             day.title = 'Print one A4 cut list of everything not yet made';
             day.onclick = printDaySheet;
             bar.append(day);
+            const dm = el('button', 'btn'); dm.append(ico(I.truck || I.box), document.createTextNode('Dispatch manifest'));
+            dm.title = 'Everything booked on a day: driver handover and invoice check';
+            dm.onclick = openDispatchManifest;
             const su = el('button', 'btn'); su.append(ico(I.box), document.createTextNode('Stock usage'));
             su.title = 'Glass used by everything marked made on a chosen day';
             su.onclick = openStockUsage;
-            bar.append(su);
+            bar.append(su, dm);
             const upBtn = el('button', 'btn'); upBtn.append(ico(I.plus), document.createTextNode('Update size list'));
             upBtn.title = 'Replace the gobo size sheet with a new CSV export. The current one is kept as a backup.';
             const fileIn = document.createElement('input');
@@ -4050,6 +4053,119 @@
         }
         /* Estimated stock usage: glass blanks consumed by everything marked made
            on a chosen day (UK time), summed by size and glass type. */
+        function openDispatchManifest() {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, 'Dispatch manifest'));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
+            const body = el('div', 'modal-body');
+            const bar = el('div', 'lbl-toolbar');
+            const dt = document.createElement('input');
+            dt.type = 'date'; dt.className = 'lbl-size';
+            dt.value = new Date().toLocaleDateString('en-CA');
+            bar.append(el('span', 'cov-line', 'Everything booked on'), dt);
+            const pr = el('button', 'btn'); pr.append(ico(I.printer), document.createTextNode('Print'));
+            pr.disabled = true;
+            bar.append(pr);
+            body.append(bar);
+            const out = el('div'); body.append(out);
+            let current = null, maniReq = 0;
+            function money(v, cur) { return (v == null || v === '') ? '' : fmtPrice(parseFloat(v), cur || 'GBP'); }
+            async function load() {
+                out.innerHTML = ''; pr.disabled = true; current = null;
+                const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Collecting the day\u2019s bookings\u2026')); out.append(t);
+                const rq = ++maniReq;
+                try {
+                    const d = await api('/api/dispatch/manifest', { date: dt.value });
+                    if (rq !== maniReq) return;
+                    out.innerHTML = ''; current = d;
+                    if (!d.rows.length) { out.append(el('div', 'cov-line', 'Nothing was booked on this day.')); return; }
+                    const wrap = el('div', 'tablewrap');
+                    const tb = el('table', 'ktable');
+                    tb.innerHTML = '<thead><tr><th>Time</th><th>Order</th><th>Customer</th><th>Courier</th>'
+                        + '<th>Tracking</th><th class="num">Courier ex VAT</th><th class="num">Customer paid</th></tr></thead>';
+                    const tbody = el('tbody');
+                    d.rows.forEach(r => {
+                        const tr = el('tr');
+                        if (r.canceled) tr.style.opacity = '.45';
+                        tr.append(el('td', null, r.time), el('td', 'kw', r.order_name + (r.canceled ? ' (cancelled)' : '')),
+                            el('td', null, r.customer),
+                            el('td', null, [r.carrier, r.service].filter(Boolean).join(' ')),
+                            el('td', null, r.tracking),
+                            el('td', 'num', money(r.amount_ex_vat, r.currency)),
+                            el('td', 'num', money(r.shipping_paid, r.currency)));
+                        tbody.append(tr);
+                    });
+                    tb.append(tbody); wrap.append(tb); out.append(wrap);
+                    const tt = d.totals || {};
+                    const bits = [tt.shipments + (tt.shipments === 1 ? ' shipment' : ' shipments')];
+                    if (tt.courier_ex_vat != null) bits.push('couriers ' + money(tt.courier_ex_vat) + ' ex VAT');
+                    if (tt.customer_paid != null) bits.push('customers paid ' + money(tt.customer_paid));
+                    if (tt.courier_ex_vat != null && tt.customer_paid != null) {
+                        const diff = tt.customer_paid - tt.courier_ex_vat;
+                        bits.push((diff >= 0 ? 'covered, ' : 'short by ') + money(Math.abs(diff)));
+                    }
+                    out.append(el('div', 'cov-note', bits.join(' \u00b7 ')
+                        + '. Margin compares what customers paid for delivery with the ex VAT courier cost.'));
+                    pr.disabled = false;
+                } catch (e) {
+                    if (rq !== maniReq) return;
+                    out.innerHTML = '';
+                    out.append(el('div', 'cov-line', e.message || 'Could not load.'));
+                }
+            }
+            pr.onclick = () => { if (current) printDispatchManifest(current); };
+            dt.onchange = load;
+            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+            const close = () => { overlay.remove(); };
+            x.onclick = close;
+            load();
+        }
+        function printDispatchManifest(d) {
+            const box = $('label-print'); box.innerHTML = '';
+            const ds = el('div', 'day-sheet');
+            ds.append(el('h1', null, 'Dispatch manifest'));
+            const nice = new Date(d.date + 'T12:00:00').toLocaleDateString('en-GB',
+                { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+            const tt = d.totals || {};
+            ds.append(el('div', 'ds-meta', nice + ' \u00b7 ' + tt.shipments
+                + (tt.shipments === 1 ? ' shipment' : ' shipments')));
+            const tb = el('table', 'ds-table');
+            tb.innerHTML = '<thead><tr><th>Time</th><th>Order</th><th>Customer</th><th>Courier</th>'
+                + '<th>Tracking</th><th>Collection ref</th><th>Ex VAT</th><th>Paid</th></tr></thead>';
+            const tbody = el('tbody');
+            d.rows.filter(r => !r.canceled).forEach(r => {
+                const tr = el('tr');
+                tr.append(el('td', null, r.time), el('td', 'ds-size', r.order_name), el('td', null, r.customer),
+                    el('td', null, [r.carrier, r.service].filter(Boolean).join(' ')),
+                    el('td', null, r.tracking), el('td', null, r.collection_ref || ''),
+                    el('td', 'ds-qty', r.amount_ex_vat == null ? '' : fmtPrice(parseFloat(r.amount_ex_vat), r.currency)),
+                    el('td', 'ds-qty', !r.shipping_paid ? '' : fmtPrice(parseFloat(r.shipping_paid), r.currency)));
+                tbody.append(tr);
+            });
+            tb.append(tbody); ds.append(tb);
+            if (tt.courier_ex_vat != null || tt.customer_paid != null) {
+                ds.append(el('div', 'ds-orders',
+                    'Couriers ' + (tt.courier_ex_vat == null ? '?' : fmtPrice(tt.courier_ex_vat, 'GBP')) + ' ex VAT'
+                    + '   Customers paid ' + (tt.customer_paid == null ? '?' : fmtPrice(tt.customer_paid, 'GBP'))));
+            }
+            box.append(ds);
+            let rule = $('label-page-rule');
+            if (!rule) { rule = document.createElement('style'); rule.id = 'label-page-rule'; document.head.append(rule); }
+            rule.textContent = '@page { size: A4 landscape; margin: 12mm; }';
+            const seq = ++printSeq;
+            document.body.classList.add('printing-label');
+            const cleanup = () => {
+                if (seq !== printSeq) return;
+                document.body.classList.remove('printing-label');
+                box.innerHTML = '';
+                const r = $('label-page-rule');
+                if (r && r.parentNode) r.parentNode.removeChild(r);
+            };
+            if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
+            setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);
+        }
         function openStockUsage() {
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal');
@@ -4978,6 +5094,18 @@
                 (function(){ var h = el('div', 'disp-result-head'); h.append(ico(I.check), el('span', null, 'Dispatched with ' + shipmentName(d))); body.append(h); })();
                 const tb = el('div', 'disp-track'); tb.append(el('span', null, 'Tracking '), el('b', null, d.tracking_number || '')); body.append(tb);
                 if (d.amount != null) body.append(el('div', 'sub', 'Quoted ' + fmtPrice(d.amount, d.currency)));
+                // The margin in one line: what the customer paid for delivery against
+                // what the courier costs before VAT.
+                if (d.shipping_paid && d.amount_ex_vat != null) {
+                    const paid = parseFloat(d.shipping_paid), ex = parseFloat(d.amount_ex_vat);
+                    if (!isNaN(paid) && !isNaN(ex)) {
+                        const diff = paid - ex;
+                        body.append(el('div', 'sub', 'Customer paid ' + fmtPrice(paid, d.currency)
+                            + ' for delivery \u00b7 courier ' + fmtPrice(ex, d.currency) + ' ex VAT \u00b7 '
+                            + (diff >= 0 ? 'covered with ' + fmtPrice(diff, d.currency) + ' over'
+                                         : 'short by ' + fmtPrice(-diff, d.currency))));
+                    }
+                }
                 if (d.dispatched_at) body.append(el('div', 'sub', 'Dispatched ' + fmtDate(d.dispatched_at)));
                 const bar = el('div', 'disp-actions');
                 const rp = el('button', 'btn btn-primary'); rp.append(ico(I.printer), document.createTextNode('Reprint label'));
@@ -5236,6 +5364,28 @@
                 labelsLoading = false;
                 renderLabels();
                 setTimeout(() => printLabels([data.orders[0]]), 450);   // preview is up; open the print dialog
+            } catch (e) {
+                labelsLoading = false;
+                box.innerHTML = ''; box.append(hero);
+                const er = el('div', 'msg error'); er.append(el('div', 'bubble', e.message || String(e))); box.append(er);
+                ht.children[1].textContent = 'Could not load that order.';
+            }
+        }
+        async function dispatchFromAdminLink(orderId) {
+            const box = $('labels-content'); box.innerHTML = '';
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
+            const ht = el('div'); ht.append(el('h2', null, 'Production Manager'), el('p', null, 'Opening dispatch for this order\u2026'));
+            hero.append(badge, ht); box.append(hero);
+            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Fetching the order\u2026')); box.append(t);
+            labelsLoading = true;
+            try {
+                const data = await api('/api/production-labels', { order_id: orderId });
+                if (!data.orders || !data.orders.length) throw new Error(data.error_note || 'Order not found.');
+                labelsCache = { data, at: Date.now() };
+                labelSel = data.orders[0].id;
+                labelsLoading = false;
+                renderLabels();
+                openDispatch(data.orders[0]);
             } catch (e) {
                 labelsLoading = false;
                 box.innerHTML = ''; box.append(hero);
@@ -5534,7 +5684,7 @@
         const bootOrderId = bootLabels ? parseInt(bootQP.get('id') || '0', 10) : 0;
         if (bootOrderId) skipLabelsAutoLoad = true;   // the deep link fetch owns the view
         renderSidebar(); renderChat(); setView(bootLabels ? 'labels' : 'overview');
-        if (bootOrderId) printFromAdminLink(bootOrderId);
+        if (bootOrderId) (bootQP.get('dispatch') === '1' ? dispatchFromAdminLink : printFromAdminLink)(bootOrderId);
         loadProfile();  // pull the saved store profile from the server (for the Settings modal)
         loadMemory();   // pull saved memories (for Overview follow-ups + the Memory tab)
         loadAnalysisCache();  // restore last AI-tab results (no tokens spent)
