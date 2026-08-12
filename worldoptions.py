@@ -30,7 +30,9 @@ from datetime import datetime, timezone
 from xml.sax.saxutils import escape as _xml_escape
 import xml.etree.ElementTree as ET
 
+import base64
 import httpx
+from urllib.parse import urlparse
 
 logger = logging.getLogger("shopify_mcp.worldoptions")
 
@@ -933,6 +935,59 @@ def _sender_block(o: dict) -> str:
             + _ts("m", "PostalCode", o.get("postcode"))
             + _ts("m", "State", o.get("state"))
             + "</wo:SendersDetails>")
+
+
+def _label_from_bytes(raw: bytes, source_url: str = "") -> dict:
+    """An inline label from downloaded bytes, typed by what the bytes actually are.
+    An HTML page is refused: saving their error page as the label would be worse
+    than having no label at all."""
+    if not raw:
+        return {}
+    if raw.startswith(b"%PDF"):
+        kind, lt = "base64pdf", "PDF"
+    elif raw.startswith(b"\x89PNG"):
+        kind, lt = "base64png", "PNG"
+    elif raw[:256].lstrip()[:1] in (b"<",):
+        return {}
+    else:
+        kind, lt = "base64bin", ""
+    return {"type": kind, "value": base64.b64encode(raw).decode("ascii"),
+            "label_type": lt, "source_url": source_url}
+
+
+def _label_url(url: str) -> str:
+    """The absolute https URL a LabelURL really means, or '' when it is not one of
+    World Options' own. Their URLs can be relative to the service host, and nothing
+    from a reply may send the server fetching arbitrary addresses."""
+    u = (url or "").strip()
+    if not u:
+        return ""
+    if "://" not in u:
+        u = (_state.get("base") or DEFAULT_BASE).rstrip("/") + "/" + u.lstrip("/")
+    try:
+        p = urlparse(u)
+    except ValueError:
+        return ""
+    host = (p.hostname or "").lower()
+    ok = (host in ("worldoptions.co.uk", "worldoptions.com")
+          or host.endswith(".worldoptions.co.uk") or host.endswith(".worldoptions.com"))
+    return u if p.scheme in ("http", "https") and ok else ""
+
+
+async def fetch_label(url: str) -> dict:
+    """Download a LabelURL into an inline label. The link they return may be
+    relative, short-lived, or unreachable from inside the admin iframe (a tab
+    opened there resolves against the app and 404s), so the bytes are captured
+    once, server-side, and kept with the dispatch."""
+    u = _label_url(url)
+    if not u:
+        return {}
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        r = await client.get(u)
+        if r.status_code != 200:
+            logger.info("world options: label url answered HTTP %s: %s", r.status_code, u)
+            return {}
+        return _label_from_bytes(r.content[:8_000_000], u)
 
 
 def _classify_label(lbl: ET.Element) -> dict:

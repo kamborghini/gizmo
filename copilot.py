@@ -890,6 +890,25 @@ def _wo_boot() -> None:
 # Booked labels can be big base64 blobs; keep them out of the small state file,
 # one JSON per order, so reprinting after a reload still works (the SOAP API has
 # no fetch-by-tracking service).
+async def _resolve_label_links(labels: list) -> list:
+    """Swap every url-type label for its downloaded bytes. Their label links are
+    unreliable from inside the admin (relative paths resolve against this app and
+    404, and the frame mangles opened tabs), so the file itself is what is kept.
+    A link that cannot be fetched is kept as-is rather than dropped."""
+    out = []
+    for lbl in labels:
+        if isinstance(lbl, dict) and lbl.get("type") == "url" and worldoptions:
+            try:
+                got = await worldoptions.fetch_label(lbl.get("value"))
+            except Exception:
+                logger.exception("label download failed for %s", lbl.get("value"))
+                got = {}
+            out.append(got or lbl)
+        else:
+            out.append(lbl)
+    return out
+
+
 def _save_dispatch_labels(order_id, labels: list) -> None:
     try:
         os.makedirs(DISPATCH_LABELS_DIR, exist_ok=True)
@@ -3995,6 +4014,10 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
     # may raise: an exception now would be reported as "the booking failed" and
     # the operator would book (and pay for) a second label.
     try:
+        shipment["labels"] = await _resolve_label_links(shipment.get("labels") or [])
+    except Exception:
+        logger.exception("label download failed after booking, order %s; keeping the links", order_id)
+    try:
         _save_dispatch_labels(int(order_id), shipment.get("labels") or [])
     except Exception:
         logger.exception("saving labels failed after a successful booking, order %s", order_id)
@@ -6470,6 +6493,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not labels:
             return _json({"error": "No stored label for this order. It may have been dispatched "
                                    "before labels were saved, or on another device."}, 404)
+        # Self-heal: an order booked while labels were stored as LINKS gets the real
+        # file downloaded on its next open, and the fix is saved back.
+        if any(isinstance(l, dict) and l.get("type") == "url" for l in labels):
+            resolved = await _resolve_label_links(labels)
+            if resolved != labels:
+                labels = resolved
+                try:
+                    _save_dispatch_labels(oid, labels)
+                except Exception:
+                    logger.exception("could not save the resolved labels for order %s", oid)
         return _json({"ok": True, "labels": labels})
 
     @mcp.custom_route("/api/dispatch/cancel", methods=["POST"])
