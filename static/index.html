@@ -822,6 +822,24 @@
         .modal-head { display: flex; align-items: center; padding: 18px 22px; border-bottom: 1px solid var(--border); }
         .modal-head h3 { margin: 0; font-size: 16px; font-weight: 700; flex: 1; letter-spacing: -.02em; }
         .modal-body { padding: 22px; overflow-y: auto; }
+        #toast-host { position: fixed; top: 14px; right: 14px; z-index: 100; display: flex;
+            flex-direction: column; gap: 8px; max-width: min(430px, 92vw); }
+        .toast { display: flex; gap: 10px; align-items: flex-start; background: var(--surface-2);
+            border: 1px solid var(--border-2); border-left: 3px solid var(--accent); border-radius: 10px;
+            padding: 11px 12px; box-shadow: 0 12px 34px rgba(0,0,0,.42); font-size: 13px; color: var(--ink);
+            animation: toastin .18s ease-out; }
+        .toast.bad { border-left-color: #f87171; }
+        .toast.good { border-left-color: #4ade80; }
+        .toast-msg { flex: 1 1 auto; line-height: 1.42; }
+        .toast-x { background: none; border: 0; color: var(--ink-3); cursor: pointer; padding: 0; line-height: 1; flex: none; }
+        .toast-x svg { width: 14px; height: 14px; }
+        .toast.out { opacity: 0; transition: opacity .32s; }
+        @keyframes toastin { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+        body.printing-label #toast-host { display: none !important; }
+        .confirm-overlay { z-index: 60; }
+        .confirm-modal { max-width: 460px; width: 92vw; }
+        .confirm-msg { font-size: 13.5px; line-height: 1.5; color: var(--ink); margin: 0; }
+        @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
         .field-label { font-size: 13px; font-weight: 600; display: block; margin-top: 8px; }
         .field-help { font-size: 12.5px; color: var(--ink-2); margin: 5px 0 12px; line-height: 1.55; }
         .pf-input { width: 100%; resize: vertical; border: 1px solid var(--border-2); border-radius: 11px;
@@ -1166,7 +1184,17 @@
                 body: JSON.stringify(payload || {}),
             });
             if (res.status === 401) throw new Error('Unauthorized. Open this from inside your Shopify admin.');
-            const data = await res.json();
+            if (res.status === 429) throw new Error('The app is being asked for too much at once. Wait a few seconds and try again.');
+            let data;
+            try { data = await res.json(); }
+            catch (e) {
+                // A gateway/proxy error page is not JSON: never show the parse error.
+                const err = new Error(res.status >= 500
+                    ? 'The server did not answer properly (error ' + res.status + '). Nothing was saved. Wait a moment and try again.'
+                    : 'Unexpected reply from the server (status ' + res.status + '). Please try again.');
+                err.noReply = true;
+                throw err;
+            }
             if (data.error) throw new Error(data.error);
             return data;
         }
@@ -1746,7 +1774,7 @@
         function setRefreshLabel(text) { const b = $('refresh-all'); const l = b && b.querySelector('.nr-label'); if (l) l.textContent = text; }
         async function refreshAll() {
             if (refreshingAll) return;
-            if (!confirm('Refresh all reports now? This re-runs the Overview, SEO, Keywords and Customers audits and uses AI credits. It can take a couple of minutes.')) return;
+            if (!await uiConfirm('Re-run the Overview, SEO, Keywords and Customers audits now? This uses AI credits and can take a couple of minutes.', { title: 'Refresh all reports', okText: 'Refresh all' })) return;
             refreshingAll = true;
             const btn = $('refresh-all'); btn.disabled = true; btn.classList.add('spin');
             const steps = [['Overview', () => loadOverview(true)], ['SEO', () => loadSEO(true)], ['Keywords', () => loadKeywords(true)], ['Customers', () => loadCustomers(true)]];
@@ -1861,11 +1889,11 @@
             $('input') && $('input').focus();
         }
         function selectConvo(id) { activeId = id; renderSidebar(); renderChat(); setView('chat'); }
-        function deleteConvo(id, ev) {
+        async function deleteConvo(id, ev) {
             ev.stopPropagation();
             const c = convos.find(x => x.id === id);
             const name = (c && c.title) ? c.title : 'this conversation';
-            if (!confirm('Delete "' + name + '"? This cannot be undone.')) return;
+            if (!await uiConfirm('Delete "' + name + '"? This cannot be undone.', { title: 'Delete conversation', okText: 'Delete' })) return;
             convos = convos.filter(x => x.id !== id);
             if (activeId === id) activeId = convos[0] ? convos[0].id : null;
             save(); renderSidebar(); renderChat();
@@ -2767,11 +2795,61 @@
             } finally { learning = false; renderMemory(); }
         }
         async function deleteKnowledge() {
-            if (!confirm('Delete what the copilot has learned about your store? This cannot be undone.')) return;
+            if (!await uiConfirm('Delete what the copilot has learned about your store? This cannot be undone.', { title: 'Delete store knowledge', okText: 'Delete' })) return;
             try { const d = await api('/api/learn', { op: 'delete' }); knowledge = (d && d.knowledge) || {}; } catch (e) {}
             renderMemory();
         }
-        function addToast(msg) { try { alert(msg); } catch (e) {} }
+        /* Chrome removed alert()/confirm()/prompt() inside cross-origin iframes, and
+           this app ALWAYS runs in one (embedded in the Shopify admin). Every message
+           and every confirmation therefore has to be drawn in the page itself. */
+        function addToast(msg, kind) {
+            const text = String(msg == null ? '' : msg).trim();
+            if (!text) return;
+            let host = document.getElementById('toast-host');
+            if (!host) { host = el('div'); host.id = 'toast-host'; document.body.append(host); }
+            const t = el('div', 'toast' + (kind ? ' ' + kind : ''));
+            t.append(el('div', 'toast-msg', text));
+            const x = el('button', 'toast-x'); x.innerHTML = I.x; x.title = 'Dismiss';
+            x.onclick = () => t.remove();
+            t.append(x);
+            host.append(t);
+            // Problems stay up long enough to be read and acted on.
+            const life = kind === 'bad' ? 14000 : 7000;
+            setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 320); }, life);
+        }
+        function toastError(msg) { addToast(msg, 'bad'); }
+        function toastOk(msg) { addToast(msg, 'good'); }
+
+        /* In-page replacement for window.confirm(). Returns a promise. */
+        function uiConfirm(message, opts) {
+            opts = opts || {};
+            return new Promise(resolve => {
+                const overlay = el('div', 'modal-overlay show confirm-overlay');
+                const modal = el('div', 'modal confirm-modal');
+                const head = el('div', 'modal-head'); head.append(el('h3', null, opts.title || 'Please confirm'));
+                const body = el('div', 'modal-body'); body.append(el('p', 'confirm-msg', message));
+                const foot = el('div', 'modal-foot');
+                const no = el('button', 'btn'); no.textContent = opts.cancelText || 'Cancel';
+                const yes = el('button', 'btn btn-primary'); yes.textContent = opts.okText || 'Confirm';
+                foot.append(no, yes);
+                modal.append(head, body, foot); overlay.append(modal); document.body.append(overlay);
+                const prev = document.activeElement;
+                const done = (v) => {
+                    overlay.remove(); document.removeEventListener('keydown', key);
+                    if (prev && prev.focus) prev.focus();
+                    resolve(v);
+                };
+                function key(e) {
+                    if (e.key === 'Escape') { e.stopPropagation(); done(false); }
+                    if (e.key === 'Enter') { e.preventDefault(); done(true); }
+                }
+                no.onclick = () => done(false);
+                yes.onclick = () => done(true);
+                overlay.onclick = (e) => { if (e.target === overlay) done(false); };
+                document.addEventListener('keydown', key);
+                yes.focus();
+            });
+        }
         function knowledgeCard() {
             const card = el('div', 'card know');
             const head = el('div', 'know-head');
@@ -3369,9 +3447,25 @@
                     if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
                 });
         }
+        // Marking made can fulfil Shopify and email the customer, and the rows
+        // re-order as soon as it lands - so a second click must never reach a
+        // different order, and must never silently undo the first one.
+        const madeBusy = {};
         async function toggleMade(o) {
-            const prev = prodStateOf(o).made_at || null;   // remember, so a failed write can be undone
+            if (madeBusy[o.id]) return;
+            const prev = prodStateOf(o).made_at || null;
             const on = !prev;
+            const dsp = dispatchStateOf(o);
+            // Un-marking something the customer has already been emailed about is a
+            // real-world action, not a toggle: make them mean it.
+            if (!on && dsp.fulfilled) {
+                const okToUndo = await uiConfirm(
+                    'This order is already fulfilled in Shopify and the customer has been emailed its tracking. '
+                    + 'Un-marking it will cancel that fulfilment and put the order back in production. Continue?',
+                    { title: 'Undo a shipped order', okText: 'Undo it' });
+                if (!okToUndo) return;
+            }
+            madeBusy[o.id] = true;
             setProdState(o.id, { made_at: on ? new Date().toISOString() : null });
             if (!on) { const st = prodStateOf(o); delete st.made_at; }
             renderLabels();
@@ -3379,17 +3473,19 @@
                 const r = await api('/api/production-state', { op: 'made', id: o.id, on });
                 if (r && r.dispatch && labelsCache && labelsCache.data) {
                     labelsCache.data.dispatch = Object.assign({}, labelsCache.data.dispatch || {}, r.dispatch);
-                    renderLabels();
                 }
-                if (r && r.ship_note) addToast(r.ship_note);
-                if (r && r.tag_note) addToast(r.tag_note);
+                renderLabels();
+                if (r && r.ship_note) addToast(r.ship_note, r.fulfilled ? 'good' : '');
+                if (r && r.tag_note) toastError(r.tag_note);
             } catch (e) {
-                // The server did not record it: put the row back as it was so the
-                // list, the filters and the day sheet do not lie.
                 setProdState(o.id, { made_at: prev });
                 if (!prev) { const st = prodStateOf(o); delete st.made_at; }
                 renderLabels();
-                addToast('Could not mark that order. Please try again.');
+                // Give them the real reason, not a generic retry.
+                toastError((e.message || 'Could not mark that order.')
+                    + (e.noReply ? '' : ' Nothing was changed - press Refresh and check before trying again.'));
+            } finally {
+                delete madeBusy[o.id];
             }
         }
         /* Paid gobo orders that never got the production tag: they would otherwise
@@ -3613,7 +3709,7 @@
                 if (!f) return;
                 if (f.size > 2 * 1024 * 1024) { addToast('That file is over 2 MB.'); return; }
                 const text = await f.text();
-                if (!confirm('Replace the size list with "' + f.name + '"? The current sheet is kept as a backup and a size check runs after.')) return;
+                if (!await uiConfirm('Replace the size list with "' + f.name + '"? The current sheet is kept as a backup and a size check runs after.', { title: 'Replace size list', okText: 'Replace' })) return;
                 upBtn.disabled = true;
                 try {
                     const r = await api('/api/gobo-sizes/upload', { csv: text });
@@ -4081,29 +4177,54 @@
             return wrap;
         }
         // Open each courier label: a URL in a new tab, a base64/dataurl PDF as a blob.
-        function openLabel(l) {
+        // Turn a label into a blob URL once, so print and download share it.
+        function labelBlobUrl(l) {
+            const MIME = { base64pdf: 'application/pdf', base64png: 'image/png', base64bin: 'application/octet-stream' };
+            const mime = MIME[l.type];
+            if (!mime) return null;
+            const bin = atob(String(l.value || '').replace(/\s+/g, ''));
+            const buf = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+            return URL.createObjectURL(new Blob([buf], { type: mime }));
+        }
+        function labelExt(l) {
+            if (l.type === 'base64png') return 'png';
+            if (l.type === 'base64pdf') return 'pdf';
+            return (l.label_type || 'zpl').toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+        }
+        // Always available: puts the file on disk. App Bridge does not intercept
+        // a download click, so this works even when opening a tab does not.
+        function downloadLabel(l, i) {
             try {
                 if (l.type === 'url' || l.type === 'dataurl') { window.open(l.value, '_blank', 'noopener'); return; }
-                const MIME = { base64pdf: 'application/pdf', base64png: 'image/png', base64bin: 'application/octet-stream' };
-                const mime = MIME[l.type];
-                if (mime) {
-                    const bin = atob(l.value.replace(/\s+/g, ''));
-                    const buf = new Uint8Array(bin.length);
-                    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-                    const url = URL.createObjectURL(new Blob([buf], { type: mime }));
-                    if (l.type === 'base64bin') {
-                        // ZPL etc: not viewable, download it for the thermal printer.
-                        const a = document.createElement('a'); a.href = url;
-                        a.download = 'shipping-label.' + ((l.label_type || 'zpl').toLowerCase());
-                        document.body.append(a); a.click(); a.remove();
-                    } else {
-                        window.open(url, '_blank', 'noopener');
-                    }
-                    setTimeout(() => URL.revokeObjectURL(url), 60000);
-                    return;
-                }
-                addToast('This label format could not be opened; download it from your World Options portal.');
-            } catch (e) { addToast('Could not open the label.'); }
+                const url = labelBlobUrl(l);
+                if (!url) { toastError('This label format cannot be saved; get it from your World Options portal.'); return; }
+                const a = document.createElement('a'); a.href = url;
+                a.download = 'shipping-label' + (i ? '-' + (i + 1) : '') + '.' + labelExt(l);
+                document.body.append(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+            } catch (e) { toastError('Could not save the label. Use Download, or your World Options portal.'); }
+        }
+        function openLabel(l) {
+            try {
+                // An https label URL is fine to hand to the admin. A blob: URL is NOT:
+                // App Bridge forwards window.open to admin.shopify.com, which cannot
+                // resolve a blob minted in this iframe, so it would open a blank tab.
+                if (l.type === 'url' || l.type === 'dataurl') { window.open(l.value, '_blank', 'noopener'); return; }
+                if (l.type === 'base64bin') { downloadLabel(l); return; }   // ZPL: not viewable
+                const url = labelBlobUrl(l);
+                if (!url) { toastError('This label format could not be opened; download it instead.'); return; }
+                // Print in place from a hidden same-origin iframe.
+                const fr = document.createElement('iframe');
+                fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0';
+                fr.onload = () => {
+                    try { fr.contentWindow.focus(); fr.contentWindow.print(); }
+                    catch (e) { toastError('Could not open the print dialog. Use Download to save the label.'); }
+                    setTimeout(() => { fr.remove(); URL.revokeObjectURL(url); }, 60000);
+                };
+                fr.src = url;
+                document.body.append(fr);
+            } catch (e) { toastError('Could not open the label. Use Download to save it instead.'); }
         }
         function labelButtons(host, labels) {
             labels = labels || [];
@@ -4111,9 +4232,16 @@
             const row = el('div', 'disp-actions');
             labels.forEach((l, i) => {
                 const b = el('button', 'btn btn-primary');
-                b.append(ico(I.printer), document.createTextNode(labels.length > 1 ? ('Label ' + (i + 1)) : 'Print label'));
+                b.append(ico(I.printer), document.createTextNode(labels.length > 1 ? ('Print label ' + (i + 1)) : 'Print label'));
                 b.onclick = () => openLabel(l);
                 row.append(b);
+                // Second route to the same file, so a print dialog that will not open
+                // can never leave a paid-for label unreachable.
+                const d = el('button', 'btn');
+                d.append(ico(I.download), document.createTextNode('Download'));
+                d.title = 'Save the label file to this computer';
+                d.onclick = () => downloadLabel(l, labels.length > 1 ? i : 0);
+                row.append(d);
             });
             host.append(row);
         }
@@ -4127,7 +4255,12 @@
             const body = el('div', 'modal-body');
             modal.append(head, body); overlay.append(modal); document.body.append(overlay);
             const prev = document.activeElement;
-            const close = () => { overlay.remove(); document.removeEventListener('keydown', esc); if (prev && prev.focus) prev.focus(); };
+            let booking = false;    // set while money is being spent
+            const close = () => {
+                if (booking) { addToast('The courier booking is still going through. Please wait.'); return; }
+                overlay.remove(); document.removeEventListener('keydown', esc);
+                if (prev && prev.focus) prev.focus();
+            };
             function esc(e) { if (e.key === 'Escape') close(); }
             x.onclick = close;
             overlay.onclick = (e) => { if (e.target === overlay) close(); };
@@ -4191,12 +4324,14 @@
                 presets.forEach(b => { const opt = el('option', null, b.name); opt.value = b.id; sel.append(opt); });
                 const cust = el('option', null, 'Custom'); cust.value = '__custom'; sel.append(cust);
                 const ins = {};
+                let weightTouched = false;
                 [['width', 'W'], ['length', 'L'], ['depth', 'D'], ['weight', 'kg']].forEach(([k, ph]) => {
                     const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.step = '0.1';
                     inp.className = 'disp-num disp-boxdim'; inp.placeholder = ph; inp.title = ph === 'kg' ? 'Weight (kg)' : ph + ' (cm)';
                     inp.oninput = staleQuote;
                     ins[k] = inp;
                 });
+                ins.weight.addEventListener('input', () => { weightTouched = true; });
                 const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove this parcel';
                 rm.onclick = () => { const i = boxRows.indexOf(row); if (i >= 0) boxRows.splice(i, 1); rowb.remove(); staleQuote(); };
                 const row = { el: rowb, sel, ins };
@@ -4204,7 +4339,13 @@
                     const b = presets.find(x => x.id === id);
                     if (!b) return;
                     ins.width.value = b.width; ins.length.value = b.length; ins.depth.value = b.depth;
-                    if (!ins.weight.value) ins.weight.value = (boxRows.length === 0 && o.weight_hint > 0) ? o.weight_hint : b.weight;
+                    // Couriers weigh the WHOLE parcel. Shopify's grams are the contents
+                    // only, so under-declaring invites a re-weigh surcharge: start from
+                    // the box's own weight plus the contents, and let them correct it.
+                    if (!weightTouched) {
+                        const contents = (boxRows.length <= 1 && o.weight_hint > 0) ? o.weight_hint : 0;
+                        ins.weight.value = Math.round(((b.weight || 0) + contents) * 100) / 100;
+                    }
                 }
                 sel.onchange = () => { applyPreset(sel.value); staleQuote(); };
                 rowb.append(sel, ins.width, ins.length, ins.depth, ins.weight, rm);
@@ -4213,6 +4354,7 @@
                 boxHostD.append(rowb);
             }
             addBoxRow(defaultPreset);
+            body.append(el('p', 'field-help', 'Sizes in cm, weight in kg. Weigh the packed box: couriers re-weigh on collection and bill the difference.'));
             const addBoxBtn = el('button', 'btn'); addBoxBtn.append(ico(I.plus), document.createTextNode('Add a box'));
             addBoxBtn.title = 'Multi-parcel shipment: every box travels on the same booking';
             addBoxBtn.onclick = () => { addBoxRow(defaultPreset); staleQuote(); };
@@ -4453,8 +4595,8 @@
                 book.onclick = async () => {
                     const cprob = customsProblem();
                     if (cprob) { addToast(cprob); return; }
-                    if (!confirm('Book ' + carrierService(chosen.carrier_name, chosen.service_name) + ' for ' + fmtPrice(chosen.amount, chosen.currency) + '? This charges your World Options account.')) return;
-                    book.disabled = true; book.textContent = 'Booking…';
+                    if (!await uiConfirm('Book ' + carrierService(chosen.carrier_name, chosen.service_name) + ' for ' + fmtPrice(chosen.amount, chosen.currency) + ' inc VAT?\n\nThis books the courier and charges your World Options account.', { title: 'Book this courier', okText: 'Book & dispatch' })) return;
+                    book.disabled = true; book.textContent = 'Booking…'; booking = true;
                     const doBook = (force) => api('/api/dispatch/book', {
                         order_id: o.id, option: chosen, boxes: lastBoxes, notify: nb.checked, force: !!force,
                         insurance: lastInsurance, signature: sigSel ? sigSel.value : '',
@@ -4466,13 +4608,28 @@
                         catch (e) {
                             // Shopify already shows the order fulfilled: ask, then retry once.
                             if (!/retry with the confirmation/.test(e.message || '')) throw e;
-                            if (!confirm('Shopify already shows this order as fulfilled (it may have shipped). Book a courier anyway?')) { book.disabled = false; setLabel(); return; }
+                            if (!await uiConfirm('Shopify already shows this order as fulfilled, which usually means it has already shipped. Book a courier anyway?', { title: 'Order looks already shipped', okText: 'Book anyway' })) { book.disabled = false; setLabel(); return; }
                             res = await doBook(true);
                         }
+                        booking = false;
                         setDispatchState(o.id, res.dispatch || {});
                         renderResult(res);
                         if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
-                    } catch (e) { book.disabled = false; setLabel(); addToast(e.message || 'Booking failed'); }
+                    } catch (e) {
+                        booking = false;
+                        const msg = String(e.message || 'Booking failed');
+                        // If the outcome is unknown the courier MAY already be booked and
+                        // charged: do not re-arm the button into a second charge.
+                        const unknown = e.noReply || /MAY still|check this order|did not get a reply/i.test(msg);
+                        toastError(msg);
+                        if (unknown) {
+                            book.textContent = 'Check before booking again';
+                            const warn = el('div', 'disp-warn', msg + ' Close this window, press Refresh, and look for a BOOKED chip on the order before trying again.');
+                            conf.append(warn);
+                        } else {
+                            book.disabled = false; setLabel();
+                        }
+                    }
                 };
                 conf.append(book);
             }
@@ -4495,6 +4652,7 @@
                 if (res.dropoff_shop) body.append(el('div', 'disp-warn', 'Drop the parcel at: ' + [res.dropoff_shop.name, res.dropoff_shop.street, res.dropoff_shop.city, res.dropoff_shop.postcode].filter(Boolean).join(', ') + '. The courier will NOT collect from you.'));
                 if (res.international) body.append(el('div', 'sub', 'Customs declaration sent; World Options generates the commercial invoice.'));
                 if (res.contact_note) body.append(el('div', 'disp-warn', res.contact_note));
+                if (res.book_note) body.append(el('div', 'disp-warn', res.book_note));
                 const f = res.fulfillment || {};
                 if (res.awaiting_made) {
                     body.append(el('div', 'disp-await', 'Not shipped yet. Shopify stays unfulfilled and the customer is not emailed until you mark this order made.'));
@@ -4526,7 +4684,7 @@
                 bar.append(rp);
                 const cancel = el('button', 'btn'); cancel.append(ico(I.x), document.createTextNode('Cancel shipment'));
                 cancel.onclick = async () => {
-                    if (!confirm('Cancel this shipment at World Options? You may still be charged depending on the courier.')) return;
+                    if (!await uiConfirm('Cancel this shipment at World Options? Depending on the courier you may still be charged.', { title: 'Cancel shipment', okText: 'Cancel shipment', cancelText: 'Keep it' })) return;
                     cancel.disabled = true;
                     try {
                         const cr = await api('/api/dispatch/cancel', { order_id: o.id, tracking_number: d.tracking_number });

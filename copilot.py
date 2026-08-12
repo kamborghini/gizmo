@@ -3701,8 +3701,13 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
 
     do_notify = cfg.get("notify_customer", True) if notify is None else bool(notify)
 
-    # Labels off to their own file; the state row stays small and reprint survives a reload.
-    _save_dispatch_labels(int(order_id), shipment.get("labels") or [])
+    # From here the courier is BOOKED and the account is charged. Nothing below
+    # may raise: an exception now would be reported as "the booking failed" and
+    # the operator would book (and pay for) a second label.
+    try:
+        _save_dispatch_labels(int(order_id), shipment.get("labels") or [])
+    except Exception:
+        logger.exception("saving labels failed after a successful booking, order %s", order_id)
     entry = {
         "tracking_number": shipment["tracking_number"],
         "carrier_name": shipment.get("carrier_name"),
@@ -3721,11 +3726,23 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
         "international": international,
         "dropoff": (dropoff_shop or {}).get("name") or "",
     }
-    _record_dispatch(int(order_id), entry)
+    book_note = ""
+    try:
+        _record_dispatch(int(order_id), entry)
+    except Exception:
+        logger.exception("recording the dispatch failed after a successful booking, order %s", order_id)
+        book_note = ("The label was booked but the app could not save it. Write the tracking "
+                     "number down before closing this window.")
 
     # Booking a label is preparation, not shipping: fulfilment waits until the
     # order is ALSO marked made. If it already is, this fulfils right now.
-    ready = await _fulfill_if_ready(registry, int(order_id), notify=do_notify)
+    try:
+        ready = await _fulfill_if_ready(registry, int(order_id), notify=do_notify)
+    except Exception:
+        logger.exception("post-booking fulfilment check failed for order %s", order_id)
+        ready = {"fulfilled": False, "reason": "error", "notified": False, "tag_note": "",
+                 "detail": "The label was booked. Shopify could not be updated just now; "
+                           "press Refresh and mark the order made when you are ready."}
     entry = _load_dispatch().get(str(int(order_id))) or entry
     fulfillment = ({"ok": True, "fulfillment_id": entry.get("fulfillment_id")} if ready["fulfilled"]
                    else {"ok": False, "reason": ready["reason"], "detail": ready["detail"]})
@@ -3743,6 +3760,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
         "insured": insurance,
         "international": international,
         "contact_note": contact_note,
+        "book_note": book_note,
     }
 
 
@@ -6061,7 +6079,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json(res, 400 if res.get("error") else 200)
         except Exception:
             logger.exception("dispatch book route failed")
-            return _json({"error": "The booking failed. Check the server logs before retrying."}, 500)
+            return _json({"error": "Something went wrong while booking. It MAY still have been "
+                                   "booked and charged: press Refresh, and check this order in "
+                                   "your World Options portal before trying again."}, 500)
 
     @mcp.custom_route("/api/dispatch/label", methods=["POST"])
     async def dispatch_label_route(request: Request):
@@ -6144,9 +6164,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             elif entry.get("fulfilled"):
                 note = ("Shipment cancelled. The order is still marked fulfilled in Shopify; "
                         "cancel that fulfillment in Shopify so the tracking is not left dead.")
-            # Put the order back in the To ship queue.
+            # Put the order back in the queue it actually belongs to: an order that
+            # was never made must return to production, not claim to be made.
+            was_made = bool((_load_prod_state().get(str(oid)) or {}).get("made_at"))
             try:
-                await _sync_order_tags(registry, oid, add=(MADE_TAG,), remove=(DISPATCHED_TAG,))
+                await _sync_order_tags(registry, oid,
+                                       add=(MADE_TAG if was_made else PRODUCTION_TAG,),
+                                       remove=(DISPATCHED_TAG,))
             except Exception:
                 logger.exception("tag revert after cancel failed for order %s", oid)
         return _json({"ok": True, "shipment": res, "note": note})
