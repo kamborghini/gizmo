@@ -356,6 +356,8 @@ def _save_profile(data: dict) -> dict:
             "flag_anomalies": bool(prefs.get("flag_anomalies", True)),
         },
     }
+    if not _store_writable(PROFILE_PATH):
+        return clean
     os.makedirs(os.path.dirname(PROFILE_PATH) or ".", exist_ok=True)
     tmp = PROFILE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -407,6 +409,10 @@ def _load_memory() -> list[dict]:
 
 
 def _write_memory(memories: list[dict]) -> list[dict]:
+    if not _store_writable(MEMORY_PATH):
+        # Hand-written merchant work: preserve the broken file for repair rather
+        # than replacing it with whatever loaded as the default.
+        return memories
     os.makedirs(os.path.dirname(MEMORY_PATH) or ".", exist_ok=True)
     tmp = MEMORY_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -467,6 +473,10 @@ def _load_skills() -> list[dict]:
 
 
 def _write_skills(skills: list[dict]) -> list[dict]:
+    if not _store_writable(SKILLS_PATH):
+        # Hand-written merchant work: preserve the broken file for repair rather
+        # than replacing it with whatever loaded as the default.
+        return skills
     os.makedirs(os.path.dirname(SKILLS_PATH) or ".", exist_ok=True)
     tmp = SKILLS_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -1088,7 +1098,7 @@ def _build_backup_zip():
                 if n in secrets_excluded:
                     continue
                 p = os.path.join(root, n)
-                if not os.path.isfile(p) or not n.lower().endswith((".json", ".csv", ".bak")):
+                if not os.path.isfile(p) or not n.lower().endswith((".json", ".jsonl", ".csv", ".bak")):
                     continue
                 try:
                     if os.path.getsize(p) > 10 * 1024 * 1024:
@@ -1175,6 +1185,18 @@ def _write_dispatch(orders: dict) -> dict:
         json.dump({"orders": orders}, fh)
     os.replace(tmp, DISPATCH_STATE_PATH)
     return orders
+
+
+def _update_dispatch(order_id, mutate) -> dict:
+    """Load, change ONE order, write. There must never be an await between the read
+    and the write: `_write_dispatch` serialises the whole store, so a snapshot held
+    across I/O silently deletes every record written in the meantime. That erased a
+    charged booking and re-armed the double-book guard until it was found."""
+    d = _load_dispatch()
+    entry = dict(d.get(str(order_id)) or {})
+    changed = mutate(entry)
+    d[str(order_id)] = entry if changed is None else changed
+    return _write_dispatch(d)
 
 
 def _record_dispatch(order_id, entry: dict) -> dict:
@@ -1401,6 +1423,8 @@ def _load_knowledge() -> dict:
 def _save_knowledge(text: str, sources: list[str]) -> dict:
     data = {"knowledge": text[:KNOWLEDGE_CAP], "sources": sources[:50],
             "learned_at": datetime.now(timezone.utc).isoformat()}
+    if not _store_writable(KNOWLEDGE_PATH):
+        return data
     os.makedirs(os.path.dirname(KNOWLEDGE_PATH) or ".", exist_ok=True)
     tmp = KNOWLEDGE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -3366,6 +3390,15 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
 
     if tag_ok:
         tag_note = ""
+    if (not fulfillment.get("ok") and fulfillment.get("reason") == "nothing_to_fulfill"
+            and _order_status(o) == "fulfilled"):
+        # Already done, so treat it as done: otherwise the record keeps
+        # fulfilled=False, every later pass re-enters and gets the same answer,
+        # and the order shows as dispatched-but-unfulfilled for ever while the
+        # customer already has their tracking.
+        logger.info("order %s was already fulfilled in Shopify; recording it", oid)
+        fulfillment = {"ok": True, "reason": "already_fulfilled",
+                       "fulfillment_id": None, "detail": "already fulfilled in Shopify"}
     if not fulfillment.get("ok"):
         # Put the order back where it was: it has not shipped after all.
         try:
@@ -3373,13 +3406,13 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
         except Exception:
             logger.exception("tag revert after failed fulfillment failed for order %s", oid)
     if fulfillment.get("ok"):
-        d = _load_dispatch()
-        e = d.get(str(oid)) or entry
-        e.update({"fulfilled": True, "fulfillment_id": fulfillment.get("fulfillment_id"),
-                  "notified": bool(do_notify), "fulfilled_at": datetime.now(timezone.utc).isoformat()})
-        d[str(oid)] = e
+        def _mark_fulfilled(e):
+            e.update({"fulfilled": True, "fulfillment_id": fulfillment.get("fulfillment_id"),
+                      "notified": bool(do_notify),
+                      "fulfilled_at": datetime.now(timezone.utc).isoformat()})
+            return e
         try:
-            _write_dispatch(d)
+            _update_dispatch(oid, _mark_fulfilled)
         except DispatchStoreUnwritable:
             logger.exception("order %s was fulfilled in Shopify but the dispatch "
                              "record could not be updated", oid)
@@ -3398,8 +3431,7 @@ async def _unfulfill_dispatch(registry: dict, order_id) -> str:
     all). Cancels the Shopify fulfilment so the customer is not left holding live
     tracking. Returns a note for the UI."""
     oid = int(order_id)
-    d = _load_dispatch()
-    entry = d.get(str(oid)) or {}
+    entry = (_load_dispatch().get(str(oid)) or {})     # read only, for the guard below
     if not entry.get("fulfilled"):
         return ""
     note = ""
@@ -3415,12 +3447,15 @@ async def _unfulfill_dispatch(registry: dict, order_id) -> str:
             logger.exception("fulfillment cancel failed for order %s", oid)
             note = ("The order is still marked fulfilled in Shopify. Cancel that fulfillment "
                     "there so the customer is not left with tracking for an unshipped order.")
-    entry["fulfilled"] = False
-    entry["notified"] = False
-    entry.pop("fulfillment_id", None)
-    d[str(oid)] = entry
+    # Re-read here: the store may have gained a booking while Shopify was thinking,
+    # and the snapshot taken above no longer describes what is on disk.
+    def _clear(e):
+        e["fulfilled"] = False
+        e["notified"] = False
+        e.pop("fulfillment_id", None)
+        return e
     try:
-        _write_dispatch(d)
+        _update_dispatch(oid, _clear)
     except DispatchStoreUnwritable:
         logger.exception("could not clear the fulfilment record for order %s", oid)
         note = ((note + " ") if note else "") + ("The app could not save this change, "
@@ -4354,9 +4389,12 @@ async def run_dispatch_book(registry: dict, order_id, option: dict, boxes: list,
 # nothing was booked: a connect failure that never reached them, or a reply that
 # ANSWERED with FAILED (their server processed and refused, creating nothing).
 # A post-send silence is never retried: the first booking may have succeeded.
+# Only unambiguous infrastructure failures. A TIMEOUT is deliberately NOT here:
+# a timed-out reply is exactly the case where the shipment may have been created,
+# which is the one thing a retry must never gamble on.
 _WO_TRANSIENT_RE = re.compile(
-    r"ssl|tls|secure channel|timed?\s*out|temporar|try again|unavailable|"
-    r"service is busy|502|503|504", re.I)
+    r"ssl|tls|secure channel|temporarily unavailable|service unavailable|"
+    r"try again later|service is busy|\b50[234]\b", re.I)
 WO_RETRY_WAIT_SECS = int(os.environ.get("WO_RETRY_WAIT_SECS", "15"))
 
 
@@ -4448,7 +4486,9 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
     if _order_status(o) == "refunded":
         return {"error": "This order was refunded; dispatching it would ship goods the "
                          "customer has been paid back for."}
-    if _order_status(o) == "fulfilled" and not existing.get("canceled") and not force:
+    if (_order_status(o) == "fulfilled"
+            and not (existing.get("canceled") and not existing.get("fulfilled"))
+            and not force):
         return {"error": "Shopify shows this order as already fulfilled, which usually means "
                          "it has shipped. If you are sure, book it from the World Options "
                          "portal, or retry with the confirmation.",
@@ -7239,12 +7279,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             oid = 0
         note = ""
         if oid:
-            d = _load_dispatch()
-            entry = d.get(str(oid)) or {}
-            entry["canceled"] = True
-            d[str(oid)] = entry
+            entry = (_load_dispatch().get(str(oid)) or {})
+            def _mark_cancelled(e):
+                e["canceled"] = True
+                return e
             try:
-                _write_dispatch(d)
+                _update_dispatch(oid, _mark_cancelled)
             except DispatchStoreUnwritable:
                 logger.exception("could not record the cancellation of order %s", oid)
             # Undo what the booking did in Shopify, so the customer is not left
@@ -7254,6 +7294,19 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 try:
                     fc = await _fulfillment_canceler(int(fid))
                     if fc.get("ok"):
+                        # The fulfilment is genuinely gone, so the record must stop
+                        # claiming otherwise: a stale fulfillment_id makes a later
+                        # un-mark-made cancel a dead fulfilment and tell the operator
+                        # to go and undo something that no longer exists.
+                        def _undo_fulfilment(e):
+                            e["fulfilled"] = False
+                            e["notified"] = False
+                            e.pop("fulfillment_id", None)
+                            return e
+                        try:
+                            _update_dispatch(oid, _undo_fulfilment)
+                        except DispatchStoreUnwritable:
+                            logger.exception("could not clear the fulfilment for order %s", oid)
                         note = ("The Shopify fulfillment was cancelled too; re-dispatching "
                                 "will re-fulfill with the new tracking.")
                     else:

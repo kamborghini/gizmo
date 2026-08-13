@@ -629,6 +629,9 @@ def _friendly_fault(reason: str) -> str:
     return ("World Options rejected the request: " + (reason or "SOAP fault"))[:400]
 
 
+SOAP_MAX_BYTES = 24 * 1024 * 1024      # a label reply, not a data feed
+
+
 def _parse(resp: httpx.Response, url: str = "") -> ET.Element:
     # A 404 (or other non-fault error) usually means the wrong endpoint, not a real
     # SOAP reply. Say so, and name the host so a misconfiguration is obvious.
@@ -637,8 +640,14 @@ def _parse(resp: httpx.Response, url: str = "") -> ET.Element:
             f"World Options did not recognise the service address ({url or _state['base_url']}). "
             "This usually means the wrong web-service URL. Expected the shipping web service at "
             f"{DEFAULT_BASE}.")
+    body = resp.content or b""
+    if len(body) > SOAP_MAX_BYTES:
+        # Parsing is what turns bytes into memory; refuse before that, not after.
+        raise WorldOptionsError(
+            f"World Options returned {len(body) // (1024 * 1024)}MB, which is far larger than "
+            "any shipping reply. Nothing was processed.")
     try:
-        root = ET.fromstring(resp.content)
+        root = ET.fromstring(body)
     except Exception:
         raise WorldOptionsError(f"World Options returned an unreadable response (HTTP {resp.status_code}).")
     fault = _find(root, "Fault")
@@ -1007,7 +1016,7 @@ def _label_url(url: str) -> str:
     if not u:
         return ""
     if "://" not in u:
-        u = (_state.get("base") or DEFAULT_BASE).rstrip("/") + "/" + u.lstrip("/")
+        u = (_state.get("base_url") or DEFAULT_BASE).rstrip("/") + "/" + u.lstrip("/")
     try:
         p = urlparse(u)
     except ValueError:
@@ -1323,7 +1332,12 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
     reply = _find(root, "DoShipmentResult")
     try:
         if reply is None:
-            raise WorldOptionsError("World Options returned no booking result.")
+            # The request was sent and something came back that we cannot read, so
+            # the shipment MAY exist. Say so rather than inviting a second booking.
+            raise WorldOptionsError(
+                "World Options replied to the booking in a form this app could not read. "
+                "The shipment MAY still have been booked and charged: check your World "
+                "Options portal before trying again.")
         msg, _notif = _reply_status(reply, "book this shipment")
     except WorldOptionsError as e:
         # The request WAS sent and their server answered with an error, which is a

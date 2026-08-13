@@ -277,9 +277,10 @@ async def _request(
                 continue
 
             if resp.status_code == 401 and not _retried and token_manager._use_client_credentials:
-                logger.warning("Got 401 — refreshing token and retrying...")
+                logger.warning("Got 401, refreshing the token and retrying")
+                _retried = True
                 await token_manager.force_refresh()
-                return await _request(method, path, params=params, body=body, _retried=True)
+                continue
 
             if resp.status_code in _RETRY_STATUS and attempt < 3:
                 # Respect Retry-After on 429; otherwise exponential backoff.
@@ -942,43 +943,6 @@ async def shopify_list_fulfillments(params: ListFulfillmentsInput) -> str:
     except Exception as e:
         return _error(e)
 
-
-class CreateFulfillmentInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    order_id:         int                        = Field(..., description="Order ID to fulfill")
-    location_id:      int                        = Field(..., description="Location ID fulfilling from")
-    tracking_number:  Optional[str]              = Field(default=None)
-    tracking_company: Optional[str]              = Field(default=None, description="e.g. UPS, FedEx, USPS")
-    tracking_url:     Optional[str]              = Field(default=None)
-    line_items:       Optional[List[Dict[str, Any]]] = Field(default=None, description="Specific line items (omit for all)")
-    notify_customer:  Optional[bool]             = Field(default=True, description="Send shipping notification email")
-
-
-@mcp.tool(
-    name="shopify_create_fulfillment",
-    annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
-)
-async def shopify_create_fulfillment(params: CreateFulfillmentInput) -> str:
-    """Create a fulfillment for an order (ship items)."""
-    try:
-        fulfillment: Dict[str, Any] = {"location_id": params.location_id}
-        for field in ["tracking_number", "tracking_company", "tracking_url", "line_items", "notify_customer"]:
-            val = getattr(params, field)
-            if val is not None:
-                fulfillment[field] = val
-        data = await _request(
-            "POST",
-            f"orders/{params.order_id}/fulfillments.json",
-            body={"fulfillment": fulfillment},
-        )
-        return _fmt(data.get("fulfillment", data))
-    except Exception as e:
-        return _error(e)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SHOP INFO
-# ═══════════════════════════════════════════════════════════════════════════
 
 class EmptyInput(BaseModel):
     model_config = ConfigDict(extra="forbid")

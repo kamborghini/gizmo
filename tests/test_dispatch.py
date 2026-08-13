@@ -2611,6 +2611,136 @@ def t_variant_costs_are_cached_so_a_report_is_not_hundreds_of_calls():
     finally:
         copilot._tool_json = saved
 
+@test
+def t_unfulfilling_one_order_cannot_erase_another_booking():
+    # _unfulfill_dispatch held a whole-store snapshot across an await on Shopify.
+    # A booking that completed inside that window was wiped when the snapshot was
+    # written back, taking the tracking number of a CHARGED label with it and
+    # re-arming the double-book guard.
+    reset_dispatch(); reset_prod()
+    copilot._record_dispatch(111, {"tracking_number": "T111", "fulfilled": True,
+                                   "fulfillment_id": 555, "dispatched_at": "2026-08-13T09:00:00+00:00"})
+    async def slow_cancel(fid):
+        # A second operator books an order while Shopify is still thinking.
+        copilot._record_dispatch(222, {"tracking_number": "T222", "fulfilled": False,
+                                       "dispatched_at": "2026-08-13T09:00:05+00:00"})
+        return {"ok": True}
+    saved = copilot._fulfillment_canceler
+    copilot._fulfillment_canceler = slow_cancel
+    try:
+        run(copilot._unfulfill_dispatch({}, 111))
+        store = copilot._load_dispatch()
+        ok("222" in store, "the booking made during the await SURVIVES: " + str(sorted(store)))
+        eq(store["222"]["tracking_number"], "T222", "with its tracking intact")
+        eq(store["111"].get("fulfilled"), False, "and the un-fulfil still applied")
+    finally:
+        copilot._fulfillment_canceler = saved
+
+@test
+def t_a_cancelled_shipment_stops_claiming_it_is_fulfilled():
+    reset_dispatch(); reset_prod()
+    copilot._record_dispatch(12345, {"tracking_number": "T1", "fulfilled": True,
+                                     "fulfillment_id": 777, "carrier_name": "UPS",
+                                     "dispatched_at": "2026-08-13T09:00:00+00:00"})
+    async def canceler(fid):
+        return {"ok": True}
+    savedc = copilot._fulfillment_canceler; copilot._fulfillment_canceler = canceler
+    async def voider(service, action, inner, retryable=True):
+        return ET.fromstring(VOID_XML)
+    saveds = worldoptions._soap_call; worldoptions._soap_call = voider
+    try:
+        r = post("/api/dispatch/cancel", {"order_id": 12345, "tracking_number": "T1"})
+        eq(r.status_code, 200, r.text)
+        e = copilot._load_dispatch()["12345"]
+        eq(e.get("canceled"), True, "marked cancelled")
+        eq(e.get("fulfilled"), False, "and no longer claims to be fulfilled")
+        ok("fulfillment_id" not in e, "the dead fulfilment id is dropped")
+    finally:
+        copilot._fulfillment_canceler = savedc
+        worldoptions._soap_call = saveds
+
+@test
+def t_rebooking_still_asks_when_shopify_never_undid_the_fulfilment():
+    # The confirmation was waived for ANY cancelled entry, including one whose
+    # Shopify fulfilment could not be undone: the re-book then went through
+    # silently and the new tracking never reached the customer.
+    reset_dispatch(); reset_prod()
+    copilot._record_dispatch(12345, {"tracking_number": "T1", "canceled": True,
+                                     "fulfilled": True, "fulfillment_id": 777,
+                                     "dispatched_at": "2026-08-13T09:00:00+00:00"})
+    saved_status = copilot._order_status
+    copilot._order_status = lambda o: "fulfilled"
+    try:
+        r = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
+        body = r.json()
+        ok(body.get("needs_force"), "still asks before spending: " + json.dumps(body)[:160])
+    finally:
+        copilot._order_status = saved_status
+
+@test
+def t_a_timeout_wording_is_never_treated_as_transient():
+    # A timeout is the unknown-outcome case: the shipment may exist. Only clearly
+    # infrastructural refusals may be retried.
+    ok(copilot._WO_TRANSIENT_RE.search("Could not create SSL/TLS secure channel"), "ssl is transient")
+    ok(copilot._WO_TRANSIENT_RE.search("Service Unavailable"), "503 wording is transient")
+    for never in ("The request timed out", "Operation timeout", "Ready date should be in format",
+                  "Customer authentication failed"):
+        eq(bool(copilot._WO_TRANSIENT_RE.search(never)), False, never + " is NOT retried")
+
+@test
+def t_an_order_already_fulfilled_in_shopify_stops_being_retried_forever():
+    # A retried fulfilment POST can succeed on a hop whose reply is lost. The next
+    # pass got nothing_to_fulfill and left fulfilled=False, so the app re-attempted
+    # for ever and showed a dispatched order as unfulfilled.
+    reset_dispatch(); reset_prod()
+    copilot._record_dispatch(12345, {"tracking_number": "T1", "fulfilled": False,
+                                     "carrier_name": "UPS", "notify": False,
+                                     "dispatched_at": "2026-08-13T09:00:00+00:00"})
+    mark_made(12345, True)
+    async def already(oid, **kw):
+        return {"ok": False, "reason": "nothing_to_fulfill", "detail": "no open fulfillment orders"}
+    savedw = copilot._fulfillment_writer; copilot._fulfillment_writer = already
+    saveds = copilot._order_status; copilot._order_status = lambda o: "fulfilled"
+    try:
+        res = run(copilot._fulfill_if_ready({}, 12345))
+        eq(res["fulfilled"], True, "treated as done: " + json.dumps(res)[:140])
+        eq(copilot._load_dispatch()["12345"]["fulfilled"], True, "and recorded, so it stops retrying")
+    finally:
+        copilot._fulfillment_writer = savedw
+        copilot._order_status = saveds
+
+@test
+def t_a_corrupt_merchant_store_is_preserved_not_overwritten():
+    # Skills and memory are hand-written. A corrupt file must be kept for repair,
+    # not replaced by whatever loaded as the empty default.
+    for path_attr, writer, payload in (("SKILLS_PATH", copilot._write_skills, [{"title": "x", "body": "y"}]),
+                                       ("MEMORY_PATH", copilot._write_memory, [{"text": "x"}])):
+        path = SCRATCH + "/" + path_attr.lower() + ".json"
+        setattr(copilot, path_attr, path)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{ this is not json")
+        copilot._poisoned_stores.discard(path)
+        copilot._load_json_store(path, "x", [])        # marks it poisoned
+        writer(payload)
+        kept = open(path, encoding="utf-8").read()
+        ok("not json" in kept, path_attr + " was preserved for repair, not overwritten")
+        copilot._poisoned_stores.discard(path)
+
+@test
+def t_an_unreadable_booking_reply_warns_about_a_possible_charge():
+    async def garbled(service, action, inner, retryable=True):
+        if service == "ShipmentService":
+            return ET.fromstring("<Envelope><Body><Nonsense/></Body></Envelope>")
+        return ET.fromstring(RATE_XML)
+    saved = worldoptions._soap_call; worldoptions._soap_call = garbled
+    try:
+        reset_dispatch(); reset_prod()
+        r = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
+        msg = r.json().get("error", "")
+        ok("MAY still have been booked" in msg, "warns rather than inviting a retry: " + msg[:120])
+    finally:
+        worldoptions._soap_call = saved
+
 # =========================== run ===========================================
 passed = failed = 0
 for fn in TESTS:
