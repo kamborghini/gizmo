@@ -21,6 +21,8 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Dispatch suite
         run: python tests/test_dispatch.py
+      - name: Frontend regressions
+        run: python tests/test_frontend.py
       - name: No em or en dashes in UI copy
         run: |
           if grep -q '—\|–' static/index.html; then

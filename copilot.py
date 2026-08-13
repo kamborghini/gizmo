@@ -3745,6 +3745,63 @@ def _goods_summary(o: dict) -> str:
     return ("; ".join(titles))[:100] or "Custom glass gobos"
 
 
+CUSTOMS_MEMORY_PATH = os.environ.get("CUSTOMS_MEMORY_PATH", "/data/customs_memory.json")
+CUSTOMS_MEMORY_MAX = 400
+
+
+def _customs_key(li: dict, title: str) -> str:
+    """What a remembered customs value is filed under: the variant when Shopify
+    gives one, otherwise the product title normalised."""
+    vid = li.get("variant_id")
+    if vid:
+        return "v" + str(vid)
+    return "t" + re.sub(r"\s+", " ", str(title or "").strip().lower())[:120]
+
+
+def _load_customs_memory() -> dict:
+    return _load_json_store(CUSTOMS_MEMORY_PATH, "items", {}) or {}
+
+
+def _remember_customs(lines: list) -> None:
+    """Keep what the operator actually typed, per product. The store prices custom
+    gobos through option dropdowns, so their base price is zero and every
+    international order needed the real value typing in by hand; remembering it
+    makes the problem solve itself through use."""
+    try:
+        mem = _load_customs_memory()
+        changed = False
+        for ln in lines or []:
+            key = str((ln or {}).get("key") or "").strip()
+            val = (ln or {}).get("unit_price")
+            if not key or val in (None, ""):
+                continue
+            try:
+                val = round(float(val), 2)
+            except (TypeError, ValueError):
+                continue
+            if val <= 0:
+                continue
+            mem[key] = {"unit_value": f"{val:.2f}",
+                        "hs": str(ln.get("hs") or "")[:24],
+                        "origin": str(ln.get("country") or "")[:2].upper(),
+                        "description": str(ln.get("description") or "")[:120],
+                        "at": datetime.now(timezone.utc).isoformat()}
+            changed = True
+        if not changed:
+            return
+        if len(mem) > CUSTOMS_MEMORY_MAX:
+            keep = sorted(mem.items(), key=lambda kv: str(kv[1].get("at") or ""))
+            mem = dict(keep[-CUSTOMS_MEMORY_MAX:])
+        if _store_writable(CUSTOMS_MEMORY_PATH):
+            os.makedirs(os.path.dirname(CUSTOMS_MEMORY_PATH) or ".", exist_ok=True)
+            tmp = CUSTOMS_MEMORY_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"items": mem}, fh)
+            os.replace(tmp, CUSTOMS_MEMORY_PATH)
+    except Exception:
+        logger.exception("could not remember the customs values")
+
+
 async def _customs_items(registry: dict, o: dict) -> list:
     """Per-line customs facts from Shopify: the HS code and the UNIT COST both live
     on the variant's inventory item (not the product). Customs declares what the
@@ -3772,6 +3829,7 @@ async def _customs_items(registry: dict, o: dict) -> list:
                 by_id[it.get("id")] = it
         except Exception:
             logger.exception("inventory items fetch failed; customs falls back to sale prices")
+    mem = _load_customs_memory()
     out = []
     for li, inv in zip(lines, inv_ids):
         item = by_id.get(int(inv)) if inv else None
@@ -3803,7 +3861,18 @@ async def _customs_items(registry: dict, o: dict) -> list:
             unit_value, basis, needs_cost = cost, "cost", False
         else:
             unit_value, basis, needs_cost = price, "sale", True
+        key = _customs_key(li, title)
+        remembered = mem.get(key) or {}
+        if remembered.get("unit_value"):
+            # What the operator typed last time beats anything derived: they were
+            # looking at the actual goods.
+            unit_value, basis, needs_cost = remembered["unit_value"], "remembered", False
+        if remembered.get("hs"):
+            hs = remembered["hs"]
+        if remembered.get("origin"):
+            origin = remembered["origin"]
         out.append({
+            "key": key,
             "title": title,
             "quantity": int(li.get("quantity") or 1),
             "price": price,
@@ -4047,7 +4116,7 @@ async def run_dispatch_diagnose(registry: dict, order_id, boxes: list) -> dict:
 async def run_dispatch_book(registry: dict, order_id, option: dict, boxes: list,
                             notify: Optional[bool] = None, force: bool = False,
                             insurance: str = "", signature: str = "",
-                            customs_body: Optional[dict] = None) -> dict:
+                            customs_body: Optional[dict] = None, by: str = "") -> dict:
     """Book the chosen courier option (this CHARGES the World Options account),
     then move the order's tag to Dispatched and create the Shopify fulfillment
     with tracking. Returns everything the UI needs to confirm what happened.
@@ -4062,7 +4131,7 @@ async def run_dispatch_book(registry: dict, order_id, option: dict, boxes: list,
         return {"error": "A courier option must be selected before booking."}
     async with _dispatch_lock(order_id):
         return await _dispatch_book_locked(registry, order_id, option, boxes, notify, force,
-                                           insurance, signature, customs_body)
+                                           insurance, signature, customs_body, by)
 
 
 # Their infrastructure wobbles ("Could not create SSL/TLS secure channel"), and
@@ -4138,7 +4207,7 @@ def _collection_ready(cfg: dict, now=None):
 
 async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: list,
                                 notify, force: bool, insurance: str, signature: str,
-                                customs_body: Optional[dict]) -> dict:
+                                customs_body: Optional[dict], by: str = "") -> dict:
     book_store = _load_dispatch()
     if DISPATCH_STATE_PATH in _poisoned_stores:
         return {"error": "The dispatch record cannot be read, so there is no way to tell "
@@ -4212,6 +4281,10 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
             return {"error": "International orders need your EORI number. Add it under "
                              "Shipping settings, International, then try again."}
         lines = (customs_body or {}).get("lines") if isinstance(customs_body, dict) else None
+        # Remember what was typed BEFORE the booking is attempted: the values are
+        # right whether or not World Options accepts the shipment, and a failed
+        # booking is exactly when nobody wants to retype them.
+        _remember_customs(lines or [])
         goods = []
         for g in (lines or []):
             if not isinstance(g, dict):
@@ -4356,6 +4429,10 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
         # Who and what, so the end-of-day manifest reads without a Shopify join,
         # and what the customer paid for delivery, so margin is one subtraction.
         "order_name": str(o.get("name") or ("#" + str(order_id))),
+        # Which staff member booked it. Shopify's session token carries their user
+        # id in `sub`; with one operator this is noise, with two it is the answer to
+        # "who booked this and why is it wrong".
+        "by": str(by or "")[:40],
         "customer": (dest.get("company") or dest.get("name")
                      or " ".join(x for x in [dest.get("firstname"), dest.get("lastname")] if x)),
         "shipping_paid": (lambda sl: str(sl[0].get("price") or "") if sl else "")(
@@ -5216,7 +5293,7 @@ def _authorize(request: Request) -> tuple[bool, Optional[str]]:
     if auth.startswith("Bearer ") and SHOPIFY_API_SECRET:
         try:
             claims = _verify_session_token(auth[7:])
-            return True, claims.get("dest")
+            return True, (str(claims.get("sub") or "") or claims.get("dest"))
         except Exception as e:
             logger.warning(f"session token rejected: {e}")
     return False, None
@@ -6759,7 +6836,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                           force=bool(body.get("force")),
                                           insurance=_insurance_amount(body),
                                           signature=str(body.get("signature") or "")[:60],
-                                          customs_body=customs_body)
+                                          customs_body=customs_body, by=_who)
             return _json(res, 400 if res.get("error") else 200)
         except Exception:
             logger.exception("dispatch book route failed")
@@ -6880,6 +6957,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 "canceled": bool(e.get("canceled")),
                 "international": bool(e.get("international")),
                 "time": when.astimezone(london).strftime("%H:%M"),
+                "by": e.get("by") or "",
             })
         rows.sort(key=lambda r: r["time"])
         live = [r for r in rows if not r["canceled"]]

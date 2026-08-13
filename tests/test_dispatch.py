@@ -2433,6 +2433,76 @@ def t_the_shopify_api_version_is_supported():
     import server as srv
     ok(srv.API_VERSION >= "2025-10", "on a supported version, not " + srv.API_VERSION)
 
+@test
+def t_customs_values_are_remembered_per_product():
+    # The store prices custom gobos through option dropdowns, so their base price
+    # is zero and every international order needed the real value typed in again.
+    copilot.CUSTOMS_MEMORY_PATH = SCRATCH + "/customs_memory.json"
+    try:
+        os.remove(copilot.CUSTOMS_MEMORY_PATH)
+    except FileNotFoundError:
+        pass
+    copilot._remember_customs([
+        {"key": "v111", "unit_price": 425.0, "hs": "9008.50.00", "country": "CN",
+         "description": "Projector"},
+        {"key": "t create your own gobo", "unit_price": 38.5, "hs": "9002.20.000",
+         "country": "GB", "description": "Custom gobo"},
+        {"key": "v999", "unit_price": 0, "hs": "", "country": "GB"},   # zero: not worth remembering
+        {"key": "", "unit_price": 12.0},                                # no key: nothing to file under
+    ])
+    mem = copilot._load_customs_memory()
+    eq(sorted(mem), ["t create your own gobo", "v111"], "only real values, only keyed ones")
+    eq(mem["v111"]["unit_value"], "425.00", "stored to the penny")
+    eq(mem["t create your own gobo"]["hs"], "9002.20.000", "and its HS code")
+
+@test
+def t_a_remembered_value_beats_the_derived_one():
+    copilot.CUSTOMS_MEMORY_PATH = SCRATCH + "/customs_memory.json"
+    copilot._remember_customs([{"key": "v111", "unit_price": 500.0, "hs": "9008.50.00",
+                                "country": "CN", "description": "Projector"}])
+    order = {"id": 12345, "name": "#12345", "currency": "GBP", "email": "c@x.co",
+             "shipping_address": {"first_name": "A", "last_name": "B", "address1": "1 Rue",
+                                  "city": "Paris", "zip": "75001", "country_code": "FR",
+                                  "phone": "0033", "name": "A B"},
+             "line_items": [{"id": 1, "title": "Projected Image 200 Watt Gobo Projector",
+                             "quantity": 1, "price": "780.00", "variant_id": 111}]}
+    async def tools(registry, name, args):
+        if name == "shopify_get_order":
+            return order
+        if name == "shopify_get_variant":
+            return {"id": 111, "inventory_item_id": 9111}
+        if name == "shopify_get_inventory_items":
+            return {"inventory_items": [{"id": 9111, "cost": "425.00",
+                                         "harmonized_system_code": "9008.50.00"}]}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
+        it = (r.json().get("customs_items") or [])[0]
+        eq(it["unit_value"], "500.00", "what was typed last time, not the 425.00 cost")
+        eq(it["value_basis"], "remembered", "and it says so, so it can be corrected knowingly")
+        eq(it["key"], "v111", "keyed to the variant so the next order finds it")
+    finally:
+        copilot._tool_json = saved
+        try:
+            os.remove(copilot.CUSTOMS_MEMORY_PATH)
+        except FileNotFoundError:
+            pass
+
+@test
+def t_a_booking_records_which_staff_member_made_it():
+    reset_dispatch(); reset_prod()
+    r = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
+    eq(r.status_code, 200, r.text)
+    entry = copilot._load_dispatch()["12345"]
+    # The test token's `sub` claim is the staff user id Shopify sends.
+    ok("by" in entry, "the record has a by field")
+    from datetime import datetime as dt
+    from zoneinfo import ZoneInfo
+    today = dt.now(ZoneInfo("Europe/London")).date().isoformat()
+    row = post("/api/dispatch/manifest", {"date": today}).json()["rows"][0]
+    ok("by" in row, "and the manifest carries it")
+
 # =========================== run ===========================================
 passed = failed = 0
 for fn in TESTS:

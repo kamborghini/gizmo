@@ -4108,6 +4108,9 @@
                     }
                     out.append(el('div', 'cov-note', bits.join(' \u00b7 ')
                         + '. Margin compares what customers paid for delivery with the ex VAT courier cost.'));
+                    const people = [...new Set(d.rows.filter(r => !r.canceled && r.by).map(r => r.by))];
+                    if (people.length > 1) out.append(el('div', 'cov-note',
+                        'Booked by ' + people.length + ' different people today.'));
                     pr.disabled = false;
                 } catch (e) {
                     if (rq !== maniReq) return;
@@ -4728,7 +4731,7 @@
                     if (pre) { dIn.value = pre.description || ''; qIn.value = pre.quantity || 1; pIn.value = pre.unit_price || ''; hIn.value = pre.hs || ''; oIn.value = pre.origin || 'GB'; }
                     else { oIn.value = 'GB'; }
                     const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove line';
-                    const line = { dIn, qIn, pIn, hIn, oIn };
+                    const line = { dIn, qIn, pIn, hIn, oIn, key: (pre && pre.key) || '' };
                     rm.onclick = () => { const i = customsLines.indexOf(line); if (i >= 0) customsLines.splice(i, 1); rowc.remove(); };
                     rowc.append(dIn, qIn, pIn, hIn, oIn, rm);
                     customsLines.push(line);
@@ -4750,9 +4753,14 @@
                             quantity: it.quantity || 1,
                             unit_price: parseFloat(it.unit_value || it.cost || it.price) || '',
                             hs: it.hs_code || quote.default_hs_code || '',
-                            origin: it.origin || ''
+                            origin: it.origin || '',
+                            key: it.key || ''
                         });
                     });
+                    const recalled = quote.customs_items.filter(it => it.value_basis === 'remembered');
+                    if (recalled.length) card.append(el('div', 'sub',
+                        'Values for ' + recalled.map(it => it.title).join(', ')
+                        + ' are what you entered last time. Change them here if they are wrong and the new ones stick.'));
                     if (fellBack.length) card.append(el('div', 'sub',
                         'No cost price in Shopify for: ' + fellBack.join(', ')
                         + '. The sale price is filled in instead; set the cost on the product to fix this.'));
@@ -4797,7 +4805,7 @@
                     const d = l.dIn.value.trim(), q = parseInt(l.qIn.value, 10), p = parseFloat(l.pIn.value);
                     if (!d || !(q > 0) || !(p >= 0) || isNaN(p)) continue;
                     lines.push({ description: d, quantity: q, unit_price: p, hs: l.hIn.value.trim(),
-                                 country: (l.oIn.value.trim().toUpperCase() || 'GB') });
+                                 country: (l.oIn.value.trim().toUpperCase() || 'GB'), key: l.key || '' });
                 }
                 return { lines, receiver_tax_id: recvTaxIn ? recvTaxIn.value.trim() : '' };
             }
