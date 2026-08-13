@@ -6917,7 +6917,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         base = {"Access-Control-Allow-Headers": "Authorization, Content-Type",
                 "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
                 "Access-Control-Max-Age": "600"}
-        if origin in _PRINT_ORIGINS or origin.endswith(".myshopify.com") and origin.startswith("https://"):
+        own_shop = f"https://{SHOPIFY_STORE}.myshopify.com" if SHOPIFY_STORE else ""
+        if origin in _PRINT_ORIGINS or (own_shop and origin == own_shop):
             return {**base, "Access-Control-Allow-Origin": origin,
                     "Access-Control-Allow-Credentials": "true", "Vary": "Origin"}
         return {**base, "Access-Control-Allow-Origin": "*"}

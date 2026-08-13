@@ -2364,6 +2364,28 @@ def t_a_redirect_off_their_hosts_is_not_followed():
 def t_an_oversized_label_is_refused_rather_than_rendered():
     eq(copilot._pdf_print_images("A" * 24_000_001), [], "a huge base64 blob is not decoded")
 
+@test
+def t_print_cors_credentials_go_only_to_this_shop():
+    # Every Shopify merchant owns a *.myshopify.com origin, so a wildcard on that
+    # suffix handed credentialed CORS to every store on Shopify.
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "copilot.py"), encoding="utf-8").read()
+    ok('origin.endswith(".myshopify.com")' not in src,
+       "no bare *.myshopify.com origin match remains")
+    ok("own_shop and origin == own_shop" in src, "only this shop's own domain matches")
+
+@test
+def t_dependencies_are_pinned_and_the_mcp_fix_is_in():
+    reqs = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "requirements.txt"), encoding="utf-8").read()
+    for line in reqs.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        ok("==" in line, "pinned exactly: " + line)
+    ok("mcp[cli]==1.28.1" in reqs,
+       "mcp is on the release that fixes session hijacking (PYSEC-2026-3481/2/3)")
+
 # =========================== run ===========================================
 passed = failed = 0
 for fn in TESTS:

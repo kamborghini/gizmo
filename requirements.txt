@@ -2,7 +2,7 @@
 # These were unbounded (">=") which meant any redeploy could pull a new major
 # release and break the running app with no code change on our side.
 # To upgrade: bump a pin deliberately, redeploy, and check /healthz.
-mcp[cli]==1.27.1
+mcp[cli]==1.28.1
 httpx==0.28.1
 pydantic==2.13.4
 uvicorn==0.48.0
