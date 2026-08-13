@@ -900,10 +900,26 @@ def _pdf_print_images(b64pdf: str) -> list:
         import base64 as _b64
         import io as _io
         import pypdfium2 as _pdfium
+        # A label is a small document. Anything larger arrived from outside this
+        # app and is refused rather than decoded into memory.
+        if len(b64pdf or "") > 24_000_000:
+            logger.warning("label PDF too large to render (%s chars of base64)", len(b64pdf))
+            return []
         doc = _pdfium.PdfDocument(_b64.b64decode(b64pdf))
         out = []
         for i in range(min(len(doc), 6)):     # a label sheet, not a document
-            pil = doc[i].render(scale=3.0).to_pil()   # ~216 dpi: crisp on thermal
+            page = doc[i]
+            # A PDF may declare an enormous page; rendering that at 3x is a memory
+            # bomb. Scale down so no page exceeds a sane pixel budget.
+            try:
+                w, h = page.get_size()
+            except Exception:
+                w = h = 0
+            scale = 3.0
+            if w > 0 and h > 0:
+                scale = min(3.0, (4000.0 / w), (4000.0 / h))
+                scale = max(scale, 0.25)
+            pil = page.render(scale=scale).to_pil()   # ~216 dpi: crisp on thermal
             buf = _io.BytesIO()
             pil.save(buf, format="PNG")
             out.append(_b64.b64encode(buf.getvalue()).decode("ascii"))

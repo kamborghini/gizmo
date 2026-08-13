@@ -4470,7 +4470,10 @@
         }
         function printLabelImages(labels) {
             const pages = [];
-            (labels || []).forEach(l => (l && l.print_images || []).forEach(p => pages.push(p)));
+            const B64 = /^[A-Za-z0-9+/=\s]+$/;   // no quote or angle can reach the attribute
+            (labels || []).forEach(l => (l && l.print_images || []).forEach(p => {
+                if (typeof p === 'string' && B64.test(p)) pages.push(p.replace(/\s+/g, ''));
+            }));
             if (!pages.length) return false;
             const fr = document.createElement('iframe');
             fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0';

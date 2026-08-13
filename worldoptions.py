@@ -32,7 +32,8 @@ import xml.etree.ElementTree as ET
 
 import base64
 import httpx
-from urllib.parse import urlparse
+import ipaddress
+from urllib.parse import urljoin, urlparse
 
 logger = logging.getLogger("shopify_mcp.worldoptions")
 
@@ -475,7 +476,8 @@ _REDACT_EL_RE = re.compile(
     r"|RecipientEmailAddress|Phone|PhoneDialCode|Fax|Address1|Address2|Address3"
     r"|Name|Company|Postalcode|PostalCode|PostCode|EORINumber|ReceiverTaxId"
     r"|ReceiverCompanyNumber|SenderVatNo|DutiesAccNumber|TransportationAccNumber"
-    r"|PersonalMessage)>([^<]*)</\1:\2>")
+    r"|PersonalMessage|City|State|State_Code|DeliveryCity|DeliveryPostCode"
+    r"|CollectionCity|CollectionPostCode)>([^<]*)</\1:\2>")
 
 
 def _redacted(xml: str) -> str:
@@ -998,7 +1000,9 @@ def _label_from_bytes(raw: bytes, source_url: str = "") -> dict:
 def _label_url(url: str) -> str:
     """The absolute https URL a LabelURL really means, or '' when it is not one of
     World Options' own. Their URLs can be relative to the service host, and nothing
-    from a reply may send the server fetching arbitrary addresses."""
+    that arrives in a reply may send this server fetching an arbitrary address.
+    Applied to EVERY redirect hop, not just the first: validating only the first
+    leaves the redirect itself as the way onto an internal address."""
     u = (url or "").strip()
     if not u:
         return ""
@@ -1008,10 +1012,46 @@ def _label_url(url: str) -> str:
         p = urlparse(u)
     except ValueError:
         return ""
+    if p.scheme not in ("http", "https"):
+        return ""
     host = (p.hostname or "").lower()
-    ok = (host in ("worldoptions.co.uk", "worldoptions.com")
-          or host.endswith(".worldoptions.co.uk") or host.endswith(".worldoptions.com"))
-    return u if p.scheme in ("http", "https") and ok else ""
+    if not (host in ("worldoptions.co.uk", "worldoptions.com")
+            or host.endswith(".worldoptions.co.uk")
+            or host.endswith(".worldoptions.com")):
+        return ""
+    # A bare IP can never be one of their names, and resolving to a private range
+    # would mean DNS pointing their host at something internal.
+    try:
+        ipaddress.ip_address(host)
+        return ""
+    except ValueError:
+        pass
+    # Their service is https; an http label link would let a network attacker swap
+    # the label for a different address, so it is upgraded rather than trusted.
+    if p.scheme == "http":
+        u = "https://" + u.split("://", 1)[1]
+    return u
+
+
+async def _get_label_bytes(url: str, timeout: float) -> tuple:
+    """(status, bytes, final_url). Redirects are followed BY HAND so every hop is
+    re-validated against the allowlist; httpx's own follow would jump anywhere."""
+    u = _label_url(url)
+    if not u:
+        return 0, b"", ""
+    async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
+        for _ in range(4):
+            r = await client.get(u)
+            if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
+                nxt = _label_url(urljoin(u, r.headers["location"]))
+                if not nxt:
+                    logger.warning("world options: label link redirected off their "
+                                   "hosts; refusing to follow")
+                    return r.status_code, b"", u
+                u = nxt
+                continue
+            return r.status_code, (r.content or b""), u
+    return 0, b"", u
 
 
 async def label_link_report(url: str) -> dict:
@@ -1022,14 +1062,12 @@ async def label_link_report(url: str) -> dict:
     if not u:
         return {"url": raw, "problem": "not a World Options address, refused to fetch"}
     try:
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-            r = await client.get(u)
-        body = r.content or b""
+        status, body, final = await _get_label_bytes(u, 20.0)
         looks = ("PDF" if body.startswith(b"%PDF") else
                  "PNG" if body.startswith(b"\x89PNG") else
                  "an HTML page" if body[:256].lstrip()[:1] == b"<" else
-                 "unknown bytes")
-        return {"url": u, "http": r.status_code, "bytes": len(body), "content": looks}
+                 "nothing" if not body else "unknown bytes")
+        return {"url": final or u, "http": status, "bytes": len(body), "content": looks}
     except Exception as e:
         return {"url": u, "problem": str(e)[:200]}
 
@@ -1042,12 +1080,11 @@ async def fetch_label(url: str) -> dict:
     u = _label_url(url)
     if not u:
         return {}
-    async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
-        r = await client.get(u)
-        if r.status_code != 200:
-            logger.info("world options: label url answered HTTP %s: %s", r.status_code, u)
-            return {}
-        return _label_from_bytes(r.content[:8_000_000], u)
+    status, body, final = await _get_label_bytes(u, 12.0)
+    if status != 200 or not body:
+        logger.info("world options: label url answered HTTP %s: %s", status, final or u)
+        return {}
+    return _label_from_bytes(body[:8_000_000], final or u)
 
 
 def _classify_label(lbl: ET.Element) -> dict:
@@ -1055,6 +1092,9 @@ def _classify_label(lbl: ET.Element) -> dict:
     # a convenience that does not survive the admin iframe. Bytes first, always.
     img = _text(lbl, "Image").strip()
     url = _text(lbl, "LabelURL").strip()
+    if len(img) > 24_000_000:      # ~18MB decoded: not a shipping label
+        logger.warning("world options: label Image is %s chars; ignoring it", len(img))
+        img = ""
     if img:
         lt = (_text(lbl, "LabelType") or "").upper()
         if "PNG" in lt:

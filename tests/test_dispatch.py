@@ -1668,7 +1668,11 @@ def t_a_rejected_booking_logs_its_envelope_without_credentials():
     red = worldoptions._redacted(x)
     for bad in ("secret-key", "hunter2", "1239999"):
         ok(bad not in red, bad + " is not in the log")
-    ok("Leeds" in red, "the rest of the envelope survives so it can be read")
+    # City is redacted too now: with the address lines it completes a customer's
+    # location in a file that outlives the failure. The SHAPE survives, which is
+    # what the panel is read for.
+    ok("<sd:City>" in red, "the element survives so the shape can be read")
+    ok("Leeds" not in red, "but the value does not")
 
 def _xsd_nillable_strings(tname):
     import glob
@@ -2308,6 +2312,57 @@ def t_manifest_lists_the_days_bookings_with_margin():
     eq(e["rows"], [], "empty day")
     b = post("/api/dispatch/manifest", {"date": "nonsense"})
     eq(b.status_code, 400, "bad date refused plainly")
+
+@test
+def t_label_fetching_cannot_be_pointed_at_anything_but_world_options():
+    # A URL that arrives in THEIR reply must never send this server fetching an
+    # arbitrary address, including on a redirect.
+    worldoptions.set_credentials(meter="1", key="k", password="p")
+    for bad, why in [
+        ("https://evil.example.com/x.pdf", "a foreign host"),
+        ("https://service.worldoptions.co.uk@evil.com/x.pdf", "a userinfo trick"),
+        ("http://169.254.169.254/latest/meta-data/", "cloud metadata"),
+        ("https://127.0.0.1/x.pdf", "loopback"),
+        ("file:///etc/passwd", "a file url"),
+        ("https://10.0.0.5/x.pdf", "a private range"),
+    ]:
+        eq(worldoptions._label_url(bad), "", why + " is refused")
+    ok(worldoptions._label_url("https://service.worldoptions.co.uk/a.pdf"), "their own host is allowed")
+    eq(worldoptions._label_url("http://service.worldoptions.co.uk/a.pdf"),
+       "https://service.worldoptions.co.uk/a.pdf", "http is upgraded, not trusted")
+    ok(worldoptions._label_url("/x.pdf").startswith("https://service.worldoptions.co.uk/"),
+       "a relative link resolves to their service host")
+
+@test
+def t_a_redirect_off_their_hosts_is_not_followed():
+    # httpx's own follow_redirects would jump anywhere; every hop is re-validated.
+    hops = []
+    class FakeResp:
+        def __init__(self, status, headers=None, content=b""):
+            self.status_code = status; self.headers = headers or {}; self.content = content
+    class FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url):
+            hops.append(url)
+            if "worldoptions" in url:
+                return FakeResp(302, {"location": "http://169.254.169.254/latest/meta-data/"})
+            return FakeResp(200, {}, b"SHOULD NEVER BE FETCHED")
+    saved = worldoptions.httpx.AsyncClient
+    worldoptions.httpx.AsyncClient = FakeClient
+    try:
+        status, body, final = run(worldoptions._get_label_bytes(
+            "https://service.worldoptions.co.uk/a.pdf", 5.0))
+        eq(body, b"", "nothing was fetched from the redirect target")
+        eq(len(hops), 1, "the off-allowlist hop was never requested")
+        ok("169.254" not in " ".join(hops), "metadata was never contacted")
+    finally:
+        worldoptions.httpx.AsyncClient = saved
+
+@test
+def t_an_oversized_label_is_refused_rather_than_rendered():
+    eq(copilot._pdf_print_images("A" * 24_000_001), [], "a huge base64 blob is not decoded")
 
 # =========================== run ===========================================
 passed = failed = 0
