@@ -1,0 +1,11 @@
+# The image runs Python only. Nothing else needs to be inside it, and anything
+# that is there is code shipped to production that nobody reviews.
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.git/
+.shopify/
+extensions/
+tests/

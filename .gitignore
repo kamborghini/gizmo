@@ -34,3 +34,8 @@ feather/
 
 # Shopify CLI local state
 .shopify/
+
+# Third-party JS: package.json + package-lock.json reproduce it with npm install.
+# Committing it shipped 30MB of unreviewed code into the repo and, via the
+# Dockerfile COPY, into the production image.
+node_modules/

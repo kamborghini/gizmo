@@ -13,3 +13,21 @@ google-auth==2.53.0
 requests==2.34.2
 pypdfium2==4.30.0
 pillow==12.3.0
+
+# Transitive dependencies pinned to their security floors. These are pulled in by
+# mcp / uvicorn / google-auth rather than named by us, so nothing constrained them
+# and each deploy resolved whatever was current: a moving, unaudited set under the
+# app. Pinned after `pip-audit` found live advisories in every one of them.
+#   starlette         request.url rebuilt from an unvalidated path; form() limits
+#                     not enforced on every path (PYSEC-2026-248 / 249)
+#   python-multipart  negative Content-Length turned a bounded read into
+#                     read-until-EOF; querystring parsing flaws (PYSEC-2026-3036/37/40)
+#   cryptography      statically linked OpenSSL fix, cert-chain blowup, wildcard
+#                     name-constraint bypass (GHSA-537c-gmf6-5ccf and others)
+#   pyasn1            quadratic OID decoding and unbounded tag ids (PYSEC-2026-3455/56/57)
+#   pydantic-settings symlink escape from secrets_dir (GHSA-4xgf-cpjx-pc3j)
+starlette==1.6.0
+python-multipart==0.0.32
+cryptography==50.0.0
+pyasn1==0.6.4
+pydantic-settings==2.15.0
