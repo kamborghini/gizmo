@@ -117,6 +117,32 @@ def t_untrusted_text_never_reaches_innerHTML():
            "innerHTML fed something that is not static markup: " + val[:70])
 
 
+@test
+def t_a_prefetched_quote_is_only_used_for_the_parcel_it_priced():
+    """A price is only valid for what it priced. The cache guard must check the
+    boxes AND the insurance, and expire, or a stale price reaches a booking."""
+    ok("hit.sig !== boxSig(boxes, insurance)" in SCRIPT,
+       "the cache is keyed on the parcels and the insurance")
+    ok("Date.now() - hit.at > QUOTE_TTL" in SCRIPT, "and expires")
+    ok("quoteCache.delete" in SCRIPT, "a booked order drops its cached price")
+
+
+@test
+def t_the_prefetch_reads_the_shared_shipping_config():
+    """A hand-rolled fetch here read cfg.boxes off the {config: ...} envelope and
+    silently pre-fetched nothing at all."""
+    ok("ensureShippingCfg()" in SCRIPT, "it uses the shared loader, which unwraps the envelope")
+    ok("prefetchCfg" not in SCRIPT, "no duplicate config fetch remains")
+
+
+@test
+def t_the_cached_quote_is_applied_after_the_modal_is_built():
+    """renderOptions touches state declared further down openDispatch; running it
+    during construction threw a temporal-dead-zone error and showed nothing."""
+    ok("setTimeout(function useCachedQuote()" in SCRIPT,
+       "the reuse is deferred past the rest of the function")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

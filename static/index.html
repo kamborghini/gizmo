@@ -3676,6 +3676,65 @@
             const n = String(o.name || '').trim();
             return n || ('#' + o.order_number);
         }
+        // ---- quote pre-fetch -------------------------------------------------
+        // Quoting is free and takes several seconds, so the To-ship queue quotes
+        // itself quietly in the background: by the time Dispatch is opened the
+        // couriers are usually already priced. A cached quote is only ever used
+        // when the parcels and insurance in the window match what was priced,
+        // which is the same rule a manual quote follows.
+        const quoteCache = new Map();          // orderId -> {sig, quote, at}
+        const QUOTE_TTL = 8 * 60 * 1000;       // prices move; do not trust an old one
+        const PREFETCH_MAX = 12;               // politeness to World Options
+        let prefetchRun = 0;
+
+        function boxSig(boxes, insurance) {
+            return JSON.stringify({ b: boxes || [], i: insurance || 0 });
+        }
+        function cachedQuote(orderId, boxes, insurance) {
+            const hit = quoteCache.get(String(orderId));
+            if (!hit || hit.sig !== boxSig(boxes, insurance)) return null;
+            if (Date.now() - hit.at > QUOTE_TTL) return null;
+            return hit.quote;
+        }
+        // The parcel the dispatch window WOULD start with, so the pre-fetch prices
+        // the same thing. Mirrors applyPreset: box weight plus the contents.
+        function defaultBoxesFor(o, cfg) {
+            const presets = (cfg && cfg.boxes) || [];
+            const b = (cfg && cfg.default_box_id && presets.find(x => x.id === cfg.default_box_id))
+                || presets[0];
+            if (!b) return null;
+            const contents = o.weight_hint > 0 ? o.weight_hint : 0;
+            const weight = Math.round(((b.weight || 0) + contents) * 100) / 100;
+            if (!(b.width > 0 && b.length > 0 && b.depth > 0 && weight > 0)) return null;
+            return [{ width: b.width, length: b.length, depth: b.depth, weight: weight }];
+        }
+        async function prefetchQuotes(orders) {
+            const run = ++prefetchRun;
+            let cfg;
+            try { cfg = await ensureShippingCfg(); }
+            catch (e) { return; }                       // not set up: nothing to do
+            if (!cfg || !cfg.connected || run !== prefetchRun) return;
+            const todo = (orders || [])
+                .filter(o => !(dispatchStateOf(o) || {}).tracking_number)
+                .slice(0, PREFETCH_MAX);
+            for (const o of todo) {
+                if (run !== prefetchRun) return;        // queue changed; abandon quietly
+                const boxes = defaultBoxesFor(o, cfg);
+                if (!boxes || cachedQuote(o.id, boxes, 0)) continue;
+                try {
+                    const q = await api('/api/dispatch/quote', { order_id: o.id, boxes: boxes, insurance: 0 });
+                    if (run !== prefetchRun) return;
+                    quoteCache.set(String(o.id), { sig: boxSig(boxes, 0), quote: q, at: Date.now() });
+                } catch (e) {
+                    // A pre-fetch is a convenience: a failure here must never reach
+                    // the operator, who has not asked for anything yet.
+                }
+                // Paced only after a real call, so re-entering with everything
+                // already cached costs nothing.
+                await new Promise(r => setTimeout(r, 250));
+            }
+        }
+
         function renderLabels() {
             if (!labelsCache) return;   // e.g. a coverage callback after the cache was cleared for a reload
             const box = $('labels-content'); box.innerHTML = '';
@@ -3695,6 +3754,10 @@
             }
             const dispatched = queueMode === 'dispatched';
             const shipMode = queueMode === 'ship';
+            // Price the ready-to-ship queue in the background so the couriers are
+            // already listed when Dispatch is opened. Free, and never blocking.
+            if (shipMode) prefetchQuotes(shown);
+            else prefetchRun++;                 // left the queue: stop any run in flight
             const heroCopy = dispatched ? 'Orders already dispatched. Select one to reprint its label or view tracking.'
                 : shipMode ? 'Orders marked made and ready to ship. Select one to dispatch a courier.'
                 : 'Orders tagged "' + (data.tag || LABEL_TAG) + '". Select an order to preview its label, then print.';
@@ -4768,6 +4831,25 @@
             quoteWrap = el('div'); quoteWrap.style.marginTop = '12px';
             body.append(quoteBtn, quoteWrap);
 
+            // If the queue already priced this exact parcel, show it now. The guard
+            // is the same one a manual quote uses: the boxes and insurance on screen
+            // must match what was priced, or nothing is reused. Deferred so the rest
+            // of this function has finished declaring what renderOptions touches.
+            setTimeout(function useCachedQuote() {
+                const bx = collectBoxes();
+                if (!bx) return;
+                const ins = insuranceAmount();
+                const hit = cachedQuote(o.id, bx, ins);
+                if (!hit) return;
+                lastBoxes = bx; lastInsurance = ins;
+                quote = hit; chosen = null;
+                renderOptions();
+                const note = el('div', 'sub');
+                note.textContent = 'Priced a moment ago while you were in the queue. '
+                    + 'Press "Get courier quotes" to reprice.';
+                quoteWrap.append(note);
+            }, 0);
+
             quoteBtn.onclick = async () => {
                 const bx = collectBoxes();
                 if (!bx) { addToast('Every parcel needs a size (width, length, depth) and weight above zero.'); return; }
@@ -4775,7 +4857,11 @@
                 lastInsurance = insuranceAmount();   // book exactly what we priced
                 quoteBtn.disabled = true; quoteWrap.innerHTML = '';
                 const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Asking World Options for prices…')); quoteWrap.append(t);
-                try { quote = await api('/api/dispatch/quote', { order_id: o.id, boxes: bx, insurance: lastInsurance }); chosen = null; renderOptions(); }
+                try {
+                    quote = await api('/api/dispatch/quote', { order_id: o.id, boxes: bx, insurance: lastInsurance });
+                    quoteCache.set(String(o.id), { sig: boxSig(bx, lastInsurance), quote: quote, at: Date.now() });
+                    chosen = null; renderOptions();
+                }
                 catch (e) { quoteWrap.innerHTML = ''; quoteWrap.append(errBubble(e.message || 'Could not get quotes')); }
                 quoteBtn.disabled = false;
             };
@@ -5128,6 +5214,7 @@
                             res = await doBook(true);
                         }
                         booking = false; x.disabled = false; x.style.opacity = '';
+                        quoteCache.delete(String(o.id));
                         setDispatchState(o.id, res.dispatch || {});
                         renderResult(res);
                         if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
