@@ -5494,7 +5494,36 @@
             const g = s.google || {};
             // Shopify
             host.append(connRow('Shopify store', s.shopify && s.shopify.ok ? 'on' : 'off',
-                s.shopify && s.shopify.ok ? ((s.shopify.name || 'Connected') + (s.shopify.currency ? ' (' + s.shopify.currency + ')' : '')) : 'Reads are not working. Check your access token.'));
+                s.shopify && s.shopify.ok
+                    ? ((s.shopify.name || 'Connected') + (s.shopify.currency ? ' (' + s.shopify.currency + ')' : '')
+                       + (s.shopify.api_version ? ' \u00b7 API ' + s.shopify.api_version : ''))
+                    : 'Reads are not working. Check your access token.'));
+            // Errors the app hit on its own: visible here whether or not the alert
+            // emails are configured, because a 500 at the dispatch desk is otherwise
+            // invisible to everyone.
+            // Snapshots live in the same volume they protect, so a download is the
+            // only copy that survives losing it. Say how old the last one is.
+            const bkState = s.backup || {};
+            const ageDays = (iso) => {
+                if (!iso) return null;
+                const t = new Date(iso); if (isNaN(t)) return null;
+                return Math.floor((Date.now() - t.getTime()) / 86400000);
+            };
+            const dAge = ageDays(bkState.download_at), sAge = ageDays(bkState.snapshot_at);
+            host.append(connRow('Backups',
+                dAge != null && dAge <= 31 ? 'on' : 'mid',
+                (sAge == null ? 'No automatic snapshot yet.'
+                              : 'Automatic snapshot ' + (sAge === 0 ? 'today' : sAge + ' days ago') + '.')
+                + ' ' + (dAge == null
+                    ? 'You have never downloaded one. A snapshot sits in the same storage it protects, so download a copy.'
+                    : 'Last download ' + (dAge === 0 ? 'today' : dAge + ' days ago') + '.')));
+            const errs = s.errors || {};
+            if (errs.last_24h) {
+                host.append(connRow('App errors', 'mid',
+                    errs.last_24h + (errs.last_24h === 1 ? ' failure' : ' failures') + ' in the last 24 hours: '
+                    + (errs.recent || []).map(e => e.where).filter((v, i, a) => a.indexOf(v) === i).join(', ')
+                    + '. Send this to your developer.'));
+            }
             // AI
             host.append(connRow('Claude AI', s.ai && s.ai.ok ? 'on' : 'off',
                 s.ai && s.ai.ok ? 'Active. Powers every analysis and the chat.' : 'Add your ANTHROPIC_API_KEY to enable analysis and chat.'));

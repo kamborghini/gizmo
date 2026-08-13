@@ -30,7 +30,7 @@ SHOPIFY_STORE        = os.environ.get("SHOPIFY_STORE", "")           # e.g. "my-
 SHOPIFY_TOKEN        = os.environ.get("SHOPIFY_ACCESS_TOKEN", "")    # Static token (shpat_...)
 SHOPIFY_CLIENT_ID    = os.environ.get("SHOPIFY_CLIENT_ID", "")
 SHOPIFY_CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
-API_VERSION          = os.environ.get("SHOPIFY_API_VERSION", "2024-10")
+API_VERSION          = os.environ.get("SHOPIFY_API_VERSION", "2026-07")
 
 # Refresh buffer: refresh token 30 minutes before expiry (only used with OAuth)
 TOKEN_REFRESH_BUFFER = int(os.environ.get("TOKEN_REFRESH_BUFFER", "1800"))

@@ -1,0 +1,24 @@
+# Dependencies are pinned exactly, which keeps deploys reproducible but means a
+# security fix only arrives when somebody looks. This looks, every Monday.
+# Note the bare pip-audit: `-r requirements.txt` scans only the packages we name,
+# and the worst findings so far were in the ones those pull in.
+name: audit
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --no-cache-dir -r requirements.txt pip-audit
+      - name: Python dependencies (whole installed environment)
+        run: pip-audit --progress-spinner off
+      - name: JavaScript dependencies
+        run: npm audit --omit=dev

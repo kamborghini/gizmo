@@ -2386,6 +2386,53 @@ def t_dependencies_are_pinned_and_the_mcp_fix_is_in():
     ok("mcp[cli]==1.28.1" in reqs,
        "mcp is on the release that fixes session hijacking (PYSEC-2026-3481/2/3)")
 
+@test
+def t_app_errors_are_recorded_and_surfaced():
+    # A 500 in the dispatch flow used to be invisible unless somebody was watching
+    # the server log, which at a dispatch desk means never.
+    copilot.ERRORS_PATH = SCRATCH + "/app_errors.json"
+    try:
+        os.remove(copilot.ERRORS_PATH)
+    except FileNotFoundError:
+        pass
+    copilot._record_error("booking a courier", ValueError("boom"))
+    rows = copilot._recent_errors(24)
+    eq(len(rows), 1, "recorded")
+    eq(rows[0]["where"], "booking a courier", "says where")
+    ok("ValueError: boom" in rows[0]["error"], "and what")
+    # It must never itself raise inside an error path.
+    copilot.ERRORS_PATH = "/nonexistent-dir-xyz/errors.json"
+    copilot._record_error("somewhere", RuntimeError("x"))   # must not raise
+    copilot.ERRORS_PATH = SCRATCH + "/app_errors.json"
+
+@test
+def t_weekly_snapshot_writes_once_a_week_and_excludes_credentials():
+    copilot.BACKUP_STATE_PATH = SCRATCH + "/backup_state.json"
+    copilot.BACKUP_SNAPSHOT_DIR = SCRATCH + "/snapshots"
+    for f in glob.glob(copilot.BACKUP_SNAPSHOT_DIR + "/*.zip"):
+        os.remove(f)
+    try:
+        os.remove(copilot.BACKUP_STATE_PATH)
+    except FileNotFoundError:
+        pass
+    ok(copilot._weekly_snapshot(), "writes the first time")
+    made = glob.glob(copilot.BACKUP_SNAPSHOT_DIR + "/*.zip")
+    eq(len(made), 1, "one snapshot on disk")
+    eq(copilot._weekly_snapshot(), False, "and not again within the week")
+    import zipfile
+    names = zipfile.ZipFile(made[0]).namelist()
+    ok(names, "the zip has contents")
+    for n in names:
+        ok("wo_secret" not in n and "google_oauth" not in n,
+           "no credential file in a snapshot: " + n)
+
+@test
+def t_the_shopify_api_version_is_supported():
+    # 2024-10 fell out of Shopify's 12-month support window, and an unsupported
+    # version is silently served from the oldest supported one.
+    import server as srv
+    ok(srv.API_VERSION >= "2025-10", "on a supported version, not " + srv.API_VERSION)
+
 # =========================== run ===========================================
 passed = failed = 0
 for fn in TESTS:

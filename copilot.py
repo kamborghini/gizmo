@@ -20,6 +20,7 @@ Required env vars:
 """
 import glob
 import os
+import sys
 import re
 import html
 import json
@@ -1015,6 +1016,142 @@ def _record_wo_failure(tech: dict) -> None:
 
 def _load_wo_failures() -> list:
     return _load_json_store(WO_FAILURES_PATH, "failures", [])
+
+
+ERRORS_PATH = os.environ.get("ERRORS_PATH", "/data/app_errors.json")
+ERRORS_MAX = 50
+_last_error_alert = 0.0
+
+
+def _record_error(where: str, exc: BaseException) -> None:
+    """Keep the last few unhandled failures. Until this existed a 500 in the
+    dispatch flow was invisible unless somebody happened to be watching the
+    server log, which at a dispatch desk means never."""
+    try:
+        rows = _load_json_store(ERRORS_PATH, "errors", [])
+        rows = [{"at": datetime.now(timezone.utc).isoformat(),
+                 "where": str(where)[:120],
+                 "error": (type(exc).__name__ + ": " + str(exc))[:400]}] + list(rows)
+        rows = rows[:ERRORS_MAX]
+        if _store_writable(ERRORS_PATH):
+            os.makedirs(os.path.dirname(ERRORS_PATH) or ".", exist_ok=True)
+            tmp = ERRORS_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"errors": rows}, fh)
+            os.replace(tmp, ERRORS_PATH)
+    except Exception:
+        logger.exception("could not record an app error")
+
+
+def _recent_errors(hours: int = 24) -> list:
+    cut = datetime.now(timezone.utc) - timedelta(hours=hours)
+    out = []
+    for r in _load_json_store(ERRORS_PATH, "errors", []):
+        try:
+            when = datetime.fromisoformat(str(r.get("at") or ""))
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if when >= cut:
+            out.append(r)
+    return out
+
+
+BACKUP_STATE_PATH = os.environ.get("BACKUP_STATE_PATH", "/data/backup_state.json")
+BACKUP_SNAPSHOT_DIR = os.environ.get("BACKUP_SNAPSHOT_DIR", "/data/snapshots")
+BACKUP_KEEP = 4
+
+
+def _build_backup_zip():
+    """(BytesIO, files_added). Everything restorable, credentials excluded."""
+    import io, zipfile
+    data_dir = os.path.dirname(SCHEDULE_PATH) or "/data"
+    repo_data = os.path.join(os.path.dirname(__file__), "data")
+    # Never export credentials, and give the two roots distinct prefixes so the
+    # repo-seed sheet cannot shadow the live uploaded one on restore.
+    secrets_excluded = {
+        os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
+        os.path.basename(WO_SECRET_PATH),
+    }
+    buf = io.BytesIO()
+    added = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for root, prefix in ((data_dir, "volume"), (repo_data, "repo-data")):
+            if not os.path.isdir(root):
+                continue
+            try:
+                names = sorted(os.listdir(root))
+            except OSError:
+                continue
+            for n in names:
+                if n in secrets_excluded:
+                    continue
+                p = os.path.join(root, n)
+                if not os.path.isfile(p) or not n.lower().endswith((".json", ".csv", ".bak")):
+                    continue
+                try:
+                    if os.path.getsize(p) > 10 * 1024 * 1024:
+                        continue
+                    z.write(p, prefix + "/" + n)
+                    added += 1
+                except OSError:
+                    continue
+    return buf, added
+
+
+def _note_backup(kind: str) -> None:
+    try:
+        st = _load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}
+        st[kind + "_at"] = datetime.now(timezone.utc).isoformat()
+        if _store_writable(BACKUP_STATE_PATH):
+            os.makedirs(os.path.dirname(BACKUP_STATE_PATH) or ".", exist_ok=True)
+            tmp = BACKUP_STATE_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"backup": st}, fh)
+            os.replace(tmp, BACKUP_STATE_PATH)
+    except Exception:
+        logger.exception("could not record the backup time")
+
+
+def _weekly_snapshot() -> bool:
+    """A dated snapshot kept in the volume, newest few retained. This survives a
+    bad write or a corrupted store; it does NOT survive losing the volume, which
+    is why the app also nags for a real download."""
+    try:
+        st = _load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}
+        last = str(st.get("snapshot_at") or "")
+        if last:
+            try:
+                when = datetime.fromisoformat(last)
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=timezone.utc)
+                if (datetime.now(timezone.utc) - when).days < 7:
+                    return False
+            except ValueError:
+                pass
+        buf, added = _build_backup_zip()
+        if not added:
+            return False
+        os.makedirs(BACKUP_SNAPSHOT_DIR, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        path = os.path.join(BACKUP_SNAPSHOT_DIR, f"snapshot-{stamp}.zip")
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as fh:
+            fh.write(buf.getvalue())
+        os.replace(tmp, path)
+        old = sorted(glob.glob(os.path.join(BACKUP_SNAPSHOT_DIR, "snapshot-*.zip")))
+        for stale in old[:-BACKUP_KEEP]:
+            try:
+                os.remove(stale)
+            except OSError:
+                pass
+        _note_backup("snapshot")
+        logger.info("weekly snapshot written: %s (%s files)", path, added)
+        return True
+    except Exception:
+        logger.exception("weekly snapshot failed")
+        return False
 
 
 def _load_dispatch() -> dict:
@@ -3744,8 +3881,9 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         point = got[2] if show_shop else {"options": []}
     except worldoptions.WorldOptionsError as e:
         return {"error": str(e)}
-    except Exception:
+    except Exception as e:
         logger.exception("dispatch quote failed")
+        _record_error("getting courier quotes", e)
         return {"error": "Couldn't get courier quotes. Check the server logs."}
     if isinstance(nosig, Exception):
         logger.info("no-signature quote unavailable: %s", nosig)
@@ -4174,6 +4312,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
         return out
     except Exception as e:
         logger.exception("dispatch booking failed")
+        _record_error("booking a courier", e)
         return {"error": "The booking failed at World Options. Check the server logs; "
                          "no charge is confirmed until a tracking number comes back.",
                 "tech": {"reply": repr(e)[:2000],
@@ -5476,6 +5615,7 @@ async def _scheduler_loop(registry: dict) -> None:
     while True:
         try:
             shopify_up = await _watchdog_tick(registry)
+            await asyncio.to_thread(_weekly_snapshot)   # no-op until a week is up
             cfg = _load_schedule()
             if not shopify_up:
                 logger.warning("scheduler: Shopify unreachable; skipping paid audits this tick")
@@ -6194,40 +6334,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
-        import io, zipfile
-        data_dir = os.path.dirname(SCHEDULE_PATH) or "/data"
-        repo_data = os.path.join(os.path.dirname(__file__), "data")
-        # Never export credentials, and give the two roots distinct prefixes so the
-        # repo-seed sheet cannot shadow the live uploaded one on restore.
-        secrets_excluded = {
-            os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
-            os.path.basename(WO_SECRET_PATH),
-        }
-        buf = io.BytesIO()
-        added = 0
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-            for root, prefix in ((data_dir, "volume"), (repo_data, "repo-data")):
-                if not os.path.isdir(root):
-                    continue
-                try:
-                    names = sorted(os.listdir(root))
-                except OSError:
-                    continue
-                for n in names:
-                    if n in secrets_excluded:
-                        continue
-                    p = os.path.join(root, n)
-                    if not os.path.isfile(p) or not n.lower().endswith((".json", ".csv", ".bak")):
-                        continue
-                    try:
-                        if os.path.getsize(p) > 10 * 1024 * 1024:
-                            continue
-                        z.write(p, prefix + "/" + n)
-                        added += 1
-                    except OSError:
-                        continue
+        buf, added = _build_backup_zip()
         if not added:
             return _json({"error": "Nothing to back up yet."}, 404)
+        _note_backup("download")
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         return Response(buf.getvalue(), media_type="application/zip",
                         headers={**_API_HEADERS,
@@ -7354,6 +7464,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
+        api_version = getattr(sys.modules.get("server"), "API_VERSION", "") or ""
         shop_ok, shop_name, currency = False, None, None
         try:
             shop = await _tool_json(registry, "shopify_get_shop", {})
@@ -7374,6 +7485,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         health = _gobo_sizes().get("health") or {}
         return _json({
             "shopify": {"ok": shop_ok, "name": shop_name, "currency": currency,
+                        "api_version": api_version,
                         "down_since": watch.get("shopify_down")},
             "ai": {"ok": bool(ANTHROPIC_API_KEY)},
             "google": google_data.status(),
@@ -7383,6 +7495,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             "volume": {"ok": vol_ok, "detail": vol_detail,
                        "poisoned": sorted(os.path.basename(p) for p in _poisoned_stores)},
             "email_alerts": {"ok": bool(RESEND_API_KEY and ALERT_EMAIL_TO)},
+            "backup": (lambda b: {"snapshot_at": b.get("snapshot_at"),
+                                  "download_at": b.get("download_at")})(
+                _load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}),
+            # Visible whether or not email is configured, which it is not yet.
+            "errors": {"last_24h": len(_recent_errors(24)),
+                       "recent": _recent_errors(24)[:5]},
             "size_list": health,
             "coverage": {"at": watch.get("coverage_at"), "pct": watch.get("coverage_pct")},
         })

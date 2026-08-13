@@ -1,0 +1,37 @@
+# Runs the dispatch suite on every push. Until this existed, the only thing
+# between a broken change and production was somebody remembering to run the
+# tests by hand, and the money paths (booking, charging, fulfilment) are in here.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'      # matches the Dockerfile
+          cache: pip
+      - run: pip install --no-cache-dir -r requirements.txt
+      - name: Dispatch suite
+        run: python tests/test_dispatch.py
+      - name: No em or en dashes in UI copy
+        run: |
+          if grep -q '—\|–' static/index.html; then
+            echo "UI copy contains an em or en dash"; exit 1
+          fi
+      - name: The AI tool registry stays read-only
+        run: |
+          python - <<'PY'
+          import server
+          bad = [n for n in server.COPILOT_TOOLS
+                 if any(w in n for w in ("create", "update", "set_", "delete", "write"))]
+          assert not bad, f"write-capable tool reachable by the AI: {bad}"
+          print(f"{len(server.COPILOT_TOOLS)} tools, all reads")
+          PY
