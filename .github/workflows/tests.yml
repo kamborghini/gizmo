@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: '3.12'      # matches the Dockerfile
           cache: pip
-      - run: pip install --no-cache-dir -r requirements.txt
+      - run: pip install -r requirements.txt
       - name: Dispatch suite
         run: python tests/test_dispatch.py
       - name: No em or en dashes in UI copy
