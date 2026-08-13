@@ -3745,6 +3745,74 @@ def _goods_summary(o: dict) -> str:
     return ("; ".join(titles))[:100] or "Custom glass gobos"
 
 
+COST_CACHE_PATH = os.environ.get("COST_CACHE_PATH", "/data/cost_cache.json")
+COST_CACHE_DAYS = 14
+COST_CACHE_MAX = 2000
+
+
+async def _variant_costs(registry: dict, variant_ids: list) -> dict:
+    """{variant_id: cost} for each variant, cached on disk.
+
+    A cost lives on the variant's inventory item, which needs one lookup to find
+    the inventory id and another to read it. Costs change rarely, so caching turns
+    a report over a month of orders from hundreds of calls into a handful."""
+    want = sorted({int(v) for v in variant_ids if v})
+    if not want:
+        return {}
+    cache = _load_json_store(COST_CACHE_PATH, "variants", {}) or {}
+    fresh_after = datetime.now(timezone.utc) - timedelta(days=COST_CACHE_DAYS)
+    out, stale = {}, []
+    for vid in want:
+        row = cache.get(str(vid))
+        at = str((row or {}).get("at") or "")
+        try:
+            when = datetime.fromisoformat(at) if at else None
+            if when is not None and when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+        except ValueError:
+            when = None
+        if row and when and when >= fresh_after:
+            out[vid] = row.get("cost") or ""
+        else:
+            stale.append(vid)
+
+    if stale:
+        async def _inv_id(vid):
+            v = await _tool_json(registry, "shopify_get_variant", {"variant_id": vid})
+            return vid, (v or {}).get("inventory_item_id")
+        pairs = await asyncio.gather(*[_inv_id(v) for v in stale], return_exceptions=True)
+        pairs = [p for p in pairs if isinstance(p, tuple) and p[1]]
+        by_inv = {}
+        ids = [str(int(p[1])) for p in pairs]
+        for i in range(0, len(ids), 100):          # their cap is 100 per call
+            chunk = ids[i:i + 100]
+            try:
+                res = await _tool_json(registry, "shopify_get_inventory_items",
+                                       {"ids": ",".join(chunk)})
+                for it in (res or {}).get("inventory_items") or []:
+                    by_inv[int(it.get("id") or 0)] = str(it.get("cost") or "")
+            except Exception:
+                logger.exception("inventory items fetch failed for a cost lookup")
+        now = datetime.now(timezone.utc).isoformat()
+        for vid, inv in pairs:
+            cost = by_inv.get(int(inv), "")
+            out[vid] = cost
+            cache[str(vid)] = {"cost": cost, "inventory_item_id": int(inv), "at": now}
+        try:
+            if len(cache) > COST_CACHE_MAX:
+                keep = sorted(cache.items(), key=lambda kv: str(kv[1].get("at") or ""))
+                cache = dict(keep[-COST_CACHE_MAX:])
+            if _store_writable(COST_CACHE_PATH):
+                os.makedirs(os.path.dirname(COST_CACHE_PATH) or ".", exist_ok=True)
+                tmp = COST_CACHE_PATH + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    json.dump({"variants": cache}, fh)
+                os.replace(tmp, COST_CACHE_PATH)
+        except Exception:
+            logger.exception("could not save the cost cache")
+    return out
+
+
 CUSTOMS_MEMORY_PATH = os.environ.get("CUSTOMS_MEMORY_PATH", "/data/customs_memory.json")
 CUSTOMS_MEMORY_MAX = 400
 
@@ -3800,6 +3868,153 @@ def _remember_customs(lines: list) -> None:
             os.replace(tmp, CUSTOMS_MEMORY_PATH)
     except Exception:
         logger.exception("could not remember the customs values")
+
+
+def _ex_vat_line_total(li: dict, taxes_included: bool) -> float:
+    """What a line actually earned, net of its discounts and of VAT.
+
+    UK stores usually show tax-inclusive prices, so the gross figure is not
+    revenue: the VAT belongs to HMRC, while the cost price it is compared against
+    is already net. Mixing the two overstates every margin."""
+    try:
+        gross = float(li.get("price") or 0) * int(li.get("quantity") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    for d in li.get("discount_allocations") or []:
+        try:
+            gross -= float((d or {}).get("amount") or 0)
+        except (TypeError, ValueError):
+            pass
+    if taxes_included:
+        for t in li.get("tax_lines") or []:
+            try:
+                gross -= float((t or {}).get("price") or 0)
+            except (TypeError, ValueError):
+                pass
+    return round(gross, 2)
+
+
+async def run_margin_report(registry: dict, days: int = 30) -> dict:
+    """What each dispatched order actually made: revenue net of VAT and discounts,
+    less what the goods cost and what the courier charged.
+
+    Only dispatched orders appear, because the courier charge is the point of the
+    exercise. An order with any item lacking a cost price in Shopify is reported
+    as incomplete rather than counted, since a missing cost silently reads as pure
+    profit, which is the one wrong answer worth avoiding."""
+    days = max(1, min(int(days or 30), 365))
+    london = ZoneInfo("Europe/London")
+    cut = datetime.now(timezone.utc) - timedelta(days=days)
+
+    dispatched = {}
+    for oid, e in (_load_dispatch() or {}).items():
+        if not e.get("tracking_number") or e.get("canceled"):
+            continue
+        ts = str(e.get("dispatched_at") or "")
+        try:
+            when = datetime.fromisoformat(ts)
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if when >= cut:
+            dispatched[str(oid)] = (e, when)
+    if not dispatched:
+        return {"rows": [], "totals": {}, "days": days, "note":
+                "No dispatched orders in this period."}
+
+    meta = {}
+    orders = await _paginate_orders(
+        registry, days=days + 14, meta=meta,
+        fields=("id,name,created_at,currency,taxes_included,total_price,"
+                "subtotal_price,total_discounts,line_items,shipping_lines,customer"))
+    by_id = {str(o.get("id")): o for o in orders}
+
+    variant_ids = []
+    for oid in dispatched:
+        for li in (by_id.get(oid) or {}).get("line_items") or []:
+            if li.get("variant_id"):
+                variant_ids.append(li["variant_id"])
+    costs = await _variant_costs(registry, variant_ids)
+
+    rows, missing_cost = [], set()
+    for oid, (entry, when) in sorted(dispatched.items(), key=lambda kv: kv[1][1]):
+        o = by_id.get(oid)
+        if not o:
+            rows.append({"order_id": oid, "order_name": entry.get("order_name") or ("#" + oid),
+                         "incomplete": "the order could not be loaded from Shopify"})
+            continue
+        taxes_included = bool(o.get("taxes_included"))
+        revenue = 0.0
+        goods_cost = 0.0
+        unknown = []
+        for li in o.get("line_items") or []:
+            if _label_skip_item(str(li.get("title") or li.get("name") or "")):
+                continue
+            revenue += _ex_vat_line_total(li, taxes_included)
+            qty = int(li.get("quantity") or 0)
+            cost = costs.get(int(li.get("variant_id") or 0) or -1, "")
+            try:
+                goods_cost += float(cost) * qty
+            except (TypeError, ValueError):
+                unknown.append(str(li.get("title") or "item"))
+        # What the customer paid for delivery, net of VAT, is revenue too.
+        ship_rev = 0.0
+        for sl in o.get("shipping_lines") or []:
+            ship_rev += _ex_vat_line_total({"price": sl.get("price"), "quantity": 1,
+                                            "tax_lines": sl.get("tax_lines"),
+                                            "discount_allocations": sl.get("discount_allocations")},
+                                           taxes_included)
+        # Records written before the ex VAT figure was stored only have the gross
+        # charge. Using it understates the margin slightly, which is the safe
+        # direction, but the row says so rather than quietly mixing the two.
+        courier, courier_gross = 0.0, False
+        for key, gross in (("amount_ex_vat", False), ("amount", True)):
+            try:
+                v = float(entry.get(key) or 0)
+            except (TypeError, ValueError):
+                v = 0.0
+            if v:
+                courier, courier_gross = v, gross
+                break
+        row = {
+            "order_id": oid,
+            "order_name": o.get("name") or entry.get("order_name") or ("#" + oid),
+            "customer": entry.get("customer") or "",
+            "dispatched": when.astimezone(london).strftime("%d %b"),
+            "revenue": round(revenue, 2),
+            "shipping_charged": round(ship_rev, 2),
+            "goods_cost": round(goods_cost, 2),
+            "courier_cost": round(courier, 2),
+            "courier_inc_vat": courier_gross,
+            "currency": o.get("currency") or entry.get("currency") or "GBP",
+        }
+        if unknown:
+            missing_cost.update(unknown)
+            row["incomplete"] = ("no cost price for " + ", ".join(sorted(set(unknown))[:3]))
+        else:
+            row["margin"] = round(revenue + ship_rev - goods_cost - courier, 2)
+            row["margin_pct"] = (round(row["margin"] / (revenue + ship_rev) * 100, 1)
+                                 if (revenue + ship_rev) > 0 else None)
+        rows.append(row)
+
+    counted = [r for r in rows if "margin" in r]
+    tot = {
+        "orders": len(rows),
+        "counted": len(counted),
+        "revenue": round(sum(r["revenue"] + r["shipping_charged"] for r in counted), 2),
+        "goods_cost": round(sum(r["goods_cost"] for r in counted), 2),
+        "courier_cost": round(sum(r["courier_cost"] for r in counted), 2),
+        "margin": round(sum(r["margin"] for r in counted), 2),
+    }
+    tot["margin_pct"] = (round(tot["margin"] / tot["revenue"] * 100, 1)
+                         if tot["revenue"] > 0 else None)
+    tot["courier_inc_vat_rows"] = sum(1 for r in counted if r.get("courier_inc_vat"))
+    return {"rows": rows, "totals": tot, "days": days,
+            "missing_cost": sorted(missing_cost)[:12],
+            "orders_incomplete": len(rows) - len(counted),
+            "fetch_failed": bool(meta.get("failed")),
+            "truncated": bool(meta.get("truncated"))}
 
 
 async def _customs_items(registry: dict, o: dict) -> list:
@@ -6971,6 +7186,28 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                  "courier_inc_vat": _tot("amount"),
                                  "courier_ex_vat": _tot("amount_ex_vat"),
                                  "customer_paid": _tot("shipping_paid")}})
+
+    @mcp.custom_route("/api/margin", methods=["POST"])
+    async def margin_route(request: Request):
+        """What dispatched orders actually made. Read-only, no AI."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        okd, _who = _authorize(request)
+        if not okd:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        try:
+            days = int((body or {}).get("days") or 30)
+        except (TypeError, ValueError):
+            days = 30
+        try:
+            return _json(await run_margin_report(registry, days))
+        except Exception:
+            logger.exception("margin report failed")
+            return _json({"error": "Could not build the margin report."}, 500)
 
     @mcp.custom_route("/api/dispatch/cancel", methods=["POST"])
     async def dispatch_cancel_route(request: Request):

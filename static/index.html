@@ -3781,7 +3781,10 @@
             const su = el('button', 'btn'); su.append(ico(I.box), document.createTextNode('Stock usage'));
             su.title = 'Glass used by everything marked made on a chosen day';
             su.onclick = openStockUsage;
-            bar.append(su, dm);
+            const mg = el('button', 'btn'); mg.append(ico(I.spark || I.box), document.createTextNode('Margins'));
+            mg.title = 'What each dispatched order actually made after goods and carriage';
+            mg.onclick = openMargins;
+            bar.append(su, dm, mg);
             const upBtn = el('button', 'btn'); upBtn.append(ico(I.plus), document.createTextNode('Update size list'));
             upBtn.title = 'Replace the gobo size sheet with a new CSV export. The current one is kept as a backup.';
             const fileIn = document.createElement('input');
@@ -4053,6 +4056,89 @@
         }
         /* Estimated stock usage: glass blanks consumed by everything marked made
            on a chosen day (UK time), summed by size and glass type. */
+        function openMargins() {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal disp-modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, 'Margins'));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
+            const body = el('div', 'modal-body');
+            const bar = el('div', 'lbl-toolbar');
+            const sel = document.createElement('select'); sel.className = 'lbl-size';
+            [[30, 'Last 30 days'], [60, 'Last 60 days'], [90, 'Last 90 days'], [365, 'Last year']]
+                .forEach(([v, t]) => { const o = el('option', null, t); o.value = v; sel.append(o); });
+            bar.append(el('span', 'cov-line', 'Dispatched orders,'), sel);
+            body.append(bar);
+            const out = el('div'); body.append(out);
+            let req = 0;
+            const money = (v, cur) => (v == null ? '' : fmtPrice(v, cur || 'GBP'));
+            async function load() {
+                out.innerHTML = '';
+                const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Working out what each order made\u2026')); out.append(t);
+                const rq = ++req;
+                try {
+                    const d = await api('/api/margin', { days: parseInt(sel.value, 10) });
+                    if (rq !== req) return;
+                    out.innerHTML = '';
+                    if (!d.rows.length) { out.append(el('div', 'cov-line', d.note || 'Nothing dispatched in this period.')); return; }
+                    const tt = d.totals || {};
+                    const head2 = el('div', 'disp-dest');
+                    head2.append(el('div', null, tt.counted + ' of ' + tt.orders + ' dispatched orders costed'));
+                    head2.append(el('div', 'sub', 'Revenue ' + money(tt.revenue) + ' \u00b7 goods ' + money(tt.goods_cost)
+                        + ' \u00b7 couriers ' + money(tt.courier_cost)));
+                    const m = el('div'); m.style.cssText = 'font-weight:800;font-size:17px;margin-top:6px';
+                    m.textContent = 'Kept ' + money(tt.margin) + (tt.margin_pct != null ? '  (' + tt.margin_pct + '%)' : '');
+                    head2.append(m);
+                    out.append(head2);
+                    const wrap = el('div', 'tablewrap');
+                    const tb = el('table', 'ktable');
+                    tb.innerHTML = '<thead><tr><th>Order</th><th>Customer</th><th>Sent</th>'
+                        + '<th class="num">Revenue</th><th class="num">Goods</th><th class="num">Courier</th>'
+                        + '<th class="num">Kept</th><th class="num">%</th></tr></thead>';
+                    const tbody = el('tbody');
+                    d.rows.forEach(r => {
+                        const tr = el('tr');
+                        if (r.incomplete) {
+                            tr.style.opacity = '.6';
+                            tr.append(el('td', 'kw', r.order_name), el('td', null, r.customer || ''),
+                                el('td', null, r.dispatched || ''));
+                            const note = el('td', null, r.incomplete); note.colSpan = 5;
+                            tr.append(note);
+                        } else {
+                            const kept = el('td', 'num', money(r.margin, r.currency));
+                            if (r.margin < 0) kept.style.color = 'var(--bad, #f87171)';
+                            tr.append(el('td', 'kw', r.order_name), el('td', null, r.customer || ''),
+                                el('td', null, r.dispatched || ''),
+                                el('td', 'num', money(r.revenue + r.shipping_charged, r.currency)),
+                                el('td', 'num', money(r.goods_cost, r.currency)),
+                                el('td', 'num', money(r.courier_cost, r.currency)), kept,
+                                el('td', 'num', r.margin_pct == null ? '' : r.margin_pct + '%'));
+                        }
+                        tbody.append(tr);
+                    });
+                    tb.append(tbody); wrap.append(tb); out.append(wrap);
+                    if (d.orders_incomplete) out.append(el('div', 'cov-note',
+                        d.orders_incomplete + ' order(s) could not be costed and are left out of the totals'
+                        + (d.missing_cost && d.missing_cost.length
+                            ? ': no cost price in Shopify for ' + d.missing_cost.join(', ') : '') + '.'));
+                    if (tt.courier_inc_vat_rows) out.append(el('div', 'cov-note',
+                        tt.courier_inc_vat_rows + ' order(s) were booked before the app stored the ex VAT courier '
+                        + 'charge, so their carriage includes VAT and their margin is understated slightly.'));
+                    if (d.truncated || d.fetch_failed) out.append(el('div', 'disp-warn',
+                        'Some orders could not be loaded from Shopify, so this is incomplete. Try again shortly.'));
+                    out.append(el('div', 'cov-note', 'Revenue and delivery are net of VAT and discounts. '
+                        + 'Goods use the cost price on each product in Shopify. Labour is not included.'));
+                } catch (e) {
+                    if (rq !== req) return;
+                    out.innerHTML = ''; out.append(el('div', 'cov-line', e.message || 'Could not load.'));
+                }
+            }
+            sel.onchange = load;
+            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+            const close = () => { overlay.remove(); };
+            x.onclick = close;
+            load();
+        }
         function openDispatchManifest() {
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal');

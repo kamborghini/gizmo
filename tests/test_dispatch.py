@@ -2503,6 +2503,114 @@ def t_a_booking_records_which_staff_member_made_it():
     row = post("/api/dispatch/manifest", {"date": today}).json()["rows"][0]
     ok("by" in row, "and the manifest carries it")
 
+@test
+def t_margin_is_net_of_vat_discounts_goods_and_carriage():
+    # UK prices are tax inclusive, so the gross figure is not revenue: the VAT
+    # belongs to HMRC while the cost price it is compared against is already net.
+    reset_dispatch(); reset_prod()
+    r = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
+    eq(r.status_code, 200, r.text)
+    # 120.00 inc VAT (20.00 of it tax) less a 10.00 discount, plus 9.00 shipping
+    # inc 1.50 tax. Goods cost 30.00 each. Courier 12.40 ex VAT (from OPT).
+    order = {"id": 12345, "name": "#104300", "currency": "GBP",
+             "created_at": "2026-08-12T09:00:00Z", "taxes_included": True,
+             "line_items": [{"id": 1, "title": "Gobo", "quantity": 2, "price": "60.00",
+                             "variant_id": 111,
+                             "tax_lines": [{"price": "20.00"}],
+                             "discount_allocations": [{"amount": "10.00"}]}],
+             "shipping_lines": [{"price": "9.00", "tax_lines": [{"price": "1.50"}]}]}
+    async def tools(registry, name, args):
+        if name == "shopify_list_orders":
+            return {"orders": [order]}
+        if name == "shopify_get_order":
+            return order
+        if name == "shopify_get_variant":
+            return {"id": 111, "inventory_item_id": 9111}
+        if name == "shopify_get_inventory_items":
+            return {"inventory_items": [{"id": 9111, "cost": "30.00"}]}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    copilot.COST_CACHE_PATH = SCRATCH + "/cost_cache.json"
+    try:
+        os.remove(copilot.COST_CACHE_PATH)
+    except FileNotFoundError:
+        pass
+    try:
+        res = run(copilot.run_margin_report({}, days=30))
+        eq(len(res["rows"]), 1, "the dispatched order is there: " + json.dumps(res)[:200])
+        row = res["rows"][0]
+        eq(row["revenue"], 90.0, "120 gross less 20 VAT less 10 discount")
+        eq(row["shipping_charged"], 7.5, "9.00 less its 1.50 of VAT")
+        eq(row["goods_cost"], 60.0, "2 x 30.00")
+        # OPT has no ex VAT figure, as records written before today do not, so the
+        # gross charge is used and the row says so.
+        eq(row["courier_cost"], 12.4, "falls back to the gross charge")
+        eq(row["courier_inc_vat"], True, "and flags that it includes VAT")
+        eq(row["margin"], 25.1, "90 + 7.5 - 60 - 12.4")
+        eq(res["totals"]["margin"], 25.1, "and it totals")
+        eq(res["totals"]["courier_inc_vat_rows"], 1, "counted so the UI can say so")
+    finally:
+        copilot._tool_json = saved
+
+@test
+def t_an_item_without_a_cost_is_flagged_not_counted_as_profit():
+    # A missing cost silently reads as pure profit, which is the one wrong answer
+    # worth avoiding in a margin report.
+    reset_dispatch(); reset_prod()
+    post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
+    order = {"id": 12345, "name": "#104301", "currency": "GBP", "taxes_included": True,
+             "created_at": "2026-08-12T09:00:00Z",
+             "line_items": [{"id": 1, "title": "Mystery Item", "quantity": 1,
+                             "price": "50.00", "variant_id": 222}],
+             "shipping_lines": []}
+    async def tools(registry, name, args):
+        if name == "shopify_list_orders":
+            return {"orders": [order]}
+        if name == "shopify_get_variant":
+            return {"id": 222, "inventory_item_id": 9222}
+        if name == "shopify_get_inventory_items":
+            return {"inventory_items": [{"id": 9222, "cost": ""}]}   # no cost set
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    copilot.COST_CACHE_PATH = SCRATCH + "/cost_cache2.json"
+    try:
+        res = run(copilot.run_margin_report({}, days=30))
+        row = res["rows"][0]
+        ok("margin" not in row, "no margin is claimed for it")
+        ok("Mystery Item" in row.get("incomplete", ""), "and it names what is missing")
+        eq(res["totals"]["counted"], 0, "excluded from the totals")
+        eq(res["orders_incomplete"], 1, "and counted as incomplete")
+    finally:
+        copilot._tool_json = saved
+
+@test
+def t_variant_costs_are_cached_so_a_report_is_not_hundreds_of_calls():
+    copilot.COST_CACHE_PATH = SCRATCH + "/cost_cache3.json"
+    try:
+        os.remove(copilot.COST_CACHE_PATH)
+    except FileNotFoundError:
+        pass
+    calls = {"n": 0}
+    async def tools(registry, name, args):
+        calls["n"] += 1
+        if name == "shopify_get_variant":
+            return {"id": args["variant_id"], "inventory_item_id": 9000 + args["variant_id"]}
+        if name == "shopify_get_inventory_items":
+            return {"inventory_items": [{"id": int(i), "cost": "5.00"}
+                                        for i in args["ids"].split(",")]}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        first = run(copilot._variant_costs({}, [1, 2, 3]))
+        eq(first, {1: "5.00", 2: "5.00", 3: "5.00"}, "costs resolved")
+        used = calls["n"]
+        ok(used <= 4, "three variants plus one batched inventory call: " + str(used))
+        again = run(copilot._variant_costs({}, [1, 2, 3]))
+        eq(again, first, "same answer from cache")
+        eq(calls["n"], used, "and no further calls at all")
+    finally:
+        copilot._tool_json = saved
+
 # =========================== run ===========================================
 passed = failed = 0
 for fn in TESTS:
