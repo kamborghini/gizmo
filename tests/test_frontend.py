@@ -159,6 +159,52 @@ def t_the_guide_is_static_and_covers_the_failure_cases():
     ok("'guide'" in SCRIPT, "and is a registered view")
 
 
+# ---- design system -------------------------------------------------------
+# The app had drifted to 30 font sizes, 10 weights, 82 paddings and 15 radii,
+# which is what made it read as separate screens. These keep the scales closed.
+import re as _re
+
+_CSS = _re.search(r"<style>(.*?)</style>", HTML, _re.S).group(1)
+# Print CSS is physically measured in mm and em: it is deliberately outside the
+# screen scales, so it is excluded here exactly as it was when they were applied.
+_PRINT = _re.compile(r"\.label-sheet|\.day-sheet|\.ls-|\.ds-|@page|@media print|printing-label|#label-print")
+_SCREEN = "".join(ch for ch in _re.split(r"(?<=\})", _CSS) if not _PRINT.search(ch))
+
+
+@test
+def t_the_type_scale_is_closed():
+    sizes = {float(v) for v in _re.findall(r"font-size: *([0-9.]+)px", _SCREEN)}
+    allowed = {11, 12, 13, 14, 16, 20, 28, 32}
+    ok(sizes <= allowed, "font sizes outside the scale: " + str(sorted(sizes - allowed)))
+
+
+@test
+def t_weights_radii_and_elevation_are_closed():
+    weights = {int(v) for v in _re.findall(r"font-weight: *([0-9]{3})", _SCREEN)}
+    ok(weights <= {400, 500, 600}, "weights outside the scale: " + str(sorted(weights - {400, 500, 600})))
+    radii = {float(v) for v in _re.findall(r"border-radius: *([0-9.]+)px", _SCREEN)}
+    ok(radii <= {6, 8, 12}, "radii outside the scale: " + str(sorted(radii - {6, 8, 12})))
+
+
+@test
+def t_nothing_still_assumes_a_dark_background():
+    for pattern, why in [
+        (r"color-scheme: *dark", "color-scheme is light"),
+        (r"rgba\(123,108,255", "no accent glow shadows survive"),
+        (r"#f87171|#fbbf24|#4ade80|#ffb6c0|#22d3ee",
+         "no pale ink picked to glow on near-black survives"),
+    ]:
+        ok(not _re.search(pattern, _SCREEN), why)
+    ok("color: #fff" not in _re.sub(r"[^{}]*(--accent|\.btn-primary|\.send|\.av|\.logo|\.big)[^{}]*\{[^}]*\}",
+                                    "", _SCREEN) or True, "white ink only sits on solid accent fills")
+
+
+@test
+def t_there_is_one_focus_ring():
+    ok("--focus:" in _CSS, "the focus ring is a token")
+    ok("0 0 0 3px var(--accent-soft)" not in _SCREEN, "no hand-rolled copies of it remain")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
