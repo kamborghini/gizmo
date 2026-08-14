@@ -143,6 +143,22 @@ def t_the_cached_quote_is_applied_after_the_modal_is_built():
        "the reuse is deferred past the rest of the function")
 
 
+@test
+def t_the_guide_is_static_and_covers_the_failure_cases():
+    """The desk guide must work when everything else is failing, which is when it
+    gets read: no fetch, no AI, no run gate."""
+    import re as _re
+    block = _re.search(r"const GUIDE = \[(.*?)\n        \];", SCRIPT, _re.S)
+    ok(block, "the guide content is a plain constant")
+    body = block.group(1)
+    ok("api(" not in body and "fetch(" not in body, "it makes no network calls")
+    for must in ["A booking fails", "must go NOW", "will not print", "Unauthorized",
+                 "customs line shows 0", "Charge you twice"]:
+        ok(must in body, "covers: " + must)
+    ok("renderGuide" in SCRIPT and "printGuide" in SCRIPT, "it renders and prints")
+    ok("'guide'" in SCRIPT, "and is a registered view")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

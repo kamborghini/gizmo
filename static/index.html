@@ -894,6 +894,7 @@
                 <button class="nav-item" data-view="memory" id="nav-memory"></button>
                 <button class="nav-item" data-view="skills" id="nav-skills"></button>
                 <button class="nav-item" data-view="chat" id="nav-chat"></button>
+                <button class="nav-item" data-view="guide" id="nav-guide"></button>
             </div>
             <button class="nav-refresh" id="refresh-all" title="Refresh all reports"></button>
             <div class="convo-head"><span>Conversations</span>
@@ -957,6 +958,10 @@
             <!-- Skills -->
             <section class="view" id="view-skills">
                 <div class="scroll"><div class="ov-wrap" id="skills-content"></div></div>
+            </section>
+
+            <section class="view" id="view-guide">
+                <div class="scroll"><div class="ov-wrap" id="guide-content"></div></div>
             </section>
 
             <!-- Chat -->
@@ -1120,6 +1125,7 @@
         $('nav-memory').append(ico(I.bookmark), document.createTextNode('Memory'));
         $('nav-skills').append(ico(I.book), document.createTextNode('Skills'));
         $('nav-chat').append(ico(I.chat), document.createTextNode('Chat'));
+        $('nav-guide').append(ico(I.book), document.createTextNode('Guide'));
         $('refresh-all').append(ico(I.rotate), el('span', 'nr-label', 'Refresh all'));
         $('refresh-all').onclick = refreshAll;
         $('new-convo').innerHTML = I.plus;
@@ -5618,12 +5624,121 @@
         }
 
         /* ---------- view switching ---------- */
+
+        // ---- Guide -----------------------------------------------------------
+        // The desk manual. Deliberately static: no network, no AI, no run gate, so
+        // it works when everything else is failing, which is exactly when it is
+        // read. Printable, because the answer to "the booking failed" is needed at
+        // the bench and not on a screen somebody is already fighting with.
+        const GUIDE = [
+            { h: 'The daily run', body: [
+                ['1. Orders arrive tagged IP', 'They appear in Production Manager under "To make". Anything paid and open that has gobo items but no IP tag shows in an amber strip at the top with an "Add to queue" button.'],
+                ['2. Print the production labels', 'Select an order to preview its label, then Print. Or use "Print all" for the whole queue. Printing tags the order In Production automatically.'],
+                ['3. Make the gobos', 'The label carries the production size, the glass type and the artwork name. A boxed CHECK line means the size could not be resolved and needs a human decision before making.'],
+                ['4. Mark made', 'Press "Mark made" on the order. It moves to "To ship". Nothing has been told to Shopify or the customer yet.'],
+                ['5. Dispatch', 'In "To ship", press Dispatch. Courier prices are usually already there, because the queue prices itself in the background. Pick a service, press Book, and the label prints.'],
+                ['6. The customer is told', 'Fulfilment in Shopify fires when the order is BOTH marked made AND has a booked label, whichever happens last. That is when the shipping email with tracking goes out.'],
+            ]},
+            { h: 'When something goes wrong', body: [
+                ['A booking fails', 'The app already retried it once if the failure was clearly a World Options outage. Open "Technical details" under the error, press Copy, and send that to your developer. It contains their exact words and the request we sent, with your password and the customer\'s details removed. Nothing was charged unless a tracking number came back.'],
+                ['A parcel must go NOW and the app will not book', 'Book it directly in the World Options portal, then mark the order made in the app. The app does not need to have booked the label for the rest of the flow to work. Never let a deploy or a bug hold up a collection.'],
+                ['The label will not print', 'Press Reprint label. If it still will not, the label is also in your World Options portal under the tracking number. A label that only ever existed as a link at World Options cannot be recovered by the app and must come from the portal.'],
+                ['"Carrier not named" on a courier option', 'World Options did not say who runs that service. The price and the booking are still fine; their service code is shown so you can look it up.'],
+                ['A customs line shows 0', 'The store prices custom gobos through the option dropdowns, so the base product price is zero. Type the real value in. It is remembered against that product and fills itself in next time. Customs treats zero-value goods as suspect and can hold the parcel.'],
+                ['An order is missing from a queue', 'Queues follow tags: To make is IP, To ship is PC, Dispatched is Dispatched. Check the tags on the order in Shopify. The search box takes an order number, a customer name or a tracking number.'],
+                ['"Unauthorized"', 'The app only runs inside your Shopify admin. Open it from Apps, not from a bookmarked URL.'],
+                ['Shopify or World Options is down', 'Settings, Connections shows the live state of both, plus any errors the app has hit in the last day. A Shopify outage lasting three hours raises an alert on the Overview tab.'],
+            ]},
+            { h: 'Dispatch, in detail', body: [
+                ['Parcels', 'Pick a box preset, or type sizes in cm and weight in kg. Weigh the PACKED box: couriers re-weigh on collection and bill the difference. "Add a box" sends a multi-parcel shipment on one booking.'],
+                ['Prices', 'Every option shows the price including VAT, with the ex VAT figure beneath, cheapest first. Quoting is free and costs nothing to repeat. Only Book spends money, and it always asks first.'],
+                ['NO SIGNATURE options', 'Shown only where the carrier genuinely offers it, which is FedEx and DHL. Cheaper, but nobody signs for the parcel, so there is no proof the customer received it.'],
+                ['Collection', 'The ready-from time is worked out when you book, not copied from settings, so it is always a real future slot. Booking after your close time moves collection to the next working day.'],
+                ['International', 'Needs your EORI number in Shipping settings. Each customs line takes a description, quantity, unit value, HS code and country of origin. Gobos default to their sale value and 9002.20.000; stocked items use their cost price and their own code. Projectors default to China, everything else to the UK. Everything is editable before booking.'],
+                ['Cancelling', 'Cancel shipment voids the booking at World Options, undoes the Shopify fulfilment if there was one, and puts the order back in its proper queue. Whether the charge is refunded is the courier\'s rule, not ours.'],
+            ]},
+            { h: 'The other tools', body: [
+                ['Day sheet', 'An A4 cut list of everything in the queue: sizes, glass, quantities and tick boxes.'],
+                ['Stock usage', 'Glass used by everything marked made on a chosen day, totalled by size and glass family.'],
+                ['Dispatch manifest', 'Everything booked on a chosen day: courier, tracking, collection reference, cost and what the customer paid. Print it for the driver handover, or check it against the World Options invoice.'],
+                ['Margins', 'What each dispatched order actually made: revenue and delivery net of VAT and discounts, less the cost of the goods and the courier. Orders with a product that has no cost price in Shopify are listed as incomplete rather than counted, because a missing cost would read as pure profit. Labour is not included.'],
+                ['Size check', 'Runs recent orders through the size database and reports models that could not be resolved, so the list can be corrected before those orders reach the bench.'],
+                ['Update size list', 'Replaces the gobo size database from a CSV. The previous five versions are kept.'],
+            ]},
+            { h: 'What the app will not do', body: [
+                ['Charge you twice', 'A booking is refused if the order already has a live label. If a booking result is ever unknown, the app says so and refuses to re-arm rather than risk a second charge.'],
+                ['Tell the customer too early', 'Booking a label is preparation. Shopify is only told the order shipped once it is also marked made.'],
+                ['Lose your work to a misclick', 'No popup closes on a click outside it or on Escape. The X is the only way out.'],
+                ['Let the assistant change anything', 'The Chat and every AI tab can only read your store. Tagging, fulfilling and booking are wired separately and cannot be reached by the assistant, whatever it is asked.'],
+            ]},
+            { h: 'Housekeeping', body: [
+                ['Backups', 'A snapshot is taken automatically every week and the newest four are kept. Those live in the same storage they protect, so download a copy occasionally from Settings, Connections.'],
+                ['Alerts', 'Connections shows what is healthy. Email alerts need a RESEND_API_KEY to be set before they can send.'],
+                ['Shipping settings', 'Origin address, box presets, collection window, insurance defaults, EORI and the World Options credentials. Credentials are write-only: the app never shows them again and never puts them in a backup.'],
+            ]},
+        ];
+        function renderGuide() {
+            const box = $('guide-content');
+            if (box.dataset.built) return;          // static content, build once
+            box.dataset.built = '1';
+            box.innerHTML = '';
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.book;
+            const ht = el('div');
+            ht.append(el('h2', null, 'Guide'),
+                      el('p', null, 'How the desk runs, and what to do when something goes wrong.'));
+            hero.append(badge, ht);
+            const pr = el('button', 'btn'); pr.append(ico(I.printer), document.createTextNode('Print this'));
+            pr.style.marginLeft = 'auto';
+            pr.onclick = printGuide;
+            hero.append(pr);
+            box.append(hero);
+            GUIDE.forEach(sec => {
+                const card = el('div', 'card'); card.style.marginTop = '14px';
+                card.append(el('div', 'disp-subhead', sec.h));
+                sec.body.forEach(([t, d]) => {
+                    const row = el('div'); row.style.cssText = 'padding:9px 0;border-top:1px solid var(--line)';
+                    row.append(el('div', 'setting-title', t), el('div', 'setting-sub', d));
+                    card.append(row);
+                });
+                box.append(card);
+            });
+        }
+        function printGuide() {
+            const host = $('label-print'); host.innerHTML = '';
+            const ds = el('div', 'day-sheet');
+            ds.append(el('h1', null, 'Store Copilot: desk guide'));
+            GUIDE.forEach(sec => {
+                ds.append(el('h2', null, sec.h));
+                sec.body.forEach(([t, d]) => {
+                    const p = el('div'); p.style.cssText = 'margin:0 0 7px';
+                    p.append(el('b', null, t + ': '), document.createTextNode(d));
+                    ds.append(p);
+                });
+            });
+            host.append(ds);
+            let rule = $('label-page-rule');
+            if (!rule) { rule = document.createElement('style'); rule.id = 'label-page-rule'; document.head.append(rule); }
+            rule.textContent = '@page { size: A4; margin: 14mm; }';
+            const seq = ++printSeq;
+            document.body.classList.add('printing-label');
+            const cleanup = () => {
+                if (seq !== printSeq) return;
+                document.body.classList.remove('printing-label');
+                host.innerHTML = '';
+                const r = $('label-page-rule');
+                if (r && r.parentNode) r.parentNode.removeChild(r);
+            };
+            if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
+            setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);
+        }
+
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
-            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'labels', 'memory', 'skills', 'chat'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', labels: 'Production Manager', memory: 'Memory', skills: 'Skills' };
+            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
-            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels') ? 'none' : '';
+            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide') ? 'none' : '';
+            if (v === 'guide') renderGuide();
             // Only offer the PDF when there is actually a report to print: the print
             // stylesheet hides the Run gate, so printing an un-run tab yields a blank page.
             $('print-btn').style.display = (['overview', 'seo', 'keywords', 'products', 'customers'].indexOf(v) >= 0 && printableCache(v)) ? '' : 'none';
