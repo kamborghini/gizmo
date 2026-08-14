@@ -21,6 +21,10 @@ os.environ.update({
     "WATCH_PATH": SCRATCH + "/watch.json", "ALERTS_PATH": SCRATCH + "/alerts.json",
     "USAGE_PATH": SCRATCH + "/usage.json", "IMPACT_PATH": SCRATCH + "/impact.json",
     "ANALYSIS_CACHE_PATH": SCRATCH + "/analysis.json",
+    # Off by default here: most tests swap _tool_json to return a different
+    # store per test, and a snapshot shared across them would answer with the
+    # previous test's orders. The tests that exercise the cache turn it on.
+    "ORDER_CACHE_SECS": "0",
 })
 for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
     os.environ.pop(v, None)
@@ -2761,6 +2765,335 @@ def t_orders_tagged_before_the_rename_still_show_in_the_finished_queue():
         eq([o["id"] for o in res2["orders"]], [], "the legacy tag only widens the finished queue")
     finally:
         copilot._tool_json = saved
+
+
+# ---- Order sweep snapshot ---------------------------------------------------
+# The queue sweeps up to 30 sequential pages of orders. These tests turn the
+# snapshot on (it is off for the rest of the suite, see ORDER_CACHE_SECS above)
+# and assert on the number of Shopify calls, never on the cache internals.
+
+def with_cache(fn, secs=45):
+    """Run fn with the order snapshot enabled and a clean slate."""
+    was = copilot.ORDER_CACHE_SECS
+    copilot.ORDER_CACHE_SECS = secs
+    copilot._bust_orders()
+    copilot._orders_inflight.clear()
+    try:
+        return fn()
+    finally:
+        copilot.ORDER_CACHE_SECS = was
+        copilot._bust_orders()
+        copilot._orders_inflight.clear()
+
+QUEUE_ORDERS = [
+    {"id": 777, "order_number": 1, "name": "#1", "created_at": "2026-08-12T09:00:00Z",
+     "tags": "IP", "line_items": [], "customer": {}, "shipping_address": {}},
+    {"id": 888, "order_number": 2, "name": "#2", "created_at": "2026-08-12T09:00:00Z",
+     "tags": "PC", "line_items": [], "customer": {}, "shipping_address": {}},
+]
+
+def sweep_counter(orders=None, fail=False):
+    """A fake registry that counts order-list pages and can fail on demand."""
+    calls = {"n": 0}
+    async def tools(registry, name, args):
+        if name == "shopify_list_orders":
+            calls["n"] += 1
+            if fail:
+                return {"_failed": True}     # what _tool_json returns for a throttled read
+            return {"orders": list(orders if orders is not None else QUEUE_ORDERS)}
+        return {}
+    return calls, tools
+
+@test
+def t_the_three_queues_share_one_sweep_instead_of_three():
+    # Flipping To make -> To ship -> Complete asks for the same window and the
+    # same fields every time; only the local tag filter differs.
+    calls, tools = sweep_counter()
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        def go():
+            a = run(copilot.run_production_labels({}, tag="IP"))
+            b = run(copilot.run_production_labels({}, tag="PC"))
+            c = run(copilot.run_production_labels({}, tag=copilot.DISPATCHED_TAG))
+            return a, b, c
+        a, b, c = with_cache(go)
+        eq(calls["n"], 1, "one sweep served all three queues")
+        eq([o["id"] for o in a["orders"]], [777], "and To make still filters correctly")
+        eq([o["id"] for o in b["orders"]], [888], "and To ship still filters correctly")
+        eq([o["id"] for o in c["orders"]], [], "and Complete still filters correctly")
+    finally:
+        copilot._tool_json = saved
+
+@test
+def t_a_tag_write_retires_the_snapshot_immediately():
+    # The queues are filtered on tags, so an order that has just been moved must
+    # not still be sitting in the queue it left.
+    calls, tools = sweep_counter()
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        def go():
+            run(copilot.run_production_labels({}, tag="IP"))
+            first = calls["n"]
+            run(copilot.run_production_labels({}, tag="IP"))
+            eq(calls["n"], first, "a repeat load costs nothing")
+            copilot._bust_orders()          # what every tag/fulfilment write does
+            run(copilot.run_production_labels({}, tag="IP"))
+            eq(calls["n"], first + 1, "and the write forced a re-read")
+        with_cache(go)
+    finally:
+        copilot._tool_json = saved
+
+@test
+def t_a_tag_write_through_the_real_path_busts_the_snapshot():
+    # Not the helper: the actual writer call site inside _sync_order_tags.
+    calls, tools = sweep_counter()
+    async def both(registry, name, args):
+        if name == "shopify_get_order":
+            return {"id": 777, "tags": "Unprocessed", "fulfillment_status": None, "cancelled_at": None}
+        return await tools(registry, name, args)
+    saved = copilot._tool_json; copilot._tool_json = both
+    try:
+        def go():
+            run(copilot.run_production_labels({}, tag="IP"))
+            first = calls["n"]
+            TAG_WRITES.clear()
+            run(copilot._sync_order_tags({}, 777, add=["IP"], remove=["Unprocessed"]))
+            ok(TAG_WRITES, "the tag write happened")
+            run(copilot.run_production_labels({}, tag="IP"))
+            eq(calls["n"], first + 1, "and it re-read the store afterwards")
+        with_cache(go)
+    finally:
+        copilot._tool_json = saved
+
+@test
+def t_refresh_re_reads_shopify_even_inside_the_window():
+    # The merchant tagged something in the Shopify admin; there are no webhooks,
+    # so Refresh is the only way to see it before the TTL runs out.
+    calls, tools = sweep_counter()
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        def go():
+            run(copilot.run_production_labels({}, tag="IP"))
+            first = calls["n"]
+            run(copilot.run_production_labels({}, tag="IP", fresh=True))
+            eq(calls["n"], first + 1, "Refresh went back to Shopify")
+        with_cache(go)
+    finally:
+        copilot._tool_json = saved
+
+@test
+def t_refresh_on_the_money_views_also_re_reads_shopify():
+    # Liability answers "who owes me". A customer paying is invisible to this app
+    # (no webhooks), so Refresh there has to reach Shopify, not a 45-second-old
+    # sweep, or the merchant chases someone who has already paid.
+    calls, tools = sweep_counter()
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        def go():
+            run(copilot._orders_snapshot({}, days=730, fields="id,tags"))
+            first = calls["n"]
+            eq(copilot._refresh_asked({}), False, "an ordinary load keeps the snapshot")
+            run(copilot._orders_snapshot({}, days=730, fields="id,tags"))
+            eq(calls["n"], first, "and costs nothing")
+            eq(copilot._refresh_asked({"fresh": True}), True, "Refresh discards it")
+            run(copilot._orders_snapshot({}, days=730, fields="id,tags"))
+            eq(calls["n"], first + 1, "so the next read goes to Shopify")
+        with_cache(go)
+    finally:
+        copilot._tool_json = saved
+
+@test
+def t_refresh_never_joins_a_sweep_that_started_before_it():
+    # The ledger reads two years of orders, which takes long enough for the
+    # merchant to mark an invoice paid in Shopify and press Refresh while it is
+    # still running. If Refresh joined that sweep it would answer with the
+    # picture from before the payment, and they would chase a paid invoice.
+    state = {"paid": False}
+    pages = {"n": 0}
+    async def tools(registry, name, args):
+        if name == "shopify_list_orders":
+            pages["n"] += 1
+            await asyncio.sleep(0.05)          # the sweep is slow, that is the point
+            return {"orders": [{"id": 9, "tags": "Purchase order unpaid",
+                                "financial_status": "paid" if state["paid"] else "pending"}]}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        def go():
+            async def scenario():
+                slow = asyncio.ensure_future(
+                    copilot._orders_snapshot({}, days=730, fields="id,tags,financial_status"))
+                await asyncio.sleep(0.01)      # the sweep is now in flight
+                state["paid"] = True           # they mark it paid in the Shopify admin
+                copilot._refresh_asked({"fresh": True})   # and press Refresh
+                after = await copilot._orders_snapshot({}, days=730,
+                                                       fields="id,tags,financial_status")
+                await slow
+                return after
+            after = run(scenario())
+            eq(after[0]["financial_status"], "paid", "Refresh saw the payment")
+            eq(pages["n"], 2, "because it swept again rather than joining the one in flight")
+        with_cache(go)
+    finally:
+        copilot._tool_json = saved
+
+@test
+def t_a_failed_sweep_is_never_cached():
+    # "Nothing owed" must never be an artefact of a throttled fetch.
+    calls, tools = sweep_counter(fail=True)
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        def go():
+            meta = {}
+            run(copilot._orders_snapshot({}, days=180, fields="id,tags", meta=meta))
+            ok(meta.get("failed"), "the failure is reported to the caller")
+            run(copilot._orders_snapshot({}, days=180, fields="id,tags"))
+            eq(calls["n"], 2, "and the next caller retries rather than reading a cached failure")
+        with_cache(go)
+    finally:
+        copilot._tool_json = saved
+
+@test
+def t_concurrent_queue_loads_share_one_sweep():
+    # Three tabs opening at once must not fire three 30-page sweeps at a REST
+    # bucket that leaks about two calls a second.
+    calls = {"n": 0}
+    async def tools(registry, name, args):
+        if name == "shopify_list_orders":
+            calls["n"] += 1
+            await asyncio.sleep(0.01)      # long enough for the others to arrive
+            return {"orders": list(QUEUE_ORDERS)}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        def go():
+            async def three():
+                return await asyncio.gather(*[copilot.run_production_labels({}, tag="IP")
+                                              for _ in range(3)])
+            res = run(three())
+            eq(calls["n"], 1, "one sweep, three callers")
+            eq([len(r["orders"]) for r in res], [1, 1, 1], "and every caller got the answer")
+        with_cache(go)
+    finally:
+        copilot._tool_json = saved
+
+@test
+def t_different_windows_do_not_borrow_each_others_orders():
+    # A 28-day sector total must never be served from a 730-day ledger sweep.
+    seen = []
+    async def tools(registry, name, args):
+        if name == "shopify_list_orders":
+            seen.append(args.get("created_at_min"))
+            return {"orders": []}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        def go():
+            run(copilot._orders_snapshot({}, days=28, fields="id"))
+            run(copilot._orders_snapshot({}, days=730, fields="id"))
+            eq(len(seen), 2, "two windows, two sweeps")
+            ok(seen[0] != seen[1], "and each asked Shopify for its own window")
+        with_cache(go)
+    finally:
+        copilot._tool_json = saved
+
+@test
+def t_product_options_are_learned_once_not_per_queue_load():
+    # Uncached this was up to 40 calls on every queue load, re-learning that a
+    # gobo has a "Gobo Size" option.
+    calls = {"n": 0}
+    async def tools(registry, name, args):
+        if name == "shopify_get_product":
+            calls["n"] += 1
+            return {"id": args["product_id"], "options": [{"name": "Gobo Size"}]}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    copilot._option_names_cache.clear()
+    try:
+        first = run(copilot._product_option_names({}, [11, 12]))
+        eq(first, {11: ["Gobo Size"], 12: ["Gobo Size"]}, "options resolved")
+        eq(calls["n"], 2, "one call per product")
+        again = run(copilot._product_option_names({}, [11, 12]))
+        eq(again, first, "same answer from cache")
+        eq(calls["n"], 2, "and no further calls at all")
+    finally:
+        copilot._tool_json = saved
+        copilot._option_names_cache.clear()
+
+@test
+def t_a_product_that_could_not_be_read_is_not_remembered_as_empty():
+    calls = {"n": 0}
+    state = {"ok": False}
+    async def tools(registry, name, args):
+        if name == "shopify_get_product":
+            calls["n"] += 1
+            if not state["ok"]:
+                return {"_failed": True}
+            return {"id": args["product_id"], "options": [{"name": "Gobo Size"}]}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    copilot._option_names_cache.clear()
+    try:
+        eq(run(copilot._product_option_names({}, [11])), {11: []}, "a failed read yields nothing")
+        state["ok"] = True
+        eq(run(copilot._product_option_names({}, [11])), {11: ["Gobo Size"]}, "and is retried later")
+        eq(calls["n"], 2, "so the failure was not cached")
+    finally:
+        copilot._tool_json = saved
+        copilot._option_names_cache.clear()
+
+
+# ---- The app shell ----------------------------------------------------------
+
+@test
+def t_the_page_is_a_small_shell_and_the_bulk_is_cacheable():
+    r = client.get("/")
+    eq(r.status_code, 200, "the app loads")
+    body = r.text
+    ok(len(body) < 60000, "the shell is small: " + str(len(body)) + " bytes")
+    ok("/assets/app.css?v=" in body, "the stylesheet moved to a hashed URL")
+    ok("/assets/app.js?v=" in body, "and so did the script")
+    ok("<style>" not in body and "<script>\n" not in body, "nothing bulky was left inline")
+    urls = re.findall(r'/assets/app\.(?:css|js)\?v=[0-9a-f]+', body)
+    ok(len(set(urls)) == 2, "the shell names both assets: " + str(set(urls)))
+    css = client.get(sorted(set(urls))[0])
+    js = client.get(sorted(set(urls))[1])
+    eq(css.status_code, 200, "the stylesheet serves")
+    eq(js.status_code, 200, "the script serves")
+    # The page 404s outside the Shopify admin; the assets must not be a way round it.
+    eq(client.get("/assets/app.js").status_code, 404, "no hash, no source")
+    eq(client.get("/assets/app.js?v=deadbeef").status_code, 404, "and a wrong hash is no better")
+    ok(len(css.text) > 20000 and len(js.text) > 100000, "and they carry the real weight")
+    for res in (css, js):
+        ok("immutable" in res.headers.get("cache-control", ""),
+           "hashed assets cache for a year: " + res.headers.get("cache-control", ""))
+    # The split must lose nothing: shell + css + js is the whole page again.
+    whole = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "static", "index.html"), encoding="utf-8").read()
+    eq(len(body) + len(css.text) + len(js.text) > len(whole) - 200, True,
+       "the page was split, not truncated")
+
+@test
+def t_a_repeat_open_of_the_same_build_is_a_304_that_still_carries_the_csp():
+    r = client.get("/")
+    etag = r.headers.get("etag")
+    ok(etag, "the shell is tagged with its build")
+    again = client.get("/", headers={"If-None-Match": etag})
+    eq(again.status_code, 304, "the same build is not sent twice")
+    ok(again.headers.get("content-security-policy"), "and the 304 still pins frame-ancestors")
+    ok("no-store" not in r.headers.get("cache-control", ""), "no-store would make the ETag inert")
+    weak = client.get("/", headers={"If-None-Match": 'W/' + etag + ', "other"'})
+    eq(weak.status_code, 304, "a weak tag in a list still matches")
+    stale = client.get("/", headers={"If-None-Match": '"an-older-build"'})
+    eq(stale.status_code, 200, "a different build is sent in full")
+
+@test
+def t_a_page_that_cannot_be_split_is_still_served_whole():
+    # A future edit to index.html must never be able to take the app down.
+    shell, css, js = copilot._split_page("<html><body>hello</body></html>")
+    eq(css, "", "no stylesheet was invented")
+    eq(js, "", "no script was invented")
+    eq(shell, "<html><body>hello</body></html>", "and the page is served exactly as authored")
 
 # =========================== run ===========================================
 passed = failed = 0

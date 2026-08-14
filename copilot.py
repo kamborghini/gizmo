@@ -149,7 +149,10 @@ _MODEL_PRICE = {
 }
 
 _PAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "index.html")
-_page_cache: Optional[str] = None
+_page_cache: Optional[str] = None   # the shell: the page with its CSS and JS lifted out
+_page_assets: dict = {}             # "css" / "js" -> (media type, bytes), served at hashed URLs
+_asset_hashes: dict = {}            # "css" / "js" -> the content hash in their URL
+_page_etag_val: str = ""
 
 WRITING_STYLE = ("Write in clear, plain text. Never use em dashes or en dashes anywhere. "
                  "Use commas, periods, or parentheses instead, and 'to' or a hyphen for ranges "
@@ -1971,7 +1974,7 @@ async def _sector_sales(registry: dict, days: int = 28) -> list:
     try:
         customers, orders = await asyncio.gather(
             _paginate_customers(registry),
-            _paginate_orders(registry, days=days, fields="id,total_price,created_at,customer"),
+            _orders_snapshot(registry, days=days, fields="id,total_price,created_at,customer"),
         )
         tags = _detect_sector_tags(customers)
         if not tags:
@@ -2041,7 +2044,7 @@ async def _overview_trends(registry: dict) -> dict:
     ga4_on, gsc_on = google_data.ga4_configured(), google_data.gsc_configured()
     # Fetch the Shopify order history and both Google timeseries at once.
     orders, ts, gts = await asyncio.gather(
-        _paginate_orders(registry, days=len(months) * 31),
+        _orders_snapshot(registry, days=len(months) * 31),
         google_data.ga4_timeseries(min(TREND_MONTHS, 24) * 31) if ga4_on else _ret({}),
         google_data.gsc_timeseries(480) if gsc_on else _ret({}),
         return_exceptions=True,
@@ -2690,6 +2693,127 @@ def _month_axis(months: int) -> list:
     return list(reversed(out))
 
 
+# ---------------------------------------------------------------------------
+# Order sweep snapshot
+#
+# Sweeping the store is the most expensive read this app makes: up to 30 pages
+# of 250 orders, chained by since_id so they cannot run in parallel. The
+# production queue reruns it on every flip between To make / To ship /
+# Complete, and all three tabs ask for the SAME window and fields, differing
+# only in a local tag filter. One snapshot therefore serves all three, and a
+# tab flip drops from ~30 sequential Shopify calls to none.
+#
+# Freshness rests on two mechanisms because they cover different mutations:
+#   - every write THIS app makes bumps _orders_epoch, retiring every snapshot
+#     at once (see the four writer call sites, each with a _bust_orders() note);
+#   - a short TTL bounds how long a change made in the Shopify admin, such as
+#     the merchant tagging an order by hand, can stay invisible. There are no
+#     webhooks, so the clock is the only thing that can ever catch those.
+#
+# Two things are deliberately NOT cached. A failed sweep, because "nothing
+# owed" must never be an artefact of a throttled fetch. And the shaped label
+# payload, because production state, dispatch state and the gobo size sheet all
+# change it without touching Shopify; those are cheap local reads and stay live.
+# ---------------------------------------------------------------------------
+ORDER_CACHE_SECS = int(os.environ.get("ORDER_CACHE_SECS", "45"))   # how long a swept order list may be reused
+ORDER_CACHE_MAX  = 6                                              # distinct (days, fields) sweeps kept in memory
+_orders_cache: dict = {}      # (days, fields) -> {"at", "epoch", "orders", "meta"}
+_orders_inflight: dict = {}   # (days, fields) -> the Task sweeping, so concurrent misses share one fetch
+_orders_epoch = 0             # bumped by every write that changes what a sweep returns
+
+
+def _refresh_asked(body: dict) -> bool:
+    """True when the merchant pressed Refresh, having discarded the snapshots.
+
+    Refresh has to mean Shopify is re-read: the reports it sits on are the ones
+    a merchant checks straight after editing something in the admin, and there
+    are no webhooks to tell us about that edit. It clears every window rather
+    than just this report's, which costs one extra sweep on whatever is opened
+    next and is still no worse than the old behaviour of always sweeping."""
+    if not isinstance(body, dict) or not body.get("fresh"):
+        return False
+    _bust_orders()
+    return True
+
+
+def _bust_orders() -> None:
+    """Retire every cached order sweep, finished or still running.
+
+    Called straight after each write this app makes to order tags or fulfilment
+    status, which are exactly the fields the queues filter on, and when the
+    merchant presses Refresh. Bumping the epoch stops a sweep already in flight
+    from storing its result, since that result was taken before the write.
+
+    Clearing _orders_inflight matters just as much: a sweep of two years of
+    orders takes long enough that a merchant can edit something in Shopify and
+    press Refresh while it is still running. Left joinable, that sweep would
+    answer the Refresh with the picture from before their edit, which on the
+    liability ledger means chasing an invoice that has just been paid. Anyone
+    already awaiting it keeps their own reference and still gets an answer; it
+    simply stops being the answer for callers that arrive after the write."""
+    global _orders_epoch
+    _orders_epoch += 1
+    _orders_cache.clear()
+    _orders_inflight.clear()
+
+
+async def _sweep_orders(registry: dict, days: int, fields: str, key) -> tuple:
+    """One shared sweep: fetches, stores if it is worth storing, and returns
+    (orders, meta) to every caller waiting on it."""
+    epoch = _orders_epoch          # the state of the store this sweep is a picture of
+    meta: dict = {}
+    try:
+        orders = await _paginate_orders(registry, days=days, fields=fields, meta=meta)
+        # Store only a complete sweep taken since the last write: "nothing owed"
+        # must never be a cached artefact of a throttled fetch.
+        if ORDER_CACHE_SECS > 0 and not meta.get("failed") and _orders_epoch == epoch:
+            _orders_cache[key] = {"at": time.monotonic(), "epoch": epoch,
+                                  "orders": orders, "meta": dict(meta)}
+            while len(_orders_cache) > ORDER_CACHE_MAX:
+                _orders_cache.pop(min(_orders_cache, key=lambda k: _orders_cache[k]["at"]), None)
+        return orders, meta
+    finally:
+        if _orders_inflight.get(key) is asyncio.current_task():
+            _orders_inflight.pop(key, None)
+
+
+async def _orders_snapshot(registry: dict, days: int,
+                           fields: str = "id,created_at,total_price,line_items",
+                           meta: Optional[dict] = None, force: bool = False) -> list:
+    """Orders from the last `days`, reusing a recent sweep when there is one.
+
+    Same contract as _paginate_orders, including the `meta` out-parameter, so
+    callers that tell a throttled fetch apart from an empty store keep working.
+    `force` is the merchant pressing Refresh: it discards everything first, so
+    an edit made in the Shopify admin shows up immediately."""
+    key = (int(days), fields)
+    if force:
+        _bust_orders()   # nothing already running may answer this
+    else:
+        # Drop anything past its window on the way in. A sweep holds names,
+        # addresses and emails; once it is too old to be used it should not
+        # still be sitting in memory waiting for someone to ask for that key.
+        now = time.monotonic()
+        for k, v in list(_orders_cache.items()):
+            if now - v["at"] >= ORDER_CACHE_SECS:
+                _orders_cache.pop(k, None)
+        if ORDER_CACHE_SECS > 0:
+            hit = _orders_cache.get(key)
+            if hit and hit["epoch"] == _orders_epoch:
+                if meta is not None:
+                    meta.update(hit["meta"])
+                return hit["orders"]
+    task = _orders_inflight.get(key)
+    if task is None or task.done():
+        task = asyncio.ensure_future(_sweep_orders(registry, days, fields, key))
+        _orders_inflight[key] = task   # no await between the read and the write, so these cannot interleave
+    # Shielded: a browser hanging up must not cancel the sweep others are waiting on.
+    orders, m = await asyncio.shield(task)
+    if meta is not None:
+        meta.update(m)
+    return orders
+
+
 async def _paginate_orders(registry: dict, days: int, max_pages: int = ORDER_PAGE_CAP,
                            fields: str = "id,created_at,total_price,line_items",
                            meta: Optional[dict] = None) -> list:
@@ -2841,19 +2965,46 @@ def _line_options(li: dict, option_names: dict) -> list:
     return opts
 
 
+# Product option names are a definition, not data: nothing in this app writes
+# products, and the merchant changes an option name close to never. Uncached,
+# a queue load spent up to 40 Shopify calls re-learning that a gobo has a
+# "Gobo Size" option. Held per process, so a redeploy relearns them; a miss is
+# harmless anyway (the variant renders as the generic "Option").
+OPTION_CACHE_SECS = int(os.environ.get("OPTION_CACHE_SECS", "21600"))   # 6 hours
+OPTION_CACHE_MAX  = 500
+_option_names_cache: dict = {}   # product_id -> {"at": monotonic, "names": [...]}
+
+
 async def _product_option_names(registry: dict, product_ids) -> dict:
     """Map product_id -> its option names (e.g. ["Gobo Size"]), fetched concurrently."""
     ids = [p for p in dict.fromkeys(product_ids) if p][:40]   # de-duped and bounded
     if not ids:
         return {}
+    now = time.monotonic()
+    out, misses = {}, []
+    for pid in ids:
+        hit = _option_names_cache.get(pid)
+        if hit and (now - hit["at"]) < OPTION_CACHE_SECS:
+            out[pid] = hit["names"]
+        else:
+            misses.append(pid)
+    if not misses:
+        return out
 
     async def one(pid):
         d = await _tool_json(registry, "shopify_get_product", {"product_id": pid})
         if not _ok(d):
-            return pid, []
-        return pid, [str(o.get("name") or "").strip() for o in (d.get("options") or [])]
+            return pid, [], False
+        return pid, [str(o.get("name") or "").strip() for o in (d.get("options") or [])], True
 
-    return {pid: names for pid, names in await asyncio.gather(*[one(i) for i in ids])}
+    for pid, names, good in await asyncio.gather(*[one(i) for i in misses]):
+        out[pid] = names
+        if good:   # a failed read is not an answer, so it is never cached
+            _option_names_cache[pid] = {"at": time.monotonic(), "names": names}
+    while len(_option_names_cache) > OPTION_CACHE_MAX:
+        _option_names_cache.pop(min(_option_names_cache,
+                                    key=lambda k: _option_names_cache[k]["at"]), None)
+    return out
 
 
 _gobo_cache = {"mtime": None, "by_mm": {}, "by_model": {}, "by_mm_loose": {}, "by_model_loose": {},
@@ -3289,7 +3440,13 @@ async def _sync_order_tags(registry: dict, order_id, add=(), remove=()) -> tuple
             new = [t for t in cur if _norm_key(t) not in drop] + list(add)
             if {_norm_key(t) for t in new} == {_norm_key(t) for t in cur}:
                 return True, ""   # already in the right state: no write
-            await _order_tag_writer(int(order_id), ", ".join(new))
+            try:
+                await _order_tag_writer(int(order_id), ", ".join(new))
+            finally:
+                # The queues are filtered on tags, so this write changes what a
+                # sweep returns. Bust on the way out even if the write raised:
+                # a half-applied change must not leave a snapshot behind.
+                _bust_orders()
             return True, ""
     except httpx.HTTPStatusError as e:
         if e.response is not None and e.response.status_code in (401, 403):
@@ -3385,23 +3542,28 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
                 tracking_url=None,
                 notify_customer=do_notify,
             )
+            _bust_orders()   # fulfillment_status is a swept field
         except Exception:
             logger.exception("fulfillment failed for order %s", oid)
+            _bust_orders()   # it may still have landed before the error
             fulfillment = {"ok": False, "reason": "error",
                            "detail": "Shopify fulfillment failed; the label is still valid. "
                                      "You can fulfill the order manually in Shopify."}
 
     if tag_ok:
         tag_note = ""
-    if (not fulfillment.get("ok") and fulfillment.get("reason") == "nothing_to_fulfill"
-            and _order_status(o) == "fulfilled"):
-        # Already done, so treat it as done: otherwise the record keeps
+    if not fulfillment.get("ok") and fulfillment.get("reason") == "nothing_to_fulfill":
+        # Shopify has nothing left to fulfil. If that is because the order is
+        # already fulfilled, treat it as done: otherwise the record keeps
         # fulfilled=False, every later pass re-enters and gets the same answer,
         # and the order shows as dispatched-but-unfulfilled for ever while the
-        # customer already has their tracking.
-        logger.info("order %s was already fulfilled in Shopify; recording it", oid)
-        fulfillment = {"ok": True, "reason": "already_fulfilled",
-                       "fulfillment_id": None, "detail": "already fulfilled in Shopify"}
+        # customer already has their tracking. Read the order to find out; this
+        # branch is rare, so the extra call costs nothing in the normal case.
+        current = await _tool_json(registry, "shopify_get_order", {"order_id": oid})
+        if _ok(current) and _order_status(current) == "fulfilled":
+            logger.info("order %s was already fulfilled in Shopify; recording it", oid)
+            fulfillment = {"ok": True, "reason": "already_fulfilled",
+                           "fulfillment_id": None, "detail": "already fulfilled in Shopify"}
     if not fulfillment.get("ok"):
         # Put the order back where it was: it has not shipped after all.
         try:
@@ -3443,12 +3605,14 @@ async def _unfulfill_dispatch(registry: dict, order_id) -> str:
     if fid and _fulfillment_canceler is not None:
         try:
             fc = await _fulfillment_canceler(int(fid))
+            _bust_orders()   # fulfillment_status is a swept field
             note = ("" if fc.get("ok") else
                     "The order is still marked fulfilled in Shopify (" + (fc.get("detail") or "")
                     + "). Cancel that fulfillment in Shopify so the customer is not left with "
                       "tracking for something that has not shipped.")
         except Exception:
             logger.exception("fulfillment cancel failed for order %s", oid)
+            _bust_orders()   # it may still have landed before the error
             note = ("The order is still marked fulfilled in Shopify. Cancel that fulfillment "
                     "there so the customer is not left with tracking for an unshipped order.")
     # Re-read here: the store may have gained a booking while Shopify was thinking,
@@ -3657,7 +3821,8 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None) -> di
 
 async def run_production_labels(registry: dict, tag: Optional[str] = None,
                                 days: Optional[int] = None,
-                                order_id: Optional[int] = None) -> dict:
+                                order_id: Optional[int] = None,
+                                fresh: bool = False) -> dict:
     # Deep-link path (the admin's More actions menu): fetch ONE order by id,
     # regardless of tag or age, so the merchant can print for exactly that order.
     if order_id:
@@ -3679,7 +3844,7 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
     fields = ("id,order_number,name,created_at,tags,email,customer,billing_address,"
               "shipping_address,line_items,note,cancelled_at,fulfillment_status,"
               "financial_status,shipping_lines")
-    orders = await _paginate_orders(registry, days=days, fields=fields)
+    orders = await _orders_snapshot(registry, days=days, fields=fields, force=fresh)
     want = [tag] + ([t for t in LEGACY_DISPATCHED_TAGS]
                     if tag.strip().lower() == DISPATCHED_TAG.strip().lower() else [])
     tagged = [o for o in orders if any(_has_tag(o, t) for t in want)]
@@ -3965,7 +4130,7 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
                 "No dispatched orders in this period."}
 
     meta = {}
-    orders = await _paginate_orders(
+    orders = await _orders_snapshot(
         registry, days=days + 14, meta=meta,
         fields=("id,name,created_at,currency,taxes_included,total_price,"
                 "subtotal_price,total_discounts,line_items,shipping_lines,customer"))
@@ -4859,7 +5024,7 @@ async def run_liability(registry: dict) -> dict:
               "total_outstanding,financial_status,currency,cancelled_at,payment_terms,"
               "billing_address,shipping_address")
     meta: dict = {}
-    orders = await _paginate_orders(registry, days=730, fields=fields, meta=meta)
+    orders = await _orders_snapshot(registry, days=730, fields=fields, meta=meta)
     if meta.get("failed"):
         # A throttled or errored page must never read as money not owed.
         return {"error": "Couldn't read all your orders from Shopify just now (it may be busy). "
@@ -5086,7 +5251,7 @@ async def run_products_list(registry: dict, months_window: Optional[int] = None)
     shop = await _tool_json(registry, "shopify_get_shop", {})
     currency = shop.get("currency", "")
 
-    orders = await _paginate_orders(registry, days=len(months) * 31)
+    orders = await _orders_snapshot(registry, days=len(months) * 31)
     bucket = _orders_product_monthly(orders, months)
     cutoff28 = datetime.now(timezone.utc) - timedelta(days=28)
     units28: dict = {}
@@ -5187,7 +5352,7 @@ async def run_reorder_radar(registry: dict) -> dict:
     customers, so the sector analytics see the whole trade side."""
     om, cm = {}, {}
     orders, customers = await asyncio.gather(
-        _paginate_orders(registry, days=540, fields="id,name,created_at,customer,line_items", meta=om),
+        _orders_snapshot(registry, days=540, fields="id,name,created_at,customer,line_items", meta=om),
         _paginate_customers(registry, meta=cm))
     if om.get("failed") or cm.get("failed"):
         return {"error": "Couldn't read all your orders and customers from Shopify just now. "
@@ -5295,7 +5460,7 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
     shop, all_customers, orders = await asyncio.gather(
         _tool_json(registry, "shopify_get_shop", {}),
         _paginate_customers(registry),
-        _paginate_orders(registry, days=len(months) * 31, fields="id,created_at,customer"),
+        _orders_snapshot(registry, days=len(months) * 31, fields="id,created_at,customer"),
     )
     shop = shop or {}
     currency = shop.get("currency", "")
@@ -5508,7 +5673,7 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
     trend = {"units": [], "revenue": []}
     try:
         months = _month_axis(PRODUCT_TREND_MONTHS)
-        p_orders = await _paginate_orders(registry, days=len(months) * 31)
+        p_orders = await _orders_snapshot(registry, days=len(months) * 31)
         b = _orders_product_monthly(p_orders, months).get(product_id, {"units": {}, "revenue": {}})
         trend = {"units": [{"label": mk, "value": b["units"].get(mk, 0)} for mk in months],
                  "revenue": [{"label": mk, "value": round(b["revenue"].get(mk, 0.0), 2)} for mk in months]}
@@ -5565,17 +5730,114 @@ def _authorize(request: Request) -> tuple[bool, Optional[str]]:
 # Page rendering
 # ---------------------------------------------------------------------------
 
-def _render_page() -> str:
-    global _page_cache
+def _split_page(html: str):
+    """Split the single-file app into (shell, css, js).
+
+    The app is authored as one file deliberately, so the split happens here at
+    serve time rather than in the source: the tests, the em dash check and every
+    edit still see one file. Returns (html, "", "") unchanged if the markers are
+    not where they are expected, so a future edit to the page can never take the
+    app down, only make it heavier."""
+    try:
+        s0 = html.index("    <style>") + len("    <style>")
+        s1 = html.index("    </style>", s0)
+        j0 = html.index("    <script>", s1) + len("    <script>")
+        j1 = html.index("    </script>", j0)
+    except ValueError:
+        logger.warning("page split: style/script markers not found, serving the page inline")
+        return html, "", ""
+    css, js = html[s0:s1], html[j0:j1]
+    if not css.strip() or not js.strip():
+        return html, "", ""
+    # Assigned, not setdefault: the hash in the URL has to track the content it
+    # is standing for, or a second split would serve new bytes under an old tag.
+    _asset_hashes["css"] = hashlib.sha256(css.encode("utf-8")).hexdigest()[:12]
+    _asset_hashes["js"] = hashlib.sha256(js.encode("utf-8")).hexdigest()[:12]
+    css_url = "/assets/app.css?v=" + _asset_hashes["css"]
+    js_url = "/assets/app.js?v=" + _asset_hashes["js"]
+    shell = (html[:s0 - len("    <style>")]
+             + f'<link rel="stylesheet" href="{css_url}" />\n'
+               f'    <link rel="preload" as="script" href="{js_url}" />'
+             + html[s1 + len("    </style>"):j0 - len("    <script>")]
+             + f'<script src="{js_url}"></script>'
+             + html[j1 + len("    </script>"):])
+    return shell, css, js
+
+
+def _page_parts() -> tuple:
+    """(shell, assets) for the running build, computed once.
+
+    The whole page is ~460 KB and the CSS and JS are ~95% of it. Shopify admin
+    opens an embedded app with a freshly minted id_token every time, so the page
+    URL is never the same twice and caching the page itself would buy nothing.
+    Moving the weight into two content-hashed URLs does: those are stable across
+    opens, cacheable for a year, and a new build simply asks for a new URL."""
+    global _page_cache, _page_assets
     if _page_cache is None:
         with open(_PAGE_PATH, "r", encoding="utf-8") as fh:
-            _page_cache = fh.read()
+            raw = fh.read()
+        shell, css, js = _split_page(raw)
+        assets = {}
+        if css and js:
+            assets["css"] = ("text/css; charset=utf-8", css.encode("utf-8"))
+            assets["js"] = ("text/javascript; charset=utf-8", js.encode("utf-8"))
+            logger.info("page split: shell %d KB, css %d KB, js %d KB",
+                        len(shell) // 1024, len(css) // 1024, len(js) // 1024)
+        _page_cache, _page_assets = shell, assets
+    return _page_cache, _page_assets
+
+
+def _render_page() -> str:
+    shell, _assets = _page_parts()
     # Embedded-only: always load App Bridge (which provides the session token).
     head = (
         f'<meta name="shopify-api-key" content="{SHOPIFY_API_KEY}" />\n'
         '    <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>'
     ) if SHOPIFY_API_KEY else ""
-    return _page_cache.replace("<!--APPBRIDGE-->", head)
+    return shell.replace("<!--APPBRIDGE-->", head)
+
+
+def _page_etag() -> str:
+    """A quoted hash of exactly the bytes this build serves.
+
+    Hashing the rendered shell rather than the commit keeps it honest in every
+    environment: there is no commit sha outside Railway, and rotating
+    SHOPIFY_API_KEY changes the page without changing the commit."""
+    global _page_etag_val
+    if not _page_etag_val:
+        _page_etag_val = '"' + hashlib.sha256(_render_page().encode("utf-8")).hexdigest()[:16] + '"'
+    return _page_etag_val
+
+
+def _etag_matches(header: Optional[str], etag: str) -> bool:
+    """RFC-shaped If-None-Match check: a list, a weak tag or * all count."""
+    for part in (header or "").split(","):
+        p = part.strip()
+        if p == "*":
+            return True
+        if p.startswith("W/"):
+            p = p[2:].strip()
+        if p and p == etag:
+            return True
+    return False
+
+
+def _asset_response(kind: str, version: str = ""):
+    """The app's own CSS or JS. Static bytes with no data and no auth, and the
+    URL carries a content hash, so a year of caching is safe: a new build asks
+    for a new URL and there is nothing to invalidate.
+
+    The hash must match. The page itself 404s outside the Shopify admin, and
+    without this check these two URLs would hand the app's whole client source
+    to anyone who guessed the path. The shell always sends the current hash,
+    and it is revalidated on every open, so it can never send a stale one."""
+    _shell, assets = _page_parts()
+    asset = assets.get(kind)
+    if not asset or version != _asset_hashes.get(kind, ""):
+        return PlainTextResponse("Not found", status_code=404, headers=_API_HEADERS)
+    media, blob = asset
+    return Response(blob, media_type=media,
+                    headers={**_API_HEADERS, "Cache-Control": "public, max-age=31536000, immutable"})
 
 
 _SHOP_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$")
@@ -5611,7 +5873,12 @@ def _frame_headers(request: Request) -> dict:
     )
     return {
         "Content-Security-Policy": csp,
-        "Cache-Control": "no-store",  # mode (embedded vs password) is env-dependent — never cache it
+        # The shell must be revalidated on every open so a deploy is never
+        # missed; its ETag is the build's own content hash, so revalidating
+        # costs a 304 rather than the page. Never add a max-age here: the URL
+        # carries no build hash, so there would be no way to bust it. The bulk
+        # of the app lives in the hashed /assets URLs, which cache for a year.
+        "Cache-Control": "private, no-cache",
         **_API_HEADERS,
     }
 
@@ -6056,7 +6323,22 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if not (qp.get("shop") or qp.get("host") or qp.get("embedded") or qp.get("id_token")):
                 return PlainTextResponse("Not Found", status_code=404, headers=_API_HEADERS)
         _ensure_scheduler(registry)  # start the background auto-refresh loop on first load (no-op until enabled)
-        return HTMLResponse(_render_page(), headers=_frame_headers(request))
+        headers = _frame_headers(request)
+        headers["ETag"] = etag = _page_etag()
+        if _etag_matches(request.headers.get("if-none-match"), etag):
+            # Same build: send the headers again (the CSP's frame-ancestors is
+            # computed per request, so a bare 304 would leave the browser using
+            # whichever one it stored) and skip the body.
+            return Response(status_code=304, headers=headers)
+        return HTMLResponse(_render_page(), headers=headers)
+
+    @mcp.custom_route("/assets/app.css", methods=["GET"])
+    async def app_css(request: Request):
+        return _asset_response("css", request.query_params.get("v", ""))
+
+    @mcp.custom_route("/assets/app.js", methods=["GET"])
+    async def app_js(request: Request):
+        return _asset_response("js", request.query_params.get("v", ""))
 
     @mcp.custom_route("/healthz", methods=["GET"])
     async def healthz(request: Request):
@@ -6192,6 +6474,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         extra = _profile_to_system(profile) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         track = (profile.get("prefs") or {}).get("track_inventory", True)
         try:
+            _refresh_asked(body)
             result = await run_overview(registry, extra, bool(track))
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
@@ -6538,8 +6821,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             order_id = int(body.get("order_id") or 0) or None
         except (TypeError, ValueError, OverflowError):
             order_id = None
+        # Refresh means the merchant wants the truth, usually because they just
+        # edited something in the Shopify admin: skip the order snapshot.
+        fresh = bool(body.get("fresh"))
         try:
-            return _json(await run_production_labels(registry, tag=tag, days=days, order_id=order_id))
+            return _json(await run_production_labels(registry, tag=tag, days=days,
+                                                     order_id=order_id, fresh=fresh))
         except Exception:
             logger.exception("Production labels failed")
             return _json({"error": "Couldn't load production orders. Check the server logs."}, 500)
@@ -6786,6 +7073,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if body is None:
             return _json({"error": "Request too large."}, 413)
         try:
+            _refresh_asked(body)
             res = await run_liability(registry)
             return _json(res, 502 if res.get("error") else 200)
         except Exception:
@@ -7300,6 +7588,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if fid and _fulfillment_canceler is not None:
                 try:
                     fc = await _fulfillment_canceler(int(fid))
+                    _bust_orders()   # fulfillment_status is a swept field
                     if fc.get("ok"):
                         # The fulfilment is genuinely gone, so the record must stop
                         # claiming otherwise: a stale fulfillment_id makes a later
@@ -7674,6 +7963,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except (TypeError, ValueError):
             months = None
         try:
+            _refresh_asked(body)
             return _json(await run_products_list(registry, months))
         except Exception:
             logger.exception("Product list failed")
@@ -7693,6 +7983,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         segment = (body.get("segment") or "").strip()[:80]
         extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         try:
+            _refresh_asked(body)
             res = await run_customers(registry, extra, segment=segment or None)
             res = _save_customer_segment(segment or "__all__", res)
             return _json(res)

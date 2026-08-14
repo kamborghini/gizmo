@@ -205,6 +205,23 @@ def t_there_is_one_focus_ring():
     ok("0 0 0 3px var(--accent-soft)" not in _SCREEN, "no hand-rolled copies of it remain")
 
 
+@test
+def t_every_refresh_button_asks_the_server_for_fresh_data():
+    # The server now reuses a recent order sweep. A Refresh that only bypasses
+    # the copy held in the page would silently return the same numbers.
+    for call, why in [
+        (r"/api/overview'\s*,\s*\{[^}]*fresh", "Overview"),
+        (r"/api/liability'\s*,\s*\{[^}]*fresh", "Liability"),
+        (r"/api/products'\s*,\s*\{[^}]*fresh", "Products"),
+        (r"/api/customers'\s*,\s*\{[^}]*fresh", "Customers"),
+        (r"/api/production-labels'\s*,\s*\{[^}]*fresh", "Production Manager"),
+    ]:
+        ok(_re.search(call, HTML), why + " Refresh reaches Shopify")
+    # ...but a queue tab flip must NOT, or the snapshot buys nothing.
+    ok(_re.search(r"queueMode = k;[^\n]*loadLabels\(true\);", HTML),
+       "flipping queues reuses the sweep")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

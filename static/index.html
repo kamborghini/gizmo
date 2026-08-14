@@ -2048,7 +2048,7 @@
             hero.append(badge, htext); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; const orb = loader(); t.append(orb, el('span', null, 'Computing live metrics and insights…')); box.append(t);
             try {
-                const data = await api('/api/overview', {});
+                const data = await api('/api/overview', { fresh: !!force });
                 overviewCache = { data, at: Date.now() }; renderOverview(overviewCache);
             } catch (e) {
                 box.innerHTML = ''; box.append(hero);
@@ -2518,7 +2518,7 @@
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Reading customers and 12 months of orders. This can take up to a minute…')); box.append(t);
             customersLoading = seg;
             try {
-                const data = await api('/api/customers', { segment: comp ? '' : seg });
+                const data = await api('/api/customers', { segment: comp ? '' : seg, fresh: !!force });
                 customersCache[seg] = { data, at: Date.now() };
                 // Only paint if the merchant is still looking at this sector: they may
                 // have switched tabs during the run, and clobbering their view looks
@@ -2616,7 +2616,7 @@
             const ht = el('div'); ht.append(el('h2', null, 'Products'), el('p', null, 'Loading your products and sales…'));
             hero.append(badge, ht); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Loading products and up to 24 months of sales…')); box.append(t);
-            try { productList = await api('/api/products', { months: 24 }); productListAt = Date.now(); renderProductList(); }
+            try { productList = await api('/api/products', { months: 24, fresh: !!force }); productListAt = Date.now(); renderProductList(); }
             catch (e) {
                 box.innerHTML = ''; box.append(hero);
                 const er = el('div', 'msg error'); er.append(el('div', 'bubble', e.message || String(e))); box.append(er);
@@ -3155,7 +3155,11 @@
             if (liabilityCache) { renderLiability(); return; }
             loadLiability(true);
         }
-        async function loadLiability(force) {
+        // As in Production Manager: force skips the copy held in this page,
+        // fresh also makes the server re-read Shopify. Opening the tab does the
+        // first, Refresh does both, so a plain look does not throw away every
+        // order the server has already read.
+        async function loadLiability(force, fresh) {
             const box = $('liability-content');
             if (liabilityCache && !force) { renderLiability(); return; }
             box.innerHTML = '';
@@ -3167,7 +3171,7 @@
             t.append(loader(), el('span', null, 'Checking up to two years of orders. No AI credits used\u2026'));
             box.append(t);
             try {
-                const data = await api('/api/liability', {});
+                const data = await api('/api/liability', { fresh: !!fresh });
                 liabilityCache = { data, at: Date.now() };
                 renderLiability();
             } catch (e) {
@@ -3495,7 +3499,11 @@
         // a coverage result landing mid-refresh would resurrect the stale list.
         let labelsLoading = false;
         let labelsReq = 0;
-        async function loadLabels(force) {
+        // force  = ignore the copy held in this page (a tab flip, a fresh view)
+        // fresh  = also make the server re-read Shopify rather than reuse its
+        //          recent sweep. Only Refresh asks for that: tab flips are the
+        //          whole reason the server keeps a snapshot.
+        async function loadLabels(force, fresh) {
             const box = $('labels-content');
             if (labelsCache && !force) { renderLabels(); return; }
             box.innerHTML = '';
@@ -3506,7 +3514,7 @@
             labelsLoading = true;
             const rq = ++labelsReq;   // only the newest fetch may commit its result
             try {
-                const data = await api('/api/production-labels', { tag: queueTag() });
+                const data = await api('/api/production-labels', { tag: queueTag(), fresh: !!fresh });
                 if (rq !== labelsReq) return;   // a newer load started; drop this stale response
                 labelsCache = { data, at: Date.now() };
                 labelsLoading = false;
@@ -3856,7 +3864,7 @@
 
             const bar = el('div', 'lbl-toolbar');
             const tools = el('div', 'lbl-tools');    // reports and setup: quieter, second
-            const reload = el('button', 'btn'); reload.append(ico(I.refresh), document.createTextNode('Refresh')); reload.onclick = () => loadLabels(true);
+            const reload = el('button', 'btn'); reload.append(ico(I.refresh), document.createTextNode('Refresh')); reload.onclick = () => loadLabels(true, true);
             bar.append(reload);
             if (unprinted.length && unprinted.length < printable.length) {
                 const pn = el('button', 'btn btn-primary'); pn.append(ico(I.printer), document.createTextNode('Print new (' + unprinted.length + ')'));
@@ -5718,7 +5726,7 @@
                 ['The label will not print', 'Press Reprint label. If it still will not, the label is also in your World Options portal under the tracking number. A label that only ever existed as a link at World Options cannot be recovered by the app and must come from the portal.'],
                 ['"Carrier not named" on a courier option', 'World Options did not say who runs that service. The price and the booking are still fine; their service code is shown so you can look it up.'],
                 ['A customs line shows 0', 'The store prices custom gobos through the option dropdowns, so the base product price is zero. Type the real value in. It is remembered against that product and fills itself in next time. Customs treats zero-value goods as suspect and can hold the parcel.'],
-                ['An order is missing from a queue', 'Queues follow tags: To make is IP, To ship is PC, Complete is Complete. Orders finished before the tag was renamed still carry "Dispatched" and still show. Check the tags on the order in Shopify. The search box takes an order number, a customer name or a tracking number.'],
+                ['An order is missing from a queue', 'Queues follow tags: To make is IP, To ship is PC, Complete is Complete. Orders finished before the tag was renamed still carry "Dispatched" and still show. Check the tags on the order in Shopify. The search box takes an order number, a customer name or a tracking number. If you have just changed a tag in Shopify itself, press Refresh: switching between queues reuses the last read of your orders so it stays instant, and Refresh is what goes back to Shopify.'],
                 ['"Unauthorized"', 'The app only runs inside your Shopify admin. Open it from Apps, not from a bookmarked URL.'],
                 ['Shopify or World Options is down', 'Settings, Connections shows the live state of both, plus any errors the app has hit in the last day. A Shopify outage lasting three hours raises an alert on the Overview tab.'],
             ]},
@@ -5820,7 +5828,7 @@
             else if (v === 'keywords') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadKeywords(true); }
             else if (v === 'products') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadProducts(true); }
             else if (v === 'customers') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadCustomers(true); }
-            else if (v === 'liability') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadLiability(true); }
+            else if (v === 'liability') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadLiability(true, true); }
             else if (v === 'chat') { act.append(ico(I.plus), document.createTextNode('New chat')); act.className = 'btn btn-primary'; act.onclick = () => newConvo(); }
             closeSidebar();
             // Tabs render cached results if present, otherwise an idle "Run" gate.
