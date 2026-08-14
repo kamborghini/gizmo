@@ -48,7 +48,15 @@ Example: if your admin URL is `https://acme-store.myshopify.com/admin`, your sto
    - `read_customers`, `write_customers`
    - `read_inventory`, `write_inventory`
    - `read_fulfillments`, `write_fulfillments`
+   - `read_merchant_managed_fulfillment_orders`, `write_merchant_managed_fulfillment_orders`
+   - `read_assigned_fulfillment_orders`, `write_assigned_fulfillment_orders`
    - `read_webhooks`, `write_webhooks`
+
+   The two fulfillment-order scopes are the ones marking an order shipped
+   actually needs: the per-order `fulfillments.json` endpoint is gone, and the
+   modern flow reads the order's fulfillment orders and creates a fulfillment
+   against them. Without them a dispatch books and charges a real courier and
+   then cannot tell Shopify, so the customer never gets their tracking.
 7. Click **Save**
 8. Go to the **API credentials** tab → click **Install app** → confirm
 9. Click **Reveal token once** and copy the token immediately — it starts with `shpat_`
