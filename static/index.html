@@ -3416,8 +3416,8 @@
         let labelSel = null;         // selected order id
         const LABEL_TAG = 'IP';
         // The production lifecycle, as tag-filtered queues. Making an order moves it
-        // IP -> PC (Mark made); dispatching moves it PC -> Dispatched.
-        const QUEUE = [['make', 'To make', 'IP'], ['ship', 'To ship', 'PC'], ['dispatched', 'Dispatched', 'Dispatched']];
+        // IP -> PC (Mark made); fulfilling moves it PC -> Complete.
+        const QUEUE = [['make', 'To make', 'IP'], ['ship', 'To ship', 'PC'], ['dispatched', 'Complete', 'Complete']];
         let queueMode = 'make';
         function queueTag() { const q = QUEUE.find(x => x[0] === queueMode); return q ? q[2] : LABEL_TAG; }
         function dispatchStateOf(o) {
@@ -3845,7 +3845,7 @@
             hero.append(el('div', 'ov-updated', freshLabel(labelsCache.at)));
             box.append(hero);
 
-            // Lifecycle queue: To make -> To ship -> Dispatched.
+            // Lifecycle queue: To make -> To ship -> Complete.
             const seg = el('div', 'lbl-seg');
             QUEUE.forEach(([k, lab]) => {
                 const b = el('button', 'lbl-segbtn' + (queueMode === k ? ' on' : ''), lab);
@@ -3976,7 +3976,7 @@
             }
             shown.forEach(o => {
                 const st = prodStateOf(o);
-                // In the Dispatched queue "fulfilled" is the expected state, not staleness.
+                // In the Complete queue "fulfilled" is the expected state, not staleness.
                 const staleStatus = dispatched && o.status === 'fulfilled' ? '' : o.status;
                 const row = el('div', 'lbl-row' + (labelSel === o.id ? ' on' : '') + (staleStatus || (st.made_at && !dispatched) ? ' stale' : ''));
                 row.setAttribute('role', 'button'); row.tabIndex = 0;
@@ -4209,7 +4209,7 @@
             const sel = document.createElement('select'); sel.className = 'lbl-size';
             [[30, 'Last 30 days'], [60, 'Last 60 days'], [90, 'Last 90 days'], [365, 'Last year']]
                 .forEach(([v, t]) => { const o = el('option', null, t); o.value = v; sel.append(o); });
-            bar.append(el('span', 'cov-line', 'Dispatched orders,'), sel);
+            bar.append(el('span', 'cov-line', 'Orders booked on'), sel);
             body.append(bar);
             const out = el('div'); body.append(out);
             let req = 0;
@@ -5710,7 +5710,7 @@
                 ['3. Make the gobos', 'The label carries the production size, the glass type and the artwork name. A boxed CHECK line means the size could not be resolved and needs a human decision before making.'],
                 ['4. Mark made', 'Press "Mark made" on the order. It moves to "To ship". Nothing has been told to Shopify or the customer yet.'],
                 ['5. Dispatch', 'In "To ship", press Dispatch. Courier prices are usually already there, because the queue prices itself in the background. Pick a service, press Book, and the label prints.'],
-                ['6. The customer is told', 'Fulfilment in Shopify fires when the order is BOTH marked made AND has a booked label, whichever happens last. That is when the shipping email with tracking goes out.'],
+                ['6. The customer is told', 'Fulfilment in Shopify fires when the order is BOTH marked made AND has a booked label, whichever happens last. That is when the shipping email with tracking goes out, and the order is tagged Complete.'],
             ]},
             { h: 'When something goes wrong', body: [
                 ['A booking fails', 'The app already retried it once if the failure was clearly a World Options outage. Open "Technical details" under the error, press Copy, and send that to your developer. It contains their exact words and the request we sent, with your password and the customer\'s details removed. Nothing was charged unless a tracking number came back.'],
@@ -5718,7 +5718,7 @@
                 ['The label will not print', 'Press Reprint label. If it still will not, the label is also in your World Options portal under the tracking number. A label that only ever existed as a link at World Options cannot be recovered by the app and must come from the portal.'],
                 ['"Carrier not named" on a courier option', 'World Options did not say who runs that service. The price and the booking are still fine; their service code is shown so you can look it up.'],
                 ['A customs line shows 0', 'The store prices custom gobos through the option dropdowns, so the base product price is zero. Type the real value in. It is remembered against that product and fills itself in next time. Customs treats zero-value goods as suspect and can hold the parcel.'],
-                ['An order is missing from a queue', 'Queues follow tags: To make is IP, To ship is PC, Dispatched is Dispatched. Check the tags on the order in Shopify. The search box takes an order number, a customer name or a tracking number.'],
+                ['An order is missing from a queue', 'Queues follow tags: To make is IP, To ship is PC, Complete is Complete. Orders finished before the tag was renamed still carry "Dispatched" and still show. Check the tags on the order in Shopify. The search box takes an order number, a customer name or a tracking number.'],
                 ['"Unauthorized"', 'The app only runs inside your Shopify admin. Open it from Apps, not from a bookmarked URL.'],
                 ['Shopify or World Options is down', 'Settings, Connections shows the live state of both, plus any errors the app has hit in the last day. A Shopify outage lasting three hours raises an alert on the Overview tab.'],
             ]},

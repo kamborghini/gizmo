@@ -325,7 +325,7 @@ def t_book_defers_fulfilment_until_made():
     eq(body["awaiting_made"], True, "flagged as waiting on Mark made")
     eq(len(FULFILLED), 0, "booking must NOT fulfil an unmade order")
     joined = " ".join(t[1].lower() for t in TAG_WRITES)
-    ok("dispatched" not in joined, "not tagged Dispatched while unmade")
+    ok("complete" not in joined.lower(), "not tagged Complete while unmade")
     st = json.load(open(SCRATCH + "/dispatch_state.json"))["orders"]["12345"]
     eq(st["fulfilled"], False, "state says unfulfilled")
     eq(st["notify"], True, "email choice stored for later")
@@ -343,7 +343,7 @@ def t_book_defers_fulfilment_until_made():
     eq(FULFILLED[0]["tracking"], "WO1234567890", "booked tracking used")
     eq(FULFILLED[0]["company"], "UPS", "carrier name mapped for Shopify")
     last = TAG_WRITES[-1][1].lower()
-    ok("dispatched" in last, "now tagged Dispatched")
+    ok("complete" in last.lower(), "now tagged Complete")
     ok("ip" not in [t.strip() for t in last.split(",")], "IP dropped")
     st = json.load(open(SCRATCH + "/dispatch_state.json"))["orders"]["12345"]
     eq(st["fulfilled"], True, "state records the fulfilment")
@@ -367,7 +367,7 @@ def t_made_first_then_dispatch_fulfils():
     eq(r.status_code, 200, r.text)
     eq(r.json()["awaiting_made"], False, "already made, so it ships now")
     eq(len(FULFILLED), 1, "dispatch fulfils an already-made order")
-    ok("dispatched" in TAG_WRITES[-1][1].lower(), "tagged Dispatched")
+    ok("complete" in TAG_WRITES[-1][1].lower(), "tagged Complete")
 
 @test
 def t_untick_made_unwinds_the_fulfilment():
@@ -382,7 +382,7 @@ def t_untick_made_unwinds_the_fulfilment():
     eq(st["fulfilled"], False, "state reverted")
     ok(st.get("tracking_number"), "label still booked")
     last = TAG_WRITES[-1][1].lower()
-    ok("dispatched" not in last, "Dispatched removed")
+    ok("complete" not in last.lower(), "the finished tag is removed")
     ok("ip" in [t.strip() for t in last.split(",")], "back in production")
 
 @test
@@ -718,7 +718,7 @@ def t_cancel_unwinds_shopify():
     ok(TAG_WRITES, "tags reverted")
     last = TAG_WRITES[-1][1].lower()
     ok("pc" in [t.strip() for t in last.split(",")], "back in To ship (PC)")
-    ok("dispatched" not in last, "Dispatched removed")
+    ok("complete" not in last.lower(), "the finished tag is removed")
 
 @test
 def t_shipping_paid_in_shape():
@@ -1062,8 +1062,8 @@ def t_dispatched_tag_survives_fulfilment():
         eq(r.status_code, 200, r.text)
         eq(r.json()["fulfilled"], True, "fulfilled")
         ok(TAG_WRITES, "a tag write happened at all")
-        ok(any("dispatched" in t[1].lower() for t in TAG_WRITES),
-           "Dispatched tag actually written: " + str(TAG_WRITES))
+        ok(any("complete" in t[1].lower() for t in TAG_WRITES),
+           "Complete tag actually written: " + str(TAG_WRITES))
     finally:
         copilot._fulfillment_writer = saved_writer
         ORDER = saved
@@ -1082,7 +1082,7 @@ def t_failed_fulfilment_reverts_the_tag():
         eq(r.status_code, 200, r.text)
         eq(r.json()["fulfilled"], False, "not fulfilled")
         last = TAG_WRITES[-1][1].lower()
-        ok("dispatched" not in last, "Dispatched reverted after the failure: " + last)
+        ok("complete" not in last.lower(), "the finished tag is reverted after the failure: " + last)
         ok("pc" in [t.strip() for t in last.split(",")], "left as made")
     finally:
         copilot._fulfillment_writer = saved_writer
@@ -2740,6 +2740,27 @@ def t_an_unreadable_booking_reply_warns_about_a_possible_charge():
         ok("MAY still have been booked" in msg, "warns rather than inviting a retry: " + msg[:120])
     finally:
         worldoptions._soap_call = saved
+
+@test
+def t_orders_tagged_before_the_rename_still_show_in_the_finished_queue():
+    # The finished tag was renamed from Dispatched to Complete. Anything finished
+    # before that still carries the old word and must not vanish from the app.
+    old_order = {**ORDER, "id": 777, "name": "#777", "tags": "Dispatched"}
+    new_order = {**ORDER, "id": 888, "name": "#888", "tags": "Complete"}
+    async def tools(registry, name, args):
+        if name == "shopify_list_orders":
+            return {"orders": [old_order, new_order]}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        res = run(copilot.run_production_labels({}, tag=copilot.DISPATCHED_TAG))
+        ids = sorted(o["id"] for o in res["orders"])
+        eq(ids, [777, 888], "both the old and the new tag appear: " + str(ids))
+        # A different queue must NOT pick up the legacy word.
+        res2 = run(copilot.run_production_labels({}, tag=copilot.MADE_TAG))
+        eq([o["id"] for o in res2["orders"]], [], "the legacy tag only widens the finished queue")
+    finally:
+        copilot._tool_json = saved
 
 # =========================== run ===========================================
 passed = failed = 0

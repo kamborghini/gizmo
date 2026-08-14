@@ -757,7 +757,10 @@ DISPATCH_LABELS_DIR = os.environ.get(
     "DISPATCH_LABELS_DIR",
     os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".", "dispatch_labels"))
 DISPATCH_STATE_MAX  = int(os.environ.get("DISPATCH_STATE_MAX", "2000"))
-DISPATCHED_TAG      = os.environ.get("DISPATCHED_TAG", "Dispatched")
+DISPATCHED_TAG      = os.environ.get("DISPATCHED_TAG", "Complete")
+# Orders finished before the tag was renamed still carry the old word. The queue
+# accepts both so history does not vanish from the app; nothing writes the old one.
+LEGACY_DISPATCHED_TAGS = ("Dispatched",)
 
 _DEFAULT_BOXES = [
     {"id": "small",  "name": "Small gobo box", "width": 20, "length": 15, "depth": 8,  "weight": 0.5},
@@ -3329,7 +3332,7 @@ async def _sync_tags_bg(registry: dict, order_ids: list, add=(), remove=()) -> N
 
 
 async def _dispatch_move_tags(registry: dict, order_id) -> tuple:
-    """Move an order onto the Dispatched tag: add Dispatched, drop the workflow
+    """Move an order onto the finished tag (Complete): add it, drop the workflow
     tags (Unprocessed / IP / PC). Called while the order is still unfulfilled so
     the write is not skipped as a 'dead' order. Returns (ok, note)."""
     return await _sync_order_tags(
@@ -3402,7 +3405,8 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
     if not fulfillment.get("ok"):
         # Put the order back where it was: it has not shipped after all.
         try:
-            await _sync_order_tags(registry, oid, add=(MADE_TAG,), remove=(DISPATCHED_TAG,))
+            await _sync_order_tags(registry, oid, add=(MADE_TAG,),
+                                   remove=(DISPATCHED_TAG, *LEGACY_DISPATCHED_TAGS))
         except Exception:
             logger.exception("tag revert after failed fulfillment failed for order %s", oid)
     if fulfillment.get("ok"):
@@ -3676,7 +3680,9 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
               "shipping_address,line_items,note,cancelled_at,fulfillment_status,"
               "financial_status,shipping_lines")
     orders = await _paginate_orders(registry, days=days, fields=fields)
-    tagged = [o for o in orders if _has_tag(o, tag)]
+    want = [tag] + ([t for t in LEGACY_DISPATCHED_TAGS]
+                    if tag.strip().lower() == DISPATCHED_TAG.strip().lower() else [])
+    tagged = [o for o in orders if any(_has_tag(o, t) for t in want)]
     tagged.sort(key=lambda o: str(o.get("created_at") or ""), reverse=True)
 
     names = await _product_option_names(
@@ -4764,6 +4770,7 @@ async def run_missing_production(registry: dict, tag: Optional[str] = None) -> d
         # Skip anything anywhere in the workflow: in production (IP), made (PC),
         # or dispatched. Only orders that never entered it are "missing".
         if _has_tag(o, tag) or _has_tag(o, MADE_TAG) or _has_tag(o, DISPATCHED_TAG) \
+                or any(_has_tag(o, t) for t in LEGACY_DISPATCHED_TAGS) \
                 or _order_status(o):
             continue
         if str(o.get("financial_status") or "").lower() not in ("paid", "partially_paid", "authorized", "partially_refunded"):
@@ -6755,7 +6762,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 else:
                     ship_note = await _unfulfill_dispatch(registry, oid)
                     okd, note = await _sync_order_tags(registry, oid, add=[PRODUCTION_TAG],
-                                                       remove=[MADE_TAG, DISPATCHED_TAG])
+                                                       remove=[MADE_TAG, DISPATCHED_TAG, *LEGACY_DISPATCHED_TAGS])
                 return _json({"ok": True, "state": {str(oid): state.get(str(oid), {})},
                               "dispatch": {str(oid): _load_dispatch().get(str(oid), {})},
                               "fulfilled": fulfilled, "notified": notified,
@@ -7326,7 +7333,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             try:
                 await _sync_order_tags(registry, oid,
                                        add=(MADE_TAG if was_made else PRODUCTION_TAG,),
-                                       remove=(DISPATCHED_TAG,))
+                                       remove=(DISPATCHED_TAG, *LEGACY_DISPATCHED_TAGS))
             except Exception:
                 logger.exception("tag revert after cancel failed for order %s", oid)
         return _json({"ok": True, "shipment": res, "note": note})
