@@ -981,13 +981,34 @@ async def _resolve_label_links(labels: list) -> list:
 DISPATCH_LABELS_MAX = int(os.environ.get("DISPATCH_LABELS_MAX", "400"))
 
 
+_ADHOC = "adhoc:"     # shipments with no Shopify order behind them
+
+
+def _is_adhoc(key) -> bool:
+    """True for a shipment booked to a pasted address rather than an order.
+
+    The prefix is what makes an ad-hoc shipment safe to file in the same store as
+    real orders: a Shopify order id is all digits, so the two can never collide,
+    and every reader that joins to Shopify simply fails to match and moves on."""
+    return str(key or "").startswith(_ADHOC)
+
+
+def _label_path(key) -> str:
+    """Where a shipment's stored label lives. Order ids keep their existing bare
+    filename; an ad-hoc key is reduced to characters a filename can hold."""
+    k = str(key)
+    name = re.sub(r"[^A-Za-z0-9_-]", "_", k)[:60] if _is_adhoc(k) else str(int(k))
+    return os.path.join(DISPATCH_LABELS_DIR, name + ".json")
+
+
 def _save_dispatch_labels(order_id, labels: list) -> None:
     try:
         os.makedirs(DISPATCH_LABELS_DIR, exist_ok=True)
-        tmp = os.path.join(DISPATCH_LABELS_DIR, f"{int(order_id)}.json.tmp")
+        path = _label_path(order_id)
+        tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump({"labels": labels or []}, fh)
-        os.replace(tmp, os.path.join(DISPATCH_LABELS_DIR, f"{int(order_id)}.json"))
+        os.replace(tmp, path)
         # With print images a label file is ~1MB, and nothing ever pruned this
         # directory. Oldest go first; a months-old label is in the courier's past
         # anyway and its tracking number stays in the dispatch record.
@@ -1004,7 +1025,7 @@ def _save_dispatch_labels(order_id, labels: list) -> None:
 
 def _load_dispatch_labels(order_id) -> list:
     try:
-        with open(os.path.join(DISPATCH_LABELS_DIR, f"{int(order_id)}.json"), "r", encoding="utf-8") as fh:
+        with open(_label_path(order_id), "r", encoding="utf-8") as fh:
             return (json.load(fh) or {}).get("labels") or []
     except (FileNotFoundError, ValueError, OSError):
         return []
@@ -3403,9 +3424,17 @@ _dispatch_locks: dict = {}
 
 
 def _dispatch_lock(order_id) -> "asyncio.Lock":
-    lock = _dispatch_locks.get(int(order_id))
+    # Keyed on the string, not int(), so an ad-hoc shipment (adhoc:<uuid>) gets a
+    # lock too. int() here used to raise before the lock was even taken, which the
+    # route reported as "it MAY have been booked and charged" for a request that
+    # never reached World Options.
+    key = str(order_id)
+    lock = _dispatch_locks.get(key)
     if lock is None:
-        lock = _dispatch_locks[int(order_id)] = asyncio.Lock()
+        if len(_dispatch_locks) > 500:   # ad-hoc ids are one per shipment, so this grows
+            for k, l in [(k, l) for k, l in _dispatch_locks.items() if not l.locked()][:250]:
+                _dispatch_locks.pop(k, None)
+        lock = _dispatch_locks[key] = asyncio.Lock()
     return lock
 
 
@@ -3877,6 +3906,271 @@ def _addr_ready(a: dict) -> str:
     return ("Missing " + ", ".join(missing)) if missing else ""
 
 
+# ---------------------------------------------------------------------------
+# Pasted addresses
+#
+# A shipment with no Shopify order behind it starts life as a block of text
+# copied out of an email. Reading it here is instant, free, works offline and
+# gives the same answer every time, and a postcode is a strong enough anchor to
+# place the rest of the block around it. Claude is only asked when this pass
+# cannot place something, because it is better at the awkward cases and worse
+# at being predictable. Either way the merchant sees and can edit every field
+# before anything is booked, so no parser ever has the last word on where a
+# parcel goes.
+# ---------------------------------------------------------------------------
+
+# Country names to the 2-letter ISO codes World Options wants. Not the full ISO
+# list: the places this merchant actually ships to, plus the spellings people
+# type. Anything unrecognised is left alone for the merchant to correct.
+_ISO2 = {
+    "united kingdom": "GB", "great britain": "GB", "uk": "GB", "gb": "GB", "england": "GB",
+    "scotland": "GB", "wales": "GB", "northern ireland": "GB", "britain": "GB",
+    "ireland": "IE", "republic of ireland": "IE", "eire": "IE",
+    "united states": "US", "united states of america": "US", "usa": "US", "u.s.a.": "US",
+    "us": "US", "america": "US", "canada": "CA", "mexico": "MX",
+    "france": "FR", "germany": "DE", "deutschland": "DE", "spain": "ES", "espana": "ES",
+    "italy": "IT", "italia": "IT", "netherlands": "NL", "holland": "NL", "the netherlands": "NL",
+    "belgium": "BE", "luxembourg": "LU", "portugal": "PT", "switzerland": "CH", "austria": "AT",
+    "denmark": "DK", "sweden": "SE", "norway": "NO", "finland": "FI", "iceland": "IS",
+    "poland": "PL", "czech republic": "CZ", "czechia": "CZ", "slovakia": "SK", "hungary": "HU",
+    "romania": "RO", "bulgaria": "BG", "greece": "GR", "croatia": "HR", "slovenia": "SI",
+    "serbia": "RS", "estonia": "EE", "latvia": "LV", "lithuania": "LT", "malta": "MT",
+    "cyprus": "CY", "turkey": "TR", "ukraine": "UA",
+    "australia": "AU", "new zealand": "NZ", "japan": "JP", "china": "CN", "hong kong": "HK",
+    "singapore": "SG", "south korea": "KR", "korea": "KR", "india": "IN", "thailand": "TH",
+    "malaysia": "MY", "indonesia": "ID", "philippines": "PH", "vietnam": "VN",
+    "united arab emirates": "AE", "uae": "AE", "saudi arabia": "SA", "qatar": "QA",
+    "kuwait": "KW", "bahrain": "BH", "oman": "OM", "israel": "IL",
+    "south africa": "ZA", "egypt": "EG", "nigeria": "NG", "kenya": "KE", "morocco": "MA",
+    "brazil": "BR", "argentina": "AR", "chile": "CL", "colombia": "CO", "peru": "PE",
+    # The near ones a UK shipper meets most, and the ones whose first two letters
+    # spell a different country: Isle of Man is not Iceland, Guernsey is not Guam.
+    "isle of man": "IM", "guernsey": "GG", "jersey": "JE", "channel islands": "GG",
+    "gibraltar": "GI", "bermuda": "BM", "pakistan": "PK", "iraq": "IQ", "iran": "IR",
+    "costa rica": "CR", "colombia ": "CO", "monaco": "MC", "andorra": "AD",
+    "liechtenstein": "LI", "san marino": "SM", "faroe islands": "FO", "greenland": "GL",
+}
+
+# GB postcodes are the anchor: the format is unambiguous, so finding one tells us
+# both where the postcode is and that the country is GB unless told otherwise.
+_UK_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*([0-9][A-Z]{2})\b", re.I)
+_EIRCODE_RE = re.compile(r"\b([A-Z][0-9]{2})\s?([A-Z0-9]{4})\b", re.I)
+_US_ZIP_RE = re.compile(r"\b([0-9]{5})(?:-[0-9]{4})?\b")
+_GENERIC_PC_RE = re.compile(r"\b([0-9]{4,6})\b")
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_PHONE_RE = re.compile(r"\+?[0-9][0-9\s().-]{7,}[0-9]")
+_PHONE_LABEL_RE = re.compile(r"^\s*(tel|telephone|phone|mob|mobile|cell|t|m|p)\s*[:.]?\s*", re.I)
+_US_STATE_RE = re.compile(r"\b([A-Z]{2})\b\s+[0-9]{5}")
+_COMPANY_RE = re.compile(
+    r"\b(ltd|limited|llp|plc|inc|incorporated|llc|gmbh|b\.?v|s\.?a|srl|sarl|pty|corp|"
+    r"corporation|company|&\s*co|group|events?|productions?|studios?|services|design|"
+    r"lighting|theatres?|theaters?|university|college|school|academy|hotel|church|"
+    r"council|trust|museum|gallery|centre|center|club|venue|hire|av|media)\b", re.I)
+_STREET_RE = re.compile(
+    r"\b(road|rd|street|st|lane|ln|avenue|ave|close|way|drive|dr|court|ct|place|pl|"
+    r"square|sq|terrace|crescent|cres|grove|gardens?|hill|park|estate|industrial|unit|"
+    r"suite|apt|apartment|floor|house|building|block|walk|row|mews|wharf|quay|bank|"
+    r"view|rise|vale|green|common|parade|broadway|boulevard|blvd|strasse|straße|"
+    r"rue|via|calle|po box)\b", re.I)
+
+
+def _split_blob(text: str) -> list:
+    """The pasted text as address lines. Newlines are the sender's own line
+    breaks and are kept; a single-line paste is split on commas instead."""
+    lines = [re.sub(r"\s+", " ", ln).strip(" ,;\t") for ln in str(text or "").splitlines()]
+    # "Please send to:" and bare "Tel:" are preamble, not address lines.
+    lines = [ln for ln in lines if ln and not (ln.endswith(":") and len(ln) < 40)]
+    if len(lines) <= 1:
+        lines = [p.strip() for p in re.split(r"\s*,\s*", lines[0] if lines else "") if p.strip()]
+    return lines[:20]
+
+
+def _country_code(text: str) -> str:
+    """A 2-letter ISO code from whatever the sender wrote, or ''."""
+    t = re.sub(r"[^a-z ]", "", str(text or "").strip().lower()).strip()
+    if t in _ISO2:
+        return _ISO2[t]
+    raw = str(text or "").strip()
+    if len(raw) == 2 and raw.isalpha():
+        return raw.upper()
+    return ""
+
+
+def _find_postcode(line: str, country: str):
+    """(postcode, the rest of the line) for the first postcode in a line.
+
+    The hard part is telling a bare-number postcode from a house number, since
+    both are just digits. The tell is what FOLLOWS them: a house number leads a
+    street ("1200 Kingston Road"), while a numeric postcode either ends the line
+    ("New York, NY 10036") or leads a town ("10115 Berlin"). Getting this the
+    wrong way round files the house number as the postcode and shifts every
+    field along, which is why it is worth the care."""
+    for rx in ((_UK_POSTCODE_RE, _EIRCODE_RE) if country in ("GB", "IE", "") else ()):
+        m = rx.search(line)
+        if m:
+            pc = (m.group(1) + " " + m.group(2)).upper()
+            return pc, (line[:m.start()] + " " + line[m.end():]).strip(" ,")
+    for rx in (_US_ZIP_RE, _GENERIC_PC_RE):
+        for m in rx.finditer(line):
+            head, tail = line[:m.start()].strip(" ,"), line[m.end():].strip(" ,")
+            if not head and _STREET_RE.search(tail):
+                continue           # digits leading a street name: a house number
+            return m.group(0), (head + " " + tail).strip(" ,")
+    return "", line
+
+
+def _parse_address(text: str) -> dict:
+    """A pasted block as the address dict the dispatch path uses, plus how well
+    it went. Never raises: an unreadable paste comes back empty for the merchant
+    to fill in by hand."""
+    out = {k: "" for k in ("name", "company", "firstname", "lastname", "street", "street2",
+                           "postcode", "city", "state", "country", "phone", "email")}
+    lines = _split_blob(text)
+    if not lines:
+        return {"address": out, "confident": False, "unplaced": []}
+
+    # Contact details first: they are unambiguous and would otherwise be read as
+    # address lines.
+    rest = []
+    for ln in lines:
+        m = _EMAIL_RE.search(ln)
+        if m:
+            out["email"] = out["email"] or m.group(0)
+            ln = (ln[:m.start()] + " " + ln[m.end():]).strip(" ,:")
+            ln = re.sub(r"^(e|email|e-mail)\s*[:.]?\s*$", "", ln, flags=re.I).strip()
+        stripped = _PHONE_LABEL_RE.sub("", ln)
+        m = _PHONE_RE.fullmatch(stripped.strip())
+        if m and len(re.sub(r"\D", "", stripped)) >= 9:
+            out["phone"] = out["phone"] or stripped.strip()
+            continue
+        if ln:
+            rest.append(ln)
+
+    # Country, if the sender named one, is almost always the last line.
+    if rest:
+        code = _country_code(rest[-1])
+        if code:
+            out["country"] = code
+            rest = rest[:-1]
+
+    # Postcode, searched from the bottom because that is where it lives.
+    for i in range(len(rest) - 1, -1, -1):
+        pc, remainder = _find_postcode(rest[i], out["country"])
+        if pc:
+            out["postcode"] = pc
+            st = _US_STATE_RE.search(rest[i])
+            if st and out["country"] in ("US", "CA", ""):
+                out["state"] = st.group(1)
+                remainder = remainder.replace(st.group(1), "").strip(" ,")
+            if remainder:
+                out["city"] = remainder            # "Manchester M1 2AB" on one line
+                rest = rest[:i] + rest[i + 1:]
+            else:
+                rest = rest[:i] + rest[i + 1:]
+                if rest:
+                    out["city"] = rest[-1]         # the line above the postcode
+                    rest = rest[:-1]
+            break
+
+    # A GB-shaped postcode with no country named means GB. Saying so is what makes
+    # the common paste land without a round trip to Claude.
+    if not out["country"] and out["postcode"] and _UK_POSTCODE_RE.fullmatch(out["postcode"]):
+        out["country"] = "GB"
+
+    # What is left is some combination of a person, a company and street lines.
+    # Tagged in place rather than bucketed, because the sender's line order is
+    # the label's line order and nothing here may be dropped: a silently lost
+    # line is a parcel sent to half an address.
+    tagged = []
+    for ln in rest:
+        started = any(t == "street" for t, _ in tagged)
+        # Company is tested first. Plenty of trading names carry a word that also
+        # names a street ("Broadway Lighting Inc"), and reading one as an address
+        # line loses the company and makes the address residential.
+        if not started and not out["company"] and not re.match(r"^\d", ln) and _COMPANY_RE.search(ln):
+            out["company"] = ln
+            tagged.append(("company", ln))
+        elif started or re.match(r"^\d", ln) or _STREET_RE.search(ln):
+            tagged.append(("street", ln))
+        else:
+            tagged.append(("person", ln))
+
+    people = [v for t, v in tagged if t == "person"]
+    if people:
+        out["name"] = people[0]
+        if len(people) > 1 and not out["company"]:
+            out["company"] = people[1]     # person, then venue, then the street
+    placed = {out["name"], out["company"]}
+    # street and street2 stay separate: the courier caps each line at 35 chars and
+    # the sender's own break carries meaning (building, then unit).
+    addr_lines = [v for t, v in tagged if t == "street" or (t == "person" and v not in placed)]
+    out["street"] = addr_lines[0] if addr_lines else ""
+    out["street2"] = addr_lines[1] if len(addr_lines) > 1 else ""
+    unplaced = addr_lines[2:]
+    if unplaced:
+        out["street2"] = (out["street2"] + ", " + ", ".join(unplaced)).strip(", ")
+
+    # Confident means "do not bother Claude with this". Being wrong here is the
+    # expensive direction, because a confident parse is the one nobody checks.
+    confident = not _addr_ready(out) and not unplaced
+    if confident and out["country"] == "GB" and not _UK_POSTCODE_RE.fullmatch(out["postcode"]):
+        confident = False          # a GB postcode always carries letters
+    return {"address": out, "confident": confident, "unplaced": unplaced}
+
+
+ADDRESS_TOOL = {
+    "name": "present_address",
+    "description": "Return the delivery address you read out of the pasted text.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "The person the parcel is for. Blank if none."},
+            "company": {"type": "string", "description": "The business name. Blank if none."},
+            "street": {"type": "string", "description": "First address line, as written."},
+            "street2": {"type": "string", "description": "Second address line, or blank."},
+            "city": {"type": "string", "description": "Town or city."},
+            "state": {"type": "string", "description": "County, state or province. Blank if none."},
+            "postcode": {"type": "string", "description": "Postcode or ZIP, as written."},
+            "country": {"type": "string", "description": "2-letter ISO code, e.g. GB, US, DE."},
+            "phone": {"type": "string", "description": "Contact phone, or blank."},
+            "email": {"type": "string", "description": "Contact email, or blank."},
+        },
+        "required": ["street", "city", "postcode", "country"],
+    },
+}
+
+ADDRESS_SYSTEM = (
+    "You read a delivery address out of text a shipper pasted from an email, and return it as "
+    "structured fields for a courier booking.\n"
+    "Rules: country is always a 2-letter ISO code. Keep the address lines as the sender wrote "
+    "them, do not merge or reorder them, because each line is printed separately on the label. "
+    "Leave a field blank if the text does not contain it. Never invent or correct a postcode, a "
+    "house number or a street name: a guess here sends a parcel to the wrong place. If the text "
+    "holds no address at all, return blanks."
+)
+
+
+async def _ai_address(text: str) -> dict:
+    """Claude's reading of a pasted block, for the ones the local pass could not
+    place. Plain structured output, no tools that touch the store."""
+    client = _anthropic()
+    resp = await _xcreate(
+        client, model=MODEL_FAST, max_tokens=1024, system=ADDRESS_SYSTEM,
+        tools=[ADDRESS_TOOL], tool_choice={"type": "tool", "name": ADDRESS_TOOL["name"]},
+        messages=[{"role": "user", "content": "Pasted text:\n\n" + str(text or "")[:4000]}],
+    )
+    got = next((b.input for b in resp.content
+                if b.type == "tool_use" and b.name == ADDRESS_TOOL["name"]), None) or {}
+    out = {k: "" for k in ("name", "company", "firstname", "lastname", "street", "street2",
+                           "postcode", "city", "state", "country", "phone", "email")}
+    for k in out:
+        v = got.get(k)
+        if isinstance(v, str):
+            out[k] = v.strip()[:120]
+    out["country"] = _country_code(out["country"]) or out["country"]
+    return out
+
+
 def _clean_box(box: dict):
     """Validated single box, or (None, error)."""
     try:
@@ -4116,6 +4410,12 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
     for oid, e in (_load_dispatch() or {}).items():
         if not e.get("tracking_number") or e.get("canceled"):
             continue
+        # This report is margin per ORDER. A pasted-address shipment has no order,
+        # no revenue and no goods cost, so it cannot have a margin. Skipping it
+        # here keeps it out of the "could not be loaded from Shopify" rows, which
+        # are the app's way of saying real data is missing.
+        if _is_adhoc(oid):
+            continue
         ts = str(e.get("dispatched_at") or "")
         try:
             when = datetime.fromisoformat(ts)
@@ -4307,37 +4607,16 @@ async def _customs_items(registry: dict, o: dict) -> list:
     return out
 
 
-async def run_dispatch_quote(registry: dict, order_id, boxes: list,
-                             insurance: str = "") -> dict:
-    """Price couriers for one order to its shipping address. Free / read-only."""
-    if not worldoptions or not worldoptions.configured():
-        return {"error": "World Options is not connected. Add your credentials in Settings."}
+async def _quote_options(origin: dict, dest: dict, boxes: list, currency: str,
+                         insurance: str, cfg: dict) -> tuple:
+    """Every courier option for one parcel to one address, as a single priced list.
 
-    o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-    if not _ok(o) or not o.get("id"):
-        return {"error": "Order not found."}
-    if _order_status(o) == "cancelled":
-        return {"error": "This order is cancelled; it should not be dispatched."}
-    if _order_status(o) == "refunded":
-        return {"error": "This order was refunded; dispatching it would ship goods the "
-                         "customer has been paid back for."}
-    dest = _ship_to(o)
-    why = _addr_ready(dest)
-    if why:
-        return {"error": f"This order's shipping address can't be quoted. {why}. "
-                         "Fix the address in Shopify, then try again."}
-    origin = await _origin_address(registry)
-    why = _addr_ready(origin)
-    if why:
-        return {"error": f"Your dispatch (origin) address is incomplete. {why}. "
-                         "Set it under Settings, Shipping."}
-    cfg = _load_shipping()
-    currency = _wo_currency(o.get("currency"), cfg)
+    Takes plain data and no order, so the queue and a pasted address are priced by
+    exactly the same code: a service that appears for one appears for the other.
+    Returns (options, currency, error)."""
     residential = not str(dest.get("company") or "").strip()
     dropoff = (cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages")
-    # Declared value rides on every parcel (customs + insurance + liability basis).
-    goods_value = _order_goods_value(o)
-    boxes = _spread_value([dict(b) for b in boxes], goods_value)
+    # The caller has already stamped each box with its declared value.
     # Declaring the wrong shipment mode hides whole service families (a UK-to-UK
     # parcel quoted as an "Export" loses the domestic road services).
     same_country = (str(origin.get("country") or "").upper()
@@ -4370,11 +4649,11 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         door, nosig = got[0], got[1]
         point = got[2] if show_shop else {"options": []}
     except worldoptions.WorldOptionsError as e:
-        return {"error": str(e)}
+        return [], currency, str(e)
     except Exception as e:
         logger.exception("dispatch quote failed")
         _record_error("getting courier quotes", e)
-        return {"error": "Couldn't get courier quotes. Check the server logs."}
+        return [], currency, "Couldn't get courier quotes. Check the server logs."
     if isinstance(nosig, Exception):
         logger.info("no-signature quote unavailable: %s", nosig)
         nosig = {"options": []}
@@ -4382,9 +4661,9 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         if isinstance(point, Exception):
             err = door
             if isinstance(err, worldoptions.WorldOptionsError):
-                return {"error": str(err)}
+                return [], currency, str(err)
             logger.exception("dispatch quote failed", exc_info=door)
-            return {"error": "Couldn't get courier quotes. Check the server logs."}
+            return [], currency, "Couldn't get courier quotes. Check the server logs."
         door = {"options": []}
     if isinstance(point, Exception):
         logger.info("pickup-point quote unavailable: %s", point)
@@ -4433,13 +4712,49 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
                     or "access point" in blob or blob.endswith("_ap"))
         merged = [x for x in merged if not _is_shop(x)]
     merged.sort(key=lambda x: (x.get("amount") is None, x.get("amount") or 0))
-    res["options"] = merged
-    if not res.get("options"):
-        return {"error": "World Options returned no courier options for this address and parcel. "
-                         "Check the postcode and the parcel size, then try again."}
+    if not merged:
+        return [], currency, ("World Options returned no courier options for this address and parcel. "
+                              "Check the postcode and the parcel size, then try again.")
+    return merged, (res.get("currency") or currency), ""
+
+
+async def run_dispatch_quote(registry: dict, order_id, boxes: list,
+                             insurance: str = "") -> dict:
+    """Price couriers for one order to its shipping address. Free / read-only."""
+    if not worldoptions or not worldoptions.configured():
+        return {"error": "World Options is not connected. Add your credentials in Settings."}
+
+    o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+    if not _ok(o) or not o.get("id"):
+        return {"error": "Order not found."}
+    if _order_status(o) == "cancelled":
+        return {"error": "This order is cancelled; it should not be dispatched."}
+    if _order_status(o) == "refunded":
+        return {"error": "This order was refunded; dispatching it would ship goods the "
+                         "customer has been paid back for."}
+    dest = _ship_to(o)
+    why = _addr_ready(dest)
+    if why:
+        return {"error": f"This order's shipping address can't be quoted. {why}. "
+                         "Fix the address in Shopify, then try again."}
+    origin = await _origin_address(registry)
+    why = _addr_ready(origin)
+    if why:
+        return {"error": f"Your dispatch (origin) address is incomplete. {why}. "
+                         "Set it under Settings, Shipping."}
+    cfg = _load_shipping()
+    currency = _wo_currency(o.get("currency"), cfg)
+    dropoff = (cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages")
+    # Declared value rides on every parcel (customs + insurance + liability basis).
+    goods_value = _order_goods_value(o)
+    boxes = _spread_value([dict(b) for b in boxes], goods_value)
+    options, quoted, err = await _quote_options(origin, dest, boxes, currency, insurance, cfg)
+    if err:
+        return {"error": err}
+    show_shop = bool(cfg.get("show_parcelshop", False))
     return {
-        "options": res["options"],
-        "currency": res.get("currency") or currency,
+        "options": options,
+        "currency": quoted or currency,
         "destination": {"name": dest.get("company") or " ".join(
             x for x in [dest.get("firstname"), dest.get("lastname")] if x).strip() or dest.get("name"),
             "city": dest.get("city"), "postcode": dest.get("postcode"), "country": dest.get("country")},
@@ -4459,6 +4774,418 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         "currency_note": ("" if str(o.get("currency") or "").upper() in (currency, "")
                           else f"Quoted in {currency}; the order was paid in {o.get('currency')}."),
     }
+
+
+# ---------------------------------------------------------------------------
+# Custom address dispatch
+#
+# A parcel that is not a Shopify order: a replacement, a sample, something for a
+# supplier. The merchant pastes the address, adds a box and a value, and books.
+#
+# These shipments are filed in the same dispatch store as orders, under an
+# "adhoc:<id>" key. That prefix is the whole safety argument. A Shopify order id
+# is all digits, so the two can never collide, which means an ad-hoc shipment
+# can never arm the double-book guard on a real order, overwrite its label, move
+# its tags, or fulfil it and email that customer somebody else's tracking. Every
+# reader that joins to Shopify simply fails to match and moves on, while the
+# readers that do not care about orders (the end-of-day manifest, the backup,
+# the eviction policy) pick these up for free.
+#
+# The id is minted by the browser BEFORE the first submit and reused on retry,
+# so the double-book guard is real here: without an order id there is nothing
+# else to recognise a second click by.
+# ---------------------------------------------------------------------------
+
+async def run_custom_quote(registry: dict, dest: dict, boxes: list,
+                           insurance: str = "", declared: float = 0.0) -> dict:
+    """Price couriers to a pasted address. Free and read-only, no order involved."""
+    if not worldoptions or not worldoptions.configured():
+        return {"error": "World Options is not connected. Add your credentials in Settings."}
+    why = _addr_ready(dest)
+    if why:
+        return {"error": f"This address can't be quoted yet. {why}."}
+    why = _country_ready(dest)
+    if why:
+        return {"error": why}
+    origin = await _origin_address(registry)
+    why = _addr_ready(origin)
+    if why:
+        return {"error": f"Your dispatch (origin) address is incomplete. {why}. "
+                         "Set it under Settings, Shipping."}
+    cfg = _load_shipping()
+    currency = _wo_currency("", cfg)     # no order to take a currency from: shop setting, then GBP
+    # Same fallback the booking uses, or the quote prices a parcel declared at
+    # zero and the booking sends one declared at the insured amount.
+    if declared <= 0 and insurance:
+        try:
+            declared = float(insurance)
+        except (TypeError, ValueError):
+            declared = 0.0
+    boxes = _spread_value([dict(b) for b in boxes], declared)
+    options, quoted, err = await _quote_options(origin, dest, boxes, currency, insurance, cfg)
+    if err:
+        return {"error": err}
+    international = str(dest.get("country") or "").upper() not in ("GB", "")
+    return {
+        "options": options,
+        "currency": quoted or currency,
+        "destination": {"name": dest.get("company") or dest.get("name") or "",
+                        "city": dest.get("city"), "postcode": dest.get("postcode"),
+                        "country": dest.get("country")},
+        "weight": round(sum(float(b.get("weight") or 0) for b in boxes), 3),
+        "boxes": len(boxes),
+        "goods_value": declared,
+        "insurance": insurance,
+        "dropoff": (cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages"),
+        "show_parcelshop": bool(cfg.get("show_parcelshop", False)),
+        "has_eori": bool(cfg.get("eori")),
+        "default_hs_code": cfg.get("default_hs_code") or "",
+        "international": international,
+        # Nothing to prefill: there are no line items behind this parcel, so the
+        # customs table is typed by hand.
+        "customs_items": [],
+        "currency_note": "",
+    }
+
+
+def _custom_id(raw) -> str:
+    """The store key for a pasted-address shipment, or '' if it is not one.
+
+    The browser mints this once per shipment so a second Book click is
+    recognisable as the same shipment rather than a second parcel."""
+    s = str(raw or "").strip()
+    if not s.startswith(_ADHOC):
+        s = _ADHOC + s
+    tail = s[len(_ADHOC):]
+    if not tail or not re.fullmatch(r"[A-Za-z0-9_-]{6,60}", tail):
+        return ""
+    return s
+
+
+def _clean_address(raw: dict) -> dict:
+    """A pasted address as the dict the dispatch path uses: only the keys it
+    knows, each trimmed to what a courier label can hold, country as ISO-2."""
+    a = raw if isinstance(raw, dict) else {}
+    out = {k: re.sub(r"\s+", " ", str(a.get(k) or "")).strip()[:120]
+           for k in ("name", "company", "firstname", "lastname", "street", "street2",
+                     "postcode", "city", "state", "country", "phone", "email")}
+    # Never truncate a country name into a code. "Isle of Man" cut to two letters
+    # is IS, which is Iceland, and every wrong answer looks exactly as valid as a
+    # right one. What cannot be recognised is left as typed and refused later.
+    out["country"] = _country_code(out["country"]) or out["country"]
+    return out
+
+
+def _country_ready(dest: dict) -> str:
+    """'' if the destination country is a code a courier will accept, else why not."""
+    c = str((dest or {}).get("country") or "").strip()
+    if re.fullmatch(r"[A-Za-z]{2}", c):
+        return ""
+    if not c:
+        return "The country is missing."
+    return ("\"" + c[:40] + "\" is not a country code. Use the 2-letter code, for example "
+            "GB, IE, US or DE, so the parcel is not sent to the wrong country.")
+
+
+def _shipment_key(body: dict) -> str:
+    """The dispatch-store key a request is talking about: a Shopify order id, or a
+    pasted-address shipment id. '' when it is neither."""
+    key = _custom_id((body or {}).get("id") or "")
+    if key:
+        return key
+    try:
+        oid = int((body or {}).get("order_id") or 0)
+    except (TypeError, ValueError, OverflowError):
+        oid = 0
+    return str(oid) if oid else ""
+
+
+async def run_custom_book(registry: dict, shipment_id: str, option: dict, dest: dict,
+                          boxes: list, insurance: str = "", reference: str = "",
+                          contents: str = "", declared: float = 0.0,
+                          customs_body: Optional[dict] = None, signature: str = "",
+                          by: str = "") -> dict:
+    """Book a courier to a pasted address. THIS SPENDS MONEY.
+
+    Deliberately not a branch inside the order booking path: that path exists to
+    tag, fulfil and notify a Shopify order, and every one of those must not
+    happen here. What is shared is the part that matters, the World Options call
+    and the label handling."""
+    if not worldoptions or not worldoptions.configured():
+        return {"error": "World Options is not connected. Add your credentials in Settings."}
+    if not isinstance(option, dict) or not option.get("service_type_code"):
+        return {"error": "Pick a courier service first."}
+    key = _custom_id(shipment_id)
+    if not key:
+        return {"error": "This shipment has no id. Close the window and start it again."}
+    async with _dispatch_lock(key):
+        return await _custom_book_locked(registry, key, option, dest, boxes, insurance,
+                                         reference, contents, declared, customs_body,
+                                         signature, by)
+
+
+async def _custom_book_locked(registry: dict, key: str, option: dict, dest: dict,
+                              boxes: list, insurance: str, reference: str, contents: str,
+                              declared: float, customs_body: Optional[dict],
+                              signature: str, by: str) -> dict:
+    book_store = _load_dispatch()
+    if DISPATCH_STATE_PATH in _poisoned_stores:
+        return {"error": "The dispatch record is unreadable, so the app cannot tell whether this "
+                         "shipment already has a label. Fix that before booking, or you risk "
+                         "paying for a second one."}
+    prior = book_store.get(key) or {}
+    if prior.get("tracking_number") and not prior.get("canceled"):
+        return {"error": "This shipment is already booked with "
+                         + (prior.get("carrier_label") or prior.get("carrier_name") or "a courier")
+                         + ", tracking " + str(prior.get("tracking_number"))
+                         + ". Cancel it first if you need to rebook."}
+
+    why = _addr_ready(dest)
+    if why:
+        return {"error": f"The delivery address is incomplete. {why}."}
+    why = _country_ready(dest)
+    if why:
+        return {"error": why}
+    origin = await _origin_address(registry)
+    why = _addr_ready(origin)
+    if why:
+        return {"error": f"Your dispatch (origin) address is incomplete. {why}. "
+                         "Set it under Settings, Shipping."}
+    cfg = _load_shipping()
+    currency = _wo_currency("", cfg)
+    reference = (str(reference or "").strip() or ("Shipment " + key[len(_ADHOC):][:12]))[:40]
+
+    contact_note = ""
+    if not str(origin.get("phone") or "").strip() or not str(origin.get("email") or "").strip():
+        return {"error": "World Options needs a phone number and an email address on your "
+                         "dispatch address. Add both under Settings, Shipping."}
+    if not str(dest.get("phone") or "").strip():
+        dest["phone"] = origin.get("phone")
+        contact_note = "No phone for the recipient, so yours went on the label."
+    if not str(dest.get("email") or "").strip():
+        dest["email"] = origin.get("email")
+        contact_note = (contact_note + " " if contact_note else "") + \
+            "No email for the recipient, so courier updates will come to you rather than them."
+
+    # With no order there are no line items, so the declared value is whatever the
+    # merchant typed. Falling back to the insured amount keeps the two consistent:
+    # insuring a parcel declared at zero is an argument the insurer wins.
+    try:
+        declared = float(declared or 0)
+    except (TypeError, ValueError):
+        declared = 0.0
+    if declared <= 0 and insurance:
+        try:
+            declared = float(insurance)
+        except (TypeError, ValueError):
+            declared = 0.0
+    boxes = _spread_value([dict(b) for b in boxes], declared)
+
+    international = str(dest.get("country") or "").upper() not in ("GB", "")
+    customs = None
+    if international:
+        if not str(cfg.get("eori") or "").strip():
+            return {"error": "International shipments need your EORI number. Add it under "
+                             "Settings, Shipping."}
+        goods = []
+        for g in ((customs_body or {}).get("lines") or []):
+            if not isinstance(g, dict):
+                continue
+            try:
+                q = int(float(g.get("quantity") or 0))
+                up = float(g.get("unit_price") or 0)
+            except (TypeError, ValueError):
+                continue
+            desc = str(g.get("description") or "").strip()
+            if not desc or q <= 0 or up < 0:
+                continue
+            goods.append({"description": desc, "quantity": q, "unit_price": round(up, 2),
+                          "weight": g.get("weight") or "",
+                          "hs": str(g.get("hs") or cfg.get("default_hs_code") or "").strip(),
+                          "country": str(g.get("country") or "GB").strip()})
+        if not goods:
+            return {"error": "International shipments need at least one customs goods line "
+                             "(what it is, how many, unit value). Fill in the customs section "
+                             "before booking."}
+        # Not remembered per product the way an order's lines are: these have no
+        # variant behind them, so they would land under a title key and pollute the
+        # prices that prefill real orders.
+        total = round(sum(g["quantity"] * g["unit_price"] for g in goods), 2)
+        boxes = _spread_value(boxes, total)
+        total_weight = round(sum(float(bx.get("weight") or 0) for bx in boxes), 3)
+        total_qty = sum(g["quantity"] for g in goods) or 1
+        for g in goods:
+            if not g.get("weight"):
+                g["weight"] = round(total_weight * g["quantity"] / total_qty, 3)
+        customs = {
+            "eori": cfg.get("eori"), "vat": cfg.get("vat_number"),
+            "invoice_type": "Help_Me_Generate",
+            "export_reason": cfg.get("export_reason") or "Sale",
+            "duties_payor": cfg.get("duties_payor") or "Duties_To_Be_Paid_By_Receiver",
+            "trade_term": cfg.get("trade_term") or "",
+            "invoice_number": reference,
+            "receiver_tax_id": str((customs_body or {}).get("receiver_tax_id") or "")[:40],
+            "receiver_company_number": str((customs_body or {}).get("receiver_company_number") or "")[:40],
+            "goods": goods, "total_value": total,
+        }
+
+    dropoff_shop = None
+    if cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages":
+        shops = option.get("shops") or []
+        if shops and isinstance(shops[0], dict):
+            dropoff_shop = shops[0]
+    delivery_shop = None
+    if option.get("delivery_dropoff"):
+        dshops = option.get("delivery_shops") or []
+        if dshops and isinstance(dshops[0], dict):
+            delivery_shop = dshops[0]
+        else:
+            return {"error": "This is a collect-from-shop service but World Options did not "
+                             "return a shop for this address. Pick a to-the-door service instead."}
+
+    _ready_dmy, _ready_hm = _collection_ready(cfg)
+    try:
+        shipment = await _book_with_one_retry(
+            option, origin, dest, boxes, currency=currency, reference=reference,
+            ready_time=_ready_hm, ready_date=_ready_dmy,
+            close_time=str(cfg.get("close_time") or ""),
+            collection_option=str(cfg.get("collection_option") or ""),
+            insurance=insurance,
+            signature=(option.get("signature_type") or signature),
+            quoted_signature=(option.get("signature_type") or ""),
+            dropoff_shop=dropoff_shop, customs=customs,
+            description=(str(contents or "").strip()[:100] or "Goods"),
+            delivery_shop=delivery_shop)
+    except worldoptions.WorldOptionsError as e:
+        msg = str(e)
+        if getattr(e, "retried", False):
+            msg += " The app already retried once for you; if this keeps happening it is a World Options outage."
+        out = {"error": msg}
+        tech = {}
+        if getattr(e, "raw", ""):
+            tech["reply"] = str(e.raw)[:2000]
+        tech["sent"] = bool(getattr(e, "envelope", "")) or bool(getattr(e, "sent", False))
+        if getattr(e, "envelope", ""):
+            tech["request"] = str(e.envelope)[:20000]
+        if tech:
+            tech["when"] = datetime.now(timezone.utc).isoformat()
+            # There is no order number to file this under, so name the shipment by
+            # where it was going: an unattributable envelope is no evidence at all.
+            tech["order"] = reference + " to " + str(dest.get("postcode") or "")
+            out["tech"] = tech
+            _record_wo_failure(tech)
+        return out
+    except Exception as e:
+        logger.exception("custom dispatch booking failed")
+        _record_error("booking a courier", e)
+        tech = {"reply": repr(e)[:2000], "when": datetime.now(timezone.utc).isoformat(),
+                "order": reference + " to " + str(dest.get("postcode") or "")}
+        _record_wo_failure(tech)
+        return {"error": "The booking failed at World Options. Check the server logs; "
+                         "no charge is confirmed until a tracking number comes back.",
+                "tech": tech}
+    if not shipment.get("tracking_number"):
+        return {"error": "World Options accepted the request but returned no tracking number. "
+                         "Check your World Options portal before retrying so you are not charged twice."}
+
+    # From here the courier is BOOKED and the account is charged. Nothing below
+    # may raise: an exception now would be reported as "the booking failed" and
+    # the operator would book (and pay for) a second label.
+    try:
+        shipment["labels"] = await _resolve_label_links(shipment.get("labels") or [])
+    except Exception:
+        logger.exception("label download failed after booking %s; keeping the links", key)
+    try:
+        shipment["labels"] = _with_print_images(shipment.get("labels") or [])
+    except Exception:
+        logger.exception("label render failed after booking %s; Download still works", key)
+    try:
+        _save_dispatch_labels(key, shipment.get("labels") or [])
+    except Exception:
+        logger.exception("saving labels failed after a successful booking, %s", key)
+
+    who = (dest.get("company") or dest.get("name")
+           or " ".join(x for x in [dest.get("firstname"), dest.get("lastname")] if x) or "")
+    entry = {
+        "tracking_number": shipment["tracking_number"],
+        "carrier_name": shipment.get("carrier_name"),
+        "carrier_known": shipment.get("carrier_known") or shipment.get("carrier_name") or "",
+        "carrier_label": (shipment.get("carrier_label") or option.get("carrier_label")
+                          or worldoptions.carrier_display(shipment.get("carrier_name") or "")),
+        "service_name": shipment.get("service_name"),
+        "service_code": option.get("service_type_code") or "",
+        "product_code": option.get("product_code") or "",
+        "amount": shipment.get("amount"),
+        "amount_ex_vat": option.get("amount_ex_vat"),
+        # The manifest prints this, so it must read as something, not as the key.
+        "order_name": reference,
+        "by": str(by or "")[:40],
+        "customer": who,
+        # Genuinely unknown rather than zero: nobody paid this app for carriage.
+        "shipping_paid": "",
+        "currency": shipment.get("currency"),
+        "dispatched_at": datetime.now(timezone.utc).isoformat(),
+        # There is no order to fulfil and no customer to email, and these two
+        # fields are what would otherwise make that happen later.
+        "fulfilled": False,
+        "notify": False,
+        "notified": False,
+        "has_label": bool(shipment.get("labels")),
+        "label_report": shipment.get("label_report") or [],
+        "collection_date": shipment.get("collection_date") or "",
+        "insured": insurance or "",
+        "international": international,
+        "dropoff": (dropoff_shop or {}).get("name") or "",
+        "delivery_shop": (delivery_shop or {}).get("name") or "",
+        "custom": True,
+        "contents": str(contents or "").strip()[:100],
+        "declared": declared,
+        "address": {k: dest.get(k, "") for k in
+                    ("name", "company", "street", "street2", "city", "state",
+                     "postcode", "country", "phone", "email")},
+    }
+    book_note = ""
+    try:
+        _record_dispatch(key, entry)
+    except Exception:
+        logger.exception("recording the dispatch failed after a successful booking, %s", key)
+        book_note = ("The label was booked but the app could not save it. Write the tracking "
+                     "number down before closing this window.")
+
+    return {
+        "ok": True,
+        "id": key,
+        "shipment": shipment,          # includes labels[] for printing now
+        "warning": shipment.get("warning") or "",
+        "dispatch": entry,
+        "dropoff_shop": dropoff_shop,
+        "delivery_shop": delivery_shop,
+        "contact_note": contact_note,
+        "note": book_note,
+    }
+
+
+def _custom_shipments(limit: int = 40) -> list:
+    """Recent pasted-address shipments, newest first. The only way back to one of
+    these after the window closes: they are not in the queue, because there is no
+    order for them to be a row of."""
+    out = []
+    for key, e in (_load_dispatch() or {}).items():
+        if not _is_adhoc(key) or not isinstance(e, dict):
+            continue
+        out.append({"id": key, "reference": e.get("order_name") or "",
+                    "customer": e.get("customer") or "",
+                    "carrier": e.get("carrier_label") or e.get("carrier_name") or "",
+                    "service": e.get("service_name") or "",
+                    "tracking": e.get("tracking_number") or "",
+                    "amount": e.get("amount"), "currency": e.get("currency") or "",
+                    "at": e.get("dispatched_at") or "",
+                    "canceled": bool(e.get("canceled")),
+                    "has_label": bool(e.get("has_label")),
+                    "address": e.get("address") or {},
+                    "contents": e.get("contents") or ""})
+    out.sort(key=lambda r: str(r.get("at") or ""), reverse=True)
+    return out[:max(1, min(int(limit or 40), 200))]
 
 
 # Flag combinations tried when the merchant reports a service they expected but
@@ -7299,6 +8026,119 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             logger.exception("shipping validate failed")
             return _json({"ok": False, "error": "Couldn't reach World Options."}, 200)
 
+    @mcp.custom_route("/api/dispatch/parse-address", methods=["POST"])
+    async def parse_address_route(request: Request):
+        """Turn a pasted block of text into address fields. Free, and local unless
+        the local pass cannot place something."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        text = str(body.get("text") or "")[:4000]
+        if not text.strip():
+            return _json({"error": "Paste an address first."}, 400)
+        local = _parse_address(text)
+        if local["confident"] or not ANTHROPIC_API_KEY:
+            return _json({"address": local["address"], "source": "local",
+                          "note": ("" if local["confident"] else
+                                   "Some of this could not be read. Check every field.")})
+        try:
+            ai = await _ai_address(text)
+        except Exception as e:
+            logger.exception("AI address parse failed")
+            return _json({"address": local["address"], "source": "local",
+                          "note": "Some of this could not be read. Check every field."})
+        # Prefer Claude's reading, but never let it blank a field the local pass
+        # did find: it is the one that read the text literally.
+        merged = dict(local["address"])
+        for k, v in ai.items():
+            if str(v or "").strip():
+                merged[k] = v
+        return _json({"address": merged, "source": "ai",
+                      "note": "Read with AI because the layout was unusual. Check every field."})
+
+    @mcp.custom_route("/api/custom/quote", methods=["POST"])
+    async def custom_quote_route(request: Request):
+        """Price couriers to a pasted address. Free / read-only, no charge."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        dest = _clean_address(body.get("address") or {})
+        boxes, err = _clean_parcel_list(body)
+        if err:
+            return _json({"error": err}, 400)
+        try:
+            declared = float(body.get("declared") or 0)
+        except (TypeError, ValueError):
+            declared = 0.0
+        try:
+            res = await run_custom_quote(registry, dest, boxes,
+                                         insurance=_insurance_amount(body), declared=declared)
+            return _json(res, 400 if res.get("error") else 200)
+        except Exception:
+            logger.exception("custom quote failed")
+            return _json({"error": "Couldn't get courier quotes. Check the server logs."}, 500)
+
+    @mcp.custom_route("/api/custom/book", methods=["POST"])
+    async def custom_book_route(request: Request):
+        """Book a courier to a pasted address. THIS SPENDS MONEY."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        option = body.get("option")
+        if not isinstance(option, dict):
+            return _json({"error": "Pick a courier service first."}, 400)
+        boxes, err = _clean_parcel_list(body)
+        if err:
+            return _json({"error": err}, 400)
+        try:
+            declared = float(body.get("declared") or 0)
+        except (TypeError, ValueError):
+            declared = 0.0
+        try:
+            res = await run_custom_book(
+                registry, str(body.get("id") or ""), option,
+                _clean_address(body.get("address") or {}), boxes,
+                insurance=_insurance_amount(body),
+                reference=str(body.get("reference") or ""),
+                contents=str(body.get("contents") or ""),
+                declared=declared,
+                customs_body=(body.get("customs") if isinstance(body.get("customs"), dict) else None),
+                signature=str(body.get("signature") or ""), by=str(who or ""))
+            return _json(res, 400 if res.get("error") else 200)
+        except Exception:
+            logger.exception("custom booking failed")
+            return _json({"error": "The booking failed. It MAY still have been booked and "
+                                   "charged: check your World Options portal before trying again."}, 500)
+
+    @mcp.custom_route("/api/custom/list", methods=["POST"])
+    async def custom_list_route(request: Request):
+        """Pasted-address shipments already booked. Read-only."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        return _json({"shipments": _custom_shipments()})
+
     @mcp.custom_route("/api/dispatch/quote", methods=["POST"])
     async def dispatch_quote_route(request: Request):
         """Price couriers for one order. Free / read-only, no charge."""
@@ -7408,15 +8248,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
-        try:
-            oid = int(body.get("order_id") or 0)
-        except (TypeError, ValueError, OverflowError):
-            oid = 0
+        # Either a Shopify order or a pasted-address shipment: both keep their
+        # label in the same place, so reprint is one path.
+        oid = _shipment_key(body)
         if not oid:
-            return _json({"error": "No order id given."}, 400)
+            return _json({"error": "No shipment given."}, 400)
         labels = _load_dispatch_labels(oid)
         if not labels:
-            return _json({"error": "No stored label for this order. It may have been dispatched "
+            return _json({"error": "No stored label for this shipment. It may have been dispatched "
                                    "before labels were saved, or on another device."}, 404)
         # Self-heal: an order booked while labels were stored as LINKS gets the real
         # file downloaded on its next open, and the fix is saved back.
@@ -7568,10 +8407,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except Exception:
             logger.exception("dispatch cancel failed")
             return _json({"error": "Couldn't cancel the shipment."}, 500)
-        try:
-            oid = int(body.get("order_id") or 0)
-        except (TypeError, ValueError, OverflowError):
-            oid = 0
+        oid = _shipment_key(body)
         note = ""
         if oid:
             entry = (_load_dispatch().get(str(oid)) or {})
@@ -7581,7 +8417,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             try:
                 _update_dispatch(oid, _mark_cancelled)
             except DispatchStoreUnwritable:
-                logger.exception("could not record the cancellation of order %s", oid)
+                logger.exception("could not record the cancellation of %s", oid)
+            # A pasted-address shipment has no order behind it: the void at World
+            # Options is the whole cancellation, and there is nothing in Shopify to
+            # put back. Everything below this line is order repair.
+            if _is_adhoc(oid):
+                return _json({"ok": True, "note": note, "canceled": True})
             # Undo what the booking did in Shopify, so the customer is not left
             # with dead tracking and the order can be re-dispatched cleanly.
             fid = entry.get("fulfillment_id")

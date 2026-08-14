@@ -222,6 +222,21 @@ def t_every_refresh_button_asks_the_server_for_fresh_data():
        "flipping queues reuses the sweep")
 
 
+@test
+def t_a_custom_shipment_has_its_own_button_and_reads_a_pasted_address():
+    ok("openCustomShip" in HTML, "the New shipment flow exists")
+    ok(_re.search(r"newShip\.onclick = openCustomShip", HTML), "and the toolbar has its own button")
+    ok("/api/dispatch/parse-address" in HTML, "pasting reads the address")
+    ok(_re.search(r"addEventListener\('paste'", HTML), "on paste, not on a second click")
+    ok("/api/custom/quote" in HTML and "/api/custom/book" in HTML, "it quotes and books")
+    # The id must be minted once, before the first submit: with no order id behind
+    # the shipment it is the only thing that can recognise a second Book click.
+    ok(_re.search(r"const shipId = 'cs'", HTML), "the shipment id is minted up front")
+    ok(_re.search(r"id: shipId", HTML), "and the same one is sent on every attempt")
+    # Money still needs an explicit confirm.
+    ok(_re.search(r"uiConfirm\('Book this courier for ", HTML), "booking asks first")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

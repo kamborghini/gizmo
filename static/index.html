@@ -533,6 +533,27 @@
             color: var(--ink); font: inherit; font-size: 13px; padding: 8px 8px; width: 100%; }
         .disp-num:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus); }
         .disp-subhead { font-size: 12px; color: var(--ink-3); font-weight: 600; margin-bottom: 4px; }
+        /* Custom address shipment: the paste box and the fields it fills. */
+        .disp-paste { width: 100%; box-sizing: border-box; min-height: 84px; resize: vertical;
+            background: var(--surface); border: 1px solid var(--border-2); border-radius: 8px;
+            color: var(--ink); font: inherit; font-size: 13px; line-height: 1.5; padding: 10px 12px; }
+        .disp-paste:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus); }
+        .disp-addr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0 4px; }
+        .disp-addr-f { display: flex; flex-direction: column; gap: 4px; }
+        .disp-addr-lab { font-size: 11px; color: var(--ink-3); font-weight: 600; }
+        .disp-text { background: var(--surface); border: 1px solid var(--border-2); border-radius: 8px;
+            color: var(--ink); font: inherit; font-size: 13px; padding: 8px 10px; width: 100%;
+            box-sizing: border-box; }
+        .disp-text:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus); }
+        .disp-recent { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            padding: 10px 0; border-bottom: 1px solid var(--line); }
+        .disp-recent:last-child { border-bottom: 0; }
+        .disp-recent-t { font-size: 13px; font-weight: 600; color: var(--ink); }
+        .disp-customs { margin: 12px 0; padding: 12px; border: 1px solid var(--line);
+            border-radius: 12px; background: var(--surface-2, transparent); }
+        .disp-customs .disp-boxrow > .disp-text { flex: 1 1 auto; min-width: 120px; }
+        .disp-customs .disp-boxrow > .disp-num { width: 88px; flex: none; }
+        @media (max-width: 640px) { .disp-addr-grid { grid-template-columns: 1fr; } }
         .disp-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
             margin: 0 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
         .disp-pick-name { font-weight: 600; color: var(--ink); }
@@ -3866,6 +3887,12 @@
             const tools = el('div', 'lbl-tools');    // reports and setup: quieter, second
             const reload = el('button', 'btn'); reload.append(ico(I.refresh), document.createTextNode('Refresh')); reload.onclick = () => loadLabels(true, true);
             bar.append(reload);
+            // A parcel that is not an order: paste an address and book it.
+            const newShip = el('button', 'btn');
+            newShip.append(ico(I.truck), document.createTextNode('New shipment'));
+            newShip.title = 'Book a courier to an address you paste in, with no Shopify order behind it';
+            newShip.onclick = openCustomShip;
+            bar.append(newShip);
             if (unprinted.length && unprinted.length < printable.length) {
                 const pn = el('button', 'btn btn-primary'); pn.append(ico(I.printer), document.createTextNode('Print new (' + unprinted.length + ')'));
                 pn.onclick = () => printLabels(unprinted);
@@ -5414,6 +5441,432 @@
             }
         }
 
+        /* A parcel with no Shopify order behind it: a replacement, a sample, a
+           supplier return. Paste the address, add a box and a value, book. The
+           shipment id is minted HERE, once, and reused if the merchant books
+           again after an error, because without an order id it is the only thing
+           that can tell a second click apart from a second parcel. */
+        const ADDR_FIELDS = [
+            ['name', 'Name', 'Who it is for'], ['company', 'Company', 'Business name, if any'],
+            ['street', 'Address line 1', ''], ['street2', 'Address line 2', ''],
+            ['city', 'Town or city', ''], ['state', 'County or state', ''],
+            ['postcode', 'Postcode', ''], ['country', 'Country', '2-letter code, e.g. GB'],
+            ['phone', 'Phone', 'The courier may need it'], ['email', 'Email', 'For tracking updates'],
+        ];
+
+        async function openCustomShip() {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal disp-modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, 'New shipment'));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
+            const body = el('div', 'modal-body');
+            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+            const prev = document.activeElement;
+            let booking = false;
+            const close = () => {
+                if (booking) { addToast('The courier booking is still going through. Please wait.'); return; }
+                overlay.remove(); if (prev && prev.focus) prev.focus();
+            };
+            x.onclick = close;   // the X is the only way out: a misclick must not wipe a filled form
+            x.focus();
+
+            const shipId = 'cs' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+            // Declared up here, not beside the quote UI: building the parcel row
+            // calls staleQuote() while the modal is still assembling, and a `let`
+            // read before its own line throws rather than reading undefined.
+            let quote = null, chosen = null;
+            let cfg = {};
+            try { cfg = await ensureShippingCfg(); }
+            catch (e) { body.append(el('div', 'msg error', e.message || 'Could not load shipping settings')); return; }
+
+            // ---- paste ----
+            body.append(el('div', 'disp-subhead', 'Paste the address'));
+            const paste = document.createElement('textarea');
+            paste.className = 'disp-paste'; paste.rows = 4;
+            paste.placeholder = 'Paste the address from an email. It will be split into the fields below.';
+            body.append(paste);
+            const pasteNote = el('div', 'sub'); body.append(pasteNote);
+
+            // ---- address fields ----
+            const addrGrid = el('div', 'disp-addr-grid');
+            const addr = {};
+            ADDR_FIELDS.forEach(([key, label, help]) => {
+                const wrap = el('label', 'disp-addr-f');
+                wrap.append(el('span', 'disp-addr-lab', label));
+                const inp = document.createElement('input');
+                inp.type = 'text'; inp.className = 'disp-text'; inp.placeholder = help || '';
+                inp.oninput = staleQuote;
+                addr[key] = inp; wrap.append(inp); addrGrid.append(wrap);
+            });
+            body.append(addrGrid);
+
+            function fillAddress(a) {
+                ADDR_FIELDS.forEach(([k]) => { addr[k].value = (a && a[k]) || ''; });
+                staleQuote();
+            }
+            function readAddress() {
+                const out = {};
+                ADDR_FIELDS.forEach(([k]) => { out[k] = addr[k].value.trim(); });
+                return out;
+            }
+            let parsing = false;
+            async function parsePaste() {
+                const text = paste.value.trim();
+                if (!text || parsing) return;
+                parsing = true;
+                pasteNote.textContent = 'Reading the address…';
+                try {
+                    const r = await api('/api/dispatch/parse-address', { text: text });
+                    fillAddress(r.address);
+                    pasteNote.textContent = r.note
+                        || (r.source === 'ai' ? 'Read with AI. Check every field.' : 'Check every field before booking.');
+                } catch (e) { pasteNote.textContent = e.message || 'Could not read that address.'; }
+                parsing = false;
+            }
+            // Reading it as it lands is the whole point of pasting.
+            paste.addEventListener('paste', () => setTimeout(parsePaste, 0));
+            paste.addEventListener('blur', parsePaste);
+
+            // ---- what is in the parcel ----
+            body.append(el('div', 'disp-subhead', 'What is in it'));
+            const meta = el('div', 'disp-addr-grid');
+            function metaField(label, help, type) {
+                const wrap = el('label', 'disp-addr-f');
+                wrap.append(el('span', 'disp-addr-lab', label));
+                const inp = document.createElement('input');
+                inp.type = type || 'text'; inp.className = 'disp-text'; inp.placeholder = help || '';
+                if (type === 'number') { inp.min = '0'; inp.step = '1'; }
+                inp.oninput = staleQuote;
+                wrap.append(inp); meta.append(wrap); return inp;
+            }
+            const refIn = metaField('Your reference', 'Shows on the World Options invoice');
+            const contentsIn = metaField('Contents', 'e.g. Replacement gobo');
+            const valueIn = metaField('Value (£)', 'What it is worth', 'number');
+            body.append(meta);
+            body.append(el('p', 'field-help', 'The value is declared to the courier. Insuring a parcel '
+                + 'declared at zero is an argument the insurer wins, so it is worth getting right.'));
+
+            // ---- boxes ----
+            body.append(el('div', 'disp-subhead', 'Parcel'));
+            const presets = (cfg.boxes || []).slice();
+            const boxHost = el('div'); body.append(boxHost);
+            const boxRows = [];
+            function addBoxRow() {
+                const rowb = el('div', 'disp-boxrow');
+                const sel = document.createElement('select'); sel.className = 'disp-sel';
+                sel.append(new Option('Custom size', ''));
+                presets.forEach(b => sel.append(new Option(b.name || 'Box', b.id)));
+                const ins = {};
+                ['width', 'length', 'depth', 'weight'].forEach(k => {
+                    const i = document.createElement('input');
+                    i.type = 'number'; i.min = '0'; i.step = '0.1'; i.className = 'disp-num';
+                    i.placeholder = k === 'weight' ? 'kg' : k.slice(0, 1).toUpperCase() + k.slice(1);
+                    i.oninput = staleQuote; ins[k] = i;
+                });
+                const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove this parcel';
+                const row = { el: rowb, ins };
+                rm.onclick = () => { const i = boxRows.indexOf(row); if (i >= 0) boxRows.splice(i, 1); rowb.remove(); staleQuote(); };
+                sel.onchange = () => {
+                    const b = presets.find(p => p.id === sel.value);
+                    if (b) { ins.width.value = b.width; ins.length.value = b.length; ins.depth.value = b.depth; ins.weight.value = b.weight || ''; }
+                    staleQuote();
+                };
+                rowb.append(sel, ins.width, ins.length, ins.depth, ins.weight, rm);
+                boxRows.push(row); boxHost.append(rowb);
+                if (presets.length) { sel.value = presets[0].id; sel.onchange(); }
+            }
+            addBoxRow();
+            const addBoxBtn = el('button', 'btn disp-addbox');
+            addBoxBtn.append(ico(I.plus), document.createTextNode('Add a box'));
+            addBoxBtn.onclick = () => { addBoxRow(); staleQuote(); };
+            body.append(addBoxBtn);
+            body.append(el('p', 'field-help', 'Sizes in cm, weight in kg. Weigh the packed box: couriers re-weigh on collection and bill the difference.'));
+
+            // ---- insurance ----
+            const insWrap = el('label', 'disp-insure');
+            const insCb = document.createElement('input'); insCb.type = 'checkbox';
+            const insAmt = document.createElement('input');
+            insAmt.type = 'number'; insAmt.min = '0'; insAmt.step = '1'; insAmt.className = 'disp-num';
+            insAmt.disabled = true;
+            insCb.onchange = () => { insAmt.disabled = !insCb.checked; if (insCb.checked && !insAmt.value) insAmt.value = valueIn.value; staleQuote(); };
+            insAmt.oninput = staleQuote;
+            insWrap.append(insCb, el('span', null, 'Insure this shipment for £'), insAmt);
+            body.append(insWrap);
+
+            function collectBoxes() {
+                const out = [];
+                for (const r of boxRows) {
+                    const b = { width: parseFloat(r.ins.width.value), length: parseFloat(r.ins.length.value),
+                                depth: parseFloat(r.ins.depth.value), weight: parseFloat(r.ins.weight.value) };
+                    if (!(b.width > 0 && b.length > 0 && b.depth > 0 && b.weight > 0)) return null;
+                    out.push(b);
+                }
+                return out.length ? out : null;
+            }
+
+            // ---- quotes ----
+            const quoteBtn = el('button', 'btn btn-primary disp-quote');
+            quoteBtn.append(ico(I.truck), document.createTextNode('Get courier quotes'));
+            const quoteWrap = el('div'); quoteWrap.style.marginTop = '12px';
+            body.append(quoteBtn, quoteWrap);
+
+            function staleQuote() {
+                // Anything that changes the parcel or the address invalidates the
+                // price: booking against a stale quote books the wrong thing.
+                if (!quote) return;
+                quote = null; chosen = null; quoteWrap.innerHTML = '';
+                quoteWrap.append(el('div', 'sub', 'The parcel changed. Get the quotes again.'));
+            }
+
+            quoteBtn.onclick = async () => {
+                const boxes = collectBoxes();
+                if (!boxes) { toastError('Fill in the parcel size and weight first.'); return; }
+                const a = readAddress();
+                if (!a.street || !a.city || !a.postcode || !a.country) {
+                    toastError('The address needs at least a street, a town, a postcode and a country.');
+                    return;
+                }
+                // A country name is not a country code, and half a name is a
+                // different country: IS is Iceland, not the Isle of Man.
+                if (!/^[A-Za-z]{2}$/.test(a.country)) {
+                    toastError('Country must be the 2-letter code, for example GB, IE, US or DE.');
+                    addr.country.focus();
+                    return;
+                }
+                quoteBtn.disabled = true; quoteWrap.innerHTML = '';
+                const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Asking World Options…'));
+                quoteWrap.append(t);
+                try {
+                    quote = await api('/api/custom/quote', {
+                        address: a, boxes: boxes,
+                        insurance: insCb.checked ? parseFloat(insAmt.value) || 0 : 0,
+                        declared: parseFloat(valueIn.value) || 0,
+                    });
+                    renderOpts();
+                } catch (e) {
+                    quoteWrap.innerHTML = '';
+                    quoteWrap.append(el('div', 'msg error', e.message || 'Could not get quotes'));
+                }
+                quoteBtn.disabled = false;
+            };
+
+            const confirmWrap = el('div'); body.append(confirmWrap);
+
+            function renderOpts() {
+                quoteWrap.innerHTML = ''; confirmWrap.innerHTML = '';
+                const opts = (quote && quote.options) || [];
+                if (!opts.length) { quoteWrap.append(el('div', 'empty', 'No courier options came back for this parcel and address.')); return; }
+                if (quote.insurance) quoteWrap.append(el('div', 'sub', 'Prices include insurance cover for ' + fmtPrice(parseFloat(quote.insurance), quote.currency) + '.'));
+                if (quote.international) quoteWrap.append(customsCard());
+                quoteWrap.append(el('div', 'disp-subhead', opts.length + ' option' + (opts.length === 1 ? '' : 's') + ' · cheapest first'));
+                const list = el('div', 'disp-opts');
+                const cheapest = Math.min.apply(null, opts.map(o => Number(o.amount) || Infinity));
+                opts.forEach((op, i) => {
+                    const rowl = el('label', 'disp-opt');
+                    const rb = document.createElement('input');
+                    rb.type = 'radio'; rb.name = 'cust-opt'; rb.value = i;
+                    rb.onchange = () => {
+                        chosen = op;
+                        list.querySelectorAll('.disp-opt').forEach(e => e.classList.remove('on'));
+                        rowl.classList.add('on'); renderConfirm();
+                    };
+                    rowl.append(rb);
+                    const top = el('div', 'disp-opt-top');
+                    const known = !!op.carrier_label;
+                    top.append(el('span', 'disp-opt-prov' + (known ? '' : ' disp-opt-unknown'),
+                        known ? op.carrier_label : 'Carrier not named'));
+                    top.append(el('span', 'disp-opt-carrier', op.service_name || (known ? '' : 'Courier service')));
+                    if (Number(op.amount) === cheapest) top.append(el('span', 'lbl-chip made', 'CHEAPEST'));
+                    if (op.shops && op.shops.length) top.append(el('span', 'lbl-chip note', 'DROP-OFF'));
+                    if (op.no_signature) top.append(el('span', 'lbl-chip note', 'NO SIGNATURE'));
+                    if (op.delivery_dropoff) top.append(el('span', 'lbl-chip warn', 'COLLECT FROM SHOP'));
+                    rowl.append(top);
+                    const priceCell = el('div', 'disp-opt-price');
+                    priceCell.append(el('span', 'p-inc', fmtPrice(op.amount, op.currency)));
+                    if (op.amount_ex_vat != null && op.vat) priceCell.append(el('span', 'p-ex', fmtPrice(op.amount_ex_vat, op.currency) + ' ex VAT'));
+                    rowl.append(priceCell);
+                    const when = el('div', 'disp-opt-when');
+                    if (op.delivery_date) {
+                        when.append(el('span', 'd', op.delivery_date));
+                        if (op.delivery_time) when.append(el('span', 't', ' ' + op.delivery_time));
+                    } else { when.append(el('span', 't', 'Delivery date not quoted')); }
+                    rowl.append(when);
+                    list.append(rowl);
+                });
+                quoteWrap.append(list);
+            }
+
+            /* Outside the UK the parcel needs a customs declaration. There are no
+               line items behind this shipment, so unlike an order nothing can be
+               prefilled: it is typed once, here, and the booking is refused
+               without it rather than going out with an empty dossier. */
+            let customsRows = [], receiverTax = null, receiverCo = null;
+            function customsCard() {
+                const card = el('div', 'disp-customs');
+                card.append(el('div', 'disp-subhead', 'Customs declaration'));
+                card.append(el('p', 'field-help', 'Going outside the UK, so the courier needs to know '
+                    + 'what is in the parcel and what it is worth. This travels with the shipment.'));
+                if (!quote.has_eori) {
+                    card.append(el('div', 'msg error', 'Add your EORI number under Settings, Shipping. '
+                        + 'International shipments cannot be booked without it.'));
+                }
+                const host = el('div');
+                customsRows = [];
+                function addLine(pref) {
+                    const row = el('div', 'disp-boxrow');
+                    const mk = (ph, cls, val) => {
+                        const i = document.createElement('input');
+                        i.type = 'text'; i.className = cls || 'disp-text'; i.placeholder = ph;
+                        if (val) i.value = val;
+                        return i;
+                    };
+                    const desc = mk('What it is', 'disp-text');
+                    const qty = mk('Qty', 'disp-num'); qty.type = 'number'; qty.min = '1'; qty.value = '1';
+                    const price = mk('Unit £', 'disp-num'); price.type = 'number'; price.min = '0'; price.step = '0.01';
+                    const hs = mk('HS code', 'disp-num', quote.default_hs_code || '');
+                    const orig = mk('Origin', 'disp-num', 'GB');
+                    const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove this line';
+                    const entry = { desc: desc, qty: qty, price: price, hs: hs, orig: orig };
+                    rm.onclick = () => {
+                        const i = customsRows.indexOf(entry);
+                        if (i >= 0) customsRows.splice(i, 1);
+                        row.remove();
+                    };
+                    row.append(desc, qty, price, hs, orig, rm);
+                    customsRows.push(entry); host.append(row);
+                    if (pref && pref.desc) { desc.value = pref.desc; price.value = pref.price || ''; }
+                }
+                card.append(host);
+                // Seed the first line from what they already typed: for a one-item
+                // parcel that is the whole declaration.
+                addLine({ desc: contentsIn.value.trim(), price: valueIn.value });
+                const addBtn = el('button', 'btn disp-addbox');
+                addBtn.append(ico(I.plus), document.createTextNode('Add a line'));
+                addBtn.onclick = () => addLine();
+                card.append(addBtn);
+                const ids = el('div', 'disp-addr-grid');
+                function idField(label, help) {
+                    const w = el('label', 'disp-addr-f');
+                    w.append(el('span', 'disp-addr-lab', label));
+                    const i = document.createElement('input');
+                    i.type = 'text'; i.className = 'disp-text'; i.placeholder = help || '';
+                    w.append(i); ids.append(w); return i;
+                }
+                receiverTax = idField('Recipient tax or VAT number', 'Optional, speeds up clearance');
+                receiverCo = idField('Recipient company number', 'Optional');
+                card.append(ids);
+                return card;
+            }
+            function collectCustoms() {
+                if (!quote || !quote.international) return null;
+                const lines = [];
+                customsRows.forEach(r => {
+                    const desc = r.desc.value.trim();
+                    const qty = parseInt(r.qty.value, 10);
+                    const price = parseFloat(r.price.value);
+                    if (!desc || !(qty > 0) || !(price >= 0)) return;
+                    lines.push({ description: desc, quantity: qty, unit_price: price,
+                                 hs: r.hs.value.trim(), country: (r.orig.value.trim() || 'GB').toUpperCase() });
+                });
+                return { lines: lines,
+                         receiver_tax_id: receiverTax ? receiverTax.value.trim() : '',
+                         receiver_company_number: receiverCo ? receiverCo.value.trim() : '' };
+            }
+
+            function renderConfirm() {
+                confirmWrap.innerHTML = '';
+                if (!chosen) return;
+                const bar = el('div', 'disp-actions');
+                const bk = el('button', 'btn btn-primary');
+                bk.append(ico(I.truck), document.createTextNode('Book ' + fmtPrice(chosen.amount, chosen.currency)));
+                bk.onclick = async () => {
+                    const boxes = collectBoxes();
+                    if (!boxes) { toastError('Fill in the parcel size and weight first.'); return; }
+                    if (!await uiConfirm('Book this courier for ' + fmtPrice(chosen.amount, chosen.currency)
+                        + '? Your World Options account is charged.',
+                        { title: 'Book the courier', okText: 'Book it' })) return;
+                    bk.disabled = true; booking = true;
+                    try {
+                        const r = await api('/api/custom/book', {
+                            id: shipId, option: chosen, address: readAddress(), boxes: boxes,
+                            insurance: insCb.checked ? parseFloat(insAmt.value) || 0 : 0,
+                            declared: parseFloat(valueIn.value) || 0,
+                            reference: refIn.value.trim(), contents: contentsIn.value.trim(),
+                            signature: chosen.signature_type || '',
+                            customs: collectCustoms(),
+                        });
+                        booking = false;
+                        renderBooked(r);
+                    } catch (e) {
+                        booking = false;
+                        bk.disabled = false;
+                        confirmWrap.append(el('div', 'msg error', e.message || 'The booking failed'));
+                    }
+                };
+                bar.append(bk); confirmWrap.append(bar);
+            }
+
+            function renderBooked(r) {
+                body.innerHTML = '';
+                const d = r.dispatch || {};
+                const h = el('div', 'disp-result-head');
+                h.append(ico(I.check), el('span', null, 'Booked with '
+                    + (d.carrier_label || d.carrier_name || 'the courier')));
+                body.append(h);
+                const tb = el('div', 'disp-track');
+                tb.append(el('span', null, 'Tracking '), el('b', null, d.tracking_number || ''));
+                body.append(tb);
+                if (d.amount != null) body.append(el('div', 'sub', 'Charged ' + fmtPrice(d.amount, d.currency)));
+                if (d.customer) body.append(el('div', 'sub', 'To ' + d.customer));
+                if (r.contact_note) body.append(el('div', 'sub', r.contact_note));
+                if (r.note) body.append(el('div', 'msg error', r.note));
+                if (!printLabelImages((r.shipment && r.shipment.labels) || [])) {
+                    labelButtons(body, (r.shipment || {}).labels, 'Print label');
+                }
+                const bar = el('div', 'disp-actions');
+                const rp = el('button', 'btn btn-primary');
+                rp.append(ico(I.printer), document.createTextNode('Reprint label'));
+                rp.onclick = () => reprintCustom(r.id || shipId, body, rp);
+                bar.append(rp);
+                const done = el('button', 'btn', 'Done'); done.onclick = close;
+                bar.append(done); body.append(bar);
+            }
+
+            // ---- already booked, from this desk or an earlier one ----
+            const recentWrap = el('div'); body.append(recentWrap);
+            (async function loadRecent() {
+                try {
+                    const r = await api('/api/custom/list', {});
+                    const rows = (r.shipments || []).filter(s => !s.canceled).slice(0, 8);
+                    if (!rows.length) return;
+                    recentWrap.append(el('div', 'disp-subhead', 'Already booked'));
+                    rows.forEach(s => {
+                        const row = el('div', 'disp-recent');
+                        const left = el('div');
+                        left.append(el('div', 'disp-recent-t', (s.reference || 'Shipment') + ' · ' + (s.customer || '')));
+                        left.append(el('div', 'sub', (s.carrier || '') + ' ' + (s.tracking || '')
+                            + (s.at ? ' · ' + fmtDate(s.at) : '')));
+                        row.append(left);
+                        const rp = el('button', 'btn');
+                        rp.append(ico(I.printer), document.createTextNode('Reprint'));
+                        rp.onclick = () => reprintCustom(s.id, body, rp);
+                        row.append(rp);
+                        recentWrap.append(row);
+                    });
+                } catch (e) { /* the list is a convenience, never a blocker */ }
+            })();
+
+            async function reprintCustom(id, host, btn) {
+                btn.disabled = true;
+                try {
+                    const r = await api('/api/dispatch/label', { id: id });
+                    if (!printLabelImages(r.labels || [])) labelButtons(host, r.labels, 'Print label');
+                } catch (e) { addToast(e.message || 'Could not fetch the label'); }
+                btn.disabled = false;
+            }
+        }
+
         async function openShippingSettings() {
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal disp-modal');
@@ -6124,6 +6577,7 @@
         window.__demoAlerts = function (list) { alerts = list || []; if (overviewCache) renderOverview(overviewCache); };
         window.__demoChatData = function (du) { const c = active(); if (c && c.turns.length) { c.turns[c.turns.length - 1].data_used = du; renderChat(); } };
         window.__demoProductDetail = function (d) { setView('products'); renderProductDetail(d); };
+        window.__demoCustomShip = function () { return openCustomShip(); };
     })();
     </script>
 </body>
