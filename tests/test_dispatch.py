@@ -26,6 +26,7 @@ os.environ.update({
     # previous test's orders. The tests that exercise the cache turn it on.
     "ORDER_CACHE_SECS": "0",
     "CHASE_LOG_PATH": SCRATCH + "/chase_log.json",
+    "CRM_PATH": SCRATCH + "/crm.json",
 })
 for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
     os.environ.pop(v, None)
@@ -3500,6 +3501,217 @@ def t_webhook_registration_is_a_standing_repair():
     finally:
         server._request = saved_req
         os.environ.pop("APP_URL", None)
+
+
+# ---- CRM --------------------------------------------------------------------
+
+def reset_crm():
+    try:
+        os.remove(SCRATCH + "/crm.json")
+    except FileNotFoundError:
+        pass
+
+def crm_seed():
+    """An org, a person in it, and a deal: the minimum living pipeline."""
+    reset_crm()
+    org = post("/api/crm/contact", {"op": "org_add", "name": "Northern Stage"}).json()["id"]
+    per = post("/api/crm/contact", {"op": "person_add", "name": "Sarah Fielding",
+                                    "org_id": org, "emails": ["sarah@ns.co.uk"]}).json()["id"]
+    deal = post("/api/crm/deal", {"op": "add", "title": "Northern Stage deal",
+                                  "person_id": per, "value": 450}).json()["id"]
+    return org, per, deal
+
+@test
+def t_a_deal_needs_a_person_or_an_organisation():
+    # Pipedrive's save rule: a deal belongs to someone; a title alone is not a deal.
+    reset_crm()
+    r = post("/api/crm/deal", {"op": "add", "title": "Orphan deal"})
+    eq(r.status_code, 400, r.text)
+    ok("person or an organisation" in r.json()["error"], r.json()["error"])
+    org = post("/api/crm/contact", {"op": "org_add", "name": "Acme"}).json()["id"]
+    r2 = post("/api/crm/deal", {"op": "add", "title": "Acme deal", "org_id": org})
+    eq(r2.status_code, 200, r2.text)
+
+@test
+def t_the_card_icon_follows_the_next_activity_and_nothing_scheduled_is_its_own_state():
+    # The four-state discipline: overdue red, today green, NOTHING amber, future
+    # grey. Having no next step is deliberately its own loud state, and the
+    # column sorts overdue, today, none, future.
+    from datetime import date, timedelta as td
+    _org, _per, deal = crm_seed()
+    board = post("/api/crm/board", {}).json()["crm"]
+    eq(board["deals"][deal]["activity_state"], "none", "a fresh deal has nothing scheduled")
+    today = date.today().isoformat()
+    a1 = post("/api/crm/activity", {"op": "add", "type": "call", "deal_id": deal,
+                                    "due_date": today}).json()
+    eq(a1["crm"]["deals"][deal]["activity_state"], "today", "due today is its own state")
+    past = (date.today() - td(days=3)).isoformat()
+    a2 = post("/api/crm/activity", {"op": "add", "type": "task", "deal_id": deal,
+                                    "due_date": past}).json()
+    eq(a2["crm"]["deals"][deal]["activity_state"], "overdue", "the earliest open activity wins")
+    eq(a2["crm"]["deals"][deal]["next_activity"], past, "and next_activity is that date")
+    eq(a2["crm"]["badge"], 2, "the badge counts overdue plus due today")
+
+@test
+def t_completing_the_last_activity_prompts_scheduling_the_next():
+    # The follow-up prompt is the product: it fires only when the deal's LAST
+    # open activity was completed, and never when another remains.
+    _org, _per, deal = crm_seed()
+    a1 = post("/api/crm/activity", {"op": "add", "type": "call", "deal_id": deal}).json()["id"]
+    a2 = post("/api/crm/activity", {"op": "add", "type": "task", "deal_id": deal}).json()["id"]
+    first = post("/api/crm/activity", {"op": "done", "id": a1}).json()
+    ok("followup_deal_id" not in first, "another activity remains, so no prompt")
+    second = post("/api/crm/activity", {"op": "done", "id": a2}).json()
+    eq(second.get("followup_deal_id"), deal, "the last one prompts for the next")
+    act = second["crm"]["activities"][a2]
+    ok(act["done_at"], "done has its own stamp")
+    ok(act["due_date"], "and the due date survives completion untouched")
+
+@test
+def t_won_lost_and_reopen_keep_the_stage_and_the_reason():
+    _org, _per, deal = crm_seed()
+    post("/api/crm/deal", {"op": "move", "id": deal, "stage_id": "s3"})
+    lost = post("/api/crm/deal", {"op": "lost", "id": deal, "reason": "Too expensive",
+                                  "comment": "Budget cut"}).json()["crm"]["deals"][deal]
+    eq(lost["status"], "lost", "lost is a status, not deletion")
+    eq(lost["lost_reason"], "Too expensive", "the reason is kept for reporting")
+    back = post("/api/crm/deal", {"op": "reopen", "id": deal}).json()["crm"]["deals"][deal]
+    eq(back["status"], "open", "reopened")
+    eq(back["stage_id"], "s3", "back to the exact stage it left from")
+    ok("lost_reason" not in back, "and the reason is cleared")
+
+@test
+def t_an_untouched_deal_rots_and_any_touch_resets_it():
+    _org, _per, deal = crm_seed()
+    stages = post("/api/crm/board", {}).json()["crm"]["stages"]
+    stages[0]["rot_days"] = 2
+    post("/api/crm/stages", {"stages": stages})
+    # Age the deal by hand: the store is plain JSON.
+    raw = json.load(open(copilot.CRM_PATH))
+    from datetime import datetime as dt, timedelta as td, timezone as tz
+    raw["crm"]["deals"][deal]["touched_at"] = (dt.now(tz.utc) - td(days=3)).isoformat()
+    json.dump(raw, open(copilot.CRM_PATH, "w"))
+    board = post("/api/crm/board", {}).json()["crm"]
+    ok(board["deals"][deal]["rotten"], "three untouched days against a two-day limit rots")
+    post("/api/crm/deal", {"op": "note_add", "id": deal, "text": "spoke to Sarah"})
+    board2 = post("/api/crm/board", {}).json()["crm"]
+    ok(not board2["deals"][deal]["rotten"], "any touch, including a note, resets the rot")
+
+@test
+def t_a_stage_holding_open_deals_cannot_be_deleted():
+    _org, _per, deal = crm_seed()
+    stages = post("/api/crm/board", {}).json()["crm"]["stages"]
+    r = post("/api/crm/stages", {"stages": stages[1:]})   # drop s1, which holds the deal
+    eq(r.status_code, 400, r.text)
+    ok("Move them" in r.json()["error"], r.json()["error"])
+
+@test
+def t_a_lead_converts_into_a_deal_carrying_everything_and_leaves_the_inbox():
+    reset_crm()
+    org = post("/api/crm/contact", {"op": "org_add", "name": "Roundhouse"}).json()["id"]
+    lead = post("/api/crm/lead", {"op": "add", "org_id": org, "value": 900,
+                                  "label": "Hot"}).json()
+    lid = lead["id"]
+    eq(lead["crm"]["leads"][lid]["title"], "Roundhouse lead", "the title autofills from the org")
+    eq(lead["crm"]["new_leads"], 1, "a fresh lead counts as new until opened")
+    post("/api/crm/lead", {"op": "note_add", "id": lid, "text": "met at PLASA"})
+    conv = post("/api/crm/lead", {"op": "convert", "id": lid}).json()
+    did = conv["id"]
+    crm = conv["crm"]
+    ok(lid not in crm["leads"], "the lead leaves the inbox, no shadow record")
+    deal = crm["deals"][did]
+    eq(deal["value"], 900.0, "value carried")
+    eq(deal["label"], "Hot", "label carried")
+    ok(any("PLASA" in n["text"] for n in deal["notes"]), "notes carried")
+
+@test
+def t_weighted_value_follows_stage_probability_and_deal_probability_overrides():
+    _org, _per, deal = crm_seed()
+    stages = post("/api/crm/board", {}).json()["crm"]["stages"]
+    stages[0]["probability"] = 50
+    post("/api/crm/stages", {"stages": stages})
+    b = post("/api/crm/board", {}).json()["crm"]["deals"][deal]
+    eq(b["weighted_value"], 225.0, "stage probability halves the weighted value")
+    post("/api/crm/deal", {"op": "update", "id": deal, "probability": 10})
+    b2 = post("/api/crm/board", {}).json()["crm"]["deals"][deal]
+    eq(b2["weighted_value"], 45.0, "a deal-level probability overrides the stage's")
+
+@test
+def t_deleting_a_deal_is_a_restorable_bin_not_an_erase():
+    _org, _per, deal = crm_seed()
+    gone = post("/api/crm/deal", {"op": "delete", "id": deal}).json()["crm"]
+    ok(deal not in gone["deals"], "a deleted deal leaves the board")
+    eq(gone["trash"], 1, "but sits in the bin")
+    back = post("/api/crm/deal", {"op": "restore", "id": deal}).json()["crm"]
+    ok(deal in back["deals"], "and restores whole")
+
+@test
+def t_a_contact_on_open_deals_cannot_be_deleted():
+    _org, per, _deal = crm_seed()
+    r = post("/api/crm/contact", {"op": "person_delete", "id": per})
+    eq(r.status_code, 400, r.text)
+    ok("open deal" in r.json()["error"], r.json()["error"])
+
+
+@test
+def t_a_nonfinite_value_can_never_brick_the_crm_store():
+    # Python's json module happily WRITES NaN, which is not JSON, so the next
+    # read would poison the store and refuse every write forever. The cast
+    # rejects it and the writer refuses non-finite as a backstop.
+    _org, _per, deal = crm_seed()
+    for bad in ("NaN", "Infinity", "-Infinity"):
+        r = post("/api/crm/deal", {"op": "update", "id": deal, "value": bad})
+        eq(r.status_code, 200, r.text)   # the bad value is ignored, not stored
+    board = post("/api/crm/board", {})
+    eq(board.status_code, 200, "the store still reads")
+    eq(board.json()["crm"]["deals"][deal]["value"], 450.0, "and the value is untouched")
+    json.load(open(copilot.CRM_PATH))    # raises if anything non-JSON was written
+
+@test
+def t_reopening_into_a_deleted_stage_lands_on_a_live_one():
+    _org, _per, deal = crm_seed()
+    post("/api/crm/deal", {"op": "move", "id": deal, "stage_id": "s2"})
+    post("/api/crm/deal", {"op": "won", "id": deal})
+    stages = post("/api/crm/board", {}).json()["crm"]["stages"]
+    kept = [s for s in stages if s["id"] != "s2"]
+    eq(post("/api/crm/stages", {"stages": kept}).status_code, 200,
+       "a stage holding only closed deals may go")
+    back = post("/api/crm/deal", {"op": "reopen", "id": deal}).json()["crm"]["deals"][deal]
+    eq(back["stage_id"], "s1", "the reopened deal lands on a stage that exists")
+
+@test
+def t_rescheduling_an_activity_resets_rotting():
+    # Pipedrive's rule: ANY touch resets rot, and rescheduling the next call is
+    # exactly how a rotten deal gets worked.
+    _org, _per, deal = crm_seed()
+    aid = post("/api/crm/activity", {"op": "add", "type": "call", "deal_id": deal}).json()["id"]
+    stages = post("/api/crm/board", {}).json()["crm"]["stages"]
+    stages[0]["rot_days"] = 2
+    post("/api/crm/stages", {"stages": stages})
+    raw = json.load(open(copilot.CRM_PATH))
+    from datetime import datetime as dt, timedelta as td, timezone as tz
+    raw["crm"]["deals"][deal]["touched_at"] = (dt.now(tz.utc) - td(days=3)).isoformat()
+    json.dump(raw, open(copilot.CRM_PATH, "w"))
+    ok(post("/api/crm/board", {}).json()["crm"]["deals"][deal]["rotten"], "rotten before")
+    post("/api/crm/activity", {"op": "update", "id": aid, "due_date": "2030-01-01"})
+    ok(not post("/api/crm/board", {}).json()["crm"]["deals"][deal]["rotten"],
+       "a reschedule is a touch, so the rot resets")
+
+@test
+def t_evicting_a_capped_deal_takes_its_activities_with_it():
+    _org, _per, deal = crm_seed()
+    aid = post("/api/crm/activity", {"op": "add", "type": "call", "deal_id": deal,
+                                     "due_date": "2020-01-01"}).json()["id"]
+    post("/api/crm/deal", {"op": "won", "id": deal})
+    saved = copilot.CRM_DEALS_MAX
+    copilot.CRM_DEALS_MAX = 0        # force the cap eviction on the next write
+    try:
+        crm = post("/api/crm/contact", {"op": "org_add", "name": "Trigger"}).json()["crm"]
+        ok(deal not in crm["deals"], "the closed deal was evicted")
+        ok(aid not in crm["activities"], "and its activity went with it")
+        eq(crm["badge"], 0, "so no orphan inflates the badge")
+    finally:
+        copilot.CRM_DEALS_MAX = saved
 
 
 # ---- The app shell ----------------------------------------------------------

@@ -565,6 +565,86 @@
             background: var(--surface); border: 1px solid var(--border-2); border-radius: 8px;
             color: var(--ink); font: inherit; font-size: 13px; line-height: 1.55; padding: 10px 12px; }
         .lia-chase-body:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus); }
+        /* ------------------------------------------------------------------
+           CRM. The board is the Pipedrive silhouette: stage columns, cards
+           carrying the four-colour activity state, a drop bar that exists
+           only mid-drag, rotten deals tinted red as a whole card.
+           ------------------------------------------------------------------ */
+        .crm-board { display: flex; gap: 10px; overflow-x: auto; align-items: flex-start;
+            padding-bottom: 12px; min-height: 300px; }
+        .crm-col { min-width: 228px; width: 228px; flex: none; background: var(--surface-2);
+            border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+        .crm-col.dragover { border-color: var(--accent); background: var(--surface-3); }
+        .crm-col-name { font-size: 12px; font-weight: 600; color: var(--ink); padding: 2px 4px 0; }
+        .crm-col-sum { font-size: 11px; color: var(--ink-3); padding: 0 4px 8px; }
+        .crm-col-add { width: 100%; border: 1px dashed var(--border-2); background: none;
+            border-radius: 8px; color: var(--ink-3); font: inherit; font-size: 12px;
+            padding: 5px 0; cursor: pointer; }
+        .crm-col-add:hover { color: var(--accent); border-color: var(--accent); }
+        .crm-card { background: var(--surface); border: 1px solid var(--border-2); border-radius: 8px;
+            padding: 8px 10px; margin-bottom: 8px; cursor: grab; }
+        .crm-card:hover { border-color: var(--border-3); }
+        .crm-card.rotten { background: #fdf1f0; border-color: #efb9b3; }
+        .crm-card-t { font-size: 13px; font-weight: 600; color: var(--ink); }
+        .crm-card-who { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
+        .crm-card-bot { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 12px; }
+        .crm-card-val { font-weight: 600; }
+        .crm-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+        .crm-ai { margin-left: auto; display: inline-flex; }
+        .crm-ai svg { width: 14px; height: 14px; }
+        .crm-ai.overdue { color: #d92c20; }
+        .crm-ai.today { color: #108043; }
+        .crm-ai.none { color: #b98900; }
+        .crm-ai.future { color: var(--ink-3); }
+        .crm-dropbar { position: fixed; left: 0; right: 0; bottom: 0; display: none; gap: 10px;
+            padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--border);
+            box-shadow: 0 -4px 16px rgba(0,0,0,.08); z-index: 60; }
+        .crm-dropbar.show { display: flex; }
+        .crm-zone { flex: 1; text-align: center; padding: 16px 0; border-radius: 8px;
+            border: 2px dashed var(--border-3); font-weight: 600; font-size: 13px; color: var(--ink-2); }
+        .crm-zone.won { border-color: #108043; color: #108043; }
+        .crm-zone.lost { border-color: #d92c20; color: #d92c20; }
+        .crm-zone.dragover { background: var(--surface-3); }
+        .crm-badge { background: #d92c20; color: #fff; border-radius: 8px; font-size: 11px;
+            font-weight: 600; padding: 0 6px; margin-left: 6px; }
+        .crm-new-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+        .crm-chev { display: flex; gap: 2px; margin: 10px 0 4px; }
+        .crm-chev-s { flex: 1; padding: 7px 2px 6px; background: var(--surface-3); cursor: pointer;
+            font-size: 11px; text-align: center; color: var(--ink-2); white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis;
+            clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 50%, calc(100% - 7px) 100%, 0 100%, 7px 50%); }
+        .crm-chev-s:first-child { clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 50%, calc(100% - 7px) 100%, 0 100%); }
+        .crm-chev-s.done { background: var(--accent-soft, #e8e5fb); color: var(--accent); }
+        .crm-chev-s.on { background: var(--accent); color: #fff; font-weight: 600; }
+        .crm-chev-s.frozen { cursor: default; }
+        .crm-sub { font-size: 11px; color: var(--ink-3); }
+        .crm-act-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px;
+            border-bottom: 1px solid var(--line); font-size: 13px; }
+        .crm-act-row:last-child { border-bottom: 0; }
+        .crm-act-row.done .crm-act-sub { text-decoration: line-through; color: var(--ink-3); }
+        .crm-act-due.overdue { color: #d92c20; font-weight: 600; }
+        .crm-act-due.today { color: #108043; font-weight: 600; }
+        .crm-ticon { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border-2);
+            background: var(--surface); cursor: pointer; display: inline-flex; align-items: center;
+            justify-content: center; color: var(--ink-3); }
+        .crm-ticon svg { width: 15px; height: 15px; }
+        .crm-ticon.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft, #efecfd); }
+        .crm-prio { font-size: 11px; font-weight: 600; border-radius: 6px; padding: 1px 5px; }
+        .crm-prio.high { background: #fde8e6; color: #d92c20; }
+        .crm-prio.medium { background: #fdf3dd; color: #b98900; }
+        .crm-prio.low { background: var(--surface-3); color: var(--ink-3); }
+        .crm-bar-row { display: flex; align-items: center; gap: 10px; margin: 5px 0; font-size: 12px; }
+        .crm-bar-lab { width: 150px; flex: none; color: var(--ink-2); white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis; text-align: right; }
+        .crm-bar-track { flex: 1; background: var(--surface-3); border-radius: 6px; height: 16px; }
+        .crm-bar-fill { height: 100%; border-radius: 6px; background: var(--accent); min-width: 2px; }
+        .crm-bar-val { width: 90px; flex: none; font-weight: 600; }
+        .crm-focus { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 12px 0; }
+        .crm-hist-row { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+        .crm-hist-row:last-child { border-bottom: 0; }
+        .crm-hist-when { font-size: 11px; color: var(--ink-3); }
+        .crm-list-row { cursor: pointer; }
+        @media (max-width: 640px) { .crm-col { min-width: 200px; width: 200px; } }
         @media (max-width: 640px) { .disp-addr-grid { grid-template-columns: 1fr; } }
         .disp-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
             margin: 0 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
@@ -995,6 +1075,7 @@
                 <button class="nav-item" data-view="products" id="nav-products"></button>
                 <button class="nav-item" data-view="customers" id="nav-customers"></button>
                 <button class="nav-item" data-view="liability" id="nav-liability"></button>
+                <button class="nav-item" data-view="crm" id="nav-crm"></button>
                 <button class="nav-item" data-view="labels" id="nav-labels"></button>
                 <button class="nav-item" data-view="memory" id="nav-memory"></button>
                 <button class="nav-item" data-view="skills" id="nav-skills"></button>
@@ -1051,6 +1132,9 @@
             </section>
 
             <!-- Production labels -->
+            <section class="view" id="view-crm">
+                <div id="crm-content"></div>
+            </section>
             <section class="view" id="view-labels">
                 <div class="scroll"><div class="ov-wrap" id="labels-content"></div></div>
             </section>
@@ -1164,6 +1248,11 @@
         const SV = (inner) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
         const I = {
             copy: SV('<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>'),
+            phone: SV('<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>'),
+            cal: SV('<rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line>'),
+            clock: SV('<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>'),
+            flag: SV('<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line>'),
+            coffee: SV('<path d="M18 8h1a4 4 0 0 1 0 8h-1"></path><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path>'),
             spark: SV('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>'),
             grid: SV('<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>'),
             chat: SV('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>'),
@@ -1227,6 +1316,7 @@
         $('nav-products').append(ico(I.box), document.createTextNode('Products'));
         $('nav-customers').append(ico(I.users), document.createTextNode('Customers'));
         $('nav-liability').append(ico(I.spark), document.createTextNode('Liability'));
+        $('nav-crm').append(ico(I.users), document.createTextNode('CRM'));
         $('nav-labels').append(ico(I.printer), document.createTextNode('Production Manager'));
         $('nav-memory').append(ico(I.bookmark), document.createTextNode('Memory'));
         $('nav-skills').append(ico(I.book), document.createTextNode('Skills'));
@@ -6342,12 +6432,994 @@
             setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);
         }
 
+        /* ==================================================================
+           CRM. Modelled on Pipedrive because its design is one idea worth
+           copying: you cannot control whether a deal closes, only whether it
+           always has a next action. So a card wears one of four states
+           (overdue red, due-today green, NOTHING-SCHEDULED amber warning,
+           future grey), columns sort by that state, and completing a deal's
+           last open activity prompts scheduling the next. All data is local;
+           Shopify is read-only here and the AI never sees any of it.
+           ================================================================== */
+        let crmCache = null, crmSeg = 'deals', crmDealsMode = 'board';
+        let crmQ = '', crmStatus = 'open', crmLeadsMode = 'active', crmContactsMode = 'people';
+        let crmActPeriod = 'upcoming', crmActTypesOff = {};
+        const CRM_TYPES = [['call', 'Call'], ['meeting', 'Meeting'], ['task', 'Task'],
+                           ['deadline', 'Deadline'], ['email', 'Email'], ['lunch', 'Lunch']];
+        const crmTypeIcon = t => ({ call: I.phone, meeting: I.users, task: I.check,
+                                    deadline: I.flag, email: I.send, lunch: I.coffee }[t] || I.check);
+        const crmMoney = (n) => fmtPrice(n, 'GBP');
+        function crmPerson(id) { return (crmCache.persons || {})[id] || null; }
+        function crmOrg(id) { return (crmCache.orgs || {})[id] || null; }
+        function crmWho(d) {
+            const p = crmPerson(d.person_id), o = crmOrg(d.org_id);
+            return [p && p.name, o && o.name].filter(Boolean).join(' · ');
+        }
+        const CRM_LABEL_COLORS = { Hot: '#d92c20', Warm: '#b98900', Cold: '#2a6ecb' };
+
+        function showCRMView() {
+            if (crmCache) { renderCRM(); return; }
+            loadCRM();
+        }
+        async function loadCRM() {
+            const box = $('crm-content'); box.innerHTML = '';
+            const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Opening the sales desk…'));
+            box.append(t);
+            try {
+                const r = await api('/api/crm/board', {});
+                crmCache = r.crm;
+                renderCRM();
+            } catch (e) {
+                box.innerHTML = '';
+                box.append(el('div', 'msg error', e.message || 'Could not load the CRM.'));
+            }
+        }
+        async function crmOp(path, body) {
+            /* Every write returns the fresh state, so the UI never guesses. */
+            const r = await api(path, body);
+            if (r && r.crm) { crmCache = r.crm; }
+            return r;
+        }
+
+        function renderCRM() {
+            const box = $('crm-content'); box.innerHTML = '';
+            const d = crmCache;
+            const seg = el('div', 'lbl-seg');
+            [['leads', 'Leads'], ['deals', 'Deals'], ['activities', 'Activities'],
+             ['contacts', 'Contacts'], ['insights', 'Insights']].forEach(([k, lab]) => {
+                const b = el('button', 'lbl-segbtn' + (crmSeg === k ? ' on' : ''));
+                b.append(document.createTextNode(lab));
+                if (k === 'activities' && d.badge > 0) b.append(el('span', 'crm-badge', String(d.badge)));
+                if (k === 'leads' && d.new_leads > 0) b.append(el('span', 'crm-badge', String(d.new_leads)));
+                b.onclick = () => { crmSeg = k; renderCRM(); };
+                seg.append(b);
+            });
+            box.append(seg);
+            const host = el('div'); host.style.marginTop = '12px'; box.append(host);
+            if (crmSeg === 'deals') renderCRMDeals(host);
+            else if (crmSeg === 'activities') renderCRMActivities(host);
+            else if (crmSeg === 'contacts') renderCRMContacts(host);
+            else if (crmSeg === 'leads') renderCRMLeads(host);
+            else renderCRMInsights(host);
+        }
+
+        /* ---------------- deals: board and list ---------------- */
+        function crmVisibleDeals() {
+            const q = crmQ.toLowerCase();
+            return Object.values(crmCache.deals).filter(x => {
+                if (crmStatus !== 'all' && x.status !== crmStatus) return false;
+                if (!q) return true;
+                return (x.title + ' ' + crmWho(x)).toLowerCase().includes(q);
+            });
+        }
+        function renderCRMDeals(host) {
+            const d = crmCache;
+            const bar = el('div', 'lbl-toolbar');
+            const add = el('button', 'btn btn-primary'); add.append(ico(I.plus), document.createTextNode('Deal'));
+            add.onclick = () => crmDealForm();
+            bar.append(add);
+            const q = document.createElement('input');
+            q.type = 'search'; q.placeholder = 'Search deals…'; q.className = 'lbl-size'; q.value = crmQ;
+            q.oninput = () => { crmQ = q.value.trim(); paint(); };
+            bar.append(q);
+            const st = el('select', 'lbl-size');
+            [['open', 'Open deals'], ['won', 'Won deals'], ['lost', 'Lost deals'], ['all', 'Everything']]
+                .forEach(([v, l]) => { const o = el('option', null, l); o.value = v; if (crmStatus === v) o.selected = true; st.append(o); });
+            st.onchange = () => { crmStatus = st.value; paint(); };
+            bar.append(st);
+            const mode = el('button', 'btn');
+            mode.textContent = crmDealsMode === 'board' ? 'List' : 'Board';
+            mode.onclick = () => { crmDealsMode = crmDealsMode === 'board' ? 'list' : 'board'; renderCRM(); };
+            bar.append(mode);
+            const stagesBtn = el('button', 'btn'); stagesBtn.append(ico(I.settings), document.createTextNode('Stages'));
+            stagesBtn.onclick = crmStageEditor;
+            bar.append(stagesBtn);
+            host.append(bar);
+            const paintHost = el('div'); paintHost.style.marginTop = '10px'; host.append(paintHost);
+            function paint() {
+                paintHost.innerHTML = '';
+                if (crmDealsMode === 'board' && crmStatus === 'open') paintBoard(paintHost);
+                else paintList(paintHost);
+            }
+            paint();
+        }
+        function paintBoard(host) {
+            const d = crmCache;
+            const board = el('div', 'crm-board');
+            const rank = { overdue: 0, today: 1, none: 2, future: 3 };
+            const deals = crmVisibleDeals().filter(x => x.status === 'open');
+            d.stages.forEach(s => {
+                const col = el('div', 'crm-col');
+                const inStage = deals.filter(x => x.stage_id === s.id)
+                    .sort((a, b) => (rank[a.activity_state] - rank[b.activity_state])
+                        || String(a.next_activity || '9999').localeCompare(String(b.next_activity || '9999')));
+                const total = inStage.reduce((n, x) => n + (x.value || 0), 0);
+                const weighted = inStage.reduce((n, x) => n + (x.weighted_value || 0), 0);
+                col.append(el('div', 'crm-col-name', s.name));
+                // The Pipedrive header line: "sum · N deals", weighted shown only
+                // when a probability under 100 is in play.
+                col.append(el('div', 'crm-col-sum', crmMoney(total) + ' · ' + inStage.length
+                    + (inStage.length === 1 ? ' deal' : ' deals')
+                    + (Math.round(weighted) !== Math.round(total) ? ' · weighted ' + crmMoney(weighted) : '')));
+                col.dataset.stage = s.id;
+                col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('dragover'); });
+                col.addEventListener('dragleave', () => col.classList.remove('dragover'));
+                col.addEventListener('drop', async e => {
+                    e.preventDefault(); col.classList.remove('dragover');
+                    const id = e.dataTransfer.getData('text/deal');
+                    if (!id || (crmCache.deals[id] || {}).stage_id === s.id) return;
+                    try { await crmOp('/api/crm/deal', { op: 'move', id: id, stage_id: s.id }); renderCRM(); }
+                    catch (err) { toastError(err.message); }
+                });
+                inStage.forEach(x => col.append(crmCard(x)));
+                const qa = el('button', 'crm-col-add', '+ Deal');
+                qa.onclick = () => crmDealForm(null, s.id);
+                col.append(qa);
+                board.append(col);
+            });
+            host.append(board);
+            host.append(crmDropbar());
+        }
+        function crmCard(x) {
+            const card = el('div', 'crm-card' + (x.rotten ? ' rotten' : ''));
+            card.draggable = true;
+            card.title = x.rotten ? 'This deal has sat untouched past the stage limit' : '';
+            card.addEventListener('dragstart', e => {
+                e.dataTransfer.setData('text/deal', x.id);
+                document.querySelector('.crm-dropbar').classList.add('show');
+            });
+            card.addEventListener('dragend', () => document.querySelector('.crm-dropbar').classList.remove('show'));
+            card.append(el('div', 'crm-card-t', x.title));
+            const who = crmWho(x);
+            if (who) card.append(el('div', 'crm-card-who', who));
+            const bot = el('div', 'crm-card-bot');
+            bot.append(el('span', 'crm-card-val', crmMoney(x.value)));
+            if (x.label) { const dot = el('span', 'crm-dot'); dot.style.background = CRM_LABEL_COLORS[x.label] || 'var(--ink-3)'; dot.title = x.label; bot.append(dot); }
+            const ai = el('span', 'crm-ai ' + x.activity_state);
+            ai.append(ico(x.activity_state === 'none' ? I.warning : I.send));
+            ai.title = x.activity_state === 'none' ? 'No next activity scheduled'
+                : x.activity_state === 'overdue' ? 'Next activity is overdue: ' + fmtDate(x.next_activity)
+                : x.activity_state === 'today' ? 'Next activity is due today'
+                : 'Next activity ' + fmtDate(x.next_activity);
+            bot.append(ai);
+            card.append(bot);
+            card.onclick = () => crmDealModal(x.id);
+            return card;
+        }
+        function crmDropbar() {
+            /* Exists only mid-drag, pinned to the bottom: WON, LOST, DELETE. */
+            const bar = el('div', 'crm-dropbar');
+            [['won', 'WON'], ['lost', 'LOST'], ['delete', 'DELETE']].forEach(([k, lab]) => {
+                const z = el('div', 'crm-zone ' + k, lab);
+                z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('dragover'); });
+                z.addEventListener('dragleave', () => z.classList.remove('dragover'));
+                z.addEventListener('drop', async e => {
+                    e.preventDefault(); bar.classList.remove('show');
+                    const id = e.dataTransfer.getData('text/deal');
+                    if (!id) return;
+                    try {
+                        if (k === 'won') { await crmOp('/api/crm/deal', { op: 'won', id: id }); addToast('Deal won.'); }
+                        else if (k === 'lost') { crmLostPrompt(id); return; }
+                        else {
+                            if (!await uiConfirm('Delete this deal? It can be restored for 30 days.', { title: 'Delete deal', okText: 'Delete' })) { renderCRM(); return; }
+                            await crmOp('/api/crm/deal', { op: 'delete', id: id });
+                        }
+                        renderCRM();
+                    } catch (err) { toastError(err.message); }
+                });
+                bar.append(z);
+            });
+            return bar;
+        }
+        function paintList(host) {
+            const deals = crmVisibleDeals().sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+            if (!deals.length) { host.append(el('div', 'empty', 'No deals match.')); return; }
+            const wrap = el('div', 'ktable-wrap'); const tb = el('table', 'ktable');
+            tb.innerHTML = '<thead><tr><th>Deal</th><th>Contact</th><th class="num">Value</th>'
+                + '<th>Stage</th><th>Next activity</th><th>Status</th></tr></thead>';
+            const stages = {}; crmCache.stages.forEach(s => stages[s.id] = s.name);
+            const tbody = el('tbody');
+            deals.forEach(x => {
+                const tr = el('tr', 'crm-list-row');
+                tr.append(el('td', 'kw', x.title));
+                tr.append(el('td', null, crmWho(x)));
+                tr.append(el('td', 'num', crmMoney(x.value)));
+                tr.append(el('td', null, x.status === 'open' ? (stages[x.stage_id] || '') : ''));
+                tr.append(el('td', null, x.next_activity ? fmtDate(x.next_activity) : (x.status === 'open' ? 'none scheduled' : '')));
+                const stTd = el('td');
+                stTd.append(el('span', 'lbl-chip' + (x.status === 'won' ? ' made' : x.status === 'lost' ? ' bad' : ''), x.status.toUpperCase()));
+                tr.append(stTd);
+                tr.onclick = () => crmDealModal(x.id);
+                tbody.append(tr);
+            });
+            tb.append(tbody); wrap.append(tb); host.append(wrap);
+        }
+
+        /* ---------------- modal scaffolding ---------------- */
+        function crmModal(title) {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal disp-modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, title));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
+            const body = el('div', 'modal-body');
+            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+            const close = () => { overlay.remove(); if (document.querySelector('#view-crm.active')) renderCRM(); };
+            x.onclick = close;   /* the X is the only way out, as everywhere else */
+            return { body: body, close: close, head: head };
+        }
+        function crmField(host, label, input) {
+            const w = el('label', 'disp-addr-f');
+            w.append(el('span', 'disp-addr-lab', label), input);
+            host.append(w); return input;
+        }
+        function crmText(val, ph) {
+            const i = document.createElement('input');
+            i.type = 'text'; i.className = 'disp-text'; i.value = val || ''; i.placeholder = ph || '';
+            return i;
+        }
+
+        /* ---------------- add/edit deal ---------------- */
+        function crmDealForm(dealId, presetStage) {
+            const m = crmModal(dealId ? 'Edit deal' : 'New deal');
+            const d = crmCache; const deal = dealId ? d.deals[dealId] : null;
+            const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
+            /* Person and organisation with inline creation: typing an unknown
+               name creates it on save, the signature Pipedrive move. */
+            const personIn = crmText(deal && crmPerson(deal.person_id) ? crmPerson(deal.person_id).name : '', 'Type to search or create');
+            const orgIn = crmText(deal && crmOrg(deal.org_id) ? crmOrg(deal.org_id).name : '', 'Type to search or create');
+            const plist = document.createElement('datalist'); plist.id = 'crm-plist';
+            Object.values(d.persons).forEach(p => plist.append(new Option(p.name)));
+            const olist = document.createElement('datalist'); olist.id = 'crm-olist';
+            Object.values(d.orgs).forEach(o => olist.append(new Option(o.name)));
+            personIn.setAttribute('list', 'crm-plist'); orgIn.setAttribute('list', 'crm-olist');
+            m.body.append(plist, olist);
+            crmField(grid, 'Contact person', personIn);
+            crmField(grid, 'Organisation', orgIn);
+            const titleIn = crmText(deal ? deal.title : '', '');
+            let titleTouched = !!deal;
+            titleIn.oninput = () => { titleTouched = true; };
+            /* The title autofills "<Name> deal" from whoever was linked. */
+            function autofill() {
+                if (titleTouched) return;
+                const src = orgIn.value.trim() || personIn.value.trim();
+                titleIn.value = src ? src + ' deal' : '';
+            }
+            personIn.addEventListener('input', autofill); orgIn.addEventListener('input', autofill);
+            crmField(grid, 'Title', titleIn);
+            const valIn = crmText(deal ? String(deal.value) : '', '0');
+            valIn.type = 'number'; valIn.min = '0'; valIn.step = '0.01';
+            crmField(grid, 'Value (£)', valIn);
+            const closeIn = crmText(deal ? deal.expected_close : '', '');
+            closeIn.type = 'date';
+            crmField(grid, 'Expected close date', closeIn);
+            const labSel = el('select', 'disp-text');
+            labSel.append(new Option('No label', ''));
+            d.labels.forEach(l => labSel.append(new Option(l, l)));
+            if (deal && deal.label) labSel.value = deal.label;
+            crmField(grid, 'Label', labSel);
+            /* Stage picker as the chevron bar, defaulting to the first stage. */
+            let stageSel = (deal && deal.stage_id) || presetStage || (d.stages[0] || {}).id;
+            const chev = el('div', 'crm-chev');
+            function paintChev() {
+                chev.innerHTML = '';
+                let reached = true;
+                d.stages.forEach(s => {
+                    const seg = el('div', 'crm-chev-s' + (s.id === stageSel ? ' on' : reached ? ' done' : ''), s.name);
+                    if (s.id === stageSel) reached = false;
+                    seg.onclick = () => { stageSel = s.id; paintChev(); };
+                    chev.append(seg);
+                });
+            }
+            paintChev();
+            m.body.append(chev);
+            const bar = el('div', 'disp-actions');
+            const save = el('button', 'btn btn-primary', dealId ? 'Save' : 'Add deal');
+            save.onclick = async () => {
+                save.disabled = true;
+                try {
+                    /* Two rules learned the hard way. The currently linked
+                       contact wins while its name is unchanged, because two
+                       contacts can share a name and a lookup here silently
+                       relinked deals to the wrong namesake. And the lookup runs
+                       against crmCache, not the snapshot from when the form
+                       opened, so a retry after a failed save finds the contact
+                       it already created instead of creating another. */
+                    const curP = deal ? crmPerson(deal.person_id) : null;
+                    const curO = deal ? crmOrg(deal.org_id) : null;
+                    const pn = personIn.value.trim(), on = orgIn.value.trim();
+                    let orgId;
+                    if (!on) orgId = '';
+                    else if (curO && on === curO.name) orgId = deal.org_id;
+                    else {
+                        const f = Object.values(crmCache.orgs).find(o => o.name.toLowerCase() === on.toLowerCase());
+                        orgId = f ? f.id : (await crmOp('/api/crm/contact', { op: 'org_add', name: on })).id;
+                    }
+                    let personId;
+                    if (!pn) personId = '';
+                    else if (curP && pn === curP.name) personId = deal.person_id;
+                    else {
+                        const f = Object.values(crmCache.persons).find(p => p.name.toLowerCase() === pn.toLowerCase());
+                        personId = f ? f.id : (await crmOp('/api/crm/contact', { op: 'person_add', name: pn, org_id: orgId })).id;
+                    }
+                    if (dealId) {
+                        await crmOp('/api/crm/deal', { op: 'update', id: dealId, title: titleIn.value.trim(),
+                            value: valIn.value, expected_close: closeIn.value, label: labSel.value,
+                            person_id: personId, org_id: orgId });
+                        if (stageSel !== deal.stage_id) await crmOp('/api/crm/deal', { op: 'move', id: dealId, stage_id: stageSel });
+                        m.close();
+                    } else {
+                        const r = await crmOp('/api/crm/deal', { op: 'add', title: titleIn.value.trim(),
+                            value: valIn.value, expected_close: closeIn.value, label: labSel.value,
+                            person_id: personId, org_id: orgId, stage_id: stageSel });
+                        m.close(); crmDealModal(r.id);
+                    }
+                } catch (e) { save.disabled = false; toastError(e.message); }
+            };
+            bar.append(save); m.body.append(bar);
+        }
+
+        function crmLostPrompt(dealId) {
+            const m = crmModal('Mark as lost');
+            m.body.append(el('p', 'field-help', 'Lost is an outcome, not a deletion: the deal keeps its '
+                + 'history and the reason feeds the Insights view.'));
+            const sel = el('select', 'disp-text');
+            crmCache.lost_reasons.forEach(r => sel.append(new Option(r, r)));
+            const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
+            crmField(grid, 'Reason', sel);
+            const com = crmText('', 'Optional comment');
+            crmField(grid, 'Comment', com);
+            const bar = el('div', 'disp-actions');
+            const go = el('button', 'btn btn-primary', 'Mark as lost');
+            go.onclick = async () => {
+                go.disabled = true;
+                try { await crmOp('/api/crm/deal', { op: 'lost', id: dealId, reason: sel.value, comment: com.value.trim() }); m.close(); }
+                catch (e) { go.disabled = false; toastError(e.message); }
+            };
+            bar.append(go); m.body.append(bar);
+        }
+
+        /* ---------------- the deal detail ---------------- */
+        function crmDealModal(dealId) {
+            const x = crmCache.deals[dealId];
+            if (!x) return;
+            const m = crmModal(x.title);
+            paintDeal(m, dealId);
+        }
+        function paintDeal(m, dealId) {
+            const d = crmCache, x = d.deals[dealId];
+            if (!x) { m.close(); return; }
+            m.body.innerHTML = '';
+            /* Status row: value, weighted, chips, won/lost/reopen. */
+            const top = el('div', 'lbl-toolbar');
+            top.append(el('b', null, crmMoney(x.value)));
+            if (x.effective_probability !== 100)
+                top.append(el('span', 'crm-sub', x.effective_probability + '% · weighted ' + crmMoney(x.weighted_value)));
+            if (x.label) top.append(el('span', 'lbl-chip', x.label.toUpperCase()));
+            if (x.rotten) top.append(el('span', 'lbl-chip bad', 'ROTTING'));
+            if (x.status === 'open') {
+                const won = el('button', 'btn btn-primary', 'Won');
+                won.onclick = async () => { try { await crmOp('/api/crm/deal', { op: 'won', id: dealId }); paintDeal(m, dealId); } catch (e) { toastError(e.message); } };
+                const lost = el('button', 'btn', 'Lost');
+                lost.onclick = () => { m.close(); crmLostPrompt(dealId); };
+                const edit = el('button', 'btn'); edit.append(ico(I.edit), document.createTextNode('Edit'));
+                edit.onclick = () => { m.close(); crmDealForm(dealId); };
+                top.append(won, lost, edit);
+            } else {
+                top.append(el('span', 'lbl-chip' + (x.status === 'won' ? ' made' : ' bad'), x.status.toUpperCase()
+                    + (x.status === 'lost' && x.lost_reason ? ': ' + x.lost_reason : '')));
+                const re = el('button', 'btn', 'Reopen');
+                re.onclick = async () => { try { await crmOp('/api/crm/deal', { op: 'reopen', id: dealId }); paintDeal(m, dealId); } catch (e) { toastError(e.message); } };
+                top.append(re);
+            }
+            m.body.append(top);
+            /* The chevron progress bar: click a segment to move stage; frozen
+               once the deal is closed. Days in the current stage ride along. */
+            let reached = true;
+            const chev = el('div', 'crm-chev');
+            d.stages.forEach(s => {
+                const cls = s.id === x.stage_id ? ' on' : (reached ? ' done' : '');
+                const seg = el('div', 'crm-chev-s' + cls + (x.status !== 'open' ? ' frozen' : ''), s.name);
+                if (s.id === x.stage_id) reached = false;
+                if (x.status === 'open' && s.id !== x.stage_id) {
+                    seg.onclick = async () => {
+                        try { await crmOp('/api/crm/deal', { op: 'move', id: dealId, stage_id: s.id }); paintDeal(m, dealId); }
+                        catch (e) { toastError(e.message); }
+                    };
+                }
+                chev.append(seg);
+            });
+            m.body.append(chev);
+            const inStage = Math.max(0, Math.floor((Date.now() - Date.parse(x.stage_entered_at || x.created_at)) / 86400000));
+            m.body.append(el('div', 'crm-sub', crmWho(x) + (crmWho(x) ? ' · ' : '')
+                + inStage + (inStage === 1 ? ' day' : ' days') + ' in this stage'
+                + (x.expected_close ? ' · expected close ' + fmtDate(x.expected_close) : '')));
+            /* Shopify card: live order history for the linked customer. */
+            const p = crmPerson(x.person_id);
+            if (p && p.shopify_customer_id) {
+                const sc = el('div', 'crm-focus');
+                sc.append(el('div', 'disp-subhead', 'Shopify'));
+                const line = el('div', 'crm-sub', 'Reading order history…'); sc.append(line);
+                api('/api/customer-history', { customer_id: p.shopify_customer_id }).then(h => {
+                    line.textContent = (h.count || 0) + ' orders on record'
+                        + ((h.recent || [])[0] ? ' · latest ' + h.recent[0].name + ' (' + fmtDate(h.recent[0].created_at) + ')' : '');
+                }).catch(() => { line.textContent = 'Order history unavailable.'; });
+                m.body.append(sc);
+            }
+            /* Composer: a note, or the inline activity scheduler. */
+            const comp = el('div', 'crm-focus');
+            comp.append(el('div', 'disp-subhead', 'Add'));
+            const ta = document.createElement('textarea');
+            ta.className = 'lia-chase-body'; ta.rows = 2; ta.placeholder = 'A note about this deal…';
+            comp.append(ta);
+            const cbar = el('div', 'disp-actions');
+            const noteBtn = el('button', 'btn', 'Save note');
+            noteBtn.onclick = async () => {
+                if (!ta.value.trim()) return;
+                try { await crmOp('/api/crm/deal', { op: 'note_add', id: dealId, text: ta.value.trim() }); paintDeal(m, dealId); }
+                catch (e) { toastError(e.message); }
+            };
+            const actBtn = el('button', 'btn btn-primary'); actBtn.append(ico(I.cal), document.createTextNode('Schedule activity'));
+            actBtn.onclick = () => crmActivityForm({ deal_id: dealId }, () => paintDeal(m, dealId));
+            cbar.append(actBtn, noteBtn); comp.append(cbar); m.body.append(comp);
+            /* Focus: what still needs doing. History below: what happened. */
+            const open = Object.values(d.activities)
+                .filter(a => a.deal_id === dealId && !a.done)
+                .sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
+            if (open.length) {
+                const f = el('div', 'crm-focus');
+                f.append(el('div', 'disp-subhead', 'Focus'));
+                open.forEach(a => f.append(crmActRow(a, () => paintDeal(m, dealId))));
+                m.body.append(f);
+            }
+            const hist = el('div', 'crm-focus');
+            hist.append(el('div', 'disp-subhead', 'History'));
+            const done = Object.values(d.activities).filter(a => a.deal_id === dealId && a.done)
+                .map(a => ({ at: a.done_at || a.updated_at, node: () => {
+                    const r = el('div', 'crm-hist-row');
+                    r.append(ico(crmTypeIcon(a.type)), document.createTextNode(' ' + a.subject + ' '));
+                    r.append(el('span', 'lbl-chip made', 'DONE'));
+                    r.append(el('div', 'crm-hist-when', 'was due ' + fmtDate(a.due_date)));
+                    return r; } }));
+            const notes = (x.notes || []).map(n => ({ at: n.at, node: () => {
+                const r = el('div', 'crm-hist-row');
+                r.append(document.createTextNode(n.text));
+                const w = el('div', 'crm-hist-when', fmtDate(n.at));
+                const del = el('a', 'miss-open', 'Delete');
+                del.onclick = async () => { try { await crmOp('/api/crm/deal', { op: 'note_del', id: dealId, note_id: n.id }); paintDeal(m, dealId); } catch (e) { toastError(e.message); } };
+                w.append(document.createTextNode(' · ')); w.append(del);
+                r.append(w); return r; } }));
+            const log = (x.changelog || []).map(c => ({ at: c.at, node: () => {
+                const r = el('div', 'crm-hist-row');
+                r.append(el('span', 'crm-sub', c.field === 'created' ? 'Deal created'
+                    : c.field + ': ' + (c.from || 'none') + ' → ' + (c.to || 'none')));
+                r.append(el('div', 'crm-hist-when', fmtDate(c.at)));
+                return r; } }));
+            const rows = done.concat(notes, log).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+            if (!rows.length) hist.append(el('div', 'crm-sub', 'Nothing yet.'));
+            rows.slice(0, 40).forEach(r => hist.append(r.node()));
+            m.body.append(hist);
+        }
+        function crmActRow(a, refresh) {
+            const r = el('div', 'crm-act-row' + (a.done ? ' done' : ''));
+            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!a.done;
+            cb.onchange = async () => {
+                try {
+                    const res = await crmOp('/api/crm/activity', { op: a.done ? 'undone' : 'done', id: a.id });
+                    refresh();
+                    /* The follow-up prompt: completing a deal's LAST open activity
+                       opens a fresh scheduler pre-linked to that deal. It nags,
+                       it never blocks: closing it is always allowed. */
+                    if (res.followup_deal_id) crmActivityForm({ deal_id: res.followup_deal_id, followup: true }, refresh);
+                } catch (e) { toastError(e.message); }
+            };
+            r.append(cb, ico(crmTypeIcon(a.type)));
+            const mid = el('div'); mid.style.flex = '1';
+            mid.append(el('div', 'crm-act-sub', a.subject));
+            const bits = [];
+            if (a.deal_id && crmCache.deals[a.deal_id]) bits.push(crmCache.deals[a.deal_id].title);
+            const sub = el('span', 'crm-sub', bits.join(' · '));
+            mid.append(sub); r.append(mid);
+            if (a.priority) r.append(el('span', 'crm-prio ' + a.priority, a.priority.toUpperCase()));
+            r.append(el('span', 'crm-act-due ' + a.state, a.due_date ? fmtDate(a.due_date) : ''));
+            return r;
+        }
+
+        /* ---------------- activity form ---------------- */
+        function crmActivityForm(preset, onDone) {
+            const m = crmModal(preset.followup ? 'Schedule the next activity' : 'Schedule activity');
+            if (preset.followup) m.body.append(el('p', 'field-help',
+                'That was the last open activity on this deal. A deal without a next step goes quiet, '
+                + 'so schedule the next one now, or close this window if the deal is done with.'));
+            let type = 'call';
+            const row = el('div', 'lbl-toolbar');
+            const subjIn = crmText('Call', '');
+            let subjTouched = false;
+            CRM_TYPES.forEach(([k, lab]) => {
+                const b = el('button', 'crm-ticon' + (type === k ? ' on' : ''));
+                b.append(ico(crmTypeIcon(k))); b.title = lab;
+                b.onclick = () => {
+                    type = k;
+                    row.querySelectorAll('.crm-ticon').forEach(n => n.classList.remove('on'));
+                    b.classList.add('on');
+                    if (!subjTouched) subjIn.value = lab;   /* the two-click activity */
+                };
+                row.append(b);
+            });
+            m.body.append(row);
+            subjIn.oninput = () => { subjTouched = true; };
+            const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
+            crmField(grid, 'Subject', subjIn);
+            const dateIn = crmText(crmCache.today, ''); dateIn.type = 'date';
+            crmField(grid, 'Due date', dateIn);
+            const timeIn = crmText('', ''); timeIn.type = 'time';
+            crmField(grid, 'Time (optional)', timeIn);
+            const prioSel = el('select', 'disp-text');
+            [['', 'No priority'], ['high', 'High'], ['medium', 'Medium'], ['low', 'Low']]
+                .forEach(([v, l]) => prioSel.append(new Option(l, v)));
+            crmField(grid, 'Priority', prioSel);
+            const dealSel = el('select', 'disp-text');
+            dealSel.append(new Option('No linked deal', ''));
+            Object.values(crmCache.deals).filter(x => x.status === 'open')
+                .forEach(x => dealSel.append(new Option(x.title, x.id)));
+            if (preset.deal_id) {
+                /* A closed deal is not in the open list, but an activity
+                   scheduled FROM its modal must not silently lose the link. */
+                if (![...dealSel.options].some(o => o.value === preset.deal_id)) {
+                    const px = crmCache.deals[preset.deal_id];
+                    if (px) dealSel.append(new Option(px.title + ' (' + px.status + ')', px.id));
+                }
+                dealSel.value = preset.deal_id;
+            }
+            crmField(grid, 'Deal', dealSel);
+            const noteIn = crmText('', 'Optional note');
+            crmField(grid, 'Note', noteIn);
+            const bar = el('div', 'disp-actions');
+            const save = el('button', 'btn btn-primary', 'Save');
+            save.onclick = async () => {
+                save.disabled = true;
+                try {
+                    await crmOp('/api/crm/activity', { op: 'add', type: type, subject: subjIn.value.trim(),
+                        due_date: dateIn.value, due_time: timeIn.value, priority: prioSel.value,
+                        deal_id: dealSel.value, note: noteIn.value.trim() });
+                    m.close(); if (onDone) onDone();
+                } catch (e) { save.disabled = false; toastError(e.message); }
+            };
+            bar.append(save); m.body.append(bar);
+        }
+
+        /* ---------------- activities segment ---------------- */
+        function renderCRMActivities(host) {
+            const bar = el('div', 'lbl-toolbar');
+            const add = el('button', 'btn btn-primary'); add.append(ico(I.plus), document.createTextNode('Activity'));
+            add.onclick = () => crmActivityForm({}, renderCRM);
+            bar.append(add);
+            /* Type toggles: lit means included, exactly the Pipedrive read. */
+            CRM_TYPES.forEach(([k, lab]) => {
+                const b = el('button', 'crm-ticon' + (crmActTypesOff[k] ? '' : ' on'));
+                b.append(ico(crmTypeIcon(k))); b.title = lab;
+                b.onclick = () => { crmActTypesOff[k] = !crmActTypesOff[k]; renderCRM(); };
+                bar.append(b);
+            });
+            [['upcoming', 'To do'], ['overdue', 'Overdue'], ['today', 'Today'],
+             ['week', 'This week'], ['done', 'Done']].forEach(([k, lab]) => {
+                const b = el('button', 'lbl-segbtn' + (crmActPeriod === k ? ' on' : ''), lab);
+                b.style.flex = 'none';
+                b.onclick = () => { crmActPeriod = k; renderCRM(); };
+                bar.append(b);
+            });
+            host.append(bar);
+            const list = el('div'); list.style.marginTop = '8px'; host.append(list);
+            const today = crmCache.today;
+            const weekEnd = new Date(Date.parse(today) + 6 * 86400000).toISOString().slice(0, 10);
+            let acts = Object.values(crmCache.activities).filter(a => !crmActTypesOff[a.type]);
+            if (crmActPeriod === 'done') acts = acts.filter(a => a.done);
+            else {
+                acts = acts.filter(a => !a.done);
+                if (crmActPeriod === 'overdue') acts = acts.filter(a => a.state === 'overdue');
+                else if (crmActPeriod === 'today') acts = acts.filter(a => a.state === 'today' || a.state === 'overdue');
+                else if (crmActPeriod === 'week') acts = acts.filter(a => a.due_date <= weekEnd);
+            }
+            acts.sort((a, b) => crmActPeriod === 'done'
+                ? String(b.done_at).localeCompare(String(a.done_at))
+                : String(a.due_date).localeCompare(String(b.due_date)));
+            if (!acts.length) {
+                list.append(el('div', 'empty', crmActPeriod === 'done' ? 'Nothing completed yet.'
+                    : 'Nothing here. A quiet desk, or deals with no next step: check the amber cards.'));
+                return;
+            }
+            acts.slice(0, 200).forEach(a => list.append(crmActRow(a, renderCRM)));
+        }
+
+        /* ---------------- contacts ---------------- */
+        function renderCRMContacts(host) {
+            const bar = el('div', 'lbl-toolbar');
+            [['people', 'People'], ['orgs', 'Organisations']].forEach(([k, lab]) => {
+                const b = el('button', 'lbl-segbtn' + (crmContactsMode === k ? ' on' : ''), lab);
+                b.style.flex = 'none';
+                b.onclick = () => { crmContactsMode = k; renderCRM(); };
+                bar.append(b);
+            });
+            const add = el('button', 'btn btn-primary');
+            add.append(ico(I.plus), document.createTextNode(crmContactsMode === 'people' ? 'Person' : 'Organisation'));
+            add.onclick = () => crmContactForm(crmContactsMode === 'people' ? 'person' : 'org');
+            bar.append(add);
+            host.append(bar);
+            const list = el('div'); list.style.marginTop = '8px'; host.append(list);
+            const items = Object.values(crmContactsMode === 'people' ? crmCache.persons : crmCache.orgs)
+                .sort((a, b) => a.name.localeCompare(b.name));
+            if (!items.length) { list.append(el('div', 'empty', 'Nobody here yet.')); return; }
+            items.forEach(c => {
+                const row = el('div', 'lbl-row');
+                row.setAttribute('role', 'button'); row.tabIndex = 0;
+                const left = el('div', 'lia-name', c.name);
+                row.append(left);
+                const mid = el('div', 'lbl-who');
+                const deals = Object.values(crmCache.deals).filter(x =>
+                    (crmContactsMode === 'people' ? x.person_id : x.org_id) === c.id);
+                const openD = deals.filter(x => x.status === 'open').length;
+                const bits = [];
+                if (crmContactsMode === 'people' && c.org_id && crmOrg(c.org_id)) bits.push(crmOrg(c.org_id).name);
+                if (crmContactsMode === 'people' && (c.emails || [])[0]) bits.push(c.emails[0]);
+                bits.push(deals.length + (deals.length === 1 ? ' deal' : ' deals')
+                    + (openD ? ' (' + openD + ' open)' : ''));
+                if (c.shopify_customer_id) bits.push('Shopify linked');
+                mid.append(el('span', 'sub', bits.join(' · ')));
+                row.append(mid);
+                row.onclick = () => crmContactForm(crmContactsMode === 'people' ? 'person' : 'org', c.id);
+                list.append(row);
+            });
+        }
+        function crmContactForm(kind, id) {
+            const existing = id ? (kind === 'person' ? crmCache.persons[id] : crmCache.orgs[id]) : null;
+            const m = crmModal(existing ? existing.name : (kind === 'person' ? 'New person' : 'New organisation'));
+            const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
+            const nameIn = crmText(existing ? existing.name : '', '');
+            crmField(grid, 'Name', nameIn);
+            let emailIn, phoneIn, orgIn, addrIn;
+            if (kind === 'person') {
+                emailIn = crmText(existing ? (existing.emails || [])[0] || '' : '', '');
+                crmField(grid, 'Email', emailIn);
+                phoneIn = crmText(existing ? (existing.phones || [])[0] || '' : '', '');
+                crmField(grid, 'Phone', phoneIn);
+                orgIn = crmText(existing && crmOrg(existing.org_id) ? crmOrg(existing.org_id).name : '', 'Type to search or create');
+                orgIn.setAttribute('list', 'crm-olist2');
+                const ol = document.createElement('datalist'); ol.id = 'crm-olist2';
+                Object.values(crmCache.orgs).forEach(o => ol.append(new Option(o.name)));
+                m.body.append(ol);
+                crmField(grid, 'Organisation', orgIn);
+            } else {
+                addrIn = crmText(existing ? existing.address : '', '');
+                crmField(grid, 'Address', addrIn);
+            }
+            /* The Shopify link: search live customers, one click to attach. */
+            let shopifyId = existing ? existing.shopify_customer_id : null;
+            if (kind === 'person') {
+                const sWrap = el('div', 'crm-focus');
+                sWrap.append(el('div', 'disp-subhead', 'Shopify customer'));
+                const status = el('div', 'crm-sub', shopifyId ? 'Linked (customer ' + shopifyId + ')' : 'Not linked');
+                const sIn = crmText('', 'Search your Shopify customers…');
+                const results = el('div');
+                let timer = null;
+                sIn.oninput = () => {
+                    clearTimeout(timer);
+                    timer = setTimeout(async () => {
+                        results.innerHTML = '';
+                        if (!sIn.value.trim()) return;
+                        try {
+                            const r = await api('/api/crm/contact', { op: 'shopify_search', q: sIn.value.trim() });
+                            (r.matches || []).forEach(c2 => {
+                                const b = el('button', 'btn');
+                                b.style.margin = '4px 4px 0 0';
+                                b.textContent = c2.name + (c2.company ? ' · ' + c2.company : '') + ' (' + (c2.orders || 0) + ' orders)';
+                                b.onclick = () => { shopifyId = c2.id; status.textContent = 'Will link to ' + c2.name; };
+                                results.append(b);
+                            });
+                            if (!(r.matches || []).length) results.append(el('div', 'crm-sub', 'No matches.'));
+                        } catch (e) { results.append(el('div', 'crm-sub', e.message)); }
+                    }, 350);
+                };
+                sWrap.append(status, sIn, results); m.body.append(sWrap);
+            }
+            const bar = el('div', 'disp-actions');
+            const save = el('button', 'btn btn-primary', existing ? 'Save' : 'Add');
+            save.onclick = async () => {
+                save.disabled = true;
+                try {
+                    if (kind === 'person') {
+                        let orgId = existing ? existing.org_id : '';
+                        const on = orgIn.value.trim();
+                        const foundO = Object.values(crmCache.orgs).find(o => o.name.toLowerCase() === on.toLowerCase());
+                        if (on && !foundO) orgId = (await crmOp('/api/crm/contact', { op: 'org_add', name: on })).id;
+                        else if (foundO) orgId = foundO.id; else if (!on) orgId = '';
+                        if (existing) {
+                            await crmOp('/api/crm/contact', { op: 'person_update', id: id, name: nameIn.value.trim(),
+                                org_id: orgId, emails: [emailIn.value.trim()].filter(Boolean),
+                                phones: [phoneIn.value.trim()].filter(Boolean) });
+                            if (shopifyId !== existing.shopify_customer_id)
+                                await crmOp('/api/crm/contact', { op: 'link_shopify', id: id, shopify_customer_id: shopifyId });
+                        } else {
+                            await crmOp('/api/crm/contact', { op: 'person_add', name: nameIn.value.trim(),
+                                org_id: orgId, emails: [emailIn.value.trim()].filter(Boolean),
+                                phones: [phoneIn.value.trim()].filter(Boolean), shopify_customer_id: shopifyId });
+                        }
+                    } else {
+                        if (existing) await crmOp('/api/crm/contact', { op: 'org_update', id: id, name: nameIn.value.trim(), address: addrIn.value.trim() });
+                        else await crmOp('/api/crm/contact', { op: 'org_add', name: nameIn.value.trim(), address: addrIn.value.trim() });
+                    }
+                    m.close();
+                } catch (e) { save.disabled = false; toastError(e.message); }
+            };
+            bar.append(save);
+            if (existing) {
+                const del = el('button', 'btn', 'Delete');
+                del.onclick = async () => {
+                    if (!await uiConfirm('Delete ' + existing.name + '?', { title: 'Delete', okText: 'Delete' })) return;
+                    try { await crmOp('/api/crm/contact', { op: kind === 'person' ? 'person_delete' : 'org_delete', id: id }); m.close(); }
+                    catch (e) { toastError(e.message); }
+                };
+                bar.append(del);
+            }
+            m.body.append(bar);
+        }
+
+        /* ---------------- leads inbox ---------------- */
+        function renderCRMLeads(host) {
+            const bar = el('div', 'lbl-toolbar');
+            const add = el('button', 'btn btn-primary'); add.append(ico(I.plus), document.createTextNode('Lead'));
+            add.onclick = () => crmLeadForm();
+            bar.append(add);
+            [['active', 'Inbox'], ['archived', 'Archive']].forEach(([k, lab]) => {
+                const b = el('button', 'lbl-segbtn' + (crmLeadsMode === k ? ' on' : ''), lab);
+                b.style.flex = 'none';
+                b.onclick = () => { crmLeadsMode = k; renderCRM(); };
+                bar.append(b);
+            });
+            host.append(bar);
+            host.append(el('p', 'field-help', 'A lead is an enquiry that is not yet a deal: it waits '
+                + 'here so the pipeline holds only real, qualified work. Convert it when it firms up.'));
+            const list = el('div'); host.append(list);
+            const leads = Object.values(crmCache.leads)
+                .filter(l => (crmLeadsMode === 'archived') === !!l.archived)
+                .sort((a, b) => (a.seen === b.seen ? String(b.created_at).localeCompare(String(a.created_at)) : (a.seen ? 1 : -1)));
+            if (!leads.length) { list.append(el('div', 'empty', crmLeadsMode === 'archived' ? 'Nothing archived.' : 'The inbox is clear.')); return; }
+            leads.forEach(l => {
+                const row = el('div', 'lbl-row');
+                row.setAttribute('role', 'button'); row.tabIndex = 0;
+                const left = el('div', 'lia-name');
+                if (!l.seen && !l.archived) left.append(el('span', 'crm-new-dot'));
+                const t = el('span', null, ' ' + l.title);
+                if (!l.seen && !l.archived) t.style.fontWeight = '600';
+                left.append(t); row.append(left);
+                const mid = el('div', 'lbl-who');
+                const bits = [];
+                if (l.value) bits.push(crmMoney(l.value));
+                const who = crmWho(l); if (who) bits.push(who);
+                bits.push(fmtDate(l.created_at));
+                mid.append(el('span', 'sub', bits.join(' · ')));
+                if (l.label) mid.append(el('span', 'lbl-chip', l.label.toUpperCase()));
+                row.append(mid);
+                row.onclick = () => crmLeadModal(l.id);
+                list.append(row);
+            });
+        }
+        function crmLeadForm() {
+            const m = crmModal('New lead');
+            const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
+            const personIn = crmText('', 'Type to search or create');
+            const orgIn = crmText('', 'Type to search or create');
+            personIn.setAttribute('list', 'crm-plist3'); orgIn.setAttribute('list', 'crm-olist3');
+            const pl = document.createElement('datalist'); pl.id = 'crm-plist3';
+            Object.values(crmCache.persons).forEach(p => pl.append(new Option(p.name)));
+            const ol = document.createElement('datalist'); ol.id = 'crm-olist3';
+            Object.values(crmCache.orgs).forEach(o => ol.append(new Option(o.name)));
+            m.body.append(pl, ol);
+            crmField(grid, 'Contact person', personIn);
+            crmField(grid, 'Organisation', orgIn);
+            const titleIn = crmText('', 'Autofills from the contact');
+            crmField(grid, 'Title', titleIn);
+            const valIn = crmText('', '0'); valIn.type = 'number'; valIn.min = '0';
+            crmField(grid, 'Value (£)', valIn);
+            const labSel = el('select', 'disp-text');
+            labSel.append(new Option('No label', ''));
+            crmCache.labels.forEach(l => labSel.append(new Option(l, l)));
+            crmField(grid, 'Label', labSel);
+            const bar = el('div', 'disp-actions');
+            const save = el('button', 'btn btn-primary', 'Add lead');
+            save.onclick = async () => {
+                save.disabled = true;
+                try {
+                    let personId = '', orgId = '';
+                    const pn = personIn.value.trim(), on = orgIn.value.trim();
+                    const foundP = Object.values(crmCache.persons).find(p => p.name.toLowerCase() === pn.toLowerCase());
+                    const foundO = Object.values(crmCache.orgs).find(o => o.name.toLowerCase() === on.toLowerCase());
+                    if (on && !foundO) orgId = (await crmOp('/api/crm/contact', { op: 'org_add', name: on })).id;
+                    else if (foundO) orgId = foundO.id;
+                    if (pn && !foundP) personId = (await crmOp('/api/crm/contact', { op: 'person_add', name: pn, org_id: orgId })).id;
+                    else if (foundP) personId = foundP.id;
+                    await crmOp('/api/crm/lead', { op: 'add', title: titleIn.value.trim(),
+                        value: valIn.value, label: labSel.value, person_id: personId, org_id: orgId });
+                    m.close();
+                } catch (e) { save.disabled = false; toastError(e.message); }
+            };
+            bar.append(save); m.body.append(bar);
+        }
+        function crmLeadModal(leadId) {
+            const l = crmCache.leads[leadId];
+            if (!l) return;
+            if (!l.seen) crmOp('/api/crm/lead', { op: 'seen', id: leadId }).catch(() => {});
+            const m = crmModal(l.title);
+            const bits = [];
+            if (l.value) bits.push(crmMoney(l.value));
+            const who = crmWho(l); if (who) bits.push(who);
+            bits.push('arrived ' + fmtDate(l.created_at));
+            m.body.append(el('div', 'crm-sub', bits.join(' · ')));
+            (l.notes || []).forEach(n => {
+                const r = el('div', 'crm-hist-row');
+                r.append(document.createTextNode(n.text), el('div', 'crm-hist-when', fmtDate(n.at)));
+                m.body.append(r);
+            });
+            const ta = document.createElement('textarea');
+            ta.className = 'lia-chase-body'; ta.rows = 2; ta.placeholder = 'A note about this lead…';
+            m.body.append(ta);
+            const bar = el('div', 'disp-actions');
+            const noteBtn = el('button', 'btn', 'Save note');
+            noteBtn.onclick = async () => {
+                if (!ta.value.trim()) return;
+                try { await crmOp('/api/crm/lead', { op: 'note_add', id: leadId, text: ta.value.trim() }); m.close(); crmLeadModal(leadId); }
+                catch (e) { toastError(e.message); }
+            };
+            if (!l.archived) {
+                const conv = el('button', 'btn btn-primary', 'Convert to deal');
+                conv.onclick = async () => {
+                    try { const r = await crmOp('/api/crm/lead', { op: 'convert', id: leadId }); m.close(); crmSeg = 'deals'; renderCRM(); crmDealModal(r.id); }
+                    catch (e) { toastError(e.message); }
+                };
+                bar.append(conv);
+                const arch = el('button', 'btn', 'Archive');
+                arch.onclick = async () => { try { await crmOp('/api/crm/lead', { op: 'archive', id: leadId }); m.close(); } catch (e) { toastError(e.message); } };
+                bar.append(arch);
+            } else {
+                const un = el('button', 'btn', 'Unarchive');
+                un.onclick = async () => { try { await crmOp('/api/crm/lead', { op: 'unarchive', id: leadId }); m.close(); } catch (e) { toastError(e.message); } };
+                bar.append(un);
+            }
+            bar.append(noteBtn); m.body.append(bar);
+        }
+
+        /* ---------------- stage editor ---------------- */
+        function crmStageEditor() {
+            const m = crmModal('Pipeline stages');
+            m.body.append(el('p', 'field-help', 'Rename the stages to your own process. Probability '
+                + 'weights the pipeline value; rotting turns a deal red after sitting untouched that many days.'));
+            const rows = el('div'); m.body.append(rows);
+            const working = crmCache.stages.map(s => ({ ...s }));
+            function paint() {
+                rows.innerHTML = '';
+                working.forEach((s, i) => {
+                    const r = el('div', 'disp-boxrow');
+                    const name = crmText(s.name, 'Stage name'); name.oninput = () => { s.name = name.value; };
+                    const prob = crmText(String(s.probability), '%'); prob.type = 'number'; prob.min = '0'; prob.max = '100';
+                    prob.className = 'disp-num'; prob.title = 'Probability %';
+                    prob.oninput = () => { s.probability = parseInt(prob.value, 10) || 0; };
+                    const rot = crmText(String(s.rot_days || ''), 'rot'); rot.type = 'number'; rot.min = '0';
+                    rot.className = 'disp-num'; rot.title = 'Rot after N days untouched (0 = never)';
+                    rot.oninput = () => { s.rot_days = parseInt(rot.value, 10) || 0; };
+                    const up = el('button', 'icon-btn'); up.innerHTML = I.up; up.title = 'Move up';
+                    up.onclick = () => { if (i > 0) { working.splice(i - 1, 0, working.splice(i, 1)[0]); paint(); } };
+                    const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove stage';
+                    rm.onclick = () => { working.splice(i, 1); paint(); };
+                    r.append(name, prob, rot, up, rm);
+                    rows.append(r);
+                });
+            }
+            paint();
+            const addBtn = el('button', 'btn disp-addbox'); addBtn.append(ico(I.plus), document.createTextNode('Add a stage'));
+            addBtn.onclick = () => { working.push({ name: '', probability: 100, rot_days: 0 }); paint(); };
+            m.body.append(addBtn);
+            const bar = el('div', 'disp-actions');
+            const save = el('button', 'btn btn-primary', 'Save stages');
+            save.onclick = async () => {
+                save.disabled = true;
+                try { await crmOp('/api/crm/stages', { stages: working }); m.close(); }
+                catch (e) { save.disabled = false; toastError(e.message); }
+            };
+            bar.append(save); m.body.append(bar);
+        }
+
+        /* ---------------- insights ---------------- */
+        function renderCRMInsights(host) {
+            const d = crmCache;
+            const deals = Object.values(d.deals);
+            const open = deals.filter(x => x.status === 'open');
+            const won = deals.filter(x => x.status === 'won');
+            const lost = deals.filter(x => x.status === 'lost');
+            const month = crmCache.today.slice(0, 7);
+            const prevMonth = new Date(Date.parse(month + '-01') - 86400000).toISOString().slice(0, 7);
+            const wonThis = won.filter(x => (x.won_at || '').slice(0, 7) === month)
+                .reduce((n, x) => n + (x.value || 0), 0);
+            const wonPrev = won.filter(x => (x.won_at || '').slice(0, 7) === prevMonth)
+                .reduce((n, x) => n + (x.value || 0), 0);
+            const winRate = (won.length + lost.length) ? Math.round(won.length / (won.length + lost.length) * 100) : null;
+            const cycles = won.map(x => (Date.parse(x.won_at) - Date.parse(x.created_at)) / 86400000).filter(n => !isNaN(n));
+            const avgCycle = cycles.length ? Math.round(cycles.reduce((a, b) => a + b, 0) / cycles.length) : null;
+            const grid = el('div', 'lia-grid');
+            [['Open pipeline', crmMoney(open.reduce((n, x) => n + (x.value || 0), 0)), ''],
+             ['Weighted', crmMoney(open.reduce((n, x) => n + (x.weighted_value || 0), 0)), ''],
+             ['Won this month', crmMoney(wonThis) + (wonPrev ? (wonThis >= wonPrev ? ' ↑' : ' ↓') : ''), wonThis >= wonPrev ? 'ok' : 'warn'],
+             ['Win rate', winRate == null ? 'no closed deals' : winRate + '%', ''],
+             ['Average cycle', avgCycle == null ? 'no wins yet' : avgCycle + ' days', '']].forEach(([k, v, tone]) => {
+                const c = el('div', 'lia-card' + (tone ? ' ' + tone : ''));
+                c.append(el('div', 'lia-k', k), el('div', 'lia-v', v));
+                grid.append(c);
+            });
+            host.append(grid);
+            function bars(title, rows, fmt) {
+                const box2 = el('div', 'crm-focus');
+                box2.append(el('div', 'disp-subhead', title));
+                const max = Math.max.apply(null, rows.map(r => r[1]).concat([1]));
+                rows.forEach(([lab, v]) => {
+                    const r = el('div', 'crm-bar-row');
+                    r.append(el('span', 'crm-bar-lab', lab));
+                    const track = el('div', 'crm-bar-track');
+                    const fill = el('div', 'crm-bar-fill');
+                    fill.style.width = Math.max(2, v / max * 100) + '%';
+                    track.append(fill); r.append(track);
+                    r.append(el('span', 'crm-bar-val', fmt ? fmt(v) : String(v)));
+                    box2.append(r);
+                });
+                if (!rows.length) box2.append(el('div', 'crm-sub', 'Nothing to chart yet.'));
+                host.append(box2);
+            }
+            /* Deals won over time: the classic monthly view. */
+            const byMonth = {};
+            won.forEach(x => { const k = (x.won_at || '').slice(0, 7); if (k) byMonth[k] = (byMonth[k] || 0) + (x.value || 0); });
+            bars('Won by month', Object.keys(byMonth).sort().slice(-12).map(k => [k, Math.round(byMonth[k])]), crmMoney);
+            /* Funnel: a won deal counts as having completed every stage. */
+            const idx = {}; d.stages.forEach((s, i) => idx[s.id] = i);
+            const funnel = d.stages.map((s, i) => {
+                const reached = deals.filter(x => x.status === 'won'
+                    || (x.status !== 'won' && (idx[x.stage_id] != null ? idx[x.stage_id] : -1) >= i)).length;
+                return [s.name, reached];
+            });
+            bars('How far deals get', funnel);
+            const reasons = {};
+            lost.forEach(x => { const k = x.lost_reason || 'No reason given'; reasons[k] = (reasons[k] || 0) + 1; });
+            bars('Why deals are lost', Object.entries(reasons).sort((a, b) => b[1] - a[1]));
+            const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+            const doneCounts = {};
+            Object.values(d.activities).filter(a => a.done && (a.done_at || '') >= cutoff)
+                .forEach(a => { doneCounts[a.type] = (doneCounts[a.type] || 0) + 1; });
+            bars('Activities completed, last 30 days',
+                CRM_TYPES.map(([k, lab]) => [lab, doneCounts[k] || 0]).filter(r => r[1] > 0));
+        }
+
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
-            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
+            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'crm', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', crm: 'CRM', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
-            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide') ? 'none' : '';
+            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide' || v === 'crm') ? 'none' : '';
             if (v === 'guide') renderGuide();
             // Only offer the PDF when there is actually a report to print: the print
             // stylesheet hides the Run gate, so printing an un-run tab yields a blank page.
@@ -6368,6 +7440,7 @@
             if (v === 'keywords') showKeywordsView();
             if (v === 'products') showProductsView();
             if (v === 'liability') showLiabilityView();
+            if (v === 'crm') showCRMView();
             if (v === 'labels') showLabelsView();
             if (v === 'memory') loadMemory();
             if (v === 'skills') loadSkills();
@@ -6667,6 +7740,8 @@
         window.__demoChatData = function (du) { const c = active(); if (c && c.turns.length) { c.turns[c.turns.length - 1].data_used = du; renderChat(); } };
         window.__demoProductDetail = function (d) { setView('products'); renderProductDetail(d); };
         window.__demoCustomShip = function () { return openCustomShip(); };
+        window.__demoCRM = { op: crmOp, render: function () { renderCRM(); }, load: loadCRM,
+                             state: function () { return crmCache; } };
     })();
     </script>
 </body>

@@ -7187,6 +7187,235 @@ def _ensure_scheduler(registry: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# CRM: the sales desk, modelled on Pipedrive.
+#
+# The shape it copies is deliberate. Pipedrive's whole design is one idea,
+# activity-based selling: you cannot control whether a deal closes, only
+# whether it always has a next action scheduled, so the product nags exactly
+# when it does not. Everything here serves that idea: the four activity states
+# on a card (overdue red, due-today green, NOTHING SCHEDULED amber warning,
+# future grey; having no next step is deliberately louder than being late),
+# the column sort those states drive, the follow-up prompt when the last open
+# activity on a deal is completed, and rotting when a deal sits untouched.
+#
+# One store, local JSON, same discipline as every other store here: atomic
+# writes, the poison guard, no await between load and write. People and
+# organisations can link to Shopify customers, which the read-only registry
+# already reaches; nothing in the CRM ever writes to Shopify, and none of it
+# is visible to the AI chat.
+# ---------------------------------------------------------------------------
+CRM_PATH = os.environ.get("CRM_PATH", "/data/crm.json")
+CRM_DEALS_MAX = 2000
+CRM_ACTIVITIES_MAX = 6000
+CRM_NOTE_CAP = 4000                 # characters per note
+CRM_DELETED_KEEP_DAYS = 30          # Pipedrive's restore window
+
+# Pipedrive seeds a new pipeline with these five stages; renaming them to the
+# merchant's own language is the first thing the stage editor is for.
+_CRM_DEFAULT_STAGES = [
+    {"id": "s1", "name": "Qualified", "probability": 100, "rot_days": 0},
+    {"id": "s2", "name": "Contact Made", "probability": 100, "rot_days": 0},
+    {"id": "s3", "name": "Demo Scheduled", "probability": 100, "rot_days": 0},
+    {"id": "s4", "name": "Proposal Made", "probability": 100, "rot_days": 0},
+    {"id": "s5", "name": "Negotiations Started", "probability": 100, "rot_days": 0},
+]
+_CRM_ACTIVITY_TYPES = ("call", "meeting", "task", "deadline", "email", "lunch")
+_CRM_LOST_REASONS = ["Too expensive", "No response", "Went with someone else", "Timing", "Other"]
+# Pipedrive ships Hot/Warm/Cold as lead labels and colour chips on deals.
+_CRM_LABELS = ["Hot", "Warm", "Cold"]
+
+
+def _crm_default() -> dict:
+    return {"seq": 0, "stages": [dict(s) for s in _CRM_DEFAULT_STAGES],
+            "deals": {}, "activities": {}, "persons": {}, "orgs": {}, "leads": {},
+            "lost_reasons": list(_CRM_LOST_REASONS), "labels": list(_CRM_LABELS),
+            "settings": {"followup_popup": True}}
+
+
+def _load_crm() -> dict:
+    d = _load_json_store(CRM_PATH, "crm", None)
+    if not isinstance(d, dict) or "deals" not in d:
+        d = _crm_default()
+    for k, v in _crm_default().items():
+        d.setdefault(k, v)
+    # A store whose counter went missing must never restart at 1 and overwrite
+    # d1: recover it from the highest id actually present.
+    try:
+        peak = max((int(str(k)[1:]) for coll in ("deals", "activities", "persons", "orgs", "leads")
+                    for k in d.get(coll, {}) if str(k)[1:].isdigit()), default=0)
+        d["seq"] = max(int(d.get("seq") or 0), peak)
+    except (TypeError, ValueError):
+        pass
+    return d
+
+
+def _write_crm(d: dict) -> None:
+    """Atomic write with the house poison guard. Raises when the store cannot
+    be written: the CRM is the only record these deals exist, so a silent
+    no-op would lose real pipeline."""
+    if not _store_writable(CRM_PATH):
+        raise RuntimeError("CRM store is not writable")
+    os.makedirs(os.path.dirname(CRM_PATH) or ".", exist_ok=True)
+    tmp = CRM_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        # allow_nan=False: Python would happily WRITE NaN, which is not JSON,
+        # so the next read would poison the store and brick the CRM. Refusing
+        # here fails one request and preserves everything.
+        json.dump({"crm": d}, fh, allow_nan=False)
+    os.replace(tmp, CRM_PATH)
+
+
+def _crm_value(x) -> float:
+    """A finite, non-negative money amount, or ValueError. NaN and Infinity
+    parse as floats but are not JSON, so they must never reach the store."""
+    import math
+    v = round(float(x or 0), 2)
+    if not math.isfinite(v):
+        raise ValueError("not a finite amount")
+    return max(0.0, v)
+
+
+def _crm_id(d: dict, prefix: str) -> str:
+    d["seq"] = int(d.get("seq") or 0) + 1
+    return f"{prefix}{d['seq']}"
+
+
+def _crm_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _crm_today():
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("Europe/London")).date()
+
+
+def _crm_log(deal: dict, field: str, old, new) -> None:
+    """The changelog Pipedrive keeps per deal: stage, value, label, contact and
+    expected close changes, plus the lifecycle events."""
+    if old == new:
+        return
+    deal.setdefault("changelog", []).append(
+        {"at": _crm_now(), "field": field, "from": old, "to": new})
+    deal["changelog"] = deal["changelog"][-100:]
+
+
+def _crm_touch(deal: dict) -> None:
+    """Any edit resets rotting; Pipedrive's rule, including note and activity
+    writes, and deliberately ignoring how far out the next activity is."""
+    deal["touched_at"] = deal["updated_at"] = _crm_now()
+
+
+def _crm_activity_state(deal_id: str, activities: dict, today) -> tuple:
+    """(state, next_due) for a deal: the four-colour discipline.
+    overdue < today < none < future is also the column sort order, so a deal
+    with no next step floats above one that is merely waiting."""
+    due = [a.get("due_date") or "" for a in activities.values()
+           if a.get("deal_id") == deal_id and not a.get("done") and a.get("due_date")]
+    if not due:
+        return "none", ""
+    nxt = min(due)
+    iso = today.isoformat()
+    return ("overdue" if nxt < iso else "today" if nxt == iso else "future"), nxt
+
+
+_CRM_STATE_RANK = {"overdue": 0, "today": 1, "none": 2, "future": 3}
+
+
+def _crm_purge(d: dict) -> None:
+    """Deleted deals fall out after the 30-day restore window; caps hold."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=CRM_DELETED_KEEP_DAYS)).isoformat()
+    dead = [k for k, v in d["deals"].items() if v.get("deleted") and str(v.get("deleted_at") or "") < cutoff]
+    for k in dead:
+        d["deals"].pop(k, None)
+        for ak in [ak for ak, a in d["activities"].items() if a.get("deal_id") == k]:
+            d["activities"].pop(ak, None)
+    while len(d["deals"]) > CRM_DEALS_MAX:
+        closed = sorted((k for k, v in d["deals"].items() if v.get("status") != "open"),
+                        key=lambda k: str(d["deals"][k].get("updated_at") or ""))
+        if not closed:
+            break
+        gone = closed[0]
+        d["deals"].pop(gone, None)
+        # Its activities go with it, or an open one becomes an immortal orphan
+        # inflating the badge for a deal that no longer exists.
+        for ak in [ak for ak, a in d["activities"].items() if a.get("deal_id") == gone]:
+            d["activities"].pop(ak, None)
+    while len(d["activities"]) > CRM_ACTIVITIES_MAX:
+        done = sorted((k for k, v in d["activities"].items() if v.get("done")),
+                      key=lambda k: str(d["activities"][k].get("done_at") or ""))
+        if not done:
+            break
+        d["activities"].pop(done[0], None)
+
+
+def _crm_shape(d: dict) -> dict:
+    """The whole CRM as one payload the tab renders from. Derived state
+    (activity colours, rotting, weighted values, badges) is computed here so
+    the browser never re-implements the rules."""
+    today = _crm_today()
+    iso = today.isoformat()
+    stages = {s["id"]: s for s in d["stages"]}
+    deals_out = {}
+    for k, v in d["deals"].items():
+        if v.get("deleted"):
+            continue
+        state, next_due = _crm_activity_state(k, d["activities"], today)
+        st = stages.get(v.get("stage_id")) or (d["stages"][0] if d["stages"] else {})
+        prob = v.get("probability") if v.get("probability") is not None else st.get("probability", 100)
+        rot_days = int(st.get("rot_days") or 0)
+        rotten = False
+        if v.get("status") == "open" and rot_days > 0:
+            try:
+                touched = datetime.fromisoformat(v.get("touched_at") or v.get("created_at"))
+                rotten = (datetime.now(timezone.utc) - touched).days >= rot_days
+            except (TypeError, ValueError):
+                rotten = False
+        deals_out[k] = {**{kk: vv for kk, vv in v.items() if kk != "deleted"},
+                        "activity_state": state, "next_activity": next_due,
+                        "effective_probability": prob,
+                        "weighted_value": round(float(v.get("value") or 0) * prob / 100.0, 2),
+                        "rotten": rotten}
+    acts_out = {}
+    for k, a in d["activities"].items():
+        dl = d["deals"].get(a.get("deal_id") or "")
+        if dl and dl.get("deleted"):
+            continue
+        due = a.get("due_date") or ""
+        state = ("done" if a.get("done")
+                 else "overdue" if due and due < iso
+                 else "today" if due == iso else "future")
+        acts_out[k] = {**a, "state": state}
+    badge = sum(1 for a in acts_out.values() if a["state"] in ("overdue", "today"))
+    new_leads = sum(1 for l in d["leads"].values() if not l.get("archived") and not l.get("seen"))
+    return {"stages": d["stages"], "deals": deals_out, "activities": acts_out,
+            "persons": d["persons"], "orgs": d["orgs"], "leads": d["leads"],
+            "lost_reasons": d["lost_reasons"], "labels": d["labels"],
+            "settings": d["settings"], "today": iso,
+            "badge": badge, "new_leads": new_leads,
+            "trash": sum(1 for v in d["deals"].values() if v.get("deleted"))}
+
+
+def _crm_deal_fields(body: dict, d: dict, deal: dict) -> None:
+    """Apply the editable deal fields from a request, logging what Pipedrive's
+    changelog logs: stage, value, label, contacts, expected close."""
+    for field, cast in (("title", lambda x: str(x).strip()[:200]),
+                        ("value", _crm_value),
+                        ("label", lambda x: str(x).strip()[:40]),
+                        ("expected_close", lambda x: str(x).strip()[:10]),
+                        ("person_id", lambda x: str(x).strip()[:40]),
+                        ("org_id", lambda x: str(x).strip()[:40]),
+                        ("probability", lambda x: (None if x in (None, "") else max(0, min(100, int(x)))))):
+        if field in body:
+            try:
+                new = cast(body.get(field))
+            except (TypeError, ValueError):
+                continue
+            if field in ("value", "label", "expected_close", "person_id", "org_id"):
+                _crm_log(deal, field, deal.get(field), new)
+            deal[field] = new
+
+
+# ---------------------------------------------------------------------------
 # Route registration (mounted onto the existing FastMCP app)
 # ---------------------------------------------------------------------------
 
@@ -8052,6 +8281,470 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             logger.exception("chase stamp failed")
             return _json({"error": "The chase could not be recorded. The data volume may be "
                                    "unwritable; check Settings, Connections."}, 500)
+
+    # ---- CRM routes -------------------------------------------------------
+    async def _crm_guard(request: Request):
+        """(error_response, body). The CRM is buttons in the app's own UI, so it
+        uses the same session auth as everything else; the AI never sees it."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre, None
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401), None
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413), None
+        return None, body
+
+    def _crm_ok(d: dict, extra: Optional[dict] = None) -> JSONResponse:
+        _crm_purge(d)
+        _write_crm(d)
+        out = {"ok": True, "crm": _crm_shape(d)}
+        if extra:
+            out.update(extra)
+        return _json(out)
+
+    @mcp.custom_route("/api/crm/board", methods=["POST"])
+    async def crm_board_route(request: Request):
+        err, _body = await _crm_guard(request)
+        if err:
+            return err
+        try:
+            return _json({"crm": _crm_shape(_load_crm())})
+        except Exception:
+            logger.exception("CRM board failed")
+            return _json({"error": "Couldn't load the CRM."}, 500)
+
+    @mcp.custom_route("/api/crm/deal", methods=["POST"])
+    async def crm_deal_route(request: Request):
+        err, body = await _crm_guard(request)
+        if err:
+            return err
+        op = str(body.get("op") or "")
+        try:
+            d = _load_crm()
+            if op == "add":
+                title = str(body.get("title") or "").strip()[:200]
+                person, org = str(body.get("person_id") or ""), str(body.get("org_id") or "")
+                # Pipedrive's save rule: a deal needs a person or an organisation.
+                if not title:
+                    return _json({"error": "The deal needs a title."}, 400)
+                if not (person and person in d["persons"]) and not (org and org in d["orgs"]):
+                    return _json({"error": "Link a person or an organisation first: a deal "
+                                           "belongs to someone."}, 400)
+                if person and person in d["persons"] and not org:
+                    org = d["persons"][person].get("org_id") or ""
+                stage = str(body.get("stage_id") or "") or (d["stages"][0]["id"] if d["stages"] else "")
+                deal = {"id": _crm_id(d, "d"), "title": title,
+                        "value": 0.0, "currency": "GBP", "stage_id": stage,
+                        "person_id": person, "org_id": org,
+                        "label": str(body.get("label") or "").strip()[:40],
+                        "status": "open", "probability": None,
+                        "expected_close": str(body.get("expected_close") or "").strip()[:10],
+                        "source": str(body.get("source") or "Manual")[:40],
+                        "created_at": _crm_now(), "updated_at": _crm_now(),
+                        "stage_entered_at": _crm_now(), "touched_at": _crm_now(),
+                        "notes": [], "changelog": []}
+                try:
+                    deal["value"] = _crm_value(body.get("value"))
+                except (TypeError, ValueError):
+                    pass
+                _crm_log(deal, "created", "", deal["title"])
+                d["deals"][deal["id"]] = deal
+                return _crm_ok(d, {"id": deal["id"]})
+
+            deal = d["deals"].get(str(body.get("id") or ""))
+            if not deal:
+                return _json({"error": "That deal no longer exists."}, 404)
+            if op == "update":
+                _crm_deal_fields(body, d, deal)
+                _crm_touch(deal)
+            elif op == "move":
+                stage = str(body.get("stage_id") or "")
+                if stage not in {s["id"] for s in d["stages"]}:
+                    return _json({"error": "Unknown stage."}, 400)
+                names = {s["id"]: s["name"] for s in d["stages"]}
+                _crm_log(deal, "stage", names.get(deal.get("stage_id")), names.get(stage))
+                deal["stage_id"] = stage
+                deal["stage_entered_at"] = _crm_now()
+                _crm_touch(deal)
+            elif op == "won":
+                deal["status"], deal["won_at"] = "won", _crm_now()
+                _crm_log(deal, "status", "open", "won")
+                _crm_touch(deal)
+            elif op == "lost":
+                deal["status"], deal["lost_at"] = "lost", _crm_now()
+                deal["lost_reason"] = str(body.get("reason") or "").strip()[:100]
+                deal["lost_comment"] = str(body.get("comment") or "").strip()[:500]
+                _crm_log(deal, "status", "open", "lost")
+                _crm_touch(deal)
+            elif op == "reopen":
+                # Back to the exact stage it left from: the stage never changed.
+                # Unless that stage was deleted meanwhile, in which case the
+                # first stage catches it, or the deal would render in no column.
+                if deal.get("stage_id") not in {s["id"] for s in d["stages"]} and d["stages"]:
+                    _crm_log(deal, "stage", deal.get("stage_id"), d["stages"][0]["name"])
+                    deal["stage_id"] = d["stages"][0]["id"]
+                    deal["stage_entered_at"] = _crm_now()
+                old = deal.get("status")
+                deal["status"] = "open"
+                deal.pop("won_at", None); deal.pop("lost_at", None)
+                deal.pop("lost_reason", None); deal.pop("lost_comment", None)
+                _crm_log(deal, "status", old, "open")
+                _crm_touch(deal)
+            elif op == "delete":
+                deal["deleted"], deal["deleted_at"] = True, _crm_now()
+            elif op == "restore":
+                deal.pop("deleted", None); deal.pop("deleted_at", None)
+            elif op == "note_add":
+                text = str(body.get("text") or "").strip()[:CRM_NOTE_CAP]
+                if not text:
+                    return _json({"error": "The note is empty."}, 400)
+                deal.setdefault("notes", []).append(
+                    {"id": _crm_id(d, "n"), "text": text, "at": _crm_now(), "pinned": False})
+                deal["notes"] = deal["notes"][-200:]
+                _crm_touch(deal)
+            elif op == "note_pin":
+                for n in deal.get("notes", []):
+                    if n["id"] == str(body.get("note_id") or ""):
+                        n["pinned"] = not n.get("pinned")
+                _crm_touch(deal)
+            elif op == "note_del":
+                deal["notes"] = [n for n in deal.get("notes", [])
+                                 if n["id"] != str(body.get("note_id") or "")]
+            else:
+                return _json({"error": "Unknown operation."}, 400)
+            return _crm_ok(d)
+        except RuntimeError:
+            return _json({"error": "The CRM could not be saved. The data volume may be "
+                                   "unwritable; check Settings, Connections."}, 500)
+        except Exception:
+            logger.exception("CRM deal op failed")
+            return _json({"error": "That change could not be made. Check the server logs."}, 500)
+
+    @mcp.custom_route("/api/crm/activity", methods=["POST"])
+    async def crm_activity_route(request: Request):
+        err, body = await _crm_guard(request)
+        if err:
+            return err
+        op = str(body.get("op") or "")
+        try:
+            d = _load_crm()
+            followup = None
+            if op == "add":
+                atype = str(body.get("type") or "task")
+                if atype not in _CRM_ACTIVITY_TYPES:
+                    atype = "task"
+                deal_id = str(body.get("deal_id") or "")
+                person, org = str(body.get("person_id") or ""), str(body.get("org_id") or "")
+                # Pipedrive's auto-linking: a deal brings its person and org;
+                # a person brings their org; an org alone brings nothing.
+                if deal_id and deal_id in d["deals"]:
+                    person = person or d["deals"][deal_id].get("person_id") or ""
+                    org = org or d["deals"][deal_id].get("org_id") or ""
+                elif person and person in d["persons"]:
+                    org = org or d["persons"][person].get("org_id") or ""
+                act = {"id": _crm_id(d, "a"), "type": atype,
+                       # The dialog pre-fills the subject with the type name, so
+                       # a valid activity is two clicks.
+                       "subject": (str(body.get("subject") or "").strip()[:200]
+                                   or atype.capitalize()),
+                       "deal_id": deal_id, "person_id": person, "org_id": org,
+                       "due_date": (str(body.get("due_date") or "").strip()[:10]
+                                    if re.fullmatch(r"\d{4}-\d{2}-\d{2}",
+                                                    str(body.get("due_date") or "").strip())
+                                    else _crm_today().isoformat()),
+                       "due_time": str(body.get("due_time") or "").strip()[:5],
+                       "note": str(body.get("note") or "").strip()[:CRM_NOTE_CAP],
+                       "priority": (str(body.get("priority") or "") if str(body.get("priority") or "")
+                                    in ("high", "medium", "low") else ""),
+                       "location": str(body.get("location") or "").strip()[:200],
+                       "done": bool(body.get("done")),
+                       "done_at": _crm_now() if body.get("done") else "",
+                       "created_at": _crm_now(), "updated_at": _crm_now()}
+                d["activities"][act["id"]] = act
+                if deal_id and deal_id in d["deals"]:
+                    _crm_touch(d["deals"][deal_id])
+                return _crm_ok(d, {"id": act["id"]})
+
+            act = d["activities"].get(str(body.get("id") or ""))
+            if not act:
+                return _json({"error": "That activity no longer exists."}, 404)
+            if op == "update":
+                for f, cap in (("subject", 200), ("due_date", 10), ("due_time", 5),
+                               ("note", CRM_NOTE_CAP), ("location", 200)):
+                    if f in body:
+                        act[f] = str(body.get(f) or "").strip()[:cap]
+                if "type" in body and str(body["type"]) in _CRM_ACTIVITY_TYPES:
+                    act["type"] = str(body["type"])
+                if "priority" in body and str(body.get("priority") or "") in ("high", "medium", "low", ""):
+                    act["priority"] = str(body.get("priority") or "")
+                if "deal_id" in body:
+                    act["deal_id"] = str(body.get("deal_id") or "")
+                act["updated_at"] = _crm_now()
+                if act.get("deal_id") and act["deal_id"] in d["deals"]:
+                    _crm_touch(d["deals"][act["deal_id"]])   # a reschedule is a touch
+            elif op == "done":
+                # The due date is never rewritten: done three days late still
+                # shows its original date in History. done_at is its own stamp.
+                act["done"], act["done_at"] = True, _crm_now()
+                act["updated_at"] = _crm_now()
+                deal_id = act.get("deal_id") or ""
+                if deal_id and deal_id in d["deals"]:
+                    _crm_touch(d["deals"][deal_id])
+                    still_open = any(a.get("deal_id") == deal_id and not a.get("done")
+                                     for a in d["activities"].values())
+                    # The follow-up prompt, the heart of activity-based selling:
+                    # fires only when the deal's LAST open activity was just
+                    # completed, and only nags, never blocks.
+                    if (not still_open and d["deals"][deal_id].get("status") == "open"
+                            and d["settings"].get("followup_popup", True)):
+                        followup = deal_id
+            elif op == "undone":
+                act["done"], act["done_at"] = False, ""
+                act["updated_at"] = _crm_now()
+                if act.get("deal_id") and act["deal_id"] in d["deals"]:
+                    _crm_touch(d["deals"][act["deal_id"]])
+            elif op == "delete":
+                if act.get("deal_id") and act["deal_id"] in d["deals"]:
+                    _crm_touch(d["deals"][act["deal_id"]])
+                d["activities"].pop(act["id"], None)
+            else:
+                return _json({"error": "Unknown operation."}, 400)
+            return _crm_ok(d, {"followup_deal_id": followup} if followup else None)
+        except RuntimeError:
+            return _json({"error": "The CRM could not be saved. The data volume may be "
+                                   "unwritable; check Settings, Connections."}, 500)
+        except Exception:
+            logger.exception("CRM activity op failed")
+            return _json({"error": "That change could not be made. Check the server logs."}, 500)
+
+    @mcp.custom_route("/api/crm/contact", methods=["POST"])
+    async def crm_contact_route(request: Request):
+        err, body = await _crm_guard(request)
+        if err:
+            return err
+        op = str(body.get("op") or "")
+        try:
+            if op == "shopify_search":
+                q = str(body.get("q") or "").strip()[:80]
+                if not q:
+                    return _json({"matches": []})
+                res = await _tool_json(registry, "shopify_search_customers", {"query": q})
+                out = []
+                for c in (res.get("customers") or [])[:8]:
+                    nm = " ".join(x for x in [c.get("first_name"), c.get("last_name")] if x).strip()
+                    addr = (c.get("default_address") or {})
+                    out.append({"id": c.get("id"), "name": nm or (c.get("email") or "Customer"),
+                                "email": c.get("email") or "", "company": addr.get("company") or "",
+                                "orders": c.get("orders_count"), "spent": c.get("total_spent")})
+                return _json({"matches": out})
+
+            d = _load_crm()
+            if op == "person_add":
+                name = str(body.get("name") or "").strip()[:120]
+                if not name:
+                    return _json({"error": "The person needs a name."}, 400)
+                p = {"id": _crm_id(d, "p"), "name": name,
+                     "org_id": str(body.get("org_id") or ""),
+                     "emails": [str(e).strip()[:120] for e in (body.get("emails") or []) if str(e).strip()][:4],
+                     "phones": [str(x).strip()[:40] for x in (body.get("phones") or []) if str(x).strip()][:4],
+                     "label": str(body.get("label") or "").strip()[:40],
+                     "shopify_customer_id": body.get("shopify_customer_id") or None,
+                     "created_at": _crm_now(), "updated_at": _crm_now(), "notes": []}
+                d["persons"][p["id"]] = p
+                return _crm_ok(d, {"id": p["id"]})
+            if op == "org_add":
+                name = str(body.get("name") or "").strip()[:120]
+                if not name:
+                    return _json({"error": "The organisation needs a name."}, 400)
+                o = {"id": _crm_id(d, "o"), "name": name,
+                     "address": str(body.get("address") or "").strip()[:300],
+                     "label": str(body.get("label") or "").strip()[:40],
+                     "created_at": _crm_now(), "updated_at": _crm_now(), "notes": []}
+                d["orgs"][o["id"]] = o
+                return _crm_ok(d, {"id": o["id"]})
+
+            if op in ("person_update", "person_delete", "link_shopify"):
+                p = d["persons"].get(str(body.get("id") or ""))
+                if not p:
+                    return _json({"error": "That person no longer exists."}, 404)
+                if op == "person_update":
+                    for f, cap in (("name", 120), ("label", 40), ("org_id", 40)):
+                        if f in body:
+                            p[f] = str(body.get(f) or "").strip()[:cap]
+                    for f in ("emails", "phones"):
+                        if f in body and isinstance(body[f], list):
+                            p[f] = [str(x).strip()[:120] for x in body[f] if str(x).strip()][:4]
+                    p["updated_at"] = _crm_now()
+                elif op == "link_shopify":
+                    p["shopify_customer_id"] = body.get("shopify_customer_id") or None
+                    p["updated_at"] = _crm_now()
+                else:
+                    linked = [v for v in d["deals"].values()
+                              if v.get("person_id") == p["id"] and v.get("status") == "open"
+                              and not v.get("deleted")]
+                    if linked:
+                        return _json({"error": "This person is on " + str(len(linked))
+                                               + " open deal(s). Close or relink those first."}, 400)
+                    d["persons"].pop(p["id"], None)
+                return _crm_ok(d)
+            if op in ("org_update", "org_delete"):
+                o = d["orgs"].get(str(body.get("id") or ""))
+                if not o:
+                    return _json({"error": "That organisation no longer exists."}, 404)
+                if op == "org_update":
+                    for f, cap in (("name", 120), ("label", 40), ("address", 300)):
+                        if f in body:
+                            o[f] = str(body.get(f) or "").strip()[:cap]
+                    o["updated_at"] = _crm_now()
+                else:
+                    linked = [v for v in d["deals"].values()
+                              if v.get("org_id") == o["id"] and v.get("status") == "open"
+                              and not v.get("deleted")]
+                    if linked:
+                        return _json({"error": "This organisation is on " + str(len(linked))
+                                               + " open deal(s). Close or relink those first."}, 400)
+                    d["orgs"].pop(o["id"], None)
+                return _crm_ok(d)
+            return _json({"error": "Unknown operation."}, 400)
+        except RuntimeError:
+            return _json({"error": "The CRM could not be saved. The data volume may be "
+                                   "unwritable; check Settings, Connections."}, 500)
+        except Exception:
+            logger.exception("CRM contact op failed")
+            return _json({"error": "That change could not be made. Check the server logs."}, 500)
+
+    @mcp.custom_route("/api/crm/lead", methods=["POST"])
+    async def crm_lead_route(request: Request):
+        err, body = await _crm_guard(request)
+        if err:
+            return err
+        op = str(body.get("op") or "")
+        try:
+            d = _load_crm()
+            if op == "add":
+                person, org = str(body.get("person_id") or ""), str(body.get("org_id") or "")
+                if not (person and person in d["persons"]) and not (org and org in d["orgs"]):
+                    return _json({"error": "Link a person or an organisation first: a lead "
+                                           "belongs to someone."}, 400)
+                who = (d["persons"].get(person, {}).get("name")
+                       or d["orgs"].get(org, {}).get("name") or "New")
+                lead = {"id": _crm_id(d, "l"),
+                        "title": str(body.get("title") or "").strip()[:200] or (who + " lead"),
+                        "value": 0.0, "label": str(body.get("label") or "").strip()[:40],
+                        "person_id": person, "org_id": org,
+                        "source": str(body.get("source") or "Manual")[:40],
+                        "archived": False, "seen": False,
+                        "created_at": _crm_now(), "updated_at": _crm_now(), "notes": []}
+                try:
+                    lead["value"] = _crm_value(body.get("value"))
+                except (TypeError, ValueError):
+                    pass
+                d["leads"][lead["id"]] = lead
+                return _crm_ok(d, {"id": lead["id"]})
+
+            lead = d["leads"].get(str(body.get("id") or ""))
+            if not lead:
+                return _json({"error": "That lead no longer exists."}, 404)
+            if op == "seen":
+                lead["seen"] = True
+            elif op == "update":
+                if lead.get("archived"):
+                    return _json({"error": "Unarchive the lead before editing it."}, 400)
+                for f, cap in (("title", 200), ("label", 40)):
+                    if f in body:
+                        lead[f] = str(body.get(f) or "").strip()[:cap]
+                if "value" in body:
+                    try:
+                        lead["value"] = _crm_value(body.get("value"))
+                    except (TypeError, ValueError):
+                        pass
+                lead["updated_at"] = _crm_now()
+            elif op == "note_add":
+                text = str(body.get("text") or "").strip()[:CRM_NOTE_CAP]
+                if not text:
+                    return _json({"error": "The note is empty."}, 400)
+                lead.setdefault("notes", []).append(
+                    {"id": _crm_id(d, "n"), "text": text, "at": _crm_now(), "pinned": False})
+            elif op == "archive":
+                lead["archived"] = True
+            elif op == "unarchive":
+                lead["archived"] = False
+            elif op == "delete":
+                d["leads"].pop(lead["id"], None)
+            elif op == "convert":
+                # Everything carries over and the lead leaves the inbox: no
+                # shadow record stays behind.
+                if lead.get("archived"):
+                    return _json({"error": "Unarchive the lead before converting it."}, 400)
+                stage = str(body.get("stage_id") or "") or (d["stages"][0]["id"] if d["stages"] else "")
+                deal = {"id": _crm_id(d, "d"), "title": lead["title"],
+                        "value": lead.get("value") or 0.0, "currency": "GBP",
+                        "stage_id": stage, "person_id": lead.get("person_id") or "",
+                        "org_id": lead.get("org_id") or "",
+                        "label": lead.get("label") or "", "status": "open",
+                        "probability": None, "expected_close": "",
+                        "source": lead.get("source") or "Manual",
+                        "created_at": _crm_now(), "updated_at": _crm_now(),
+                        "stage_entered_at": _crm_now(), "touched_at": _crm_now(),
+                        "notes": lead.get("notes") or [], "changelog": []}
+                _crm_log(deal, "created", "", "converted from lead")
+                d["deals"][deal["id"]] = deal
+                d["leads"].pop(lead["id"], None)
+                return _crm_ok(d, {"id": deal["id"]})
+            else:
+                return _json({"error": "Unknown operation."}, 400)
+            return _crm_ok(d)
+        except RuntimeError:
+            return _json({"error": "The CRM could not be saved. The data volume may be "
+                                   "unwritable; check Settings, Connections."}, 500)
+        except Exception:
+            logger.exception("CRM lead op failed")
+            return _json({"error": "That change could not be made. Check the server logs."}, 500)
+
+    @mcp.custom_route("/api/crm/stages", methods=["POST"])
+    async def crm_stages_route(request: Request):
+        err, body = await _crm_guard(request)
+        if err:
+            return err
+        try:
+            d = _load_crm()
+            raw = body.get("stages")
+            if not isinstance(raw, list) or not raw or len(raw) > 12:
+                return _json({"error": "A pipeline needs between 1 and 12 stages."}, 400)
+            new = []
+            for s in raw:
+                if not isinstance(s, dict) or not str(s.get("name") or "").strip():
+                    return _json({"error": "Every stage needs a name."}, 400)
+                sid = str(s.get("id") or "").strip() or _crm_id(d, "s")
+                try:
+                    prob = max(0, min(100, int(s.get("probability", 100))))
+                    rot = max(0, min(365, int(s.get("rot_days", 0) or 0)))
+                except (TypeError, ValueError):
+                    prob, rot = 100, 0
+                new.append({"id": sid, "name": str(s["name"]).strip()[:60],
+                            "probability": prob, "rot_days": rot})
+            # Pipedrive deletes a stage's deals after a warning. Refusing and
+            # asking to move them first loses nothing and cannot surprise:
+            # these are real deals, not sample data.
+            kept = {s["id"] for s in new}
+            orphans = [v for v in d["deals"].values()
+                       if not v.get("deleted") and v.get("status") == "open"
+                       and v.get("stage_id") not in kept]
+            if orphans:
+                return _json({"error": "That would remove a stage holding "
+                                       + str(len(orphans)) + " open deal(s). Move them to "
+                                       "another stage first."}, 400)
+            d["stages"] = new
+            return _crm_ok(d)
+        except RuntimeError:
+            return _json({"error": "The CRM could not be saved. The data volume may be "
+                                   "unwritable; check Settings, Connections."}, 500)
+        except Exception:
+            logger.exception("CRM stages op failed")
+            return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/stock-usage", methods=["POST"])
     async def stock_usage_route(request: Request):
