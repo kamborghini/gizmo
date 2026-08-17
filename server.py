@@ -1121,12 +1121,63 @@ async def cancel_order_fulfillment(fulfillment_id: int) -> dict:
         return {"ok": False, "detail": f"Fulfillment cancel failed: {type(e).__name__}"}
 
 
+# Webhook topics the desk listens for. orders/updated fires for paid, cancelled,
+# edited, fulfilled and tag changes, so together these cover everything the
+# order snapshot caches; duplicate deliveries are deduped at the receiver.
+WEBHOOK_TOPICS = ("orders/create", "orders/updated", "refunds/create")
+
+
+def _app_public_url() -> str:
+    """Where Shopify should POST webhooks: this app's own public address.
+    Railway sets RAILWAY_PUBLIC_DOMAIN; APP_URL overrides for anything else.
+    Empty locally, which simply leaves webhooks unregistered there."""
+    url = os.environ.get("APP_URL", "").strip().rstrip("/")
+    if url:
+        return url
+    dom = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "").strip()
+    return f"https://{dom}" if dom else ""
+
+
+async def ensure_order_webhooks() -> dict:
+    """Make sure the order webhooks exist and point at this deployment.
+
+    Idempotent and safe to run hourly: Shopify quietly deletes a subscription
+    after sustained delivery failure (an outage on our side), so registration
+    must be a standing repair, not a one-off install step. Returns a small
+    status dict for the Settings panel; never raises."""
+    base = _app_public_url()
+    if not base:
+        return {"ok": False, "detail": "No public URL (APP_URL/RAILWAY_PUBLIC_DOMAIN unset)."}
+    address = base + "/webhooks/orders"
+    try:
+        data = await _request("GET", "webhooks.json", params={"limit": 250})
+        have = {}
+        for w in data.get("webhooks", []):
+            if str(w.get("address") or "") == address:
+                have[str(w.get("topic") or "")] = w
+        made = 0
+        for topic in WEBHOOK_TOPICS:
+            if topic in have:
+                continue
+            await _request("POST", "webhooks.json",
+                           body={"webhook": {"topic": topic, "address": address, "format": "json"}})
+            made += 1
+        if made:
+            logger.info("webhooks: registered %d subscription(s) at %s", made, address)
+        return {"ok": True, "address": address,
+                "topics": sorted(set(list(have.keys()) + list(WEBHOOK_TOPICS)))}
+    except Exception as e:
+        logger.warning("webhooks: could not ensure subscriptions: %s", e)
+        return {"ok": False, "detail": f"{type(e).__name__}: {e}"[:200]}
+
+
 try:
     import copilot
     copilot.add_routes(mcp, COPILOT_TOOLS,
                        order_tag_writer=update_order_tags,
                        fulfillment_writer=create_order_fulfillment,
-                       fulfillment_canceler=cancel_order_fulfillment)
+                       fulfillment_canceler=cancel_order_fulfillment,
+                       webhook_ensurer=ensure_order_webhooks)
 except Exception as e:
     logger.error(f"Store Copilot disabled (chat UI unavailable): {e}")
 

@@ -26,6 +26,7 @@ import html
 import json
 import time
 import hmac
+import base64
 import hashlib
 import socket
 import asyncio
@@ -2743,6 +2744,36 @@ _orders_inflight: dict = {}   # (days, fields) -> the Task sweeping, so concurre
 _orders_epoch = 0             # bumped by every write that changes what a sweep returns
 
 
+# ---------------------------------------------------------------------------
+# Webhooks: how the desk stays live.
+#
+# Without these the app is blind between reads: the order snapshot has a 45s
+# TTL, and an edit made in the Shopify admin (a payment landing, a tag changed,
+# a refund) stays invisible until the clock runs out. Shopify POSTs order
+# events here instead; each verified event retires the snapshot, so the next
+# read of any tab reflects reality within seconds. The TTL stays as the
+# backstop, because webhooks are at-least-once, unordered and occasionally
+# late; the payload is treated purely as a trigger and never as state.
+# ---------------------------------------------------------------------------
+WEBHOOK_MAX_BYTES = 1024 * 1024        # a full order payload, with headroom
+_webhook_state = {"last_at": 0.0, "last_topic": "", "count": 0, "ensured": None}
+_webhook_seen: dict = {}               # delivery id -> monotonic time (dedupe)
+
+
+def _webhook_note_delivery(delivery_id: str) -> bool:
+    """True if this delivery is new. Shopify redelivers on any slow response,
+    so the same event arriving twice must not read as two events."""
+    now = time.monotonic()
+    if len(_webhook_seen) > 500:
+        cutoff = now - 600
+        for k in [k for k, t in _webhook_seen.items() if t < cutoff]:
+            _webhook_seen.pop(k, None)
+    if delivery_id in _webhook_seen:
+        return False
+    _webhook_seen[delivery_id] = now
+    return True
+
+
 def _refresh_asked(body: dict) -> bool:
     """True when the merchant pressed Refresh, having discarded the snapshots.
 
@@ -3419,6 +3450,7 @@ _PROPOSAL_RE = re.compile(r"https://" + re.escape(PROPOSAL_HOST) + r"/proof/[A-Z
 _order_tag_writer = None
 _fulfillment_writer = None
 _fulfillment_canceler = None
+_webhook_ensurer = None
 _tag_locks: dict = {}
 _dispatch_locks: dict = {}
 
@@ -5741,6 +5773,138 @@ def _liability_terms(o: dict):
     return n, f"Net {n}", "assumed", (created + timedelta(days=n)) if created else None
 
 
+# ---------------------------------------------------------------------------
+# Chase desk: the weekly session of asking credit customers for money.
+#
+# The ledger already knows everything the email needs to say; what cost the
+# merchant 30 to 60 minutes a week was saying it, from scratch, per account,
+# and remembering who was asked last week. So the app composes the email (one
+# statement per account, every unpaid order listed, tone stepped by how late
+# the oldest one is) and keeps a last-chased stamp. The merchant copies the
+# text into their own mail client and stays the sender: nothing here writes to
+# Shopify or sends anything.
+# ---------------------------------------------------------------------------
+CHASE_LOG_PATH = os.environ.get("CHASE_LOG_PATH", "/data/chase_log.json")
+CHASE_LOG_MAX = 300
+
+
+def _load_chase_log() -> dict:
+    return _load_json_store(CHASE_LOG_PATH, "accounts", {}) or {}
+
+
+def _mark_chased(key: str, by: str = "") -> dict:
+    """Stamp an account as chased now. Returns the entry, or raises on a store
+    that cannot be written (the caller turns that into a visible error: a chase
+    stamp that silently fails re-creates the double-chasing this exists to stop)."""
+    accounts = _load_chase_log()
+    accounts[str(key)] = {"at": datetime.now(timezone.utc).isoformat(), "by": str(by or "")[:40]}
+    if len(accounts) > CHASE_LOG_MAX:
+        drop = sorted(accounts.items(), key=lambda kv: str(kv[1].get("at") or ""))
+        accounts = dict(drop[-CHASE_LOG_MAX:])
+    if not _store_writable(CHASE_LOG_PATH):
+        raise RuntimeError("chase log is not writable")
+    os.makedirs(os.path.dirname(CHASE_LOG_PATH) or ".", exist_ok=True)
+    tmp = CHASE_LOG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"accounts": accounts}, fh)
+    os.replace(tmp, CHASE_LOG_PATH)
+    return accounts[str(key)]
+
+
+def _chase_money(amount: float, currency: str) -> str:
+    sym = {"GBP": "£", "USD": "$", "EUR": "€"}.get((currency or "").upper())
+    return (f"{sym}{amount:,.2f}" if sym else f"{amount:,.2f} {currency}".strip())
+
+
+def _chase_date(iso: str) -> str:
+    try:
+        return datetime.fromisoformat(iso).strftime("%d %b %Y").lstrip("0")
+    except (TypeError, ValueError):
+        return ""
+
+
+def _chase_email(c: dict, currency: str) -> dict:
+    """The chasing email for one account, composed from its unpaid orders.
+
+    Tone follows the oldest overdue debt: a statement while everything is
+    within terms, a nudge in the first week, firmer to thirty days, and a
+    formal final reminder beyond that. Never threats, never legalese: these
+    are trade customers the merchant wants to keep."""
+    orders = c.get("orders") or []
+    over = [r for r in orders if r.get("status") == "overdue"]
+    worst = max((r.get("days_over") or 0) for r in orders) if orders else 0
+    total = _chase_money(c.get("total") or 0.0, currency)
+    # The distinction every sentence below has to respect: "outstanding" is the
+    # whole account, "overdue" is only the part past its due date. An account
+    # often carries both at once, and telling a customer their fresh order is
+    # overdue is exactly the dispute a chasing email must not start.
+    over_amt = _chase_money(sum(r.get("outstanding") or 0.0 for r in over), currency)
+    mixed = bool(over) and len(over) < len(orders)
+    name = str(c.get("name") or "").strip() or "there"
+    # "the order below" only when the list holds exactly the overdue ones;
+    # in a mixed statement the sentence must point at the marked rows.
+    which = (("orders marked overdue below have" if len(over) > 1 else "order marked overdue below has")
+             if mixed else ("orders below have" if len(over) > 1 else "order below has"))
+
+    if not over:
+        tone = "statement"
+        subject = f"Statement of account: {total} outstanding"
+        opening = ("I hope all is well. A quick statement of what is currently open on your "
+                   "account with us. Nothing is overdue; this is just to keep our records aligned.")
+        closing = "If anything here does not match your records, do let me know."
+    elif worst <= 7:
+        tone = "gentle"
+        subject = (f"Payment reminder: {over[0]['name']} ({over_amt})"
+                   if len(over) == 1 else f"Payment reminder: {over_amt} overdue")
+        opening = (f"I hope all is well. A gentle reminder that the {which} "
+                   "gone past their due date. I know these things slip; a payment when "
+                   "convenient would be much appreciated.")
+        closing = "If payment is already on its way, please ignore this and accept my thanks."
+    elif worst <= 30:
+        tone = "firm"
+        subject = f"Overdue account: {over_amt} past due"
+        opening = (f"Following up on the {which.replace(' have', ',').replace(' has', ',')} "
+                   "now more than a week past due. Could you let me know when payment will "
+                   "be made, or if there is a problem with any of these orders that is "
+                   "holding it up?")
+        closing = ("If something is wrong our end, an invoice you never received or a query "
+                   "on an order, tell me and I will sort it straight away.")
+    else:
+        tone = "final"
+        subject = f"Final reminder: {over_amt} overdue"
+        opening = ((f"The oldest debt below is now {worst} days past due"
+                    if len(over) > 1 or mixed else f"The order below is now {worst} days past due")
+                   + " despite earlier reminders. Please arrange payment within the next 7 "
+                     "days, or reply with a date I can expect it by. I would much rather "
+                     "resolve this together than have to hold future orders on the account.")
+        closing = "If there is a genuine difficulty, talk to me; there is usually a way through."
+
+    lines = []
+    for r in orders:
+        when = _chase_date(r.get("created_at"))
+        bits = [f"{r['name']}  ordered {when}" if when else str(r["name"])]
+        if r.get("due"):
+            bits.append(f"due {_chase_date(r['due'])}")
+        bits.append(f"{_chase_money(r.get('outstanding') or 0.0, currency)} outstanding")
+        if (r.get("days_over") or 0) > 0 and r.get("status") == "overdue":
+            bits.append(f"{r['days_over']} days overdue")
+        elif mixed:
+            bits.append("not yet due")
+        lines.append("  " + ", ".join(bits))
+
+    totals = [f"Total outstanding: {total}"]
+    if mixed:
+        totals.append(f"Of that, overdue: {over_amt}")
+    body = "\n".join([
+        f"Hello {name},", "", opening, "",
+        *lines, "",
+        *totals, "",
+        "Please use the order number as the payment reference.",
+        closing, "", "Thank you,", "",
+    ])
+    return {"subject": subject, "body": body, "tone": tone}
+
+
 async def run_liability(registry: dict) -> dict:
     """Accounts receivable from orders tagged "Purchase order unpaid": what each
     credit customer owes, whether it is inside their payment terms, and which
@@ -5814,6 +5978,7 @@ async def run_liability(registry: dict) -> dict:
             "channel": _liability_channel(matched[0]),
             "channels": [_liability_channel(t) for t in matched],
             "tags": _order_tags(o),
+            "email": str(o.get("email") or cust.get("email") or ""),
         })
     # Customer roll-up.
     customers: dict = {}
@@ -5828,10 +5993,17 @@ async def run_liability(registry: dict) -> dict:
         c["terms"].add(r["terms"])
         c["assumed"] = c["assumed"] or r["terms_source"] == "assumed"
         c["orders"].append(r)
+    chase_log = _load_chase_log()
     cust_rows = []
-    for c in customers.values():
+    for key, c in customers.items():
         c["orders"].sort(key=lambda r: (r["due"] or "9999"))
         c["terms"] = (sorted(c["terms"])[0] if len(c["terms"]) == 1 else "Mixed")
+        c["key"] = key
+        c["email"] = next((r["email"] for r in c["orders"] if r.get("email")), "")
+        c["last_chased"] = chase_log.get(key) or None
+        # The email is composed here rather than in the browser so the wording
+        # is tested alongside the numbers it carries.
+        c["chase"] = _chase_email(c, currency or "GBP")
         cust_rows.append(c)
     cust_rows.sort(key=lambda c: (-c["overdue"], -c["total"]))
     buckets = {"within": 0.0, "due_soon": 0.0, "1-7": 0.0, "8-30": 0.0, "31-60": 0.0, "60+": 0.0}
@@ -6936,6 +7108,14 @@ async def _watchdog_tick(registry: dict) -> bool:
                     await _send_alert_email("Store Copilot: new models missing from the size list",
                                             [k.replace("|", " / ") for k in fresh]
                                             + ["", "Open the Labels tab and run Size check for details."])
+        # Webhook subscriptions are a standing repair, not an install step:
+        # Shopify silently deletes one after sustained delivery failure (an
+        # outage on our side), so re-assert them every tick.
+        if up and _webhook_ensurer is not None:
+            try:
+                _webhook_state["ensured"] = await _webhook_ensurer()
+            except Exception:
+                logger.exception("webhook registration failed")
         _save_watch(state)
         return up or fails < 3
     except Exception:
@@ -7011,14 +7191,15 @@ def _ensure_scheduler(registry: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=None,
-               fulfillment_canceler=None) -> None:
+               fulfillment_canceler=None, webhook_ensurer=None) -> None:
     # The write capabilities the server hands over. None of them ever joins any
     # tool registry: the AI can read the store; only the app's own print / Mark
     # made / Dispatch actions can touch tags or fulfillments.
-    global _order_tag_writer, _fulfillment_writer, _fulfillment_canceler
+    global _order_tag_writer, _fulfillment_writer, _fulfillment_canceler, _webhook_ensurer
     _order_tag_writer = order_tag_writer
     _fulfillment_writer = fulfillment_writer
     _fulfillment_canceler = fulfillment_canceler
+    _webhook_ensurer = webhook_ensurer
     _wo_boot()
     # Shopify tools + live SEO tools + Google data tools (the last only if configured)
     chat_registry = {**registry, **_build_seo_tools(registry), **_build_google_tools()}
@@ -7066,6 +7247,47 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/assets/app.js", methods=["GET"])
     async def app_js(request: Request):
         return _asset_response("js", request.query_params.get("v", ""))
+
+    @mcp.custom_route("/webhooks/orders", methods=["POST"])
+    async def order_webhook(request: Request):
+        """Shopify's order events. The HMAC is the whole authentication: the
+        body is signed with the app secret, so a valid signature can only come
+        from Shopify. No session token (Shopify has none) and no rate limiter
+        (a burst of genuine orders must never be answered 429, because repeated
+        failures make Shopify silently delete the subscription)."""
+        if not SHOPIFY_API_SECRET:
+            return PlainTextResponse("Unauthorized", status_code=401)
+        # Streamed with a hard cap, NOT request.body(): the signature can only be
+        # checked after the body is read, so this read happens for anyone, and a
+        # chunked upload with no Content-Length would otherwise buffer without
+        # limit into memory on an endpoint that deliberately has no rate limiter.
+        total, chunks = 0, []
+        try:
+            async for chunk in request.stream():
+                total += len(chunk)
+                if total > WEBHOOK_MAX_BYTES:
+                    return PlainTextResponse("Too large", status_code=413)
+                chunks.append(chunk)
+        except Exception:
+            return PlainTextResponse("Bad request", status_code=400)
+        raw = b"".join(chunks)
+        sent = request.headers.get("x-shopify-hmac-sha256", "")
+        want = base64.b64encode(hmac.new(SHOPIFY_API_SECRET.encode("utf-8"),
+                                         raw, hashlib.sha256).digest()).decode("ascii")
+        if not sent or not hmac.compare_digest(want, sent):
+            return PlainTextResponse("Unauthorized", status_code=401)
+        # Signed, but for the wrong store: refuse rather than act on it.
+        shop = str(request.headers.get("x-shopify-shop-domain") or "")
+        if SHOPIFY_STORE and not shop.lower().startswith(SHOPIFY_STORE.split(".")[0].lower() + "."):
+            return PlainTextResponse("Unauthorized", status_code=401)
+        delivery = str(request.headers.get("x-shopify-webhook-id") or "")
+        if delivery and not _webhook_note_delivery(delivery):
+            return PlainTextResponse("ok", status_code=200)   # a redelivery, already handled
+        _bust_orders()
+        _webhook_state["last_at"] = time.time()
+        _webhook_state["last_topic"] = str(request.headers.get("x-shopify-topic") or "")
+        _webhook_state["count"] += 1
+        return PlainTextResponse("ok", status_code=200)
 
     @mcp.custom_route("/healthz", methods=["GET"])
     async def healthz(request: Request):
@@ -7806,6 +8028,30 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except Exception:
             logger.exception("Liability failed")
             return _json({"error": "Couldn't build the liability view."}, 500)
+
+    @mcp.custom_route("/api/liability/chase", methods=["POST"])
+    async def liability_chase_route(request: Request):
+        """Stamp an account as chased today. Local state only: the merchant's
+        own mail client sends the email, so this records the fact, not the act."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        key = str(body.get("key") or "").strip()[:120]
+        if not key:
+            return _json({"error": "No account given."}, 400)
+        try:
+            entry = _mark_chased(key, by=str(who or ""))
+            return _json({"ok": True, "key": key, "chased": entry})
+        except Exception:
+            logger.exception("chase stamp failed")
+            return _json({"error": "The chase could not be recorded. The data volume may be "
+                                   "unwritable; check Settings, Connections."}, 500)
 
     @mcp.custom_route("/api/stock-usage", methods=["POST"])
     async def stock_usage_route(request: Request):
@@ -9002,6 +9248,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             "volume": {"ok": vol_ok, "detail": vol_detail,
                        "poisoned": sorted(os.path.basename(p) for p in _poisoned_stores)},
             "email_alerts": {"ok": bool(RESEND_API_KEY and ALERT_EMAIL_TO)},
+            # Live updates: whether Shopify is pushing order events to the app,
+            # and when one last arrived. Without them the desk falls back to the
+            # short cache and the Refresh button, which still work.
+            "webhooks": {"ok": bool((_webhook_state.get("ensured") or {}).get("ok")),
+                         "detail": (_webhook_state.get("ensured") or {}).get("detail") or "",
+                         "last_event_at": (_webhook_state["last_at"] or None),
+                         "events": _webhook_state["count"]},
             "backup": (lambda b: {"snapshot_at": b.get("snapshot_at"),
                                   "download_at": b.get("download_at")})(
                 _load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}),
