@@ -6030,6 +6030,167 @@ async def run_liability(registry: dict) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Stock bridge: the glass a Mark made consumes flows into the stock app.
+#
+# Zeta (the stock app) is the shelf's ledger; this desk is where the shelf
+# actually empties. Marking an order made resolves its items into glass lines
+# (the same resolution the day sheet uses) and pushes them to zeta, which
+# books them exactly like a count-down: stock falls, usage rises, the reorder
+# engine sees it. Un-marking pushes a reversal. Zeta is idempotent per order,
+# so a repeat or a retry can never double-book.
+#
+# The push must never hold the workbench hostage: Mark made succeeds locally
+# first, and a failed push (zeta down, network blip) parks the order id in a
+# pending store on the volume that the scheduler retries every tick.
+# ---------------------------------------------------------------------------
+ZETA_URL = os.environ.get("ZETA_URL", "").strip().rstrip("/")
+ZETA_SYNC_TOKEN = os.environ.get("ZETA_SYNC_TOKEN", "").strip()
+ZETA_SYNC_PATH = os.environ.get("ZETA_SYNC_PATH", "/data/zeta_sync.json")
+_zeta_last = {"ok_at": 0.0, "error": ""}
+
+
+def _zeta_configured() -> bool:
+    return bool(ZETA_URL and ZETA_SYNC_TOKEN)
+
+
+def _load_zeta_pending() -> dict:
+    return _load_json_store(ZETA_SYNC_PATH, "pending", {}) or {}
+
+
+_zeta_locks: dict = {}
+
+
+def _zeta_lock(order_id) -> "asyncio.Lock":
+    """One lock per order: a drain retry and a fresh click for the same order
+    must serialise, or an in-flight stale booking could land after a newer
+    reversal and leave the stock app holding glass for an un-made order."""
+    key = str(order_id)
+    lock = _zeta_locks.get(key)
+    if lock is None:
+        if len(_zeta_locks) > 500:
+            for k in [k for k, l in _zeta_locks.items() if not l.locked()][:250]:
+                _zeta_locks.pop(k, None)
+        lock = _zeta_locks[key] = asyncio.Lock()
+    return lock
+
+
+def _write_zeta_pending(p: dict) -> bool:
+    """True when the queue actually reached disk. The caller's wording depends
+    on it: promising "the app will keep retrying" over a write that silently
+    failed would turn a lost booking into a reassuring toast."""
+    try:
+        if not _store_writable(ZETA_SYNC_PATH):
+            return False
+        os.makedirs(os.path.dirname(ZETA_SYNC_PATH) or ".", exist_ok=True)
+        tmp = ZETA_SYNC_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"pending": p}, fh)
+        os.replace(tmp, ZETA_SYNC_PATH)
+        return True
+    except Exception:
+        logger.exception("stock bridge: could not save the pending queue")
+        return False
+
+
+async def _zeta_send(op: str, order_id, order_name: str, lines: list) -> dict:
+    """One push to zeta. Separate so tests can stand in a fake transport."""
+    async with httpx.AsyncClient(timeout=10.0) as cl:
+        r = await cl.post(ZETA_URL + "/api/sync/consumption",
+                          headers={"Authorization": "Bearer " + ZETA_SYNC_TOKEN},
+                          json={"op": op, "order_id": str(order_id),
+                                "order_name": order_name, "lines": lines})
+        r.raise_for_status()
+        return r.json()
+
+
+async def _zeta_push(registry: dict, order_id, op: str) -> str:
+    """Book or reverse one order at the stock app. Returns '' on success or a
+    short note for the operator; failure always parks the order for retry."""
+    if not _zeta_configured():
+        return ""
+    async with _zeta_lock(order_id):
+        return await _zeta_push_locked(registry, order_id, op)
+
+
+async def _zeta_push_locked(registry: dict, order_id, op: str) -> str:
+    try:
+        if op == "book":
+            res = await run_production_labels(registry, order_id=int(order_id))
+            orders = (res or {}).get("orders") or []
+            if not orders:
+                raise RuntimeError("order could not be read")
+            o = orders[0]
+            await _zeta_send("book", order_id, str(o.get("name") or ""), _usage_lines(o))
+        else:
+            await _zeta_send("reverse", order_id, "", [])
+        # The queue is reloaded AT write time, never carried across the await:
+        # a concurrent push's outcome must not be overwritten by this one's
+        # stale snapshot of the queue.
+        pending = _load_zeta_pending()
+        pending.pop(str(order_id), None)
+        _write_zeta_pending(pending)
+        _zeta_last["ok_at"], _zeta_last["error"] = time.time(), ""
+        return ""
+    except Exception as e:
+        # The op recorded is the LATEST intent: made-then-unmade while zeta is
+        # down must end as a reverse, not replay a stale book.
+        pending = _load_zeta_pending()
+        pending[str(order_id)] = {"op": op, "at": _crm_now(),
+                                  "tries": int((pending.get(str(order_id)) or {}).get("tries") or 0) + 1}
+        parked = _write_zeta_pending(pending)
+        _zeta_last["error"] = f"{type(e).__name__}: {e}"[:200]
+        logger.warning("stock bridge: %s for order %s failed (%s); %s",
+                       op, order_id, type(e).__name__,
+                       "queued for retry" if parked else "AND THE QUEUE COULD NOT BE SAVED")
+        if not parked:
+            _record_error("booking made glass at the stock app", e)
+            return ("The stock app was not updated AND the retry could not be saved. "
+                    "Adjust this order's stock by hand, or press Mark made again later.")
+        return "The stock app could not be updated just now; the app will keep retrying."
+
+
+async def _zeta_drain(registry: dict) -> None:
+    """Retry everything parked, once per scheduler tick. Never raises.
+
+    The op is re-read from the store under the order's lock, never taken from
+    this loop's snapshot: while one retry was in flight the merchant may have
+    changed their mind, and the LATEST intent is the only one that may run."""
+    if not _zeta_configured():
+        return
+    for oid in list(_load_zeta_pending().keys()):
+        try:
+            async with _zeta_lock(oid):
+                entry = _load_zeta_pending().get(str(oid))
+                if not entry:
+                    continue   # settled by a fresh click while we waited
+                await _zeta_push_locked(registry, oid, str(entry.get("op") or "book"))
+        except Exception:
+            logger.exception("stock bridge: drain failed for %s", oid)
+
+
+def _usage_lines(shaped_order: dict) -> list:
+    """One shaped label order as glass-consumption lines.
+
+    Resolvable items become {size, family, qty}; anything the size lookup
+    flagged for review, or that carries no size, becomes {size, family, qty,
+    note} so the caller can show it rather than silently dropping glass. The
+    same resolution feeds the day sheet and the stock-app push, so the two can
+    never disagree about what a day's making consumed."""
+    out = []
+    for it in shaped_order.get("items", []):
+        qty = int(it.get("quantity") or 1)
+        # Original vs Copy is the same physical blank: group stock by the
+        # glass family ("Mono - Original" and "Mono - Copy" -> "Mono").
+        family = re.split(r"\s+-\s+", it.get("glass_type") or "")[0].strip() or "(type not recorded)"
+        if it.get("review_reason") or not it.get("production_size"):
+            out.append({"size": str(it.get("production_size") or ""), "family": family,
+                        "qty": qty, "note": str(it.get("review_reason") or "no size resolved")[:200]})
+        else:
+            out.append({"size": str(it["production_size"]), "family": family, "qty": qty})
+    return out
+
+
 async def run_stock_usage(registry: dict, date_str: str) -> dict:
     """Estimated stock used on one day: every order whose Mark made stamp falls
     inside the selected day (UK time), its items resolved through the same size
@@ -6070,19 +6231,15 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
             continue
         for o in (res.get("orders") or []):
             orders_in.append(str(o.get("name") or ""))
-            for it in o.get("items", []):
-                qty = int(it.get("quantity") or 1)
-                pieces += qty
-                if it.get("review_reason") or not it.get("production_size"):
-                    u = unresolved.setdefault(str(o.get("name") or ""), 0)
-                    unresolved[str(o.get("name") or "")] = u + qty
+            for line in _usage_lines(o):
+                pieces += line["qty"]
+                if line.get("note"):
+                    nm = str(o.get("name") or "")
+                    unresolved[nm] = unresolved.get(nm, 0) + line["qty"]
                     continue
-                # Original vs Copy is the same physical blank: group stock by the
-                # glass family ("Mono - Original" and "Mono - Copy" -> "Mono").
-                family = re.split(r"\s+-\s+", it.get("glass_type") or "")[0].strip() or "(type not recorded)"
-                key = (it["production_size"], family)
-                r = rows.setdefault(key, {"size": it["production_size"], "glass": family, "qty": 0})
-                r["qty"] += qty
+                key = (line["size"], line["family"])
+                r = rows.setdefault(key, {"size": line["size"], "glass": line["family"], "qty": 0})
+                r["qty"] += line["qty"]
     out_rows = sorted(rows.values(), key=lambda r: (-float(r["size"]), r["glass"]))
     return {"date": day.isoformat(), "orders": len(orders_in), "order_names": orders_in[:60],
             "pieces": pieces, "rows": out_rows, "fetch_failed": fetch_failed,
@@ -7116,6 +7273,10 @@ async def _watchdog_tick(registry: dict) -> bool:
                 _webhook_state["ensured"] = await _webhook_ensurer()
             except Exception:
                 logger.exception("webhook registration failed")
+        # Stock-bridge retries: bookings that failed to reach the stock app.
+        # Not gated on Shopify being up: reversals need no Shopify read, and a
+        # book retry just fails and stays parked if Shopify is still down.
+        await _zeta_drain(registry)
         _save_watch(state)
         return up or fails < 3
     except Exception:
@@ -8228,10 +8389,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     ship_note = await _unfulfill_dispatch(registry, oid)
                     okd, note = await _sync_order_tags(registry, oid, add=[PRODUCTION_TAG],
                                                        remove=[MADE_TAG, DISPATCHED_TAG, *LEGACY_DISPATCHED_TAGS])
+                # The shelf's ledger: made books the glass at the stock app,
+                # un-made returns it. Local state is already saved, so a bridge
+                # failure only queues a retry, never blocks the workbench.
+                stock_note = await _zeta_push(registry, oid, "book" if on else "reverse")
                 return _json({"ok": True, "state": {str(oid): state.get(str(oid), {})},
                               "dispatch": {str(oid): _load_dispatch().get(str(oid), {})},
                               "fulfilled": fulfilled, "notified": notified,
-                              "ship_note": ship_note,
+                              "ship_note": ship_note, "stock_note": stock_note,
                               "tag_note": ("" if okd else note)})
             return _json({"error": "Unknown op."}, 400)
         except Exception:
@@ -9948,6 +10113,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                          "detail": (_webhook_state.get("ensured") or {}).get("detail") or "",
                          "last_event_at": (_webhook_state["last_at"] or None),
                          "events": _webhook_state["count"]},
+            # The stock bridge: glass booked at the stock app when orders are
+            # marked made. Pending = bookings still waiting on a retry.
+            "stock_bridge": {"configured": _zeta_configured(),
+                             "pending": len(_load_zeta_pending()),
+                             "last_ok_at": (_zeta_last["ok_at"] or None),
+                             "error": _zeta_last["error"]},
             "backup": (lambda b: {"snapshot_at": b.get("snapshot_at"),
                                   "download_at": b.get("download_at")})(
                 _load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}),

@@ -3714,6 +3714,159 @@ def t_evicting_a_capped_deal_takes_its_activities_with_it():
         copilot.CRM_DEALS_MAX = saved
 
 
+# ---- Stock bridge (gizmo -> zeta) -------------------------------------------
+
+def with_zeta(fn, send=None):
+    """Run fn with the bridge configured and a fake transport standing in for
+    the stock app. Returns the list of pushes zeta would have received."""
+    sent = []
+    async def fake_send(op, order_id, order_name, lines):
+        if send:
+            return await send(op, order_id, order_name, lines, sent)
+        sent.append({"op": op, "order_id": str(order_id), "order_name": order_name, "lines": lines})
+        return {"ok": True}
+    saved = (copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN, copilot.ZETA_SYNC_PATH, copilot._zeta_send)
+    copilot.ZETA_URL = "https://zeta.test"
+    copilot.ZETA_SYNC_TOKEN = "tok"
+    copilot.ZETA_SYNC_PATH = SCRATCH + "/zeta_sync.json"
+    copilot._zeta_send = fake_send
+    try:
+        os.remove(copilot.ZETA_SYNC_PATH)
+    except FileNotFoundError:
+        pass
+    try:
+        fn(sent)
+        return sent
+    finally:
+        (copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN, copilot.ZETA_SYNC_PATH, copilot._zeta_send) = saved
+
+@test
+def t_marking_made_books_the_glass_at_the_stock_app():
+    reset_dispatch(); reset_prod()
+    def go(sent):
+        r = mark_made(12345, True)
+        eq(r.status_code, 200, r.text)
+        eq(r.json().get("stock_note"), "", "no note when the push lands")
+        eq(len(sent), 1, "one push per made")
+        eq(sent[0]["op"], "book")
+        eq(sent[0]["order_id"], "12345")
+        ok(sent[0]["lines"], "the push carries resolved glass lines")
+        r2 = mark_made(12345, False)
+        eq(r2.status_code, 200, r2.text)
+        eq(sent[1]["op"], "reverse", "un-making pushes the reversal")
+        eq(copilot._load_zeta_pending(), {}, "nothing left queued")
+    with_zeta(go)
+
+@test
+def t_a_dead_stock_app_queues_the_booking_and_the_drain_retries_it():
+    reset_dispatch(); reset_prod()
+    state = {"up": False}
+    async def send(op, order_id, order_name, lines, sent):
+        if not state["up"]:
+            raise RuntimeError("connection refused")
+        sent.append({"op": op, "order_id": str(order_id)})
+        return {"ok": True}
+    def go(sent):
+        r = mark_made(12345, True)
+        eq(r.status_code, 200, "the workbench is never blocked by the bridge")
+        ok("retrying" in r.json().get("stock_note", ""), r.json().get("stock_note"))
+        pend = copilot._load_zeta_pending()
+        eq(pend.get("12345", {}).get("op"), "book", "the booking is parked")
+        state["up"] = True
+        run(copilot._zeta_drain({}))
+        eq(len(sent), 1, "the drain delivered it")
+        eq(copilot._load_zeta_pending(), {}, "and the queue emptied")
+    with_zeta(go, send=send)
+
+@test
+def t_made_then_unmade_while_zeta_is_down_ends_as_a_reversal():
+    # The queue records the LATEST intent: replaying a stale book after the
+    # merchant already un-made the order would book glass that was never used.
+    reset_dispatch(); reset_prod()
+    state = {"up": False}
+    async def send(op, order_id, order_name, lines, sent):
+        if not state["up"]:
+            raise RuntimeError("down")
+        sent.append({"op": op})
+        return {"ok": True}
+    def go(sent):
+        mark_made(12345, True)
+        mark_made(12345, False)
+        eq(copilot._load_zeta_pending().get("12345", {}).get("op"), "reverse",
+           "the queue holds the reversal, not the stale booking")
+        state["up"] = True
+        run(copilot._zeta_drain({}))
+        eq([s["op"] for s in sent], ["reverse"], "only the reversal was sent")
+    with_zeta(go, send=send)
+
+@test
+def t_an_unconfigured_bridge_stays_silent():
+    reset_dispatch(); reset_prod()
+    saved = (copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN)
+    copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN = "", ""
+    try:
+        r = mark_made(12345, True)
+        eq(r.status_code, 200, r.text)
+        eq(r.json().get("stock_note"), "", "no nagging when the bridge is off")
+    finally:
+        (copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN) = saved
+
+@test
+def t_the_push_lines_match_the_day_sheet_resolution():
+    # One resolver feeds both, so the stock app and the printed day sheet can
+    # never disagree about what a day's making consumed.
+    shaped = {"items": [
+        {"quantity": 2, "glass_type": "Mono - Original", "production_size": "26.5"},
+        {"quantity": 1, "glass_type": "Mono - Copy", "production_size": "26.5"},
+        {"quantity": 1, "glass_type": "Colour - Original", "production_size": "48"},
+        {"quantity": 3, "glass_type": "", "production_size": "", "review_reason": "no model matched"},
+    ]}
+    lines = copilot._usage_lines(shaped)
+    eq(len(lines), 4, "every item becomes a line")
+    eq(lines[0]["family"], "Mono", "Original and Copy share a family")
+    ok("note" in lines[3] and lines[3]["note"] == "no model matched",
+       "unresolvable glass is carried with its reason, never dropped")
+
+
+@test
+def t_the_drain_pushes_the_current_intent_not_its_snapshot():
+    # While a retry is in flight the merchant can change their mind; the queue's
+    # CURRENT op is the only one that may run, or a stale book would land after
+    # a newer reverse and the stock app would hold glass for an un-made order.
+    reset_dispatch(); reset_prod()
+    def go(sent):
+        pend = {"12345": {"op": "book", "at": "2026-08-17T10:00:00+00:00", "tries": 1}}
+        copilot._write_zeta_pending(pend)
+        # The intent changes before the drain gets to it.
+        pend["12345"]["op"] = "reverse"
+        copilot._write_zeta_pending(pend)
+        run(copilot._zeta_drain({}))
+        eq([s["op"] for s in sent], ["reverse"], "the drain read the store, not a snapshot")
+    with_zeta(go)
+
+@test
+def t_a_booking_that_cannot_even_be_queued_says_so_honestly():
+    # A corrupt pending store means the retry promise would be a lie: the note
+    # must tell the operator to act, never to relax.
+    reset_dispatch(); reset_prod()
+    async def send(op, order_id, order_name, lines, sent):
+        raise RuntimeError("zeta down")
+    def go(sent):
+        with open(copilot.ZETA_SYNC_PATH, "w") as fh:
+            fh.write("{corrupt")
+        copilot._load_zeta_pending()      # poisons the store, as in production
+        r = mark_made(12345, True)
+        eq(r.status_code, 200, "the workbench still works")
+        note = r.json().get("stock_note", "")
+        ok("by hand" in note or "could not be saved" in note.lower() or "again later" in note,
+           "the note admits the retry was not saved: " + note)
+        ok("keep retrying" not in note, "and never promises a retry that will not happen")
+    try:
+        with_zeta(go, send=send)
+    finally:
+        copilot._poisoned_stores.discard(SCRATCH + "/zeta_sync.json")
+
+
 # ---- The app shell ----------------------------------------------------------
 
 @test

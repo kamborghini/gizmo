@@ -3810,6 +3810,7 @@
                 }
                 renderLabels();
                 if (r && r.ship_note) addToast(r.ship_note, r.fulfilled ? 'good' : '');
+                if (r && r.stock_note) addToast(r.stock_note);
                 if (r && r.tag_note) toastError(r.tag_note);
             } catch (e) {
                 setProdState(o.id, { made_at: prev });
@@ -7490,6 +7491,15 @@
                 wh.ok ? ('Shopify pushes order changes to the app as they happen (' + evAge(wh.last_event_at) + ').')
                       : ('Not receiving order events yet' + (wh.detail ? ': ' + wh.detail : '.')
                          + ' The app falls back to refreshing on a short timer, which still works.')));
+            // The stock bridge: whether Mark made is reaching the stock app.
+            const sb = s.stock_bridge || {};
+            if (sb.configured || sb.pending) {
+                host.append(connRow('Stock app', sb.configured && !sb.pending ? 'on' : 'mid',
+                    !sb.configured ? 'ZETA_URL and ZETA_SYNC_TOKEN are not set, so made glass is not booked against stock.'
+                    : sb.pending ? (sb.pending + ' booking(s) waiting to reach the stock app'
+                        + (sb.error ? ' (' + sb.error + ')' : '') + '. The app retries on its own.')
+                    : 'Made orders book their glass at the stock app automatically.'));
+            }
             // Errors the app hit on its own: visible here whether or not the alert
             // emails are configured, because a 500 at the dispatch desk is otherwise
             // invisible to everyone.
