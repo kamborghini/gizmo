@@ -7799,7 +7799,16 @@ def _files_default() -> dict:
     return {"seq": 0, "folders": {}, "files": {}, "doomed": []}
 
 
+_files_mem: Optional[dict] = None
+
+
 def _load_files() -> dict:
+    """Disk is the record; memory serves the requests. Finder lists a folder
+    many times a minute, and re-parsing the store from disk each time was the
+    single biggest cost on the drive."""
+    global _files_mem
+    if _files_mem is not None:
+        return _files_mem
     d = _load_json_store(FILES_PATH, "files_store", None)
     if not isinstance(d, dict) or "files" not in d:
         d = _files_default()
@@ -7811,17 +7820,24 @@ def _load_files() -> dict:
         d["seq"] = max(int(d.get("seq") or 0), peak)
     except (TypeError, ValueError):
         pass
+    _files_mem = d
     return d
 
 
 def _write_files(d: dict) -> None:
-    if not _store_writable(FILES_PATH):
-        raise RuntimeError("files store is not writable")
-    os.makedirs(os.path.dirname(FILES_PATH) or ".", exist_ok=True)
-    tmp = FILES_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"files_store": d}, fh)
-    os.replace(tmp, FILES_PATH)
+    global _files_mem
+    try:
+        if not _store_writable(FILES_PATH):
+            raise RuntimeError("files store is not writable")
+        os.makedirs(os.path.dirname(FILES_PATH) or ".", exist_ok=True)
+        tmp = FILES_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"files_store": d}, fh)
+        os.replace(tmp, FILES_PATH)
+        _files_mem = d
+    except Exception:
+        _files_mem = None    # memory never outlives a failed write
+        raise
 
 
 def _files_id(d: dict, prefix: str) -> str:
@@ -8477,11 +8493,18 @@ def _dav_rfc1123(iso: str) -> str:
         return datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
 
 
-def _dav_entry_xml(href: str, name: str, is_dir: bool, size: int = 0, mtime: str = "") -> str:
+def _dav_entry_xml(href: str, name: str, is_dir: bool, size: int = 0, mtime: str = "",
+                   etag: str = "", quota: Optional[tuple] = None) -> str:
     rt = "<D:collection/>" if is_dir else ""
     extra = "" if is_dir else (
         f"<D:getcontentlength>{size}</D:getcontentlength>"
         "<D:getcontenttype>application/octet-stream</D:getcontenttype>")
+    if etag:
+        extra += f'<D:getetag>"{etag}"</D:getetag>'
+    if quota:
+        used, avail = quota
+        extra += (f"<D:quota-used-bytes>{used}</D:quota-used-bytes>"
+                  f"<D:quota-available-bytes>{avail}</D:quota-available-bytes>")
     return ("<D:response><D:href>" + html.escape(href) + "</D:href>"
             "<D:propstat><D:prop>"
             "<D:displayname>" + html.escape(name) + "</D:displayname>"
@@ -10555,8 +10578,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             parts = []
             if kind == "folder":
                 folder_path = _dav_path_of_folder(d, kid)
+                used = _files_usage(d)
+                q = (used, max(0, int(FILES_QUOTA_GB * 1024 * 1024 * 1024) - used))
                 parts.append(_dav_entry_xml(_dav_href_dir(*folder_path),
-                                            folder_path[-1] if folder_path else "Files", True))
+                                            folder_path[-1] if folder_path else "Files", True,
+                                            quota=q))
                 if depth == "1":
                     for fid, f in d["folders"].items():
                         if str(f.get("parent_id") or "") == kid:
@@ -10566,13 +10592,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         if f.get("status") == "active" and str(f.get("folder_id") or "") == kid:
                             parts.append(_dav_entry_xml(_dav_href(*folder_path, f["name"]),
                                                         f["name"], False, int(f.get("size") or 0),
-                                                        f.get("uploaded_at") or f.get("created_at") or ""))
+                                                        f.get("uploaded_at") or f.get("created_at") or "",
+                                                        etag=f"{k}-{f.get('size') or 0}"))
             else:
                 f = d["files"][kid]
                 fp = _dav_path_of_folder(d, str(f.get("folder_id") or ""))
                 parts.append(_dav_entry_xml(_dav_href(*fp, f["name"]), f["name"], False,
                                             int(f.get("size") or 0),
-                                            f.get("uploaded_at") or f.get("created_at") or ""))
+                                            f.get("uploaded_at") or f.get("created_at") or "",
+                                            etag=f"{kid}-{f.get('size') or 0}"))
             xml = ('<?xml version="1.0" encoding="utf-8"?>'
                    '<D:multistatus xmlns:D="DAV:">' + "".join(parts) + "</D:multistatus>")
             return Response(xml, status_code=207, media_type="application/xml; charset=utf-8", headers=hdrs)
@@ -10585,6 +10613,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if method == "HEAD":
                 return Response(status_code=200, headers={**hdrs, "Content-Length": str(size)})
             url = await asyncio.to_thread(_files_sign_get, f["r2_key"], f.get("name") or "file")
+            # Tried and measured: a 302 to the signed URL comes back as an
+            # EMPTY file from macOS's client, so downloads stream through the
+            # app on purpose.
             client = httpx.AsyncClient(timeout=60)
             upstream = await client.send(client.build_request("GET", url), stream=True)
             if upstream.status_code != 200:
@@ -10625,6 +10656,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     if total > FILES_MAX_UPLOAD:
                         return Response(status_code=413, headers=hdrs)
                     spool.write(chunk)
+                # Reserve under the lock, upload OUTSIDE it, commit under it
+                # again: the lock is held for milliseconds, so several saves
+                # upload side by side instead of queueing.
+                now = datetime.now(timezone.utc).isoformat()
                 async with _files_lock:
                     d = _load_files()
                     parent = _dav_walk_folder(d, segs[:-1])
@@ -10632,31 +10667,48 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         return Response(status_code=409, headers=hdrs)
                     _k, _f = _dav_resolve(d, path)
                     existing = _f if _k == "file" else None
+                    if existing is None:
+                        # a concurrent save of the same new name reuses its
+                        # reservation instead of minting a twin
+                        existing = next((k for k, f in d["files"].items()
+                                         if str(f.get("folder_id") or "") == parent
+                                         and f.get("name", "").lower() == name.lower()
+                                         and f.get("status") == "pending"), None)
                     quota = int(FILES_QUOTA_GB * 1024 * 1024 * 1024)
                     already = int(d["files"][existing].get("size") or 0) if existing else 0
                     if not hidden and _files_usage(d) - already + total > quota:
                         return Response(status_code=507, headers=hdrs)
                     if existing:
                         fid, key = existing, d["files"][existing]["r2_key"]
+                        fresh = False
                     else:
                         fid = _files_id(d, "f")
                         key = f"{fid}/{name}"
-                    spool.seek(0)
-                    try:
-                        await asyncio.to_thread(
-                            lambda: _files_s3().upload_fileobj(spool, R2_BUCKET, key))
-                    except Exception:
-                        logger.exception("dav put failed")
-                        return Response(status_code=502, headers=hdrs)
-                    now = datetime.now(timezone.utc).isoformat()
-                    if existing:
-                        d["files"][fid].update({"size": total, "uploaded_at": now, "by": uid})
-                    else:
                         d["files"][fid] = {"name": name, "folder_id": parent, "size": total,
                                            "type": "application/octet-stream", "r2_key": key,
-                                           "status": "active", "by": uid, "created_at": now,
-                                           "uploaded_at": now, "hidden": hidden}
+                                           "status": "pending", "by": uid, "created_at": now,
+                                           "hidden": hidden}
+                        fresh = True
                     _write_files(d)
+                spool.seek(0)
+                try:
+                    await asyncio.to_thread(
+                        lambda: _files_s3().upload_fileobj(spool, R2_BUCKET, key))
+                except Exception:
+                    logger.exception("dav put failed")
+                    async with _files_lock:
+                        d = _load_files()
+                        if fresh and d["files"].get(fid, {}).get("status") == "pending":
+                            d["files"].pop(fid, None)
+                            _write_files(d)
+                    return Response(status_code=502, headers=hdrs)
+                async with _files_lock:
+                    d = _load_files()
+                    rec = d["files"].get(fid)
+                    if rec is not None:
+                        rec.update({"size": total, "status": "active", "by": uid,
+                                    "uploaded_at": datetime.now(timezone.utc).isoformat()})
+                        _write_files(d)
             finally:
                 spool.close()
             if not hidden:

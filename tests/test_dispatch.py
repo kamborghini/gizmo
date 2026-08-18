@@ -4071,6 +4071,7 @@ class FakeS3:
 def with_files(fn, configured=True, s3=None):
     """Run fn(fake_s3) with the file store configured against a fake bucket."""
     fake = s3 or FakeS3()
+    copilot._files_mem = None
     saved = (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
              copilot._files_s3_client, dict(copilot._files_ready), copilot.FILES_QUOTA_GB)
     if configured:
@@ -4089,6 +4090,7 @@ def with_files(fn, configured=True, s3=None):
         (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
          copilot._files_s3_client, ready, copilot.FILES_QUOTA_GB) = saved
         copilot._files_ready.update(ready)
+        copilot._files_mem = None
         copilot._poisoned_stores.discard(copilot.FILES_PATH)
         try:
             os.remove(copilot.FILES_PATH)
@@ -4274,6 +4276,7 @@ def t_files_corrupt_store_refuses_writes_and_keeps_the_file():
     def go(fake):
         with open(copilot.FILES_PATH, "w") as fh:
             fh.write("{not json")
+        copilot._files_mem = None
         r = post("/api/files/tree", {})
         eq(r.status_code, 200, "reads survive a broken store")
         eq(r.json()["store"]["files"], {}, "as empty, never invented")
@@ -4808,6 +4811,7 @@ def t_dav_speaks_finder_with_the_apps_own_accounts():
         copilot.R2_ACCOUNT_ID = copilot.R2_ACCESS_KEY_ID = copilot.R2_SECRET_ACCESS_KEY = "acct"
         copilot._files_s3_client = fake_s3
         copilot._dav_auth_cache.clear()
+        copilot._files_mem = None
         try:
             os.remove(copilot.FILES_PATH)
         except FileNotFoundError:
