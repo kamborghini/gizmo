@@ -293,7 +293,7 @@
         .insight.warning .ico { background: var(--warn-bg); color: var(--warn); }
         .insight.opportunity .ico { background: var(--opp-bg); color: var(--opp); }
 
-        .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--sh-1); }
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--sh-1); padding: 16px 20px; }
 
         /* ---------- Form controls: one recipe, applied by element ---------- */
         input[type=text], input[type=number], input[type=date], input[type=search],
@@ -572,8 +572,10 @@
            ------------------------------------------------------------------ */
         .crm-board { display: flex; gap: 10px; overflow-x: auto; align-items: flex-start;
             padding-bottom: 12px; min-height: 300px; }
-        .crm-col { min-width: 228px; width: 228px; flex: none; background: var(--surface-2);
-            border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+        .crm-col { min-width: 228px; flex: 1 0 228px; background: var(--surface-2);
+            border: 1px solid var(--line); border-radius: 12px; padding: 8px;
+            min-height: 380px; display: flex; flex-direction: column; }
+        .crm-col .crm-col-add { margin-top: auto; }
         .crm-col.dragover { border-color: var(--accent); background: var(--surface-3); }
         .crm-col-name { font-size: 12px; font-weight: 600; color: var(--ink); padding: 2px 4px 0; }
         .crm-col-sum { font-size: 11px; color: var(--ink-3); padding: 0 4px 8px; }
@@ -644,7 +646,7 @@
         .crm-hist-row:last-child { border-bottom: 0; }
         .crm-hist-when { font-size: 11px; color: var(--ink-3); }
         .crm-list-row { cursor: pointer; }
-        @media (max-width: 640px) { .crm-col { min-width: 200px; width: 200px; } }
+        @media (max-width: 640px) { .crm-col { min-width: 200px; flex-basis: 200px; min-height: 260px; } }
         @media (max-width: 640px) { .disp-addr-grid { grid-template-columns: 1fr; } }
         .disp-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
             margin: 0 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
@@ -6511,6 +6513,16 @@
         function renderCRM() {
             const box = $('crm-content'); box.innerHTML = '';
             const d = crmCache;
+            // The house header every other tab wears: without it the segment bar
+            // sat flush under the top bar and the whole tab read as unfinished.
+            const hero = el('div', 'ov-hero');
+            const badge = el('div', 'badge'); badge.innerHTML = I.users;
+            const ht = el('div');
+            ht.append(el('h2', null, 'CRM'),
+                el('p', null, 'Deals, activities and contacts for the sales desk. Every open deal '
+                    + 'should carry a next activity; the amber cards are the ones that do not.'));
+            hero.append(badge, ht);
+            box.append(hero);
             const seg = el('div', 'lbl-seg');
             [['leads', 'Leads'], ['deals', 'Deals'], ['activities', 'Activities'],
              ['contacts', 'Contacts'], ['insights', 'Insights']].forEach(([k, lab]) => {
@@ -6605,6 +6617,11 @@
                 board.append(col);
             });
             host.append(board);
+            if (!deals.length) {
+                host.append(el('div', 'crm-sub',
+                    'The pipeline is empty. Press + Deal to add your first, or convert a lead '
+                    + 'from the Leads inbox. Rename the stages to your own process under Stages.'));
+            }
             host.append(crmDropbar());
         }
         function crmCard(x) {
