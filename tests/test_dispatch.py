@@ -3903,6 +3903,25 @@ def t_the_unprocessed_queue_lists_waiting_orders_and_release_moves_them_to_ip():
         copilot._tool_json = saved
 
 
+@test
+def t_the_glass_catalogue_covers_every_sheet_size_in_every_family():
+    # The stock app's mapping view is only trustworthy if it shows the WHOLE
+    # translation, so the catalogue must be the sheet's sizes times the three
+    # families, with nothing invented and nothing dropped.
+    combos = copilot._zeta_catalog_combos()
+    sizes = {c["size"] for c in combos}
+    fams = {c["family"] for c in combos}
+    ok(len(sizes) >= 20, "the live sheet's sizes are all there: " + str(len(sizes)))
+    eq(fams, {"Mono", "HM", "Colour"}, "exactly the three families")
+    eq(len(combos), len(sizes) * 3, "every size appears once per family")
+    ok(all(c["size"] for c in combos), "no blank sizes")
+    seen = set()
+    for c in combos:
+        key = (c["family"], c["size"])
+        ok(key not in seen, "no duplicates: " + str(key))
+        seen.add(key)
+
+
 # ---- The app shell ----------------------------------------------------------
 
 @test

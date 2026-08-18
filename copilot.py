@@ -6160,6 +6160,27 @@ async def _zeta_push_locked(registry: dict, order_id, op: str) -> str:
         return "The stock app could not be updated just now; the app will keep retrying."
 
 
+def _zeta_catalog_combos() -> list:
+    """Every glass line this app can produce: each size on the live sheet, per
+    family. This is the domain of the translation the stock app displays."""
+    sizes = sorted({str(e.get("production_size") or "").strip()
+                    for entries in (_gobo_sizes().get("by_model") or {}).values()
+                    for e in entries if str(e.get("production_size") or "").strip()},
+                   key=lambda v: (float(v) if v.replace(".", "", 1).isdigit() else 9999))
+    return [{"family": fam, "size": sz} for sz in sizes for fam in ("Mono", "HM", "Colour")]
+
+
+async def _zeta_send_catalog() -> None:
+    """Publish the catalogue so the stock app's mapping view shows the whole
+    translation rather than only the lines that have already parked."""
+    combos = _zeta_catalog_combos()
+    async with httpx.AsyncClient(timeout=10.0) as cl:
+        r = await cl.post(ZETA_URL + "/api/sync/catalog",
+                          headers={"Authorization": "Bearer " + ZETA_SYNC_TOKEN},
+                          json={"combos": combos[:500]})
+        r.raise_for_status()
+
+
 async def _zeta_drain(registry: dict) -> None:
     """Retry everything parked, once per scheduler tick. Never raises.
 
@@ -7287,6 +7308,13 @@ async def _watchdog_tick(registry: dict) -> bool:
         # Not gated on Shopify being up: reversals need no Shopify read, and a
         # book retry just fails and stays parked if Shopify is still down.
         await _zeta_drain(registry)
+        # And the catalogue, so the stock app's mapping view stays complete as
+        # the size sheet evolves. Cheap, idempotent, best-effort.
+        if _zeta_configured():
+            try:
+                await _zeta_send_catalog()
+            except Exception:
+                logger.warning("stock bridge: catalogue push failed; next tick retries")
         _save_watch(state)
         return up or fails < 3
     except Exception:
