@@ -6979,7 +6979,13 @@ def _frame_headers(request: Request) -> dict:
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         "img-src 'self' data: https:; "
-        "connect-src 'self' https://*.shopify.com https://*.myshopify.com; "
+        # Files uploads/downloads go browser-to-bucket, so the page must be
+        # allowed to talk to this account's R2 endpoint and nothing broader.
+        # Without it the browser kills the PUT before it starts and the only
+        # symptom is "the transfer failed".
+        "connect-src 'self' https://*.shopify.com https://*.myshopify.com"
+        + (f" https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com" if _files_configured() else "")
+        + "; "
         # The store's own quote domain is allowed so the Proof modal can embed
         # proposal pages; nothing else may be framed.
         f"frame-src https://*.shopify.com https://{PROPOSAL_HOST}; "

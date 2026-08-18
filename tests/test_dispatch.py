@@ -4362,6 +4362,24 @@ def t_files_concurrent_uploads_do_not_clobber_the_store():
     with_files(go)
 
 @test
+def t_files_r2_endpoint_is_allowed_by_the_page_csp():
+    # The browser PUTs bytes straight to the bucket; a CSP that only knows
+    # Shopify kills that transfer before it starts. Found live: every real
+    # upload failed with "the transfer failed" while every server-side and
+    # stubbed-browser check passed, because only a real browser enforces CSP.
+    def go(fake):
+        csp = client.get("/").headers.get("content-security-policy", "")
+        connect = csp.split("connect-src", 1)[1].split(";")[0]
+        ok("https://acct.r2.cloudflarestorage.com" in connect,
+           "the account's R2 endpoint is in connect-src: " + connect)
+    with_files(go)
+    def go2(fake):
+        csp = client.get("/").headers.get("content-security-policy", "")
+        ok("r2.cloudflarestorage.com" not in csp,
+           "an unconfigured app allows nothing extra")
+    with_files(go2, configured=False)
+
+@test
 def t_files_disposition_and_names():
     eq(copilot._files_clean_name("  ../we\x00ird/na me.pdf  "), "_we_ird_na me.pdf")
     eq(copilot._files_clean_name(""), "untitled")
