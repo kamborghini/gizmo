@@ -7748,7 +7748,10 @@ def _files_s3():
             from botocore.config import Config as _BotoConfig
             _files_s3_client = boto3.client(
                 "s3",
-                endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+                # R2_ENDPOINT is a test-rig override; production always derives
+                # the real account endpoint.
+                endpoint_url=(os.environ.get("R2_ENDPOINT")
+                              or f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"),
                 aws_access_key_id=R2_ACCESS_KEY_ID,
                 aws_secret_access_key=R2_SECRET_ACCESS_KEY,
                 region_name="auto",
@@ -10527,6 +10530,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def dav_route(request: Request):
         method = request.method
         path = request.path_params.get("sub_path") or "/"
+        if os.environ.get("DAV_TRACE"):
+            logger.info("DAV %s %s len=%s te=%s expect=%s", method, path,
+                        request.headers.get("content-length"),
+                        request.headers.get("transfer-encoding"),
+                        request.headers.get("expect"))
         hdrs = {"DAV": "1, 2", "MS-Author-Via": "DAV"}
         if method == "OPTIONS":
             return Response(status_code=200, headers={**hdrs,
@@ -10597,19 +10605,31 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return Response(status_code=403, headers=hdrs)
             name = _files_clean_name(segs[-1])
             hidden = bool(_DAV_JUNK.match(segs[-1]))
-            async with _files_lock:
-                d = _load_files()
-                parent = _dav_walk_folder(d, segs[:-1])
-                if parent is None:
-                    return Response(status_code=409, headers=hdrs)
-                import tempfile as _tf
+            if hidden:
+                # Sidecar names keep their exact dots: stripping them broke
+                # the lookup, so Finder re-uploaded a fresh copy every save
+                # and the mangled names stopped being dotfiles at all.
+                name = _FILENAME_BAD.sub("_", segs[-1]).strip()[:180] or "untitled"
+                if name in (".", ".."):
+                    name = "_" + name
+            # The WHOLE body is read before the store lock is touched: macOS
+            # writes a file and its ._ sidecar at once and keeps the chunked
+            # data PUT open until the sidecar answers, so reading under the
+            # lock deadlocks the pair (seen live as "zero KB" forever).
+            import tempfile as _tf
+            spool = _tf.TemporaryFile()
+            try:
                 total = 0
-                with _tf.TemporaryFile() as spool:
-                    async for chunk in request.stream():
-                        total += len(chunk)
-                        if total > FILES_MAX_UPLOAD:
-                            return Response(status_code=413, headers=hdrs)
-                        spool.write(chunk)
+                async for chunk in request.stream():
+                    total += len(chunk)
+                    if total > FILES_MAX_UPLOAD:
+                        return Response(status_code=413, headers=hdrs)
+                    spool.write(chunk)
+                async with _files_lock:
+                    d = _load_files()
+                    parent = _dav_walk_folder(d, segs[:-1])
+                    if parent is None:
+                        return Response(status_code=409, headers=hdrs)
                     _k, _f = _dav_resolve(d, path)
                     existing = _f if _k == "file" else None
                     quota = int(FILES_QUOTA_GB * 1024 * 1024 * 1024)
@@ -10628,15 +10648,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     except Exception:
                         logger.exception("dav put failed")
                         return Response(status_code=502, headers=hdrs)
-                now = datetime.now(timezone.utc).isoformat()
-                if existing:
-                    d["files"][fid].update({"size": total, "uploaded_at": now, "by": uid})
-                else:
-                    d["files"][fid] = {"name": name, "folder_id": parent, "size": total,
-                                       "type": "application/octet-stream", "r2_key": key,
-                                       "status": "active", "by": uid, "created_at": now,
-                                       "uploaded_at": now, "hidden": hidden}
-                _write_files(d)
+                    now = datetime.now(timezone.utc).isoformat()
+                    if existing:
+                        d["files"][fid].update({"size": total, "uploaded_at": now, "by": uid})
+                    else:
+                        d["files"][fid] = {"name": name, "folder_id": parent, "size": total,
+                                           "type": "application/octet-stream", "r2_key": key,
+                                           "status": "active", "by": uid, "created_at": now,
+                                           "uploaded_at": now, "hidden": hidden}
+                    _write_files(d)
+            finally:
+                spool.close()
             if not hidden:
                 _track(uid, "files", "updated a file from Finder" if existing
                        else "added a file from Finder", name)
