@@ -8247,6 +8247,9 @@
                 back.onclick = () => { setAppSession(''); ov.dataset.mode = ''; authShow('login'); };
                 card.append(fc, fp, err, go, back);
             } else {
+                authApi('/api/auth/state', {}).then(st => {
+                    if (st.setup) { ov.dataset.mode = ''; authShow('setup'); }
+                }).catch(() => {});
                 card.append(el('h2', null, 'Sign in'),
                     el('p', 'auth-sub', 'Your own account, not Shopify\'s. Ask an admin if you '
                         + 'do not have one yet.'));
