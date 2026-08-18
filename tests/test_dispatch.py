@@ -4457,6 +4457,14 @@ def make_user(name, username, role="member"):
 def login(username, pw):
     return bare("/api/auth/login", {"username": username, "password": pw})
 
+def ready_user(name, username, role="member", pw="chosen-pw-123456"):
+    """Create an account and take it THROUGH the forced first-password change,
+    returning (uid, session, pw) ready for normal use."""
+    uid, starter = make_user(name, username, role=role)
+    s0 = login(username, starter).json()["session"]
+    post_s(s0, "/api/auth/password", {"current": starter, "new": pw})
+    return uid, login(username, pw).json()["session"], pw
+
 @test
 def t_auth_first_run_creates_the_master_and_bricks_the_door():
     def go():
@@ -4567,8 +4575,7 @@ def t_auth_rank_order_is_enforced_on_the_server():
         eq(post_s(ian_sess, "/api/team/user", {"op": "reset_password", "id": master}).status_code,
            403, "nor their password reset")
         # A member manages nobody.
-        owen_sess = login("owen", post("/api/team/user", {"op": "reset_password", "id": owen})
-                          .json()["starter_password"]).json()["session"]
+        _m, owen_sess, _pw = ready_user("Molly", "molly")
         eq(post_s(owen_sess, "/api/team/board", {}).status_code, 403, "members see no register")
         eq(post_s(owen_sess, "/api/backup", {}).status_code, 403, "and no admin doors")
         eq(post_s(owen_sess, "/api/files/tree", {}).status_code, 200, "work tools stay open")
@@ -4591,18 +4598,16 @@ def t_auth_the_master_is_untouchable():
 def t_auth_switch_off_and_delete_end_sessions_immediately():
     def go():
         ensure_auth()
-        owen, starter = make_user("Owen", "owen")
-        sess = login("owen", starter).json()["session"]
+        owen, sess, owen_pw = ready_user("Owen", "owen")
         eq(post_s(sess, "/api/team/me", {}).status_code, 200)
         post("/api/team/user", {"op": "active", "id": owen, "active": False})
         eq(post_s(sess, "/api/team/me", {}).status_code, 401, "off means off, this second")
-        eq(login("owen", starter).status_code, 401, "and the door stays shut")
+        eq(login("owen", owen_pw).status_code, 401, "and the door stays shut")
         post("/api/team/user", {"op": "active", "id": owen, "active": True})
-        amy, amy_starter = make_user("Amy", "amy")
-        amy_sess = login("amy", amy_starter).json()["session"]
+        amy, amy_sess, amy_pw = ready_user("Amy", "amy")
         post("/api/team/user", {"op": "delete", "id": amy})
         eq(post_s(amy_sess, "/api/team/me", {}).status_code, 401, "deletion ends the session")
-        eq(login("amy", amy_starter).status_code, 401, "and the account")
+        eq(login("amy", amy_pw).status_code, 401, "and the account")
         names = post("/api/team/board", {}).json()["names"]
         ok(any(v == "Amy" for v in names.values()), "history keeps the deleted account's name")
     with_accounts(go)
@@ -4611,9 +4616,8 @@ def t_auth_switch_off_and_delete_end_sessions_immediately():
 def t_auth_logout_ends_exactly_that_session():
     def go():
         ensure_auth()
-        owen, starter = make_user("Owen", "owen")
-        s1 = login("owen", starter).json()["session"]
-        s2 = login("owen", starter).json()["session"]
+        owen, s1, pw = ready_user("Owen", "owen")
+        s2 = login("owen", pw).json()["session"]
         post_s(s1, "/api/auth/logout", {})
         eq(post_s(s1, "/api/team/me", {}).status_code, 401, "the logged-out session is dead")
         eq(post_s(s2, "/api/team/me", {}).status_code, 200, "the other lives on")
@@ -4677,8 +4681,7 @@ def t_auth_the_print_document_needs_only_the_perimeter():
 def t_tabs_are_locked_on_the_server_not_just_hidden():
     def go():
         ensure_auth()
-        owen, starter = make_user("Owen", "owen")
-        sess = login("owen", starter).json()["session"]
+        owen, sess, pw = ready_user("Owen", "owen")
         r = post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["labels"]})
         eq(r.status_code, 200, r.text)
         eq(post_s(sess, "/api/files/tree", {}).status_code, 403, "a blocked tab answers 403")
@@ -4690,7 +4693,7 @@ def t_tabs_are_locked_on_the_server_not_just_hidden():
            "and a 403 never killed the session")
         me = post_s(sess, "/api/team/me", {}).json()["me"]
         eq(me["tabs"], ["labels"], "the account knows its own doors")
-        eq(login("owen", starter).json()["me"]["tabs"], ["labels"],
+        eq(login("owen", pw).json()["me"]["tabs"], ["labels"],
            "and the login answer carries the doors, so the page hides them at once")
         eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": None}).status_code, 200)
         eq(post_s(sess, "/api/files/tree", {}).status_code, 200, "null restores everything")
@@ -4723,8 +4726,7 @@ def t_work_the_clock_is_the_servers_and_only_for_parttime():
         ensure_auth()
         eq(post("/api/work/clock", {"op": "in"}).status_code, 400,
            "the master does not clock in; monitoring follows the part-time role only")
-        pt, starter = make_user("Poppy", "poppy", role="parttime")
-        sess = login("poppy", starter).json()["session"]
+        pt, sess, pw = ready_user("Poppy", "poppy", role="parttime")
         st = post_s(sess, "/api/work/status", {}).json()
         ok(st["monitored"] and not st["clocked_in"], "logged in is not clocked in")
         r = post_s(sess, "/api/work/clock", {"op": "in", "start": "1999-01-01T00:00:00Z"})
@@ -4748,8 +4750,7 @@ def t_work_the_clock_is_the_servers_and_only_for_parttime():
 def t_work_events_are_stamped_only_on_the_clock():
     def go():
         ensure_auth()
-        pt, starter = make_user("Poppy", "poppy", role="parttime")
-        sess = login("poppy", starter).json()["session"]
+        pt, sess, pw = ready_user("Poppy", "poppy", role="parttime")
         copilot._track(pt, "production", "marked made", "#off-clock")
         post_s(sess, "/api/work/clock", {"op": "in"})
         copilot._track(pt, "production", "marked made", "#on-clock")
@@ -4764,7 +4765,7 @@ def t_work_events_are_stamped_only_on_the_clock():
         ok("ws" not in by_detail["#system"], "and never billable")
         ok("ws" not in by_detail["#after"], "the stamp stops at clock-out")
         # the role drives it: change the role and the monitoring stops by itself
-        post_s(login("poppy", starter).json()["session"], "/api/work/clock", {"op": "in"})
+        post_s(login("poppy", pw).json()["session"], "/api/work/clock", {"op": "in"})
         post("/api/team/user", {"op": "role", "id": pt, "role": "member"})
         copilot._track(pt, "production", "marked made", "#as-member")
         ev2 = post("/api/team/board", {}).json()["events"]
@@ -4776,8 +4777,7 @@ def t_work_events_are_stamped_only_on_the_clock():
 def t_work_resolve_is_a_recorded_correction_and_reports_add_up():
     def go():
         ensure_auth()
-        pt, starter = make_user("Poppy", "poppy", role="parttime")
-        sess = login("poppy", starter).json()["session"]
+        pt, sess, pw = ready_user("Poppy", "poppy", role="parttime")
         post_s(sess, "/api/work/clock", {"op": "in"})
         r = post("/api/work/resolve", {"uid": pt, "note": "left the bench without clocking out"})
         eq(r.status_code, 200, r.text)
@@ -4786,8 +4786,8 @@ def t_work_resolve_is_a_recorded_correction_and_reports_add_up():
            "the closure wears its author and the original start stands")
         ev = post("/api/team/board", {}).json()["events"]
         ok(any(e["action"] == "resolved a work session" for e in ev), "and is on the ledger")
-        post_s(login("poppy", starter).json()["session"], "/api/work/clock", {"op": "in"})
-        post_s(login("poppy", starter).json()["session"], "/api/work/clock", {"op": "out"})
+        post_s(login("poppy", pw).json()["session"], "/api/work/clock", {"op": "in"})
+        post_s(login("poppy", pw).json()["session"], "/api/work/clock", {"op": "out"})
         rep = post("/api/work/report", {"uid": pt}).json()
         eq(rep["count"], 2, "both sessions in the report")
         ok(rep["csv"].startswith("Name,Date,Clock in"), "csv for payroll")
@@ -4819,8 +4819,8 @@ def t_dav_speaks_finder_with_the_apps_own_accounts():
         copilot._poisoned_stores.discard(copilot.FILES_PATH)
         try:
             import base64 as b64
-            _, starter = make_user("Poppy", "poppy", role="parttime")
-            auth = {"Authorization": "Basic " + b64.b64encode(f"poppy:{starter}".encode()).decode()}
+            _, _sess, ppw = ready_user("Poppy", "poppy", role="parttime")
+            auth = {"Authorization": "Basic " + b64.b64encode(f"poppy:{ppw}".encode()).decode()}
             bad = {"Authorization": "Basic " + b64.b64encode(b"poppy:wrong-password").decode()}
             r = client.request("PROPFIND", "/dav/", headers={"Depth": "1"})
             eq(r.status_code, 401, "no credentials, no listing")
@@ -4861,6 +4861,106 @@ def t_dav_speaks_finder_with_the_apps_own_accounts():
                 os.remove(copilot.FILES_PATH)
             except FileNotFoundError:
                 pass
+    with_accounts(go)
+
+@test
+def t_audit_tab_gate_covers_cache_print_and_shipping():
+    def go():
+        ensure_auth()
+        owen, starter = make_user("Owen", "owen")
+        sess = login("owen", starter).json()["session"]
+        post_s(sess, "/api/auth/password", {"current": starter, "new": "owens-own-pw-1"})
+        sess = login("owen", "owens-own-pw-1").json()["session"]
+        post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["files"]})
+        # /api/cache filters to allowed tabs
+        r = post_s(sess, "/api/cache", {})
+        eq(r.status_code, 200)
+        ok(all(k not in r.json() for k in ("overview", "seo", "keywords", "customers_segments")),
+           "cache leaks nothing for a files-only account")
+        # shipping is labels-gated now
+        eq(post_s(sess, "/api/shipping/config", {}).status_code, 403, "shipping read is labels-gated")
+        # print doc refuses a labels-denied app session
+        r2 = client.get("/print/production-labels?ids=12345&id_token=" + tok(),
+                        headers={"X-App-Session": sess})
+        ok("switched off" in r2.text or "Unauthorized" in r2.text, "print refused for labels-denied")
+    with_accounts(go)
+
+@test
+def t_audit_dav_cache_respects_revocation_and_own_lockout():
+    def go():
+        ensure_auth()
+        fake = FakeS3()
+        saved = (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
+                 copilot._files_s3_client)
+        copilot.R2_ACCOUNT_ID = copilot.R2_ACCESS_KEY_ID = copilot.R2_SECRET_ACCESS_KEY = "acct"
+        copilot._files_s3_client = fake
+        copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
+        copilot._files_mem = None
+        try:
+            os.remove(copilot.FILES_PATH)
+        except FileNotFoundError:
+            pass
+        try:
+            import base64 as b64
+            pt, starter = make_user("Poppy", "poppy", role="parttime")
+            # a starter password never mounts the drive
+            auth0 = {"Authorization": "Basic " + b64.b64encode(f"poppy:{starter}".encode()).decode()}
+            eq(client.request("PROPFIND", "/dav/", headers={**auth0, "Depth": "0"}).status_code, 401,
+               "must-change accounts cannot open the drive")
+            sess = login("poppy", starter).json()["session"]
+            post_s(sess, "/api/auth/password", {"current": starter, "new": "poppys-own-pw-9"})
+            auth = {"Authorization": "Basic " + b64.b64encode(b"poppy:poppys-own-pw-9").decode()}
+            eq(client.request("PROPFIND", "/dav/", headers={**auth, "Depth": "0"}).status_code, 207,
+               "the chosen password mounts it")
+            # cache is warm; now switch the account off -> next request refused AT ONCE
+            post("/api/team/user", {"op": "active", "id": pt, "active": False})
+            eq(client.request("PROPFIND", "/dav/", headers={**auth, "Depth": "0"}).status_code, 401,
+               "a warm cache does not outlive deactivation")
+            post("/api/team/user", {"op": "active", "id": pt, "active": True})
+            # wrong DAV passwords lock only the DRIVE, never the web login
+            bad = {"Authorization": "Basic " + b64.b64encode(b"poppy:nope").decode()}
+            for _ in range(9):
+                client.request("PROPFIND", "/dav/", headers={**bad, "Depth": "0"})
+            eq(login("poppy", "poppys-own-pw-9").status_code, 200,
+               "a stale Finder mount cannot lock the person out of the app")
+        finally:
+            (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
+             copilot._files_s3_client) = saved
+            copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
+            copilot._files_mem = None
+            try:
+                os.remove(copilot.FILES_PATH)
+            except FileNotFoundError:
+                pass
+    with_accounts(go)
+
+@test
+def t_audit_must_change_blocks_the_app_until_chosen():
+    def go():
+        ensure_auth()
+        owen, starter = make_user("Owen", "owen")
+        sess = login("owen", starter).json()["session"]
+        eq(post_s(sess, "/api/files/tree", {}).status_code, 401,
+           "a starter password opens nothing but the password screen")
+        eq(post_s(sess, "/api/auth/password", {"current": starter, "new": "owens-own-pw-1"}).status_code,
+           200, "except the change-password route")
+        sess2 = login("owen", "owens-own-pw-1").json()["session"]
+        eq(post_s(sess2, "/api/files/tree", {}).status_code, 200, "then everything opens")
+    with_accounts(go)
+
+@test
+def t_audit_demoting_a_clocked_in_parttime_closes_the_shift():
+    def go():
+        ensure_auth()
+        pt, starter = make_user("Poppy", "poppy", role="parttime")
+        sess = login("poppy", starter).json()["session"]
+        post_s(sess, "/api/auth/password", {"current": starter, "new": "poppys-own-pw-9"})
+        sess = login("poppy", "poppys-own-pw-9").json()["session"]
+        post_s(sess, "/api/work/clock", {"op": "in"})
+        post("/api/team/user", {"op": "role", "id": pt, "role": "member"})
+        b = post("/api/work/board", {}).json()
+        eq(len(b["open"]), 0, "no open session hangs after the demotion")
+        ok(any(s.get("corrected") for s in b["sessions"]), "it was closed as a correction")
     with_accounts(go)
 
 # =========================== run ===========================================

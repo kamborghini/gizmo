@@ -31,7 +31,7 @@
             --line: var(--border);
 
             /* Text: primary, secondary, tertiary/placeholder */
-            --ink: #1a1a1a; --ink-2: #616161; --ink-3: #8a8a8a;
+            --ink: #1a1a1a; --ink-2: #616161; --ink-3: #767676;
 
             /* The brand accent, retuned for contrast on white */
             --accent: #5b4bdb; --accent-2: #4a3cc4; --accent-ink: #4a3cc4;
@@ -1095,6 +1095,21 @@
         .files-up .upstate { color: var(--ink-3); font-size: 12px; white-space: nowrap; }
         .files-up.failed .upstate { color: var(--danger); white-space: normal; }
         .files-rename { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 13px; padding: 3px 8px; border: 1px solid var(--accent); border-radius: 6px; background: var(--surface); color: var(--ink); }
+        /* Team + Work rows reuse the files-row shell but carry long data
+           strings and no leading icon: let their meta wrap instead of clip,
+           and drop the file-icon indent on phones. */
+        .tm-row { flex-wrap: wrap; }
+        .tm-row .files-meta { white-space: normal; }
+        @media (max-width: 640px) { .tm-row .files-meta { margin-left: 0; } }
+        /* A text field that matches the height of .lbl-size selects, so a row
+           mixing inputs, a select and a button lines up. */
+        .tm-field { flex: 1 1 120px; min-width: 0; background: var(--surface); color: var(--ink);
+            font: inherit; font-size: 13px; padding: 8px 12px; line-height: 1.35;
+            border: 1px solid var(--border-2); border-radius: var(--r-sm); box-shadow: var(--hair); }
+        .tm-field:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+        .tm-tabpick { display: inline-flex; align-items: center; gap: 6px; margin: 0 10px 8px 0;
+            cursor: pointer; font-size: 13px; color: var(--ink-2); min-height: 32px; }
+        .tm-tabpick input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
         /* On a phone the name owns the first line; size and date step down a line
            rather than crushing the name to a letter. */
         @media (max-width: 640px) {
@@ -1376,6 +1391,11 @@
             folderPlus: SV('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line>'),
             upload: SV('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>'),
             fileDoc: SV('<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline>'),
+            briefcase: SV('<rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>'),
+            userCheck: SV('<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><polyline points="17 11 19 13 23 9"></polyline>'),
+            helpCircle: SV('<circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line>'),
+            card: SV('<rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line>'),
+            logOut: SV('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line>'),
         };
         const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
         const loader = () => { const b = el('div', 'three-body'); b.append(el('div', 'three-body__dot'), el('div', 'three-body__dot'), el('div', 'three-body__dot')); return b; };
@@ -1405,22 +1425,22 @@
         $('nav-keywords').append(ico(I.tag), document.createTextNode('Keywords'));
         $('nav-products').append(ico(I.box), document.createTextNode('Products'));
         $('nav-customers').append(ico(I.users), document.createTextNode('Customers'));
-        $('nav-liability').append(ico(I.spark), document.createTextNode('Liability'));
-        $('nav-crm').append(ico(I.users), document.createTextNode('CRM'));
+        $('nav-liability').append(ico(I.card), document.createTextNode('Liability'));
+        $('nav-crm').append(ico(I.briefcase), document.createTextNode('CRM'));
         $('nav-files').append(ico(I.folder), document.createTextNode('Files'));
-        $('nav-team').append(ico(I.users), document.createTextNode('Team'));
+        $('nav-team').append(ico(I.userCheck), document.createTextNode('Team'));
         $('nav-labels').append(ico(I.printer), document.createTextNode('Production Manager'));
         $('nav-memory').append(ico(I.bookmark), document.createTextNode('Memory'));
         $('nav-skills').append(ico(I.book), document.createTextNode('Skills'));
         $('nav-chat').append(ico(I.chat), document.createTextNode('Chat'));
-        $('nav-guide').append(ico(I.book), document.createTextNode('Guide'));
+        $('nav-guide').append(ico(I.helpCircle), document.createTextNode('Guide'));
         $('refresh-all').append(ico(I.rotate), el('span', 'nr-label', 'Refresh all'));
         $('refresh-all').onclick = refreshAll;
         $('new-convo').innerHTML = I.plus;
         $('menu-btn').innerHTML = I.menu;
         $('send').innerHTML = I.send;
         $('settings-btn').innerHTML = I.settings;
-        $('logout-btn').innerHTML = I.chevLeft;
+        $('logout-btn').innerHTML = I.logOut;
         $('logout-btn').onclick = () => authLogout();
         /* ---- the clock: part-time accounts punch in and out here ---- */
         let clockState = null, clockTimer = null;
@@ -6705,7 +6725,7 @@
             // The house header every other tab wears: without it the segment bar
             // sat flush under the top bar and the whole tab read as unfinished.
             const hero = el('div', 'ov-hero');
-            const badge = el('div', 'badge'); badge.innerHTML = I.users;
+            const badge = el('div', 'badge'); badge.innerHTML = I.briefcase;
             const ht = el('div');
             ht.append(el('h2', null, 'CRM'),
                 el('p', null, 'Deals, activities and contacts for the sales desk. Every open deal '
@@ -8256,6 +8276,7 @@
             const brand = el('div', 'auth-brand'); brand.innerHTML = I.spark;
             card.append(brand);
             const err = el('div', 'auth-error');
+            err.setAttribute('role', 'alert');
             async function finish(p) {
                 setAppSession(p.session);
                 teamMe = p.me;
@@ -8275,6 +8296,7 @@
                 const [fp, inPw] = authField('Password (8 characters or more)', 'password', 'au-pw');
                 inPw.autocomplete = 'new-password';
                 const go = el('button', 'btn btn-primary auth-go', 'Create the master account');
+                [inName, inUser, inPw].forEach(i => i.onkeydown = e => { if (e.key === 'Enter') go.click(); });
                 go.onclick = async () => {
                     go.disabled = true; err.textContent = '';
                     try {
@@ -8291,6 +8313,7 @@
                 const [fp, inNew] = authField('New password (8 characters or more)', 'password', 'au-new');
                 inNew.autocomplete = 'new-password';
                 const go = el('button', 'btn btn-primary auth-go', 'Save my password');
+                [inCur, inNew].forEach(i => i.onkeydown = e => { if (e.key === 'Enter') go.click(); });
                 go.onclick = async () => {
                     go.disabled = true; err.textContent = '';
                     try {
@@ -8376,7 +8399,7 @@
             const box = $('team-content'); box.innerHTML = '';
             const d = teamCache;
             const hero = el('div', 'ov-hero');
-            const badge = el('div', 'badge'); badge.innerHTML = I.users;
+            const badge = el('div', 'badge'); badge.innerHTML = I.userCheck;
             const ht = el('div');
             ht.append(el('h2', null, 'Team'),
                 el('p', null, 'The app\'s own accounts, and what everyone has been doing. Each '
@@ -8432,11 +8455,11 @@
             host.append(bar);
             const list = el('div', 'files-list');
             if (teamNewOpen) {
-                const row = el('div', 'files-row');
+                const row = el('div', 'files-row tm-row');
                 const inName = document.createElement('input');
-                inName.className = 'files-rename'; inName.placeholder = 'Name';
+                inName.className = 'tm-field'; inName.placeholder = 'Name';
                 const inUser = document.createElement('input');
-                inUser.className = 'files-rename'; inUser.placeholder = 'Username';
+                inUser.className = 'tm-field'; inUser.placeholder = 'Username';
                 const roleSel = el('select', 'lbl-size');
                 [['member', 'Member'], ['parttime', 'Part-time']].concat(myLevel >= 3 ? [['admin', 'Admin']] : [])
                     .forEach(([v, lab]) => { const o = el('option', null, lab); o.value = v; roleSel.append(o); });
@@ -8455,8 +8478,7 @@
                 list.append(row);
             }
             d.users.forEach(u => {
-                const row = el('div', 'files-row');
-                row.style.flexWrap = 'wrap';
+                const row = el('div', 'files-row tm-row');
                 const mine = u.id === d.me;
                 const theirLevel = lvl[u.role] || 1;
                 const manageable = u.role !== 'master' && (myLevel >= 3 || myLevel > theirLevel);
@@ -8549,7 +8571,7 @@
                 if (u.active === false) { row.style.opacity = '.55'; }
                 list.append(row);
                 if (teamTabsOpen === u.id && u.role !== 'master') {
-                    const panel = el('div', 'files-row'); panel.style.flexWrap = 'wrap';
+                    const panel = el('div', 'files-row tm-row'); panel.style.flexWrap = 'wrap';
                     panel.style.background = 'var(--bg-2)';
                     const NAMES = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords',
                         products: 'Products', customers: 'Customers', liability: 'Liability',
@@ -8557,15 +8579,19 @@
                         memory: 'Memory', skills: 'Skills', chat: 'Chat' };
                     const chosen = new Set(Array.isArray(u.tabs) ? u.tabs : TAB_KEYS);
                     const boxes = [];
+                    const group = el('div');
+                    group.setAttribute('role', 'group');
+                    group.setAttribute('aria-label', 'Tabs ' + (u.name || 'this account') + ' can open');
+                    group.style.cssText = 'flex:1 1 100%;display:flex;flex-wrap:wrap';
                     TAB_KEYS.forEach(k => {
-                        const lab = el('label', 'files-meta');
-                        lab.style.cssText = 'display:inline-flex;align-items:center;gap:5px;margin-right:10px;cursor:pointer';
+                        const lab = el('label', 'tm-tabpick');
                         const cb = document.createElement('input');
                         cb.type = 'checkbox'; cb.checked = chosen.has(k); cb.dataset.k = k;
                         boxes.push(cb);
                         lab.append(cb, document.createTextNode(NAMES[k]));
-                        panel.append(lab);
+                        group.append(lab);
                     });
+                    panel.append(group);
                     const save = el('button', 'btn btn-primary', 'Save');
                     save.onclick = async () => {
                         save.disabled = true;
@@ -8602,7 +8628,7 @@
                 const openList = el('div', 'files-list');
                 if (!d.open.length) openList.append(el('div', 'files-empty', 'Nobody is clocked in.'));
                 d.open.forEach(ws => {
-                    const row = el('div', 'files-row');
+                    const row = el('div', 'files-row tm-row');
                     const name = el('span', 'files-name still'); name.textContent = nm(ws.uid);
                     row.append(name, el('span', 'files-meta',
                         'since ' + String(ws.start).slice(11, 16) + ' · ' + fd(ws.secs) + ' so far'));
@@ -8628,7 +8654,7 @@
                     + 'appears for them the next time they open the app.'));
                 uids.forEach(uid => {
                     const t = d.totals[uid];
-                    const row = el('div', 'files-row');
+                    const row = el('div', 'files-row tm-row');
                     const name = el('span', 'files-name still'); name.textContent = nm(uid);
                     row.append(name, el('span', 'files-meta',
                         'today ' + fd(t.today) + ' · this week ' + fd(t.week) + ' · this month '
@@ -8640,7 +8666,7 @@
                 const sl = el('div', 'files-list');
                 if (!d.sessions.length) sl.append(el('div', 'files-empty', 'No completed sessions yet.'));
                 d.sessions.slice(0, 40).forEach(s => {
-                    const row = el('div', 'files-row');
+                    const row = el('div', 'files-row tm-row');
                     const name = el('span', 'files-name still');
                     name.textContent = nm(s.uid) + (s.corrected ? ' (closed by ' + nm(s.corrected_by) + ')' : '');
                     row.append(name, el('span', 'files-meta',
@@ -8706,12 +8732,12 @@
                 const day = fmtDate(e.t);
                 if (day !== lastDay) {
                     lastDay = day;
-                    const h = el('div', 'files-row');
+                    const h = el('div', 'files-row tm-row');
                     h.append(el('span', 'files-meta', day));
                     h.style.background = 'var(--bg-2)';
                     list.append(h);
                 }
-                const row = el('div', 'files-row');
+                const row = el('div', 'files-row tm-row');
                 const hh = isNaN(dt) ? '' : String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
                 row.append(el('span', 'files-meta', hh));
                 const nm = e.src === 'system' ? 'System' : ((d.names || {})[e.sub] || 'Not named yet');

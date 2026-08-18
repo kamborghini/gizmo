@@ -6856,6 +6856,10 @@ def _authorize(request: Request) -> tuple[bool, Optional[str]]:
             if u is not None:
                 logger.warning("switched-off account %s was refused", uid)
             return False, None
+        # A starter password unlocks nothing but the choose-your-own screen:
+        # until the account owns its password, every other route is closed.
+        if u.get("must_change") and not request.url.path.startswith("/api/auth/"):
+            return False, None
         return True, uid
     return False, None
 
@@ -8191,6 +8195,8 @@ _TAB_ROUTES = (
     ("/api/stock-usage", "labels"), ("/api/margin", "labels"), ("/api/gobo-sizes", "labels"),
     ("/api/memory", "memory"), ("/api/learn", "memory"), ("/api/impact", "memory"),
     ("/api/skills", "skills"), ("/api/chat", "chat"),
+    ("/api/shipping", "labels"),
+    ("/print/production-labels", "labels"),
 )
 
 
@@ -8381,9 +8387,19 @@ def _team_counts(events: list, days: int = 30) -> dict:
 _dav_auth_cache: dict = {}
 
 
+_dav_fail_cache: dict = {}    # username -> (fail_count, blocked_until_ts): DAV's own throttle
+
+
 def _dav_check_auth(header: str):
-    """(uid, error_code). Caches a GOOD credential hash briefly so Finder's
-    request storms do not pay scrypt every time."""
+    """(uid, error_code). The cache stores only that a PASSWORD matched (scrypt
+    is expensive and Finder asks constantly); the live account state -- active,
+    deleted, locked, files-tab, must-change -- is re-checked on EVERY request,
+    so revoking access or resetting a password takes effect at once, not after
+    the cache expires.
+
+    DAV failures are throttled on their OWN counter, never the web login's, so
+    a Finder mount retrying a stale keychain password cannot lock a person out
+    of the app itself."""
     if not header.startswith("Basic "):
         return None, 401
     try:
@@ -8391,36 +8407,42 @@ def _dav_check_auth(header: str):
         username, _, pw = raw.partition(":")
     except Exception:
         return None, 401
-    key = hashlib.sha256(raw.encode()).hexdigest()
-    hit = _dav_auth_cache.get(key)
-    if hit and hit[1] > time.time():
-        return hit[0], None
+    username = username.strip().lower()
+    now = time.time()
+    blocked = _dav_fail_cache.get(username)
+    if blocked and blocked[1] > now:
+        return None, 401       # too many wrong tries at the drive: pause it alone
     d = _load_users()
     uid = next((k for k, u in d["users"].items()
-                if not u.get("deleted") and u.get("username") == username.strip().lower()), None)
+                if not u.get("deleted") and u.get("username") == username), None)
     u = d["users"].get(uid) if uid else None
-    now = datetime.now(timezone.utc)
+    # Every live gate, checked every time -- the cache below only vouches for
+    # the password, nothing else.
     if not u or not u.get("active", True):
         return None, 401
-    if str(u.get("lock_until") or "") > now.isoformat():
+    if str(u.get("lock_until") or "") > datetime.now(timezone.utc).isoformat():
         return None, 401
+    if _user_tabs(uid) is not None and "files" not in (_user_tabs(uid) or []):
+        return None, 403
+    if u.get("must_change"):
+        # A starter password is for the first web sign-in only; it never mounts
+        # the drive. Once they have chosen their own, the drive opens.
+        return None, 401
+    key = hashlib.sha256(raw.encode()).hexdigest()
+    hit = _dav_auth_cache.get(key)
+    if hit and hit[1] > now:
+        return uid, None
     if not _check_pw(pw, u.get("pw") or ""):
-        u["fails"] = int(u.get("fails") or 0) + 1
-        if u["fails"] >= LOGIN_FAIL_LIMIT:
-            u["fails"] = 0
-            u["lock_until"] = (now + timedelta(minutes=LOGIN_LOCK_MINUTES)).isoformat()
-        try:
-            _write_users(d)
-        except Exception:
-            pass
+        cnt = (_dav_fail_cache.get(username) or (0, 0))[0] + 1
+        _dav_fail_cache[username] = (cnt, now + LOGIN_LOCK_MINUTES * 60 if cnt >= LOGIN_FAIL_LIMIT else 0)
+        if len(_dav_fail_cache) > 500:
+            _dav_fail_cache.clear()
         _track(uid, "auth", "failed login", "wrong password at the file drive")
         return None, 401
-    tabs = _user_tabs(uid)
-    if tabs is not None and "files" not in tabs:
-        return None, 403
+    _dav_fail_cache.pop(username, None)
     if len(_dav_auth_cache) > 500:
         _dav_auth_cache.clear()
-    _dav_auth_cache[key] = (uid, time.time() + 600)
+    _dav_auth_cache[key] = (uid, now + 600)
     return uid, None
 
 
@@ -8887,7 +8909,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         pre = _pre_checks(request)
         if pre:
             return pre
-        ok, _who = _authorize(request)
+        ok, who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
         body = await _read_json_capped(request)
@@ -8897,10 +8919,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         try:
             if op == "add" and isinstance(body.get("items"), list):
                 _add_memories(body["items"])
+                _track(who, "memory", "added to memory", str(len(body["items"])) + " item(s)")
             elif op == "set_status" and body.get("id"):
                 _update_memory(body["id"], body.get("status", "done"))
+                _track(who, "memory", "changed a memory's status", str(body.get("status") or "done"))
             elif op == "delete" and body.get("id"):
                 _delete_memory(body["id"])
+                _track(who, "memory", "deleted a memory")
         except Exception:
             logger.exception("Memory op failed")
             return _json({"error": "Couldn't update memory (is a writable volume mounted at /data?)."}, 500)
@@ -8911,7 +8936,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         pre = _pre_checks(request)
         if pre:
             return pre
-        ok, _who = _authorize(request)
+        ok, who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
         body = await _read_json_capped(request)
@@ -8921,10 +8946,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         try:
             if op == "add":
                 _add_skill(body.get("title", ""), body.get("content", ""))
+                _track(who, "skills", "added a skill", str(body.get("title") or "")[:60])
             elif op == "update" and body.get("id"):
                 _update_skill(body["id"], body.get("title", ""), body.get("content", ""))
+                _track(who, "skills", "edited a skill", str(body.get("title") or "")[:60])
             elif op == "delete" and body.get("id"):
                 _delete_skill(body["id"])
+                _track(who, "skills", "deleted a skill")
         except ValueError as e:
             return _json({"error": str(e)}, 400)
         except Exception:
@@ -8939,12 +8967,19 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         pre = _pre_checks(request)
         if pre:
             return pre
-        ok, _who = _authorize(request)
+        ok, who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
         cache = _load_analysis_cache()
-        out = {k: cache[k] for k in ("overview", "seo", "keywords") if isinstance(cache.get(k), dict) and "result" in cache[k]}
-        if isinstance(cache.get("customers_segments"), dict):
+        # This one route carries several tabs' cached results, so the tab map
+        # cannot gate it wholesale: filter each section to what this account
+        # may open, or a tab restriction would leak here.
+        allowed = _user_tabs(who)
+        def ok_tab(tab):
+            return allowed is None or tab in allowed
+        out = {k: cache[k] for k in ("overview", "seo", "keywords")
+               if ok_tab(k) and isinstance(cache.get(k), dict) and "result" in cache[k]}
+        if ok_tab("customers") and isinstance(cache.get("customers_segments"), dict):
             out["customers_segments"] = cache["customers_segments"]
         return _json(out)
 
@@ -10474,8 +10509,31 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     return _json({"error": "Roles are admin, member or part-time."}, 400)
                 if u.get("role") == "master":
                     return _json({"error": "The master admin cannot be demoted."}, 400)
+                was_pt = u.get("role") == "parttime"
                 u["role"] = role
                 _write_users(d)
+                if was_pt and role != "parttime":
+                    # No longer monitored, so an open shift cannot just hang:
+                    # close it now, recorded as this admin's correction.
+                    try:
+                        w = _load_work()
+                        ws = w["open"].pop(target, None)
+                        if ws:
+                            nowu = datetime.now(timezone.utc)
+                            ws["end"] = nowu.isoformat()
+                            try:
+                                ws["secs"] = max(0, int((nowu - datetime.fromisoformat(ws["start"])).total_seconds()))
+                            except Exception:
+                                ws["secs"] = 0
+                            ws.update({"corrected": True, "corrected_by": who,
+                                       "corrected_at": nowu.isoformat(),
+                                       "note": "closed automatically when the role changed"})
+                            w["sessions"].append(ws)
+                            _write_work(w)
+                            _track(who, "work", "closed a session on role change",
+                                   _team_name(target) or target)
+                    except Exception:
+                        logger.exception("could not close the work session on role change")
                 _track(who, "team", "changed a role",
                        f"{label} is now " + {"admin": "an admin", "member": "a member",
                                              "parttime": "part-time"}[role])
@@ -10562,6 +10620,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if method == "OPTIONS":
             return Response(status_code=200, headers={**hdrs,
                 "Allow": "OPTIONS, PROPFIND, GET, HEAD, PUT, MKCOL, DELETE, MOVE, COPY, LOCK, UNLOCK"})
+        # The drive has no Shopify perimeter, so it gets its own rate ceiling:
+        # generous for Finder's request storms, a wall against a scanner.
+        if not _window_ok(_rl_hits.setdefault("dav:" + _client_key(request), []),
+                          max(RATE_MAX_CLIENT, 300), time.monotonic()):
+            return Response(status_code=429, headers=hdrs)
         uid, code = _dav_check_auth(request.headers.get("authorization", ""))
         if code:
             return Response(status_code=code, headers={**hdrs,
@@ -10676,11 +10739,28 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                          and f.get("status") == "pending"), None)
                     quota = int(FILES_QUOTA_GB * 1024 * 1024 * 1024)
                     already = int(d["files"][existing].get("size") or 0) if existing else 0
-                    if not hidden and _files_usage(d) - already + total > quota:
+                    if _files_usage(d) - already + total > quota:
                         return Response(status_code=507, headers=hdrs)
-                    if existing:
-                        fid, key = existing, d["files"][existing]["r2_key"]
-                        fresh = False
+                    supersede = None
+                    if existing and hidden:
+                        # Junk sidecars overwrite in place; they are never
+                        # versioned and never shown.
+                        fid, key, fresh = existing, d["files"][existing]["r2_key"], False
+                    elif existing and d["files"][existing].get("status") == "pending":
+                        fid, key, fresh = existing, d["files"][existing]["r2_key"], False
+                    elif existing:
+                        # Saving over a real file keeps the old version: the
+                        # prior record goes to the 30-day trash on commit and a
+                        # fresh key holds the new bytes, matching how the app's
+                        # trash protects every other delete.
+                        supersede = existing
+                        fid = _files_id(d, "f")
+                        key = f"{fid}/{name}"
+                        d["files"][fid] = {"name": name, "folder_id": parent, "size": total,
+                                           "type": "application/octet-stream", "r2_key": key,
+                                           "status": "pending", "by": uid, "created_at": now,
+                                           "hidden": hidden}
+                        fresh = True
                     else:
                         fid = _files_id(d, "f")
                         key = f"{fid}/{name}"
@@ -10708,6 +10788,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     if rec is not None:
                         rec.update({"size": total, "status": "active", "by": uid,
                                     "uploaded_at": datetime.now(timezone.utc).isoformat()})
+                        if supersede and supersede in d["files"] and supersede != fid:
+                            old = d["files"][supersede]
+                            old["status"] = "trashed"
+                            old["trashed_at"] = datetime.now(timezone.utc).isoformat()
                         _write_files(d)
             finally:
                 spool.close()
@@ -11871,8 +11955,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # The admin print action runs on the Shopify order page, outside
             # the app and its login, so it authenticates with the embed token
             # alone. It can only render labels and stamp printed. If an app
-            # session header happens to be present, the print is attributed.
+            # session header happens to be present, the print is attributed --
+            # and that account's Production Manager access is enforced, so a
+            # labels-denied user cannot print by hand-driving this URL.
             doc_who = _session_uid(request.headers.get("x-app-session")) or ""
+            if doc_who:
+                tabs = _user_tabs(doc_who)
+                if tabs is not None and "labels" not in tabs:
+                    return deny("Production Manager is switched off for your account.")
 
         ids = []
         for part in str(request.query_params.get("ids") or "").split(","):
