@@ -6161,13 +6161,25 @@ async def _zeta_push_locked(registry: dict, order_id, op: str) -> str:
 
 
 def _zeta_catalog_combos() -> list:
-    """Every glass line this app can produce: each size on the live sheet, per
-    family. This is the domain of the translation the stock app displays."""
-    sizes = sorted({str(e.get("production_size") or "").strip()
+    """Every consumption line this app can produce. Sheet sizes pass through
+    the bezel rule first: an 86 or 100 order sends 64.9 glass plus a ring, so
+    the catalogue lists those lines, never 86 glass that will not exist."""
+    sheet = sorted({str(e.get("production_size") or "").strip()
                     for entries in (_gobo_sizes().get("by_model") or {}).values()
                     for e in entries if str(e.get("production_size") or "").strip()},
                    key=lambda v: (float(v) if v.replace(".", "", 1).isdigit() else 9999))
-    return [{"family": fam, "size": sz} for sz in sizes for fam in ("Mono", "HM", "Colour")]
+    glass, rings = [], []
+    for sz in sheet:
+        cut = _BEZEL_UP.get(sz)
+        if cut:
+            rings.append(sz)
+            if cut not in glass and cut not in sheet:
+                glass.append(cut)
+        else:
+            glass.append(sz)
+    combos = [{"family": fam, "size": sz} for sz in glass for fam in ("Mono", "HM", "Colour")]
+    combos += [{"family": "Ring", "size": sz} for sz in rings]
+    return combos
 
 
 async def _zeta_send_catalog() -> None:
@@ -6200,14 +6212,23 @@ async def _zeta_drain(registry: dict) -> None:
             logger.exception("stock bridge: drain failed for %s", oid)
 
 
-def _usage_lines(shaped_order: dict) -> list:
-    """One shaped label order as glass-consumption lines.
+# An 86mm or 100mm gobo is not cut from 86 or 100 glass: it is a 64.9mm blank
+# bezelled up to the ordered diameter by a ring. The usage lines must say what
+# the bench actually consumes, or the stock sheet drifts one ring and one
+# mis-sized blank at a time.
+_BEZEL_UP = {"86": "64.9", "100": "64.9"}   # ordered size -> the glass it is cut from
 
-    Resolvable items become {size, family, qty}; anything the size lookup
-    flagged for review, or that carries no size, becomes {size, family, qty,
-    note} so the caller can show it rather than silently dropping glass. The
-    same resolution feeds the day sheet and the stock-app push, so the two can
-    never disagree about what a day's making consumed."""
+
+def _usage_lines(shaped_order: dict) -> list:
+    """One shaped label order as consumption lines.
+
+    Resolvable items become {size, family, qty}; a bezelled size becomes TWO
+    lines, the glass blank it is cut from plus the ring that brings it up to
+    the ordered diameter. Anything the size lookup flagged for review, or that
+    carries no size, becomes {size, family, qty, note} so the caller can show
+    it rather than silently dropping glass. The same resolution feeds the day
+    sheet and the stock-app push, so the two can never disagree about what a
+    day's making consumed."""
     out = []
     for it in shaped_order.get("items", []):
         qty = int(it.get("quantity") or 1)
@@ -6217,8 +6238,14 @@ def _usage_lines(shaped_order: dict) -> list:
         if it.get("review_reason") or not it.get("production_size"):
             out.append({"size": str(it.get("production_size") or ""), "family": family,
                         "qty": qty, "note": str(it.get("review_reason") or "no size resolved")[:200]})
+            continue
+        size = str(it["production_size"])
+        glass = _BEZEL_UP.get(size)
+        if glass:
+            out.append({"size": glass, "family": family, "qty": qty})
+            out.append({"size": size, "family": "Ring", "qty": qty})
         else:
-            out.append({"size": str(it["production_size"]), "family": family, "qty": qty})
+            out.append({"size": size, "family": family, "qty": qty})
     return out
 
 
