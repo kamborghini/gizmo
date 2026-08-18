@@ -3608,7 +3608,7 @@
         const LABEL_TAG = 'IP';
         // The production lifecycle, as tag-filtered queues. Making an order moves it
         // IP -> PC (Mark made); fulfilling moves it PC -> Complete.
-        const QUEUE = [['make', 'To make', 'IP'], ['ship', 'To ship', 'PC'], ['dispatched', 'Complete', 'Complete']];
+        const QUEUE = [['unprocessed', 'Unprocessed', 'Unprocessed'], ['make', 'To make', 'IP'], ['ship', 'To ship', 'PC'], ['dispatched', 'Complete', 'Complete']];
         let queueMode = 'make';
         function queueTag() { const q = QUEUE.find(x => x[0] === queueMode); return q ? q[2] : LABEL_TAG; }
         function dispatchStateOf(o) {
@@ -3785,6 +3785,17 @@
         // re-order as soon as it lands - so a second click must never reach a
         // different order, and must never silently undo the first one.
         const madeBusy = {};
+        async function readyToMake(o, btn) {
+            btn.disabled = true;
+            try {
+                await api('/api/production-labels/queue', { order_id: o.id });
+                addToast(orderNo(o) + ' moved to To make.');
+                loadLabels(true);
+            } catch (e) {
+                btn.disabled = false;
+                toastError(e.message || 'Could not move the order');
+            }
+        }
         async function toggleMade(o) {
             if (madeBusy[o.id]) return;
             const prev = prodStateOf(o).made_at || null;
@@ -4028,12 +4039,14 @@
             }
             const dispatched = queueMode === 'dispatched';
             const shipMode = queueMode === 'ship';
+            const unproc = queueMode === 'unprocessed';
             // Price the ready-to-ship queue in the background so the couriers are
             // already listed when Dispatch is opened. Free, and never blocking.
             if (shipMode) prefetchQuotes(shown);
             else prefetchRun++;                 // left the queue: stop any run in flight
             const heroCopy = dispatched ? 'Orders already dispatched. Select one to reprint its label or view tracking.'
                 : shipMode ? 'Orders marked made and ready to ship. Select one to dispatch a courier.'
+                : unproc ? 'New orders not yet released to the workbench. Press Ready to make when one should join the To make queue.'
                 : 'Orders tagged "' + (data.tag || LABEL_TAG) + '". Select an order to preview its label, then print.';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
             const ht = el('div'); ht.append(el('h2', null, 'Production Manager'), el('p', null, heroCopy));
@@ -4166,6 +4179,7 @@
             if (!orders.length) {
                 const emptyCopy = dispatched ? 'No orders have been dispatched yet. Dispatch one from the "To ship" queue.'
                     : queueMode === 'ship' ? 'Nothing is ready to ship. Mark orders made in "To make" to move them here.'
+                    : unproc ? 'Nothing is waiting. New orders tagged "Unprocessed" in Shopify will appear here for release.'
                     : 'No orders are currently tagged "' + (data.tag || LABEL_TAG) + '". Add that tag to an order in Shopify and refresh.';
                 box.append(el('div', 'empty', emptyCopy));
                 return;
@@ -4236,6 +4250,17 @@
                 const pr = el('button', 'btn'); pr.title = 'Print label'; pr.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Print'));
                 pr.onclick = (e) => { e.stopPropagation(); printLabels([o]); };
                 acts.append(pr);
+                if (unproc) {
+                    // The release gate: out of Unprocessed, into To make. Same
+                    // tag move the amber strip's Add to queue performs.
+                    if (!o.status) {
+                        const rd = el('button', 'btn btn-primary');
+                        rd.title = 'Remove the Unprocessed tag and add IP, so this order joins To make';
+                        rd.append(ico(I.check), el('span', 'lbl-btn-txt', 'Ready to make'));
+                        rd.onclick = (e) => { e.stopPropagation(); readyToMake(o, rd); };
+                        acts.append(rd);
+                    }
+                } else {
                 if (o.status !== 'cancelled') {
                     const dispatched = !!dsp.tracking_number && !dsp.canceled;
                     const db = el('button', 'btn' + (dispatched ? ' on' : (queueMode === 'ship' ? ' btn-primary' : '')));
@@ -4250,6 +4275,7 @@
                     mk.append(ico(I.check), el('span', 'lbl-btn-txt', st.made_at ? 'Made' : 'Mark made'));
                     mk.onclick = (e) => { e.stopPropagation(); toggleMade(o); };
                     acts.append(mk);
+                }
                 }
                 row.append(acts);
                 row.onclick = () => { labelSel = (labelSel === o.id ? null : o.id); renderLabels(); };
@@ -6333,7 +6359,7 @@
         // the bench and not on a screen somebody is already fighting with.
         const GUIDE = [
             { h: 'The daily run', body: [
-                ['1. Orders arrive tagged IP', 'They appear in Production Manager under "To make". Anything paid and open that has gobo items but no IP tag shows in an amber strip at the top with an "Add to queue" button.'],
+                ['1. Orders arrive tagged Unprocessed', 'They wait in the "Unprocessed" queue until you press "Ready to make", which moves them into "To make" (the tag changes from Unprocessed to IP). Anything paid and open that has gobo items but no workflow tag at all shows in an amber strip on the To make queue with an "Add to queue" button.'],
                 ['2. Print the production labels', 'Select an order to preview its label, then Print. Or use "Print all" for the whole queue. Printing tags the order In Production automatically.'],
                 ['3. Make the gobos', 'The label carries the production size, the glass type and the artwork name. A boxed CHECK line means the size could not be resolved and needs a human decision before making.'],
                 ['4. Mark made', 'Press "Mark made" on the order. It moves to "To ship". Nothing has been told to Shopify or the customer yet.'],

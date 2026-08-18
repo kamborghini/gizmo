@@ -223,6 +223,16 @@ def t_every_refresh_button_asks_the_server_for_fresh_data():
 
 
 @test
+def t_the_unprocessed_queue_is_first_in_the_lifecycle_with_a_release_button():
+    ok(_re.search(r"\[\'unprocessed\', \'Unprocessed\', \'Unprocessed\'\], \[\'make\'", HTML),
+       "Unprocessed sits before To make in the queue order")
+    ok("readyToMake" in HTML, "the release handler exists")
+    ok(_re.search(r"readyToMake\(o, rd\)", HTML), "and the row button calls it")
+    ok(_re.search(r"api\('/api/production-labels/queue', \{ order_id: o\.id \}\)", HTML),
+       "release reuses the existing tag-move route")
+
+
+@test
 def t_a_custom_shipment_has_its_own_button_and_reads_a_pasted_address():
     ok("openCustomShip" in HTML, "the New shipment flow exists")
     ok(_re.search(r"newShip\.onclick = openCustomShip", HTML), "and the toolbar has its own button")
