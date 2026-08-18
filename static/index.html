@@ -570,6 +570,7 @@
            carrying the four-colour activity state, a drop bar that exists
            only mid-drag, rotten deals tinted red as a whole card.
            ------------------------------------------------------------------ */
+        .crm-wrap { max-width: 1600px; }
         .crm-board { display: flex; gap: 10px; overflow-x: auto; align-items: flex-start;
             padding-bottom: 12px; min-height: 300px; }
         .crm-col { min-width: 228px; flex: 1 0 228px; background: var(--surface-2);
@@ -1135,7 +1136,7 @@
 
             <!-- Production labels -->
             <section class="view" id="view-crm">
-                <div id="crm-content"></div>
+                <div class="scroll"><div class="ov-wrap crm-wrap" id="crm-content"></div></div>
             </section>
             <section class="view" id="view-labels">
                 <div class="scroll"><div class="ov-wrap" id="labels-content"></div></div>
