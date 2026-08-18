@@ -4793,6 +4793,72 @@ def t_work_resolve_is_a_recorded_correction_and_reports_add_up():
         eq(rep2["count"], 0, "the date range filters")
     with_accounts(go)
 
+@test
+def t_dav_speaks_finder_with_the_apps_own_accounts():
+    def go():
+        ensure_auth()
+        def fake_upload(fileobj, bucket, key):
+            fake_s3.objects[key] = len(fileobj.read())
+        fake_s3 = FakeS3()
+        fake_s3.upload_fileobj = fake_upload
+        fake_s3.copy_object = lambda **kw: fake_s3.objects.__setitem__(
+            kw["Key"], fake_s3.objects.get(kw["CopySource"]["Key"], 0))
+        saved = (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
+                 copilot._files_s3_client)
+        copilot.R2_ACCOUNT_ID = copilot.R2_ACCESS_KEY_ID = copilot.R2_SECRET_ACCESS_KEY = "acct"
+        copilot._files_s3_client = fake_s3
+        copilot._dav_auth_cache.clear()
+        try:
+            os.remove(copilot.FILES_PATH)
+        except FileNotFoundError:
+            pass
+        copilot._poisoned_stores.discard(copilot.FILES_PATH)
+        try:
+            import base64 as b64
+            _, starter = make_user("Poppy", "poppy", role="parttime")
+            auth = {"Authorization": "Basic " + b64.b64encode(f"poppy:{starter}".encode()).decode()}
+            bad = {"Authorization": "Basic " + b64.b64encode(b"poppy:wrong-password").decode()}
+            r = client.request("PROPFIND", "/dav/", headers={"Depth": "1"})
+            eq(r.status_code, 401, "no credentials, no listing")
+            ok("WWW-Authenticate" in r.headers, "and Finder is told to ask")
+            eq(client.request("PROPFIND", "/dav/", headers={**bad, "Depth": "1"}).status_code, 401)
+            r2 = client.request("PROPFIND", "/dav/", headers={**auth, "Depth": "1"})
+            eq(r2.status_code, 207, r2.text[:200])
+            eq(client.request("MKCOL", "/dav/Proofs", headers=auth).status_code, 201)
+            r3 = client.put("/dav/Proofs/0538 proof.pdf", headers=auth, content=b"x" * 500)
+            eq(r3.status_code, 201, "a save from Finder lands")
+            st = copilot._load_files()
+            rec = next(v for v in st["files"].values() if v["name"] == "0538 proof.pdf")
+            eq(rec["size"], 500, "with the true size")
+            ok(rec["by"], "and the person's account on it")
+            listing = client.request("PROPFIND", "/dav/Proofs", headers={**auth, "Depth": "1"}).text
+            ok("0538 proof.pdf" in listing, "and it lists")
+            # junk is accepted but invisible in the app
+            eq(client.put("/dav/Proofs/.DS_Store", headers=auth, content=b"j").status_code, 201)
+            tree = post("/api/files/tree", {}).json()["store"]
+            ok(all(f["name"] != ".DS_Store" for f in tree["files"].values()),
+               "Finder droppings never reach the page")
+            # move, then delete = the same 30-day trash as the page
+            eq(client.request("MOVE", "/dav/Proofs/0538 proof.pdf", headers={**auth,
+               "Destination": "/dav/Proofs/0538 proof v2.pdf"}).status_code, 201)
+            eq(client.request("DELETE", "/dav/Proofs/0538 proof v2.pdf", headers=auth).status_code, 204)
+            st2 = copilot._load_files()
+            rec2 = next(v for v in st2["files"].values() if v["name"] == "0538 proof v2.pdf")
+            eq(rec2["status"], "trashed", "a Finder delete is a trash, never a destruction")
+            ev = post("/api/team/board", {}).json()["events"]
+            ok(any(e["action"] == "added a file from Finder" for e in ev), "saves hit the ledger")
+            lk = client.request("LOCK", "/dav/Proofs", headers=auth)
+            eq(lk.status_code, 200, "class 2 for a read-write mount")
+        finally:
+            (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
+             copilot._files_s3_client) = saved
+            copilot._dav_auth_cache.clear()
+            try:
+                os.remove(copilot.FILES_PATH)
+            except FileNotFoundError:
+                pass
+    with_accounts(go)
+
 # =========================== run ===========================================
 
 passed = failed = 0

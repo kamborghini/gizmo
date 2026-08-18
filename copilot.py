@@ -7857,7 +7857,8 @@ def _files_purge(d: dict) -> None:
     stale_pending = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
     doomed = [k for k, f in d["files"].items()
               if (f.get("trashed_at") and f["trashed_at"] < cutoff)
-              or (f.get("status") == "pending" and str(f.get("created_at") or "") < stale_pending)]
+              or (f.get("status") == "pending" and str(f.get("created_at") or "") < stale_pending)
+              or (f.get("hidden") and str(f.get("uploaded_at") or "") < cutoff)]
     for k in doomed:
         f = d["files"].pop(k)
         if f.get("r2_key"):
@@ -7884,7 +7885,8 @@ def _files_reap(d: dict, s3) -> bool:
 def _files_shape(d: dict) -> dict:
     used = _files_usage(d)
     return {"folders": d["folders"],
-            "files": {k: v for k, v in d["files"].items() if v.get("status") == "active"},
+            "files": {k: v for k, v in d["files"].items()
+                      if v.get("status") == "active" and not v.get("hidden")},
             "trash": [{**v, "id": k} for k, v in d["files"].items() if v.get("trashed_at")],
             "used": used, "quota": int(FILES_QUOTA_GB * 1024 * 1024 * 1024),
             "names": _team_names(),   # resolves `by` ids to people at render time
@@ -8344,6 +8346,146 @@ def _team_counts(events: list, days: int = 30) -> dict:
         for k in c:
             c[k] = max(0, c[k])
     return out
+
+
+# ---------------------------------------------------------------------------
+# WebDAV: the Files store as a native Finder drive. macOS mounts it with
+# Connect to Server; each person signs in with their own APP account, so a
+# proof saved from a Mac carries their name (and their work session when they
+# are on the clock) exactly like an upload through the page.
+#
+# This is the one surface WITHOUT the Shopify perimeter: Finder cannot carry
+# an embed token. The door is HTTPS + the app's own credentials, with the
+# same wrong-password counters and pause as the login screen, and it opens
+# only for accounts allowed the Files tab.
+# ---------------------------------------------------------------------------
+_dav_auth_cache: dict = {}
+
+
+def _dav_check_auth(header: str):
+    """(uid, error_code). Caches a GOOD credential hash briefly so Finder's
+    request storms do not pay scrypt every time."""
+    if not header.startswith("Basic "):
+        return None, 401
+    try:
+        raw = base64.b64decode(header[6:]).decode("utf-8")
+        username, _, pw = raw.partition(":")
+    except Exception:
+        return None, 401
+    key = hashlib.sha256(raw.encode()).hexdigest()
+    hit = _dav_auth_cache.get(key)
+    if hit and hit[1] > time.time():
+        return hit[0], None
+    d = _load_users()
+    uid = next((k for k, u in d["users"].items()
+                if not u.get("deleted") and u.get("username") == username.strip().lower()), None)
+    u = d["users"].get(uid) if uid else None
+    now = datetime.now(timezone.utc)
+    if not u or not u.get("active", True):
+        return None, 401
+    if str(u.get("lock_until") or "") > now.isoformat():
+        return None, 401
+    if not _check_pw(pw, u.get("pw") or ""):
+        u["fails"] = int(u.get("fails") or 0) + 1
+        if u["fails"] >= LOGIN_FAIL_LIMIT:
+            u["fails"] = 0
+            u["lock_until"] = (now + timedelta(minutes=LOGIN_LOCK_MINUTES)).isoformat()
+        try:
+            _write_users(d)
+        except Exception:
+            pass
+        _track(uid, "auth", "failed login", "wrong password at the file drive")
+        return None, 401
+    tabs = _user_tabs(uid)
+    if tabs is not None and "files" not in tabs:
+        return None, 403
+    if len(_dav_auth_cache) > 500:
+        _dav_auth_cache.clear()
+    _dav_auth_cache[key] = (uid, time.time() + 600)
+    return uid, None
+
+
+def _dav_split(path: str) -> list:
+    return [p for p in path.split("/") if p not in ("", ".")]
+
+
+def _dav_walk_folder(d: dict, segs: list):
+    """Resolve folder path segments case-insensitively. Returns folder id
+    ('' = root) or None."""
+    parent = ""
+    for seg in segs:
+        nxt = next((fid for fid, f in d["folders"].items()
+                    if str(f.get("parent_id") or "") == parent
+                    and f.get("name", "").lower() == seg.lower()), None)
+        if nxt is None:
+            return None
+        parent = nxt
+    return parent
+
+
+def _dav_resolve(d: dict, path: str):
+    """('folder', id) | ('file', id) | (None, None). Hidden files resolve here
+    (Finder wants its metadata files back) but never appear in the app."""
+    segs = _dav_split(path)
+    fid = _dav_walk_folder(d, segs)
+    if fid is not None:
+        return "folder", fid
+    if not segs:
+        return None, None
+    parent = _dav_walk_folder(d, segs[:-1])
+    if parent is None:
+        return None, None
+    name = segs[-1].lower()
+    for k, f in d["files"].items():
+        if f.get("status") == "active" and str(f.get("folder_id") or "") == parent \
+                and f.get("name", "").lower() == name:
+            return "file", k
+    return None, None
+
+
+def _dav_href(*segs) -> str:
+    from urllib.parse import quote
+    return "/dav/" + "/".join(quote(s) for s in segs if s)
+
+
+def _dav_href_dir(*segs) -> str:
+    """Collection hrefs end in exactly one slash: macOS's client refuses a
+    whole mount over a root href of /dav// instead of /dav/."""
+    h = _dav_href(*segs)
+    return h if h.endswith("/") else h + "/"
+
+
+def _dav_path_of_folder(d: dict, fid: str) -> list:
+    out, hops = [], 0
+    while fid and fid in d["folders"] and hops < 50:
+        out.insert(0, d["folders"][fid]["name"])
+        fid = str(d["folders"][fid].get("parent_id") or "")
+        hops += 1
+    return out
+
+
+_DAV_JUNK = re.compile(r"^(\.|_)|^desktop\.ini$", re.I)
+
+
+def _dav_rfc1123(iso: str) -> str:
+    try:
+        return datetime.fromisoformat(iso).strftime("%a, %d %b %Y %H:%M:%S GMT")
+    except Exception:
+        return datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+
+
+def _dav_entry_xml(href: str, name: str, is_dir: bool, size: int = 0, mtime: str = "") -> str:
+    rt = "<D:collection/>" if is_dir else ""
+    extra = "" if is_dir else (
+        f"<D:getcontentlength>{size}</D:getcontentlength>"
+        "<D:getcontenttype>application/octet-stream</D:getcontenttype>")
+    return ("<D:response><D:href>" + html.escape(href) + "</D:href>"
+            "<D:propstat><D:prop>"
+            "<D:displayname>" + html.escape(name) + "</D:displayname>"
+            f"<D:resourcetype>{rt}</D:resourcetype>"
+            f"<D:getlastmodified>{_dav_rfc1123(mtime)}</D:getlastmodified>"
+            + extra +
+            "</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>")
 
 
 def _files_tick() -> None:
@@ -10377,6 +10519,255 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         users = [_user_public(uid, u) for uid, u in d["users"].items() if not u.get("deleted")]
         users.sort(key=lambda u: (-ROLE_LEVELS.get(u["role"], 0), u["name"] or "~"))
         return users
+
+    # ---- WebDAV route -----------------------------------------------------
+    @mcp.custom_route("/dav{sub_path:path}", methods=["OPTIONS", "PROPFIND", "GET", "HEAD",
+                                                      "PUT", "MKCOL", "DELETE", "MOVE",
+                                                      "COPY", "LOCK", "UNLOCK"])
+    async def dav_route(request: Request):
+        method = request.method
+        path = request.path_params.get("sub_path") or "/"
+        hdrs = {"DAV": "1, 2", "MS-Author-Via": "DAV"}
+        if method == "OPTIONS":
+            return Response(status_code=200, headers={**hdrs,
+                "Allow": "OPTIONS, PROPFIND, GET, HEAD, PUT, MKCOL, DELETE, MOVE, COPY, LOCK, UNLOCK"})
+        uid, code = _dav_check_auth(request.headers.get("authorization", ""))
+        if code:
+            return Response(status_code=code, headers={**hdrs,
+                "WWW-Authenticate": 'Basic realm="Store Copilot Files"'} if code == 401 else hdrs)
+        d = _load_files()
+        kind, kid = _dav_resolve(d, path)
+
+        if method == "PROPFIND":
+            depth = request.headers.get("depth", "1")
+            if depth not in ("0", "1"):
+                return Response(status_code=403, headers=hdrs)
+            if kind is None:
+                return Response(status_code=404, headers=hdrs)
+            parts = []
+            if kind == "folder":
+                folder_path = _dav_path_of_folder(d, kid)
+                parts.append(_dav_entry_xml(_dav_href_dir(*folder_path),
+                                            folder_path[-1] if folder_path else "Files", True))
+                if depth == "1":
+                    for fid, f in d["folders"].items():
+                        if str(f.get("parent_id") or "") == kid:
+                            parts.append(_dav_entry_xml(_dav_href_dir(*folder_path, f["name"]),
+                                                        f["name"], True, mtime=f.get("created_at") or ""))
+                    for k, f in d["files"].items():
+                        if f.get("status") == "active" and str(f.get("folder_id") or "") == kid:
+                            parts.append(_dav_entry_xml(_dav_href(*folder_path, f["name"]),
+                                                        f["name"], False, int(f.get("size") or 0),
+                                                        f.get("uploaded_at") or f.get("created_at") or ""))
+            else:
+                f = d["files"][kid]
+                fp = _dav_path_of_folder(d, str(f.get("folder_id") or ""))
+                parts.append(_dav_entry_xml(_dav_href(*fp, f["name"]), f["name"], False,
+                                            int(f.get("size") or 0),
+                                            f.get("uploaded_at") or f.get("created_at") or ""))
+            xml = ('<?xml version="1.0" encoding="utf-8"?>'
+                   '<D:multistatus xmlns:D="DAV:">' + "".join(parts) + "</D:multistatus>")
+            return Response(xml, status_code=207, media_type="application/xml; charset=utf-8", headers=hdrs)
+
+        if method in ("GET", "HEAD"):
+            if kind != "file":
+                return Response(status_code=404 if kind is None else 403, headers=hdrs)
+            f = d["files"][kid]
+            size = int(f.get("size") or 0)
+            if method == "HEAD":
+                return Response(status_code=200, headers={**hdrs, "Content-Length": str(size)})
+            url = await asyncio.to_thread(_files_sign_get, f["r2_key"], f.get("name") or "file")
+            client = httpx.AsyncClient(timeout=60)
+            upstream = await client.send(client.build_request("GET", url), stream=True)
+            if upstream.status_code != 200:
+                await upstream.aclose(); await client.aclose()
+                return Response(status_code=502, headers=hdrs)
+            async def gen():
+                try:
+                    async for chunk in upstream.aiter_bytes(65536):
+                        yield chunk
+                finally:
+                    await upstream.aclose(); await client.aclose()
+            return StreamingResponse(gen(), headers={**hdrs, "Content-Length": str(size)},
+                                     media_type="application/octet-stream")
+
+        if method == "PUT":
+            segs = _dav_split(path)
+            if not segs:
+                return Response(status_code=403, headers=hdrs)
+            name = _files_clean_name(segs[-1])
+            hidden = bool(_DAV_JUNK.match(segs[-1]))
+            async with _files_lock:
+                d = _load_files()
+                parent = _dav_walk_folder(d, segs[:-1])
+                if parent is None:
+                    return Response(status_code=409, headers=hdrs)
+                import tempfile as _tf
+                total = 0
+                with _tf.TemporaryFile() as spool:
+                    async for chunk in request.stream():
+                        total += len(chunk)
+                        if total > FILES_MAX_UPLOAD:
+                            return Response(status_code=413, headers=hdrs)
+                        spool.write(chunk)
+                    _k, _f = _dav_resolve(d, path)
+                    existing = _f if _k == "file" else None
+                    quota = int(FILES_QUOTA_GB * 1024 * 1024 * 1024)
+                    already = int(d["files"][existing].get("size") or 0) if existing else 0
+                    if not hidden and _files_usage(d) - already + total > quota:
+                        return Response(status_code=507, headers=hdrs)
+                    if existing:
+                        fid, key = existing, d["files"][existing]["r2_key"]
+                    else:
+                        fid = _files_id(d, "f")
+                        key = f"{fid}/{name}"
+                    spool.seek(0)
+                    try:
+                        await asyncio.to_thread(
+                            lambda: _files_s3().upload_fileobj(spool, R2_BUCKET, key))
+                    except Exception:
+                        logger.exception("dav put failed")
+                        return Response(status_code=502, headers=hdrs)
+                now = datetime.now(timezone.utc).isoformat()
+                if existing:
+                    d["files"][fid].update({"size": total, "uploaded_at": now, "by": uid})
+                else:
+                    d["files"][fid] = {"name": name, "folder_id": parent, "size": total,
+                                       "type": "application/octet-stream", "r2_key": key,
+                                       "status": "active", "by": uid, "created_at": now,
+                                       "uploaded_at": now, "hidden": hidden}
+                _write_files(d)
+            if not hidden:
+                _track(uid, "files", "updated a file from Finder" if existing
+                       else "added a file from Finder", name)
+            return Response(status_code=204 if existing else 201, headers=hdrs)
+
+        if method == "MKCOL":
+            segs = _dav_split(path)
+            if not segs:
+                return Response(status_code=403, headers=hdrs)
+            async with _files_lock:
+                d = _load_files()
+                if _dav_walk_folder(d, segs) is not None:
+                    return Response(status_code=405, headers=hdrs)
+                parent = _dav_walk_folder(d, segs[:-1])
+                if parent is None:
+                    return Response(status_code=409, headers=hdrs)
+                fid = _files_id(d, "d")
+                d["folders"][fid] = {"name": _files_clean_name(segs[-1]), "parent_id": parent,
+                                     "created_at": datetime.now(timezone.utc).isoformat()}
+                _write_files(d)
+            _track(uid, "files", "made a folder from Finder", segs[-1][:60])
+            return Response(status_code=201, headers=hdrs)
+
+        if method == "DELETE":
+            async with _files_lock:
+                d = _load_files()
+                kind, kid = _dav_resolve(d, path)
+                if kind is None:
+                    return Response(status_code=404, headers=hdrs)
+                if kind == "folder":
+                    if not kid:
+                        return Response(status_code=403, headers=hdrs)
+                    busy = any(str(f.get("parent_id") or "") == kid for f in d["folders"].values()) \
+                        or any(str(v.get("folder_id") or "") == kid and v.get("status") == "active"
+                               for v in d["files"].values())
+                    if busy:
+                        return Response(status_code=403, headers=hdrs)
+                    gone = d["folders"].pop(kid)
+                    _write_files(d)
+                    _track(uid, "files", "deleted a folder from Finder", gone.get("name") or "")
+                    return Response(status_code=204, headers=hdrs)
+                f = d["files"][kid]
+                if f.get("hidden"):
+                    d["files"].pop(kid)
+                    if f.get("r2_key"):
+                        d.setdefault("doomed", []).append(f["r2_key"])
+                else:
+                    f["status"] = "trashed"
+                    f["trashed_at"] = datetime.now(timezone.utc).isoformat()
+                _write_files(d)
+            if not f.get("hidden"):
+                _track(uid, "files", "put a file in the trash from Finder", f.get("name") or "")
+            return Response(status_code=204, headers=hdrs)
+
+        if method in ("MOVE", "COPY"):
+            from urllib.parse import urlparse, unquote
+            dest = request.headers.get("destination", "")
+            dpath = unquote(urlparse(dest).path)
+            if not dpath.startswith("/dav"):
+                return Response(status_code=400, headers=hdrs)
+            dsegs = _dav_split(dpath[4:])
+            if not dsegs:
+                return Response(status_code=403, headers=hdrs)
+            async with _files_lock:
+                d = _load_files()
+                kind, kid = _dav_resolve(d, path)
+                if kind is None:
+                    return Response(status_code=404, headers=hdrs)
+                dparent = _dav_walk_folder(d, dsegs[:-1])
+                if dparent is None:
+                    return Response(status_code=409, headers=hdrs)
+                dname = _files_clean_name(dsegs[-1])
+                dk, did = _dav_resolve(d, "/".join(dsegs))
+                if dk is not None and did != kid:
+                    if request.headers.get("overwrite", "T").upper() == "F":
+                        return Response(status_code=412, headers=hdrs)
+                    if dk == "file":
+                        d["files"][did]["status"] = "trashed"
+                        d["files"][did]["trashed_at"] = datetime.now(timezone.utc).isoformat()
+                    else:
+                        return Response(status_code=412, headers=hdrs)
+                if kind == "folder":
+                    if method == "COPY":
+                        return Response(status_code=403, headers=hdrs)
+                    hop, guard = dparent, 0
+                    while hop and guard < 60:
+                        if hop == kid:
+                            return Response(status_code=409, headers=hdrs)  # into its own subtree
+                        hop = str(d["folders"].get(hop, {}).get("parent_id") or "")
+                        guard += 1
+                    d["folders"][kid]["name"] = dname
+                    d["folders"][kid]["parent_id"] = dparent
+                    _write_files(d)
+                    _track(uid, "files", "moved a folder from Finder", dname)
+                    return Response(status_code=201, headers=hdrs)
+                f = d["files"][kid]
+                if method == "MOVE":
+                    f["name"], f["folder_id"] = dname, dparent
+                    _write_files(d)
+                    _track(uid, "files", "moved a file from Finder", dname)
+                    return Response(status_code=201, headers=hdrs)
+                nid = _files_id(d, "f")
+                nkey = f"{nid}/{dname}"
+                try:
+                    await asyncio.to_thread(lambda: _files_s3().copy_object(
+                        Bucket=R2_BUCKET, CopySource={"Bucket": R2_BUCKET, "Key": f["r2_key"]},
+                        Key=nkey))
+                except Exception:
+                    logger.exception("dav copy failed")
+                    return Response(status_code=502, headers=hdrs)
+                d["files"][nid] = {**f, "name": dname, "folder_id": dparent, "r2_key": nkey,
+                                   "by": uid, "created_at": datetime.now(timezone.utc).isoformat()}
+                _write_files(d)
+                _track(uid, "files", "copied a file from Finder", dname)
+                return Response(status_code=201, headers=hdrs)
+
+        if method == "LOCK":
+            # Finder demands class 2 to mount read-write; the lock is a polite
+            # fiction over a store that serialises writes itself.
+            token = "opaquelocktoken:" + secrets.token_hex(8)
+            xml = ('<?xml version="1.0" encoding="utf-8"?>'
+                   '<D:prop xmlns:D="DAV:"><D:lockdiscovery><D:activelock>'
+                   '<D:locktype><D:write/></D:locktype><D:lockscope><D:exclusive/></D:lockscope>'
+                   '<D:depth>0</D:depth><D:timeout>Second-600</D:timeout>'
+                   f'<D:locktoken><D:href>{token}</D:href></D:locktoken>'
+                   '</D:activelock></D:lockdiscovery></D:prop>')
+            return Response(xml, status_code=200, media_type="application/xml; charset=utf-8",
+                            headers={**hdrs, "Lock-Token": "<" + token + ">"})
+        if method == "UNLOCK":
+            return Response(status_code=204, headers=hdrs)
+        return Response(status_code=405, headers=hdrs)
 
     # ---- Work routes ------------------------------------------------------
     # The clock. Timestamps are minted HERE, never accepted from the browser.
