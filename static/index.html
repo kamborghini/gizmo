@@ -8148,7 +8148,7 @@
            Settings; members see neither. Hiding is politeness; the server
            enforces every gate again.
            ================================================================== */
-        let teamMe = null, teamCache = null, teamSeg = 'people', teamNewOpen = false;
+        let teamMe = null, teamCache = null, teamSeg = 'people', teamNewOpen = false, teamTabsOpen = '';
         let teamFilterWho = '', teamFilterArea = '';
         function byName(sub) {
             if (!sub) return '';
@@ -8166,12 +8166,29 @@
             if (data.error) throw new Error(data.error);
             return data;
         }
+        const TAB_KEYS = ['overview', 'seo', 'keywords', 'products', 'customers', 'liability',
+                          'crm', 'files', 'labels', 'memory', 'skills', 'chat'];
+        function tabAllowed(v) {
+            if (!teamMe || !Array.isArray(teamMe.tabs)) return true;
+            if (TAB_KEYS.indexOf(v) < 0) return true;   // guide and team are governed elsewhere
+            return teamMe.tabs.indexOf(v) >= 0;
+        }
         function applyRoleChrome() {
             const lvl = teamMe ? ({ master: 3, admin: 2, member: 1 }[teamMe.role] || 1) : 1;
             $('nav-team').style.display = lvl >= 2 ? '' : 'none';
             $('settings-btn').style.display = lvl >= 2 ? '' : 'none';
             const acct = $('auth-account');
             if (acct) acct.textContent = teamMe ? teamMe.name : '';
+            TAB_KEYS.forEach(v => {
+                const n = $('nav-' + v);
+                if (n) n.style.display = tabAllowed(v) ? '' : 'none';
+            });
+            const av = document.querySelector('.view.active');
+            const cur = av ? av.id.replace('view-', '') : '';
+            if (cur && !tabAllowed(cur)) {
+                const first = TAB_KEYS.find(tabAllowed);
+                setView(first || 'guide');
+            }
         }
         function authOverlay() {
             let ov = $('auth-overlay');
@@ -8467,6 +8484,11 @@
                         };
                         acts.append(rp, off);
                     }
+                    if (manageable) {
+                        const tb = el('button', 'btn', 'Tabs');
+                        tb.onclick = () => { teamTabsOpen = teamTabsOpen === u.id ? '' : u.id; renderTeam(); };
+                        acts.append(tb);
+                    }
                     if (myLevel >= 3) {
                         const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Delete account';
                         del.onclick = async () => {
@@ -8483,10 +8505,46 @@
                 row.append(acts);
                 if (u.active === false) { row.style.opacity = '.55'; }
                 list.append(row);
+                if (teamTabsOpen === u.id && u.role !== 'master') {
+                    const panel = el('div', 'files-row'); panel.style.flexWrap = 'wrap';
+                    panel.style.background = 'var(--bg-2)';
+                    const NAMES = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords',
+                        products: 'Products', customers: 'Customers', liability: 'Liability',
+                        crm: 'CRM', files: 'Files', labels: 'Production Manager',
+                        memory: 'Memory', skills: 'Skills', chat: 'Chat' };
+                    const chosen = new Set(Array.isArray(u.tabs) ? u.tabs : TAB_KEYS);
+                    const boxes = [];
+                    TAB_KEYS.forEach(k => {
+                        const lab = el('label', 'files-meta');
+                        lab.style.cssText = 'display:inline-flex;align-items:center;gap:5px;margin-right:10px;cursor:pointer';
+                        const cb = document.createElement('input');
+                        cb.type = 'checkbox'; cb.checked = chosen.has(k); cb.dataset.k = k;
+                        boxes.push(cb);
+                        lab.append(cb, document.createTextNode(NAMES[k]));
+                        panel.append(lab);
+                    });
+                    const save = el('button', 'btn btn-primary', 'Save');
+                    save.onclick = async () => {
+                        save.disabled = true;
+                        const picked = boxes.filter(b => b.checked).map(b => b.dataset.k);
+                        try {
+                            await api('/api/team/user', { op: 'tabs', id: u.id,
+                                tabs: picked.length === TAB_KEYS.length ? null : picked });
+                            teamTabsOpen = '';
+                        } catch (e) { toastError(e.message); save.disabled = false; return; }
+                        loadTeam();
+                    };
+                    const all = el('button', 'btn', 'Everything');
+                    all.onclick = () => boxes.forEach(b => { b.checked = true; });
+                    panel.append(all, save);
+                    list.append(panel);
+                }
             });
             host.append(list, el('div', 'files-hint',
                 'Accounts belong to the app, not Shopify. New accounts get a starter password '
-                + 'shown once; everyone chooses their own on first sign-in.'));
+                + 'shown once; everyone chooses their own on first sign-in. Tabs controls which '
+                + 'parts of the app an account can open; it is enforced by the server, not '
+                + 'just hidden.'));
         }
         function renderTeamFeed(host) {
             const d = teamCache;

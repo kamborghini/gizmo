@@ -4667,6 +4667,50 @@ def t_auth_the_print_document_needs_only_the_perimeter():
         ok("Unauthorized" not in r.text, "the print document renders with the embed token")
     with_accounts(go)
 
+@test
+def t_tabs_are_locked_on_the_server_not_just_hidden():
+    def go():
+        ensure_auth()
+        owen, starter = make_user("Owen", "owen")
+        sess = login("owen", starter).json()["session"]
+        r = post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["labels"]})
+        eq(r.status_code, 200, r.text)
+        eq(post_s(sess, "/api/files/tree", {}).status_code, 403, "a blocked tab answers 403")
+        blocked = post_s(sess, "/api/files/tree", {}).json()["error"]
+        ok("switched off for your account" in blocked, blocked)
+        eq(post_s(sess, "/api/production-labels", {}).status_code, 200,
+           "the allowed tab still works")
+        eq(post_s(sess, "/api/team/me", {}).status_code, 200,
+           "and a 403 never killed the session")
+        me = post_s(sess, "/api/team/me", {}).json()["me"]
+        eq(me["tabs"], ["labels"], "the account knows its own doors")
+        eq(login("owen", starter).json()["me"]["tabs"], ["labels"],
+           "and the login answer carries the doors, so the page hides them at once")
+        eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": None}).status_code, 200)
+        eq(post_s(sess, "/api/files/tree", {}).status_code, 200, "null restores everything")
+    with_accounts(go)
+
+@test
+def t_tabs_cannot_touch_the_master_and_follow_rank():
+    def go():
+        ensure_auth()
+        master = APP_AUTH["master"]
+        eq(post("/api/team/user", {"op": "tabs", "id": master, "tabs": ["labels"]}).status_code,
+           403, "the master cannot be restricted")
+        eq(post("/api/files/tree", {}).status_code, 200, "and opens everything regardless")
+        ian, ian_pw = make_user("Ian", "ian", role="admin")
+        owen, owen_pw = make_user("Owen", "owen")
+        ian_sess = login("ian", ian_pw).json()["session"]
+        post_s(ian_sess, "/api/auth/password", {"current": ian_pw, "new": "ians-own-pw12"})
+        ian_sess = login("ian", "ians-own-pw12").json()["session"]
+        eq(post_s(ian_sess, "/api/team/user",
+                  {"op": "tabs", "id": owen, "tabs": ["files"]}).status_code, 200,
+           "an admin sets a member's tabs")
+        eq(post_s(ian_sess, "/api/team/user",
+                  {"op": "tabs", "id": ian, "tabs": ["files"]}).status_code, 403,
+           "but cannot set an admin's, including their own")
+    with_accounts(go)
+
 # =========================== run ===========================================
 
 passed = failed = 0

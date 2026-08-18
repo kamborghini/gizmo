@@ -7072,6 +7072,9 @@ def _pre_checks(request: Request, ai: bool = False, max_body: Optional[int] = No
     cl = request.headers.get("content-length", "")
     if cl.isdigit() and int(cl) > (max_body or MAX_BODY_BYTES):
         return _json({"error": "Request too large."}, 413)
+    denied = _tab_denied(request)
+    if denied is not None:
+        return denied
     return None
 
 
@@ -8150,6 +8153,57 @@ def _master_reset_check(d: dict) -> None:
             return
 
 
+# Tab access: which parts of the app an account may open. None means all.
+# The master is never restricted. Enforcement is central (in _pre_checks) via
+# this path map, so hiding a tab in the page is never the only lock.
+TAB_KEYS = ("overview", "seo", "keywords", "products", "customers", "liability",
+            "crm", "files", "labels", "memory", "skills", "chat")
+_TAB_ROUTES = (
+    ("/api/overview", "overview"), ("/api/seo", "seo"), ("/api/keyword", "keywords"),
+    ("/api/products", "products"), ("/api/product", "products"),
+    ("/api/customers", "customers"), ("/api/customer-history", "customers"),
+    ("/api/customer-tags", "customers"), ("/api/reorder-radar", "customers"),
+    ("/api/liability", "liability"),
+    ("/api/crm/", "crm"), ("/api/files/", "files"),
+    ("/api/production-labels", "labels"), ("/api/production-state", "labels"),
+    ("/api/dispatch/", "labels"), ("/api/custom/", "labels"),
+    ("/api/stock-usage", "labels"), ("/api/margin", "labels"), ("/api/gobo-sizes", "labels"),
+    ("/api/memory", "memory"), ("/api/learn", "memory"), ("/api/impact", "memory"),
+    ("/api/skills", "skills"), ("/api/chat", "chat"),
+)
+
+
+def _user_tabs(uid: Optional[str]):
+    """None = everything. The master is unrestrictable by construction."""
+    u = _team_user(uid)
+    if not u or u.get("role") == "master":
+        return None
+    t = u.get("tabs")
+    return None if not isinstance(t, list) else [k for k in t if k in TAB_KEYS]
+
+
+def _tab_denied(request: Request) -> Optional[JSONResponse]:
+    """The central lock. Only ever a 403: a 401 here would read as a dead
+    session and bounce the person to the login screen in a loop."""
+    path = request.url.path
+    # Longest prefix wins: /api/production-labels must map to labels, not
+    # fall to the shorter /api/product entry.
+    tab, best = None, 0
+    for p, t in _TAB_ROUTES:
+        if path.startswith(p) and len(p) > best:
+            tab, best = t, len(p)
+    if not tab:
+        return None
+    uid = _session_uid(request.headers.get("x-app-session"))
+    if not uid:
+        return None            # not our concern here; _authorize answers 401
+    tabs = _user_tabs(uid)
+    if tabs is None or tab in tabs:
+        return None
+    return _json({"error": "That part of the app is switched off for your account. "
+                           "Ask an admin if you need it."}, 403)
+
+
 def _team_setup_needed() -> bool:
     return not any(not u.get("deleted") for u in _load_users()["users"].values())
 
@@ -8159,7 +8213,9 @@ def _user_public(uid: str, u: dict) -> dict:
     return {"id": uid, "name": u.get("name") or "", "username": u.get("username") or "",
             "role": u.get("role") or "member", "active": u.get("active", True),
             "deleted": bool(u.get("deleted")), "must_change": bool(u.get("must_change")),
-            "created_at": u.get("created_at") or "", "last_login_at": u.get("last_login_at") or ""}
+            "created_at": u.get("created_at") or "", "last_login_at": u.get("last_login_at") or "",
+            "tabs": (None if u.get("role") == "master" or not isinstance(u.get("tabs"), list)
+                     else u.get("tabs"))}
 
 
 def _track(sub: Optional[str], area: str, action: str, detail: str = "") -> None:
@@ -9911,7 +9967,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"setup": False, "logged_in": False})
         return _json({"setup": False, "logged_in": True,
                       "me": {"id": uid, "name": u.get("name"), "role": u.get("role"),
-                             "must_change": bool(u.get("must_change"))}})
+                             "must_change": bool(u.get("must_change")),
+                             "tabs": _user_tabs(uid)}})
 
     @mcp.custom_route("/api/auth/setup", methods=["POST"])
     async def auth_setup_route(request: Request):
@@ -10001,7 +10058,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _track(uid, "auth", "logged in")
         return _json({"ok": True, "session": token,
                       "me": {"id": uid, "name": u.get("name"), "role": u.get("role"),
-                             "must_change": bool(u.get("must_change"))}})
+                             "must_change": bool(u.get("must_change")),
+                             "tabs": _user_tabs(uid)}})
 
     @mcp.custom_route("/api/auth/logout", methods=["POST"])
     async def auth_logout_route(request: Request):
@@ -10070,7 +10128,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Unauthorized"}, 401)
         u = _team_user(who) or {}
         return _json({"me": {"sub": who, "id": who, "name": u.get("name") or "",
-                             "role": u.get("role") or "member", "grace": False}})
+                             "role": u.get("role") or "member", "grace": False,
+                             "tabs": _user_tabs(who)}})
 
     @mcp.custom_route("/api/team/board", methods=["POST"])
     async def team_board_route(request: Request):
@@ -10191,6 +10250,21 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     _drop_sessions(uid=target)   # off means off, this second
                 _track(who, "team", "changed access",
                        f"{label}'s access was switched {'on' if on else 'off'}")
+            elif op == "tabs":
+                if not may_manage():
+                    return _json({"error": "You cannot manage that account."}, 403)
+                raw = body.get("tabs")
+                if raw is None:
+                    u.pop("tabs", None)
+                    detail = f"{label} can open everything"
+                else:
+                    if not isinstance(raw, list):
+                        return _json({"error": "Tabs must be a list, or null for everything."}, 400)
+                    tabs = [k for k in raw if k in TAB_KEYS]
+                    u["tabs"] = tabs
+                    detail = f"{label} can open: " + (", ".join(tabs) if tabs else "nothing")
+                _write_users(d)
+                _track(who, "team", "changed tab access", detail)
             elif op == "reset_password":
                 if not may_manage():
                     return _json({"error": "You cannot manage that account."}, 403)
