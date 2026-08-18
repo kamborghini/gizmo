@@ -257,6 +257,38 @@ def t_a_custom_shipment_has_its_own_button_and_reads_a_pasted_address():
     ok(_re.search(r"uiConfirm\('Book this courier for ", HTML), "booking asks first")
 
 
+@test
+def t_files_tab_wears_the_house_container():
+    """Every view sits in scroll > ov-wrap; the CRM shipped without it twice
+    and the merchant sent the screenshot both times."""
+    ok(re.search(r'id="view-files">\s*<div class="scroll"><div class="ov-wrap" id="files-content">', HTML),
+       "the Files view uses the house container")
+    ok('data-view="files"' in HTML, "the nav knows the Files tab")
+    ok("showFilesView" in SCRIPT and "renderFilesBrowser" in SCRIPT, "the view has its module")
+
+
+@test
+def t_files_upload_goes_straight_to_the_bucket():
+    """The PUT to storage must be the raw signed URL: sending the app's session
+    token to Cloudflare would leak it to a third party, and routing bytes
+    through the app would defeat the whole design."""
+    put = re.search(r"x\.open\('PUT', r\.url\);(.*?)x\.send\(file\)", SCRIPT, re.S)
+    ok(put, "the upload is an XHR PUT to the signed URL")
+    ok("Authorization" not in put.group(1), "and no session token travels with it")
+    ok("setRequestHeader('Content-Type', ctype)" in put.group(1),
+       "the content type matches what was signed")
+
+
+@test
+def t_files_download_never_opens_a_popup():
+    """window.open after an await is popup-blocked inside the admin iframe;
+    the signed URL is an attachment, so same-frame navigation downloads it."""
+    seg = re.search(r"async function download\(fid\)(.*?)\n            \}", SCRIPT, re.S)
+    ok(seg, "the download helper exists")
+    ok("window.open" not in seg.group(1), "no popup")
+    ok("a.click()" in seg.group(1), "an anchor carries the download")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

@@ -26,6 +26,7 @@ import html
 import json
 import time
 import hmac
+import threading
 import base64
 import hashlib
 import socket
@@ -7342,6 +7343,14 @@ async def _watchdog_tick(registry: dict) -> bool:
                 await _zeta_send_catalog()
             except Exception:
                 logger.warning("stock bridge: catalogue push failed; next tick retries")
+        # Files trash past its 30-day window, and uploads that never finished.
+        # Not gated on Shopify: the bucket is a different service entirely.
+        # Under the store lock: the purge is a read-modify-write like any route.
+        try:
+            async with _files_lock:
+                await asyncio.to_thread(_files_tick)
+        except Exception:
+            logger.exception("files purge failed")
         _save_watch(state)
         return up or fails < 3
     except Exception:
@@ -7639,6 +7648,264 @@ def _crm_deal_fields(body: dict, d: dict, deal: dict) -> None:
             if field in ("value", "label", "expected_close", "person_id", "org_id"):
                 _crm_log(deal, field, deal.get(field), new)
             deal[field] = new
+
+
+# ---------------------------------------------------------------------------
+# Files: the office file server, without the office.
+#
+# The split that makes it work: NAMES live here, BYTES live in Cloudflare R2.
+# The folder tree, filenames, and trash are a JSON store on the volume (backed
+# up with everything else, instant to list); the file contents sit in an R2
+# bucket, which is durable object storage costing pennies for 50GB. The app
+# never carries the bytes: it signs short-lived URLs and the browser talks to
+# Cloudflare directly, so dragging a 2GB artwork file in from home moves at
+# the home connection's speed, not through Railway.
+#
+# A record's R2 key is minted once and never renamed: renames and moves are
+# metadata edits. Deleting is a 30-day trash (or an explicit "delete now" from
+# it); either way the key first moves to a doomed list that is WRITTEN TO DISK
+# before any byte dies, and the hourly reaper is the only code that touches
+# delete_object, retrying until the bucket confirms.
+# ---------------------------------------------------------------------------
+R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "").strip()
+R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "").strip()
+R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "").strip()
+R2_BUCKET = os.environ.get("R2_BUCKET", "gizmo-files").strip()
+FILES_PATH = os.environ.get("FILES_PATH", "/data/files.json")
+FILES_QUOTA_GB = float(os.environ.get("FILES_QUOTA_GB", "50"))
+FILES_MAX_UPLOAD = 4 * 1024 * 1024 * 1024      # a single presigned PUT tops out near 5GB
+FILES_TRASH_DAYS = 30
+_files_s3_client = None
+_files_s3_birth = threading.Lock()   # boto3's default session is not thread-safe to build on
+_files_ready = {"bucket": False, "cors": False, "error": "", "at": 0.0}
+# One writer at a time: every route that loads, mutates and writes the store
+# holds this across the whole exchange. The browser deliberately runs three
+# uploads at once, so without it two upload-url calls interleave around their
+# await and the later write silently drops the earlier record.
+_files_lock = asyncio.Lock()
+
+
+def _files_configured() -> bool:
+    return bool(R2_ACCOUNT_ID and R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY)
+
+
+def _files_s3():
+    """The S3-protocol client for R2, built once. A seam the tests replace."""
+    global _files_s3_client
+    with _files_s3_birth:
+        if _files_s3_client is None:
+            import boto3
+            from botocore.config import Config as _BotoConfig
+            _files_s3_client = boto3.client(
+                "s3",
+                endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+                aws_access_key_id=R2_ACCESS_KEY_ID,
+                aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+                region_name="auto",
+                # Short timeouts: these calls run while a route (and the store
+                # lock) waits, so a hung R2 must fail in seconds, not minutes.
+                config=_BotoConfig(signature_version="s3v4", connect_timeout=5,
+                                   read_timeout=10, retries={"max_attempts": 2}))
+    return _files_s3_client
+
+
+def _files_ensure_bucket(page_origin: str) -> None:
+    """Create the bucket and set its CORS on first use, so the only setup the
+    merchant does is pasting three credentials. CORS must allow the app's own
+    origin or the browser's direct PUT to Cloudflare is refused before it
+    starts. Never raises; failures surface in the status block."""
+    if _files_ready["bucket"] and _files_ready["cors"]:
+        return
+    # A failing bucket is not probed on every presign: one attempt a minute,
+    # so a dead R2 costs each upload one fast refusal, not a retry storm.
+    if _files_ready["error"] and time.time() - float(_files_ready.get("at") or 0) < 60:
+        return
+    _files_ready["at"] = time.time()
+    s3 = _files_s3()
+    try:
+        if not _files_ready["bucket"]:
+            try:
+                s3.head_bucket(Bucket=R2_BUCKET)
+            except Exception:
+                s3.create_bucket(Bucket=R2_BUCKET)
+            _files_ready["bucket"] = True
+        if not _files_ready["cors"] and page_origin:
+            s3.put_bucket_cors(Bucket=R2_BUCKET, CORSConfiguration={
+                "CORSRules": [{"AllowedOrigins": [page_origin],
+                               "AllowedMethods": ["PUT", "GET"],
+                               "AllowedHeaders": ["content-type"],
+                               "MaxAgeSeconds": 3600}]})
+            _files_ready["cors"] = True
+        _files_ready["error"] = ""
+    except Exception as e:
+        _files_ready["error"] = f"{type(e).__name__}: {e}"[:200]
+        logger.warning("files: bucket setup failed: %s", _files_ready["error"])
+
+
+def _files_default() -> dict:
+    return {"seq": 0, "folders": {}, "files": {}, "doomed": []}
+
+
+def _load_files() -> dict:
+    d = _load_json_store(FILES_PATH, "files_store", None)
+    if not isinstance(d, dict) or "files" not in d:
+        d = _files_default()
+    for k, v in _files_default().items():
+        d.setdefault(k, v)
+    try:
+        peak = max((int(str(k)[1:]) for coll in ("folders", "files")
+                    for k in d.get(coll, {}) if str(k)[1:].isdigit()), default=0)
+        d["seq"] = max(int(d.get("seq") or 0), peak)
+    except (TypeError, ValueError):
+        pass
+    return d
+
+
+def _write_files(d: dict) -> None:
+    if not _store_writable(FILES_PATH):
+        raise RuntimeError("files store is not writable")
+    os.makedirs(os.path.dirname(FILES_PATH) or ".", exist_ok=True)
+    tmp = FILES_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"files_store": d}, fh)
+    os.replace(tmp, FILES_PATH)
+
+
+def _files_id(d: dict, prefix: str) -> str:
+    d["seq"] = int(d.get("seq") or 0) + 1
+    return f"{prefix}{d['seq']}"
+
+
+_FILENAME_BAD = re.compile(r"[\\/\x00-\x1f]")
+
+
+def _files_clean_name(name: str) -> str:
+    """A display name that cannot climb paths or break the UI. The R2 key never
+    contains it, so this is about honesty on screen, not storage safety."""
+    n = _FILENAME_BAD.sub("_", str(name or "")).strip().strip(".")
+    return n[:180] or "untitled"
+
+
+def _files_usage(d: dict) -> int:
+    """Space spoken for: active files, the trash (still in the bucket), and
+    uploads in flight, so three simultaneous uploads cannot each squeeze
+    through the same last gigabyte."""
+    return sum(int(f.get("size") or 0) for f in d["files"].values()
+               if f.get("status") in ("active", "pending") or f.get("trashed_at"))
+
+
+def _files_folder_ok(d: dict, folder_id: str) -> bool:
+    return folder_id == "" or folder_id in d["folders"]
+
+
+def _files_purge(d: dict) -> None:
+    """Metadata only: trash past its window and uploads that never completed
+    move their keys to the doomed list. No byte dies here; the reaper deletes
+    from the bucket only after this state has safely reached disk, so a failed
+    write can never leave a trash entry whose bytes are already gone."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=FILES_TRASH_DAYS)).isoformat()
+    stale_pending = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    doomed = [k for k, f in d["files"].items()
+              if (f.get("trashed_at") and f["trashed_at"] < cutoff)
+              or (f.get("status") == "pending" and str(f.get("created_at") or "") < stale_pending)]
+    for k in doomed:
+        f = d["files"].pop(k)
+        if f.get("r2_key"):
+            d.setdefault("doomed", []).append(f["r2_key"])
+
+
+def _files_reap(d: dict, s3) -> bool:
+    """Delete doomed bytes from the bucket; keys stay on the list until the
+    bucket confirms, so a failed delete is retried next hour instead of
+    orphaning a billed object forever. Returns True when the list changed."""
+    done = []
+    for key in list(d.get("doomed") or []):
+        try:
+            s3.delete_object(Bucket=R2_BUCKET, Key=key)
+            done.append(key)
+        except Exception:
+            logger.warning("files: could not delete %s from the bucket; next tick retries", key)
+    if done:
+        d["doomed"] = [k for k in d["doomed"] if k not in done]
+        return True
+    return False
+
+
+def _files_shape(d: dict) -> dict:
+    used = _files_usage(d)
+    return {"folders": d["folders"],
+            "files": {k: v for k, v in d["files"].items() if v.get("status") == "active"},
+            "trash": [{**v, "id": k} for k, v in d["files"].items() if v.get("trashed_at")],
+            "used": used, "quota": int(FILES_QUOTA_GB * 1024 * 1024 * 1024),
+            "configured": _files_configured(), "setup_error": _files_ready["error"]}
+
+
+def _files_origin() -> str:
+    url = (os.environ.get("APP_URL") or "").strip().rstrip("/")
+    if not url:
+        dom = (os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "").strip()
+        url = f"https://{dom}" if dom else ""
+    return url
+
+
+def _files_disposition(name: str) -> str:
+    """Downloads keep their real filename even when it has accents or symbols:
+    a plain-ASCII fallback plus the RFC 5987 encoded form."""
+    from urllib.parse import quote
+    ascii_name = re.sub(r"[^ -~]", "_", name).replace('"', "'")
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
+
+
+def _files_sign_put(key: str, ctype: str) -> str:
+    """Blocking (network on first use); call off the event loop."""
+    _files_ensure_bucket(_files_origin())
+    if not _files_ready["bucket"]:
+        raise RuntimeError(_files_ready["error"] or "bucket unavailable")
+    # 15 minutes: the browser PUTs immediately, and a PUT that starts before
+    # the deadline may finish after it, so this does not cut off big files.
+    # What it does shrink is how long a leaked URL could replay an overwrite.
+    return _files_s3().generate_presigned_url(
+        "put_object",
+        Params={"Bucket": R2_BUCKET, "Key": key, "ContentType": ctype},
+        ExpiresIn=900)
+
+
+def _files_sign_get(key: str, name: str) -> str:
+    return _files_s3().generate_presigned_url(
+        "get_object",
+        Params={"Bucket": R2_BUCKET, "Key": key,
+                "ResponseContentDisposition": _files_disposition(name)},
+        ExpiresIn=300)
+
+
+def _files_head(key: str):
+    """True byte count of what actually landed in the bucket. None means the
+    bucket answered 'no such object'; anything else raises, because a storage
+    wobble must never be reported as 'your upload vanished'."""
+    try:
+        return int(_files_s3().head_object(Bucket=R2_BUCKET, Key=key)["ContentLength"])
+    except Exception as e:
+        resp = getattr(e, "response", None)
+        code = str(((resp or {}).get("Error") or {}).get("Code") or "") if isinstance(resp, dict) else ""
+        if code in ("404", "NoSuchKey", "NotFound") or "404" in str(e):
+            return None
+        raise RuntimeError(f"storage head failed: {type(e).__name__}") from e
+
+
+def _files_tick() -> None:
+    """Hourly housekeeping: move expired trash and abandoned uploads to the
+    doomed list, persist that, and only then reap doomed bytes from the
+    bucket. Blocking; the scheduler runs it in a thread under the store lock."""
+    d = _load_files()
+    before = (len(d["files"]), len(d.get("doomed") or []))
+    _files_purge(d)
+    if (len(d["files"]), len(d["doomed"])) != before:
+        if not _store_writable(FILES_PATH):
+            return                          # nothing deleted unless the pop is durable
+        _write_files(d)
+    if _files_configured() and d.get("doomed"):
+        if _files_reap(d, _files_s3()) and _store_writable(FILES_PATH):
+            _write_files(d)
 
 
 # ---------------------------------------------------------------------------
@@ -8975,6 +9242,256 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                    "unwritable; check Settings, Connections."}, 500)
         except Exception:
             logger.exception("CRM stages op failed")
+            return _json({"error": "That change could not be made. Check the server logs."}, 500)
+
+    # ---- Files routes -----------------------------------------------------
+    # The office file server, minus the office. These routes only ever handle
+    # names and signed URLs; the bytes go browser-to-bucket directly.
+    async def _files_guard(request: Request):
+        pre = _pre_checks(request)
+        if pre:
+            return pre, None, ""
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401), None, ""
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413), None, ""
+        return None, body, str(who or "")
+
+    def _files_ok(d: dict, extra: Optional[dict] = None) -> JSONResponse:
+        _write_files(d)
+        out = {"ok": True, "store": _files_shape(d)}
+        if extra:
+            out.update(extra)
+        return _json(out)
+
+    _FILES_STORE_FAIL = ("The change could not be saved. The data volume may be "
+                         "unwritable; check Settings, Connections.")
+
+    @mcp.custom_route("/api/files/tree", methods=["POST"])
+    async def files_tree_route(request: Request):
+        err, _body, _who = await _files_guard(request)
+        if err:
+            return err
+        try:
+            return _json({"store": _files_shape(_load_files())})
+        except Exception:
+            logger.exception("files tree failed")
+            return _json({"error": "Couldn't load the files."}, 500)
+
+    @mcp.custom_route("/api/files/folder", methods=["POST"])
+    async def files_folder_route(request: Request):
+        err, body, _who = await _files_guard(request)
+        if err:
+            return err
+        op = str(body.get("op") or "")
+        try:
+            async with _files_lock:
+                d = _load_files()
+                if op == "add":
+                    name = _files_clean_name(body.get("name"))
+                    parent = str(body.get("parent_id") or "")
+                    if not _files_folder_ok(d, parent):
+                        return _json({"error": "That folder no longer exists."}, 400)
+                    if any(f.get("name", "").lower() == name.lower()
+                           and str(f.get("parent_id") or "") == parent
+                           for f in d["folders"].values()):
+                        return _json({"error": "A folder with that name is already here."}, 400)
+                    fid = _files_id(d, "d")
+                    d["folders"][fid] = {"name": name, "parent_id": parent,
+                                         "created_at": datetime.now(timezone.utc).isoformat()}
+                    return _files_ok(d, {"id": fid})
+                if op == "rename":
+                    fid = str(body.get("id") or "")
+                    if fid not in d["folders"]:
+                        return _json({"error": "That folder no longer exists."}, 400)
+                    name = _files_clean_name(body.get("name"))
+                    parent = str(d["folders"][fid].get("parent_id") or "")
+                    if any(k != fid and f.get("name", "").lower() == name.lower()
+                           and str(f.get("parent_id") or "") == parent
+                           for k, f in d["folders"].items()):
+                        return _json({"error": "A folder with that name is already here."}, 400)
+                    d["folders"][fid]["name"] = name
+                    return _files_ok(d)
+                if op == "delete":
+                    fid = str(body.get("id") or "")
+                    if fid not in d["folders"]:
+                        return _json({"error": "That folder no longer exists."}, 400)
+                    if any(str(f.get("parent_id") or "") == fid for f in d["folders"].values()) \
+                       or any(str(v.get("folder_id") or "") == fid and v.get("status") == "active"
+                              for v in d["files"].values()):
+                        return _json({"error": "The folder isn't empty. Move or delete "
+                                               "what's inside first."}, 400)
+                    d["folders"].pop(fid)
+                    return _files_ok(d)
+                return _json({"error": "Unknown folder action."}, 400)
+        except RuntimeError:
+            return _json({"error": _FILES_STORE_FAIL}, 500)
+        except Exception:
+            logger.exception("files folder op failed")
+            return _json({"error": "That change could not be made. Check the server logs."}, 500)
+
+    @mcp.custom_route("/api/files/upload-url", methods=["POST"])
+    async def files_upload_route(request: Request):
+        err, body, who = await _files_guard(request)
+        if err:
+            return err
+        if not _files_configured():
+            return _json({"error": "File storage isn't connected yet. Add the Cloudflare R2 "
+                                   "keys in Railway to switch it on."}, 400)
+        name = _files_clean_name(body.get("name"))
+        try:
+            size = int(body.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        if size <= 0:
+            return _json({"error": "The file looks empty."}, 400)
+        if size > FILES_MAX_UPLOAD:
+            return _json({"error": "That file is over the 4GB single-file limit."}, 400)
+        folder = str(body.get("folder_id") or "")
+        try:
+            async with _files_lock:
+                d = _load_files()
+                if not _files_folder_ok(d, folder):
+                    return _json({"error": "That folder no longer exists."}, 400)
+                quota = int(FILES_QUOTA_GB * 1024 * 1024 * 1024)
+                if _files_usage(d) + size > quota:
+                    return _json({"error": "That upload would go over the storage space. "
+                                           "Empty the trash or remove old files first."}, 400)
+                fid = _files_id(d, "f")
+                key = f"{fid}/{name}"
+                ctype = str(body.get("type") or "application/octet-stream").strip()[:100] \
+                    or "application/octet-stream"
+                try:
+                    url = await asyncio.to_thread(_files_sign_put, key, ctype)
+                except RuntimeError as e:
+                    logger.warning("files: presign failed: %s", e)
+                    return _json({"error": "Storage isn't reachable right now. Check the R2 "
+                                           "keys in Railway, then try again."}, 502)
+                d["files"][fid] = {"name": name, "folder_id": folder, "size": size,
+                                   "type": ctype, "r2_key": key, "status": "pending", "by": who,
+                                   "created_at": datetime.now(timezone.utc).isoformat()}
+                return _files_ok(d, {"id": fid, "url": url})
+        except RuntimeError:
+            return _json({"error": _FILES_STORE_FAIL}, 500)
+        except Exception:
+            logger.exception("files upload-url failed")
+            return _json({"error": "The upload could not be prepared. Check the server logs."}, 500)
+
+    @mcp.custom_route("/api/files/complete", methods=["POST"])
+    async def files_complete_route(request: Request):
+        err, body, _who = await _files_guard(request)
+        if err:
+            return err
+        fid = str(body.get("id") or "")
+        try:
+            async with _files_lock:
+                d = _load_files()
+                f = d["files"].get(fid)
+                if not f or f.get("status") != "pending":
+                    return _json({"error": "That upload is no longer expected."}, 400)
+                try:
+                    true_size = await asyncio.to_thread(_files_head, f["r2_key"])
+                except RuntimeError:
+                    # A storage wobble is not a lost upload: keep the record
+                    # pending so a retry can finish the same upload.
+                    return _json({"error": "Storage isn't answering right now. Wait a "
+                                           "moment and try again; the upload is not lost."}, 502)
+                if true_size is None:
+                    return _json({"error": "The file never arrived in storage. Try the "
+                                           "upload again."}, 400)
+                # The browser's claimed size opened the door; what actually
+                # landed is what counts against the space.
+                f["size"] = true_size
+                if true_size > FILES_MAX_UPLOAD \
+                        or _files_usage(d) > int(FILES_QUOTA_GB * 1024 * 1024 * 1024):
+                    _write_files(d)   # keep the honest size; the sweep clears it
+                    return _json({"error": "The file is bigger than the storage space "
+                                           "allows, so it has not been kept."}, 400)
+                f["status"] = "active"
+                f["uploaded_at"] = datetime.now(timezone.utc).isoformat()
+                return _files_ok(d)
+        except RuntimeError:
+            return _json({"error": _FILES_STORE_FAIL}, 500)
+        except Exception:
+            logger.exception("files complete failed")
+            return _json({"error": "The upload could not be confirmed. Check the server logs."}, 500)
+
+    @mcp.custom_route("/api/files/download-url", methods=["POST"])
+    async def files_download_route(request: Request):
+        err, body, _who = await _files_guard(request)
+        if err:
+            return err
+        fid = str(body.get("id") or "")
+        try:
+            d = _load_files()
+            f = d["files"].get(fid)
+            if not f or f.get("status") == "pending":
+                return _json({"error": "That file no longer exists."}, 404)
+            url = await asyncio.to_thread(_files_sign_get, f["r2_key"], f.get("name") or "file")
+            return _json({"ok": True, "url": url, "name": f.get("name")})
+        except Exception:
+            logger.exception("files download-url failed")
+            return _json({"error": "Storage isn't reachable right now. Try again in a "
+                                   "moment."}, 502)
+
+    @mcp.custom_route("/api/files/file", methods=["POST"])
+    async def files_file_route(request: Request):
+        err, body, _who = await _files_guard(request)
+        if err:
+            return err
+        op = str(body.get("op") or "")
+        fid = str(body.get("id") or "")
+        try:
+            async with _files_lock:
+                d = _load_files()
+                f = d["files"].get(fid)
+                if not f or f.get("status") == "pending":
+                    return _json({"error": "That file no longer exists."}, 400)
+                if op == "rename":
+                    if f.get("status") != "active":
+                        return _json({"error": "Restore the file from the trash first."}, 400)
+                    f["name"] = _files_clean_name(body.get("name"))
+                    return _files_ok(d)
+                if op == "move":
+                    if f.get("status") != "active":
+                        return _json({"error": "Restore the file from the trash first."}, 400)
+                    folder = str(body.get("folder_id") or "")
+                    if not _files_folder_ok(d, folder):
+                        return _json({"error": "That folder no longer exists."}, 400)
+                    f["folder_id"] = folder
+                    return _files_ok(d)
+                if op == "trash":
+                    if f.get("status") != "active":
+                        return _json({"error": "The file is already in the trash."}, 400)
+                    f["status"] = "trashed"
+                    f["trashed_at"] = datetime.now(timezone.utc).isoformat()
+                    return _files_ok(d)
+                if op == "restore":
+                    if not f.get("trashed_at"):
+                        return _json({"error": "The file isn't in the trash."}, 400)
+                    f.pop("trashed_at", None)
+                    f["status"] = "active"
+                    if not _files_folder_ok(d, str(f.get("folder_id") or "")):
+                        f["folder_id"] = ""   # its folder went away; restore to the top level
+                    return _files_ok(d)
+                if op == "destroy":
+                    # "Delete now" from the trash: the record goes at once (so
+                    # the space frees), the key joins the doomed list, and the
+                    # hourly reaper removes the bytes from the bucket.
+                    if not f.get("trashed_at"):
+                        return _json({"error": "Only files already in the trash can be "
+                                               "deleted for good."}, 400)
+                    d["files"].pop(fid)
+                    if f.get("r2_key"):
+                        d.setdefault("doomed", []).append(f["r2_key"])
+                    return _files_ok(d)
+                return _json({"error": "Unknown file action."}, 400)
+        except RuntimeError:
+            return _json({"error": _FILES_STORE_FAIL}, 500)
+        except Exception:
+            logger.exception("files file op failed")
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/stock-usage", methods=["POST"])

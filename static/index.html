@@ -1034,6 +1034,53 @@
         .modal-body { padding: 20px; overflow-y: auto; }
         #toast-host { position: fixed; top: 14px; right: 14px; z-index: 100; display: flex;
             flex-direction: column; gap: 8px; max-width: min(430px, 92vw); }
+        /* Files */
+        .files-meter { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--ink-2); margin: 4px 0 14px; }
+        .files-meter .bar { flex: 0 1 220px; height: 6px; border-radius: 6px; background: var(--surface-3); overflow: hidden; }
+        .files-meter .bar i { display: block; height: 100%; background: var(--accent); border-radius: 6px; }
+        .files-meter.warn .bar i { background: var(--danger); }
+        .files-crumbs { display: flex; align-items: center; gap: 2px; margin: 12px 0 8px; font-size: 13px; flex-wrap: wrap; color: var(--ink-3); }
+        .files-crumb { border: 0; background: transparent; font: inherit; font-size: 13px; color: var(--ink-2); padding: 4px 7px; border-radius: 6px; cursor: pointer; }
+        .files-crumb:hover { background: var(--surface-2); color: var(--ink); }
+        .files-crumb.here { color: var(--ink); font-weight: 600; cursor: default; background: transparent; }
+        .files-crumb.dropok { background: var(--accent-soft); color: var(--accent-ink); }
+        .files-crumbs svg { width: 13px; height: 13px; }
+        .files-list { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden; }
+        .files-list.drag { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+        .files-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-top: 0.5px solid var(--line); font-size: 13px; }
+        .files-row:first-child { border-top: 0; }
+        .files-row:hover { background: var(--bg-2); }
+        .files-row.dropok { background: var(--accent-soft); }
+        .files-row > svg, .files-row > span:first-child svg { width: 16px; height: 16px; color: var(--ink-3); flex: none; display: block; }
+        .files-row.is-folder > span:first-child svg { color: var(--accent-ink); }
+        .files-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            border: 0; background: transparent; font: inherit; font-size: 13px; font-weight: 500; color: var(--ink); text-align: left; cursor: pointer; padding: 0; }
+        .files-name:hover { color: var(--accent-ink); text-decoration: underline; }
+        .files-name.still { cursor: default; }
+        .files-name.still:hover { color: var(--ink); text-decoration: none; }
+        .files-name .fpath { color: var(--ink-3); font-weight: 400; }
+        .files-meta { color: var(--ink-3); font-size: 12px; white-space: nowrap; flex: none; }
+        .files-acts { display: flex; gap: 2px; flex: none; opacity: 0; transition: opacity .12s; }
+        .files-row:hover .files-acts, .files-row:focus-within .files-acts { opacity: 1; }
+        @media (hover: none) { .files-acts { opacity: 1; } }
+        .files-empty { padding: 40px 16px; text-align: center; color: var(--ink-3); font-size: 13px; }
+        .files-hint { margin-top: 8px; font-size: 12px; color: var(--ink-3); }
+        .files-up { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); margin-bottom: 8px; font-size: 13px; }
+        .files-up .upname { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .files-up .bar { flex: 1 1 60px; height: 5px; border-radius: 6px; background: var(--surface-3); overflow: hidden; }
+        .files-up .bar i { display: block; height: 100%; background: var(--accent); border-radius: 6px; }
+        .files-up.failed { border-color: var(--danger); }
+        .files-up .upstate { color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+        .files-up.failed .upstate { color: var(--danger); white-space: normal; }
+        .files-rename { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 13px; padding: 3px 8px; border: 1px solid var(--accent); border-radius: 6px; background: var(--surface); color: var(--ink); }
+        /* On a phone the name owns the first line; size and date step down a line
+           rather than crushing the name to a letter. */
+        @media (max-width: 640px) {
+            .files-row { flex-wrap: wrap; }
+            .files-name { flex: 1 1 0; }
+            .files-acts { order: 2; }
+            .files-meta { order: 3; flex: 1 1 100%; margin: 0 0 0 26px; }
+        }
         .toast { display: flex; gap: 8px; align-items: flex-start; background: var(--surface-2);
             border: 1px solid var(--border-2); border-left: 3px solid var(--accent); border-radius: 8px;
             padding: 12px 12px; box-shadow: 0 12px 34px rgba(0,0,0,.42); font-size: 13px; color: var(--ink);
@@ -1079,6 +1126,7 @@
                 <button class="nav-item" data-view="customers" id="nav-customers"></button>
                 <button class="nav-item" data-view="liability" id="nav-liability"></button>
                 <button class="nav-item" data-view="crm" id="nav-crm"></button>
+                <button class="nav-item" data-view="files" id="nav-files"></button>
                 <button class="nav-item" data-view="labels" id="nav-labels"></button>
                 <button class="nav-item" data-view="memory" id="nav-memory"></button>
                 <button class="nav-item" data-view="skills" id="nav-skills"></button>
@@ -1137,6 +1185,11 @@
             <!-- Production labels -->
             <section class="view" id="view-crm">
                 <div class="scroll"><div class="ov-wrap crm-wrap" id="crm-content"></div></div>
+            </section>
+
+            <!-- Files -->
+            <section class="view" id="view-files">
+                <div class="scroll"><div class="ov-wrap" id="files-content"></div></div>
             </section>
             <section class="view" id="view-labels">
                 <div class="scroll"><div class="ov-wrap" id="labels-content"></div></div>
@@ -1289,6 +1342,10 @@
             download: SV('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>'),
             eye: SV('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>'),
             printer: SV('<polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect>'),
+            folder: SV('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>'),
+            folderPlus: SV('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line>'),
+            upload: SV('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>'),
+            fileDoc: SV('<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline>'),
         };
         const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
         const loader = () => { const b = el('div', 'three-body'); b.append(el('div', 'three-body__dot'), el('div', 'three-body__dot'), el('div', 'three-body__dot')); return b; };
@@ -1320,6 +1377,7 @@
         $('nav-customers').append(ico(I.users), document.createTextNode('Customers'));
         $('nav-liability').append(ico(I.spark), document.createTextNode('Liability'));
         $('nav-crm').append(ico(I.users), document.createTextNode('CRM'));
+        $('nav-files').append(ico(I.folder), document.createTextNode('Files'));
         $('nav-labels').append(ico(I.printer), document.createTextNode('Production Manager'));
         $('nav-memory').append(ico(I.bookmark), document.createTextNode('Memory'));
         $('nav-skills').append(ico(I.book), document.createTextNode('Skills'));
@@ -6432,6 +6490,13 @@
                 ['Lose your work to a misclick', 'No popup closes on a click outside it or on Escape. The X is the only way out.'],
                 ['Let the assistant change anything', 'The Chat and every AI tab can only read your store. Tagging, fulfilling and booking are wired separately and cannot be reached by the assistant, whatever it is asked.'],
             ]},
+            { h: 'Files', body: [
+                ['What it is', 'A shared file store for the whole team, reachable from anywhere the app is. The folder tree lives with the app; the files themselves live in a Cloudflare R2 bucket, which is durable storage costing well under a pound a month for 50 GB. Uploads and downloads travel straight between your browser and Cloudflare, so big files move at full speed.'],
+                ['Setting it up', 'In the Cloudflare dashboard open R2 Object Storage and press Continue to enable it (the free tier covers the first 10 GB). Then go to R2, then Manage API tokens, and press Create Account API token. Name it Store Copilot, set Permissions to Object Read and Write, apply it to all buckets, and press Create. Copy the three values it shows: the Access Key ID, the Secret Access Key, and your Account ID (shown on the R2 overview page, right-hand side).'],
+                ['Connecting it', 'In Railway open the gizmo service, then Variables, and add R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY with those values. The app creates its own bucket and settings on first use; nothing else to click.'],
+                ['Using it', 'Drag files onto the list to upload them where you stand. Click a name to download. Drag a file onto a folder, or onto a step of the path, to move it. Deleting sends a file to the trash, where it waits 30 days before it is really gone.'],
+                ['What it costs', 'Cloudflare bills about 1p per 10 GB per month past the free tier, and downloads are free. At the full 50 GB that is roughly 60p a month.'],
+            ]},
             { h: 'Housekeeping', body: [
                 ['Backups', 'A snapshot is taken automatically every week and the newest four are kept. Those live in the same storage they protect, so download a copy occasionally from Settings, Connections.'],
                 ['Alerts', 'Connections shows what is healthy. Email alerts need a RESEND_API_KEY to be set before they can send.'],
@@ -7496,12 +7561,466 @@
                 CRM_TYPES.map(([k, lab]) => [lab, doneCounts[k] || 0]).filter(r => r[1] > 0));
         }
 
+        /* ==================================================================
+           Files: the office file server, minus the office. The folder tree
+           and names live on the app's own volume; the bytes live in a
+           Cloudflare R2 bucket. Uploads and downloads run browser-to-bucket
+           on short-lived signed URLs, so a big artwork file moves at your
+           own connection's speed and never through the app. Deleting is a
+           30-day trash, never instant.
+           ================================================================== */
+        let filesCache = null, filesFolder = '', filesQ = '', filesSeg = 'files';
+        let filesUploads = [], filesQueue = [], filesActive = 0, filesNewFolder = false;
+
+        function showFilesView() {
+            if (filesCache) { renderFiles(); refreshFilesQuiet(); return; }
+            loadFiles();
+        }
+        function filesInputBusy() {
+            const a = document.activeElement;
+            return !!(a && a.closest && a.closest('#files-content') && /^(input|textarea)$/i.test(a.tagName));
+        }
+        async function refreshFilesQuiet() {
+            /* The store is shared with the rest of the team, so re-entering the
+               tab quietly re-reads it; a repaint only happens when something
+               actually changed and no one is mid-typing in a rename box. */
+            try {
+                const r = await api('/api/files/tree', {});
+                if (JSON.stringify(r.store) === JSON.stringify(filesCache)) return;
+                filesCache = r.store;
+                if (!filesInputBusy() && document.querySelector('#view-files.active')) renderFiles();
+            } catch (e) { /* the cached view stands until the next visit */ }
+        }
+        async function loadFiles() {
+            const box = $('files-content'); box.innerHTML = '';
+            const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Opening the file store…'));
+            box.append(t);
+            try {
+                const r = await api('/api/files/tree', {});
+                filesCache = r.store;
+                renderFiles();
+            } catch (e) {
+                box.innerHTML = '';
+                box.append(el('div', 'msg error', e.message || 'Could not load the files.'));
+            }
+        }
+        async function filesOp(path, body) {
+            /* Every write returns the fresh store, so the UI never guesses. */
+            const r = await api(path, body);
+            if (r && r.store) filesCache = r.store;
+            return r;
+        }
+        function fmtBytes(n) {
+            n = Number(n) || 0;
+            if (n < 1024) return n + ' B';
+            const u = ['KB', 'MB', 'GB', 'TB']; let i = -1;
+            do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
+            return (n >= 10 ? Math.round(n) : n.toFixed(1)) + ' ' + u[i];
+        }
+        function filesPathOf(folderId) {
+            const names = []; let cur = folderId, hops = 0;
+            while (cur && filesCache.folders[cur] && hops++ < 50) {
+                names.unshift(filesCache.folders[cur].name);
+                cur = filesCache.folders[cur].parent_id || '';
+            }
+            return names.join(' / ');
+        }
+
+        function renderFiles() {
+            const box = $('files-content'); box.innerHTML = '';
+            const d = filesCache;
+            const hero = el('div', 'ov-hero');
+            const badge = el('div', 'badge'); badge.innerHTML = I.folder;
+            const ht = el('div');
+            ht.append(el('h2', null, 'Files'),
+                el('p', null, 'The office file server, reachable from anywhere. Drag files in to '
+                    + 'store them; click a name to download it. Everything deleted waits in the '
+                    + 'trash for 30 days before it is gone.'));
+            hero.append(badge, ht);
+            box.append(hero);
+            // Storage meter: how much of the space is spoken for.
+            const pct = d.quota ? Math.min(100, Math.round(d.used * 100 / d.quota)) : 0;
+            const meter = el('div', 'files-meter' + (pct >= 90 ? ' warn' : ''));
+            const bar = el('div', 'bar'); const fill = el('i'); fill.style.width = pct + '%'; bar.append(fill);
+            meter.append(bar, el('span', null, fmtBytes(d.used) + ' of ' + fmtBytes(d.quota) + ' used'));
+            box.append(meter);
+            if (!d.configured) {
+                const card = el('div', 'card');
+                card.append(el('div', 'setting-title', 'Connect the storage'));
+                const p = el('p', null, 'Files keeps its storage in a Cloudflare R2 bucket: durable, '
+                    + 'priced in pennies, and the app signs every transfer so nothing is public. '
+                    + 'Three keys in Railway switch it on; the Guide tab has the exact steps.');
+                p.style.cssText = 'margin:8px 0 0;font-size:13px;color:var(--ink-2);line-height:1.55;max-width:64ch';
+                card.append(p);
+                if (d.setup_error) card.append(el('div', 'msg error', 'Storage answered with an error: ' + d.setup_error));
+                box.append(card);
+                return;
+            }
+            if (d.setup_error) box.append(el('div', 'msg error', 'Storage answered with an error: ' + d.setup_error
+                + '. Uploads may fail until the R2 keys in Railway are right.'));
+            const seg = el('div', 'lbl-seg');
+            [['files', 'Files'], ['trash', 'Trash']].forEach(([k, lab]) => {
+                const b = el('button', 'lbl-segbtn' + (filesSeg === k ? ' on' : ''));
+                b.append(document.createTextNode(lab));
+                if (k === 'trash' && d.trash.length) b.append(el('span', 'crm-badge', String(d.trash.length)));
+                b.onclick = () => { filesSeg = k; renderFiles(); };
+                seg.append(b);
+            });
+            box.append(seg);
+            const host = el('div'); host.style.marginTop = '12px'; box.append(host);
+            if (filesSeg === 'trash') renderFilesTrash(host);
+            else renderFilesBrowser(host);
+        }
+
+        function renderFilesTrash(host) {
+            const rows = (filesCache.trash || []).slice()
+                .sort((a, b) => (b.trashed_at || '').localeCompare(a.trashed_at || ''));
+            const list = el('div', 'files-list');
+            if (!rows.length) list.append(el('div', 'files-empty', 'The trash is empty.'));
+            rows.forEach(f => {
+                const row = el('div', 'files-row');
+                row.append(ico(I.fileDoc));
+                const name = el('span', 'files-name still');
+                name.textContent = f.name;
+                const from = filesPathOf(f.folder_id);
+                if (from) name.append(el('span', 'fpath', '  ·  ' + from));
+                row.append(name, el('span', 'files-meta', fmtBytes(f.size) + ' · deleted ' + fmtDate(f.trashed_at)));
+                const acts = el('div', 'files-acts');
+                const back = el('button', 'btn'); back.textContent = 'Put back';
+                back.onclick = async () => {
+                    back.disabled = true;
+                    try { await filesOp('/api/files/file', { op: 'restore', id: f.id }); renderFiles(); }
+                    catch (e) { back.disabled = false; toastError(e.message || 'Could not restore the file.'); }
+                };
+                const gone = el('button', 'btn'); gone.textContent = 'Delete now';
+                gone.onclick = async () => {
+                    if (!(await uiConfirm('Delete "' + f.name + '" for good? It cannot be put back after this.',
+                                          { okText: 'Delete for good' }))) return;
+                    gone.disabled = true;
+                    try { await filesOp('/api/files/file', { op: 'destroy', id: f.id }); renderFiles(); }
+                    catch (e) { gone.disabled = false; toastError(e.message || 'Could not delete the file.'); }
+                };
+                acts.append(back, gone);
+                row.append(acts);
+                list.append(row);
+            });
+            host.append(list, el('div', 'files-hint',
+                'Files here are emptied for good after 30 days. Put one back to keep it, '
+                + 'or Delete now to free its space at once.'));
+        }
+
+        function renderFilesBrowser(host) {
+            // A folder that vanished (another machine deleted it) must not
+            // strand the view on an empty nowhere.
+            if (filesFolder && !filesCache.folders[filesFolder]) filesFolder = '';
+            const bar = el('div', 'lbl-toolbar');
+            const up = el('button', 'btn btn-primary'); up.append(ico(I.upload), document.createTextNode('Upload'));
+            const fi = document.createElement('input');
+            fi.type = 'file'; fi.multiple = true; fi.style.display = 'none';
+            fi.onchange = () => { filesEnqueue(fi.files); fi.value = ''; };
+            up.onclick = () => {
+                if (filesQ) { toastError('Clear the search first, so the upload has a folder to land in.'); return; }
+                fi.click();
+            };
+            bar.append(up, fi);
+            const nf = el('button', 'btn'); nf.append(ico(I.folderPlus), document.createTextNode('New folder'));
+            nf.onclick = () => { filesNewFolder = true; paintList(); };
+            bar.append(nf);
+            const q = document.createElement('input');
+            q.type = 'search'; q.placeholder = 'Search files…'; q.className = 'lbl-size'; q.value = filesQ;
+            q.oninput = () => { filesQ = q.value.trim(); paintCrumbs(); paintList(); };
+            bar.append(q);
+            host.append(bar);
+
+            const crumbsHost = el('div'); host.append(crumbsHost);
+            const upHost = el('div'); host.append(upHost);
+            const listHost = el('div'); host.append(listHost);
+            host.append(el('div', 'files-hint',
+                'Drag files anywhere on the list to upload them here. Drag a file onto a folder, '
+                + 'or onto a step of the path above, to move it.'));
+
+            function crumbBtn(label, fid, here) {
+                const b = el('button', 'files-crumb' + (here ? ' here' : ''), label);
+                if (!here) b.onclick = () => { filesFolder = fid; filesQ = ''; q.value = ''; paintCrumbs(); paintList(); };
+                // A crumb is also a place to drop a file: "move it up there".
+                b.ondragover = (e) => { if (dragFileId) { e.preventDefault(); b.classList.add('dropok'); } };
+                b.ondragleave = () => b.classList.remove('dropok');
+                b.ondrop = (e) => { e.preventDefault(); b.classList.remove('dropok'); if (dragFileId) moveFile(dragFileId, fid); };
+                return b;
+            }
+            function paintCrumbs() {
+                crumbsHost.innerHTML = '';
+                const crumbs = el('div', 'files-crumbs');
+                if (filesQ) {
+                    crumbs.append(el('span', 'files-crumb here', 'Search results'));
+                    crumbsHost.append(crumbs);
+                    return;
+                }
+                const chain = []; let cur = filesFolder, hops = 0;
+                while (cur && filesCache.folders[cur] && hops++ < 50) {
+                    chain.unshift([cur, filesCache.folders[cur].name]);
+                    cur = filesCache.folders[cur].parent_id || '';
+                }
+                crumbs.append(crumbBtn('All files', '', !chain.length));
+                chain.forEach(([fid, name], i) => {
+                    crumbs.append(ico(I.chev), crumbBtn(name, fid, i === chain.length - 1));
+                });
+                crumbsHost.append(crumbs);
+            }
+
+            let dragFileId = null;
+            async function moveFile(fid, folderId) {
+                try { await filesOp('/api/files/file', { op: 'move', id: fid, folder_id: folderId }); paintList(); }
+                catch (e) { toastError(e.message || 'Could not move the file.'); }
+            }
+            async function download(fid) {
+                try {
+                    const r = await api('/api/files/download-url', { id: fid });
+                    // The signed link is served as an attachment, so navigating to it
+                    // triggers the download and the page stays put. A popup window
+                    // would be blocked here (we run inside the admin's iframe).
+                    const a = document.createElement('a');
+                    a.href = r.url; a.rel = 'noopener';
+                    document.body.append(a); a.click(); a.remove();
+                } catch (e) { toastError(e.message || 'Could not fetch the file.'); }
+            }
+            function inlineRename(row, nameEl, current, save) {
+                const inp = document.createElement('input');
+                inp.className = 'files-rename'; inp.value = current;
+                let done = false;
+                const finish = (commit) => {
+                    if (done) return; done = true;
+                    if (commit && inp.value.trim() && inp.value.trim() !== current) save(inp.value.trim());
+                    else paintList();
+                };
+                inp.onkeydown = (e) => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
+                inp.onblur = () => finish(true);
+                row.replaceChild(inp, nameEl);
+                inp.focus(); inp.select();
+            }
+
+            function folderRow(fid, f) {
+                const row = el('div', 'files-row is-folder');
+                row.append(ico(I.folder));
+                const name = el('button', 'files-name', f.name);
+                name.onclick = () => { filesFolder = fid; paintCrumbs(); paintList(); };
+                row.append(name);
+                const inside = Object.values(filesCache.files).filter(x => (x.folder_id || '') === fid).length;
+                row.append(el('span', 'files-meta', inside === 1 ? '1 file' : inside + ' files'));
+                const acts = el('div', 'files-acts');
+                const rn = el('button', 'icon-btn'); rn.innerHTML = I.edit; rn.title = 'Rename folder';
+                rn.onclick = () => inlineRename(row, name, f.name, async (v) => {
+                    try { await filesOp('/api/files/folder', { op: 'rename', id: fid, name: v }); } catch (e) { toastError(e.message); }
+                    paintList();
+                });
+                const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Delete folder (must be empty)';
+                del.onclick = async () => {
+                    try { await filesOp('/api/files/folder', { op: 'delete', id: fid }); paintCrumbs(); paintList(); }
+                    catch (e) { toastError(e.message || 'Could not delete the folder.'); }
+                };
+                acts.append(rn, del);
+                row.append(acts);
+                // Folders accept dropped rows (move) and dropped OS files (upload into it).
+                row.ondragover = (e) => { e.preventDefault(); e.stopPropagation(); row.classList.add('dropok'); };
+                row.ondragleave = () => row.classList.remove('dropok');
+                row.ondrop = (e) => {
+                    e.preventDefault(); e.stopPropagation(); row.classList.remove('dropok');
+                    if (dragFileId) { moveFile(dragFileId, fid); return; }
+                    if (dropHasDir(e)) { toastError('Drop files, not folders. Make the folder here first, then drop its files into it.'); return; }
+                    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) filesEnqueue(e.dataTransfer.files, fid);
+                };
+                return row;
+            }
+            function dropHasDir(e) {
+                const items = e.dataTransfer ? Array.from(e.dataTransfer.items || []) : [];
+                return items.some(it => it.webkitGetAsEntry && it.webkitGetAsEntry() && it.webkitGetAsEntry().isDirectory);
+            }
+            function fileRow(fid, f, showPath) {
+                const row = el('div', 'files-row');
+                row.append(ico(I.fileDoc));
+                const name = el('button', 'files-name');
+                name.textContent = f.name;
+                if (showPath) {
+                    const p = filesPathOf(f.folder_id);
+                    if (p) name.append(el('span', 'fpath', '  ·  ' + p));
+                }
+                name.title = 'Download'; name.onclick = () => download(fid);
+                row.append(name);
+                row.append(el('span', 'files-meta',
+                    fmtBytes(f.size) + ' · ' + fmtDate(f.uploaded_at || f.created_at) + (f.by ? ' · ' + f.by : '')));
+                const acts = el('div', 'files-acts');
+                const dl = el('button', 'icon-btn'); dl.innerHTML = I.download; dl.title = 'Download';
+                dl.onclick = () => download(fid);
+                const rn = el('button', 'icon-btn'); rn.innerHTML = I.edit; rn.title = 'Rename';
+                rn.onclick = () => inlineRename(row, name, f.name, async (v) => {
+                    try { await filesOp('/api/files/file', { op: 'rename', id: fid, name: v }); } catch (e) { toastError(e.message); }
+                    paintList();
+                });
+                const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Move to trash';
+                del.onclick = async () => {
+                    try { await filesOp('/api/files/file', { op: 'trash', id: fid }); renderFiles(); }
+                    catch (e) { toastError(e.message || 'Could not delete the file.'); }
+                };
+                acts.append(dl, rn, del);
+                row.append(acts);
+                row.draggable = true;
+                row.ondragstart = (e) => { dragFileId = fid; e.dataTransfer.effectAllowed = 'move'; };
+                row.ondragend = () => { dragFileId = null; };
+                return row;
+            }
+
+            function paintList() {
+                listHost.innerHTML = '';
+                dragFileId = null;   // a repaint may remove the row being dragged; its dragend never fires
+                const list = el('div', 'files-list');
+                const fmap = filesCache.files;
+                // The list swallows drops in every mode: an unhandled drop makes
+                // the browser NAVIGATE to the dropped file, taking the app with it.
+                list.ondragover = (e) => { if (!dragFileId) { e.preventDefault(); list.classList.add('drag'); } };
+                list.ondragleave = (e) => { if (!e.relatedTarget || !list.contains(e.relatedTarget)) list.classList.remove('drag'); };
+                list.ondrop = (e) => {
+                    e.preventDefault(); list.classList.remove('drag');
+                    if (dragFileId) return;
+                    if (filesQ) { toastError('Clear the search first, so the upload has a folder to land in.'); return; }
+                    if (dropHasDir(e)) { toastError('Drop files, not folders. Make the folder here first, then drop its files into it.'); return; }
+                    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) filesEnqueue(e.dataTransfer.files);
+                };
+                if (filesQ) {
+                    const ql = filesQ.toLowerCase();
+                    const hits = Object.entries(fmap).filter(([, f]) => f.name.toLowerCase().includes(ql))
+                        .sort((a, b) => a[1].name.localeCompare(b[1].name));
+                    if (!hits.length) list.append(el('div', 'files-empty', 'No file matches that search.'));
+                    hits.forEach(([fid, f]) => list.append(fileRow(fid, f, true)));
+                    listHost.append(list);
+                    return;
+                }
+                if (filesNewFolder) {
+                    const row = el('div', 'files-row is-folder');
+                    row.append(ico(I.folder));
+                    const inp = document.createElement('input');
+                    inp.className = 'files-rename'; inp.placeholder = 'Folder name';
+                    let done = false;
+                    const finish = async (commit) => {
+                        if (done) return; done = true; filesNewFolder = false;
+                        const v = inp.value.trim();
+                        if (commit && v) {
+                            try { await filesOp('/api/files/folder', { op: 'add', name: v, parent_id: filesFolder }); }
+                            catch (e) { toastError(e.message || 'Could not create the folder.'); }
+                        }
+                        paintList();
+                    };
+                    inp.onkeydown = (e) => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
+                    inp.onblur = () => finish(true);
+                    row.append(inp);
+                    list.append(row);
+                    setTimeout(() => inp.focus(), 0);
+                }
+                const folders = Object.entries(filesCache.folders)
+                    .filter(([, f]) => (f.parent_id || '') === filesFolder)
+                    .sort((a, b) => a[1].name.localeCompare(b[1].name));
+                const files = Object.entries(fmap)
+                    .filter(([, f]) => (f.folder_id || '') === filesFolder)
+                    .sort((a, b) => a[1].name.localeCompare(b[1].name));
+                folders.forEach(([fid, f]) => list.append(folderRow(fid, f)));
+                files.forEach(([fid, f]) => list.append(fileRow(fid, f, false)));
+                if (!folders.length && !files.length && !filesNewFolder)
+                    list.append(el('div', 'files-empty', 'Nothing here yet. Drag files in, or press Upload.'));
+                listHost.append(list);
+            }
+
+            function paintUploads() {
+                upHost.innerHTML = '';
+                filesUploads.forEach(u => {
+                    const row = el('div', 'files-up' + (u.state === 'failed' ? ' failed' : ''));
+                    row.append(ico(I.upload), el('span', 'upname', u.name));
+                    const bar = el('div', 'bar'); const fill = el('i');
+                    fill.style.width = (u.state === 'done' ? 100 : u.pct) + '%'; bar.append(fill);
+                    row.append(bar);
+                    const label = u.state === 'failed' ? (u.err || 'Upload failed.')
+                        : u.state === 'waiting' ? 'Waiting…'
+                        : u.state === 'signing' ? 'Starting…'
+                        : u.state === 'confirming' ? 'Finishing…'
+                        : u.state === 'done' ? 'Done' : u.pct + '%';
+                    row.append(el('span', 'upstate', label));
+                    if (u.state === 'failed') {
+                        const rt = el('button', 'btn', 'Try again');
+                        rt.onclick = () => { u.state = 'waiting'; u.pct = 0; u.err = ''; filesQueue.push(u.job); paintUploads(); filesPump(); };
+                        row.append(rt);
+                    }
+                    upHost.append(row);
+                });
+            }
+            renderFilesBrowser._paintUploads = paintUploads;
+            renderFilesBrowser._paintList = paintList;
+            paintCrumbs();
+            paintUploads();
+            paintList();
+        }
+
+        function filesEnqueue(fileList, intoFolder) {
+            const files = Array.from(fileList || []);
+            if (!files.length) return;
+            if (!filesCache || !filesCache.configured) { toastError('File storage is not connected yet. The Guide tab has the setup steps.'); return; }
+            // Uploads that already finished stop cluttering the list once new work starts.
+            filesUploads = filesUploads.filter(u => u.state !== 'done');
+            files.forEach(f => {
+                const u = { name: f.name, pct: 0, state: 'waiting', err: '' };
+                u.job = { file: f, row: u, folder: intoFolder != null ? intoFolder : filesFolder };
+                filesUploads.push(u);
+                filesQueue.push(u.job);
+            });
+            if (renderFilesBrowser._paintUploads) renderFilesBrowser._paintUploads();
+            filesPump();
+        }
+        function filesPump() {
+            // Three at a time: enough to keep the pipe full, not enough to choke it.
+            while (filesActive < 3 && filesQueue.length) {
+                filesActive++;
+                filesSend(filesQueue.shift()).finally(() => { filesActive--; filesPump(); });
+            }
+        }
+        async function filesSend(job) {
+            const { file, row, folder } = job;
+            const paint = () => { if (renderFilesBrowser._paintUploads) renderFilesBrowser._paintUploads(); };
+            try {
+                row.state = 'signing'; paint();
+                const ctype = file.type || 'application/octet-stream';
+                const r = await filesOp('/api/files/upload-url',
+                    { name: file.name, size: file.size, type: ctype, folder_id: folder });
+                row.state = 'sending'; paint();
+                await new Promise((resolve, reject) => {
+                    const x = new XMLHttpRequest();
+                    x.open('PUT', r.url);
+                    x.setRequestHeader('Content-Type', ctype);
+                    x.upload.onprogress = (ev) => {
+                        if (ev.lengthComputable) { row.pct = Math.round(ev.loaded * 100 / ev.total); paint(); }
+                    };
+                    x.onload = () => (x.status >= 200 && x.status < 300) ? resolve()
+                        : reject(new Error('Storage refused the upload (status ' + x.status + ').'));
+                    x.onerror = () => reject(new Error('The transfer failed. Check the connection and try again.'));
+                    x.send(file);
+                });
+                row.state = 'confirming'; paint();
+                await filesOp('/api/files/complete', { id: r.id });
+                row.state = 'done'; row.pct = 100;
+                paint();
+                // A full repaint keeps the storage meter honest too; skipped
+                // while someone is typing in a rename box, where the list
+                // alone refreshes instead.
+                if (!filesInputBusy() && document.querySelector('#view-files.active')) renderFiles();
+                else if (renderFilesBrowser._paintList) renderFilesBrowser._paintList();
+            } catch (e) {
+                row.state = 'failed'; row.err = e.message || 'Upload failed.';
+                paint();
+            }
+        }
+
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
-            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'crm', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', crm: 'CRM', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
+            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'crm', 'files', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', crm: 'CRM', files: 'Files', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
-            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide' || v === 'crm') ? 'none' : '';
+            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide' || v === 'crm' || v === 'files') ? 'none' : '';
             if (v === 'guide') renderGuide();
             // Only offer the PDF when there is actually a report to print: the print
             // stylesheet hides the Run gate, so printing an un-run tab yields a blank page.
@@ -7523,6 +8042,7 @@
             if (v === 'products') showProductsView();
             if (v === 'liability') showLiabilityView();
             if (v === 'crm') showCRMView();
+            if (v === 'files') showFilesView();
             if (v === 'labels') showLabelsView();
             if (v === 'memory') loadMemory();
             if (v === 'skills') loadSkills();
@@ -7537,6 +8057,10 @@
             if (t && t.classList && t.classList.contains('toggle') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); t.click(); }
         });
         $('menu-btn').onclick = openSidebar; $('backdrop').onclick = closeSidebar;
+        // A drop that misses its target must never let the browser navigate to
+        // the dropped file: that would replace the whole app mid-task.
+        document.addEventListener('dragover', (e) => e.preventDefault());
+        document.addEventListener('drop', (e) => e.preventDefault());
 
         /* ---------- settings (store profile) ---------- */
         const prefToggles = () => document.querySelectorAll('#settings-modal .toggle[data-pref]');
