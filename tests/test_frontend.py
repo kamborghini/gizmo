@@ -331,6 +331,19 @@ def t_the_app_has_its_own_front_door():
        "starter passwords get their one showing")
 
 
+@test
+def t_the_clock_is_for_part_timers_and_sends_no_timestamps():
+    """The clock button shows only for the part-time role, and the client
+    never supplies a time: the server's clock is the record."""
+    ok("teamMe.role === 'parttime'" in SCRIPT and "clockBoot" in SCRIPT,
+       "the clock follows the role")
+    ok(re.search(r"api\('/api/work/clock', \{ op: [^}]+\}\)", SCRIPT),
+       "clocking sends only the direction, never a timestamp")
+    ok("'/api/work/board'" in SCRIPT and "Export for payroll" in SCRIPT,
+       "the admin work dashboard exists with its export")
+    ok("on the clock" in SCRIPT, "billable events are marked in the feed")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

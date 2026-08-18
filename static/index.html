@@ -1161,7 +1161,8 @@
                 <button class="icon-btn" id="new-convo" title="New chat"></button></div>
             <div class="convos" id="convos"></div>
             <div class="side-foot"><span class="dot"></span><span class="auth-account" id="auth-account"></span>
-                <button class="icon-btn" id="logout-btn" title="Log out" style="margin-left:auto"></button>
+                <button class="btn" id="clock-btn" style="display:none;margin-left:auto"></button>
+                <button class="icon-btn" id="logout-btn" title="Log out"></button>
                 <button class="icon-btn" id="settings-btn" title="Settings"></button></div>
         </aside>
         <div class="backdrop" id="backdrop"></div>
@@ -1421,6 +1422,45 @@
         $('settings-btn').innerHTML = I.settings;
         $('logout-btn').innerHTML = I.chevLeft;
         $('logout-btn').onclick = () => authLogout();
+        /* ---- the clock: part-time accounts punch in and out here ---- */
+        let clockState = null, clockTimer = null;
+        function fmtDur(secs) {
+            const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60);
+            return h ? h + 'h ' + String(m).padStart(2, '0') + 'm' : m + 'm';
+        }
+        function paintClock() {
+            const b = $('clock-btn');
+            if (!clockState || !clockState.monitored) { b.style.display = 'none'; return; }
+            b.style.display = '';
+            if (clockState.clocked_in) {
+                const secs = clockState.session.secs
+                    + Math.floor((Date.now() - clockState.at) / 1000);
+                b.textContent = 'Clock out · ' + fmtDur(secs);
+                b.classList.add('btn-primary');
+            } else {
+                b.textContent = 'Clock in';
+                b.classList.remove('btn-primary');
+            }
+        }
+        async function clockBoot() {
+            try {
+                const r = await api('/api/work/status', {});
+                clockState = r; clockState.at = Date.now();
+                paintClock();
+                if (clockTimer) clearInterval(clockTimer);
+                clockTimer = setInterval(paintClock, 30000);
+            } catch (e) { /* the button stays as it is */ }
+        }
+        $('clock-btn').onclick = async () => {
+            const b = $('clock-btn'); b.disabled = true;
+            try {
+                await api('/api/work/clock', { op: clockState && clockState.clocked_in ? 'out' : 'in' });
+                await clockBoot();
+                addToast(clockState.clocked_in ? 'Clocked in. Your work is now being recorded '
+                    + 'against this session.' : 'Clocked out.');
+            } catch (e) { toastError(e.message); }
+            b.disabled = false;
+        };
         $('settings-close').innerHTML = I.x;
         // Re-evaluate the PDF button after a report finishes loading (setView runs before
         // the data arrives, so the button would otherwise stay hidden until you switch tabs).
@@ -8177,6 +8217,7 @@
             const lvl = teamMe ? ({ master: 3, admin: 2, member: 1 }[teamMe.role] || 1) : 1;
             $('nav-team').style.display = lvl >= 2 ? '' : 'none';
             $('settings-btn').style.display = lvl >= 2 ? '' : 'none';
+            if (teamMe && teamMe.role === 'parttime') clockBoot(); else $('clock-btn').style.display = 'none';
             const acct = $('auth-account');
             if (acct) acct.textContent = teamMe ? teamMe.name : '';
             TAB_KEYS.forEach(v => {
@@ -8343,7 +8384,7 @@
             hero.append(badge, ht);
             box.append(hero);
             const seg = el('div', 'lbl-seg');
-            [['people', 'People'], ['activity', 'Activity']].forEach(([k, lab]) => {
+            [['people', 'People'], ['work', 'Work'], ['activity', 'Activity']].forEach(([k, lab]) => {
                 const b = el('button', 'lbl-segbtn' + (teamSeg === k ? ' on' : ''), lab);
                 b.onclick = () => { teamSeg = k; renderTeam(); };
                 seg.append(b);
@@ -8351,6 +8392,7 @@
             box.append(seg);
             const host = el('div'); host.style.marginTop = '12px'; box.append(host);
             if (teamSeg === 'activity') renderTeamFeed(host);
+            else if (teamSeg === 'work') renderTeamWork(host);
             else renderTeamPeople(host);
         }
         function showStarterPw(name, pw) {
@@ -8395,7 +8437,7 @@
                 const inUser = document.createElement('input');
                 inUser.className = 'files-rename'; inUser.placeholder = 'Username';
                 const roleSel = el('select', 'lbl-size');
-                [['member', 'Member']].concat(myLevel >= 3 ? [['admin', 'Admin']] : [])
+                [['member', 'Member'], ['parttime', 'Part-time']].concat(myLevel >= 3 ? [['admin', 'Admin']] : [])
                     .forEach(([v, lab]) => { const o = el('option', null, lab); o.value = v; roleSel.append(o); });
                 const go = el('button', 'btn btn-primary', 'Create');
                 go.onclick = async () => {
@@ -8451,7 +8493,7 @@
                     acts.append(el('span', 'files-meta', 'Master admin'));
                 } else {
                     const role = el('select', 'lbl-size');
-                    [['admin', 'Admin'], ['member', 'Member']].forEach(([v, lab]) => {
+                    [['admin', 'Admin'], ['member', 'Member'], ['parttime', 'Part-time']].forEach(([v, lab]) => {
                         const o = el('option', null, lab); o.value = v;
                         if (u.role === v) o.selected = true; role.append(o);
                     });
@@ -8546,6 +8588,91 @@
                 + 'parts of the app an account can open; it is enforced by the server, not '
                 + 'just hidden.'));
         }
+        function renderTeamWork(host) {
+            const wrap = el('div');
+            host.append(wrap);
+            wrap.append(loader());
+            api('/api/work/board', {}).then(d => {
+                wrap.innerHTML = '';
+                const nm = (uid) => (d.names || {})[uid] || uid;
+                const fd = (s) => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+                    return h ? h + 'h ' + String(m).padStart(2, '0') + 'm' : m + 'm'; };
+                wrap.append(el('div', 'disp-subhead', 'On the clock now'));
+                const openList = el('div', 'files-list');
+                if (!d.open.length) openList.append(el('div', 'files-empty', 'Nobody is clocked in.'));
+                d.open.forEach(ws => {
+                    const row = el('div', 'files-row');
+                    const name = el('span', 'files-name still'); name.textContent = nm(ws.uid);
+                    row.append(name, el('span', 'files-meta',
+                        'since ' + String(ws.start).slice(11, 16) + ' · ' + fd(ws.secs) + ' so far'));
+                    const acts = el('div', 'files-acts'); acts.style.opacity = '1';
+                    const res = el('button', 'btn', 'Close this session');
+                    res.onclick = async () => {
+                        if (!(await uiConfirm('Close ' + nm(ws.uid) + '\'s open session now? Use this '
+                            + 'when someone forgot to clock out. The closure is recorded as a '
+                            + 'correction under your name.'))) return;
+                        try { await api('/api/work/resolve', { uid: ws.uid }); } catch (e) { toastError(e.message); }
+                        renderTeam();
+                    };
+                    acts.append(res);
+                    row.append(acts);
+                    openList.append(row);
+                });
+                wrap.append(openList);
+                wrap.append(el('div', 'disp-subhead', 'Hours per person'));
+                const tl = el('div', 'files-list');
+                const uids = Object.keys(d.totals);
+                if (!uids.length) tl.append(el('div', 'files-empty',
+                    'No part-time accounts yet. Set someone\'s role to Part-time and the clock '
+                    + 'appears for them the next time they open the app.'));
+                uids.forEach(uid => {
+                    const t = d.totals[uid];
+                    const row = el('div', 'files-row');
+                    const name = el('span', 'files-name still'); name.textContent = nm(uid);
+                    row.append(name, el('span', 'files-meta',
+                        'today ' + fd(t.today) + ' · this week ' + fd(t.week) + ' · this month '
+                        + fd(t.month) + ' · ' + t.sessions + ' sessions · avg ' + fd(t.avg)));
+                    tl.append(row);
+                });
+                wrap.append(tl);
+                wrap.append(el('div', 'disp-subhead', 'Recent sessions'));
+                const sl = el('div', 'files-list');
+                if (!d.sessions.length) sl.append(el('div', 'files-empty', 'No completed sessions yet.'));
+                d.sessions.slice(0, 40).forEach(s => {
+                    const row = el('div', 'files-row');
+                    const name = el('span', 'files-name still');
+                    name.textContent = nm(s.uid) + (s.corrected ? ' (closed by ' + nm(s.corrected_by) + ')' : '');
+                    row.append(name, el('span', 'files-meta',
+                        fmtDate(s.start) + ' · ' + String(s.start).slice(11, 16) + ' to '
+                        + String(s.end).slice(11, 16) + ' · ' + fd(s.secs || 0) + ' · '
+                        + ((d.event_counts || {})[s.id] || 0) + ' actions'));
+                    sl.append(row);
+                });
+                wrap.append(sl);
+                const bar = el('div', 'lbl-toolbar'); bar.style.marginTop = '12px';
+                const frm = document.createElement('input'); frm.type = 'date'; frm.className = 'lbl-size';
+                const to = document.createElement('input'); to.type = 'date'; to.className = 'lbl-size';
+                const exp = el('button', 'btn'); exp.append(ico(I.download), document.createTextNode('Export for payroll'));
+                exp.onclick = async () => {
+                    exp.disabled = true;
+                    try {
+                        const r = await api('/api/work/report', { from: frm.value || '', to: to.value || '' });
+                        const blob = new Blob([r.csv], { type: 'text/csv' });
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = 'work-sessions' + (frm.value ? '-' + frm.value : '') + '.csv';
+                        document.body.append(a); a.click(); a.remove();
+                        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+                    } catch (e) { toastError(e.message); }
+                    exp.disabled = false;
+                };
+                bar.append(frm, to, exp);
+                wrap.append(bar, el('div', 'files-hint',
+                    'The export covers the chosen dates, or everything kept when left blank. '
+                    + 'Each row is one session: date, clock in, clock out, hours, actions, '
+                    + 'and whether an admin closed it.'));
+            }).catch(e => { wrap.innerHTML = ''; wrap.append(el('div', 'msg error', e.message)); });
+        }
         function renderTeamFeed(host) {
             const d = teamCache;
             const bar = el('div', 'lbl-toolbar');
@@ -8586,9 +8713,10 @@
                 const row = el('div', 'files-row');
                 const hh = isNaN(dt) ? '' : String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
                 row.append(el('span', 'files-meta', hh));
-                const nm = (d.names || {})[e.sub] || 'Not named yet';
+                const nm = e.src === 'system' ? 'System' : ((d.names || {})[e.sub] || 'Not named yet');
                 const line = el('span', 'files-name'); line.classList.add('still');
-                line.textContent = nm + ' ' + e.action + (e.detail ? ': ' + e.detail : '');
+                line.textContent = nm + ' ' + e.action + (e.detail ? ': ' + e.detail : '')
+                    + (e.ws ? ' · on the clock' : '');
                 row.append(line);
                 row.append(el('span', 'files-meta',
                     (TEAM_AREAS.find(a => a[0] === e.area) || ['', e.area])[1]));

@@ -7965,7 +7965,7 @@ ACTIVITY_MAX = int(os.environ.get("ACTIVITY_MAX", "8000"))
 SESSION_HOURS = float(os.environ.get("SESSION_HOURS", "24"))
 LOGIN_FAIL_LIMIT = 8
 LOGIN_LOCK_MINUTES = 15
-ROLE_LEVELS = {"master": 3, "admin": 2, "member": 1}
+ROLE_LEVELS = {"master": 3, "admin": 2, "member": 1, "parttime": 1}
 _users_mem: Optional[dict] = None
 _sessions_mem: Optional[dict] = None
 
@@ -8204,6 +8204,73 @@ def _tab_denied(request: Request) -> Optional[JSONResponse]:
                            "Ask an admin if you need it."}, 403)
 
 
+# ---------------------------------------------------------------------------
+# Work sessions: clocking in and out, for part-time accounts only. The clock
+# is the SERVER'S: routes take no timestamps from the browser, one session can
+# be open per person, and a close computes its own duration. Whether someone
+# is monitored follows their ROLE at the moment of each event, never a name.
+# Sessions are append-only; an admin resolving a forgotten clock-out closes
+# the session with correction stamps beside the original start, on the ledger.
+# ---------------------------------------------------------------------------
+WORK_PATH = os.environ.get("WORK_PATH", "/data/worklog.json")
+WORK_KEEP = int(os.environ.get("WORK_KEEP", "2000"))
+_work_mem: Optional[dict] = None
+
+
+def _load_work() -> dict:
+    global _work_mem
+    if _work_mem is None:
+        d = _load_json_store(WORK_PATH, "work_store", None)
+        _work_mem = d if isinstance(d, dict) and "sessions" in d else {"seq": 0, "open": {}, "sessions": []}
+    return _work_mem
+
+
+def _write_work(d: dict) -> None:
+    global _work_mem
+    _work_mem = d
+    if not _store_writable(WORK_PATH):
+        raise RuntimeError("work log is not writable")
+    os.makedirs(os.path.dirname(WORK_PATH) or ".", exist_ok=True)
+    tmp = WORK_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"work_store": d}, fh)
+    os.replace(tmp, WORK_PATH)
+
+
+def _fmt_secs(secs: int) -> str:
+    h, m = int(secs) // 3600, (int(secs) % 3600) // 60
+    return (f"{h}h {m:02d}m" if h else f"{m}m")
+
+
+def _work_monitored(uid: Optional[str]) -> bool:
+    """Role-driven, checked at the moment it matters: change the role and the
+    monitoring follows by itself."""
+    return _team_role(uid) == "parttime"
+
+
+def _work_open_session(uid: Optional[str]) -> Optional[dict]:
+    if not uid:
+        return None
+    return _load_work()["open"].get(str(uid))
+
+
+def _work_secs(uid: str, day_from: str) -> int:
+    """Seconds worked since day_from (ISO), open session counted to now."""
+    d = _load_work()
+    now = datetime.now(timezone.utc)
+    total = 0
+    for s in d["sessions"]:
+        if s.get("uid") == uid and str(s.get("start") or "") >= day_from:
+            total += int(s.get("secs") or 0)
+    o = d["open"].get(uid)
+    if o and str(o.get("start") or "") >= day_from:
+        try:
+            total += max(0, int((now - datetime.fromisoformat(o["start"])).total_seconds()))
+        except Exception:
+            pass
+    return total
+
+
 def _team_setup_needed() -> bool:
     return not any(not u.get("deleted") for u in _load_users()["users"].values())
 
@@ -8225,9 +8292,16 @@ def _track(sub: Optional[str], area: str, action: str, detail: str = "") -> None
         rows = _load_json_store(ACTIVITY_PATH, "events", [])
         if not isinstance(rows, list):
             rows = []
-        rows.append({"t": datetime.now(timezone.utc).isoformat(),
-                     "sub": str(sub or ""), "area": area,
-                     "action": str(action)[:80], "detail": str(detail)[:200]})
+        e = {"t": datetime.now(timezone.utc).isoformat(),
+             "sub": str(sub or ""), "area": area,
+             "action": str(action)[:80], "detail": str(detail)[:200]}
+        if not sub:
+            e["src"] = "system"    # webhooks, schedulers, integrations: never a person
+        elif _work_monitored(sub):
+            ws = _work_open_session(sub)
+            if ws:
+                e["ws"] = ws.get("id")   # billable: on the clock
+        rows.append(e)
         if len(rows) > ACTIVITY_MAX:
             rows = rows[-ACTIVITY_MAX:]
         if _store_writable(ACTIVITY_PATH):
@@ -10166,8 +10240,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 name = str(body.get("name") or "").strip()[:60]
                 username = _clean_username(body.get("username"))
                 role = str(body.get("role") or "member")
-                if role not in ("admin", "member"):
-                    return _json({"error": "New accounts are admin or member."}, 400)
+                if role not in ("admin", "member", "parttime"):
+                    return _json({"error": "New accounts are admin, member or part-time."}, 400)
                 if role == "admin" and my_level < ROLE_LEVELS["master"]:
                     return _json({"error": "Only the master admin can create admins."}, 403)
                 if not name or not username:
@@ -10228,14 +10302,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 role = str(body.get("role") or "")
                 if my_level < ROLE_LEVELS["master"]:
                     return _json({"error": "Only the master admin changes roles."}, 403)
-                if role not in ("admin", "member"):
-                    return _json({"error": "Roles are admin or member."}, 400)
+                if role not in ("admin", "member", "parttime"):
+                    return _json({"error": "Roles are admin, member or part-time."}, 400)
                 if u.get("role") == "master":
                     return _json({"error": "The master admin cannot be demoted."}, 400)
                 u["role"] = role
                 _write_users(d)
                 _track(who, "team", "changed a role",
-                       f"{label} is now {'an admin' if role == 'admin' else 'a member'}")
+                       f"{label} is now " + {"admin": "an admin", "member": "a member",
+                                             "parttime": "part-time"}[role])
             elif op == "active":
                 on = bool(body.get("active"))
                 if u.get("role") == "master":
@@ -10302,6 +10377,195 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         users = [_user_public(uid, u) for uid, u in d["users"].items() if not u.get("deleted")]
         users.sort(key=lambda u: (-ROLE_LEVELS.get(u["role"], 0), u["name"] or "~"))
         return users
+
+    # ---- Work routes ------------------------------------------------------
+    # The clock. Timestamps are minted HERE, never accepted from the browser.
+    @mcp.custom_route("/api/work/clock", methods=["POST"])
+    async def work_clock_route(request: Request):
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        if not _work_monitored(who):
+            return _json({"error": "Only part-time accounts clock in and out."}, 400)
+        op = str(body.get("op") or "")
+        now = datetime.now(timezone.utc)
+        try:
+            d = _load_work()
+            if op == "in":
+                if d["open"].get(who):
+                    return _json({"error": "You are already clocked in."}, 400)
+                d["seq"] = int(d.get("seq") or 0) + 1
+                ws = {"id": f"w{d['seq']}", "uid": who, "start": now.isoformat()}
+                d["open"][who] = ws
+                _write_work(d)
+                _track(who, "work", "clocked in")
+                return _json({"ok": True, "session": ws})
+            if op == "out":
+                ws = d["open"].pop(who, None)
+                if not ws:
+                    return _json({"error": "You are not clocked in."}, 400)
+                ws["end"] = now.isoformat()
+                try:
+                    ws["secs"] = max(0, int((now - datetime.fromisoformat(ws["start"])).total_seconds()))
+                except Exception:
+                    ws["secs"] = 0
+                d["sessions"].append(ws)
+                if len(d["sessions"]) > WORK_KEEP:
+                    d["sessions"] = d["sessions"][-WORK_KEEP:]
+                _write_work(d)
+                _track(who, "work", "clocked out", _fmt_secs(ws["secs"]))
+                return _json({"ok": True, "session": ws})
+            return _json({"error": "Unknown clock action."}, 400)
+        except RuntimeError:
+            return _json({"error": "The clock could not be saved. The data volume may be "
+                                   "unwritable; check Settings, Connections."}, 500)
+
+    @mcp.custom_route("/api/work/status", methods=["POST"])
+    async def work_status_route(request: Request):
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        if not _work_monitored(who):
+            return _json({"monitored": False})
+        ws = _work_open_session(who)
+        secs = 0
+        if ws:
+            try:
+                secs = max(0, int((datetime.now(timezone.utc)
+                                   - datetime.fromisoformat(ws["start"])).total_seconds()))
+            except Exception:
+                pass
+        return _json({"monitored": True, "clocked_in": bool(ws),
+                      "session": ({**ws, "secs": secs} if ws else None)})
+
+    def _day_starts():
+        now = datetime.now(timezone.utc)
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week = today - timedelta(days=today.weekday())
+        month = today.replace(day=1)
+        return today.isoformat(), week.isoformat(), month.isoformat()
+
+    @mcp.custom_route("/api/work/board", methods=["POST"])
+    async def work_board_route(request: Request):
+        err, packed = await _team_guard(request, ROLE_LEVELS["admin"])
+        if err:
+            return err
+        _who, _body = packed
+        try:
+            d = _load_work()
+            users = _load_users()["users"]
+            today, week, month = _day_starts()
+            now = datetime.now(timezone.utc)
+            open_rows = []
+            for uid, ws in d["open"].items():
+                try:
+                    secs = max(0, int((now - datetime.fromisoformat(ws["start"])).total_seconds()))
+                except Exception:
+                    secs = 0
+                open_rows.append({**ws, "secs": secs})
+            events = _load_json_store(ACTIVITY_PATH, "events", [])
+            if not isinstance(events, list):
+                events = []
+            by_ws: dict = {}
+            for e in events:
+                if e.get("ws"):
+                    by_ws[e["ws"]] = by_ws.get(e["ws"], 0) + 1
+            totals = {}
+            for uid, u in users.items():
+                if u.get("role") != "parttime" or u.get("deleted"):
+                    continue
+                rows = [s for s in d["sessions"] if s.get("uid") == uid]
+                totals[uid] = {"today": _work_secs(uid, today), "week": _work_secs(uid, week),
+                               "month": _work_secs(uid, month), "sessions": len(rows),
+                               "avg": int(sum(int(s.get("secs") or 0) for s in rows) / len(rows)) if rows else 0}
+            recent = d["sessions"][-120:][::-1]
+            for s in recent:
+                s = s  # sessions carry corrections inline
+            return _json({"open": open_rows, "sessions": recent, "totals": totals,
+                          "event_counts": by_ws, "names": _team_names()})
+        except Exception:
+            logger.exception("work board failed")
+            return _json({"error": "Couldn't load the work board."}, 500)
+
+    @mcp.custom_route("/api/work/resolve", methods=["POST"])
+    async def work_resolve_route(request: Request):
+        # An admin closing a forgotten clock-out. The original start stands;
+        # the correction wears its author and lands on the ledger.
+        err, packed = await _team_guard(request, ROLE_LEVELS["admin"])
+        if err:
+            return err
+        who, body = packed
+        uid = str(body.get("uid") or "")
+        try:
+            d = _load_work()
+            ws = d["open"].pop(uid, None)
+            if not ws:
+                return _json({"error": "That person has no open session."}, 400)
+            now = datetime.now(timezone.utc)
+            ws["end"] = now.isoformat()
+            try:
+                ws["secs"] = max(0, int((now - datetime.fromisoformat(ws["start"])).total_seconds()))
+            except Exception:
+                ws["secs"] = 0
+            ws["corrected"] = True
+            ws["corrected_by"] = who
+            ws["corrected_at"] = now.isoformat()
+            ws["note"] = str(body.get("note") or "")[:200]
+            d["sessions"].append(ws)
+            _write_work(d)
+            _track(who, "work", "resolved a work session",
+                   f"closed {(_team_name(uid) or uid)}'s open session at {_fmt_secs(ws['secs'])}")
+            return _json({"ok": True, "session": ws})
+        except RuntimeError:
+            return _json({"error": "The correction could not be saved. The data volume may "
+                                   "be unwritable; check Settings, Connections."}, 500)
+
+    @mcp.custom_route("/api/work/report", methods=["POST"])
+    async def work_report_route(request: Request):
+        err, packed = await _team_guard(request, ROLE_LEVELS["admin"])
+        if err:
+            return err
+        _who, body = packed
+        uid = str(body.get("uid") or "")
+        frm = str(body.get("from") or "")[:10]
+        to = str(body.get("to") or "")[:10]
+        try:
+            d = _load_work()
+            rows = [s for s in d["sessions"]
+                    if (not uid or s.get("uid") == uid)
+                    and (not frm or str(s.get("start") or "")[:10] >= frm)
+                    and (not to or str(s.get("start") or "")[:10] <= to)]
+            events = _load_json_store(ACTIVITY_PATH, "events", [])
+            counts = {}
+            if isinstance(events, list):
+                for e in events:
+                    if e.get("ws"):
+                        counts[e["ws"]] = counts.get(e["ws"], 0) + 1
+            names = _team_names()
+            total = sum(int(s.get("secs") or 0) for s in rows)
+            lines = ["Name,Date,Clock in,Clock out,Hours,Actions,Corrected"]
+            for s in rows:
+                st, en = str(s.get("start") or ""), str(s.get("end") or "")
+                lines.append(",".join([
+                    '"' + (names.get(s.get("uid")) or s.get("uid") or "") + '"',
+                    st[:10], st[11:16], en[11:16],
+                    f"{int(s.get('secs') or 0) / 3600:.2f}",
+                    str(counts.get(s.get("id"), 0)),
+                    "yes" if s.get("corrected") else ""]))
+            return _json({"sessions": rows, "total_secs": total, "count": len(rows),
+                          "event_counts": counts, "csv": "\n".join(lines)})
+        except Exception:
+            logger.exception("work report failed")
+            return _json({"error": "Couldn't build the report."}, 500)
 
     @mcp.custom_route("/api/stock-usage", methods=["POST"])
     async def stock_usage_route(request: Request):

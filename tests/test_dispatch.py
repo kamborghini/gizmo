@@ -31,6 +31,7 @@ os.environ.update({
     "USERS_PATH": SCRATCH + "/users.json",
     "ACTIVITY_PATH": SCRATCH + "/activity.json",
     "SESSIONS_PATH": SCRATCH + "/sessions.json",
+    "WORK_PATH": SCRATCH + "/worklog.json",
 })
 for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
     os.environ.pop(v, None)
@@ -4424,8 +4425,10 @@ def with_accounts(fn):
     def wipe():
         copilot._users_mem = None
         copilot._sessions_mem = None
+        copilot._work_mem = None
         APP_AUTH["session"] = APP_AUTH["master"] = ""
-        for p in (copilot.USERS_PATH, copilot.SESSIONS_PATH, copilot.ACTIVITY_PATH):
+        for p in (copilot.USERS_PATH, copilot.SESSIONS_PATH, copilot.ACTIVITY_PATH,
+                  copilot.WORK_PATH):
             try:
                 os.remove(p)
             except FileNotFoundError:
@@ -4709,6 +4712,85 @@ def t_tabs_cannot_touch_the_master_and_follow_rank():
         eq(post_s(ian_sess, "/api/team/user",
                   {"op": "tabs", "id": ian, "tabs": ["files"]}).status_code, 403,
            "but cannot set an admin's, including their own")
+    with_accounts(go)
+
+@test
+def t_work_the_clock_is_the_servers_and_only_for_parttime():
+    def go():
+        ensure_auth()
+        eq(post("/api/work/clock", {"op": "in"}).status_code, 400,
+           "the master does not clock in; monitoring follows the part-time role only")
+        pt, starter = make_user("Poppy", "poppy", role="parttime")
+        sess = login("poppy", starter).json()["session"]
+        st = post_s(sess, "/api/work/status", {}).json()
+        ok(st["monitored"] and not st["clocked_in"], "logged in is not clocked in")
+        r = post_s(sess, "/api/work/clock", {"op": "in", "start": "1999-01-01T00:00:00Z"})
+        eq(r.status_code, 200, r.text)
+        ok(r.json()["session"]["start"].startswith("20"),
+           "the browser's timestamp was ignored; the server minted its own")
+        eq(post_s(sess, "/api/work/clock", {"op": "in"}).status_code, 400, "no double clock-in")
+        copilot._track("SYS-TEST-NOBODY", "production", "marked made", "#x")
+        copilot._track("", "production", "marked made", "#hook")
+        eq(post_s(sess, "/api/work/clock", {"op": "out"}).status_code, 200)
+        eq(post_s(sess, "/api/work/clock", {"op": "out"}).status_code, 400,
+           "no clock-out when not clocked in")
+        b = post("/api/work/board", {}).json()
+        eq(len(b["sessions"]), 1, "the session is on the record")
+        ok(b["sessions"][0]["secs"] >= 0 and b["sessions"][0]["end"], "with a computed duration")
+        eq(post_s(sess, "/api/work/board", {}).status_code, 403,
+           "part-time accounts cannot read the monitoring board")
+    with_accounts(go)
+
+@test
+def t_work_events_are_stamped_only_on_the_clock():
+    def go():
+        ensure_auth()
+        pt, starter = make_user("Poppy", "poppy", role="parttime")
+        sess = login("poppy", starter).json()["session"]
+        copilot._track(pt, "production", "marked made", "#off-clock")
+        post_s(sess, "/api/work/clock", {"op": "in"})
+        copilot._track(pt, "production", "marked made", "#on-clock")
+        copilot._track("", "production", "marked made", "#system")
+        post_s(sess, "/api/work/clock", {"op": "out"})
+        copilot._track(pt, "production", "marked made", "#after")
+        ev = post("/api/team/board", {}).json()["events"]
+        by_detail = {e["detail"]: e for e in ev if e.get("detail", "").startswith("#")}
+        ok("ws" not in by_detail["#off-clock"], "off the clock is not billable")
+        ok(by_detail["#on-clock"].get("ws"), "on the clock carries the session")
+        eq(by_detail["#system"].get("src"), "system", "automation is never a person")
+        ok("ws" not in by_detail["#system"], "and never billable")
+        ok("ws" not in by_detail["#after"], "the stamp stops at clock-out")
+        # the role drives it: change the role and the monitoring stops by itself
+        post_s(login("poppy", starter).json()["session"], "/api/work/clock", {"op": "in"})
+        post("/api/team/user", {"op": "role", "id": pt, "role": "member"})
+        copilot._track(pt, "production", "marked made", "#as-member")
+        ev2 = post("/api/team/board", {}).json()["events"]
+        row = next(e for e in ev2 if e.get("detail") == "#as-member")
+        ok("ws" not in row, "a role change ends the monitoring on its own")
+    with_accounts(go)
+
+@test
+def t_work_resolve_is_a_recorded_correction_and_reports_add_up():
+    def go():
+        ensure_auth()
+        pt, starter = make_user("Poppy", "poppy", role="parttime")
+        sess = login("poppy", starter).json()["session"]
+        post_s(sess, "/api/work/clock", {"op": "in"})
+        r = post("/api/work/resolve", {"uid": pt, "note": "left the bench without clocking out"})
+        eq(r.status_code, 200, r.text)
+        s = r.json()["session"]
+        ok(s["corrected"] and s["corrected_by"] == APP_AUTH["master"] and s["start"],
+           "the closure wears its author and the original start stands")
+        ev = post("/api/team/board", {}).json()["events"]
+        ok(any(e["action"] == "resolved a work session" for e in ev), "and is on the ledger")
+        post_s(login("poppy", starter).json()["session"], "/api/work/clock", {"op": "in"})
+        post_s(login("poppy", starter).json()["session"], "/api/work/clock", {"op": "out"})
+        rep = post("/api/work/report", {"uid": pt}).json()
+        eq(rep["count"], 2, "both sessions in the report")
+        ok(rep["csv"].startswith("Name,Date,Clock in"), "csv for payroll")
+        ok('"Poppy"' in rep["csv"] and "yes" in rep["csv"], "with the correction marked")
+        rep2 = post("/api/work/report", {"uid": pt, "from": "2099-01-01"}).json()
+        eq(rep2["count"], 0, "the date range filters")
     with_accounts(go)
 
 # =========================== run ===========================================
