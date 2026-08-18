@@ -1112,6 +1112,10 @@ def _build_backup_zip():
     secrets_excluded = {
         os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
         os.path.basename(WO_SECRET_PATH),
+        # Sessions are transient bearer state: never in a backup. The accounts
+        # register IS included: it holds only scrypt hashes, and restoring it
+        # is exactly what brings the team back after a lost volume.
+        os.path.basename(SESSIONS_PATH),
     }
     buf = io.BytesIO()
     added = 0
@@ -6836,21 +6840,23 @@ def _authorize(request: Request) -> tuple[bool, Optional[str]]:
     auth = request.headers.get("authorization", "")
     if auth.startswith("Bearer ") and SHOPIFY_API_SECRET:
         try:
-            claims = _verify_session_token(auth[7:])
+            _verify_session_token(auth[7:])
         except Exception as e:
             logger.warning(f"session token rejected: {e}")
             return False, None
-        who = str(claims.get("sub") or "") or claims.get("dest")
-        try:
-            u = _team_touch(str(who))
-            if not u.get("active", True):
-                logger.warning("switched-off user %s was refused", who)
-                return False, None
-        except Exception:
-            # A broken register must never brick the shop: these are verified
-            # staff tokens, so fail OPEN on register trouble and say so loudly.
-            logger.exception("users register unavailable; letting the verified token through")
-        return True, who
+        # The embed token is only the perimeter. WHO you are is the app's own
+        # session, minted at its login screen; no session, no entry. The one
+        # exception is first-run setup, when no accounts exist yet: the
+        # /api/auth routes handle that themselves and never come through here.
+        uid = _session_uid(request.headers.get("x-app-session"))
+        if not uid:
+            return False, None
+        u = _team_user(uid)
+        if not u or not u.get("active", True):
+            if u is not None:
+                logger.warning("switched-off account %s was refused", uid)
+            return False, None
+        return True, uid
     return False, None
 
 
@@ -7362,25 +7368,26 @@ async def _watchdog_tick(registry: dict) -> bool:
                 await _zeta_send_catalog()
             except Exception:
                 logger.warning("stock bridge: catalogue push failed; next tick retries")
-        # Grace mode re-opening after an admin has existed means the register
-        # was LOST (corrupt file, missing volume): every staff member is
-        # acting as an admin right now. Silent escalation is the one thing
-        # this must never be, so say it everywhere the merchant looks.
+        # The accounts vanishing after setup means the register was LOST
+        # (corrupt file, missing volume): the app will demand first-run setup
+        # again. Nobody is silently let in, but the merchant must hear about
+        # it, because their team is locked out until setup happens.
         try:
-            if state.get("team_established") and _team_grace():
+            if state.get("team_established") and _team_setup_needed():
                 last = str(state.get("team_lost_alert_at") or "")
                 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 if last != today:
                     state["team_lost_alert_at"] = today
-                    logger.error("the team register is empty after admins existed; everyone is admin")
+                    logger.error("the accounts register is empty after setup; the app will re-run first-run setup")
                     _add_alerts([{"tab": "settings", "tab_label": "Team",
-                                  "metric": "The team register was lost: everyone is an admin "
-                                            "until roles are set again on the Team tab", "pct": None}])
-                    await _send_alert_email("Store Copilot: the team register was lost",
-                                            ["The list of people and roles is empty even though admins "
-                                             "were set before (a corrupt file or a missing data volume).",
-                                             "Until roles are set again on the Team tab, everyone who "
-                                             "opens the app is treated as an admin."])
+                                  "metric": "The user accounts were lost: the app is asking to be "
+                                            "set up again", "pct": None}])
+                    await _send_alert_email("Store Copilot: the user accounts were lost",
+                                            ["The list of accounts is empty even though it was set up "
+                                             "before (a corrupt file or a missing data volume).",
+                                             "The app will show its first-run setup screen; recreate the "
+                                             "master account, then the team's accounts."])
+            _sessions_sweep()
         except Exception:
             logger.exception("team register check failed")
         # Files trash past its 30-day window, and uploads that never finished.
@@ -7934,36 +7941,73 @@ def _files_head(key: str):
 
 
 # ---------------------------------------------------------------------------
-# Team: who is using the app, and who did what.
+# Team: the app's own accounts. Shopify has no authority here.
 #
-# Identity comes free with the embed: every request carries a verified Shopify
-# session token whose `sub` is that staff member's own id, so there are no
-# passwords here and nothing to steal. This layer only puts names and roles on
-# those ids, and keeps an append-only ledger of the actions that matter.
+# The embed token still gates the PERIMETER (a request must come from inside
+# the shop's Shopify admin at all), but WHO you are is the app's own business:
+# a register of accounts with scrypt-hashed passwords, server-side sessions,
+# and a rank order of roles. master (Cameron) outranks admin outranks member;
+# every management action is checked as "does the actor outrank the target,
+# and is the action within the actor's rank" on the server, per request.
 #
-# Bootstrap is a grace mode, not a race: while no active admin exists in the
-# register, everyone acts as an admin, so the first person can set themselves
-# up no matter who opens the app first. New ids auto-register as members the
-# moment they appear; an admin names them. The last active admin can never be
-# demoted or switched off, so the shop cannot lock itself out.
+# Passwords are never stored, logged, or echoed: the register keeps only
+# scrypt hashes, and the one time a password ever appears in a response is
+# the single showing of a generated starter password to the admin who asked
+# for it, already flagged must_change.
 # ---------------------------------------------------------------------------
 USERS_PATH = os.environ.get("USERS_PATH", "/data/users.json")
+SESSIONS_PATH = os.environ.get("SESSIONS_PATH", "/data/sessions.json")
 ACTIVITY_PATH = os.environ.get("ACTIVITY_PATH", "/data/activity.json")
 ACTIVITY_MAX = int(os.environ.get("ACTIVITY_MAX", "8000"))
+SESSION_HOURS = float(os.environ.get("SESSION_HOURS", "24"))
+LOGIN_FAIL_LIMIT = 8
+LOGIN_LOCK_MINUTES = 15
+ROLE_LEVELS = {"master": 3, "admin": 2, "member": 1}
 _users_mem: Optional[dict] = None
+_sessions_mem: Optional[dict] = None
+
+
+def _hash_pw(pw: str, salt: Optional[bytes] = None) -> str:
+    salt = salt or os.urandom(16)
+    h = hashlib.scrypt(pw.encode("utf-8"), salt=salt, n=2 ** 14, r=8, p=1)
+    return salt.hex() + "$" + h.hex()
+
+
+def _check_pw(pw: str, stored: str) -> bool:
+    try:
+        salt_hex, h_hex = stored.split("$", 1)
+        h = hashlib.scrypt(pw.encode("utf-8"), salt=bytes.fromhex(salt_hex), n=2 ** 14, r=8, p=1)
+        return hmac.compare_digest(h.hex(), h_hex)
+    except Exception:
+        return False
+
+
+def _users_default() -> dict:
+    return {"version": 2, "seq": 0, "users": {}}
 
 
 def _load_users() -> dict:
     global _users_mem
     if _users_mem is None:
         d = _load_json_store(USERS_PATH, "users_store", None)
-        _users_mem = d if isinstance(d, dict) and "users" in d else {"users": {}}
+        if isinstance(d, dict) and d.get("version") == 2 and "users" in d:
+            _users_mem = d
+        else:
+            if isinstance(d, dict) and d.get("users"):
+                # The short-lived Shopify-identity register: set aside, start clean.
+                try:
+                    os.replace(USERS_PATH, USERS_PATH + ".v1.bak")
+                    logger.info("team: v1 register archived; the app now owns its accounts")
+                except OSError:
+                    pass
+            _users_mem = _users_default()
+        _master_reset_check(_users_mem)
     return _users_mem
 
 
 def _write_users(d: dict) -> None:
-    """Raises when the register cannot be made durable, so a role or access
-    change is never reported as done while only the memory copy holds it."""
+    """Raises when the register cannot be made durable, so an account change
+    is never reported as done while only the memory copy holds it."""
     global _users_mem
     _users_mem = d
     if not _store_writable(USERS_PATH):
@@ -7975,61 +8019,147 @@ def _write_users(d: dict) -> None:
     os.replace(tmp, USERS_PATH)
 
 
-def _team_grace(d: Optional[dict] = None) -> bool:
-    """No active admin on record yet: the register is still being set up."""
-    d = d or _load_users()
-    return not any(u.get("role") == "admin" and u.get("active", True)
-                   for u in d["users"].values())
+def _load_sessions() -> dict:
+    global _sessions_mem
+    if _sessions_mem is None:
+        d = _load_json_store(SESSIONS_PATH, "sessions", None)
+        _sessions_mem = d if isinstance(d, dict) else {}
+    return _sessions_mem
 
 
-def _team_touch(sub: str) -> dict:
-    """Register or refresh the calling identity. Returns their record. Disk is
-    only touched for a new face or an hourly last-seen refresh; the in-memory
-    register carries the rest."""
-    d = _load_users()
+def _write_sessions(d: dict) -> None:
+    global _sessions_mem
+    _sessions_mem = d
+    if not _store_writable(SESSIONS_PATH):
+        return    # sessions are re-creatable; losing them only forces a login
+    os.makedirs(os.path.dirname(SESSIONS_PATH) or ".", exist_ok=True)
+    tmp = SESSIONS_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"sessions": d}, fh)
+    os.replace(tmp, SESSIONS_PATH)
+
+
+def _new_session(uid: str) -> str:
+    """Mint a session for a user. The raw token goes to the browser once;
+    the store keeps only its hash, so the file can never impersonate anyone."""
+    raw = secrets.token_urlsafe(32)
+    key = hashlib.sha256(raw.encode()).hexdigest()
+    s = _load_sessions()
+    s[key] = {"uid": uid,
+              "exp": (datetime.now(timezone.utc) + timedelta(hours=SESSION_HOURS)).isoformat(),
+              "created_at": datetime.now(timezone.utc).isoformat()}
+    _write_sessions(s)
+    return raw
+
+
+def _session_uid(raw: Optional[str]) -> Optional[str]:
+    if not raw:
+        return None
+    s = _load_sessions()
+    row = s.get(hashlib.sha256(str(raw).encode()).hexdigest())
+    if not row:
+        return None
+    now = datetime.now(timezone.utc)
+    if str(row.get("exp") or "") < now.isoformat():
+        return None
+    # Sliding window: steady work never logs you out mid-shift. The bump is
+    # written at most every few hours, not per request.
+    try:
+        exp = datetime.fromisoformat(str(row.get("exp")))
+        if (exp - now).total_seconds() < (SESSION_HOURS - 4) * 3600:
+            row["exp"] = (now + timedelta(hours=SESSION_HOURS)).isoformat()
+            _write_sessions(s)
+    except Exception:
+        pass
+    return str(row.get("uid") or "") or None
+
+
+def _drop_sessions(uid: Optional[str] = None, token: Optional[str] = None) -> None:
+    s = _load_sessions()
+    if token:
+        s.pop(hashlib.sha256(str(token).encode()).hexdigest(), None)
+    if uid:
+        for k in [k for k, v in s.items() if v.get("uid") == uid]:
+            s.pop(k)
+    _write_sessions(s)
+
+
+def _sessions_sweep() -> None:
+    s = _load_sessions()
     now = datetime.now(timezone.utc).isoformat()
-    u = d["users"].get(sub)
-    if u is None:
-        u = {"name": "", "role": "member", "active": True, "named": False,
-             "first_seen": now, "last_seen": now}
-        d["users"][sub] = u
-        try:
-            _write_users(d)
-        except Exception:
-            logger.exception("users register write failed; the memory copy stands")
-        _track(sub, "team", "first sign-in", "a new person opened the app")
-        return u
-    last = u.get("last_seen") or ""
-    u["last_seen"] = now
-    if not last or last < (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat():
-        try:
-            _write_users(d)
-        except Exception:
-            logger.exception("users register write failed; the memory copy stands")
-    return u
+    dead = [k for k, v in s.items() if str(v.get("exp") or "") < now]
+    if dead:
+        for k in dead:
+            s.pop(k)
+        _write_sessions(s)
 
 
-def _team_role(sub: Optional[str]) -> str:
-    """Effective role for enforcement: stored role, or admin-for-everyone
-    while the register has no admin at all."""
-    if not sub:
-        return "member"
-    d = _load_users()
-    if _team_grace(d):
-        return "admin"
-    u = d["users"].get(sub)
+def _team_user(uid: Optional[str]) -> Optional[dict]:
+    if not uid:
+        return None
+    u = _load_users()["users"].get(str(uid))
+    return None if not u or u.get("deleted") else u
+
+
+def _team_role(uid: Optional[str]) -> str:
+    u = _team_user(uid)
     return u.get("role", "member") if u else "member"
 
 
-def _team_name(sub: str) -> str:
-    u = _load_users()["users"].get(str(sub))
+def _team_level(uid: Optional[str]) -> int:
+    return ROLE_LEVELS.get(_team_role(uid), 0) if _team_user(uid) else 0
+
+
+def _team_name(uid: str) -> str:
+    u = _load_users()["users"].get(str(uid))
     return (u or {}).get("name") or ""
 
 
 def _team_names() -> dict:
-    """sub -> display name, for resolving `by` stamps at render time. Renaming
-    a person fixes their whole history at once because records store the id."""
-    return {sub: (u.get("name") or "") for sub, u in _load_users()["users"].items()}
+    """uid -> display name, deleted accounts included: history keeps its
+    names even after an account is removed."""
+    return {uid: (u.get("name") or "") for uid, u in _load_users()["users"].items()}
+
+
+_master_reset_done = False
+
+
+def _master_reset_check(d: dict) -> None:
+    """Break-glass for a forgotten master password: set MASTER_RESET=yes in
+    Railway, redeploy, read the one-time password from the deploy logs, log
+    in (forced to choose a new password), then REMOVE the variable."""
+    global _master_reset_done
+    if _master_reset_done or not os.environ.get("MASTER_RESET"):
+        return
+    _master_reset_done = True
+    for uid, u in d["users"].items():
+        if u.get("role") == "master" and not u.get("deleted"):
+            starter = secrets.token_urlsafe(9)
+            u["pw"] = _hash_pw(starter)
+            u["must_change"] = True
+            u["fails"], u["lock_until"] = 0, ""
+            try:
+                _write_users(d)
+            except Exception:
+                logger.exception("master reset could not be saved")
+                return
+            logger.error("MASTER RESET: temporary password for %s is: %s  "
+                         "Sign in with it now, choose a new password, and REMOVE "
+                         "the MASTER_RESET variable.", u.get("username"), starter)
+            _track(uid, "auth", "master password reset", "via the MASTER_RESET variable")
+            return
+
+
+def _team_setup_needed() -> bool:
+    return not any(not u.get("deleted") for u in _load_users()["users"].values())
+
+
+def _user_public(uid: str, u: dict) -> dict:
+    """Everything about an account EXCEPT anything derived from its password."""
+    return {"id": uid, "name": u.get("name") or "", "username": u.get("username") or "",
+            "role": u.get("role") or "member", "active": u.get("active", True),
+            "deleted": bool(u.get("deleted")), "must_change": bool(u.get("must_change")),
+            "created_at": u.get("created_at") or "", "last_login_at": u.get("last_login_at") or ""}
 
 
 def _track(sub: Optional[str], area: str, action: str, detail: str = "") -> None:
@@ -8365,7 +8495,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Request too large."}, 413)
         # Save when a profile object is supplied; otherwise just load.
         if isinstance(body.get("profile"), dict):
-            if _team_role(_who) != "admin":
+            if _team_level(_who) < ROLE_LEVELS["admin"]:
                 return _json({"error": "Only an admin can change the store profile."}, 403)
             try:
                 saved = _save_profile(body["profile"])
@@ -8534,7 +8664,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Request too large."}, 413)
         try:
             if isinstance(body.get("config"), dict):
-                if _team_role(_who) != "admin":
+                if _team_level(_who) < ROLE_LEVELS["admin"]:
                     return _json({"error": "Only an admin can change the schedule."}, 403)
                 cfg = _save_schedule(body["config"])
                 _track(_who, "settings", "changed the audit schedule")
@@ -8714,7 +8844,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         ok, who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
-        if _team_role(who) != "admin":
+        if _team_level(who) < ROLE_LEVELS["admin"]:
             return _json({"error": "Only an admin can replace the size list."}, 403)
         body = await _read_json_capped(request, cap=big)
         if body is None:
@@ -8832,7 +8962,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         ok, who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
-        if _team_role(who) != "admin":
+        if _team_level(who) < ROLE_LEVELS["admin"]:
             return _json({"error": "Only an admin can download a backup."}, 403)
         body = await _read_json_capped(request)
         if body is None:
@@ -9731,36 +9861,220 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             logger.exception("files file op failed")
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
-    # ---- Team routes ------------------------------------------------------
-    # Names and roles over the identities Shopify already verifies, and the
-    # ledger of who did what. Enforcement lives here on the server; hiding
-    # buttons in the page is only politeness.
-    async def _team_guard(request: Request, admin: bool):
+    # ---- Auth + Team routes -----------------------------------------------
+    # The app's own front door. Every route here still demands the Shopify
+    # embed token first (the perimeter: requests must come from inside the
+    # shop's admin), and then deals in the app's own accounts and sessions.
+    def _shop_gate(request: Request) -> bool:
+        auth = request.headers.get("authorization", "")
+        if not (auth.startswith("Bearer ") and SHOPIFY_API_SECRET):
+            return False
+        try:
+            _verify_session_token(auth[7:])
+            return True
+        except Exception:
+            return False
+
+    async def _auth_guard(request: Request):
         pre = _pre_checks(request)
         if pre:
-            return pre, ""
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401), ""
-        if admin and _team_role(who) != "admin":
-            return _json({"error": "Only an admin can do that."}, 403), ""
+            return pre, None
+        if not _shop_gate(request):
+            return _json({"error": "Unauthorized"}, 401), None
         body = await _read_json_capped(request)
         if body is None:
-            return _json({"error": "Request too large."}, 413), ""
-        return None, (str(who or ""), body)
+            return _json({"error": "Request too large."}, 413), None
+        return None, body
+
+    def _clean_username(v) -> str:
+        return re.sub(r"[^a-z0-9@._-]", "", str(v or "").strip().lower())[:80]
+
+    def _find_username(d: dict, username: str) -> Optional[str]:
+        for uid, u in d["users"].items():
+            if not u.get("deleted") and u.get("username") == username:
+                return uid
+        return None
+
+    def _starter_password() -> str:
+        return secrets.token_urlsafe(9)
+
+    @mcp.custom_route("/api/auth/state", methods=["POST"])
+    async def auth_state_route(request: Request):
+        err, _body = await _auth_guard(request)
+        if err:
+            return err
+        if _team_setup_needed():
+            return _json({"setup": True, "logged_in": False})
+        uid = _session_uid(request.headers.get("x-app-session"))
+        u = _team_user(uid)
+        if not u or not u.get("active", True):
+            return _json({"setup": False, "logged_in": False})
+        return _json({"setup": False, "logged_in": True,
+                      "me": {"id": uid, "name": u.get("name"), "role": u.get("role"),
+                             "must_change": bool(u.get("must_change"))}})
+
+    @mcp.custom_route("/api/auth/setup", methods=["POST"])
+    async def auth_setup_route(request: Request):
+        # First run only: create the master account. The moment one account
+        # exists this door is bricked shut.
+        err, body = await _auth_guard(request)
+        if err:
+            return err
+        if not _team_setup_needed():
+            return _json({"error": "The app is already set up."}, 400)
+        name = str(body.get("name") or "").strip()[:60]
+        username = _clean_username(body.get("username"))
+        pw = str(body.get("password") or "")
+        if not name or not username:
+            return _json({"error": "A name and a username are both needed."}, 400)
+        if len(pw) < 8:
+            return _json({"error": "The password needs at least 8 characters."}, 400)
+        try:
+            d = _load_users()
+            d["seq"] = int(d.get("seq") or 0) + 1
+            uid = f"u{d['seq']}"
+            d["users"][uid] = {"name": name, "username": username, "pw": _hash_pw(pw),
+                               "role": "master", "active": True, "deleted": False,
+                               "must_change": False, "fails": 0, "lock_until": "",
+                               "created_at": datetime.now(timezone.utc).isoformat(),
+                               "last_login_at": datetime.now(timezone.utc).isoformat()}
+            _write_users(d)
+            try:
+                state = _load_watch()
+                state["team_established"] = True
+                _save_watch(state)
+            except Exception:
+                logger.exception("could not record that setup happened")
+            token = _new_session(uid)
+            _track(uid, "team", "set up the app", f"{name} is the master admin")
+            return _json({"ok": True, "session": token,
+                          "me": {"id": uid, "name": name, "role": "master", "must_change": False}})
+        except RuntimeError:
+            return _json({"error": "The account could not be saved. The data volume may be "
+                                   "unwritable; check the Railway service."}, 500)
+
+    @mcp.custom_route("/api/auth/login", methods=["POST"])
+    async def auth_login_route(request: Request):
+        err, body = await _auth_guard(request)
+        if err:
+            return err
+        username = _clean_username(body.get("username"))
+        pw = str(body.get("password") or "")
+        d = _load_users()
+        uid = _find_username(d, username)
+        u = d["users"].get(uid) if uid else None
+        now = datetime.now(timezone.utc)
+        # One vague answer for every failure: which part was wrong is nobody's
+        # business at the door.
+        vague = _json({"error": "That username and password do not match."}, 401)
+        if not u:
+            _track("", "auth", "failed login", f"unknown username {username[:40]}")
+            return vague
+        if str(u.get("lock_until") or "") > now.isoformat():
+            # Locked answers exactly like wrong: a different reply would tell
+            # a guesser which usernames exist.
+            _track(uid, "auth", "failed login", "account is paused")
+            return vague
+        if not u.get("active", True):
+            _track(uid, "auth", "failed login", "account is switched off")
+            return vague
+        if not _check_pw(pw, u.get("pw") or ""):
+            u["fails"] = int(u.get("fails") or 0) + 1
+            if u["fails"] >= LOGIN_FAIL_LIMIT:
+                u["fails"] = 0
+                u["lock_until"] = (now + timedelta(minutes=LOGIN_LOCK_MINUTES)).isoformat()
+                _track(uid, "auth", "account paused", "too many wrong passwords")
+            try:
+                _write_users(d)
+            except RuntimeError:
+                pass
+            _track(uid, "auth", "failed login", "wrong password")
+            return vague
+        u["fails"] = 0
+        u["lock_until"] = ""
+        u["last_login_at"] = now.isoformat()
+        try:
+            _write_users(d)
+        except RuntimeError:
+            pass
+        token = _new_session(uid)
+        _track(uid, "auth", "logged in")
+        return _json({"ok": True, "session": token,
+                      "me": {"id": uid, "name": u.get("name"), "role": u.get("role"),
+                             "must_change": bool(u.get("must_change"))}})
+
+    @mcp.custom_route("/api/auth/logout", methods=["POST"])
+    async def auth_logout_route(request: Request):
+        err, _body = await _auth_guard(request)
+        if err:
+            return err
+        raw = request.headers.get("x-app-session")
+        uid = _session_uid(raw)
+        _drop_sessions(token=raw)
+        if uid:
+            _track(uid, "auth", "logged out")
+        return _json({"ok": True})
+
+    @mcp.custom_route("/api/auth/password", methods=["POST"])
+    async def auth_password_route(request: Request):
+        # Change your OWN password: the current one is always required, so a
+        # borrowed open session cannot quietly take over the account.
+        err, body = await _auth_guard(request)
+        if err:
+            return err
+        uid = _session_uid(request.headers.get("x-app-session"))
+        u = _team_user(uid)
+        if not u or not u.get("active", True):
+            return _json({"error": "Unauthorized"}, 401)
+        current, new = str(body.get("current") or ""), str(body.get("new") or "")
+        if not _check_pw(current, u.get("pw") or ""):
+            _track(uid, "auth", "failed password change", "wrong current password")
+            return _json({"error": "The current password is wrong."}, 400)
+        if len(new) < 8:
+            return _json({"error": "The new password needs at least 8 characters."}, 400)
+        try:
+            d = _load_users()
+            d["users"][uid]["pw"] = _hash_pw(new)
+            d["users"][uid]["must_change"] = False
+            _write_users(d)
+        except RuntimeError:
+            return _json({"error": "The change could not be saved. The data volume may be "
+                                   "unwritable; check Settings, Connections."}, 500)
+        _drop_sessions(uid=uid)          # every session dies with the old password
+        token = _new_session(uid)        # except this one, freshly minted
+        _track(uid, "auth", "changed their password")
+        return _json({"ok": True, "session": token})
+
+    # ---- Team management --------------------------------------------------
+    async def _team_guard(request: Request, min_level: int):
+        pre = _pre_checks(request)
+        if pre:
+            return pre, None
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401), None
+        if _team_level(who) < min_level:
+            return _json({"error": "Only an admin can do that."}, 403), None
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413), None
+        return None, (str(who), body)
 
     @mcp.custom_route("/api/team/me", methods=["POST"])
     async def team_me_route(request: Request):
-        err, packed = await _team_guard(request, admin=False)
-        if err:
-            return err
-        who, _body = packed
-        return _json({"me": {"sub": who, "name": _team_name(who),
-                             "role": _team_role(who), "grace": _team_grace()}})
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        u = _team_user(who) or {}
+        return _json({"me": {"sub": who, "id": who, "name": u.get("name") or "",
+                             "role": u.get("role") or "member", "grace": False}})
 
     @mcp.custom_route("/api/team/board", methods=["POST"])
     async def team_board_route(request: Request):
-        err, packed = await _team_guard(request, admin=True)
+        err, packed = await _team_guard(request, ROLE_LEVELS["admin"])
         if err:
             return err
         who, _body = packed
@@ -9769,74 +10083,138 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             events = _load_json_store(ACTIVITY_PATH, "events", [])
             if not isinstance(events, list):
                 events = []
-            users = [{"sub": sub, **u} for sub, u in d["users"].items()]
-            users.sort(key=lambda u: (u.get("role") != "admin", u.get("name") or "~", u["sub"]))
+            users = [_user_public(uid, u) for uid, u in d["users"].items() if not u.get("deleted")]
+            users.sort(key=lambda u: (-ROLE_LEVELS.get(u["role"], 0), u["name"] or "~"))
             return _json({"users": users, "events": events[-600:][::-1],
                           "counts": _team_counts(events), "names": _team_names(),
-                          "grace": _team_grace(d), "me": who})
+                          "me": who, "my_role": _team_role(who)})
         except Exception:
             logger.exception("team board failed")
             return _json({"error": "Couldn't load the team."}, 500)
 
     @mcp.custom_route("/api/team/user", methods=["POST"])
     async def team_user_route(request: Request):
-        err, packed = await _team_guard(request, admin=True)
+        err, packed = await _team_guard(request, ROLE_LEVELS["admin"])
         if err:
             return err
         who, body = packed
         op = str(body.get("op") or "")
-        sub = str(body.get("sub") or "")
+        my_level = _team_level(who)
         try:
             d = _load_users()
-            u = d["users"].get(sub)
-            if not u:
-                return _json({"error": "That person isn't on the register."}, 400)
-            def last_admin() -> bool:
-                return u.get("role") == "admin" and u.get("active", True) and sum(
-                    1 for x in d["users"].values()
-                    if x.get("role") == "admin" and x.get("active", True)) <= 1
-            label = u.get("name") or "an unnamed person"
+            if op == "create":
+                # Admins mint members; only the master mints admins.
+                name = str(body.get("name") or "").strip()[:60]
+                username = _clean_username(body.get("username"))
+                role = str(body.get("role") or "member")
+                if role not in ("admin", "member"):
+                    return _json({"error": "New accounts are admin or member."}, 400)
+                if role == "admin" and my_level < ROLE_LEVELS["master"]:
+                    return _json({"error": "Only the master admin can create admins."}, 403)
+                if not name or not username:
+                    return _json({"error": "A name and a username are both needed."}, 400)
+                if _find_username(d, username):
+                    return _json({"error": "That username is already taken."}, 400)
+                starter = _starter_password()
+                d["seq"] = int(d.get("seq") or 0) + 1
+                uid = f"u{d['seq']}"
+                d["users"][uid] = {"name": name, "username": username,
+                                   "pw": _hash_pw(starter), "role": role, "active": True,
+                                   "deleted": False, "must_change": True, "fails": 0,
+                                   "lock_until": "",
+                                   "created_at": datetime.now(timezone.utc).isoformat(),
+                                   "last_login_at": ""}
+                _write_users(d)
+                _track(who, "team", "created an account", f"{name} ({role})")
+                # The one and only showing of the starter password, to the
+                # admin who asked for it. It is already marked must-change.
+                return _json({"ok": True, "id": uid, "starter_password": starter,
+                              "users": _team_public_list(d)})
+            target = str(body.get("id") or body.get("sub") or "")
+            u = d["users"].get(target)
+            if not u or u.get("deleted"):
+                return _json({"error": "That account does not exist."}, 400)
+            their_level = ROLE_LEVELS.get(u.get("role"), 1)
+            label = u.get("name") or "an unnamed account"
+            # The rank rule, once: you must OUTRANK who you manage, and the
+            # master outranks everyone but is above being managed at all.
+            def may_manage() -> bool:
+                if u.get("role") == "master":
+                    return False
+                if my_level >= ROLE_LEVELS["master"]:
+                    return True
+                return my_level > their_level
             if op == "rename":
+                if target != who and not may_manage():
+                    return _json({"error": "You cannot manage that account."}, 403)
                 name = str(body.get("name") or "").strip()[:60]
                 if not name:
                     return _json({"error": "The name cannot be empty."}, 400)
-                u["name"], u["named"] = name, True
+                u["name"] = name
                 _write_users(d)
-                _track(who, "team", "named a person", f"{label} is now called {name}")
+                _track(who, "team", "renamed an account", f"{label} is now {name}")
+            elif op == "username":
+                if target != who and not may_manage():
+                    return _json({"error": "You cannot manage that account."}, 403)
+                username = _clean_username(body.get("username"))
+                if not username:
+                    return _json({"error": "The username cannot be empty."}, 400)
+                other = _find_username(d, username)
+                if other and other != target:
+                    return _json({"error": "That username is already taken."}, 400)
+                u["username"] = username
+                _write_users(d)
+                _track(who, "team", "changed a username", label)
             elif op == "role":
                 role = str(body.get("role") or "")
+                if my_level < ROLE_LEVELS["master"]:
+                    return _json({"error": "Only the master admin changes roles."}, 403)
                 if role not in ("admin", "member"):
                     return _json({"error": "Roles are admin or member."}, 400)
-                if role == "member" and last_admin():
-                    return _json({"error": "That would leave the app with no admin. Make "
-                                           "someone else an admin first."}, 400)
+                if u.get("role") == "master":
+                    return _json({"error": "The master admin cannot be demoted."}, 400)
                 u["role"] = role
                 _write_users(d)
-                if role == "admin":
-                    try:
-                        state = _load_watch()
-                        state["team_established"] = True
-                        _save_watch(state)
-                    except Exception:
-                        logger.exception("could not record that the register is established")
-                _track(who, "team", "changed a role", f"{label} is now {'an admin' if role == 'admin' else 'a member'}")
+                _track(who, "team", "changed a role",
+                       f"{label} is now {'an admin' if role == 'admin' else 'a member'}")
             elif op == "active":
                 on = bool(body.get("active"))
-                if not on and sub == who:
-                    return _json({"error": "You cannot switch off your own access. Ask "
-                                           "the other admin."}, 400)
-                if not on and last_admin():
-                    return _json({"error": "That would leave the app with no admin. Make "
-                                           "someone else an admin first."}, 400)
+                if u.get("role") == "master":
+                    return _json({"error": "The master admin cannot be switched off."}, 400)
+                if not may_manage():
+                    return _json({"error": "You cannot manage that account."}, 403)
+                if target == who:
+                    return _json({"error": "You cannot switch off your own access."}, 400)
                 u["active"] = on
                 _write_users(d)
+                if not on:
+                    _drop_sessions(uid=target)   # off means off, this second
                 _track(who, "team", "changed access",
                        f"{label}'s access was switched {'on' if on else 'off'}")
+            elif op == "reset_password":
+                if not may_manage():
+                    return _json({"error": "You cannot manage that account."}, 403)
+                starter = _starter_password()
+                u["pw"] = _hash_pw(starter)
+                u["must_change"] = True
+                u["fails"], u["lock_until"] = 0, ""
+                _write_users(d)
+                _drop_sessions(uid=target)       # the old password's sessions die
+                _track(who, "team", "reset a password", label)
+                return _json({"ok": True, "starter_password": starter,
+                              "users": _team_public_list(d)})
+            elif op == "delete":
+                if my_level < ROLE_LEVELS["master"]:
+                    return _json({"error": "Only the master admin can delete accounts."}, 403)
+                if u.get("role") == "master":
+                    return _json({"error": "The master admin cannot be deleted."}, 400)
+                u["deleted"], u["active"] = True, False
+                _write_users(d)
+                _drop_sessions(uid=target)
+                _track(who, "team", "deleted an account", label)
             else:
                 return _json({"error": "Unknown team action."}, 400)
-            users = [{"sub": s, **x} for s, x in d["users"].items()]
-            users.sort(key=lambda x: (x.get("role") != "admin", x.get("name") or "~", x["sub"]))
-            return _json({"ok": True, "users": users, "grace": _team_grace(d)})
+            return _json({"ok": True, "users": _team_public_list(d)})
         except RuntimeError:
             global _users_mem
             _users_mem = None   # memory diverged from disk; the next read takes disk truth
@@ -9845,6 +10223,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except Exception:
             logger.exception("team user op failed")
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
+
+    def _team_public_list(d: dict) -> list:
+        users = [_user_public(uid, u) for uid, u in d["users"].items() if not u.get("deleted")]
+        users.sort(key=lambda u: (-ROLE_LEVELS.get(u["role"], 0), u["name"] or "~"))
+        return users
 
     @mcp.custom_route("/api/stock-usage", methods=["POST"])
     async def stock_usage_route(request: Request):
@@ -9974,7 +10357,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         op = str(body.get("op") or "get").lower()
         if op != "set":
             return _json({"config": _shipping_public(_load_shipping())})
-        if _team_role(who) != "admin":
+        if _team_level(who) < ROLE_LEVELS["admin"]:
             return _json({"error": "Only an admin can change the shipping settings."}, 403)
         cfg = _load_shipping()
         if "origin" in body:
@@ -10679,17 +11062,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if not token or not SHOPIFY_API_SECRET:
                 return deny("Unauthorized. Open this from your Shopify admin.")
             try:
-                claims = _verify_session_token(token)
+                _verify_session_token(token)
             except Exception:
                 return deny("Unauthorized. Open this from your Shopify admin.")
-            # The register applies here exactly as it does on /api: a
-            # switched-off person's token is valid to Shopify but not to us.
-            doc_who = str(claims.get("sub") or "") or str(claims.get("dest") or "")
-            try:
-                if not _team_touch(doc_who).get("active", True):
-                    return deny("Unauthorized. Open this from your Shopify admin.")
-            except Exception:
-                logger.exception("users register unavailable; letting the verified token through")
+            # The admin print action runs on the Shopify order page, outside
+            # the app and its login, so it authenticates with the embed token
+            # alone. It can only render labels and stamp printed. If an app
+            # session header happens to be present, the print is attributed.
+            doc_who = _session_uid(request.headers.get("x-app-session")) or ""
 
         ids = []
         for part in str(request.query_params.get("ids") or "").split(","):

@@ -1034,6 +1034,28 @@
         .modal-body { padding: 20px; overflow-y: auto; }
         #toast-host { position: fixed; top: 14px; right: 14px; z-index: 100; display: flex;
             flex-direction: column; gap: 8px; max-width: min(430px, 92vw); }
+        /* Auth: the app's own front door */
+        .auth-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center;
+            justify-content: center; background: var(--bg); }
+        .auth-card { width: min(380px, calc(100vw - 48px)); background: var(--surface);
+            border: 1px solid var(--border); border-radius: 12px; padding: 28px; box-shadow: var(--hair); }
+        .auth-brand { width: 40px; height: 40px; border-radius: 12px; margin-bottom: 14px;
+            background: linear-gradient(140deg, var(--accent), var(--accent-2)); color: #fff;
+            display: flex; align-items: center; justify-content: center; }
+        .auth-brand svg { width: 20px; height: 20px; }
+        .auth-card h2 { margin: 0 0 6px; font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+        .auth-sub { margin: 0 0 16px; font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+        .auth-field { margin-bottom: 12px; }
+        .auth-field label { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 4px; }
+        .auth-field input { width: 100%; box-sizing: border-box; font: inherit; font-size: 14px;
+            padding: 8px 10px; border: 1px solid var(--border-2); border-radius: 8px;
+            background: var(--surface); color: var(--ink); }
+        .auth-field input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+        .auth-error { color: var(--danger); font-size: 12px; min-height: 16px; margin: 2px 0 8px; }
+        .auth-go { width: 100%; justify-content: center; }
+        .auth-account { font-size: 12px; color: var(--ink-2); overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; max-width: 90px; }
+
         /* Files */
         .files-meter { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--ink-2); margin: 4px 0 14px; }
         .files-meter .bar { flex: 0 1 220px; height: 6px; border-radius: 6px; background: var(--surface-3); overflow: hidden; }
@@ -1138,8 +1160,9 @@
             <div class="convo-head"><span>Conversations</span>
                 <button class="icon-btn" id="new-convo" title="New chat"></button></div>
             <div class="convos" id="convos"></div>
-            <div class="side-foot"><span class="dot"></span><span>Read-only · Claude</span>
-                <button class="icon-btn" id="settings-btn" title="Settings" style="margin-left:auto"></button></div>
+            <div class="side-foot"><span class="dot"></span><span class="auth-account" id="auth-account"></span>
+                <button class="icon-btn" id="logout-btn" title="Log out" style="margin-left:auto"></button>
+                <button class="icon-btn" id="settings-btn" title="Settings"></button></div>
         </aside>
         <div class="backdrop" id="backdrop"></div>
 
@@ -1396,6 +1419,8 @@
         $('menu-btn').innerHTML = I.menu;
         $('send').innerHTML = I.send;
         $('settings-btn').innerHTML = I.settings;
+        $('logout-btn').innerHTML = I.chevLeft;
+        $('logout-btn').onclick = () => authLogout();
         $('settings-close').innerHTML = I.x;
         // Re-evaluate the PDF button after a report finishes loading (setView runs before
         // the data arrives, so the button would otherwise stay hidden until you switch tabs).
@@ -1469,13 +1494,24 @@
             const token = await shopify.idToken();
             return { 'Authorization': 'Bearer ' + token };
         }
+        let memSession = '';   // storage can be blocked in some browsers; memory carries the page
+        function appSession() { try { return localStorage.getItem('sc_app_session') || memSession; } catch (e) { return memSession; } }
+        function setAppSession(t) { memSession = t || ''; try { t ? localStorage.setItem('sc_app_session', t) : localStorage.removeItem('sc_app_session'); } catch (e) {} }
         async function api(path, payload) {
+            const hdrs = Object.assign({ 'Content-Type': 'application/json' }, await authHeaders());
+            const sess = appSession();
+            if (sess) hdrs['X-App-Session'] = sess;
             const res = await fetch(path, {
                 method: 'POST',
-                headers: Object.assign({ 'Content-Type': 'application/json' }, await authHeaders()),
+                headers: hdrs,
                 body: JSON.stringify(payload || {}),
             });
-            if (res.status === 401) throw new Error('Unauthorized. Open this from inside your Shopify admin.');
+            if (res.status === 401) {
+                // The embed token was fine, so this is the app's own door: the
+                // session is missing or expired. Show the login screen.
+                if (!path.startsWith('/api/auth/')) { setAppSession(''); authShow('login'); }
+                throw new Error('Please log in.');
+            }
             if (res.status === 429) throw new Error('The app is being asked for too much at once. Wait a few seconds and try again.');
             let data;
             try { data = await res.json(); }
@@ -6505,11 +6541,12 @@
                 ['What it costs', 'Cloudflare bills about 1p per 10 GB per month past the free tier, and downloads are free. At the full 50 GB that is roughly 60p a month.'],
             ]},
             { h: 'The team', body: [
-                ['Who is who', 'Everyone signs into Shopify as themselves, and the app recognises each person automatically. The first time someone opens it from their own Shopify login they appear on the Team tab; click their row to give them their name. Every action they take is then recorded under it.'],
-                ['Admins and members', 'Admins see the Team tab and Settings, manage people, and change the setup (couriers, backups, the size list). Members use everything else: labels, dispatch, files, the sales desk and chat. The app refuses to let the last admin be demoted or switched off, so nobody can lock the shop out.'],
-                ['The activity ledger', 'Team, then Activity: who did what, newest first, with a filter by person or area. The People view shows 30-day tallies per person: orders made, dispatches, files, sales desk touches.'],
-                ['Adding a person', 'Give them a staff login in Shopify first: Settings, then Users, in your Shopify admin (not this app). When they open Store Copilot once, they appear on the Team tab ready to be named. If Shopify will not let you add staff, that is the Basic plan limit; the Grow plan allows up to 5 staff.'],
-                ['Switching someone off', 'Team, then Switch off on their row. They will see "Unauthorized" if they try to open the app until an admin restores them.'],
+                ['Your own accounts', 'The app keeps its own accounts: a username and password each, nothing to do with Shopify logins. Opening the app shows its sign-in screen; the very first open ever shows setup instead, where the master admin account is created. Passwords are stored scrambled and are never shown to anyone, including admins.'],
+                ['The three ranks', 'The master admin (one account) controls everything, including the other accounts, and can never be demoted, switched off or deleted. Admins manage member accounts and the day-to-day setup, but cannot touch the master or other admins, and cannot change roles. Members use the work tools: labels, dispatch, files, the sales desk and chat.'],
+                ['Adding a person', 'Team, then New account: their name, a username, and the role. The app makes a starter password and shows it exactly once; pass it on privately. They sign in with it and are made to choose their own password straight away.'],
+                ['Forgotten passwords', 'Reset password on their row makes a new starter password, shown once. Their old password and any open sessions stop working immediately. Nobody, ever, can look up an existing password.'],
+                ['Switching someone off', 'Team, then Switch off on their row: they are signed out that second and cannot sign back in until restored. Delete (master only) removes the account for good; their history keeps their name.'],
+                ['The activity ledger', 'Team, then Activity: who did what, newest first, filter by person or area. Sign-ins, failed sign-ins and every account change are recorded alongside the work itself. The People view shows 30-day tallies per person.'],
             ]},
             { h: 'Housekeeping', body: [
                 ['Backups', 'A snapshot is taken automatically every week and the newest four are kept. Those live in the same storage they protect, so download a copy occasionally from Settings, Connections.'],
@@ -8111,7 +8148,7 @@
            Settings; members see neither. Hiding is politeness; the server
            enforces every gate again.
            ================================================================== */
-        let teamMe = null, teamCache = null, teamSeg = 'people';
+        let teamMe = null, teamCache = null, teamSeg = 'people', teamNewOpen = false;
         let teamFilterWho = '', teamFilterArea = '';
         function byName(sub) {
             if (!sub) return '';
@@ -8119,20 +8156,136 @@
             if (names[sub]) return names[sub];
             return /^\d+$/.test(String(sub)) ? '' : String(sub).slice(0, 24);
         }
-        async function loadTeamMe(attempt) {
-            try {
-                const r = await api('/api/team/me', {});
-                teamMe = r.me;
-                const admin = teamMe && teamMe.role === 'admin';
-                $('nav-team').style.display = admin ? '' : 'none';
-                $('settings-btn').style.display = admin ? '' : 'none';
-            } catch (e) {
-                // One flaky boot call must not hide the Team tab all session:
-                // try again a few times, then leave the chrome as it is (the
-                // server enforces every gate regardless).
-                attempt = attempt || 0;
-                if (attempt < 3) setTimeout(() => loadTeamMe(attempt + 1), 4000 * (attempt + 1));
+        /* ---- the app's own front door ---- */
+        async function authApi(path, payload) {
+            const hdrs = Object.assign({ 'Content-Type': 'application/json' }, await authHeaders());
+            const sess = appSession();
+            if (sess) hdrs['X-App-Session'] = sess;
+            const res = await fetch(path, { method: 'POST', headers: hdrs, body: JSON.stringify(payload || {}) });
+            const data = await res.json().catch(() => ({}));
+            if (data.error) throw new Error(data.error);
+            return data;
+        }
+        function applyRoleChrome() {
+            const lvl = teamMe ? ({ master: 3, admin: 2, member: 1 }[teamMe.role] || 1) : 1;
+            $('nav-team').style.display = lvl >= 2 ? '' : 'none';
+            $('settings-btn').style.display = lvl >= 2 ? '' : 'none';
+            const acct = $('auth-account');
+            if (acct) acct.textContent = teamMe ? teamMe.name : '';
+        }
+        function authOverlay() {
+            let ov = $('auth-overlay');
+            if (ov) return ov;
+            ov = el('div'); ov.id = 'auth-overlay'; ov.className = 'auth-overlay';
+            document.body.append(ov);
+            return ov;
+        }
+        function authField(labelText, type, id) {
+            const w = el('div', 'auth-field');
+            const lab = el('label', null, labelText); lab.htmlFor = id;
+            const inp = document.createElement('input');
+            inp.type = type; inp.id = id; inp.autocomplete = type === 'password' ? 'current-password' : 'username';
+            w.append(lab, inp);
+            return [w, inp];
+        }
+        function authShow(mode) {
+            const ov = authOverlay();
+            if (ov.style.display === 'flex' && ov.dataset.mode === mode) return;   // already up; never wipe typing
+            ov.dataset.mode = mode;
+            ov.innerHTML = ''; ov.style.display = 'flex';
+            const card = el('div', 'auth-card');
+            const brand = el('div', 'auth-brand'); brand.innerHTML = I.spark;
+            card.append(brand);
+            const err = el('div', 'auth-error');
+            async function finish(p) {
+                setAppSession(p.session);
+                teamMe = p.me;
+                if (p.me && p.me.must_change) { authShow('change'); return; }
+                ov.style.display = 'none'; ov.dataset.mode = '';
+                applyRoleChrome();
+                // A deep link that hit the login screen carries on now.
+                const pend = window.__pendingAdminLink; window.__pendingAdminLink = null;
+                if (pend) (pend.dispatch ? dispatchFromAdminLink : printFromAdminLink)(pend.id);
             }
+            if (mode === 'setup') {
+                card.append(el('h2', null, 'Set up Store Copilot'),
+                    el('p', 'auth-sub', 'The app keeps its own accounts. Create the master '
+                        + 'admin account first: it controls everything, including the other accounts.'));
+                const [fn, inName] = authField('Your name', 'text', 'au-name');
+                const [fu, inUser] = authField('Username', 'text', 'au-user');
+                const [fp, inPw] = authField('Password (8 characters or more)', 'password', 'au-pw');
+                inPw.autocomplete = 'new-password';
+                const go = el('button', 'btn btn-primary auth-go', 'Create the master account');
+                go.onclick = async () => {
+                    go.disabled = true; err.textContent = '';
+                    try {
+                        finish(await authApi('/api/auth/setup',
+                            { name: inName.value, username: inUser.value, password: inPw.value }));
+                    } catch (e) { err.textContent = e.message; go.disabled = false; }
+                };
+                card.append(fn, fu, fp, err, go);
+            } else if (mode === 'change') {
+                card.append(el('h2', null, 'Choose your own password'),
+                    el('p', 'auth-sub', 'The starter password was only for getting in. Set your '
+                        + 'own before carrying on; nobody else ever sees it.'));
+                const [fc, inCur] = authField('Current password', 'password', 'au-cur');
+                const [fp, inNew] = authField('New password (8 characters or more)', 'password', 'au-new');
+                inNew.autocomplete = 'new-password';
+                const go = el('button', 'btn btn-primary auth-go', 'Save my password');
+                go.onclick = async () => {
+                    go.disabled = true; err.textContent = '';
+                    try {
+                        const r = await authApi('/api/auth/password', { current: inCur.value, new: inNew.value });
+                        setAppSession(r.session);
+                        if (teamMe) teamMe.must_change = false;
+                        ov.style.display = 'none'; ov.dataset.mode = '';
+                        applyRoleChrome();
+                    } catch (e) { err.textContent = e.message; go.disabled = false; }
+                };
+                const back = el('button', 'files-crumb', 'Sign in as someone else');
+                back.style.marginTop = '10px';
+                back.onclick = () => { setAppSession(''); ov.dataset.mode = ''; authShow('login'); };
+                card.append(fc, fp, err, go, back);
+            } else {
+                card.append(el('h2', null, 'Sign in'),
+                    el('p', 'auth-sub', 'Your own account, not Shopify\'s. Ask an admin if you '
+                        + 'do not have one yet.'));
+                const [fu, inUser] = authField('Username', 'text', 'au-user');
+                const [fp, inPw] = authField('Password', 'password', 'au-pw');
+                const go = el('button', 'btn btn-primary auth-go', 'Sign in');
+                const submit = async () => {
+                    go.disabled = true; err.textContent = '';
+                    try {
+                        finish(await authApi('/api/auth/login', { username: inUser.value, password: inPw.value }));
+                    } catch (e) { err.textContent = e.message; go.disabled = false; }
+                };
+                go.onclick = submit;
+                inPw.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+                card.append(fu, fp, err, go);
+            }
+            ov.append(card);
+            const first = card.querySelector('input'); if (first) setTimeout(() => first.focus(), 50);
+        }
+        async function authBoot(attempt) {
+            try {
+                const st = await authApi('/api/auth/state', {});
+                if (st.setup) { authShow('setup'); return; }
+                if (!st.logged_in) { authShow('login'); return; }
+                teamMe = st.me;
+                if (st.me.must_change) { authShow('change'); return; }
+                const ov = $('auth-overlay'); if (ov) { ov.style.display = 'none'; ov.dataset.mode = ''; }
+                applyRoleChrome();
+                window.__pendingAdminLink = null;   // the boot-time call ran with a live session
+            } catch (e) {
+                attempt = attempt || 0;
+                if (attempt < 3) setTimeout(() => authBoot(attempt + 1), 3000 * (attempt + 1));
+            }
+        }
+        async function authLogout() {
+            try { await authApi('/api/auth/logout', {}); } catch (e) {}
+            setAppSession('');
+            teamMe = null;
+            authShow('login');
         }
         function showTeamView() {
             if (teamCache) { renderTeam(); }
@@ -8164,14 +8317,11 @@
             const badge = el('div', 'badge'); badge.innerHTML = I.users;
             const ht = el('div');
             ht.append(el('h2', null, 'Team'),
-                el('p', null, 'Everyone who uses the app, and what they have been doing. People '
-                    + 'appear here the first time they open the app from their own Shopify login; '
-                    + 'name them once and their whole history wears that name.'));
+                el('p', null, 'The app\'s own accounts, and what everyone has been doing. Each '
+                    + 'person signs in with their own username and password; their actions are '
+                    + 'recorded under their name.'));
             hero.append(badge, ht);
             box.append(hero);
-            if (d.grace) box.append(el('div', 'msg error',
-                'No admin is set yet, so everyone can see everything. Find yourself below, then '
-                + 'set your role to Admin to switch the doors on.'));
             const seg = el('div', 'lbl-seg');
             [['people', 'People'], ['activity', 'Activity']].forEach(([k, lab]) => {
                 const b = el('button', 'lbl-segbtn' + (teamSeg === k ? ' on' : ''), lab);
@@ -8183,27 +8333,82 @@
             if (teamSeg === 'activity') renderTeamFeed(host);
             else renderTeamPeople(host);
         }
+        function showStarterPw(name, pw) {
+            /* The one showing of a starter password. Copy it, hand it over,
+               and the person is forced to change it on first login. */
+            const overlay = el('div', 'modal-overlay show confirm-overlay');
+            const modal = el('div', 'modal confirm-modal');
+            const head = el('div', 'modal-head'); head.append(el('h3', null, 'Starter password for ' + name));
+            const body = el('div', 'modal-body');
+            body.append(el('p', 'confirm-msg', 'This is shown once and never again. Pass it on '
+                + 'privately; they must choose their own password the first time they sign in.'));
+            const pwBox = el('div', 'auth-field');
+            const inp = document.createElement('input');
+            inp.type = 'text'; inp.readOnly = true; inp.value = pw;
+            pwBox.append(inp); body.append(pwBox);
+            const foot = el('div', 'modal-foot');
+            const copy = el('button', 'btn'); copy.append(ico(I.copy), document.createTextNode('Copy'));
+            copy.onclick = async () => {
+                try { await navigator.clipboard.writeText(pw); copy.textContent = 'Copied'; }
+                catch (e) { inp.select(); document.execCommand('copy'); copy.textContent = 'Copied'; }
+            };
+            const done = el('button', 'btn btn-primary', 'Done');
+            done.onclick = () => overlay.remove();
+            foot.append(copy, done);
+            modal.append(head, body, foot); overlay.append(modal); document.body.append(overlay);
+            inp.onclick = () => inp.select();
+        }
         function renderTeamPeople(host) {
             const d = teamCache;
+            const lvl = { master: 3, admin: 2, member: 1 };
+            const myLevel = lvl[d.my_role] || 0;
+            const bar = el('div', 'lbl-toolbar');
+            const add = el('button', 'btn btn-primary'); add.append(ico(I.plus), document.createTextNode('New account'));
+            add.onclick = () => { teamNewOpen = !teamNewOpen; renderTeam(); };
+            bar.append(add);
+            host.append(bar);
             const list = el('div', 'files-list');
+            if (teamNewOpen) {
+                const row = el('div', 'files-row');
+                const inName = document.createElement('input');
+                inName.className = 'files-rename'; inName.placeholder = 'Name';
+                const inUser = document.createElement('input');
+                inUser.className = 'files-rename'; inUser.placeholder = 'Username';
+                const roleSel = el('select', 'lbl-size');
+                [['member', 'Member']].concat(myLevel >= 3 ? [['admin', 'Admin']] : [])
+                    .forEach(([v, lab]) => { const o = el('option', null, lab); o.value = v; roleSel.append(o); });
+                const go = el('button', 'btn btn-primary', 'Create');
+                go.onclick = async () => {
+                    go.disabled = true;
+                    try {
+                        const r = await api('/api/team/user', { op: 'create', name: inName.value,
+                            username: inUser.value, role: roleSel.value });
+                        teamNewOpen = false;
+                        showStarterPw(inName.value.trim() || 'the new account', r.starter_password);
+                        loadTeam();
+                    } catch (e) { go.disabled = false; toastError(e.message); }
+                };
+                row.append(inName, inUser, roleSel, go);
+                list.append(row);
+            }
             d.users.forEach(u => {
                 const row = el('div', 'files-row');
                 row.style.flexWrap = 'wrap';
+                const mine = u.id === d.me;
+                const theirLevel = lvl[u.role] || 1;
+                const manageable = u.role !== 'master' && (myLevel >= 3 || myLevel > theirLevel);
                 const nameBtn = el('button', 'files-name');
-                nameBtn.textContent = (u.name || 'Not named yet')
-                    + (u.sub === d.me ? ' (you)' : '');
-                if (!u.name) nameBtn.style.color = 'var(--ink-3)';
+                nameBtn.textContent = u.name + (mine ? ' (you)' : '');
                 nameBtn.title = 'Rename';
-                const startRename = () => {
+                if (mine || manageable) nameBtn.onclick = () => {
                     const inp = document.createElement('input');
-                    inp.className = 'files-rename'; inp.value = u.name || '';
-                    inp.placeholder = 'Their name';
+                    inp.className = 'files-rename'; inp.value = u.name;
                     let done = false;
                     const finish = async (commit) => {
                         if (done) return; done = true;
                         const v = inp.value.trim();
                         if (commit && v && v !== u.name) {
-                            try { await teamOp({ op: 'rename', sub: u.sub, name: v }); }
+                            try { await api('/api/team/user', { op: 'rename', id: u.id, name: v }); }
                             catch (e) { toastError(e.message); }
                         }
                         loadTeam();
@@ -8212,45 +8417,73 @@
                     inp.onblur = () => finish(true);
                     row.replaceChild(inp, nameBtn);
                     inp.focus(); inp.select();
-                };
-                nameBtn.onclick = startRename;
+                }; else nameBtn.classList.add('still');
                 row.append(nameBtn);
-                const c = (d.counts || {})[u.sub] || {};
+                const c = (d.counts || {})[u.id] || {};
                 const bits = [['made', c.made], ['dispatched', c.dispatched], ['files', c.files],
-                              ['sales', c.crm], ['other', c.other]]
-                    .filter(([, n]) => n > 0).map(([lab, n]) => n + ' ' + lab);
+                              ['sales', c.crm]].filter(([, n]) => n > 0).map(([lab, n]) => n + ' ' + lab);
                 row.append(el('span', 'files-meta',
-                    (bits.length ? bits.join(' · ') + ' in 30 days' : 'nothing recorded yet')
-                    + ' · last seen ' + fmtDate(u.last_seen)));
+                    u.username + ' · '
+                    + (bits.length ? bits.join(' · ') + ' in 30 days · ' : '')
+                    + (u.last_login_at ? 'last login ' + fmtDate(u.last_login_at) : 'never logged in')));
                 const acts = el('div', 'files-acts'); acts.style.opacity = '1';
-                const role = el('select', 'lbl-size');
-                [['admin', 'Admin'], ['member', 'Member']].forEach(([v, lab]) => {
-                    const o = el('option', null, lab); o.value = v;
-                    if ((u.role || 'member') === v) o.selected = true;
-                    role.append(o);
-                });
-                role.onchange = async () => {
-                    try { await teamOp({ op: 'role', sub: u.sub, role: role.value }); }
-                    catch (e) { toastError(e.message); }
-                    loadTeam();
-                };
-                const off = el('button', 'btn', u.active === false ? 'Restore access' : 'Switch off');
-                off.onclick = async () => {
-                    const on = u.active === false;
-                    if (!on && !(await uiConfirm('Switch off ' + (u.name || 'this person') + '’s access? '
-                        + 'They will not be able to open the app until an admin restores it.'))) return;
-                    try { await teamOp({ op: 'active', sub: u.sub, active: on }); }
-                    catch (e) { toastError(e.message); }
-                    loadTeam();
-                };
-                acts.append(role, off);
+                if (u.role === 'master') {
+                    acts.append(el('span', 'files-meta', 'Master admin'));
+                } else {
+                    const role = el('select', 'lbl-size');
+                    [['admin', 'Admin'], ['member', 'Member']].forEach(([v, lab]) => {
+                        const o = el('option', null, lab); o.value = v;
+                        if (u.role === v) o.selected = true; role.append(o);
+                    });
+                    role.disabled = myLevel < 3;
+                    role.onchange = async () => {
+                        try { await api('/api/team/user', { op: 'role', id: u.id, role: role.value }); }
+                        catch (e) { toastError(e.message); }
+                        loadTeam();
+                    };
+                    acts.append(role);
+                    if (manageable) {
+                        const rp = el('button', 'btn', 'Reset password');
+                        rp.onclick = async () => {
+                            if (!(await uiConfirm('Reset ' + u.name + '\'s password? Their current '
+                                + 'one stops working immediately.'))) return;
+                            try {
+                                const r = await api('/api/team/user', { op: 'reset_password', id: u.id });
+                                showStarterPw(u.name, r.starter_password);
+                            } catch (e) { toastError(e.message); }
+                            loadTeam();
+                        };
+                        const off = el('button', 'btn', u.active === false ? 'Restore' : 'Switch off');
+                        off.onclick = async () => {
+                            const on = u.active === false;
+                            if (!on && !(await uiConfirm('Switch off ' + u.name + '\'s access? They '
+                                + 'are signed out immediately and cannot sign back in until restored.'))) return;
+                            try { await api('/api/team/user', { op: 'active', id: u.id, active: on }); }
+                            catch (e) { toastError(e.message); }
+                            loadTeam();
+                        };
+                        acts.append(rp, off);
+                    }
+                    if (myLevel >= 3) {
+                        const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Delete account';
+                        del.onclick = async () => {
+                            if (!(await uiConfirm('Delete ' + u.name + '\'s account for good? Their '
+                                + 'history keeps their name, but they can never sign in again.',
+                                { okText: 'Delete the account' }))) return;
+                            try { await api('/api/team/user', { op: 'delete', id: u.id }); }
+                            catch (e) { toastError(e.message); }
+                            loadTeam();
+                        };
+                        acts.append(del);
+                    }
+                }
                 row.append(acts);
                 if (u.active === false) { row.style.opacity = '.55'; }
                 list.append(row);
             });
             host.append(list, el('div', 'files-hint',
-                'Click a name to change it. Every person needs their own Shopify staff login: '
-                + 'the register can only tell people apart when they sign in as themselves.'));
+                'Accounts belong to the app, not Shopify. New accounts get a starter password '
+                + 'shown once; everyone chooses their own on first sign-in.'));
         }
         function renderTeamFeed(host) {
             const d = teamCache;
@@ -8303,12 +8536,6 @@
             host.append(list, el('div', 'files-hint',
                 'The newest actions are at the top. The feed shows the last 600; the full ledger keeps 8,000 and is in every backup.'));
         }
-        async function teamOp(body) {
-            const r = await api('/api/team/user', body);
-            if (r && r.users && teamCache) { teamCache.users = r.users; teamCache.grace = r.grace; }
-            return r;
-        }
-
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
             ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'crm', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
@@ -8617,7 +8844,8 @@
         const bootLabels = bootQP.get('view') === 'labels';
         const bootOrderId = bootLabels ? parseInt(bootQP.get('id') || '0', 10) : 0;
         if (bootOrderId) skipLabelsAutoLoad = true;   // the deep link fetch owns the view
-        renderSidebar(); renderChat(); loadTeamMe(); setView(bootLabels ? 'labels' : 'overview');
+        if (bootOrderId) window.__pendingAdminLink = { id: bootOrderId, dispatch: bootQP.get('dispatch') === '1' };
+        renderSidebar(); renderChat(); authBoot(); setView(bootLabels ? 'labels' : 'overview');
         if (bootOrderId) (bootQP.get('dispatch') === '1' ? dispatchFromAdminLink : printFromAdminLink)(bootOrderId);
         loadProfile();  // pull the saved store profile from the server (for the Settings modal)
         loadMemory();   // pull saved memories (for Overview follow-ups + the Memory tab)

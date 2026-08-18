@@ -30,6 +30,7 @@ os.environ.update({
     "FILES_PATH": SCRATCH + "/files.json",
     "USERS_PATH": SCRATCH + "/users.json",
     "ACTIVITY_PATH": SCRATCH + "/activity.json",
+    "SESSIONS_PATH": SCRATCH + "/sessions.json",
 })
 for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
     os.environ.pop(v, None)
@@ -178,9 +179,32 @@ async def fake_soap_call(service, action, inner, retryable=True):
 worldoptions._soap_call = fake_soap_call
 
 client = TestClient(server.mcp.streamable_http_app())
+APP_AUTH = {"session": "", "master": ""}
+MASTER_PW = "test-password-123"
+def ensure_auth():
+    """The app owns its accounts now: every request needs a session. The
+    harness lazily creates/logs into the master account the first time."""
+    if APP_AUTH["session"]:
+        return APP_AUTH["session"]
+    copilot._rl_hits.clear(); copilot._rl_global.clear()
+    h = {"Authorization": "Bearer " + tok()}
+    st = client.post("/api/auth/state", json={}, headers=h).json()
+    if st.get("setup"):
+        r = client.post("/api/auth/setup", json={"name": "Cameron", "username": "cameron",
+                                                 "password": MASTER_PW}, headers=h).json()
+    else:
+        r = client.post("/api/auth/login", json={"username": "cameron",
+                                                 "password": MASTER_PW}, headers=h).json()
+    APP_AUTH["session"], APP_AUTH["master"] = r["session"], r["me"]["id"]
+    return APP_AUTH["session"]
 def post(path, body):
     copilot._rl_hits.clear(); copilot._rl_global.clear()   # the suite outpaces the app's rate limiter
-    return client.post(path, json=body, headers={"Authorization": "Bearer " + tok()})
+    return client.post(path, json=body, headers={"Authorization": "Bearer " + tok(),
+                                                 "X-App-Session": ensure_auth()})
+def post_s(session, path, body):
+    copilot._rl_hits.clear(); copilot._rl_global.clear()
+    return client.post(path, json=body, headers={"Authorization": "Bearer " + tok(),
+                                                 "X-App-Session": session})
 
 # =========================== unit: envelope construction ====================
 @test
@@ -4350,7 +4374,7 @@ def t_files_concurrent_uploads_do_not_clobber_the_store():
         async def race():
             copilot._rl_hits.clear(); copilot._rl_global.clear()
             transport = httpx.ASGITransport(app=server.mcp.streamable_http_app())
-            headers = {"Authorization": "Bearer " + tok()}
+            headers = {"Authorization": "Bearer " + tok(), "X-App-Session": ensure_auth()}
             async with httpx.AsyncClient(transport=transport, base_url="http://testserver",
                                          headers=headers) as ac:
                 return await asyncio.gather(*[
@@ -4393,163 +4417,219 @@ def t_files_disposition_and_names():
     ok("filename*=UTF-8''caf%C3%A9" in d, d)
     ok('\n' not in d and '\r' not in d, "no header injection")
 
-# =========================== team: users, roles, ledger =====================
-def postas(sub, path, body):
-    copilot._rl_hits.clear(); copilot._rl_global.clear()
-    return client.post(path, json=body, headers={"Authorization": "Bearer " + tok(sub)})
-
-def with_team(fn):
-    """Run fn against a fresh, empty register and ledger."""
-    copilot._users_mem = None
-    for p in (copilot.USERS_PATH, copilot.ACTIVITY_PATH):
-        try:
-            os.remove(p)
-        except FileNotFoundError:
-            pass
-        copilot._poisoned_stores.discard(p)
-    try:
-        fn()
-    finally:
+# =========================== accounts: the app's own auth ===================
+def with_accounts(fn):
+    """Run fn against a fresh, empty accounts world. On exit everything is
+    wiped again so the harness's lazy master is recreated for later tests."""
+    def wipe():
         copilot._users_mem = None
-        for p in (copilot.USERS_PATH, copilot.ACTIVITY_PATH):
+        copilot._sessions_mem = None
+        APP_AUTH["session"] = APP_AUTH["master"] = ""
+        for p in (copilot.USERS_PATH, copilot.SESSIONS_PATH, copilot.ACTIVITY_PATH):
             try:
                 os.remove(p)
             except FileNotFoundError:
                 pass
+            copilot._poisoned_stores.discard(p)
+    wipe()
+    try:
+        fn()
+    finally:
+        wipe()
+
+def bare(path, body):
+    copilot._rl_hits.clear(); copilot._rl_global.clear()
+    return client.post(path, json=body, headers={"Authorization": "Bearer " + tok()})
+
+def make_user(name, username, role="member"):
+    r = post("/api/team/user", {"op": "create", "name": name, "username": username, "role": role})
+    eq(r.status_code, 200, r.text)
+    j = r.json()
+    uid = [u["id"] for u in j["users"] if u["username"] == username][0]
+    return uid, j["starter_password"]
+
+def login(username, pw):
+    return bare("/api/auth/login", {"username": username, "password": pw})
 
 @test
-def t_team_first_face_registers_and_grace_makes_them_admin():
+def t_auth_first_run_creates_the_master_and_bricks_the_door():
     def go():
-        r = post("/api/team/me", {})
+        st = bare("/api/auth/state", {}).json()
+        ok(st["setup"], "an empty app asks to be set up")
+        eq(bare("/api/auth/setup", {"name": "C", "username": "c", "password": "short"}).status_code,
+           400, "8 characters minimum")
+        r = bare("/api/auth/setup", {"name": "Cameron", "username": "cameron",
+                                     "password": MASTER_PW})
         eq(r.status_code, 200, r.text)
-        me = r.json()["me"]
-        eq(me["role"], "admin", "with no admin on record, everyone acts as one")
-        ok(me["grace"], "and the answer says the register is still being set up")
-        b = post("/api/team/board", {})
-        eq(b.status_code, 200, b.text)
-        eq(len(b.json()["users"]), 1, "the arrival registered themselves")
-        ok(any(e["action"] == "first sign-in" for e in b.json()["events"]),
-           "and the arrival is on the ledger")
-    with_team(go)
+        eq(r.json()["me"]["role"], "master")
+        eq(bare("/api/auth/setup", {"name": "X", "username": "x", "password": "longenough1"}).status_code,
+           400, "setup runs exactly once")
+        st2 = bare("/api/auth/state", {}).json()
+        ok(not st2["setup"] and not st2["logged_in"], "a session cookie is not implied")
+    with_accounts(go)
 
 @test
-def t_team_roles_gate_the_doors_once_an_admin_exists():
+def t_auth_no_session_means_no_entry_anywhere():
     def go():
-        boss = post("/api/team/me", {}).json()["me"]["sub"]
-        eq(post("/api/team/user", {"op": "rename", "sub": boss, "name": "Cameron"}).status_code, 200)
-        eq(post("/api/team/user", {"op": "role", "sub": boss, "role": "admin"}).status_code, 200)
-        r2 = postas("222", "/api/team/me", {})
-        eq(r2.json()["me"]["role"], "member", "new faces are members once an admin exists")
-        eq(postas("222", "/api/team/board", {}).status_code, 403, "the register is admin only")
-        eq(postas("222", "/api/backup", {}).status_code, 403, "backups are admin only")
-        eq(postas("222", "/api/shipping/config", {"op": "set"}).status_code, 403,
-           "shipping settings are admin only")
-        eq(postas("222", "/api/shipping/config", {}).status_code, 200, "reading them stays open")
-        eq(postas("222", "/api/files/tree", {}).status_code, 200, "the work tools stay open")
-        eq(postas("222", "/api/gobo-sizes/upload", {"csv": "x"}).status_code, 403,
-           "the size list is admin only")
-    with_team(go)
+        ensure_auth()
+        eq(bare("/api/files/tree", {}).status_code, 401,
+           "a valid Shopify embed token alone opens nothing")
+        eq(post("/api/files/tree", {}).status_code, 200, "a session does")
+    with_accounts(go)
 
 @test
-def t_team_lockout_is_impossible():
+def t_auth_login_is_vague_locked_and_logged():
     def go():
-        boss = post("/api/team/me", {}).json()["me"]["sub"]
-        post("/api/team/user", {"op": "role", "sub": boss, "role": "admin"})
-        eq(post("/api/team/user", {"op": "role", "sub": boss, "role": "member"}).status_code, 400,
-           "the last admin cannot be demoted")
-        eq(post("/api/team/user", {"op": "active", "sub": boss, "active": False}).status_code, 400,
-           "nor switch themselves off")
-        postas("222", "/api/team/me", {})
-        post("/api/team/user", {"op": "rename", "sub": "222", "name": "Ian"})
-        eq(post("/api/team/user", {"op": "role", "sub": "222", "role": "admin"}).status_code, 200)
-        eq(post("/api/team/user", {"op": "role", "sub": boss, "role": "member"}).status_code, 200,
-           "with a second admin standing, stepping down is allowed")
-    with_team(go)
+        ensure_auth()
+        r = login("cameron", "wrong-password")
+        eq(r.status_code, 401)
+        ok("do not match" in r.json()["error"], "one vague answer")
+        r2 = login("nobody", "whatever12")
+        eq(r2.status_code, 401)
+        eq(r.json()["error"], r2.json()["error"], "the same vague answer for user and password")
+        for _ in range(8):
+            login("cameron", "wrong-password")
+        r3 = login("cameron", MASTER_PW)
+        eq(r3.status_code, 401, "the pause blocks even the right password")
+        eq(r3.json()["error"], r.json()["error"],
+           "and answers with the same vague line, so a guesser learns nothing")
+        ev = post("/api/team/board", {})
+        # the pause blocks even the right password, so the board call needs the
+        # existing session, which stays valid
+        eq(ev.status_code, 200, ev.text)
+        ok(any(e["action"] == "failed login" for e in ev.json()["events"]), "failures are on the ledger")
+        ok(any(e["action"] == "account paused" for e in ev.json()["events"]), "so is the pause")
+    with_accounts(go)
 
 @test
-def t_team_switched_off_means_every_door_is_shut():
+def t_auth_passwords_are_hashed_and_never_echoed():
     def go():
-        boss = post("/api/team/me", {}).json()["me"]["sub"]
-        post("/api/team/user", {"op": "role", "sub": boss, "role": "admin"})
-        postas("333", "/api/team/me", {})
-        eq(post("/api/team/user", {"op": "active", "sub": "333", "active": False}).status_code, 200)
-        eq(postas("333", "/api/files/tree", {}).status_code, 401,
-           "a verified token still bounces when its person is switched off")
-        eq(post("/api/team/user", {"op": "active", "sub": "333", "active": True}).status_code, 200)
-        eq(postas("333", "/api/files/tree", {}).status_code, 200, "and works again when restored")
-    with_team(go)
+        ensure_auth()
+        raw = open(copilot.USERS_PATH).read()
+        ok(MASTER_PW not in raw, "no plain text password on disk")
+        b = post("/api/team/board", {}).json()
+        ok(all("pw" not in u and "password" not in u for u in b["users"]),
+           "no password material in any response")
+        uid, starter = make_user("Owen", "owen")
+        ok(starter not in open(copilot.USERS_PATH).read(), "starter passwords are hashed too")
+    with_accounts(go)
 
 @test
-def t_team_a_switched_off_id_cannot_use_the_print_document_either():
-    # The admin print action authenticates with a raw session token, outside
-    # _authorize; the register must apply there too or a ban means nothing.
+def t_auth_starter_password_flow_forces_a_change():
     def go():
-        boss = post("/api/team/me", {}).json()["me"]["sub"]
-        post("/api/team/user", {"op": "role", "sub": boss, "role": "admin"})
-        postas("444", "/api/team/me", {})
-        post("/api/team/user", {"op": "active", "sub": "444", "active": False})
-        r = client.get("/print/production-labels?ids=12345&id_token=" + tok("444"))
-        ok(r.status_code in (200, 401) and "Unauthorized" in r.text,
-           "the print document refuses a switched-off id: " + r.text[:80])
-        r2 = client.get("/print/production-labels?ids=12345&id_token=" + tok(boss))
-        ok("Unauthorized" not in r2.text, "an active id still prints")
-    with_team(go)
+        ensure_auth()
+        uid, starter = make_user("Owen", "owen")
+        r = login("owen", starter)
+        eq(r.status_code, 200, r.text)
+        ok(r.json()["me"]["must_change"], "the starter is only for getting in")
+        sess = r.json()["session"]
+        r2 = post_s(sess, "/api/auth/password", {"current": "wrong", "new": "owens-own-pw1"})
+        eq(r2.status_code, 400, "the current password is always required")
+        r3 = post_s(sess, "/api/auth/password", {"current": starter, "new": "owens-own-pw1"})
+        eq(r3.status_code, 200, r3.text)
+        eq(login("owen", starter).status_code, 401, "the starter is dead")
+        eq(login("owen", "owens-own-pw1").status_code, 200, "the chosen password lives")
+        eq(post_s(sess, "/api/files/tree", {}).status_code, 401,
+           "changing the password killed the old session")
+        eq(post_s(r3.json()["session"], "/api/files/tree", {}).status_code, 200,
+           "and handed back a fresh one")
+    with_accounts(go)
 
 @test
-def t_team_a_role_change_that_cannot_be_saved_says_so():
-    # "ok" while only memory holds the change would evaporate on restart.
+def t_auth_rank_order_is_enforced_on_the_server():
     def go():
-        boss = post("/api/team/me", {}).json()["me"]["sub"]
-        post("/api/team/user", {"op": "role", "sub": boss, "role": "admin"})
-        with open(copilot.USERS_PATH + ".block", "w") as fh:
-            fh.write("x")
-        copilot._poisoned_stores.add(copilot.USERS_PATH)
-        try:
-            r = post("/api/team/user", {"op": "rename", "sub": boss, "name": "Ghost"})
-            eq(r.status_code, 500, "an unsaveable change is refused, not pretended")
-            ok("unwritable" in r.json()["error"], r.text)
-        finally:
-            copilot._poisoned_stores.discard(copilot.USERS_PATH)
-            os.remove(copilot.USERS_PATH + ".block")
-        copilot._users_mem = None
-        eq(post("/api/team/board", {}).json()["users"][0].get("name"), "",
-           "and the phantom rename never took")
-    with_team(go)
+        ensure_auth()
+        ian, ian_pw = make_user("Ian", "ian", role="admin")
+        owen, owen_pw = make_user("Owen", "owen")
+        ian_sess = login("ian", ian_pw).json()["session"]
+        post_s(ian_sess, "/api/auth/password", {"current": ian_pw, "new": "ians-own-pw12"})
+        ian_sess = login("ian", "ians-own-pw12").json()["session"]
+        # An admin manages members...
+        r = post_s(ian_sess, "/api/team/user", {"op": "create", "name": "Amy", "username": "amy"})
+        eq(r.status_code, 200, "an admin can create members")
+        eq(post_s(ian_sess, "/api/team/user", {"op": "reset_password", "id": owen}).status_code, 200,
+           "an admin can reset a member's password")
+        # ...but never upwards.
+        eq(post_s(ian_sess, "/api/team/user",
+                  {"op": "create", "name": "Bob", "username": "bob", "role": "admin"}).status_code,
+           403, "only the master creates admins")
+        eq(post_s(ian_sess, "/api/team/user", {"op": "role", "id": ian, "role": "admin"}).status_code,
+           403, "an admin cannot touch roles at all")
+        master = APP_AUTH["master"]
+        eq(post_s(ian_sess, "/api/team/user", {"op": "rename", "id": master, "name": "X"}).status_code,
+           403, "the master cannot be managed by an admin")
+        eq(post_s(ian_sess, "/api/team/user", {"op": "reset_password", "id": master}).status_code,
+           403, "nor their password reset")
+        # A member manages nobody.
+        owen_sess = login("owen", post("/api/team/user", {"op": "reset_password", "id": owen})
+                          .json()["starter_password"]).json()["session"]
+        eq(post_s(owen_sess, "/api/team/board", {}).status_code, 403, "members see no register")
+        eq(post_s(owen_sess, "/api/backup", {}).status_code, 403, "and no admin doors")
+        eq(post_s(owen_sess, "/api/files/tree", {}).status_code, 200, "work tools stay open")
+    with_accounts(go)
 
 @test
-def t_team_counts_mean_work_not_events():
+def t_auth_the_master_is_untouchable():
     def go():
-        boss = post("/api/team/me", {}).json()["me"]["sub"]
-        post("/api/team/user", {"op": "role", "sub": boss, "role": "admin"})
-        copilot._track(boss, "production", "marked made", "#1")
-        copilot._track(boss, "production", "marked made", "#2")
-        copilot._track(boss, "production", "un-marked made", "#2")
-        copilot._track(boss, "dispatch", "booked a courier", "#1")
-        copilot._track(boss, "dispatch", "cancelled a shipment", "#1")
-        c = post("/api/team/board", {}).json()["counts"][boss]
-        eq(c["made"], 1, "an undo subtracts a made")
-        eq(c["dispatched"], 0, "a cancellation subtracts a booking")
-    with_team(go)
+        ensure_auth()
+        master = APP_AUTH["master"]
+        eq(post("/api/team/user", {"op": "role", "id": master, "role": "member"}).status_code, 400,
+           "the master cannot be demoted, even by themselves")
+        eq(post("/api/team/user", {"op": "delete", "id": master}).status_code, 400,
+           "or deleted")
+        eq(post("/api/team/user", {"op": "active", "id": master, "active": False}).status_code, 400,
+           "or switched off")
+    with_accounts(go)
 
 @test
-def t_team_a_broken_register_never_bricks_the_shop():
-    # A full disk or corrupt users.json must not turn into "everyone is
-    # locked out": verified staff tokens fail OPEN when the register is down.
+def t_auth_switch_off_and_delete_end_sessions_immediately():
     def go():
+        ensure_auth()
+        owen, starter = make_user("Owen", "owen")
+        sess = login("owen", starter).json()["session"]
+        eq(post_s(sess, "/api/team/me", {}).status_code, 200)
+        post("/api/team/user", {"op": "active", "id": owen, "active": False})
+        eq(post_s(sess, "/api/team/me", {}).status_code, 401, "off means off, this second")
+        eq(login("owen", starter).status_code, 401, "and the door stays shut")
+        post("/api/team/user", {"op": "active", "id": owen, "active": True})
+        amy, amy_starter = make_user("Amy", "amy")
+        amy_sess = login("amy", amy_starter).json()["session"]
+        post("/api/team/user", {"op": "delete", "id": amy})
+        eq(post_s(amy_sess, "/api/team/me", {}).status_code, 401, "deletion ends the session")
+        eq(login("amy", amy_starter).status_code, 401, "and the account")
+        names = post("/api/team/board", {}).json()["names"]
+        ok(any(v == "Amy" for v in names.values()), "history keeps the deleted account's name")
+    with_accounts(go)
+
+@test
+def t_auth_logout_ends_exactly_that_session():
+    def go():
+        ensure_auth()
+        owen, starter = make_user("Owen", "owen")
+        s1 = login("owen", starter).json()["session"]
+        s2 = login("owen", starter).json()["session"]
+        post_s(s1, "/api/auth/logout", {})
+        eq(post_s(s1, "/api/team/me", {}).status_code, 401, "the logged-out session is dead")
+        eq(post_s(s2, "/api/team/me", {}).status_code, 200, "the other lives on")
+    with_accounts(go)
+
+@test
+def t_auth_a_lost_register_means_setup_not_a_free_for_all():
+    def go():
+        ensure_auth()
         with open(copilot.USERS_PATH, "w") as fh:
             fh.write("{not json")
         copilot._users_mem = None
-        r = post("/api/files/tree", {})
-        eq(r.status_code, 200, "a verified token still works with a broken register")
-        eq(open(copilot.USERS_PATH).read(), "{not json", "and the broken file is preserved")
-    with_team(go)
+        eq(post("/api/files/tree", {}).status_code, 401,
+           "with the accounts lost, nobody is silently let in")
+        st = bare("/api/auth/state", {}).json()
+        ok(st["setup"], "the app asks to be set up again instead")
+    with_accounts(go)
 
 @test
-def t_team_ledger_records_the_workbench():
+def t_auth_the_ledger_attributes_work_to_accounts():
     def go():
-        boss = post("/api/team/me", {}).json()["me"]["sub"]
-        post("/api/team/user", {"op": "rename", "sub": boss, "name": "Cameron"})
-        post("/api/team/user", {"op": "role", "sub": boss, "role": "admin"})
+        ensure_auth()
         reset_dispatch(); reset_prod()
         def work(sent):
             r = mark_made(12345, True)
@@ -4558,12 +4638,37 @@ def t_team_ledger_records_the_workbench():
         b = post("/api/team/board", {}).json()
         ev = [e for e in b["events"] if e["action"] == "marked made"]
         ok(ev, "marking made reached the ledger")
-        eq(ev[0]["sub"], boss, "attributed to its person")
-        counts = b["counts"].get(boss) or {}
-        ok(counts.get("made", 0) >= 1, "and tallied under production")
-    with_team(go)
+        eq(ev[0]["sub"], APP_AUTH["master"], "attributed to the signed-in account")
+        ok((b["counts"].get(APP_AUTH["master"]) or {}).get("made", 0) >= 1, "and tallied")
+    with_accounts(go)
+
+@test
+def t_auth_counts_mean_work_not_events():
+    def go():
+        ensure_auth()
+        boss = APP_AUTH["master"]
+        copilot._track(boss, "production", "marked made", "#1")
+        copilot._track(boss, "production", "marked made", "#2")
+        copilot._track(boss, "production", "un-marked made", "#2")
+        copilot._track(boss, "dispatch", "booked a courier", "#1")
+        copilot._track(boss, "dispatch", "cancelled a shipment", "#1")
+        c = post("/api/team/board", {}).json()["counts"][boss]
+        eq(c["made"], 1, "an undo subtracts a made")
+        eq(c["dispatched"], 0, "a cancellation subtracts a booking")
+    with_accounts(go)
+
+@test
+def t_auth_the_print_document_needs_only_the_perimeter():
+    # The admin print action lives on the Shopify order page, outside the
+    # app's login; the embed token alone must keep it working.
+    def go():
+        ensure_auth()
+        r = client.get("/print/production-labels?ids=12345&id_token=" + tok())
+        ok("Unauthorized" not in r.text, "the print document renders with the embed token")
+    with_accounts(go)
 
 # =========================== run ===========================================
+
 passed = failed = 0
 for fn in TESTS:
     try:

@@ -306,15 +306,29 @@ def t_files_folder_drops_recreate_the_tree():
 
 @test
 def t_team_tab_is_admin_chrome_only():
-    """The tab and the settings gear hide until /api/team/me says admin.
-    Hiding is politeness; the server gates are pinned in the backend suite."""
+    """The tab and the settings gear hide unless the signed-in account is an
+    admin. Hiding is politeness; the server gates are pinned in the backend."""
     ok(re.search(r'id="view-team">\s*<div class="scroll"><div class="ov-wrap" id="team-content">', HTML),
        "the Team view wears the house container")
     ok('id="nav-team" style="display:none"' in HTML,
        "the tab starts hidden until the role is known")
-    ok("loadTeamMe" in SCRIPT and "'/api/team/me'" in SCRIPT, "the role is asked for at boot")
-    ok(re.search(r"\$\('settings-btn'\)\.style\.display = admin", SCRIPT),
-       "the settings gear hides for members")
+    ok("authBoot" in SCRIPT and "'/api/auth/state'" in SCRIPT, "the account is asked for at boot")
+    ok("applyRoleChrome" in SCRIPT, "chrome follows the role")
+
+
+@test
+def t_the_app_has_its_own_front_door():
+    """App accounts, not Shopify: a login overlay, passwords in password
+    fields, the session on every call, and 401 meaning 'log in again'."""
+    ok("authShow" in SCRIPT and "'/api/auth/login'" in SCRIPT, "the login screen exists")
+    ok("'/api/auth/setup'" in SCRIPT, "and the first-run setup screen")
+    ok("X-App-Session" in SCRIPT, "the session rides on every api call")
+    ok(re.search(r"setAppSession\(''\); authShow\('login'\)", SCRIPT),
+       "a 401 clears the session and asks for a login")
+    ok("authField('Password" in SCRIPT and "'password', 'au-pw'" in SCRIPT,
+       "passwords are typed into password fields")
+    ok("starter_password" in SCRIPT and "showStarterPw" in SCRIPT,
+       "starter passwords get their one showing")
 
 
 if __name__ == "__main__":
