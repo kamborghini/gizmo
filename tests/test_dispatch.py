@@ -28,6 +28,8 @@ os.environ.update({
     "CHASE_LOG_PATH": SCRATCH + "/chase_log.json",
     "CRM_PATH": SCRATCH + "/crm.json",
     "FILES_PATH": SCRATCH + "/files.json",
+    "USERS_PATH": SCRATCH + "/users.json",
+    "ACTIVITY_PATH": SCRATCH + "/activity.json",
 })
 for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
     os.environ.pop(v, None)
@@ -43,11 +45,14 @@ def eq(a, b, msg=""):
     if a != b: raise AssertionError(f"{msg}: {a!r} != {b!r}")
 def ok(c, msg=""):
     if not c: raise AssertionError(f"FAIL: {msg}")
-def tok():
+def tok(sub=None):
     now = int(time.time())
-    return jwt.encode({"iss": "https://test-store.myshopify.com/admin",
-                       "dest": "https://test-store.myshopify.com", "aud": "a",
-                       "exp": now + 120, "nbf": now - 5}, SECRET, algorithm="HS256")
+    claims = {"iss": "https://test-store.myshopify.com/admin",
+              "dest": "https://test-store.myshopify.com", "aud": "a",
+              "exp": now + 120, "nbf": now - 5}
+    if sub is not None:
+        claims["sub"] = str(sub)
+    return jwt.encode(claims, SECRET, algorithm="HS256")
 def run(coro): return asyncio.get_event_loop().run_until_complete(coro)
 
 # ---- Fake Shopify order + shop ---------------------------------------------
@@ -4387,6 +4392,176 @@ def t_files_disposition_and_names():
     d = copilot._files_disposition('café "q".pdf')
     ok("filename*=UTF-8''caf%C3%A9" in d, d)
     ok('\n' not in d and '\r' not in d, "no header injection")
+
+# =========================== team: users, roles, ledger =====================
+def postas(sub, path, body):
+    copilot._rl_hits.clear(); copilot._rl_global.clear()
+    return client.post(path, json=body, headers={"Authorization": "Bearer " + tok(sub)})
+
+def with_team(fn):
+    """Run fn against a fresh, empty register and ledger."""
+    copilot._users_mem = None
+    for p in (copilot.USERS_PATH, copilot.ACTIVITY_PATH):
+        try:
+            os.remove(p)
+        except FileNotFoundError:
+            pass
+        copilot._poisoned_stores.discard(p)
+    try:
+        fn()
+    finally:
+        copilot._users_mem = None
+        for p in (copilot.USERS_PATH, copilot.ACTIVITY_PATH):
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+
+@test
+def t_team_first_face_registers_and_grace_makes_them_admin():
+    def go():
+        r = post("/api/team/me", {})
+        eq(r.status_code, 200, r.text)
+        me = r.json()["me"]
+        eq(me["role"], "admin", "with no admin on record, everyone acts as one")
+        ok(me["grace"], "and the answer says the register is still being set up")
+        b = post("/api/team/board", {})
+        eq(b.status_code, 200, b.text)
+        eq(len(b.json()["users"]), 1, "the arrival registered themselves")
+        ok(any(e["action"] == "first sign-in" for e in b.json()["events"]),
+           "and the arrival is on the ledger")
+    with_team(go)
+
+@test
+def t_team_roles_gate_the_doors_once_an_admin_exists():
+    def go():
+        boss = post("/api/team/me", {}).json()["me"]["sub"]
+        eq(post("/api/team/user", {"op": "rename", "sub": boss, "name": "Cameron"}).status_code, 200)
+        eq(post("/api/team/user", {"op": "role", "sub": boss, "role": "admin"}).status_code, 200)
+        r2 = postas("222", "/api/team/me", {})
+        eq(r2.json()["me"]["role"], "member", "new faces are members once an admin exists")
+        eq(postas("222", "/api/team/board", {}).status_code, 403, "the register is admin only")
+        eq(postas("222", "/api/backup", {}).status_code, 403, "backups are admin only")
+        eq(postas("222", "/api/shipping/config", {"op": "set"}).status_code, 403,
+           "shipping settings are admin only")
+        eq(postas("222", "/api/shipping/config", {}).status_code, 200, "reading them stays open")
+        eq(postas("222", "/api/files/tree", {}).status_code, 200, "the work tools stay open")
+        eq(postas("222", "/api/gobo-sizes/upload", {"csv": "x"}).status_code, 403,
+           "the size list is admin only")
+    with_team(go)
+
+@test
+def t_team_lockout_is_impossible():
+    def go():
+        boss = post("/api/team/me", {}).json()["me"]["sub"]
+        post("/api/team/user", {"op": "role", "sub": boss, "role": "admin"})
+        eq(post("/api/team/user", {"op": "role", "sub": boss, "role": "member"}).status_code, 400,
+           "the last admin cannot be demoted")
+        eq(post("/api/team/user", {"op": "active", "sub": boss, "active": False}).status_code, 400,
+           "nor switch themselves off")
+        postas("222", "/api/team/me", {})
+        post("/api/team/user", {"op": "rename", "sub": "222", "name": "Ian"})
+        eq(post("/api/team/user", {"op": "role", "sub": "222", "role": "admin"}).status_code, 200)
+        eq(post("/api/team/user", {"op": "role", "sub": boss, "role": "member"}).status_code, 200,
+           "with a second admin standing, stepping down is allowed")
+    with_team(go)
+
+@test
+def t_team_switched_off_means_every_door_is_shut():
+    def go():
+        boss = post("/api/team/me", {}).json()["me"]["sub"]
+        post("/api/team/user", {"op": "role", "sub": boss, "role": "admin"})
+        postas("333", "/api/team/me", {})
+        eq(post("/api/team/user", {"op": "active", "sub": "333", "active": False}).status_code, 200)
+        eq(postas("333", "/api/files/tree", {}).status_code, 401,
+           "a verified token still bounces when its person is switched off")
+        eq(post("/api/team/user", {"op": "active", "sub": "333", "active": True}).status_code, 200)
+        eq(postas("333", "/api/files/tree", {}).status_code, 200, "and works again when restored")
+    with_team(go)
+
+@test
+def t_team_a_switched_off_id_cannot_use_the_print_document_either():
+    # The admin print action authenticates with a raw session token, outside
+    # _authorize; the register must apply there too or a ban means nothing.
+    def go():
+        boss = post("/api/team/me", {}).json()["me"]["sub"]
+        post("/api/team/user", {"op": "role", "sub": boss, "role": "admin"})
+        postas("444", "/api/team/me", {})
+        post("/api/team/user", {"op": "active", "sub": "444", "active": False})
+        r = client.get("/print/production-labels?ids=12345&id_token=" + tok("444"))
+        ok(r.status_code in (200, 401) and "Unauthorized" in r.text,
+           "the print document refuses a switched-off id: " + r.text[:80])
+        r2 = client.get("/print/production-labels?ids=12345&id_token=" + tok(boss))
+        ok("Unauthorized" not in r2.text, "an active id still prints")
+    with_team(go)
+
+@test
+def t_team_a_role_change_that_cannot_be_saved_says_so():
+    # "ok" while only memory holds the change would evaporate on restart.
+    def go():
+        boss = post("/api/team/me", {}).json()["me"]["sub"]
+        post("/api/team/user", {"op": "role", "sub": boss, "role": "admin"})
+        with open(copilot.USERS_PATH + ".block", "w") as fh:
+            fh.write("x")
+        copilot._poisoned_stores.add(copilot.USERS_PATH)
+        try:
+            r = post("/api/team/user", {"op": "rename", "sub": boss, "name": "Ghost"})
+            eq(r.status_code, 500, "an unsaveable change is refused, not pretended")
+            ok("unwritable" in r.json()["error"], r.text)
+        finally:
+            copilot._poisoned_stores.discard(copilot.USERS_PATH)
+            os.remove(copilot.USERS_PATH + ".block")
+        copilot._users_mem = None
+        eq(post("/api/team/board", {}).json()["users"][0].get("name"), "",
+           "and the phantom rename never took")
+    with_team(go)
+
+@test
+def t_team_counts_mean_work_not_events():
+    def go():
+        boss = post("/api/team/me", {}).json()["me"]["sub"]
+        post("/api/team/user", {"op": "role", "sub": boss, "role": "admin"})
+        copilot._track(boss, "production", "marked made", "#1")
+        copilot._track(boss, "production", "marked made", "#2")
+        copilot._track(boss, "production", "un-marked made", "#2")
+        copilot._track(boss, "dispatch", "booked a courier", "#1")
+        copilot._track(boss, "dispatch", "cancelled a shipment", "#1")
+        c = post("/api/team/board", {}).json()["counts"][boss]
+        eq(c["made"], 1, "an undo subtracts a made")
+        eq(c["dispatched"], 0, "a cancellation subtracts a booking")
+    with_team(go)
+
+@test
+def t_team_a_broken_register_never_bricks_the_shop():
+    # A full disk or corrupt users.json must not turn into "everyone is
+    # locked out": verified staff tokens fail OPEN when the register is down.
+    def go():
+        with open(copilot.USERS_PATH, "w") as fh:
+            fh.write("{not json")
+        copilot._users_mem = None
+        r = post("/api/files/tree", {})
+        eq(r.status_code, 200, "a verified token still works with a broken register")
+        eq(open(copilot.USERS_PATH).read(), "{not json", "and the broken file is preserved")
+    with_team(go)
+
+@test
+def t_team_ledger_records_the_workbench():
+    def go():
+        boss = post("/api/team/me", {}).json()["me"]["sub"]
+        post("/api/team/user", {"op": "rename", "sub": boss, "name": "Cameron"})
+        post("/api/team/user", {"op": "role", "sub": boss, "role": "admin"})
+        reset_dispatch(); reset_prod()
+        def work(sent):
+            r = mark_made(12345, True)
+            eq(r.status_code, 200, r.text)
+        with_zeta(work)
+        b = post("/api/team/board", {}).json()
+        ev = [e for e in b["events"] if e["action"] == "marked made"]
+        ok(ev, "marking made reached the ledger")
+        eq(ev[0]["sub"], boss, "attributed to its person")
+        counts = b["counts"].get(boss) or {}
+        ok(counts.get("made", 0) >= 1, "and tallied under production")
+    with_team(go)
 
 # =========================== run ===========================================
 passed = failed = 0

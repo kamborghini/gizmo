@@ -228,8 +228,8 @@ def t_the_unprocessed_queue_is_first_in_the_lifecycle_with_a_release_button():
        "Unprocessed sits before To make in the queue order")
     ok("readyToMake" in HTML, "the release handler exists")
     ok(_re.search(r"readyToMake\(o, rd\)", HTML), "and the row button calls it")
-    ok(_re.search(r"api\('/api/production-labels/queue', \{ order_id: o\.id \}\)", HTML),
-       "release reuses the existing tag-move route")
+    ok(_re.search(r"api\('/api/production-labels/queue', \{ order_id: o\.id, name: orderNo\(o\) \}\)", HTML),
+       "release reuses the existing tag-move route, and names the order for the ledger")
 
 
 @test
@@ -302,6 +302,19 @@ def t_files_folder_drops_recreate_the_tree():
     ensure = re.search(r"async function filesEnsurePath(.*?)\n        \}", SCRIPT, re.S)
     ok(ensure and "toLowerCase()" in ensure.group(1),
        "existing folders are matched the way the server rejects duplicates: case blind")
+
+
+@test
+def t_team_tab_is_admin_chrome_only():
+    """The tab and the settings gear hide until /api/team/me says admin.
+    Hiding is politeness; the server gates are pinned in the backend suite."""
+    ok(re.search(r'id="view-team">\s*<div class="scroll"><div class="ov-wrap" id="team-content">', HTML),
+       "the Team view wears the house container")
+    ok('id="nav-team" style="display:none"' in HTML,
+       "the tab starts hidden until the role is known")
+    ok("loadTeamMe" in SCRIPT and "'/api/team/me'" in SCRIPT, "the role is asked for at boot")
+    ok(re.search(r"\$\('settings-btn'\)\.style\.display = admin", SCRIPT),
+       "the settings gear hides for members")
 
 
 if __name__ == "__main__":

@@ -1127,6 +1127,7 @@
                 <button class="nav-item" data-view="liability" id="nav-liability"></button>
                 <button class="nav-item" data-view="crm" id="nav-crm"></button>
                 <button class="nav-item" data-view="files" id="nav-files"></button>
+                <button class="nav-item" data-view="team" id="nav-team" style="display:none"></button>
                 <button class="nav-item" data-view="labels" id="nav-labels"></button>
                 <button class="nav-item" data-view="memory" id="nav-memory"></button>
                 <button class="nav-item" data-view="skills" id="nav-skills"></button>
@@ -1190,6 +1191,11 @@
             <!-- Files -->
             <section class="view" id="view-files">
                 <div class="scroll"><div class="ov-wrap" id="files-content"></div></div>
+            </section>
+
+            <!-- Team -->
+            <section class="view" id="view-team">
+                <div class="scroll"><div class="ov-wrap" id="team-content"></div></div>
             </section>
             <section class="view" id="view-labels">
                 <div class="scroll"><div class="ov-wrap" id="labels-content"></div></div>
@@ -1378,6 +1384,7 @@
         $('nav-liability').append(ico(I.spark), document.createTextNode('Liability'));
         $('nav-crm').append(ico(I.users), document.createTextNode('CRM'));
         $('nav-files').append(ico(I.folder), document.createTextNode('Files'));
+        $('nav-team').append(ico(I.users), document.createTextNode('Team'));
         $('nav-labels').append(ico(I.printer), document.createTextNode('Production Manager'));
         $('nav-memory').append(ico(I.bookmark), document.createTextNode('Memory'));
         $('nav-skills').append(ico(I.book), document.createTextNode('Skills'));
@@ -3849,7 +3856,7 @@
         async function readyToMake(o, btn) {
             btn.disabled = true;
             try {
-                await api('/api/production-labels/queue', { order_id: o.id });
+                await api('/api/production-labels/queue', { order_id: o.id, name: orderNo(o) });
                 addToast(orderNo(o) + ' moved to To make.');
                 loadLabels(true);
             } catch (e) {
@@ -3876,7 +3883,7 @@
             if (!on) { const st = prodStateOf(o); delete st.made_at; }
             renderLabels();
             try {
-                const r = await api('/api/production-state', { op: 'made', id: o.id, on });
+                const r = await api('/api/production-state', { op: 'made', id: o.id, on, name: orderNo(o) });
                 if (r && r.dispatch && labelsCache && labelsCache.data) {
                     labelsCache.data.dispatch = Object.assign({}, labelsCache.data.dispatch || {}, r.dispatch);
                 }
@@ -3933,7 +3940,7 @@
                     q.disabled = true;
                     q.textContent = 'Tagging…';
                     try {
-                        await api('/api/production-labels/queue', { order_id: m.id });
+                        await api('/api/production-labels/queue', { order_id: m.id, name: m.name || '' });
                         // It is in the queue now: drop it from the strip and refetch
                         // the list so the new row appears.
                         if (labelsMissing && labelsMissing.data) {
@@ -5599,7 +5606,7 @@
                         + '… do not close this window';
                     x.disabled = true; x.style.opacity = '.35';
                     const doBook = (force) => api('/api/dispatch/book', {
-                        order_id: o.id, option: chosen, boxes: lastBoxes, notify: nb.checked, force: !!force,
+                        order_id: o.id, name: orderNo(o), option: chosen, boxes: lastBoxes, notify: nb.checked, force: !!force,
                         insurance: lastInsurance, signature: sigSel ? sigSel.value : '',
                         customs: quote.international ? collectCustoms() : null
                     });
@@ -6496,6 +6503,13 @@
                 ['Connecting it', 'In Railway open the gizmo service, then Variables, and add R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY with those values. The app creates its own bucket and settings on first use; nothing else to click.'],
                 ['Using it', 'Drag files, or whole folders, onto the list to upload them where you stand: a dropped folder is recreated here, structure and all. Click a name to download. Drag a file onto a folder, or onto a step of the path, to move it. Deleting sends a file to the trash, where it waits 30 days before it is really gone.'],
                 ['What it costs', 'Cloudflare bills about 1p per 10 GB per month past the free tier, and downloads are free. At the full 50 GB that is roughly 60p a month.'],
+            ]},
+            { h: 'The team', body: [
+                ['Who is who', 'Everyone signs into Shopify as themselves, and the app recognises each person automatically. The first time someone opens it from their own Shopify login they appear on the Team tab; click their row to give them their name. Every action they take is then recorded under it.'],
+                ['Admins and members', 'Admins see the Team tab and Settings, manage people, and change the setup (couriers, backups, the size list). Members use everything else: labels, dispatch, files, the sales desk and chat. The app refuses to let the last admin be demoted or switched off, so nobody can lock the shop out.'],
+                ['The activity ledger', 'Team, then Activity: who did what, newest first, with a filter by person or area. The People view shows 30-day tallies per person: orders made, dispatches, files, sales desk touches.'],
+                ['Adding a person', 'Give them a staff login in Shopify first: Settings, then Users, in your Shopify admin (not this app). When they open Store Copilot once, they appear on the Team tab ready to be named. If Shopify will not let you add staff, that is the Basic plan limit; the Grow plan allows up to 5 staff.'],
+                ['Switching someone off', 'Team, then Switch off on their row. They will see "Unauthorized" if they try to open the app until an admin restores them.'],
             ]},
             { h: 'Housekeeping', body: [
                 ['Backups', 'A snapshot is taken automatically every week and the newest four are kept. Those live in the same storage they protect, so download a copy occasionally from Settings, Connections.'],
@@ -7842,7 +7856,7 @@
                 name.title = 'Download'; name.onclick = () => download(fid);
                 row.append(name);
                 row.append(el('span', 'files-meta',
-                    fmtBytes(f.size) + ' · ' + fmtDate(f.uploaded_at || f.created_at) + (f.by ? ' · ' + f.by : '')));
+                    fmtBytes(f.size) + ' · ' + fmtDate(f.uploaded_at || f.created_at) + (byName(f.by) ? ' · ' + byName(f.by) : '')));
                 const acts = el('div', 'files-acts');
                 const dl = el('button', 'icon-btn'); dl.innerHTML = I.download; dl.title = 'Download';
                 dl.onclick = () => download(fid);
@@ -8090,12 +8104,217 @@
             }
         }
 
+        /* ==================================================================
+           Team. Identity is Shopify's: every request already carries the
+           staff member's own verified id, so this is names and roles over
+           ids, plus the ledger of who did what. Admins see this tab and
+           Settings; members see neither. Hiding is politeness; the server
+           enforces every gate again.
+           ================================================================== */
+        let teamMe = null, teamCache = null, teamSeg = 'people';
+        let teamFilterWho = '', teamFilterArea = '';
+        function byName(sub) {
+            if (!sub) return '';
+            const names = (filesCache && filesCache.names) || (teamCache && teamCache.names) || {};
+            if (names[sub]) return names[sub];
+            return /^\d+$/.test(String(sub)) ? '' : String(sub).slice(0, 24);
+        }
+        async function loadTeamMe(attempt) {
+            try {
+                const r = await api('/api/team/me', {});
+                teamMe = r.me;
+                const admin = teamMe && teamMe.role === 'admin';
+                $('nav-team').style.display = admin ? '' : 'none';
+                $('settings-btn').style.display = admin ? '' : 'none';
+            } catch (e) {
+                // One flaky boot call must not hide the Team tab all session:
+                // try again a few times, then leave the chrome as it is (the
+                // server enforces every gate regardless).
+                attempt = attempt || 0;
+                if (attempt < 3) setTimeout(() => loadTeamMe(attempt + 1), 4000 * (attempt + 1));
+            }
+        }
+        function showTeamView() {
+            if (teamCache) { renderTeam(); }
+            loadTeam();
+        }
+        async function loadTeam() {
+            const box = $('team-content');
+            if (!teamCache) {
+                box.innerHTML = '';
+                const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Opening the team…'));
+                box.append(t);
+            }
+            try {
+                const r = await api('/api/team/board', {});
+                teamCache = r;
+                renderTeam();
+            } catch (e) {
+                box.innerHTML = '';
+                box.append(el('div', 'msg error', e.message || 'Could not load the team.'));
+            }
+        }
+        const TEAM_AREAS = [['production', 'Production'], ['dispatch', 'Dispatch'], ['files', 'Files'],
+                            ['crm', 'Sales desk'], ['chase', 'Chasing'], ['sizes', 'Size list'],
+                            ['settings', 'Settings'], ['team', 'Team']];
+        function renderTeam() {
+            const box = $('team-content'); box.innerHTML = '';
+            const d = teamCache;
+            const hero = el('div', 'ov-hero');
+            const badge = el('div', 'badge'); badge.innerHTML = I.users;
+            const ht = el('div');
+            ht.append(el('h2', null, 'Team'),
+                el('p', null, 'Everyone who uses the app, and what they have been doing. People '
+                    + 'appear here the first time they open the app from their own Shopify login; '
+                    + 'name them once and their whole history wears that name.'));
+            hero.append(badge, ht);
+            box.append(hero);
+            if (d.grace) box.append(el('div', 'msg error',
+                'No admin is set yet, so everyone can see everything. Find yourself below, then '
+                + 'set your role to Admin to switch the doors on.'));
+            const seg = el('div', 'lbl-seg');
+            [['people', 'People'], ['activity', 'Activity']].forEach(([k, lab]) => {
+                const b = el('button', 'lbl-segbtn' + (teamSeg === k ? ' on' : ''), lab);
+                b.onclick = () => { teamSeg = k; renderTeam(); };
+                seg.append(b);
+            });
+            box.append(seg);
+            const host = el('div'); host.style.marginTop = '12px'; box.append(host);
+            if (teamSeg === 'activity') renderTeamFeed(host);
+            else renderTeamPeople(host);
+        }
+        function renderTeamPeople(host) {
+            const d = teamCache;
+            const list = el('div', 'files-list');
+            d.users.forEach(u => {
+                const row = el('div', 'files-row');
+                row.style.flexWrap = 'wrap';
+                const nameBtn = el('button', 'files-name');
+                nameBtn.textContent = (u.name || 'Not named yet')
+                    + (u.sub === d.me ? ' (you)' : '');
+                if (!u.name) nameBtn.style.color = 'var(--ink-3)';
+                nameBtn.title = 'Rename';
+                const startRename = () => {
+                    const inp = document.createElement('input');
+                    inp.className = 'files-rename'; inp.value = u.name || '';
+                    inp.placeholder = 'Their name';
+                    let done = false;
+                    const finish = async (commit) => {
+                        if (done) return; done = true;
+                        const v = inp.value.trim();
+                        if (commit && v && v !== u.name) {
+                            try { await teamOp({ op: 'rename', sub: u.sub, name: v }); }
+                            catch (e) { toastError(e.message); }
+                        }
+                        loadTeam();
+                    };
+                    inp.onkeydown = (e) => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
+                    inp.onblur = () => finish(true);
+                    row.replaceChild(inp, nameBtn);
+                    inp.focus(); inp.select();
+                };
+                nameBtn.onclick = startRename;
+                row.append(nameBtn);
+                const c = (d.counts || {})[u.sub] || {};
+                const bits = [['made', c.made], ['dispatched', c.dispatched], ['files', c.files],
+                              ['sales', c.crm], ['other', c.other]]
+                    .filter(([, n]) => n > 0).map(([lab, n]) => n + ' ' + lab);
+                row.append(el('span', 'files-meta',
+                    (bits.length ? bits.join(' · ') + ' in 30 days' : 'nothing recorded yet')
+                    + ' · last seen ' + fmtDate(u.last_seen)));
+                const acts = el('div', 'files-acts'); acts.style.opacity = '1';
+                const role = el('select', 'lbl-size');
+                [['admin', 'Admin'], ['member', 'Member']].forEach(([v, lab]) => {
+                    const o = el('option', null, lab); o.value = v;
+                    if ((u.role || 'member') === v) o.selected = true;
+                    role.append(o);
+                });
+                role.onchange = async () => {
+                    try { await teamOp({ op: 'role', sub: u.sub, role: role.value }); }
+                    catch (e) { toastError(e.message); }
+                    loadTeam();
+                };
+                const off = el('button', 'btn', u.active === false ? 'Restore access' : 'Switch off');
+                off.onclick = async () => {
+                    const on = u.active === false;
+                    if (!on && !(await uiConfirm('Switch off ' + (u.name || 'this person') + '’s access? '
+                        + 'They will not be able to open the app until an admin restores it.'))) return;
+                    try { await teamOp({ op: 'active', sub: u.sub, active: on }); }
+                    catch (e) { toastError(e.message); }
+                    loadTeam();
+                };
+                acts.append(role, off);
+                row.append(acts);
+                if (u.active === false) { row.style.opacity = '.55'; }
+                list.append(row);
+            });
+            host.append(list, el('div', 'files-hint',
+                'Click a name to change it. Every person needs their own Shopify staff login: '
+                + 'the register can only tell people apart when they sign in as themselves.'));
+        }
+        function renderTeamFeed(host) {
+            const d = teamCache;
+            const bar = el('div', 'lbl-toolbar');
+            const whoSel = el('select', 'lbl-size');
+            const optAll = el('option', null, 'Everyone'); optAll.value = ''; whoSel.append(optAll);
+            d.users.forEach(u => {
+                const o = el('option', null, u.name || 'Not named yet'); o.value = u.sub;
+                if (teamFilterWho === u.sub) o.selected = true;
+                whoSel.append(o);
+            });
+            whoSel.onchange = () => { teamFilterWho = whoSel.value; renderTeam(); };
+            const areaSel = el('select', 'lbl-size');
+            const aAll = el('option', null, 'Everything'); aAll.value = ''; areaSel.append(aAll);
+            TEAM_AREAS.forEach(([v, lab]) => {
+                const o = el('option', null, lab); o.value = v;
+                if (teamFilterArea === v) o.selected = true;
+                areaSel.append(o);
+            });
+            areaSel.onchange = () => { teamFilterArea = areaSel.value; renderTeam(); };
+            bar.append(whoSel, areaSel);
+            host.append(bar);
+            const rows = (d.events || []).filter(e =>
+                (!teamFilterWho || e.sub === teamFilterWho)
+                && (!teamFilterArea || e.area === teamFilterArea));
+            const list = el('div', 'files-list');
+            if (!rows.length) list.append(el('div', 'files-empty', 'Nothing recorded for that view yet.'));
+            let lastDay = '';
+            rows.forEach(e => {
+                const dt = new Date(e.t);
+                const day = fmtDate(e.t);
+                if (day !== lastDay) {
+                    lastDay = day;
+                    const h = el('div', 'files-row');
+                    h.append(el('span', 'files-meta', day));
+                    h.style.background = 'var(--bg-2)';
+                    list.append(h);
+                }
+                const row = el('div', 'files-row');
+                const hh = isNaN(dt) ? '' : String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
+                row.append(el('span', 'files-meta', hh));
+                const nm = (d.names || {})[e.sub] || 'Not named yet';
+                const line = el('span', 'files-name'); line.classList.add('still');
+                line.textContent = nm + ' ' + e.action + (e.detail ? ': ' + e.detail : '');
+                row.append(line);
+                row.append(el('span', 'files-meta',
+                    (TEAM_AREAS.find(a => a[0] === e.area) || ['', e.area])[1]));
+                list.append(row);
+            });
+            host.append(list, el('div', 'files-hint',
+                'The newest actions are at the top. The feed shows the last 600; the full ledger keeps 8,000 and is in every backup.'));
+        }
+        async function teamOp(body) {
+            const r = await api('/api/team/user', body);
+            if (r && r.users && teamCache) { teamCache.users = r.users; teamCache.grace = r.grace; }
+            return r;
+        }
+
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
-            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'crm', 'files', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', crm: 'CRM', files: 'Files', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
+            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'crm', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', crm: 'CRM', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
-            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide' || v === 'crm' || v === 'files') ? 'none' : '';
+            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide' || v === 'crm' || v === 'files' || v === 'team') ? 'none' : '';
             if (v === 'guide') renderGuide();
             // Only offer the PDF when there is actually a report to print: the print
             // stylesheet hides the Run gate, so printing an un-run tab yields a blank page.
@@ -8118,6 +8337,7 @@
             if (v === 'liability') showLiabilityView();
             if (v === 'crm') showCRMView();
             if (v === 'files') showFilesView();
+            if (v === 'team') showTeamView();
             if (v === 'labels') showLabelsView();
             if (v === 'memory') loadMemory();
             if (v === 'skills') loadSkills();
@@ -8397,7 +8617,7 @@
         const bootLabels = bootQP.get('view') === 'labels';
         const bootOrderId = bootLabels ? parseInt(bootQP.get('id') || '0', 10) : 0;
         if (bootOrderId) skipLabelsAutoLoad = true;   // the deep link fetch owns the view
-        renderSidebar(); renderChat(); setView(bootLabels ? 'labels' : 'overview');
+        renderSidebar(); renderChat(); loadTeamMe(); setView(bootLabels ? 'labels' : 'overview');
         if (bootOrderId) (bootQP.get('dispatch') === '1' ? dispatchFromAdminLink : printFromAdminLink)(bootOrderId);
         loadProfile();  // pull the saved store profile from the server (for the Settings modal)
         loadMemory();   // pull saved memories (for Overview follow-ups + the Memory tab)

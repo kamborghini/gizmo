@@ -6830,14 +6830,27 @@ def _verify_session_token(token: str) -> dict:
 
 def _authorize(request: Request) -> tuple[bool, Optional[str]]:
     """Return (ok, who). The only accepted credential is a verified Shopify
-    session token (Bearer JWT from App Bridge) — the app is embedded-only."""
+    session token (Bearer JWT from App Bridge) — the app is embedded-only.
+    `who` is the staff member's own Shopify id, so every action is theirs.
+    A verified id still gets refused when an admin has switched them off."""
     auth = request.headers.get("authorization", "")
     if auth.startswith("Bearer ") and SHOPIFY_API_SECRET:
         try:
             claims = _verify_session_token(auth[7:])
-            return True, (str(claims.get("sub") or "") or claims.get("dest"))
         except Exception as e:
             logger.warning(f"session token rejected: {e}")
+            return False, None
+        who = str(claims.get("sub") or "") or claims.get("dest")
+        try:
+            u = _team_touch(str(who))
+            if not u.get("active", True):
+                logger.warning("switched-off user %s was refused", who)
+                return False, None
+        except Exception:
+            # A broken register must never brick the shop: these are verified
+            # staff tokens, so fail OPEN on register trouble and say so loudly.
+            logger.exception("users register unavailable; letting the verified token through")
+        return True, who
     return False, None
 
 
@@ -7349,6 +7362,27 @@ async def _watchdog_tick(registry: dict) -> bool:
                 await _zeta_send_catalog()
             except Exception:
                 logger.warning("stock bridge: catalogue push failed; next tick retries")
+        # Grace mode re-opening after an admin has existed means the register
+        # was LOST (corrupt file, missing volume): every staff member is
+        # acting as an admin right now. Silent escalation is the one thing
+        # this must never be, so say it everywhere the merchant looks.
+        try:
+            if state.get("team_established") and _team_grace():
+                last = str(state.get("team_lost_alert_at") or "")
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                if last != today:
+                    state["team_lost_alert_at"] = today
+                    logger.error("the team register is empty after admins existed; everyone is admin")
+                    _add_alerts([{"tab": "settings", "tab_label": "Team",
+                                  "metric": "The team register was lost: everyone is an admin "
+                                            "until roles are set again on the Team tab", "pct": None}])
+                    await _send_alert_email("Store Copilot: the team register was lost",
+                                            ["The list of people and roles is empty even though admins "
+                                             "were set before (a corrupt file or a missing data volume).",
+                                             "Until roles are set again on the Team tab, everyone who "
+                                             "opens the app is treated as an admin."])
+        except Exception:
+            logger.exception("team register check failed")
         # Files trash past its 30-day window, and uploads that never finished.
         # Not gated on Shopify: the bucket is a different service entirely.
         # Under the store lock: the purge is a read-modify-write like any route.
@@ -7843,6 +7877,7 @@ def _files_shape(d: dict) -> dict:
             "files": {k: v for k, v in d["files"].items() if v.get("status") == "active"},
             "trash": [{**v, "id": k} for k, v in d["files"].items() if v.get("trashed_at")],
             "used": used, "quota": int(FILES_QUOTA_GB * 1024 * 1024 * 1024),
+            "names": _team_names(),   # resolves `by` ids to people at render time
             "configured": _files_configured(), "setup_error": _files_ready["error"]}
 
 
@@ -7896,6 +7931,159 @@ def _files_head(key: str):
         if code in ("404", "NoSuchKey", "NotFound") or "404" in str(e):
             return None
         raise RuntimeError(f"storage head failed: {type(e).__name__}") from e
+
+
+# ---------------------------------------------------------------------------
+# Team: who is using the app, and who did what.
+#
+# Identity comes free with the embed: every request carries a verified Shopify
+# session token whose `sub` is that staff member's own id, so there are no
+# passwords here and nothing to steal. This layer only puts names and roles on
+# those ids, and keeps an append-only ledger of the actions that matter.
+#
+# Bootstrap is a grace mode, not a race: while no active admin exists in the
+# register, everyone acts as an admin, so the first person can set themselves
+# up no matter who opens the app first. New ids auto-register as members the
+# moment they appear; an admin names them. The last active admin can never be
+# demoted or switched off, so the shop cannot lock itself out.
+# ---------------------------------------------------------------------------
+USERS_PATH = os.environ.get("USERS_PATH", "/data/users.json")
+ACTIVITY_PATH = os.environ.get("ACTIVITY_PATH", "/data/activity.json")
+ACTIVITY_MAX = int(os.environ.get("ACTIVITY_MAX", "8000"))
+_users_mem: Optional[dict] = None
+
+
+def _load_users() -> dict:
+    global _users_mem
+    if _users_mem is None:
+        d = _load_json_store(USERS_PATH, "users_store", None)
+        _users_mem = d if isinstance(d, dict) and "users" in d else {"users": {}}
+    return _users_mem
+
+
+def _write_users(d: dict) -> None:
+    """Raises when the register cannot be made durable, so a role or access
+    change is never reported as done while only the memory copy holds it."""
+    global _users_mem
+    _users_mem = d
+    if not _store_writable(USERS_PATH):
+        raise RuntimeError("users register is not writable")
+    os.makedirs(os.path.dirname(USERS_PATH) or ".", exist_ok=True)
+    tmp = USERS_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"users_store": d}, fh)
+    os.replace(tmp, USERS_PATH)
+
+
+def _team_grace(d: Optional[dict] = None) -> bool:
+    """No active admin on record yet: the register is still being set up."""
+    d = d or _load_users()
+    return not any(u.get("role") == "admin" and u.get("active", True)
+                   for u in d["users"].values())
+
+
+def _team_touch(sub: str) -> dict:
+    """Register or refresh the calling identity. Returns their record. Disk is
+    only touched for a new face or an hourly last-seen refresh; the in-memory
+    register carries the rest."""
+    d = _load_users()
+    now = datetime.now(timezone.utc).isoformat()
+    u = d["users"].get(sub)
+    if u is None:
+        u = {"name": "", "role": "member", "active": True, "named": False,
+             "first_seen": now, "last_seen": now}
+        d["users"][sub] = u
+        try:
+            _write_users(d)
+        except Exception:
+            logger.exception("users register write failed; the memory copy stands")
+        _track(sub, "team", "first sign-in", "a new person opened the app")
+        return u
+    last = u.get("last_seen") or ""
+    u["last_seen"] = now
+    if not last or last < (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat():
+        try:
+            _write_users(d)
+        except Exception:
+            logger.exception("users register write failed; the memory copy stands")
+    return u
+
+
+def _team_role(sub: Optional[str]) -> str:
+    """Effective role for enforcement: stored role, or admin-for-everyone
+    while the register has no admin at all."""
+    if not sub:
+        return "member"
+    d = _load_users()
+    if _team_grace(d):
+        return "admin"
+    u = d["users"].get(sub)
+    return u.get("role", "member") if u else "member"
+
+
+def _team_name(sub: str) -> str:
+    u = _load_users()["users"].get(str(sub))
+    return (u or {}).get("name") or ""
+
+
+def _team_names() -> dict:
+    """sub -> display name, for resolving `by` stamps at render time. Renaming
+    a person fixes their whole history at once because records store the id."""
+    return {sub: (u.get("name") or "") for sub, u in _load_users()["users"].items()}
+
+
+def _track(sub: Optional[str], area: str, action: str, detail: str = "") -> None:
+    """One line in the ledger. Synchronous and awaited by nothing, so two
+    concurrent routes cannot interleave around it on the single event loop."""
+    try:
+        rows = _load_json_store(ACTIVITY_PATH, "events", [])
+        if not isinstance(rows, list):
+            rows = []
+        rows.append({"t": datetime.now(timezone.utc).isoformat(),
+                     "sub": str(sub or ""), "area": area,
+                     "action": str(action)[:80], "detail": str(detail)[:200]})
+        if len(rows) > ACTIVITY_MAX:
+            rows = rows[-ACTIVITY_MAX:]
+        if _store_writable(ACTIVITY_PATH):
+            os.makedirs(os.path.dirname(ACTIVITY_PATH) or ".", exist_ok=True)
+            tmp = ACTIVITY_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"events": rows}, fh)
+            os.replace(tmp, ACTIVITY_PATH)
+    except Exception:
+        logger.exception("activity ledger write failed")
+
+
+def _team_counts(events: list, days: int = 30) -> dict:
+    """Per-person tallies over the window, grouped the way the shop thinks:
+    made, dispatched, files, sales desk, everything else."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    out: dict = {}
+    for e in events:
+        if e.get("t", "") < cutoff:
+            continue
+        sub = str(e.get("sub") or "")
+        c = out.setdefault(sub, {"made": 0, "dispatched": 0, "files": 0, "crm": 0, "other": 0})
+        a, area = str(e.get("action") or ""), e.get("area")
+        # Tallies mean WORK: undos subtract, and only real completions add.
+        if a == "marked made":
+            c["made"] += 1
+        elif a == "un-marked made":
+            c["made"] -= 1
+        elif a.startswith("booked a"):
+            c["dispatched"] += 1
+        elif a == "cancelled a shipment":
+            c["dispatched"] -= 1
+        elif a == "uploaded a file":
+            c["files"] += 1
+        elif area == "crm":
+            c["crm"] += 1
+        else:
+            c["other"] += 1
+    for c in out.values():
+        for k in c:
+            c[k] = max(0, c[k])
+    return out
 
 
 def _files_tick() -> None:
@@ -8177,8 +8365,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Request too large."}, 413)
         # Save when a profile object is supplied; otherwise just load.
         if isinstance(body.get("profile"), dict):
+            if _team_role(_who) != "admin":
+                return _json({"error": "Only an admin can change the store profile."}, 403)
             try:
                 saved = _save_profile(body["profile"])
+                _track(_who, "settings", "changed the store profile")
                 return _json({"profile": saved})
             except Exception:
                 logger.exception("Profile save failed")
@@ -8343,7 +8534,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Request too large."}, 413)
         try:
             if isinstance(body.get("config"), dict):
+                if _team_role(_who) != "admin":
+                    return _json({"error": "Only an admin can change the schedule."}, 403)
                 cfg = _save_schedule(body["config"])
+                _track(_who, "settings", "changed the audit schedule")
                 if cfg.get("enabled"):
                     _ensure_scheduler(registry)
             else:
@@ -8517,9 +8711,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         pre = _pre_checks(request, max_body=big)
         if pre:
             return pre
-        ok, _who = _authorize(request)
+        ok, who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        if _team_role(who) != "admin":
+            return _json({"error": "Only an admin can replace the size list."}, 403)
         body = await _read_json_capped(request, cap=big)
         if body is None:
             return _json({"error": "That file is too large (2 MB cap)."}, 413)
@@ -8571,6 +8767,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         health = _gobo_sizes().get("health") or {}
         logger.info("gobo sizes: sheet replaced via upload (%d csv rows, %s model keys)",
                     len(rows), health.get("models"))
+        _track(who, "sizes", "replaced the size list", f"{len(rows)} rows")
         return _json({"ok": True, "rows": len(rows),
                       "models_before": before, "models_after": health.get("models"),
                       "dead_aliases": health.get("dead_aliases", 0)})
@@ -8632,9 +8829,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         pre = _pre_checks(request)
         if pre:
             return pre
-        ok, _who = _authorize(request)
+        ok, who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        if _team_role(who) != "admin":
+            return _json({"error": "Only an admin can download a backup."}, 403)
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
@@ -8642,6 +8841,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not added:
             return _json({"error": "Nothing to back up yet."}, 404)
         _note_backup("download")
+        _track(who, "settings", "downloaded a backup")
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         return Response(buf.getvalue(), media_type="application/zip",
                         headers={**_API_HEADERS,
@@ -8664,6 +8864,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if op == "printed":
                 ids = [int(i) for i in (body.get("ids") or []) if str(i).strip().isdigit()][:100]
                 stamped = _mark_printed(ids) if ids else True
+                if ids and stamped:
+                    _track(_who, "production", "printed labels",
+                           str(len(ids)) + (" order" if len(ids) == 1 else " orders"))
                 # Printing moves the order into production: Unprocessed -> IP.
                 notes = []
                 for oid in ids:
@@ -8689,6 +8892,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         if not entry:
                             state.pop(str(oid), None)
                 _write_prod_state(state)
+                _track(_who, "production", "undid a print",
+                       str(len(ids)) + (" order" if len(ids) == 1 else " orders"))
                 notes = []
                 for oid in ids:
                     okd, note = await _sync_order_tags(registry, oid,
@@ -8704,6 +8909,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     return _json({"error": "No order id given."}, 400)
                 on = bool(body.get("on", True))
                 state = _mark_made(oid, on)
+                nm = re.sub(r"[^#\w-]", "", str(body.get("name") or ""))[:20] or f"order {oid}"
+                _track(_who, "production", "marked made" if on else "un-marked made", nm)
                 # Made is the moment an order actually ships: if a courier label is
                 # already booked, THIS is what fulfils Shopify and emails tracking.
                 ship_note, fulfilled, notified = "", False, False
@@ -8780,6 +8987,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "No account given."}, 400)
         try:
             entry = _mark_chased(key, by=str(who or ""))
+            _track(who, "chase", "marked an account chased", key[:60])
             return _json({"ok": True, "key": key, "chased": entry})
         except Exception:
             logger.exception("chase stamp failed")
@@ -8789,21 +8997,32 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # ---- CRM routes -------------------------------------------------------
     async def _crm_guard(request: Request):
         """(error_response, body). The CRM is buttons in the app's own UI, so it
-        uses the same session auth as everything else; the AI never sees it."""
+        uses the same session auth as everything else; the AI never sees it.
+        The caller's id is stashed for _crm_ok's ledger line: the two always
+        run inside one request, and nothing awaits between them."""
         pre = _pre_checks(request)
         if pre:
             return pre, None
-        ok, _who = _authorize(request)
+        ok, who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401), None
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413), None
+        # Set LAST, after every await in this guard: the route reads it on the
+        # very next synchronous line, so no other request can overwrite it in
+        # between on the single event loop.
+        _crm_actor["sub"] = str(who or "")
         return None, body
 
-    def _crm_ok(d: dict, extra: Optional[dict] = None) -> JSONResponse:
+    _crm_actor = {"sub": ""}
+
+    def _crm_ok(d: dict, extra: Optional[dict] = None, action: str = "",
+                detail: str = "", who: str = "") -> JSONResponse:
         _crm_purge(d)
         _write_crm(d)
+        if action:
+            _track(who, "crm", action, detail)
         out = {"ok": True, "crm": _crm_shape(d)}
         if extra:
             out.update(extra)
@@ -8825,6 +9044,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, body = await _crm_guard(request)
         if err:
             return err
+        actor = _crm_actor["sub"]
         op = str(body.get("op") or "")
         try:
             d = _load_crm()
@@ -8856,7 +9076,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     pass
                 _crm_log(deal, "created", "", deal["title"])
                 d["deals"][deal["id"]] = deal
-                return _crm_ok(d, {"id": deal["id"]})
+                return _crm_ok(d, {"id": deal["id"]}, action="added a deal",
+                               detail=deal["title"][:60], who=actor)
 
             deal = d["deals"].get(str(body.get("id") or ""))
             if not deal:
@@ -8919,7 +9140,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                  if n["id"] != str(body.get("note_id") or "")]
             else:
                 return _json({"error": "Unknown operation."}, 400)
-            return _crm_ok(d)
+            return _crm_ok(d, action=("deal " + op).replace("_", " "), detail=(deal.get("title") or "")[:60], who=actor)
         except RuntimeError:
             return _json({"error": "The CRM could not be saved. The data volume may be "
                                    "unwritable; check Settings, Connections."}, 500)
@@ -8932,6 +9153,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, body = await _crm_guard(request)
         if err:
             return err
+        actor = _crm_actor["sub"]
         op = str(body.get("op") or "")
         try:
             d = _load_crm()
@@ -8970,7 +9192,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 d["activities"][act["id"]] = act
                 if deal_id and deal_id in d["deals"]:
                     _crm_touch(d["deals"][deal_id])
-                return _crm_ok(d, {"id": act["id"]})
+                return _crm_ok(d, {"id": act["id"]}, action="added an activity", detail=(act.get("note") or act.get("type") or "")[:60], who=actor)
 
             act = d["activities"].get(str(body.get("id") or ""))
             if not act:
@@ -9016,7 +9238,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 d["activities"].pop(act["id"], None)
             else:
                 return _json({"error": "Unknown operation."}, 400)
-            return _crm_ok(d, {"followup_deal_id": followup} if followup else None)
+            return _crm_ok(d, {"followup_deal_id": followup} if followup else None, action=("activity " + op).replace("_", " "), who=actor)
         except RuntimeError:
             return _json({"error": "The CRM could not be saved. The data volume may be "
                                    "unwritable; check Settings, Connections."}, 500)
@@ -9029,6 +9251,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, body = await _crm_guard(request)
         if err:
             return err
+        actor = _crm_actor["sub"]
         op = str(body.get("op") or "")
         try:
             if op == "shopify_search":
@@ -9058,7 +9281,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                      "shopify_customer_id": body.get("shopify_customer_id") or None,
                      "created_at": _crm_now(), "updated_at": _crm_now(), "notes": []}
                 d["persons"][p["id"]] = p
-                return _crm_ok(d, {"id": p["id"]})
+                return _crm_ok(d, {"id": p["id"]}, action="added a person", detail=(p.get("name") or "")[:60], who=actor)
             if op == "org_add":
                 name = str(body.get("name") or "").strip()[:120]
                 if not name:
@@ -9068,7 +9291,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                      "label": str(body.get("label") or "").strip()[:40],
                      "created_at": _crm_now(), "updated_at": _crm_now(), "notes": []}
                 d["orgs"][o["id"]] = o
-                return _crm_ok(d, {"id": o["id"]})
+                return _crm_ok(d, {"id": o["id"]}, action="added an organisation", detail=(o.get("name") or "")[:60], who=actor)
 
             if op in ("person_update", "person_delete", "link_shopify"):
                 p = d["persons"].get(str(body.get("id") or ""))
@@ -9093,7 +9316,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         return _json({"error": "This person is on " + str(len(linked))
                                                + " open deal(s). Close or relink those first."}, 400)
                     d["persons"].pop(p["id"], None)
-                return _crm_ok(d)
+                return _crm_ok(d, action=("contact " + op).replace("_", " "), who=actor)
             if op in ("org_update", "org_delete"):
                 o = d["orgs"].get(str(body.get("id") or ""))
                 if not o:
@@ -9111,7 +9334,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         return _json({"error": "This organisation is on " + str(len(linked))
                                                + " open deal(s). Close or relink those first."}, 400)
                     d["orgs"].pop(o["id"], None)
-                return _crm_ok(d)
+                return _crm_ok(d, action=("contact " + op).replace("_", " "), who=actor)
             return _json({"error": "Unknown operation."}, 400)
         except RuntimeError:
             return _json({"error": "The CRM could not be saved. The data volume may be "
@@ -9125,6 +9348,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, body = await _crm_guard(request)
         if err:
             return err
+        actor = _crm_actor["sub"]
         op = str(body.get("op") or "")
         try:
             d = _load_crm()
@@ -9147,7 +9371,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 except (TypeError, ValueError):
                     pass
                 d["leads"][lead["id"]] = lead
-                return _crm_ok(d, {"id": lead["id"]})
+                return _crm_ok(d, {"id": lead["id"]}, action="added a lead", detail=(lead.get("title") or "")[:60], who=actor)
 
             lead = d["leads"].get(str(body.get("id") or ""))
             if not lead:
@@ -9197,10 +9421,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _crm_log(deal, "created", "", "converted from lead")
                 d["deals"][deal["id"]] = deal
                 d["leads"].pop(lead["id"], None)
-                return _crm_ok(d, {"id": deal["id"]})
+                return _crm_ok(d, {"id": deal["id"]}, action="converted a lead to a deal", detail=deal["title"][:60], who=actor)
             else:
                 return _json({"error": "Unknown operation."}, 400)
-            return _crm_ok(d)
+            return _crm_ok(d, action=("" if op == "seen" else ("lead " + op).replace("_", " ")), who=actor)
         except RuntimeError:
             return _json({"error": "The CRM could not be saved. The data volume may be "
                                    "unwritable; check Settings, Connections."}, 500)
@@ -9242,7 +9466,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                        + str(len(orphans)) + " open deal(s). Move them to "
                                        "another stage first."}, 400)
             d["stages"] = new
-            return _crm_ok(d)
+            return _crm_ok(d, action="edited the pipeline stages", who=_crm_actor["sub"])
         except RuntimeError:
             return _json({"error": "The CRM could not be saved. The data volume may be "
                                    "unwritable; check Settings, Connections."}, 500)
@@ -9265,8 +9489,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Request too large."}, 413), None, ""
         return None, body, str(who or "")
 
-    def _files_ok(d: dict, extra: Optional[dict] = None) -> JSONResponse:
+    def _files_ok(d: dict, extra: Optional[dict] = None, action: str = "",
+                  detail: str = "", who: str = "") -> JSONResponse:
         _write_files(d)
+        if action:
+            _track(who, "files", action, detail)
         out = {"ok": True, "store": _files_shape(d)}
         if extra:
             out.update(extra)
@@ -9307,7 +9534,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     fid = _files_id(d, "d")
                     d["folders"][fid] = {"name": name, "parent_id": parent,
                                          "created_at": datetime.now(timezone.utc).isoformat()}
-                    return _files_ok(d, {"id": fid})
+                    return _files_ok(d, {"id": fid}, action="made a folder", detail=name, who=_who)
                 if op == "rename":
                     fid = str(body.get("id") or "")
                     if fid not in d["folders"]:
@@ -9318,8 +9545,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                            and str(f.get("parent_id") or "") == parent
                            for k, f in d["folders"].items()):
                         return _json({"error": "A folder with that name is already here."}, 400)
+                    old_name = d["folders"][fid]["name"]
                     d["folders"][fid]["name"] = name
-                    return _files_ok(d)
+                    return _files_ok(d, action="renamed a folder", detail=f"{old_name} to {name}", who=_who)
                 if op == "delete":
                     fid = str(body.get("id") or "")
                     if fid not in d["folders"]:
@@ -9329,8 +9557,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                               for v in d["files"].values()):
                         return _json({"error": "The folder isn't empty. Move or delete "
                                                "what's inside first."}, 400)
-                    d["folders"].pop(fid)
-                    return _files_ok(d)
+                    gone = d["folders"].pop(fid)
+                    return _files_ok(d, action="deleted a folder", detail=gone.get("name") or "", who=_who)
                 return _json({"error": "Unknown folder action."}, 400)
         except RuntimeError:
             return _json({"error": _FILES_STORE_FAIL}, 500)
@@ -9417,7 +9645,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                            "allows, so it has not been kept."}, 400)
                 f["status"] = "active"
                 f["uploaded_at"] = datetime.now(timezone.utc).isoformat()
-                return _files_ok(d)
+                return _files_ok(d, action="uploaded a file",
+                                 detail=f"{f.get('name')} ({true_size} bytes)"[:200], who=_who)
         except RuntimeError:
             return _json({"error": _FILES_STORE_FAIL}, 500)
         except Exception:
@@ -9458,8 +9687,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if op == "rename":
                     if f.get("status") != "active":
                         return _json({"error": "Restore the file from the trash first."}, 400)
+                    old_name = f.get("name") or ""
                     f["name"] = _files_clean_name(body.get("name"))
-                    return _files_ok(d)
+                    return _files_ok(d, action="renamed a file",
+                                     detail=f"{old_name} to {f['name']}", who=_who)
                 if op == "move":
                     if f.get("status") != "active":
                         return _json({"error": "Restore the file from the trash first."}, 400)
@@ -9467,13 +9698,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     if not _files_folder_ok(d, folder):
                         return _json({"error": "That folder no longer exists."}, 400)
                     f["folder_id"] = folder
-                    return _files_ok(d)
+                    return _files_ok(d, action="moved a file", detail=f.get("name") or "", who=_who)
                 if op == "trash":
                     if f.get("status") != "active":
                         return _json({"error": "The file is already in the trash."}, 400)
                     f["status"] = "trashed"
                     f["trashed_at"] = datetime.now(timezone.utc).isoformat()
-                    return _files_ok(d)
+                    return _files_ok(d, action="put a file in the trash", detail=f.get("name") or "", who=_who)
                 if op == "restore":
                     if not f.get("trashed_at"):
                         return _json({"error": "The file isn't in the trash."}, 400)
@@ -9481,7 +9712,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     f["status"] = "active"
                     if not _files_folder_ok(d, str(f.get("folder_id") or "")):
                         f["folder_id"] = ""   # its folder went away; restore to the top level
-                    return _files_ok(d)
+                    return _files_ok(d, action="restored a file from the trash", detail=f.get("name") or "", who=_who)
                 if op == "destroy":
                     # "Delete now" from the trash: the record goes at once (so
                     # the space frees), the key joins the doomed list, and the
@@ -9492,12 +9723,127 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     d["files"].pop(fid)
                     if f.get("r2_key"):
                         d.setdefault("doomed", []).append(f["r2_key"])
-                    return _files_ok(d)
+                    return _files_ok(d, action="deleted a file for good", detail=f.get("name") or "", who=_who)
                 return _json({"error": "Unknown file action."}, 400)
         except RuntimeError:
             return _json({"error": _FILES_STORE_FAIL}, 500)
         except Exception:
             logger.exception("files file op failed")
+            return _json({"error": "That change could not be made. Check the server logs."}, 500)
+
+    # ---- Team routes ------------------------------------------------------
+    # Names and roles over the identities Shopify already verifies, and the
+    # ledger of who did what. Enforcement lives here on the server; hiding
+    # buttons in the page is only politeness.
+    async def _team_guard(request: Request, admin: bool):
+        pre = _pre_checks(request)
+        if pre:
+            return pre, ""
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401), ""
+        if admin and _team_role(who) != "admin":
+            return _json({"error": "Only an admin can do that."}, 403), ""
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413), ""
+        return None, (str(who or ""), body)
+
+    @mcp.custom_route("/api/team/me", methods=["POST"])
+    async def team_me_route(request: Request):
+        err, packed = await _team_guard(request, admin=False)
+        if err:
+            return err
+        who, _body = packed
+        return _json({"me": {"sub": who, "name": _team_name(who),
+                             "role": _team_role(who), "grace": _team_grace()}})
+
+    @mcp.custom_route("/api/team/board", methods=["POST"])
+    async def team_board_route(request: Request):
+        err, packed = await _team_guard(request, admin=True)
+        if err:
+            return err
+        who, _body = packed
+        try:
+            d = _load_users()
+            events = _load_json_store(ACTIVITY_PATH, "events", [])
+            if not isinstance(events, list):
+                events = []
+            users = [{"sub": sub, **u} for sub, u in d["users"].items()]
+            users.sort(key=lambda u: (u.get("role") != "admin", u.get("name") or "~", u["sub"]))
+            return _json({"users": users, "events": events[-600:][::-1],
+                          "counts": _team_counts(events), "names": _team_names(),
+                          "grace": _team_grace(d), "me": who})
+        except Exception:
+            logger.exception("team board failed")
+            return _json({"error": "Couldn't load the team."}, 500)
+
+    @mcp.custom_route("/api/team/user", methods=["POST"])
+    async def team_user_route(request: Request):
+        err, packed = await _team_guard(request, admin=True)
+        if err:
+            return err
+        who, body = packed
+        op = str(body.get("op") or "")
+        sub = str(body.get("sub") or "")
+        try:
+            d = _load_users()
+            u = d["users"].get(sub)
+            if not u:
+                return _json({"error": "That person isn't on the register."}, 400)
+            def last_admin() -> bool:
+                return u.get("role") == "admin" and u.get("active", True) and sum(
+                    1 for x in d["users"].values()
+                    if x.get("role") == "admin" and x.get("active", True)) <= 1
+            label = u.get("name") or "an unnamed person"
+            if op == "rename":
+                name = str(body.get("name") or "").strip()[:60]
+                if not name:
+                    return _json({"error": "The name cannot be empty."}, 400)
+                u["name"], u["named"] = name, True
+                _write_users(d)
+                _track(who, "team", "named a person", f"{label} is now called {name}")
+            elif op == "role":
+                role = str(body.get("role") or "")
+                if role not in ("admin", "member"):
+                    return _json({"error": "Roles are admin or member."}, 400)
+                if role == "member" and last_admin():
+                    return _json({"error": "That would leave the app with no admin. Make "
+                                           "someone else an admin first."}, 400)
+                u["role"] = role
+                _write_users(d)
+                if role == "admin":
+                    try:
+                        state = _load_watch()
+                        state["team_established"] = True
+                        _save_watch(state)
+                    except Exception:
+                        logger.exception("could not record that the register is established")
+                _track(who, "team", "changed a role", f"{label} is now {'an admin' if role == 'admin' else 'a member'}")
+            elif op == "active":
+                on = bool(body.get("active"))
+                if not on and sub == who:
+                    return _json({"error": "You cannot switch off your own access. Ask "
+                                           "the other admin."}, 400)
+                if not on and last_admin():
+                    return _json({"error": "That would leave the app with no admin. Make "
+                                           "someone else an admin first."}, 400)
+                u["active"] = on
+                _write_users(d)
+                _track(who, "team", "changed access",
+                       f"{label}'s access was switched {'on' if on else 'off'}")
+            else:
+                return _json({"error": "Unknown team action."}, 400)
+            users = [{"sub": s, **x} for s, x in d["users"].items()]
+            users.sort(key=lambda x: (x.get("role") != "admin", x.get("name") or "~", x["sub"]))
+            return _json({"ok": True, "users": users, "grace": _team_grace(d)})
+        except RuntimeError:
+            global _users_mem
+            _users_mem = None   # memory diverged from disk; the next read takes disk truth
+            return _json({"error": "The change could not be saved. The data volume may be "
+                                   "unwritable; check Settings, Connections."}, 500)
+        except Exception:
+            logger.exception("team user op failed")
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/stock-usage", methods=["POST"])
@@ -9543,6 +9889,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                                add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG])
             if not okd:
                 return _json({"error": note or "Couldn't tag the order."}, 502)
+            nm = re.sub(r"[^#\w-]", "", str(body.get("name") or ""))[:20] or f"order {oid}"
+            _track(_who, "production", "released to make", nm)
             return _json({"ok": True})
         except Exception:
             logger.exception("Queue tagging failed")
@@ -9617,7 +9965,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         pre = _pre_checks(request)
         if pre:
             return pre
-        ok, _who = _authorize(request)
+        ok, who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
         body = await _read_json_capped(request)
@@ -9626,6 +9974,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         op = str(body.get("op") or "get").lower()
         if op != "set":
             return _json({"config": _shipping_public(_load_shipping())})
+        if _team_role(who) != "admin":
+            return _json({"error": "Only an admin can change the shipping settings."}, 403)
         cfg = _load_shipping()
         if "origin" in body:
             cfg["origin"] = _clean_origin(body.get("origin"))
@@ -9681,6 +10031,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if worldoptions:
                     worldoptions.set_base_url(cfg["base_url"])
         _save_shipping(cfg)
+        _track(who, "settings", "changed shipping settings",
+               "courier credentials updated" if any(k in body for k in ("meter_number", "key", "password"))
+               else "origin, boxes or preferences")
         # Credentials: only persist non-empty values, and only when not env-managed.
         if worldoptions and any(k in body for k in ("meter_number", "key", "password")):
             if _wo_creds_from_env():
@@ -9815,6 +10168,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 declared=declared,
                 customs_body=(body.get("customs") if isinstance(body.get("customs"), dict) else None),
                 signature=str(body.get("signature") or ""), by=str(who or ""))
+            if not res.get("error"):
+                svc = str(option.get("service") or "").strip()[:40]
+                _track(who, "dispatch", "booked a custom shipment",
+                       (str(body.get("reference") or "pasted address")[:30]
+                        + (" · " + svc if svc else "")))
             return _json(res, 400 if res.get("error") else 200)
         except Exception:
             logger.exception("custom booking failed")
@@ -9920,6 +10278,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                           insurance=_insurance_amount(body),
                                           signature=str(body.get("signature") or "")[:60],
                                           customs_body=customs_body, by=_who)
+            if not res.get("error"):
+                nm = re.sub(r"[^#\w-]", "", str(body.get("name") or ""))[:20] or f"order {oid}"
+                svc = str(option.get("service") or "").strip()[:40]
+                _track(_who, "dispatch", "booked a courier", (nm + (" · " + svc if svc else "")))
             return _json(res, 400 if res.get("error") else 200)
         except Exception:
             logger.exception("dispatch book route failed")
@@ -10112,6 +10474,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _update_dispatch(oid, _mark_cancelled)
             except DispatchStoreUnwritable:
                 logger.exception("could not record the cancellation of %s", oid)
+            _track(_who, "dispatch", "cancelled a shipment",
+                   (entry.get("order_name") or str(oid))[:30])
             # A pasted-address shipment has no order behind it: the void at World
             # Options is the whole cancellation, and there is nothing in Shopify to
             # put back. Everything below this line is order repair.
@@ -10305,6 +10669,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 authed = int(exp_s) > time.time() and hmac.compare_digest(sig, expect)
             except (TypeError, ValueError):
                 authed = False
+        doc_who = ""
         if not authed:
             token = qp.get("id_token") or ""
             if not token:
@@ -10314,9 +10679,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if not token or not SHOPIFY_API_SECRET:
                 return deny("Unauthorized. Open this from your Shopify admin.")
             try:
-                _verify_session_token(token)
+                claims = _verify_session_token(token)
             except Exception:
                 return deny("Unauthorized. Open this from your Shopify admin.")
+            # The register applies here exactly as it does on /api: a
+            # switched-off person's token is valid to Shopify but not to us.
+            doc_who = str(claims.get("sub") or "") or str(claims.get("dest") or "")
+            try:
+                if not _team_touch(doc_who).get("active", True):
+                    return deny("Unauthorized. Open this from your Shopify admin.")
+            except Exception:
+                logger.exception("users register unavailable; letting the verified token through")
 
         ids = []
         for part in str(request.query_params.get("ids") or "").split(","):
@@ -10346,7 +10719,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # and move their tags along in the background so the document itself
         # renders without waiting on Shopify writes.
         printed_ids = [o["id"] for o in orders if o.get("id")]
-        _mark_printed(printed_ids)
+        stamped_ok = _mark_printed(printed_ids)
+        if printed_ids and stamped_ok:
+            _track(doc_who, "production", "printed labels",
+                   str(len(printed_ids)) + (" order" if len(printed_ids) == 1 else " orders")
+                   + " from the admin print action")
         if printed_ids:
             asyncio.get_running_loop().create_task(
                 _sync_tags_bg(registry, printed_ids, add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG]))
