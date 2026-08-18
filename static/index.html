@@ -3932,20 +3932,41 @@
         }
         /* "Repeat customer" line above the label preview, fetched once per customer. */
         const labelHistCache = {};
+        /* An order number on screen is a door, never a label: it opens the
+           order in the Shopify admin. Falls back to plain text when the link
+           cannot be built (custom shipments, store handle unknown). */
+        function orderA(name, url) {
+            if (!url) return el('span', null, name || '');
+            const a = el('a', 'miss-open', name || 'Order');
+            a.href = url; a.target = '_top';
+            a.onclick = (e) => e.stopPropagation();
+            return a;
+        }
         function histText(d) {
             if (!d || !d.count || d.count < 2) return 'First order from this customer.';
             const prev = (d.recent || [])[1];
             return 'Repeat customer: ' + d.count + ' orders'
                 + (prev ? ' · previous ' + prev.name + ' (' + fmtDate(prev.created_at) + ')' : '');
         }
+        function histFill(h, d) {
+            h.textContent = '';
+            if (!d || !d.count || d.count < 2) { h.textContent = 'First order from this customer.'; return; }
+            const prev = (d.recent || [])[1];
+            h.append(document.createTextNode('Repeat customer: ' + d.count + ' orders'));
+            if (prev) {
+                h.append(document.createTextNode(' · previous '));
+                h.append(orderA(prev.name, prev.admin_url));
+                h.append(document.createTextNode(' (' + fmtDate(prev.created_at) + ')'));
+            }
+        }
         function histLine(o) {
             const h = el('div', 'lbl-hist');
             const cached = labelHistCache[o.customer_id];
-            if (cached) { h.textContent = histText(cached); return h; }
+            if (cached) { histFill(h, cached); return h; }
             h.textContent = 'Checking order history…';
             api('/api/customer-history', { customer_id: o.customer_id }).then(d => {
                 labelHistCache[o.customer_id] = d;
-                if (h.isConnected) h.textContent = histText(d);
+                if (h.isConnected) histFill(h, d);
             }).catch(() => { if (h.isConnected) h.remove(); });
             return h;
         }
@@ -4362,7 +4383,13 @@
                     tr.append(el('td', null, r.manufacturer || ''));
                     tr.append(el('td', null, r.reason));
                     const c4 = el('td', 'num', String(r.count)); tr.append(c4);
-                    tr.append(el('td', null, (r.orders || []).join(', ')));
+                    const seen = el('td');
+                    (r.orders || []).forEach((o2, i2) => {
+                        if (i2) seen.append(document.createTextNode(', '));
+                        seen.append(typeof o2 === 'string' ? document.createTextNode(o2)
+                                    : orderA(o2.name, o2.admin_url));
+                    });
+                    tr.append(seen);
                     tbody.append(tr);
                 });
                 tb.append(tbody); wrap.append(tb); card.append(wrap);
@@ -4472,14 +4499,16 @@
                         const tr = el('tr');
                         if (r.incomplete) {
                             tr.style.opacity = '.6';
-                            tr.append(el('td', 'kw', r.order_name), el('td', null, r.customer || ''),
+                            const oc0 = el('td', 'kw'); oc0.append(orderA(r.order_name, r.admin_url));
+                            tr.append(oc0, el('td', null, r.customer || ''),
                                 el('td', null, r.dispatched || ''));
                             const note = el('td', null, r.incomplete); note.colSpan = 5;
                             tr.append(note);
                         } else {
                             const kept = el('td', 'num', money(r.margin, r.currency));
                             if (r.margin < 0) kept.style.color = 'var(--danger)';
-                            tr.append(el('td', 'kw', r.order_name), el('td', null, r.customer || ''),
+                            const oc1 = el('td', 'kw'); oc1.append(orderA(r.order_name, r.admin_url));
+                            tr.append(oc1, el('td', null, r.customer || ''),
                                 el('td', null, r.dispatched || ''),
                                 el('td', 'num', money(r.revenue + r.shipping_charged, r.currency)),
                                 el('td', 'num', money(r.goods_cost, r.currency)),
@@ -4547,7 +4576,9 @@
                     d.rows.forEach(r => {
                         const tr = el('tr');
                         if (r.canceled) tr.style.opacity = '.45';
-                        tr.append(el('td', null, r.time), el('td', 'kw', r.order_name + (r.canceled ? ' (cancelled)' : '')),
+                        const om = el('td', 'kw'); om.append(orderA(r.order_name, r.admin_url));
+                        if (r.canceled) om.append(document.createTextNode(' (cancelled)'));
+                        tr.append(el('td', null, r.time), om,
                             el('td', null, r.customer),
                             el('td', null, [r.carrier, r.service].filter(Boolean).join(' ')),
                             el('td', null, r.tracking),
@@ -6905,8 +6936,14 @@
                 sc.append(el('div', 'disp-subhead', 'Shopify'));
                 const line = el('div', 'crm-sub', 'Reading order history…'); sc.append(line);
                 api('/api/customer-history', { customer_id: p.shopify_customer_id }).then(h => {
-                    line.textContent = (h.count || 0) + ' orders on record'
-                        + ((h.recent || [])[0] ? ' · latest ' + h.recent[0].name + ' (' + fmtDate(h.recent[0].created_at) + ')' : '');
+                    line.textContent = '';
+                    line.append(document.createTextNode((h.count || 0) + ' orders on record'));
+                    const latest = (h.recent || [])[0];
+                    if (latest) {
+                        line.append(document.createTextNode(' · latest '));
+                        line.append(orderA(latest.name, latest.admin_url));
+                        line.append(document.createTextNode(' (' + fmtDate(latest.created_at) + ')'));
+                    }
                 }).catch(() => { line.textContent = 'Order history unavailable.'; });
                 m.body.append(sc);
             }

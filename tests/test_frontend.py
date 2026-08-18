@@ -233,6 +233,16 @@ def t_the_unprocessed_queue_is_first_in_the_lifecycle_with_a_release_button():
 
 
 @test
+def t_order_numbers_are_doors_not_labels():
+    ok("function orderA(" in HTML, "the shared order-link helper exists")
+    ok(_re.search(r"orderA\(o2\.name, o2\.admin_url\)", HTML), "coverage Seen on links")
+    ok(_re.search(r"orderA\(r\.order_name, r\.admin_url\)", HTML), "manifest and margin rows link")
+    ok(_re.search(r"orderA\(prev\.name, prev\.admin_url\)", HTML), "the repeat-customer line links")
+    ok(_re.search(r"orderA\(latest\.name, latest\.admin_url\)", HTML), "the CRM Shopify card links")
+    ok(_re.search(r"a\.target = '_top'", HTML), "links escape the embedded iframe to the admin")
+
+
+@test
 def t_a_custom_shipment_has_its_own_button_and_reads_a_pasted_address():
     ok("openCustomShip" in HTML, "the New shipment flow exists")
     ok(_re.search(r"newShip\.onclick = openCustomShip", HTML), "and the toolbar has its own button")

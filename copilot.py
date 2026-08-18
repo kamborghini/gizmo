@@ -2934,6 +2934,14 @@ def _orders_product_monthly(orders: list, months: list) -> dict:
 # No AI is involved; this is a plain Shopify read.
 # ---------------------------------------------------------------------------
 
+def _admin_order_url(order_id) -> str:
+    """The Shopify admin page for an order. An order number on screen should
+    always be a door, not a label."""
+    store = (SHOPIFY_STORE or "").split(".")[0]
+    return (f"https://admin.shopify.com/store/{store}/orders/{order_id}"
+            if store and str(order_id or "").isdigit() else "")
+
+
 def _order_tags(order: dict) -> list:
     raw = order.get("tags")
     if isinstance(raw, str):
@@ -4480,6 +4488,7 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
         o = by_id.get(oid)
         if not o:
             rows.append({"order_id": oid, "order_name": entry.get("order_name") or ("#" + oid),
+                         "admin_url": _admin_order_url(oid),
                          "incomplete": "the order could not be loaded from Shopify"})
             continue
         taxes_included = bool(o.get("taxes_included"))
@@ -4517,6 +4526,7 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
                 break
         row = {
             "order_id": oid,
+            "admin_url": _admin_order_url(oid),
             "order_name": o.get("name") or entry.get("order_name") or ("#" + oid),
             "customer": entry.get("customer") or "",
             "dispatched": when.astimezone(london).strftime("%d %b"),
@@ -6283,8 +6293,8 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
             f = flagged.setdefault(key, {"manufacturer": mfr, "model": model or "(blank)",
                                          "reason": reason, "count": 0, "orders": []})
             f["count"] += 1
-            if oname not in f["orders"] and len(f["orders"]) < 3:
-                f["orders"].append(oname)
+            if oname not in [x["name"] for x in f["orders"]] and len(f["orders"]) < 3:
+                f["orders"].append({"name": oname, "admin_url": _admin_order_url(o.get("id"))})
     rows = sorted(flagged.values(), key=lambda r: -r["count"])[:100]
     return {"orders_scanned": len(orders), "items_seen": items_seen,
             "gobo_items": gobo_items, "sized": sized,
@@ -8280,7 +8290,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"error": "Couldn't read that customer's orders."}, 502)
             orders = sorted((data.get("orders") or []), key=lambda o: str(o.get("created_at") or ""), reverse=True)
             return _json({"count": len(orders),
-                          "recent": [{"name": o.get("name"), "created_at": o.get("created_at")}
+                          "recent": [{"name": o.get("name"), "created_at": o.get("created_at"),
+                                      "admin_url": _admin_order_url(o.get("id"))}
                                      for o in orders[:3]]})
         except Exception:
             logger.exception("Customer history failed")
@@ -9435,6 +9446,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 continue
             rows.append({
                 "order_id": oid,
+                "admin_url": _admin_order_url(oid),
                 "order_name": e.get("order_name") or ("#" + str(oid)),
                 "customer": e.get("customer") or "",
                 "carrier": (e.get("carrier_label")
