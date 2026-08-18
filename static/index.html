@@ -6494,7 +6494,7 @@
                 ['What it is', 'A shared file store for the whole team, reachable from anywhere the app is. The folder tree lives with the app; the files themselves live in a Cloudflare R2 bucket, which is durable storage costing well under a pound a month for 50 GB. Uploads and downloads travel straight between your browser and Cloudflare, so big files move at full speed.'],
                 ['Setting it up', 'In the Cloudflare dashboard open R2 Object Storage and press Continue to enable it (the free tier covers the first 10 GB). Then go to R2, then Manage API tokens, and press Create Account API token. Name it Store Copilot and set Permissions to Admin Read and Write. This level is needed because the app creates its own bucket and grants your browser permission to upload to it; an Object-only token is refused for both. It covers R2 alone, never the rest of the Cloudflare account. Press Create and copy the three values it shows: the Access Key ID, the Secret Access Key, and your Account ID (shown on the R2 overview page, right-hand side).'],
                 ['Connecting it', 'In Railway open the gizmo service, then Variables, and add R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY with those values. The app creates its own bucket and settings on first use; nothing else to click.'],
-                ['Using it', 'Drag files onto the list to upload them where you stand. Click a name to download. Drag a file onto a folder, or onto a step of the path, to move it. Deleting sends a file to the trash, where it waits 30 days before it is really gone.'],
+                ['Using it', 'Drag files, or whole folders, onto the list to upload them where you stand: a dropped folder is recreated here, structure and all. Click a name to download. Drag a file onto a folder, or onto a step of the path, to move it. Deleting sends a file to the trash, where it waits 30 days before it is really gone.'],
                 ['What it costs', 'Cloudflare bills about 1p per 10 GB per month past the free tier, and downloads are free. At the full 50 GB that is roughly 60p a month.'],
             ]},
             { h: 'Housekeeping', body: [
@@ -7736,8 +7736,8 @@
             const upHost = el('div'); host.append(upHost);
             const listHost = el('div'); host.append(listHost);
             host.append(el('div', 'files-hint',
-                'Drag files anywhere on the list to upload them here. Drag a file onto a folder, '
-                + 'or onto a step of the path above, to move it.'));
+                'Drag files, or whole folders, anywhere on the list to upload them here. Drag a '
+                + 'file onto a folder, or onto a step of the path above, to move it.'));
 
             function crumbBtn(label, fid, here) {
                 const b = el('button', 'files-crumb' + (here ? ' here' : ''), label);
@@ -7826,14 +7826,9 @@
                 row.ondrop = (e) => {
                     e.preventDefault(); e.stopPropagation(); row.classList.remove('dropok');
                     if (dragFileId) { moveFile(dragFileId, fid); return; }
-                    if (dropHasDir(e)) { toastError('Drop files, not folders. Make the folder here first, then drop its files into it.'); return; }
-                    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) filesEnqueue(e.dataTransfer.files, fid);
+                    if (e.dataTransfer) filesIngestDrop(e.dataTransfer, fid);
                 };
                 return row;
-            }
-            function dropHasDir(e) {
-                const items = e.dataTransfer ? Array.from(e.dataTransfer.items || []) : [];
-                return items.some(it => it.webkitGetAsEntry && it.webkitGetAsEntry() && it.webkitGetAsEntry().isDirectory);
             }
             function fileRow(fid, f, showPath) {
                 const row = el('div', 'files-row');
@@ -7882,8 +7877,7 @@
                     e.preventDefault(); list.classList.remove('drag');
                     if (dragFileId) return;
                     if (filesQ) { toastError('Clear the search first, so the upload has a folder to land in.'); return; }
-                    if (dropHasDir(e)) { toastError('Drop files, not folders. Make the folder here first, then drop its files into it.'); return; }
-                    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) filesEnqueue(e.dataTransfer.files);
+                    if (e.dataTransfer) filesIngestDrop(e.dataTransfer, filesFolder);
                 };
                 if (filesQ) {
                     const ql = filesQ.toLowerCase();
@@ -7958,19 +7952,100 @@
         }
 
         function filesEnqueue(fileList, intoFolder) {
-            const files = Array.from(fileList || []);
-            if (!files.length) return;
+            const base = intoFolder != null ? intoFolder : filesFolder;
+            filesEnqueuePairs(Array.from(fileList || []).map(f => ({ file: f, folder: base })));
+        }
+        function filesEnqueuePairs(pairs) {
+            if (!pairs.length) return;
             if (!filesCache || !filesCache.configured) { toastError('File storage is not connected yet. The Guide tab has the setup steps.'); return; }
             // Uploads that already finished stop cluttering the list once new work starts.
             filesUploads = filesUploads.filter(u => u.state !== 'done');
-            files.forEach(f => {
-                const u = { name: f.name, pct: 0, state: 'waiting', err: '' };
-                u.job = { file: f, row: u, folder: intoFolder != null ? intoFolder : filesFolder };
+            pairs.forEach(p => {
+                const u = { name: p.file.name, pct: 0, state: 'waiting', err: '' };
+                u.job = { file: p.file, row: u, folder: p.folder };
                 filesUploads.push(u);
                 filesQueue.push(u.job);
             });
             if (renderFilesBrowser._paintUploads) renderFilesBrowser._paintUploads();
             filesPump();
+        }
+
+        /* ---- folder drops: recreate the dropped tree, then upload into it ---- */
+        const FILES_JUNK = /^(\.DS_Store|\._|Thumbs\.db$|desktop\.ini$)/;
+        const filesEntryFile = (entry) => new Promise((res, rej) => entry.file(res, rej));
+        const filesReadBatch = (reader) => new Promise((res, rej) => reader.readEntries(res, rej));
+        async function filesTraverse(entry, path, out, stats) {
+            /* Walks a dropped entry. Directories are remembered even when empty,
+               so the recreated tree is faithful; readEntries hands back at most
+               100 children per call and must be drained until it answers []. */
+            if (stats.capped) return;
+            if (entry.isFile) {
+                const f = await filesEntryFile(entry);
+                if (FILES_JUNK.test(f.name)) { stats.junk++; return; }
+                if (out.length >= 500) { stats.capped = true; return; }
+                out.push({ file: f, relPath: path });
+                return;
+            }
+            if (entry.isDirectory) {
+                if (path.length >= 12) { stats.deep = true; return; }
+                const here = path.concat(entry.name);
+                stats.dirs.push(here);
+                const reader = entry.createReader();
+                for (;;) {
+                    const batch = await filesReadBatch(reader);
+                    if (!batch.length) break;
+                    for (const e of batch) await filesTraverse(e, here, out, stats);
+                }
+            }
+        }
+        async function filesEnsurePath(path, baseFolder, memo) {
+            /* Resolves ['Jobs','2026'] under baseFolder to a folder id, reusing
+               an existing folder at each step (matched the way the server
+               refuses duplicates: by name, case blind) and creating the rest. */
+            let parent = baseFolder, key = '';
+            for (const seg of path) {
+                key += '/' + seg.toLowerCase();
+                if (memo[key]) { parent = memo[key]; continue; }
+                const hit = Object.entries(filesCache.folders).find(([, f]) =>
+                    String(f.parent_id || '') === String(parent) && f.name.toLowerCase() === seg.toLowerCase());
+                if (hit) { memo[key] = hit[0]; parent = hit[0]; continue; }
+                const r = await filesOp('/api/files/folder', { op: 'add', name: seg, parent_id: parent });
+                memo[key] = r.id; parent = r.id;
+            }
+            return parent;
+        }
+        async function filesIngestPairs(pairs, baseFolder, stats) {
+            /* The shared back half of every folder drop: make the folders,
+               then queue each file into its own one. Sequential on folders so
+               two branches never race the same new name. */
+            stats = stats || { dirs: [], junk: 0, capped: false, deep: false };
+            const memo = {};
+            try {
+                for (const p of stats.dirs) await filesEnsurePath(p, baseFolder, memo);
+                const jobs = [];
+                for (const p of pairs) jobs.push({ file: p.file, folder: await filesEnsurePath(p.relPath, baseFolder, memo) });
+                if (renderFilesBrowser._paintList) renderFilesBrowser._paintList();
+                filesEnqueuePairs(jobs);
+            } catch (e) {
+                toastError(e.message || 'The folders could not be created.');
+                return;
+            }
+            if (stats.capped) toastError('That drop was very large: only the first 500 files were taken. Drop the rest separately.');
+            if (stats.deep) toastError('Folders nested more than 12 deep were skipped.');
+        }
+        window.__filesIngest = filesIngestPairs;   // test hook: the drop path minus the native entry objects
+        async function filesIngestDrop(dt, baseFolder) {
+            const entries = Array.from(dt.items || [])
+                .map(it => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
+            if (!entries.some(e => e.isDirectory)) { filesEnqueue(dt.files, baseFolder); return; }
+            const out = [], stats = { dirs: [], junk: 0, capped: false, deep: false };
+            try {
+                for (const e of entries) await filesTraverse(e, [], out, stats);
+            } catch (err) {
+                toastError('That folder could not be read. Open it and drag its files in instead.');
+                return;
+            }
+            await filesIngestPairs(out, baseFolder, stats);
         }
         function filesPump() {
             // Three at a time: enough to keep the pipe full, not enough to choke it.

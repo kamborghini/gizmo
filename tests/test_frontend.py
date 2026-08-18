@@ -289,6 +289,21 @@ def t_files_download_never_opens_a_popup():
     ok("a.click()" in seg.group(1), "an anchor carries the download")
 
 
+@test
+def t_files_folder_drops_recreate_the_tree():
+    """A dropped folder must be walked (readEntries drained until empty, not
+    trusted to answer everything once), junk files skipped, and existing
+    folders REUSED case-blind rather than erroring as duplicates."""
+    ok("webkitGetAsEntry" in SCRIPT and "readEntries" in SCRIPT, "directory entries are traversed")
+    ok(re.search(r"for \(;;\) \{\s*const batch = await filesReadBatch", SCRIPT),
+       "readEntries is drained in a loop")
+    ok("DS_Store" in SCRIPT, "macOS junk files are filtered")
+    ok("Drop files, not folders" not in SCRIPT, "the old refusal is gone")
+    ensure = re.search(r"async function filesEnsurePath(.*?)\n        \}", SCRIPT, re.S)
+    ok(ensure and "toLowerCase()" in ensure.group(1),
+       "existing folders are matched the way the server rejects duplicates: case blind")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
