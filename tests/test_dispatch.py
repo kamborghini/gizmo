@@ -32,6 +32,10 @@ os.environ.update({
     "ACTIVITY_PATH": SCRATCH + "/activity.json",
     "SESSIONS_PATH": SCRATCH + "/sessions.json",
     "WORK_PATH": SCRATCH + "/worklog.json",
+    "GOBO_SIZES_LIVE": SCRATCH + "/gobo-sizes.csv",
+    "PROFILE_PATH": SCRATCH + "/store_profile.json",
+    "KNOWLEDGE_PATH": SCRATCH + "/store_knowledge.json",
+    "ZETA_SYNC_PATH": SCRATCH + "/zeta_sync.json",
 })
 for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
     os.environ.pop(v, None)
@@ -5200,6 +5204,70 @@ def t_dav_refusals_explain_themselves_and_caches_die_with_the_password():
             copilot._files_mem = None
             try:
                 os.remove(copilot.FILES_PATH)
+            except FileNotFoundError:
+                pass
+    with_accounts(go)
+
+@test
+def t_backup_is_exhaustive_by_construction():
+    """Every store path the app defines must be reachable by the backup, or
+    stand on the deliberate exclusion list. A new store added outside the
+    backup's reach fails HERE, not during a migration."""
+    data_dir = os.path.dirname(copilot.SCHEDULE_PATH)
+    excluded = {os.path.basename(copilot.WO_SECRET_PATH),
+                os.path.basename(copilot.SESSIONS_PATH)}
+    misses = []
+    for name in dir(copilot):
+        if not name.endswith("_PATH") or name.startswith("_"):
+            continue
+        val = getattr(copilot, name)
+        if not isinstance(val, str) or not val:
+            continue
+        base = os.path.basename(val)
+        if base in excluded:
+            continue
+        in_data_top = os.path.dirname(val) == data_dir
+        in_labels = os.path.dirname(val) == copilot.DISPATCH_LABELS_DIR
+        repo_data = os.path.join(os.path.dirname(copilot.__file__), "data")
+        in_repo = os.path.dirname(val) == repo_data   # ships with the code AND in the zip
+        good_ext = base.lower().endswith((".json", ".jsonl", ".csv", ".bak"))
+        if not ((in_data_top or in_labels or in_repo) and good_ext):
+            misses.append(f"{name} -> {val}")
+    ok(copilot.GOBO_SIZES_LIVE.lower().endswith(".csv")
+       and os.path.dirname(copilot.GOBO_SIZES_LIVE) == data_dir,
+       "the live size sheet is inside the backup's reach")
+    eq(misses, [], "stores the backup would MISS: " + "; ".join(misses))
+
+@test
+def t_backup_carries_labels_and_restore_returns_them():
+    def go():
+        ensure_auth()
+        os.makedirs(copilot.DISPATCH_LABELS_DIR, exist_ok=True)
+        lp = os.path.join(copilot.DISPATCH_LABELS_DIR, "104239.json")
+        with open(lp, "w") as fh:
+            json.dump({"label": "keep-me"}, fh)
+        try:
+            import base64 as b64
+            import zipfile as zz
+            import io as iio
+            buf, added = copilot._build_backup_zip()
+            names = zz.ZipFile(iio.BytesIO(buf.getvalue())).namelist()
+            ok("volume-labels/104239.json" in names, "dispatch labels ride in the backup")
+            blob = b64.b64encode(buf.getvalue()).decode()
+            chk = post("/api/restore", {"zip": blob, "check": True})
+            eq(chk.status_code, 200, chk.text)
+            j = chk.json()
+            ok(j.get("check") and "104239.json" in j["would_restore"],
+               "the dry run names the label file")
+            ok("users.json" in j["would_restore"], "and the register")
+            os.remove(lp)
+            r = post("/api/restore", {"zip": blob})
+            eq(r.status_code, 200, r.text)
+            ok("104239.json" in r.json()["files"], "the real restore lists it")
+            eq(json.load(open(lp))["label"], "keep-me", "and the label file is back")
+        finally:
+            try:
+                os.remove(lp)
             except FileNotFoundError:
                 pass
     with_accounts(go)

@@ -1121,7 +1121,11 @@ def _build_backup_zip():
     buf = io.BytesIO()
     added = 0
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for root, prefix in ((data_dir, "volume"), (repo_data, "repo-data")):
+        # Stored dispatch labels live in their own folder; without them a
+        # restored app could not reprint anything dispatched before the move.
+        roots = ((data_dir, "volume"), (repo_data, "repo-data"),
+                 (DISPATCH_LABELS_DIR, "volume-labels"))
+        for root, prefix in roots:
             if not os.path.isdir(root):
                 continue
             try:
@@ -9379,7 +9383,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         regions: fresh volume, first-run setup, restore, sign back in. Only
         the volume's own JSON/CSV files are accepted, by basename, so a
         crafted zip cannot write anywhere else."""
-        big = 20 * 1024 * 1024
+        big = 60 * 1024 * 1024
         pre = _pre_checks(request, max_body=big)
         if pre:
             return pre
@@ -9390,7 +9394,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Only the master admin can restore a backup."}, 403)
         body = await _read_json_capped(request, cap=big)
         if body is None:
-            return _json({"error": "That file is too large (20 MB cap)."}, 413)
+            return _json({"error": "That file is too large (60 MB cap)."}, 413)
         import io as _io
         import zipfile as _zip
         try:
@@ -9403,30 +9407,53 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # sessions: the same exclusions the backup applies, applied again.
         blocked = {os.path.basename(WO_SECRET_PATH), os.path.basename(SESSIONS_PATH),
                    os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json"))}
-        restored = 0
+        # (name, target_dir) for every restorable entry; everything else named
+        # in the manifest as skipped, so nothing ever vanishes silently.
+        todo, skipped = [], []
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            base = os.path.basename(info.filename)
+            if info.filename.startswith("volume/"):
+                target = data_dir
+            elif info.filename.startswith("volume-labels/"):
+                target = DISPATCH_LABELS_DIR
+            elif info.filename.startswith("repo-data/"):
+                skipped.append(base + " (ships with the app's code)")
+                continue
+            else:
+                skipped.append(info.filename + " (not part of a backup)")
+                continue
+            if not base or base in blocked or not base.lower().endswith((".json", ".jsonl", ".csv", ".bak")):
+                skipped.append(base + " (never restored)")
+                continue
+            if info.file_size > 10 * 1024 * 1024:
+                skipped.append(base + " (too large)")
+                continue
+            todo.append((info, base, target))
+        if not todo:
+            return _json({"error": "Nothing in that zip looked like this app's backup."}, 400)
+        if body.get("check"):
+            # Dry run: the exact manifest, nothing written.
+            return _json({"ok": True, "check": True,
+                          "would_restore": sorted(b for _, b, _t in todo),
+                          "skipped": sorted(skipped)})
+        restored_names = []
         try:
-            for info in zf.infolist():
-                if info.is_dir() or not info.filename.startswith("volume/"):
-                    continue
-                base = os.path.basename(info.filename)
-                if not base or base in blocked or not base.endswith((".json", ".csv")):
-                    continue
-                if info.file_size > 8 * 1024 * 1024:
-                    continue
+            for info, base, target in todo:
                 payload = zf.read(info)
-                tmp = os.path.join(data_dir, base + ".tmp")
-                os.makedirs(data_dir, exist_ok=True)
+                os.makedirs(target, exist_ok=True)
+                tmp = os.path.join(target, base + ".tmp")
                 with open(tmp, "wb") as fh:
                     fh.write(payload)
-                os.replace(tmp, os.path.join(data_dir, base))
-                _poisoned_stores.discard(os.path.join(data_dir, base))
-                restored += 1
+                os.replace(tmp, os.path.join(target, base))
+                _poisoned_stores.discard(os.path.join(target, base))
+                restored_names.append(base)
         except OSError:
             logger.exception("restore failed mid-write")
             return _json({"error": "The volume refused the restore part-way. Check the "
                                    "Railway service and try again."}, 500)
-        if not restored:
-            return _json({"error": "Nothing in that zip looked like this app's backup."}, 400)
+        restored = len(restored_names)
         # Every memory copy now lies; drop them all and start from disk truth.
         global _users_mem, _sessions_mem, _work_mem, _events_mem, _events_dirty, _files_mem
         _users_mem = _sessions_mem = _work_mem = _events_mem = _files_mem = None
@@ -9438,7 +9465,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _events_flush()
         logger.warning("backup restored by %s: %d files; all sessions dropped", who, restored)
         return _json({"ok": True, "restored": restored,
-                      "note": "Everyone signs in again now, with the accounts from the backup."})
+                      "files": sorted(restored_names), "skipped": sorted(skipped),
+                      "note": "Everyone signs in again now, with the accounts from the "
+                              "backup. Two things never travel in a backup and need "
+                              "re-entering once: the World Options courier credentials "
+                              "in Settings, and the Google connection if you use it."})
 
     @mcp.custom_route("/api/backup", methods=["POST"])
     async def backup_route(request: Request):
