@@ -1120,9 +1120,23 @@ def _build_backup_zip():
     }
     buf = io.BytesIO()
     added = 0
+    included, skipped = [], []
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         # Stored dispatch labels live in their own folder; without them a
         # restored app could not reprint anything dispatched before the move.
+        # Newest 60 only: labels are ~1MB each and an uncapped archive could
+        # build a backup too large for its own restore.
+        label_keep = set()
+        if os.path.isdir(DISPATCH_LABELS_DIR):
+            try:
+                by_age = sorted(os.listdir(DISPATCH_LABELS_DIR),
+                                key=lambda n: os.path.getmtime(os.path.join(DISPATCH_LABELS_DIR, n)),
+                                reverse=True)
+                label_keep = set(by_age[:60])
+                for n in by_age[60:]:
+                    skipped.append({"name": n, "reason": "older label; newest 60 kept"})
+            except OSError:
+                pass
         roots = ((data_dir, "volume"), (repo_data, "repo-data"),
                  (DISPATCH_LABELS_DIR, "volume-labels"))
         for root, prefix in roots:
@@ -1135,16 +1149,27 @@ def _build_backup_zip():
             for n in names:
                 if n in secrets_excluded:
                     continue
+                if prefix == "volume-labels" and n not in label_keep:
+                    continue
                 p = os.path.join(root, n)
                 if not os.path.isfile(p) or not n.lower().endswith((".json", ".jsonl", ".csv", ".bak")):
                     continue
                 try:
-                    if os.path.getsize(p) > 10 * 1024 * 1024:
+                    size = os.path.getsize(p)
+                    if size > 10 * 1024 * 1024:
+                        # Named, never silent: a store that outgrew the backup
+                        # is exactly what the merchant must hear about.
+                        skipped.append({"name": n, "reason": f"too large ({size // (1024 * 1024)}MB)"})
+                        logger.warning("backup skipped %s: %d bytes", n, size)
                         continue
                     z.write(p, prefix + "/" + n)
+                    included.append({"name": prefix + "/" + n, "size": size})
                     added += 1
                 except OSError:
                     continue
+        z.writestr("manifest.json", json.dumps({
+            "built_at": datetime.now(timezone.utc).isoformat(),
+            "included": included, "skipped": skipped}))
     return buf, added
 
 
@@ -9383,7 +9408,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         regions: fresh volume, first-run setup, restore, sign back in. Only
         the volume's own JSON/CSV files are accepted, by basename, so a
         crafted zip cannot write anywhere else."""
-        big = 60 * 1024 * 1024
+        big = 120 * 1024 * 1024
         pre = _pre_checks(request, max_body=big)
         if pre:
             return pre
@@ -9394,7 +9419,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Only the master admin can restore a backup."}, 403)
         body = await _read_json_capped(request, cap=big)
         if body is None:
-            return _json({"error": "That file is too large (60 MB cap)."}, 413)
+            return _json({"error": "That file is too large (120 MB cap)."}, 413)
         import io as _io
         import zipfile as _zip
         try:
@@ -9410,10 +9435,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # (name, target_dir) for every restorable entry; everything else named
         # in the manifest as skipped, so nothing ever vanishes silently.
         todo, skipped = [], []
+        built_at = ""
         for info in zf.infolist():
             if info.is_dir():
                 continue
             base = os.path.basename(info.filename)
+            if info.filename == "manifest.json":
+                try:
+                    built_at = str(json.loads(zf.read(info)).get("built_at") or "")[:19]
+                except Exception:
+                    pass
+                continue
             if info.filename.startswith("volume/"):
                 target = data_dir
             elif info.filename.startswith("volume-labels/"):
@@ -9435,36 +9467,68 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Nothing in that zip looked like this app's backup."}, 400)
         if body.get("check"):
             # Dry run: the exact manifest, nothing written.
-            return _json({"ok": True, "check": True,
+            return _json({"ok": True, "check": True, "backup_built_at": built_at,
                           "would_restore": sorted(b for _, b, _t in todo),
                           "skipped": sorted(skipped)})
+        # Doors first, then writes: sessions drop BEFORE anything is written,
+        # so no new request can race the restore (this request already holds
+        # its authorisation), and the files lock is held through the writes so
+        # an upload in flight commits before us, never after us.
+        _write_sessions({})
+        _dav_auth_cache.clear()
         restored_names = []
-        try:
-            for info, base, target in todo:
-                payload = zf.read(info)
-                os.makedirs(target, exist_ok=True)
-                tmp = os.path.join(target, base + ".tmp")
-                with open(tmp, "wb") as fh:
-                    fh.write(payload)
-                os.replace(tmp, os.path.join(target, base))
-                _poisoned_stores.discard(os.path.join(target, base))
-                restored_names.append(base)
-        except OSError:
-            logger.exception("restore failed mid-write")
-            return _json({"error": "The volume refused the restore part-way. Check the "
-                                   "Railway service and try again."}, 500)
+        def _drop_all_caches():
+            global _users_mem, _sessions_mem, _work_mem, _events_mem, _events_dirty, _files_mem
+            _users_mem = _work_mem = _events_mem = _files_mem = None
+            _sessions_mem = None
+            _events_dirty = False
+            _dav_auth_cache.clear()
+        async with _files_lock:
+            try:
+                for info, base, target in todo:
+                    payload = zf.read(info)
+                    os.makedirs(target, exist_ok=True)
+                    tmp = os.path.join(target, base + ".tmp")
+                    with open(tmp, "wb") as fh:
+                        fh.write(payload)
+                    os.replace(tmp, os.path.join(target, base))
+                    _poisoned_stores.discard(os.path.join(target, base))
+                    restored_names.append(base)
+            except OSError:
+                logger.exception("restore failed mid-write")
+                # Disk is part-new: memory must never serve (or later flush)
+                # the pre-restore world over it.
+                _drop_all_caches()
+                return _json({"error": "The volume refused the restore part-way. Check the "
+                                       "Railway service and try again."}, 500)
+            # A backup is a photograph of an earlier clock. Ages must not be
+            # trusted: an upload that was mid-flight at backup time would read
+            # as days-stale and the sweep would DELETE its bytes, and old
+            # trash would purge instantly. Everything time-sensitive restarts
+            # its clock now, and the doomed list is cleared: an orphaned
+            # object in the bucket costs pennies, a wrong deletion is forever.
+            try:
+                _drop_all_caches()   # memory must re-read the RESTORED disk here
+                fd = _load_files()
+                nown = datetime.now(timezone.utc).isoformat()
+                for v in fd["files"].values():
+                    if v.get("status") == "pending":
+                        v["status"] = "trashed"
+                        v["trashed_at"] = nown
+                    elif v.get("trashed_at"):
+                        v["trashed_at"] = nown
+                fd["doomed"] = []
+                _write_files(fd)
+            except Exception:
+                logger.exception("restore: files-clock normalisation failed")
         restored = len(restored_names)
         # Every memory copy now lies; drop them all and start from disk truth.
-        global _users_mem, _sessions_mem, _work_mem, _events_mem, _events_dirty, _files_mem
-        _users_mem = _sessions_mem = _work_mem = _events_mem = _files_mem = None
-        _events_dirty = False
-        _dav_auth_cache.clear()
-        _sessions_mem = {}
-        _write_sessions({})          # everyone signs back in against the restored register
+        _drop_all_caches()
+        _write_sessions({})          # already empty; re-assert against the restored disk
         _track(who, "settings", "restored a backup", f"{restored} files")
         _events_flush()
         logger.warning("backup restored by %s: %d files; all sessions dropped", who, restored)
-        return _json({"ok": True, "restored": restored,
+        return _json({"ok": True, "restored": restored, "backup_built_at": built_at,
                       "files": sorted(restored_names), "skipped": sorted(skipped),
                       "note": "Everyone signs in again now, with the accounts from the "
                               "backup. Two things never travel in a backup and need "

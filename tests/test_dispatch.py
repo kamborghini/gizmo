@@ -5272,6 +5272,107 @@ def t_backup_carries_labels_and_restore_returns_them():
                 pass
     with_accounts(go)
 
+@test
+def t_backup_manifest_and_restore_clock_normalisation():
+    def go():
+        ensure_auth()
+        fake = FakeS3()
+        saved = (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
+                 copilot._files_s3_client)
+        copilot.R2_ACCOUNT_ID = copilot.R2_ACCESS_KEY_ID = copilot.R2_SECRET_ACCESS_KEY = "acct"
+        copilot._files_s3_client = fake
+        copilot._files_mem = None
+        try:
+            os.remove(copilot.FILES_PATH)
+        except FileNotFoundError:
+            pass
+        copilot._poisoned_stores.discard(copilot.FILES_PATH)
+        try:
+            import base64 as b64
+            import zipfile as zz
+            import io as iio
+            # a mid-flight upload and an old trash entry, photographed by a backup
+            up = post("/api/files/upload-url", {"name": "mid-flight.pdf", "size": 10}).json()
+            k1 = up["url"].split("?")[0].replace("https://fake-r2.test/", "")
+            fake.objects[k1] = 10
+            done = post("/api/files/upload-url", {"name": "old-trash.pdf", "size": 5}).json()
+            k2 = done["url"].split("?")[0].replace("https://fake-r2.test/", "")
+            fake.objects[k2] = 5
+            post("/api/files/complete", {"id": done["id"]})
+            post("/api/files/file", {"op": "trash", "id": done["id"]})
+            d = copilot._load_files()
+            d["files"][up["id"]]["created_at"] = "2026-08-01T00:00:00+00:00"   # "days old" pending
+            d["files"][done["id"]]["trashed_at"] = "2026-07-01T00:00:00+00:00" # "expired" trash
+            d["doomed"] = ["ghost/stale-key.pdf"]
+            copilot._write_files(d)
+            buf, _ = copilot._build_backup_zip()
+            man = json.loads(zz.ZipFile(iio.BytesIO(buf.getvalue())).read("manifest.json"))
+            ok(man.get("built_at", "").startswith("20"), "the backup names its build time")
+            ok(any(i["name"] == "volume/files.json" for i in man["included"]),
+               "and lists what it holds")
+            blob = b64.b64encode(buf.getvalue()).decode()
+            chk = post("/api/restore", {"zip": blob, "check": True}).json()
+            ok(chk.get("backup_built_at", "").startswith("20"),
+               "the dry run shows the backup's age before anything is written")
+            ok(all(n != "manifest.json" for n in chk["would_restore"]),
+               "the manifest itself is never restored")
+            r = post("/api/restore", {"zip": blob})
+            eq(r.status_code, 200, r.text)
+            # sign back in (restore drops sessions) and check the clocks
+            APP_AUTH["session"] = ""
+            fd = copilot._load_files()
+            mid = fd["files"][up["id"]]
+            eq(mid["status"], "trashed", "a photographed mid-flight upload lands in the trash")
+            ok(mid["trashed_at"].startswith("2026-08-19") or mid["trashed_at"] > "2026-08-19",
+               "with a fresh 30-day clock, so the sweep cannot eat its bytes")
+            old = fd["files"][done["id"]]
+            ok(old["trashed_at"] > "2026-08-01", "expired trash gets a fresh clock too")
+            eq(fd["doomed"], [], "and a restored doomed list never deletes anything")
+            copilot._files_tick()
+            ok(k1 in fake.objects and k2 in fake.objects,
+               "the reaper touched nothing after the restore")
+        finally:
+            (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
+             copilot._files_s3_client) = saved
+            copilot._files_mem = None
+            try:
+                os.remove(copilot.FILES_PATH)
+            except FileNotFoundError:
+                pass
+    with_accounts(go)
+
+@test
+def t_backup_caps_labels_to_the_newest_sixty():
+    def go():
+        ensure_auth()
+        import zipfile as zz
+        import io as iio
+        os.makedirs(copilot.DISPATCH_LABELS_DIR, exist_ok=True)
+        made = []
+        try:
+            for i in range(65):
+                p = os.path.join(copilot.DISPATCH_LABELS_DIR, f"ord{i:03d}.json")
+                with open(p, "w") as fh:
+                    fh.write("{}")
+                os.utime(p, (1700000000 + i, 1700000000 + i))
+                made.append(p)
+            buf, _ = copilot._build_backup_zip()
+            z = zz.ZipFile(iio.BytesIO(buf.getvalue()))
+            labels = [n for n in z.namelist() if n.startswith("volume-labels/")]
+            eq(len(labels), 60, "newest sixty ride along")
+            ok("volume-labels/ord064.json" in labels, "the newest is kept")
+            ok("volume-labels/ord000.json" not in labels, "the oldest is named, not silently lost:")
+            man = json.loads(z.read("manifest.json"))
+            ok(any(s["name"] == "ord000.json" for s in man["skipped"]),
+               "the manifest names what stayed behind")
+        finally:
+            for p in made:
+                try:
+                    os.remove(p)
+                except FileNotFoundError:
+                    pass
+    with_accounts(go)
+
 # =========================== run ===========================================
 
 passed = failed = 0
