@@ -6149,6 +6149,19 @@ async def _zeta_send(op: str, order_id, order_name: str, lines: list) -> dict:
         return r.json()
 
 
+USAGE_SHEETS_PATH = os.environ.get("USAGE_SHEETS_PATH", "/data/usage_sheets.json")
+
+
+async def _zeta_send_sheet(payload: dict) -> dict:
+    """One usage sheet to zeta. Separate so tests can stand in a fake."""
+    async with httpx.AsyncClient(timeout=20.0) as cl:
+        r = await cl.post(ZETA_URL + "/api/sync/usage-sheet",
+                          headers={"Authorization": "Bearer " + ZETA_SYNC_TOKEN},
+                          json=payload)
+        r.raise_for_status()
+        return r.json()
+
+
 async def _zeta_push(registry: dict, order_id, op: str) -> str:
     """Book or reverse one order at the stock app. Returns '' on success or a
     short note for the operator; failure always parks the order for retry."""
@@ -6335,7 +6348,8 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
                 r["qty"] += line["qty"]
     out_rows = sorted(rows.values(), key=lambda r: (-float(r["size"]), r["glass"]))
     return {"date": day.isoformat(), "orders": len(orders_in), "order_names": orders_in[:60],
-            "pieces": pieces, "rows": out_rows, "fetch_failed": fetch_failed,
+            "order_ids": made_ids, "pieces": pieces, "rows": out_rows,
+            "fetch_failed": fetch_failed,
             "unresolved": [{"name": k, "qty": v} for k, v in sorted(unresolved.items())]}
 
 
@@ -11437,10 +11451,102 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Request too large."}, 413)
         try:
             res = await run_stock_usage(registry, str(body.get("date") or ""))
+            if not res.get("error"):
+                # The day's send record rides along, so the page can say
+                # "already sent" instead of letting a double-send surprise.
+                sheets = _load_json_store(USAGE_SHEETS_PATH, "sheets", {})
+                if isinstance(sheets, dict) and res.get("date") in sheets:
+                    rec = dict(sheets[res["date"]])
+                    rec.pop("result", None)
+                    res["sent"] = rec
             return _json(res, 400 if res.get("error") else 200)
         except Exception:
             logger.exception("Stock usage failed")
             return _json({"error": "Couldn't build the stock usage list."}, 500)
+
+    @mcp.custom_route("/api/stock-usage/send", methods=["POST"])
+    async def stock_usage_send_route(request: Request):
+        """The reviewed day sheet goes to the stock app as FINAL figures. The
+        stock app applies only the difference against what the automatic
+        per-order bookings already recorded, so this can never double-count;
+        re-sending a day REPLACES its previous sheet. Every line comes back
+        with its own status, and the send is recorded here for the record of
+        final-versus-estimate."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        if not _zeta_configured():
+            return _json({"error": "The stock app isn't connected (ZETA_URL and the sync "
+                                   "token are needed)."}, 400)
+        date_str = str(body.get("date") or "")
+        raw = body.get("lines")
+        if not isinstance(raw, list) or not raw or len(raw) > 100:
+            return _json({"error": "The sheet needs between 1 and 100 lines."}, 400)
+        lines = []
+        for ln in raw:
+            if not isinstance(ln, dict):
+                continue
+            family = str(ln.get("family") or "").strip()[:60]
+            size = str(ln.get("size") or "").strip()[:40]
+            try:
+                final = int(round(float(ln.get("final"))))
+                est = max(0, int(round(float(ln.get("estimated") or 0))))
+            except (TypeError, ValueError, OverflowError):
+                return _json({"error": f"The quantity for {family} {size} is not a number."}, 400)
+            if not family or not size:
+                return _json({"error": "Every line needs a glass type and a size."}, 400)
+            if final < 0 or final > 10000:
+                return _json({"error": f"The quantity for {family} {size} must be between "
+                                       "0 and 10,000."}, 400)
+            lines.append({"family": family, "size": size, "estimated": est, "final": final})
+        if not lines:
+            return _json({"error": "The sheet needs at least one line."}, 400)
+        # The day's covered orders are recomputed HERE: the sheet's deltas are
+        # measured against these orders' automatic bookings, and that list is
+        # not something a page should be trusted to supply.
+        try:
+            usage = await run_stock_usage(registry, date_str)
+        except Exception:
+            logger.exception("stock usage recompute failed")
+            return _json({"error": "Couldn't rebuild the day's order list."}, 500)
+        if usage.get("error"):
+            return _json({"error": usage["error"]}, 400)
+        payload = {"sheet_id": "day-" + usage["date"], "day": usage["date"],
+                   "order_ids": [str(i) for i in (usage.get("order_ids") or [])],
+                   "lines": lines}
+        try:
+            result = await _zeta_send_sheet(payload)
+        except Exception as e:
+            logger.warning("usage sheet send failed: %s", e)
+            return _json({"error": "The stock app didn't accept the sheet. Nothing was "
+                                   "recorded; check it is up and try again."}, 502)
+        rec = {"sent_at": datetime.now(timezone.utc).isoformat(), "by": who,
+               "lines": lines, "result": result, "replaced": bool(result.get("replaced"))}
+        try:
+            sheets = _load_json_store(USAGE_SHEETS_PATH, "sheets", {})
+            if not isinstance(sheets, dict):
+                sheets = {}
+            sheets[usage["date"]] = rec
+            if _store_writable(USAGE_SHEETS_PATH):
+                os.makedirs(os.path.dirname(USAGE_SHEETS_PATH) or ".", exist_ok=True)
+                tmp = USAGE_SHEETS_PATH + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    json.dump({"sheets": sheets}, fh)
+                os.replace(tmp, USAGE_SHEETS_PATH)
+        except Exception:
+            logger.exception("usage sheet record failed (the stock app HAS the sheet)")
+        _track(who, "production", "sent a stock sheet",
+               f"{usage['date']} · {len(lines)} line(s)"
+               + (" · replaced the earlier send" if result.get("replaced") else ""))
+        return _json({"ok": True, "sent": {"sent_at": rec["sent_at"], "by": who,
+                                           "replaced": rec["replaced"]},
+                      "result": result})
 
     @mcp.custom_route("/api/production-labels/queue", methods=["POST"])
     async def labels_queue_route(request: Request):

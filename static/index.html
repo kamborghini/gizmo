@@ -4880,25 +4880,123 @@
                         out.append(el('div', 'empty', 'Nothing was marked made on this day.'));
                         return;
                     }
-                    const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = '10px';
-                    const tb = el('table', 'ktable');
-                    tb.innerHTML = '<thead><tr><th>Size</th><th>Glass</th><th class=\"num\">Pieces</th></tr></thead>';
-                    const tbody = el('tbody');
-                    d.rows.forEach(r => {
-                        const tr = el('tr');
-                        tr.append(el('td', 'kw', r.size + 'mm'), el('td', null, r.glass), el('td', 'num', String(r.qty)));
-                        tbody.append(tr);
-                    });
-                    tb.append(tbody); wrap.append(tb); out.append(wrap);
                     if (d.unresolved.length) {
                         const uq = d.unresolved.reduce((s, u) => s + u.qty, 0);
                         out.append(el('div', 'cov-note', uq + (uq === 1 ? ' pc' : ' pcs')
                             + ' had no resolved size (' + d.unresolved.map(u => u.name).join(', ')
-                            + ') and are not counted above.'));
+                            + ') and are not counted below. Add a line by hand if they were made.'));
                     }
                     if (d.fetch_failed) {
                         out.append(el('div', 'cov-note', d.fetch_failed + ' made order(s) could not be loaded from Shopify (it may be busy) and are missing from this total. Try again shortly.'));
                     }
+                    /* The review sheet: the estimate stands on the left, the
+                       FINAL figure being sent is the editable column. Lines
+                       can be amended, removed, or added before sending. */
+                    const sheet = d.rows.map(r => ({ family: r.glass, size: String(r.size),
+                        estimated: r.qty, final: r.qty }));
+                    let lastResult = null;
+                    const sheetHost = el('div'); out.append(sheetHost);
+                    function paintSheet() {
+                        sheetHost.innerHTML = '';
+                        if (d.sent) {
+                            const nm = byName(d.sent.by);
+                            const b = el('div', 'cov-note',
+                                'Already sent to the stock sheet at ' + String(d.sent.sent_at).slice(11, 16)
+                                + (nm ? ' by ' + nm : '') + '. Sending again replaces that sheet.');
+                            b.style.color = 'var(--accent-ink)';
+                            sheetHost.append(b);
+                        }
+                        const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = '10px';
+                        const tb = el('table', 'ktable');
+                        tb.innerHTML = '<thead><tr><th>Size</th><th>Glass</th><th>Unit</th>'
+                            + '<th class="num">Estimated</th><th class="num">Final</th><th></th></tr></thead>';
+                        const tbody = el('tbody');
+                        sheet.forEach((r, i) => {
+                            const tr = el('tr');
+                            const inp = document.createElement('input');
+                            inp.type = 'number'; inp.min = '0'; inp.max = '10000'; inp.value = r.final;
+                            inp.className = 'tm-field'; inp.style.cssText = 'width:76px;flex:none;padding:4px 8px';
+                            inp.setAttribute('aria-label', 'Final quantity for ' + r.family + ' ' + r.size);
+                            inp.oninput = () => { r.final = inp.value; };
+                            const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove this line (not actually used)';
+                            rm.onclick = () => { sheet.splice(i, 1); paintSheet(); };
+                            const est = el('td', 'num', String(r.estimated));
+                            est.style.color = 'var(--ink-3)';
+                            const tdF = el('td', 'num'); tdF.append(inp);
+                            const tdR = el('td'); tdR.append(rm);
+                            tr.append(el('td', 'kw', r.size + 'mm'), el('td', null, r.family),
+                                el('td', null, r.family === 'Ring' ? 'rings' : 'blanks'), est, tdF, tdR);
+                            tbody.append(tr);
+                        });
+                        const addTr = el('tr');
+                        const famSel = el('select', 'lbl-size');
+                        ['Mono', 'HM', 'Colour', 'Ring'].forEach(f => { const o = el('option', null, f); o.value = f; famSel.append(o); });
+                        const szIn = document.createElement('input');
+                        szIn.className = 'tm-field'; szIn.placeholder = 'Size mm';
+                        szIn.style.cssText = 'width:82px;flex:none;padding:4px 8px';
+                        const qIn = document.createElement('input');
+                        qIn.type = 'number'; qIn.min = '1'; qIn.max = '10000'; qIn.placeholder = 'Qty';
+                        qIn.className = 'tm-field'; qIn.style.cssText = 'width:70px;flex:none;padding:4px 8px';
+                        const addB = el('button', 'btn'); addB.append(ico(I.plus), document.createTextNode('Add'));
+                        addB.title = 'Add something that was used but not in the estimate';
+                        addB.onclick = () => {
+                            const s = szIn.value.trim(); const q = parseInt(qIn.value, 10);
+                            if (!s || !(q > 0)) { toastError('An added line needs a size and a quantity.'); return; }
+                            sheet.push({ family: famSel.value, size: s, estimated: 0, final: q });
+                            paintSheet();
+                        };
+                        const tds = [el('td'), el('td'), el('td', null, ''), el('td', 'num', '0'), el('td', 'num'), el('td')];
+                        tds[0].append(szIn); tds[1].append(famSel); tds[3].style.color = 'var(--ink-3)';
+                        tds[4].append(qIn); tds[5].append(addB);
+                        tds.forEach(t2 => addTr.append(t2));
+                        tbody.append(addTr);
+                        tb.append(tbody); wrap.append(tb); sheetHost.append(wrap);
+                        const send = el('button', 'btn btn-primary'); send.style.marginTop = '10px';
+                        send.append(ico(I.send), document.createTextNode(
+                            d.sent ? 'Send again (replaces the earlier sheet)' : 'Send to stock sheet'));
+                        send.onclick = async () => {
+                            const lines = sheet.map(r => ({ family: r.family, size: String(r.size),
+                                estimated: r.estimated, final: parseInt(r.final, 10) }));
+                            if (!lines.length) { toastError('The sheet has no lines left.'); return; }
+                            if (lines.some(l => !(l.final >= 0))) { toastError('Every line needs a final quantity.'); return; }
+                            if (!(await uiConfirm('Send ' + lines.length + ' line(s) for ' + d.date
+                                + ' to the stock app? Stock adjusts to these FINAL figures'
+                                + (d.sent ? ', replacing the sheet sent earlier' : '') + '.',
+                                { okText: 'Send' }))) return;
+                            send.disabled = true;
+                            try {
+                                const r = await api('/api/stock-usage/send', { date: d.date, lines: lines });
+                                d.sent = r.sent;
+                                lastResult = r.result;
+                                paintSheet();
+                                addToast('Stock sheet sent: ' + (r.result.adjustments || 0) + ' adjustment(s) made.', 'good');
+                            } catch (e) { toastError(e.message || 'The send failed. Nothing was recorded.'); }
+                            send.disabled = false;
+                        };
+                        sheetHost.append(send);
+                        if (lastResult && lastResult.results) {
+                            const box = el('div'); box.style.marginTop = '10px';
+                            lastResult.results.forEach(rr => {
+                                let txt = rr.family + ' ' + rr.size + 'mm: ';
+                                if (rr.status === 'adjusted') {
+                                    txt += 'adjusted ' + (rr.delta > 0 ? '+' : '') + rr.delta
+                                        + ' (auto-booked ' + rr.already_booked + ', final ' + rr.final + ')'
+                                        + (rr.short ? ' · the shelf was ' + rr.short + ' short' : '');
+                                } else if (rr.status === 'matched') {
+                                    txt += 'already right (auto-booked ' + rr.already_booked + ')';
+                                } else if (rr.status === 'no_item') {
+                                    txt += 'NO STOCK ITEM: map this line in the stock app, then send again';
+                                } else {
+                                    txt += 'the quantity was not readable';
+                                }
+                                const line = el('div', 'cov-note', txt);
+                                if (rr.status === 'no_item') line.style.color = 'var(--danger)';
+                                box.append(line);
+                            });
+                            sheetHost.append(box);
+                        }
+                    }
+                    paintSheet();
                     pr.disabled = !d.rows.length;
                 } catch (e) {
                     if (rq !== usageReq) return;
@@ -8414,7 +8512,7 @@
             if (!sub) return '';
             const names = (filesCache && filesCache.names) || (teamCache && teamCache.names) || {};
             if (names[sub]) return names[sub];
-            return /^\d+$/.test(String(sub)) ? '' : String(sub).slice(0, 24);
+            return /^(u?\d+)$/.test(String(sub)) ? '' : String(sub).slice(0, 24);
         }
         /* ---- the app's own front door ---- */
         async function authApi(path, payload) {

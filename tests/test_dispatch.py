@@ -33,6 +33,7 @@ os.environ.update({
     "SESSIONS_PATH": SCRATCH + "/sessions.json",
     "WORK_PATH": SCRATCH + "/worklog.json",
     "GOBO_SIZES_LIVE": SCRATCH + "/gobo-sizes.csv",
+    "USAGE_SHEETS_PATH": SCRATCH + "/usage_sheets.json",
     "PROFILE_PATH": SCRATCH + "/store_profile.json",
     "KNOWLEDGE_PATH": SCRATCH + "/store_knowledge.json",
     "ZETA_SYNC_PATH": SCRATCH + "/zeta_sync.json",
@@ -5371,6 +5372,85 @@ def t_backup_caps_labels_to_the_newest_sixty():
                     os.remove(p)
                 except FileNotFoundError:
                     pass
+    with_accounts(go)
+
+@test
+def t_stock_sheet_sends_finals_and_records_the_day():
+    def go():
+        ensure_auth()
+        reset_dispatch(); reset_prod()
+        try:
+            os.remove(copilot.USAGE_SHEETS_PATH)
+        except FileNotFoundError:
+            pass
+        sent_payloads = []
+        async def fake_sheet(payload):
+            sent_payloads.append(payload)
+            return {"ok": True, "day": payload["day"], "replaced": len(sent_payloads) > 1,
+                    "adjustments": 1,
+                    "results": [{"family": "Mono", "size": "37.5", "final": 12,
+                                 "already_booked": 10, "delta": 2, "status": "adjusted"}]}
+        saved = (copilot._zeta_send_sheet, copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN)
+        copilot._zeta_send_sheet = fake_sheet
+        copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN = "https://zeta.test", "tok"
+        try:
+            def work(sent):
+                eq(mark_made(12345, True).status_code, 200)
+            with_zeta(work)
+            from zoneinfo import ZoneInfo
+            import datetime as _dt
+            today = _dt.datetime.now(ZoneInfo("Europe/London")).date().isoformat()
+            day = post("/api/stock-usage", {"date": today}).json()
+            ok(day.get("order_ids"), "the day sheet names its covered orders")
+            ok("sent" not in day, "an unsent day carries no sent flag")
+            r = post("/api/stock-usage/send", {"date": today, "lines": [
+                {"family": "Mono", "size": "37.5", "estimated": 10, "final": 12}]})
+            eq(r.status_code, 200, r.text)
+            j = r.json()
+            ok(j["sent"]["sent_at"], "the send is stamped")
+            eq(j["result"]["results"][0]["status"], "adjusted", "per-line statuses come back")
+            eq(sent_payloads[0]["order_ids"], [str(i) for i in day["order_ids"]],
+               "the covered orders are recomputed server-side, never trusted from the page")
+            day2 = post("/api/stock-usage", {"date": today}).json()
+            ok(day2.get("sent", {}).get("sent_at"), "the day now says it was sent")
+            r2 = post("/api/stock-usage/send", {"date": today, "lines": [
+                {"family": "Mono", "size": "37.5", "estimated": 10, "final": 11}]})
+            ok(r2.json()["sent"]["replaced"], "a re-send is flagged as a replacement")
+            ev = post("/api/team/board", {}).json()["events"]
+            ok(any(e["action"] == "sent a stock sheet" for e in ev), "and lands on the ledger")
+            bad = post("/api/stock-usage/send", {"date": today, "lines": [
+                {"family": "Mono", "size": "37.5", "estimated": 10, "final": "loads"}]})
+            eq(bad.status_code, 400, "a non-number final is refused before anything is sent")
+        finally:
+            (copilot._zeta_send_sheet, copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN) = saved
+            try:
+                os.remove(copilot.USAGE_SHEETS_PATH)
+            except FileNotFoundError:
+                pass
+    with_accounts(go)
+
+@test
+def t_stock_sheet_failure_records_nothing():
+    def go():
+        ensure_auth()
+        reset_dispatch(); reset_prod()
+        async def dead_sheet(payload):
+            raise RuntimeError("connection refused")
+        saved = (copilot._zeta_send_sheet, copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN)
+        copilot._zeta_send_sheet = dead_sheet
+        copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN = "https://zeta.test", "tok"
+        try:
+            from zoneinfo import ZoneInfo
+            import datetime as _dt
+            today = _dt.datetime.now(ZoneInfo("Europe/London")).date().isoformat()
+            r = post("/api/stock-usage/send", {"date": today, "lines": [
+                {"family": "Mono", "size": "37.5", "estimated": 10, "final": 12}]})
+            eq(r.status_code, 502, "a dead stock app is a plain answer")
+            ok("Nothing was recorded" in r.json()["error"], r.text)
+            day = post("/api/stock-usage", {"date": today}).json()
+            ok("sent" not in day, "and no phantom send is recorded")
+        finally:
+            (copilot._zeta_send_sheet, copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN) = saved
     with_accounts(go)
 
 # =========================== run ===========================================

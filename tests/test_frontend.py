@@ -357,6 +357,21 @@ def t_files_preview_select_and_move_exist():
        "a rename keeps its extension")
 
 
+@test
+def t_stock_sheet_review_is_editable_and_honest():
+    """The estimate and the FINAL figure are separate columns; lines amend,
+    add and remove; a sent day says so; sending confirms first."""
+    ok("Send to stock sheet" in SCRIPT, "the send button exists")
+    ok("Already sent to the stock sheet" in SCRIPT, "a sent day announces itself")
+    ok("replaces the earlier sheet" in SCRIPT, "and a re-send is labelled as a replacement")
+    ok("'/api/stock-usage/send'" in SCRIPT, "wired to the send route")
+    ok(re.search(r"<th class=\"num\">Estimated</th><th class=\"num\">Final</th>", SCRIPT),
+       "estimate and final are distinct columns")
+    ok("NO STOCK ITEM" in SCRIPT, "a failed line is named, never silent")
+    ok("Add something that was used but not in the estimate" in SCRIPT,
+       "lines can be added beyond the estimate")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
