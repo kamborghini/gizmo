@@ -260,6 +260,12 @@ async def get_thread(thread_id: str) -> dict:
     msgs = []
     subject = ""
     for m in (data.get("messages") or []):
+        # An UNSENT draft is a message on the thread with the DRAFT label.
+        # Counting it would make the board report that the shop had replied,
+        # move the conversation on, and later feed our own unsent words back
+        # to the model as though the customer had already received them.
+        if "DRAFT" in (m.get("labelIds") or []):
+            continue
         name, email = parseaddr(_header(m, "From"))
         subject = subject or _header(m, "Subject")
         msgs.append({"id": str(m.get("id") or ""),
@@ -274,7 +280,21 @@ async def get_thread(thread_id: str) -> dict:
             "subject": subject, "messages": msgs}
 
 
-def _b64url(data: str) -> str:
+def _part_charset(part: dict) -> str:
+    """The charset Gmail declares for this part. Assuming UTF-8 turns a
+    Windows-1252 pound sign into a replacement character, and this shop's
+    inbound mail is quotes and prices: a mangled currency symbol beside a
+    number is worse than no body at all."""
+    for h in (part.get("headers") or []):
+        if str(h.get("name", "")).lower() == "content-type":
+            v = str(h.get("value") or "")
+            if "charset=" in v.lower():
+                cs = v.lower().split("charset=", 1)[1].split(";")[0]
+                return cs.strip().strip('"').strip("'")
+    return ""
+
+
+def _b64url(data: str, charset: str = "") -> str:
     """Gmail hands body bytes back base64URL encoded and unpadded. Plain
     b64decode mangles any part whose alphabet happens to contain - or _,
     which is data-dependent: it passes every test and then fails on one
@@ -282,9 +302,15 @@ def _b64url(data: str) -> str:
     import base64
     s = str(data or "")
     try:
-        return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4)).decode("utf-8", "replace")
+        raw = base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
     except Exception:
         return ""
+    for enc in ([charset] if charset else []) + ["utf-8", "cp1252", "latin-1"]:
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", "replace")
 
 
 def _walk_body(part: dict, out: dict) -> None:
@@ -292,29 +318,38 @@ def _walk_body(part: dict, out: dict) -> None:
     body on the root part with no `parts` at all, so a walker that only ever
     looks at `parts` reads nothing for exactly the plainest emails."""
     mime = str(part.get("mimeType") or "").split(";")[0].strip().lower()
+    # The filename check comes FIRST: an attached .eml is a container with a
+    # filename, and descending into it reads the forwarded mail as if the
+    # sender had written it themselves.
+    if part.get("filename"):
+        return
     kids = part.get("parts") or []
     if kids:
         for k in kids:
             _walk_body(k, out)
         return
-    if part.get("filename"):
-        return                       # an attachment, not the message
     body = part.get("body") or {}
     if body.get("attachmentId") or not body.get("data"):
         return                       # bytes live elsewhere: never pull them in
-    if mime == "text/plain" and not out.get("plain"):
-        out["plain"] = _b64url(body["data"])
-    elif mime == "text/html" and not out.get("html"):
-        out["html"] = _b64url(body["data"])
+    text = _b64url(body["data"], _part_charset(part))
+    if mime == "text/plain" and not (out.get("plain") or "").strip():
+        out["plain"] = text          # a whitespace-only stub must not win
+    elif mime == "text/html" and not (out.get("html") or "").strip():
+        out["html"] = text
 
 
 def _strip_html(html: str) -> str:
     import re as _re
-    txt = _re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html or "")
-    txt = _re.sub(r"(?i)<br\s*/?>|</p>", "\n", txt)
+    import html as _html
+    txt = html or ""
+    # Unterminated script/style must not survive as readable text, so drop
+    # from the opening tag to the end when there is no closing tag.
+    txt = _re.sub(r"(?is)<(script|style)[^>]*>.*?(</\1>|$)", " ", txt)
+    txt = _re.sub(r"(?i)<br\s*/?>|</p>|</div>|</tr>", "\n", txt)
     txt = _re.sub(r"<[^>]+>", " ", txt)
-    txt = (txt.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<")
-              .replace("&gt;", ">").replace("&quot;", '"').replace("&#39;", "'"))
+    # unescape AFTER tags are gone, and handle every entity rather than six:
+    # &pound; and &#163; are the ones that matter on a quote.
+    txt = _html.unescape(txt)
     return _re.sub(r"[ \t]{2,}", " ", _re.sub(r"\n{3,}", "\n\n", txt)).strip()
 
 
@@ -327,6 +362,8 @@ async def read_thread(thread_id: str, per_msg_chars: int = 4000) -> dict:
     data = await _call("GET", f"threads/{thread_id}", params={"format": "full"})
     msgs = []
     for m in (data.get("messages") or []):
+        if "DRAFT" in (m.get("labelIds") or []):
+            continue      # our own unsent words are not part of the conversation
         payload = m.get("payload") or {}
         found: dict = {}
         _walk_body(payload, found)
@@ -346,9 +383,17 @@ async def read_thread(thread_id: str, per_msg_chars: int = 4000) -> dict:
     return {"id": str(data.get("id") or thread_id), "messages": msgs}
 
 
+async def delete_draft(draft_id: str) -> None:
+    """Best effort: a leftover draft is clutter, not a crisis."""
+    try:
+        await _call("DELETE", f"drafts/{draft_id}")
+    except Exception as e:
+        logger.warning("Gmail: could not remove the previous draft %s: %s", draft_id, e)
+
+
 async def create_draft(thread_id: str, to_addr: str, subject: str, body_text: str,
                        in_reply_to: str = "", references: str = "",
-                       cc: str = "") -> dict:
+                       cc: str = "", replaces: str = "") -> dict:
     """Put a reply in the mailbox as a DRAFT. A draft is inert: nothing is
     sent, nobody is notified, and the merchant reviews and sends it in Gmail.
     This app never sends mail itself.
@@ -359,6 +404,12 @@ async def create_draft(thread_id: str, to_addr: str, subject: str, body_text: st
     import base64
     from email.message import EmailMessage
     me = address()
+    # Every header value below is derived from Gmail data, i.e. ultimately
+    # from whoever sent the email. A newline inside one would start a new
+    # header line, so strip line breaks before they get near a header.
+    clean = lambda v: " ".join(str(v or "").split())[:998]
+    to_addr, cc, subject = clean(to_addr), clean(cc), clean(subject)
+    in_reply_to, references = clean(in_reply_to), clean(references)
     msg = EmailMessage()
     if me:
         msg["From"] = me
@@ -383,6 +434,10 @@ async def create_draft(thread_id: str, to_addr: str, subject: str, body_text: st
         logger.warning("Gmail put the draft on thread %s, not %s", landed, thread_id)
         raise GmailError("Gmail saved the draft but could not attach it to this "
                          "conversation. Check your drafts folder.")
+    if replaces:
+        # Saving twice must leave ONE draft on the conversation, not a pile of
+        # near-identical ones that all look ready to send.
+        await delete_draft(replaces)
     return {"id": str(out.get("id") or ""), "thread_id": landed or str(thread_id)}
 
 

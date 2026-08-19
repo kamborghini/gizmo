@@ -6030,10 +6030,10 @@ def t_mail_draft_is_saved_never_sent_and_threaded_to_the_customer():
                  "message_id": "<def@mail>", "references": "<abc@mail>",
                  "at": "2026-08-19T02:00:00+00:00", "text": "Checking now."}]}
         async def fake_draft(thread_id, to_addr, subject, body_text,
-                             in_reply_to="", references="", cc=""):
+                             in_reply_to="", references="", cc="", replaces=""):
             captured.update({"thread_id": thread_id, "to": to_addr, "subject": subject,
-                             "body": body_text, "irt": in_reply_to})
-            return {"id": "d1", "thread_id": thread_id}
+                             "body": body_text, "irt": in_reply_to, "replaces": replaces})
+            return {"id": "d%d" % (len(captured.get("ids", [])) + 1), "thread_id": thread_id}
         saved = (_gm.read_thread, _gm.create_draft)
         _gm.read_thread, _gm.create_draft = fake_read, fake_draft
         try:
@@ -6049,9 +6049,191 @@ def t_mail_draft_is_saved_never_sent_and_threaded_to_the_customer():
             ok(any("draft" in a["action"] for a in t["activity"]))
             eq(post_s(sess, "/api/mail/draft", {"id": "t1", "op": "save", "text": ""}).status_code,
                400, "an empty draft is not saved")
+            # Saving again REPLACES: one draft per conversation, not a pile.
+            post_s(sess, "/api/mail/draft", {"id": "t1", "op": "save", "text": "Second go."})
+            eq(captured["replaces"], "d1", "the previous draft is cleared up")
         finally:
             _gm.read_thread, _gm.create_draft = saved
     with_mail(go)
+
+@test
+def t_mail_draft_refuses_to_write_into_someone_elses_conversation():
+    def go():
+        ensure_auth()
+        _uid_a, sess_a, _ = ready_user("Ann", "ann")
+        _uid_b, sess_b, _ = ready_user("Bob", "bob")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        post_s(sess_a, "/api/mail/claim", {"id": "t1"})
+        r = post_s(sess_b, "/api/mail/draft", {"id": "t1", "op": "compose"})
+        eq(r.status_code, 403, "a reply is at least as big a move as a state change")
+        ok("Ann" in r.json()["error"], r.text)
+        # A lead may still step in, and so may the owner.
+        async def fake_read(tid, per_msg_chars=4000):
+            return {"id": tid, "messages": [
+                {"id": "m1", "from_name": "Jo", "from_email": "jo@customer.com",
+                 "subject": "S", "message_id": "<a@b>", "references": "", "reply_to": "",
+                 "at": "2026-08-19T01:00:00+00:00", "text": "hello"}]}
+        captured = {}
+        async def fake_draft(thread_id, to_addr, subject, body_text, in_reply_to="",
+                             references="", cc="", replaces=""):
+            captured["to"] = to_addr
+            return {"id": "d1", "thread_id": thread_id}
+        saved = (_gm.read_thread, _gm.create_draft)
+        _gm.read_thread, _gm.create_draft = fake_read, fake_draft
+        try:
+            eq(post("/api/mail/draft", {"id": "t1", "op": "save", "text": "x"}).status_code, 200,
+               "a lead can")
+        finally:
+            _gm.read_thread, _gm.create_draft = saved
+    with_mail(go)
+
+@test
+def t_mail_draft_refuses_a_reply_that_would_go_nowhere():
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        async def only_us(tid, per_msg_chars=4000):
+            return {"id": tid, "messages": [
+                {"id": "m1", "from_name": "Sales", "from_email": MBOX, "subject": "S",
+                 "message_id": "<a@b>", "references": "", "reply_to": "",
+                 "at": "2026-08-19T01:00:00+00:00", "text": "note to self"}]}
+        saved = _gm.read_thread
+        _gm.read_thread = only_us
+        try:
+            r = post("/api/mail/draft", {"id": "t1", "op": "save", "text": "hello"})
+            eq(r.status_code, 400, "a reply addressed to our own mailbox is refused")
+            ok("circle" in r.json()["error"], r.text)
+        finally:
+            _gm.read_thread = saved
+    with_mail(go)
+
+@test
+def t_mail_own_unsent_drafts_are_not_part_of_the_conversation():
+    """A draft sitting in Gmail must not read as a reply we already sent,
+    on the board or in the next prompt."""
+    def go():
+        ensure_auth()
+        thread = {"id": "t1", "historyId": "h1", "messages": [
+            {"id": "m1", "labelIds": ["INBOX"], "internalDate": "1787000000000",
+             "snippet": "where is it", "payload": {"headers": [
+                 {"name": "From", "value": "Jo <jo@customer.com>"},
+                 {"name": "Subject", "value": "Order"}]}},
+            {"id": "m2", "labelIds": ["DRAFT"], "internalDate": "1787000900000",
+             "snippet": "our unsent words", "payload": {"headers": [
+                 {"name": "From", "value": "Sales <" + MBOX + ">"},
+                 {"name": "Subject", "value": "Re: Order"}]}}]}
+        async def fake_call(method, path, params=None, body=None):
+            return thread
+        saved = _gm._call
+        _gm._call = fake_call
+        try:
+            got = asyncio.run(_gm.get_thread("t1"))
+            eq(len(got["messages"]), 1, "the unsent draft is not a message on the board")
+            eq(got["messages"][0]["from_email"], "jo@customer.com")
+            read = asyncio.run(_gm.read_thread("t1"))
+            eq(len(read["messages"]), 1, "and Claude never reads our own draft back")
+        finally:
+            _gm._call = saved
+    with_mail(go)
+
+@test
+def t_mail_rule_is_exactly_means_exactly():
+    def go():
+        ensure_auth()
+        post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Newsletter", "done": True,
+            "conditions": [{"field": "subject", "op": "is", "value": "newsletter"}]}})
+        _seed_thread("r1", subject="Re: newsletter query, can you quote 40 gobos?")
+        eq(copilot._load_mail()["threads"]["r1"]["state"], "unassigned",
+           "a real enquiry containing the word is NOT the word")
+        _seed_thread("r2", subject="Newsletter")
+        eq(copilot._load_mail()["threads"]["r2"]["state"], "done", "the exact subject still matches")
+        # A display name can no longer impersonate an address.
+        post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Boss", "done": True,
+            "conditions": [{"field": "from", "op": "is", "value": "boss@bigcustomer.com"}]}})
+        _seed_thread("r3", subject="hello", frm=("boss@bigcustomer.com", "spoof@spammer.example"))
+        eq(copilot._load_mail()["threads"]["r3"]["state"], "unassigned",
+           "a stranger putting that address in their DISPLAY NAME does not match it")
+        _seed_thread("r5", subject="hello", frm=("The Boss", "boss@bigcustomer.com"))
+        eq(copilot._load_mail()["threads"]["r5"]["state"], "done", "the real address does")
+        # A non-address value still matches the name, which is what it is for.
+        post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Accounts", "done": True,
+            "conditions": [{"field": "from", "op": "is", "value": "Accounts"}]}})
+        _seed_thread("r6", subject="hello", frm=("Accounts", "ap@theatre.org"))
+        eq(copilot._load_mail()["threads"]["r6"]["state"], "done", "names still work")
+        _seed_thread("r4", subject="hello", frm=("Someone", "boss@bigcustomer.com.evil.com"))
+        eq(copilot._load_mail()["threads"]["r4"]["state"], "unassigned",
+           "but a lookalike address is not an exact match")
+    with_mail(go)
+
+@test
+def t_mail_rule_that_cannot_assign_does_not_let_the_next_one_close_it():
+    """The critical one: a VIP rule whose owner loses the Inbox tab must not
+    fall through to a catch-all that closes the customer's email."""
+    def go():
+        ensure_auth()
+        uid_a, _s, _ = ready_user("Ann", "ann")
+        post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "VIP", "assign": uid_a,
+            "conditions": [{"field": "domain", "op": "is", "value": "bigcustomer.com"}]}})
+        post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Bulk", "done": True,
+            "conditions": [{"field": "subject", "op": "contains", "value": "order"}]}})
+        _seed_thread("v1", subject="order query", frm=("Boss", "boss@bigcustomer.com"))
+        eq(copilot._load_mail()["threads"]["v1"]["owner"], uid_a, "normally VIP wins")
+        post("/api/team/user", {"op": "tabs", "id": uid_a, "tabs": ["overview"]})
+        _seed_thread("v2", subject="order query two", frm=("Boss", "boss@bigcustomer.com"))
+        t = copilot._load_mail()["threads"]["v2"]
+        eq(t["state"], "unassigned", "a broken VIP rule leaves it VISIBLE, never closed")
+        eq(t["owner"], "")
+        rule = [r for r in copilot._load_mail()["rules"] if r["name"] == "VIP"][0]
+        ok(rule.get("broken"), "and the filter itself reports the fault")
+    with_mail(go)
+
+@test
+def t_mail_rule_needs_something_positive_to_match_on():
+    def go():
+        ensure_auth()
+        r = post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Catch all", "done": True,
+            "conditions": [{"field": "subject", "op": "not_contains", "value": "zzzz"}]}})
+        eq(r.status_code, 400, "a lone 'does not contain' would swallow the inbox")
+        eq(post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Round with nobody", "assign": "_round", "pool": [],
+            "conditions": [{"field": "subject", "op": "contains", "value": "x"}]}}).status_code,
+           400, "sharing between nobody is not an action")
+        # A narrowing not_contains alongside a positive match is fine.
+        eq(post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Quotes but not spam", "done": True, "mode": "all",
+            "conditions": [{"field": "subject", "op": "contains", "value": "quote"},
+                           {"field": "subject", "op": "not_contains", "value": "seo"}]}}).status_code,
+           200, "as a narrowing clause it is exactly right")
+    with_mail(go)
+
+@test
+def t_mail_body_charset_and_entities_survive():
+    import base64 as _b64
+    raw = "Budget is £450 for Dave O’Brien".encode("cp1252")
+    part = {"mimeType": "text/plain",
+            "headers": [{"name": "Content-Type", "value": 'text/plain; charset="windows-1252"'}],
+            "body": {"data": _b64.urlsafe_b64encode(raw).decode().rstrip("=")}}
+    out = {}
+    _gm._walk_body(part, out)
+    ok("£450" in out.get("plain", ""), "a pound sign is not mangled: " + repr(out.get("plain")))
+    txt = _gm._strip_html("<div>20 gobos for &pound;12.50</div><div>Total &#163;250 &mdash; ok?</div>")
+    ok("£12.50" in txt and "£250" in txt, "entities are decoded, not shown raw: " + txt)
+    ok("script" not in _gm._strip_html("<script>alert(1)").lower(),
+       "an unterminated script does not survive as text")
+    # An attached .eml must not be read as the sender's own words.
+    out = {}
+    _gm._walk_body({"mimeType": "message/rfc822", "filename": "forwarded.eml", "parts": [
+        {"mimeType": "text/plain", "body": {"data": _b64.urlsafe_b64encode(
+            b"words from a different email").decode().rstrip("=")}}]}, out)
+    eq(out.get("plain"), None, "an attachment is not the message")
 
 @test
 def t_mail_draft_compose_asks_claude_with_the_conversation():

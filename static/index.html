@@ -692,6 +692,7 @@
         .mrule-bar .btn { font-size: 12px; padding: 3px 9px; }
         .mrule-cond { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
         .mrule-pool { margin: 6px 0; }
+        .mrule-broken { font-size: 12px; color: #b98900; margin-top: 4px; }
         .mrule-tag { flex: none; font-size: 11px; color: var(--ink-3); background: var(--surface-3);
             border-radius: 12px; padding: 0 6px; }
         .mail-draft { border: 1px solid var(--accent-line); background: var(--accent-soft);
@@ -1714,7 +1715,16 @@
                 if (!path.startsWith('/api/auth/')) { setAppSession(''); authShow('login'); }
                 throw new Error('Please log in.');
             }
-            if (res.status === 429) throw new Error('The app is being asked for too much at once. Wait a few seconds and try again.');
+            if (res.status === 429) {
+                /* A rate limit really does clear in seconds, but the daily AI
+                   spend cap does not: telling someone to wait a moment when
+                   the truth is "not until tomorrow, or raise the cap" sends
+                   them round a loop. Routes that mean the latter say so. */
+                let hard = null;
+                try { hard = await res.clone().json(); } catch (e) { hard = null; }
+                throw new Error(hard && hard.hard && hard.error ? hard.error
+                    : 'The app is being asked for too much at once. Wait a few seconds and try again.');
+            }
             let data;
             try { data = await res.json(); }
             catch (e) {
@@ -8336,6 +8346,11 @@
             if (t.snippet) subj.append(document.createTextNode(' · ' + t.snippet));
             row.append(subj);
             if (t.msg_count > 1) row.append(el('span', 'mcount', String(t.msg_count)));
+            if (t.rule) {
+                const rt = el('span', 'mrule-tag', 'filter');
+                rt.title = 'Sorted by the filter "' + t.rule + '"';
+                row.append(rt);
+            }
             if (t.notes) {
                 const n = el('span', 'mnote'); n.innerHTML = I.bookmark;
                 n.title = t.notes + (t.notes === 1 ? ' internal note' : ' internal notes');
@@ -8392,6 +8407,7 @@
             if (mailFilter === 'mine' && t.owner !== mailCache.me) return false;
             if (mailFilter === 'unassigned' && t.state !== 'unassigned') return false;
             if (mailFilter === 'done' && t.state !== 'done') return false;
+            if (mailFilter === 'unread' && !t.unread) return false;
             return mailTextMatches(t);
         }
         function paintMailBoard() {
@@ -8453,7 +8469,7 @@
            actions: hand it to someone, or close it on arrival.
            ================================================================== */
         const MAIL_FIELDS = [['from', 'Sender'], ['domain', 'Sender domain'],
-                             ['subject', 'Subject'], ['text', 'Anything in the email']];
+                             ['subject', 'Subject'], ['text', 'Subject or preview text']];
         const MAIL_OPS = [['contains', 'contains'], ['not_contains', 'does not contain'],
                           ['is', 'is exactly'], ['starts', 'starts with']];
         async function openMailRules() {
@@ -8498,6 +8514,10 @@
                 if (r.done) acts.push('close on arrival');
                 row.append(el('div', 'mrule-do', acts.join(', ')
                     + (r.hits ? '  ·  used ' + r.hits + (r.hits === 1 ? ' time' : ' times') : '')));
+                if (r.broken) {
+                    const w = el('div', 'mrule-broken', r.broken);
+                    row.append(w);
+                }
                 if (lead) {
                     const bar = el('div', 'mrule-bar');
                     const mk = (label, fn) => { const b = el('button', 'btn', label); b.onclick = fn; bar.append(b); };
@@ -8612,7 +8632,7 @@
                 const o = document.createElement('option'); o.value = v; o.textContent = t;
                 if (r.assign === v) o.selected = true; who.append(o);
             });
-            (mailCache.team || []).forEach(u => {
+            (mailCache.team || []).filter(u => u.can_own !== false).forEach(u => {
                 const o = document.createElement('option');
                 o.value = u.uid; o.textContent = 'give it to ' + u.name;
                 if (r.assign === u.uid) o.selected = true; who.append(o);
@@ -8623,7 +8643,7 @@
                 poolBox.style.display = who.value === '_round' ? '' : 'none';
                 if (who.value !== '_round') return;
                 poolBox.append(el('div', 'setting-sub', 'Share between:'));
-                (mailCache.team || []).forEach(u => {
+                (mailCache.team || []).filter(u => u.can_own !== false).forEach(u => {
                     const l = el('label', 'tm-tabpick');
                     const cb = document.createElement('input');
                     cb.type = 'checkbox'; cb.checked = (r.pool || []).indexOf(u.uid) >= 0;
@@ -8665,18 +8685,19 @@
         /* Claude drafts, a person edits, Gmail holds it as a draft, a person
            sends it. The app never sends mail, and nothing reaches a customer
            without someone reading it first. */
-        async function mailComposeDraft(m, t, btn, guidance) {
+        async function mailComposeDraft(m, t, btn, guidance, previous) {
             const old = m.body.querySelector('.mail-draft');
             if (old) old.remove();
             const host = el('div', 'mail-draft');
             btn.disabled = true;
-            btn.textContent = guidance ? 'Rewriting...' : 'Reading the conversation...';
+            btn.textContent = guidance ? 'Rewriting\u2026' : 'Reading the conversation\u2026';
             host.append(el('div', 'setting-sub', 'Claude is reading the whole thread.'));
             btn.parentNode.after(host);
             let out;
             try {
-                out = await api('/api/mail/draft', guidance
-                    ? { id: t.id, op: 'compose', guidance: guidance }
+                out = await api('/api/mail/draft', guidance || previous
+                    ? { id: t.id, op: 'compose', guidance: guidance || '',
+                        previous: previous || '' }
                     : { id: t.id, op: 'compose' });
             } catch (e) {
                 host.remove();
@@ -8685,7 +8706,16 @@
                 return;
             }
             btn.disabled = false; btn.textContent = 'Compose reply with Claude';
-            host.innerHTML = '';
+            host.remove();
+            mailDraftPanel(m, t, btn, out);
+        }
+        /* One place that builds the draft panel, so the compose path and the
+           rescue-after-repaint path can never drift apart. */
+        function mailDraftPanel(m, t, btn, out) {
+            const prior = m.body.querySelector('.mail-draft');
+            if (prior) prior.remove();
+            const host = el('div', 'mail-draft');
+            btn.parentNode.after(host);
             host.append(el('div', 'setting-title', 'Draft reply'));
             host.append(el('div', 'setting-sub',
                 'Read it before it goes anywhere. Claude leaves gaps like ____ where '
@@ -8708,7 +8738,7 @@
             const copy = el('button', 'btn', 'Copy');
             copy.onclick = async () => {
                 try { await navigator.clipboard.writeText(ta.value); toastOk('Copied'); }
-                catch (e) { ta.select(); toastError('Press Cmd C to copy.'); }
+                catch (e) { ta.select(); toastError('Select all and copy with the keyboard.'); }
             };
             const drop = el('button', 'btn', 'Discard');
             drop.onclick = () => host.remove();
@@ -8721,7 +8751,7 @@
             const note = crmText('', 'Not right? Say what to change, then Try again');
             note.style.flex = '1';
             const again = el('button', 'btn', 'Try again');
-            again.onclick = () => mailComposeDraft(m, t, btn, note.value.trim());
+            again.onclick = () => mailComposeDraft(m, t, btn, note.value.trim(), ta.value);
             steer.append(note, again);
             host.append(steer);
             host.append(el('div', 'setting-sub',
@@ -8769,6 +8799,11 @@
         }
         function paintMailThread(m, r) {
             const t = r.thread;
+            /* Rescue an unsaved draft before the rebuild: every other button in
+               this modal repaints, and losing two minutes of edited reply to a
+               stray click on 'Start work' is not acceptable. */
+            const live = m.body.querySelector('.mail-draft textarea');
+            const rescued = live && live.value.trim() ? live.value : '';
             m.body.innerHTML = '';
             if (r.viewers && r.viewers.length) {
                 m.body.append(el('div', 'mail-viewwarn', r.viewers.join(' and ')
@@ -8789,6 +8824,11 @@
             const compose = el('button', 'btn', 'Compose reply with Claude');
             compose.onclick = () => mailComposeDraft(m, t, compose);
             draftBar.append(compose);
+            if (rescued) {
+                /* The repaint would have thrown this away. Put it back with
+                   its buttons, exactly where it was. */
+                setTimeout(() => mailDraftPanel(m, t, compose, { draft: rescued }), 0);
+            }
             if (t.draft_at) {
                 draftBar.append(el('span', 'mail-bulk-hint',
                     'a draft was saved into Gmail ' + mailAgoLong(t.draft_at)));
