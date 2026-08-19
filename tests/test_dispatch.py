@@ -5980,6 +5980,245 @@ def t_mail_bulk_clears_a_backlog_and_reports_what_it_could_not_do():
     with_mail(go)
 
 @test
+def t_mail_gmail_body_parsing_handles_the_shapes_gmail_actually_sends():
+    """A simple email keeps its whole body on the ROOT part with no `parts`
+    at all, so a walker that only looks at `parts` reads nothing for exactly
+    the plainest mail. Attachments must never be pulled into the request."""
+    import base64 as _b64
+    enc = lambda s: _b64.urlsafe_b64encode(s.encode()).decode().rstrip("=")
+    # (a) flat text/plain, no parts
+    out = {}
+    _gm._walk_body({"mimeType": "text/plain",
+                    "body": {"data": enc("just a plain note")}}, out)
+    eq(out.get("plain"), "just a plain note", "the flat shape is read")
+    # (b) nested mixed > related > alternative, with an attachment alongside
+    out = {}
+    _gm._walk_body({"mimeType": "multipart/mixed", "parts": [
+        {"mimeType": "multipart/related", "parts": [
+            {"mimeType": "multipart/alternative", "parts": [
+                {"mimeType": "text/plain", "body": {"data": enc("the real words")}},
+                {"mimeType": "text/html", "body": {"data": enc("<p>the real words</p>")}}]}]},
+        {"mimeType": "application/pdf", "filename": "invoice.pdf",
+         "body": {"attachmentId": "att1", "size": 20000000}}]}, out)
+    eq(out.get("plain"), "the real words", "three levels deep is still found")
+    # (c) html only: tags stripped rather than fed to the model raw
+    out = {}
+    _gm._walk_body({"mimeType": "text/html",
+                    "body": {"data": enc("<p>Hello<br>there</p><script>x()</script>")}}, out)
+    txt = _gm._strip_html(out.get("html") or "")
+    ok("Hello" in txt and "there" in txt and "script" not in txt and "<" not in txt, txt)
+    # (d) unpadded base64url with the URL-safe alphabet
+    raw = _b64.urlsafe_b64encode("café — test?>".encode()).decode().rstrip("=")
+    ok("café" in _gm._b64url(raw), "unpadded base64url decodes")
+
+@test
+def t_mail_draft_is_saved_never_sent_and_threaded_to_the_customer():
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1", subject="Where is my order?")
+        captured = {}
+        async def fake_read(tid, per_msg_chars=4000):
+            return {"id": tid, "messages": [
+                {"id": "m1", "from_name": "Jo", "from_email": "jo@customer.com",
+                 "reply_to": "", "subject": "Where is my order?",
+                 "message_id": "<abc@mail>", "references": "", "at": "2026-08-19T01:00:00+00:00",
+                 "text": "Any news on my gobos?"},
+                {"id": "m2", "from_name": "Sales", "from_email": MBOX,
+                 "reply_to": "", "subject": "Re: Where is my order?",
+                 "message_id": "<def@mail>", "references": "<abc@mail>",
+                 "at": "2026-08-19T02:00:00+00:00", "text": "Checking now."}]}
+        async def fake_draft(thread_id, to_addr, subject, body_text,
+                             in_reply_to="", references="", cc=""):
+            captured.update({"thread_id": thread_id, "to": to_addr, "subject": subject,
+                             "body": body_text, "irt": in_reply_to})
+            return {"id": "d1", "thread_id": thread_id}
+        saved = (_gm.read_thread, _gm.create_draft)
+        _gm.read_thread, _gm.create_draft = fake_read, fake_draft
+        try:
+            r = post_s(sess, "/api/mail/draft", {"id": "t1", "op": "save",
+                                                 "text": "Hello Jo, they ship Friday."})
+            eq(r.status_code, 200, r.text)
+            eq(captured["to"], "jo@customer.com",
+               "the reply goes to the CUSTOMER, not back to our own mailbox")
+            eq(captured["irt"], "<abc@mail>", "and threads onto their message")
+            eq(captured["thread_id"], "t1")
+            t = copilot._load_mail()["threads"]["t1"]
+            ok(t.get("draft_at"), "the thread records that a draft exists")
+            ok(any("draft" in a["action"] for a in t["activity"]))
+            eq(post_s(sess, "/api/mail/draft", {"id": "t1", "op": "save", "text": ""}).status_code,
+               400, "an empty draft is not saved")
+        finally:
+            _gm.read_thread, _gm.create_draft = saved
+    with_mail(go)
+
+@test
+def t_mail_draft_compose_asks_claude_with_the_conversation():
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1", subject="Quote please")
+        async def fake_read(tid, per_msg_chars=4000):
+            return {"id": tid, "messages": [
+                {"id": "m1", "from_name": "Jo", "from_email": "jo@customer.com",
+                 "subject": "Quote please", "message_id": "<a@b>", "references": "",
+                 "reply_to": "", "at": "2026-08-19T01:00:00+00:00",
+                 "text": "How much for six B-size steel gobos?"}]}
+        seen = {}
+        class _Blk:
+            type = "text"
+            def __init__(self, t): self.text = t
+        class _Resp:
+            content = [_Blk("Hi Jo, six B-size steel gobos come to ____ including artwork.")]
+            usage = None
+        async def fake_create(client, **kw):
+            seen.update(kw)
+            return _Resp()
+        saved = (_gm.read_thread, copilot._xcreate, copilot.ANTHROPIC_API_KEY)
+        _gm.read_thread = fake_read
+        copilot._xcreate = fake_create
+        copilot.ANTHROPIC_API_KEY = "x"
+        try:
+            r = post_s(sess, "/api/mail/draft", {"id": "t1", "op": "compose",
+                                                 "guidance": "mention the 3 week lead time"})
+            eq(r.status_code, 200, r.text)
+            ok("____" in r.json()["draft"], "gaps rather than invented facts")
+            prompt = seen["messages"][0]["content"]
+            ok("six B-size steel gobos" in prompt, "the real conversation is in the prompt")
+            ok("mention the 3 week lead time" in prompt, "and so is the steer")
+            ok("Ann" in prompt, "it writes as the person handling it")
+            ok("NEVER invent a fact" in seen["system"], "the no-invention rule is enforced")
+        finally:
+            _gm.read_thread, copilot._xcreate, copilot.ANTHROPIC_API_KEY = saved
+    with_mail(go)
+
+@test
+def t_mail_rules_sort_arriving_mail_and_never_steal_live_work():
+    def go():
+        ensure_auth()
+        uid_a, sess_a, _ = ready_user("Ann", "ann")
+        # Leads only.
+        eq(post_s(sess_a, "/api/mail/rules", {"op": "save", "rule": {}}).status_code, 403)
+        eq(post_s(sess_a, "/api/mail/rules", {"op": "list"}).status_code, 200,
+           "but anyone may see what the standing decisions are")
+        # A rule has to match something and do something.
+        eq(post("/api/mail/rules", {"op": "save", "rule": {"name": "Empty"}}).status_code, 400)
+        eq(post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "No action", "conditions": [{"field": "from", "op": "contains",
+                                                 "value": "x"}]}}).status_code, 400)
+        r = post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Newsletters", "done": True,
+            "conditions": [{"field": "domain", "op": "is", "value": "leadgenblast.io"}]}})
+        eq(r.status_code, 200, r.text)
+        post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Invoices", "assign": uid_a,
+            "conditions": [{"field": "subject", "op": "contains", "value": "invoice"}]}})
+        store = copilot._load_mail()
+        # Junk closes itself on arrival.
+        _seed_thread("j1", subject="Grow your business", frm=("Lead Gen", "hi@leadgenblast.io"))
+        eq(store["threads"]["j1"]["state"], "done", "junk never becomes somebody's job")
+        # A subject rule hands the thread to the right person.
+        _seed_thread("i1", subject="Copy invoice INV-2291 please")
+        eq(store["threads"]["i1"]["owner"], uid_a)
+        eq(store["threads"]["i1"]["state"], "assigned")
+        ok(any("Invoices" in a["action"] for a in store["threads"]["i1"]["activity"]))
+        # Ordinary mail is untouched.
+        _seed_thread("o1", subject="Quote for 6 gobos")
+        eq(store["threads"]["o1"]["state"], "unassigned")
+        # A LATER message must never re-file a live conversation.
+        store["threads"]["o1"]["subject"] = "Quote, now about the invoice"
+        copilot._mail_apply_thread(store, {
+            "id": "o1", "historyId": "h9", "subject": "Re: invoice attached",
+            "messages": [_mk_msg("o1-m1", "Jo", "jo@customer.com", "2026-08-19T01:00:00+00:00"),
+                         _mk_msg("o1-m2", "Jo", "jo@customer.com", "2026-08-19T05:00:00+00:00")]}, MBOX)
+        eq(store["threads"]["o1"]["owner"], "", "a reply does not re-triage the thread")
+    with_mail(go)
+
+@test
+def t_mail_rules_run_over_existing_leaves_owned_mail_alone():
+    def go():
+        ensure_auth()
+        uid_a, sess_a, _ = ready_user("Ann", "ann")
+        _seed_thread("e1", subject="Invoice query")
+        _seed_thread("e2", subject="Invoice chase")
+        _seed_thread("e3", subject="Artwork")
+        post_s(sess_a, "/api/mail/claim", {"id": "e2"})     # Ann is working this one
+        post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Invoices", "assign": uid_a,
+            "conditions": [{"field": "subject", "op": "contains", "value": "invoice"}]}})
+        r = post("/api/mail/rules", {"op": "run"})
+        eq(r.status_code, 200, r.text)
+        eq(r.json()["changed"], 1, "only the untouched one is sorted")
+        th = copilot._load_mail()["threads"]
+        eq(th["e1"]["owner"], uid_a)
+        eq(th["e3"]["state"], "unassigned", "and unrelated mail is left alone")
+    with_mail(go)
+
+@test
+def t_mail_rules_round_robin_shares_the_load():
+    def go():
+        ensure_auth()
+        uid_a, _sa, _ = ready_user("Ann", "ann")
+        uid_b, _sb, _ = ready_user("Bob", "bob")
+        post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Share the quotes", "assign": "_round", "pool": [uid_a, uid_b],
+            "conditions": [{"field": "subject", "op": "contains", "value": "quote"}]}})
+        for i in range(4):
+            _seed_thread("q%d" % i, subject="Quote request %d" % i)
+        owners = [copilot._load_mail()["threads"]["q%d" % i]["owner"] for i in range(4)]
+        eq(owners, [uid_a, uid_b, uid_a, uid_b], "the work alternates between them")
+    with_mail(go)
+
+@test
+def t_mail_rules_edit_toggle_reorder_and_delete():
+    def go():
+        ensure_auth()
+        uid_a, _s, _ = ready_user("Ann", "ann")
+        a = post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "First", "done": True,
+            "conditions": [{"field": "subject", "op": "contains", "value": "spam"}]}}).json()["id"]
+        b = post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Second", "assign": uid_a,
+            "conditions": [{"field": "subject", "op": "contains", "value": "spam"}]}}).json()["id"]
+        # First match wins, so order is priority.
+        _seed_thread("s1", subject="spam thing")
+        eq(copilot._load_mail()["threads"]["s1"]["state"], "done")
+        post("/api/mail/rules", {"op": "move", "id": b})     # promote Second
+        _seed_thread("s2", subject="spam thing two")
+        eq(copilot._load_mail()["threads"]["s2"]["owner"], uid_a, "order decides")
+        # Switching one off takes it out of the running, keeping its history.
+        post("/api/mail/rules", {"op": "toggle", "id": b})
+        _seed_thread("s3", subject="spam thing three")
+        eq(copilot._load_mail()["threads"]["s3"]["state"], "done")
+        # Editing keeps the id and the hit count.
+        before = [r for r in copilot._load_mail()["rules"] if r["id"] == a][0]["hits"]
+        ok(before > 0)
+        post("/api/mail/rules", {"op": "save", "rule": {
+            "id": a, "name": "Renamed", "done": True,
+            "conditions": [{"field": "subject", "op": "contains", "value": "spam"}]}})
+        after = [r for r in copilot._load_mail()["rules"] if r["id"] == a][0]
+        eq(after["name"], "Renamed")
+        eq(after["hits"], before, "an edit does not reset what the filter has done")
+        eq(post("/api/mail/rules", {"op": "delete", "id": a}).status_code, 200)
+        eq(len(post("/api/mail/rules", {"op": "list"}).json()["rules"]), 1)
+        eq(post("/api/mail/rules", {"op": "delete", "id": "nope"}).status_code, 404)
+    with_mail(go)
+
+@test
+def t_mail_rules_cannot_assign_to_someone_who_cannot_see_the_inbox():
+    def go():
+        ensure_auth()
+        uid_a, _s, _ = ready_user("Ann", "ann")
+        post("/api/team/user", {"op": "tabs", "id": uid_a, "tabs": ["overview"]})
+        r = post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Bad target", "assign": uid_a,
+            "conditions": [{"field": "subject", "op": "contains", "value": "x"}]}})
+        eq(r.status_code, 400, "a filter that would bury email is refused at save time")
+    with_mail(go)
+
+@test
 def t_mail_bulk_assign_matches_the_single_route_exactly():
     """A handover must not erase how far the work had got: flattening
     'waiting on the customer' back to 'assigned' loses the one signal that

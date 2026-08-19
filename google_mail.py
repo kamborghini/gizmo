@@ -274,6 +274,118 @@ async def get_thread(thread_id: str) -> dict:
             "subject": subject, "messages": msgs}
 
 
+def _b64url(data: str) -> str:
+    """Gmail hands body bytes back base64URL encoded and unpadded. Plain
+    b64decode mangles any part whose alphabet happens to contain - or _,
+    which is data-dependent: it passes every test and then fails on one
+    real customer's email."""
+    import base64
+    s = str(data or "")
+    try:
+        return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4)).decode("utf-8", "replace")
+    except Exception:
+        return ""
+
+
+def _walk_body(part: dict, out: dict) -> None:
+    """Depth-first for the readable text. A simple message keeps its whole
+    body on the root part with no `parts` at all, so a walker that only ever
+    looks at `parts` reads nothing for exactly the plainest emails."""
+    mime = str(part.get("mimeType") or "").split(";")[0].strip().lower()
+    kids = part.get("parts") or []
+    if kids:
+        for k in kids:
+            _walk_body(k, out)
+        return
+    if part.get("filename"):
+        return                       # an attachment, not the message
+    body = part.get("body") or {}
+    if body.get("attachmentId") or not body.get("data"):
+        return                       # bytes live elsewhere: never pull them in
+    if mime == "text/plain" and not out.get("plain"):
+        out["plain"] = _b64url(body["data"])
+    elif mime == "text/html" and not out.get("html"):
+        out["html"] = _b64url(body["data"])
+
+
+def _strip_html(html: str) -> str:
+    import re as _re
+    txt = _re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html or "")
+    txt = _re.sub(r"(?i)<br\s*/?>|</p>", "\n", txt)
+    txt = _re.sub(r"<[^>]+>", " ", txt)
+    txt = (txt.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<")
+              .replace("&gt;", ">").replace("&quot;", '"').replace("&#39;", "'"))
+    return _re.sub(r"[ \t]{2,}", " ", _re.sub(r"\n{3,}", "\n\n", txt)).strip()
+
+
+async def read_thread(thread_id: str, per_msg_chars: int = 4000) -> dict:
+    """The conversation as READABLE TEXT, for drafting a reply against.
+
+    format=full parses the body into `payload` and leaves attachment bytes
+    behind an attachmentId; format=raw would inline a 20MB attachment into
+    this request, which is why it is not used."""
+    data = await _call("GET", f"threads/{thread_id}", params={"format": "full"})
+    msgs = []
+    for m in (data.get("messages") or []):
+        payload = m.get("payload") or {}
+        found: dict = {}
+        _walk_body(payload, found)
+        text = found.get("plain") or _strip_html(found.get("html") or "")
+        name, email = parseaddr(_header(m, "From"))
+        msgs.append({
+            "id": str(m.get("id") or ""),
+            "from_name": name or email, "from_email": email.lower(),
+            "to": _header(m, "To"), "cc": _header(m, "Cc"),
+            "reply_to": _header(m, "Reply-To"),
+            "subject": _header(m, "Subject"),
+            "message_id": _header(m, "Message-ID") or _header(m, "Message-Id"),
+            "references": _header(m, "References"),
+            "at": _msg_time(m),
+            "text": (text or str(m.get("snippet") or ""))[:per_msg_chars],
+        })
+    return {"id": str(data.get("id") or thread_id), "messages": msgs}
+
+
+async def create_draft(thread_id: str, to_addr: str, subject: str, body_text: str,
+                       in_reply_to: str = "", references: str = "",
+                       cc: str = "") -> dict:
+    """Put a reply in the mailbox as a DRAFT. A draft is inert: nothing is
+    sent, nobody is notified, and the merchant reviews and sends it in Gmail.
+    This app never sends mail itself.
+
+    Gmail only threads the draft when the Subject and the reply headers line
+    up with the parent, so every header here is derived from the parent in
+    code. The model writes the body and nothing else."""
+    import base64
+    from email.message import EmailMessage
+    me = address()
+    msg = EmailMessage()
+    if me:
+        msg["From"] = me
+    msg["To"] = to_addr
+    if cc:
+        msg["Cc"] = cc
+    s = (subject or "").strip()
+    msg["Subject"] = s if s[:3].lower() == "re:" else ("Re: " + s if s else "Re:")
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+        refs = (references or "").split()
+        if in_reply_to not in refs:
+            refs.append(in_reply_to)
+        msg["References"] = " ".join(refs)
+    msg.set_content(body_text or "")
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    out = await _call("POST", "drafts", body={"message": {"raw": raw, "threadId": thread_id}})
+    landed = str(((out.get("message") or {}).get("threadId")) or "")
+    if landed and landed != str(thread_id):
+        # Documented threading rules were not met, so Gmail started a NEW
+        # conversation. Say so rather than let a stray draft go unnoticed.
+        logger.warning("Gmail put the draft on thread %s, not %s", landed, thread_id)
+        raise GmailError("Gmail saved the draft but could not attach it to this "
+                         "conversation. Check your drafts folder.")
+    return {"id": str(out.get("id") or ""), "thread_id": landed or str(thread_id)}
+
+
 async def modify_thread(thread_id: str, add: list = None, remove: list = None) -> None:
     body = {}
     if add:

@@ -401,6 +401,26 @@ def t_inbox_reads_as_a_list_with_bulk_triage():
 
 
 @test
+def t_inbox_unread_filters_and_claude_reply():
+    """Three things the merchant asked for after living with it: unread as a
+    real thing, standing filters, and a Claude-drafted reply."""
+    ok("value: 'unread'" in SCRIPT and "mailFilter === 'unread' && !t.unread" in SCRIPT,
+       "unread is a filter with its own count, not just bold text")
+    ok("'/api/mail/rules'" in SCRIPT, "filters are managed in the app")
+    ok("Apply to existing mail" in SCRIPT, "and can be run over the pile already there")
+    ok("share out between people" in SCRIPT, "including sharing work round the team")
+    ok("never re-filed underneath them" in SCRIPT,
+       "the card says plainly that live work is not re-triaged")
+    ok("Compose reply with Claude" in SCRIPT, "the reply button exists")
+    ok("'/api/mail/draft'" in SCRIPT and "op: 'save'" in SCRIPT,
+       "drafting and saving are separate steps, with a human in between")
+    ok("you send it yourself" in SCRIPT,
+       "and the app is explicit that it never sends the mail")
+    ok("gaps like ____" in SCRIPT,
+       "the panel explains why the draft has blanks in it")
+
+
+@test
 def t_inbox_board_owns_every_email():
     """The Inbox tab: five state columns, a claim on every unowned card, the
     who's-doing-what strip with self-set presence, and a collision warning

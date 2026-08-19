@@ -682,6 +682,25 @@
         .mail-bulkbar.armed { border-color: var(--accent-line); background: var(--accent-soft);
             color: var(--accent-ink); }
         .mail-bulk-hint { color: inherit; }
+        .mrule { border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; }
+        .mrule-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+        .mrule-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+        .mrule-name.off { color: var(--ink-3); text-decoration: line-through; }
+        .mrule-when { font-size: 12px; color: var(--ink-2); }
+        .mrule-do { font-size: 12px; color: var(--ink-3); margin-top: 3px; }
+        .mrule-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+        .mrule-bar .btn { font-size: 12px; padding: 3px 9px; }
+        .mrule-cond { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+        .mrule-pool { margin: 6px 0; }
+        .mrule-tag { flex: none; font-size: 11px; color: var(--ink-3); background: var(--surface-3);
+            border-radius: 12px; padding: 0 6px; }
+        .mail-draft { border: 1px solid var(--accent-line); background: var(--accent-soft);
+            border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+        .mail-draft-text { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px;
+            line-height: 1.55; padding: 9px 11px; margin-top: 8px; border-radius: 6px;
+            border: 1px solid var(--border-2); background: var(--surface); color: var(--ink);
+            resize: vertical; }
+        .mail-draft-text:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
         @media (max-width: 700px) {
             .mfrom { flex-basis: 96px; }
             .mail-owner, .mcount { display: none; }
@@ -8105,15 +8124,17 @@
             box.append(who);
             /* ---- toolbar ---- */
             const top = el('div', 'mail-top');
-            const counts = { open: 0, mine: 0, unassigned: 0, done: 0 };
+            const counts = { open: 0, mine: 0, unassigned: 0, unread: 0, done: 0 };
             (d.threads || []).forEach(t => {
                 if (t.state === 'done') { counts.done++; return; }
                 counts.open++;
                 if (t.owner === d.me) counts.mine++;
                 if (t.state === 'unassigned') counts.unassigned++;
+                if (t.unread) counts.unread++;
             });
             const lab = (text, n) => text + (n ? ' (' + n + ')' : '');
             top.append(segControl([{ value: 'open', label: lab('Open', counts.open) },
+                                   { value: 'unread', label: lab('Unread', counts.unread) },
                                    { value: 'mine', label: lab('Mine', counts.mine) },
                                    { value: 'unassigned', label: lab('Unassigned', counts.unassigned) },
                                    { value: 'done', label: 'Done' }],
@@ -8129,6 +8150,9 @@
             top.append(sync);
             top.append(segControl([{ value: 'list', label: 'List' }, { value: 'board', label: 'Board' }],
                 mailView, v => { mailView = v; mailSel.clear(); renderMail(); }));
+            const filt = el('button', 'btn', 'Filters' + (d.rules ? ' (' + d.rules + ')' : ''));
+            filt.onclick = () => openMailRules();
+            top.append(filt);
             const rf = el('button', 'btn', 'Refresh');
             rf.onclick = async () => {
                 rf.disabled = true;
@@ -8357,6 +8381,7 @@
             else if (t.state === 'done') return false;
             if (mailFilter === 'mine' && t.owner !== mailCache.me) return false;
             if (mailFilter === 'unassigned' && t.state !== 'unassigned') return false;
+            if (mailFilter === 'unread' && !t.unread) return false;
             return mailTextMatches(t);
         }
         function mailBoardMatches(t) {
@@ -8422,6 +8447,287 @@
             card.onclick = () => openMailThread(t.id);
             return card;
         }
+        /* ==================================================================
+           Filters: standing decisions about mail that arrives. Gmail's own
+           shape, because that is what people already know, with this app's
+           actions: hand it to someone, or close it on arrival.
+           ================================================================== */
+        const MAIL_FIELDS = [['from', 'Sender'], ['domain', 'Sender domain'],
+                             ['subject', 'Subject'], ['text', 'Anything in the email']];
+        const MAIL_OPS = [['contains', 'contains'], ['not_contains', 'does not contain'],
+                          ['is', 'is exactly'], ['starts', 'starts with']];
+        async function openMailRules() {
+            let data;
+            try { data = await api('/api/mail/rules', { op: 'list' }); }
+            catch (e) { toastError(e.message); return; }
+            const m = mailModal('Filters');
+            m.overlay.querySelector('.modal').style.maxWidth = '640px';
+            paintMailRules(m, data);
+        }
+        function paintMailRules(m, data) {
+            const lead = data.lead;
+            m.body.innerHTML = '';
+            m.body.append(el('div', 'setting-sub',
+                'Filters act on email as it ARRIVES. A conversation someone is already '
+                + 'holding is never re-filed underneath them. The first filter that '
+                + 'matches wins, so the order here is the order they are tried.'));
+            const reload = async (r) => {
+                if (r && r.rules) { paintMailRules(m, { rules: r.rules, lead: lead }); }
+                refreshMailQuiet();
+            };
+            const call = async (payload) => {
+                try { return await api('/api/mail/rules', payload); }
+                catch (e) { toastError(e.message); return null; }
+            };
+            const list = el('div');
+            list.style.margin = '12px 0';
+            (data.rules || []).forEach((r, i) => {
+                const row = el('div', 'mrule');
+                const head = el('div', 'mrule-head');
+                head.append(el('span', 'mrule-name' + (r.enabled === false ? ' off' : ''), r.name));
+                const bits = r.conditions.map(c =>
+                    (MAIL_FIELDS.find(f => f[0] === c.field) || [0, c.field])[1] + ' '
+                    + (MAIL_OPS.find(o => o[0] === c.op) || [0, c.op])[1] + ' "' + c.value + '"');
+                head.append(el('span', 'mrule-when',
+                    bits.join(r.mode === 'any' ? '  or  ' : '  and  ')));
+                row.append(head);
+                const acts = [];
+                if (r.assign === '_round') acts.push('share out between '
+                    + (r.pool || []).map(u => teamNameOf(u) || '?').join(', '));
+                else if (r.assign) acts.push('give to ' + (teamNameOf(r.assign) || 'someone'));
+                if (r.done) acts.push('close on arrival');
+                row.append(el('div', 'mrule-do', acts.join(', ')
+                    + (r.hits ? '  ·  used ' + r.hits + (r.hits === 1 ? ' time' : ' times') : '')));
+                if (lead) {
+                    const bar = el('div', 'mrule-bar');
+                    const mk = (label, fn) => { const b = el('button', 'btn', label); b.onclick = fn; bar.append(b); };
+                    mk('Edit', () => mailRuleForm(m, data, r));
+                    mk(r.enabled === false ? 'Switch on' : 'Switch off',
+                        async () => reload(await call({ op: 'toggle', id: r.id })));
+                    if (i > 0) mk('Up', async () => reload(await call({ op: 'move', id: r.id })));
+                    if (i < data.rules.length - 1) mk('Down',
+                        async () => reload(await call({ op: 'move', id: r.id, down: true })));
+                    mk('Delete', async () => {
+                        if (!(await uiConfirm('Delete the filter "' + r.name + '"? '
+                            + 'Email it already sorted stays as it is.'))) return;
+                        reload(await call({ op: 'delete', id: r.id }));
+                    });
+                    row.append(bar);
+                }
+                list.append(row);
+            });
+            if (!(data.rules || []).length) {
+                list.append(el('div', 'mail-empty', lead
+                    ? 'No filters yet. A first one might close newsletters on arrival, '
+                      + 'or send anything mentioning "invoice" straight to whoever does the books.'
+                    : 'No filters have been set up yet.'));
+            }
+            m.body.append(list);
+            if (!lead) {
+                m.body.append(el('div', 'setting-sub', 'Only a lead can change these.'));
+                return;
+            }
+            const bar = el('div', 'mail-statebar');
+            const add = el('button', 'btn btn-primary', 'New filter');
+            add.onclick = () => mailRuleForm(m, data, null);
+            bar.append(add);
+            const run = el('button', 'btn', 'Apply to existing mail');
+            run.onclick = async () => {
+                if (!(await uiConfirm('Run every filter over the email already here? '
+                    + 'Only unclaimed, unassigned email is touched, so nothing is taken '
+                    + 'off anyone who is working on it.'))) return;
+                run.disabled = true;
+                const r = await call({ op: 'run' });
+                if (r) toastOk(r.changed + ' email' + (r.changed === 1 ? '' : 's') + ' sorted');
+                run.disabled = false;
+                reload(r);
+            };
+            bar.append(run);
+            m.body.append(bar);
+        }
+        function mailRuleForm(m, data, rule) {
+            const r = rule ? JSON.parse(JSON.stringify(rule))
+                : { name: '', mode: 'all', conditions: [{ field: 'from', op: 'contains', value: '' }],
+                    assign: '', pool: [], done: false, enabled: true };
+            m.body.innerHTML = '';
+            m.body.append(el('div', 'setting-title', rule ? 'Edit filter' : 'New filter'));
+            const name = crmText(r.name, 'What is this filter for?');
+            crmField(m.body, 'Name', name);
+            const modeRow = el('div', 'setting-sub');
+            modeRow.style.margin = '10px 0 4px';
+            modeRow.append(document.createTextNode('Match '));
+            const mode = document.createElement('select');
+            mode.className = 'mail-presence-pick';
+            [['all', 'all of these'], ['any', 'any of these']].forEach(([v, t]) => {
+                const o = document.createElement('option');
+                o.value = v; o.textContent = t; if (r.mode === v) o.selected = true;
+                mode.append(o);
+            });
+            modeRow.append(mode);
+            m.body.append(modeRow);
+            const conds = el('div');
+            const paintConds = () => {
+                conds.innerHTML = '';
+                r.conditions.forEach((c, i) => {
+                    const row = el('div', 'mrule-cond');
+                    const f = document.createElement('select'); f.className = 'mail-presence-pick';
+                    MAIL_FIELDS.forEach(([v, t]) => {
+                        const o = document.createElement('option');
+                        o.value = v; o.textContent = t; if (c.field === v) o.selected = true;
+                        f.append(o);
+                    });
+                    f.onchange = () => { c.field = f.value; };
+                    const o2 = document.createElement('select'); o2.className = 'mail-presence-pick';
+                    MAIL_OPS.forEach(([v, t]) => {
+                        const o = document.createElement('option');
+                        o.value = v; o.textContent = t; if (c.op === v) o.selected = true;
+                        o2.append(o);
+                    });
+                    o2.onchange = () => { c.op = o2.value; };
+                    const val = crmText(c.value, 'what to look for');
+                    val.style.flex = '1';
+                    val.oninput = () => { c.value = val.value; };
+                    row.append(f, o2, val);
+                    if (r.conditions.length > 1) {
+                        const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Remove';
+                        x.onclick = () => { r.conditions.splice(i, 1); paintConds(); };
+                        row.append(x);
+                    }
+                    conds.append(row);
+                });
+                const more = el('button', 'btn', 'Add another condition');
+                more.onclick = () => {
+                    if (r.conditions.length >= 8) return;
+                    r.conditions.push({ field: 'subject', op: 'contains', value: '' });
+                    paintConds();
+                };
+                conds.append(more);
+            };
+            paintConds();
+            m.body.append(conds);
+            m.body.append(el('div', 'setting-title', 'Then'));
+            const who = document.createElement('select');
+            who.className = 'mail-presence-pick';
+            [['', 'leave it for the room'], ['_round', 'share out between people']].forEach(([v, t]) => {
+                const o = document.createElement('option'); o.value = v; o.textContent = t;
+                if (r.assign === v) o.selected = true; who.append(o);
+            });
+            (mailCache.team || []).forEach(u => {
+                const o = document.createElement('option');
+                o.value = u.uid; o.textContent = 'give it to ' + u.name;
+                if (r.assign === u.uid) o.selected = true; who.append(o);
+            });
+            const poolBox = el('div', 'mrule-pool');
+            const paintPool = () => {
+                poolBox.innerHTML = '';
+                poolBox.style.display = who.value === '_round' ? '' : 'none';
+                if (who.value !== '_round') return;
+                poolBox.append(el('div', 'setting-sub', 'Share between:'));
+                (mailCache.team || []).forEach(u => {
+                    const l = el('label', 'tm-tabpick');
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox'; cb.checked = (r.pool || []).indexOf(u.uid) >= 0;
+                    cb.onchange = () => {
+                        r.pool = cb.checked ? (r.pool || []).concat([u.uid])
+                                            : (r.pool || []).filter(x => x !== u.uid);
+                    };
+                    l.append(cb, document.createTextNode(u.name));
+                    poolBox.append(l);
+                });
+            };
+            who.onchange = () => { r.assign = who.value; paintPool(); };
+            crmField(m.body, 'Owner', who);
+            m.body.append(poolBox);
+            paintPool();
+            const doneL = el('label', 'tm-tabpick');
+            const doneCb = document.createElement('input');
+            doneCb.type = 'checkbox'; doneCb.checked = !!r.done;
+            doneCb.onchange = () => { r.done = doneCb.checked; };
+            doneL.append(doneCb, document.createTextNode('Close it on arrival (for mail nobody needs to answer)'));
+            m.body.append(doneL);
+            const bar = el('div', 'mail-statebar');
+            const save = el('button', 'btn btn-primary', 'Save filter');
+            save.onclick = async () => {
+                r.name = name.value; r.mode = mode.value; r.assign = who.value;
+                save.disabled = true;
+                try {
+                    const out = await api('/api/mail/rules', { op: 'save', rule: r });
+                    paintMailRules(m, { rules: out.rules, lead: true });
+                    refreshMailQuiet();
+                } catch (e) { toastError(e.message); save.disabled = false; }
+            };
+            const back = el('button', 'btn', 'Back');
+            back.onclick = () => paintMailRules(m, data);
+            bar.append(save, back);
+            m.body.append(bar);
+        }
+
+        /* Claude drafts, a person edits, Gmail holds it as a draft, a person
+           sends it. The app never sends mail, and nothing reaches a customer
+           without someone reading it first. */
+        async function mailComposeDraft(m, t, btn, guidance) {
+            const old = m.body.querySelector('.mail-draft');
+            if (old) old.remove();
+            const host = el('div', 'mail-draft');
+            btn.disabled = true;
+            btn.textContent = guidance ? 'Rewriting...' : 'Reading the conversation...';
+            host.append(el('div', 'setting-sub', 'Claude is reading the whole thread.'));
+            btn.parentNode.after(host);
+            let out;
+            try {
+                out = await api('/api/mail/draft', guidance
+                    ? { id: t.id, op: 'compose', guidance: guidance }
+                    : { id: t.id, op: 'compose' });
+            } catch (e) {
+                host.remove();
+                btn.disabled = false; btn.textContent = 'Compose reply with Claude';
+                toastError(e.message);
+                return;
+            }
+            btn.disabled = false; btn.textContent = 'Compose reply with Claude';
+            host.innerHTML = '';
+            host.append(el('div', 'setting-title', 'Draft reply'));
+            host.append(el('div', 'setting-sub',
+                'Read it before it goes anywhere. Claude leaves gaps like ____ where '
+                + 'it would have had to guess at a price or a date: fill those in.'));
+            const ta = document.createElement('textarea');
+            ta.className = 'mail-draft-text';
+            ta.rows = 10; ta.value = out.draft;
+            host.append(ta);
+            const bar = el('div', 'mail-statebar');
+            const save = el('button', 'btn btn-primary', 'Save to Gmail as a draft');
+            save.onclick = async () => {
+                save.disabled = true;
+                try {
+                    await api('/api/mail/draft', { id: t.id, op: 'save', text: ta.value });
+                } catch (e) { toastError(e.message); save.disabled = false; return; }
+                toastOk('Saved into Gmail. Open the conversation there to check it and send.');
+                host.remove();
+                refreshMailQuiet();
+            };
+            const copy = el('button', 'btn', 'Copy');
+            copy.onclick = async () => {
+                try { await navigator.clipboard.writeText(ta.value); toastOk('Copied'); }
+                catch (e) { ta.select(); toastError('Press Cmd C to copy.'); }
+            };
+            const drop = el('button', 'btn', 'Discard');
+            drop.onclick = () => host.remove();
+            bar.append(save, copy, drop);
+            host.append(bar);
+            /* Steering: say what to change and it drafts again, rather than
+               making the person rewrite a paragraph they did not want. */
+            const steer = el('div', 'mrule-cond');
+            steer.style.marginTop = '8px';
+            const note = crmText('', 'Not right? Say what to change, then Try again');
+            note.style.flex = '1';
+            const again = el('button', 'btn', 'Try again');
+            again.onclick = () => mailComposeDraft(m, t, btn, note.value.trim());
+            steer.append(note, again);
+            host.append(steer);
+            host.append(el('div', 'setting-sub',
+                'Saving puts it in Gmail as a draft. Nothing is sent: you send it yourself.'));
+        }
+
         function mailModal(title) {
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal disp-modal');
@@ -8478,6 +8784,16 @@
                 m.body.append(el('div', 'mail-crmchip', 'CRM: ' + r.crm.name
                     + (r.crm.org ? ' (' + r.crm.org + ')' : '')));
             }
+            /* ---- draft a reply with Claude ---- */
+            const draftBar = el('div', 'mail-statebar');
+            const compose = el('button', 'btn', 'Compose reply with Claude');
+            compose.onclick = () => mailComposeDraft(m, t, compose);
+            draftBar.append(compose);
+            if (t.draft_at) {
+                draftBar.append(el('span', 'mail-bulk-hint',
+                    'a draft was saved into Gmail ' + mailAgoLong(t.draft_at)));
+            }
+            m.body.append(draftBar);
             const gm = el('a', 'setting-sub', 'Open in Gmail');
             gm.href = 'https://mail.google.com/mail/#all/' + encodeURIComponent(t.id);
             gm.target = '_blank'; gm.rel = 'noopener';
