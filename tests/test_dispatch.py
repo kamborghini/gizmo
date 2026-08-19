@@ -5906,6 +5906,57 @@ def t_mail_sync_abandons_when_the_store_is_replaced_under_it():
             _gm.list_threads, _gm.get_thread = saved
     with_mail(go)
 
+@test
+def t_mail_connect_ticket_is_master_only_and_single_use():
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        saved = (_gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET)
+        _gm.OAUTH_CLIENT_ID = _gm.OAUTH_CLIENT_SECRET = "demo"
+        try:
+            eq(post_s(sess, "/api/mail/connect-link", {}).status_code, 403,
+               "only the master connects the mailbox")
+            r = post("/api/mail/connect-link", {})
+            eq(r.status_code, 200, r.text)
+            url = r.json()["url"]
+            ok(url.startswith("/oauth/gmail/start?t="), url)
+            ticket = url.split("t=", 1)[1]
+            # The ticket opens the consent walk exactly once.
+            first = client.get("/oauth/gmail/start", params={"t": ticket},
+                               follow_redirects=False)
+            eq(first.status_code, 302, "the ticket starts the consent walk")
+            ok("select_account" in first.headers["location"],
+               "Google is forced to ask WHICH account, so the wrong one cannot slip through")
+            again = client.get("/oauth/gmail/start", params={"t": ticket},
+                               follow_redirects=False)
+            eq(again.status_code, 403, "a spent ticket is dead")
+            eq(client.get("/oauth/gmail/start", params={"t": "made-up"},
+                          follow_redirects=False).status_code, 403)
+            eq(client.get("/oauth/gmail/start", follow_redirects=False).status_code, 403,
+               "and no ticket at all is still forbidden")
+        finally:
+            _gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET = saved
+            copilot._mail_connect_tickets.clear()
+    with_mail(go)
+
+@test
+def t_mail_connect_ticket_expires():
+    def go():
+        ensure_auth()
+        saved = (_gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET)
+        _gm.OAUTH_CLIENT_ID = _gm.OAUTH_CLIENT_SECRET = "demo"
+        try:
+            url = post("/api/mail/connect-link", {}).json()["url"]
+            ticket = url.split("t=", 1)[1]
+            copilot._mail_connect_tickets[ticket] = time.time() - 1   # age it
+            eq(client.get("/oauth/gmail/start", params={"t": ticket},
+                          follow_redirects=False).status_code, 403,
+               "a stale ticket is refused")
+        finally:
+            _gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET = saved
+            copilot._mail_connect_tickets.clear()
+    with_mail(go)
+
 # =========================== run ===========================================
 
 passed = failed = 0

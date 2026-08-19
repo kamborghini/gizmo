@@ -400,6 +400,14 @@ def t_inbox_board_owns_every_email():
        "a failed submit hands back the button and the typed text")
     ok("mailFetchSeq" in SCRIPT,
        "stale board responses cannot repaint over fresher ones")
+    ok("'/api/mail/connect-link'" in SCRIPT,
+       "connecting is a button, not a secret pasted into a URL")
+    ok("NOT your own" in SCRIPT,
+       "the card warns which Google account is about to be connected")
+    ok("window.open('', '_blank')" in SCRIPT,
+       "the consent tab opens inside the click, or the popup blocker eats it")
+    ok("if (!teamMe || teamMe.role === 'master')" in SCRIPT,
+       "an unresolved role must not tell the master to ask an admin")
 
 
 if __name__ == "__main__":

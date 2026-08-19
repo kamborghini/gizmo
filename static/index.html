@@ -7942,20 +7942,41 @@
             if (!d.connected) {
                 const card = el('div', 'card');
                 card.append(el('div', 'setting-title', 'Connect the shared mailbox'));
-                if (teamMe && teamMe.role === 'master') {
+                /* Master OR not-yet-known, as with Restore in Settings: the
+                   board can paint before authBoot resolves, and telling the
+                   master to "ask an admin" strands the one person who can do
+                   it. The server refuses anyone else regardless. */
+                if (!teamMe || teamMe.role === 'master') {
                     const p1 = el('div', 'setting-sub');
                     p1.textContent = d.client
-                        ? 'Open the connect link below in a browser where you are signed in as the '
-                          + 'shared mailbox (for example sales@), and approve access. The board fills itself after that.'
+                        ? 'Connect the mailbox whose email the team answers. Google will ask which '
+                          + 'account to use: choose the shared mailbox, NOT your own account. Whichever '
+                          + 'account you pick is the one this board reads.'
                         : 'The server needs GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET set first, '
                           + 'with the Gmail API enabled in the same Google Cloud project.';
                     card.append(p1);
                     if (d.client) {
-                        const code = el('div', 'setting-sub');
-                        code.style.cssText = 'font-family:ui-monospace,monospace;user-select:all;margin-top:6px';
-                        code.textContent = location.origin + '/oauth/gmail/start?key=YOUR-CONNECT-SECRET';
-                        card.append(code, el('div', 'setting-sub',
-                            'Replace YOUR-CONNECT-SECRET with the GOOGLE_CONNECT_SECRET value from the server settings.'));
+                        const go = el('button', 'btn btn-primary', 'Connect mailbox');
+                        go.style.marginTop = '10px';
+                        go.onclick = async () => {
+                            /* The tab must be opened INSIDE the click, before any
+                               await, or the popup blocker eats it. Google refuses
+                               to be framed, so it cannot open in this iframe. */
+                            const tab = window.open('', '_blank');
+                            go.disabled = true;
+                            try {
+                                const r = await api('/api/mail/connect-link', {});
+                                if (tab) tab.location = r.url;
+                                else toastError('Allow pop-ups for this page, then try again.');
+                            } catch (e) {
+                                if (tab) tab.close();
+                                toastError(e.message);
+                            }
+                            go.disabled = false;
+                        };
+                        card.append(go);
+                        card.append(el('div', 'setting-sub',
+                            'Opens Google in a new tab. Nothing is stored until you approve it there.'));
                     }
                 } else {
                     card.append(el('div', 'setting-sub', 'Ask an admin to connect the shared mailbox. '

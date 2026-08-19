@@ -103,7 +103,11 @@ def consent_url(redirect_uri: str, state: str) -> str:
         "response_type": "code",
         "scope": " ".join(SCOPES),
         "access_type": "offline",
-        "prompt": "consent",           # force a refresh token every time
+        # consent = a refresh token every time. select_account = Google ALWAYS
+        # asks which account: without it, whoever is already signed into that
+        # browser gets connected silently, and the likeliest person clicking
+        # this is signed in as themselves, not as the shared mailbox.
+        "prompt": "consent select_account",
         "state": state,
     }
     return f"{AUTH_ENDPOINT}?{urlencode(params)}"

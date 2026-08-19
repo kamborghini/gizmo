@@ -8061,6 +8061,14 @@ _mail_mem: Optional[dict] = None
 _mail_lock = asyncio.Lock()     # one sync at a time; board reads never block
 _mail_viewers: dict = {}        # thread_id -> {uid: monotonic_ts}, collision warnings
 MAIL_VIEW_SECONDS = 25          # a heartbeat older than this no longer counts
+# One-time tickets that let the master start the Google consent walk from a
+# button instead of pasting a server secret into a URL. The consent page must
+# open as a TOP-LEVEL navigation in a new tab (Google refuses to be framed,
+# and the app lives in an iframe), and a new tab cannot carry the session
+# header — hence a ticket in the URL. Single-use and short-lived, so it is a
+# strictly smaller thing to leak than the standing connect secret.
+_mail_connect_tickets: dict = {}     # ticket -> expiry (wall clock)
+MAIL_TICKET_SECONDS = 300
 
 
 def _mail_default() -> dict:
@@ -13334,9 +13342,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
         if not google_mail.client_configured():
             return _oauth_page("Not configured", "Set GOOGLE_OAUTH_CLIENT_ID / SECRET on the server first.")
+        # Two ways in: a single-use ticket minted for the master through the
+        # app (the button), or the standing connect secret (the manual path,
+        # kept so the mailbox is still recoverable when nobody can sign in).
+        ticket = request.query_params.get("t", "")
+        exp = _mail_connect_tickets.pop(ticket, None) if ticket else None
         key = request.query_params.get("key", "")
-        if not (google_data.CONNECT_SECRET and key and
-                secrets.compare_digest(key, google_data.CONNECT_SECRET)):
+        by_secret = (google_data.CONNECT_SECRET and key and
+                     secrets.compare_digest(key, google_data.CONNECT_SECRET))
+        if not ((exp is not None and exp > time.time()) or by_secret):
             return PlainTextResponse("Forbidden", status_code=403, headers=_API_HEADERS)
         now = time.time()
         for s, exp in list(_oauth_states.items()):
@@ -13370,6 +13384,28 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         addr = google_mail.address() or "the mailbox"
         return _oauth_page("✅ Mailbox connected", f"{addr} is now linked. The Inbox tab will "
                            "fill on its next refresh. You can close this tab.")
+
+    @mcp.custom_route("/api/mail/connect-link", methods=["POST"])
+    async def mail_connect_link_route(request: Request):
+        """Master-only: mint a single-use ticket for the consent walk, so
+        nobody has to copy a server secret into a URL by hand."""
+        err, _body, who = await _mail_guard(request)
+        if err:
+            return err
+        if _team_role(who) != "master":
+            return _json({"error": "Only the master account can connect the mailbox."}, 403)
+        if not google_mail.client_configured():
+            return _json({"error": "The server has no Google client configured yet. "
+                                   "Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET."}, 400)
+        now = time.time()
+        for t, exp in list(_mail_connect_tickets.items()):
+            if exp < now:
+                _mail_connect_tickets.pop(t, None)
+        ticket = secrets.token_urlsafe(24)
+        _mail_connect_tickets[ticket] = now + MAIL_TICKET_SECONDS
+        _track(who, "mail", "started connecting the mailbox")
+        return _json({"url": f"/oauth/gmail/start?t={ticket}",
+                      "expires_in": MAIL_TICKET_SECONDS})
 
     @mcp.custom_route("/api/mail/disconnect", methods=["POST"])
     async def mail_disconnect_route(request: Request):
