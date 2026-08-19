@@ -6195,6 +6195,56 @@ def t_mail_rule_that_cannot_assign_does_not_let_the_next_one_close_it():
     with_mail(go)
 
 @test
+def t_mail_rule_files_into_a_gmail_folder():
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        r = post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Newsletters", "folder": "Newsletters", "archive": True,
+            "conditions": [{"field": "domain", "op": "is", "value": "leadgenblast.io"}]}})
+        eq(r.status_code, 200, r.text)
+        # Filing alone is a real action: it does not also need an owner.
+        eq(post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Quotes", "folder": "Quotes",
+            "conditions": [{"field": "subject", "op": "contains", "value": "quote"}]}}).status_code,
+           200)
+        # Archiving with nowhere to file it would just hide the email.
+        eq(post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Vanish", "archive": True,
+            "conditions": [{"field": "subject", "op": "contains", "value": "x"}]}}).status_code, 400)
+        _seed_thread("n1", subject="Grow your business", frm=("Lead Gen", "hi@leadgenblast.io"))
+        t = copilot._load_mail()["threads"]["n1"]
+        eq(t["folder"], "Newsletters", "the intent is recorded on arrival")
+        ok(t["folder_archive"], "including taking it out of the inbox")
+        ok(not t.get("folder_done"), "and Gmail has not been called yet")
+        # The sync carries it out, once.
+        calls = []
+        async def modify(tid, add=None, remove=None):
+            calls.append({"id": tid, "add": add, "remove": remove})
+        async def label(name, known):
+            known[name] = "L_" + name
+            return known[name]
+        async def listing(q, n):
+            return []
+        saved = (_gm.modify_thread, _gm.ensure_label, _gm.list_threads)
+        _gm.modify_thread, _gm.ensure_label, _gm.list_threads = modify, label, listing
+        try:
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            filed = [c for c in calls if c["add"] == ["L_Newsletters"]]
+            eq(len(filed), 1, "filed exactly once")
+            eq(filed[0]["remove"], ["INBOX"], "and taken out of the inbox as asked")
+            eq(copilot._load_mail()["threads"]["n1"]["folder_done"], "Newsletters")
+            calls.clear()
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            eq([c for c in calls if c["add"] == ["L_Newsletters"]], [],
+               "and never filed again on later syncs")
+        finally:
+            _gm.modify_thread, _gm.ensure_label, _gm.list_threads = saved
+    with_mail(go)
+
+@test
 def t_mail_rule_needs_something_positive_to_match_on():
     def go():
         ensure_auth()

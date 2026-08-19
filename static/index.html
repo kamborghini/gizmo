@@ -665,9 +665,18 @@
             white-space: nowrap; color: var(--ink-2); }
         .msubj { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
             white-space: nowrap; color: var(--ink-3); }
-        .msubj b { font-weight: 500; color: var(--ink); }
+        .msubj b { font-weight: 400; color: var(--ink-2); }
+        /* Unread has to be obvious at a glance, not a 100-weight difference
+           nobody can see. Read rows sit back (400, muted); unread comes
+           forward: full-strength ink, 600, its own tint and a blue edge. */
+        .mrow.unread { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+        .mrow.unread:hover { background: var(--accent-soft); }
         .mrow.unread .mfrom { color: var(--ink); font-weight: 600; }
-        .mrow.unread .msubj b { font-weight: 600; }
+        .mrow.unread .msubj { color: var(--ink-2); }
+        .mrow.unread .msubj b { font-weight: 600; color: var(--ink); }
+        .mrow.unread .mage { color: var(--accent-ink); font-weight: 600; }
+        .munread { flex: none; font-size: 11px; font-weight: 600; letter-spacing: .03em;
+            color: var(--accent-ink); }
         .mcount { flex: none; font-size: 11px; color: var(--ink-3); background: var(--surface-3);
             border-radius: 12px; padding: 0 6px; }
         .mnote { flex: none; display: inline-flex; color: var(--ink-3); }
@@ -8293,6 +8302,10 @@
         }
         function paintMailBody() {
             const rows = (mailCache.threads || []).filter(mailCardMatches);
+            /* Anything nobody has opened rises to the top. The board already
+               arrives newest-first, so within each group the order is
+               unchanged; this only lifts the unread ones clear of the pile. */
+            rows.sort((a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0));
             /* A tick may only ever mean a row you can SEE. Without this, a
                search that narrows the list, or a colleague closing a thread
                between repaints, leaves ids armed that are nowhere on screen,
@@ -8340,13 +8353,22 @@
                           progress: 'In progress', waiting: 'Waiting on the customer',
                           done: 'Done' }[t.state] || '';
             row.append(dot);
+            if (t.unread) {
+                const u = el('span', 'munread', 'New');
+                u.title = 'Nobody has opened this yet';
+                row.append(u);
+            }
             row.append(el('span', 'mfrom', t.from_name || t.from_email || ''));
             const subj = el('span', 'msubj');
             subj.append(el('b', null, t.subject));
             if (t.snippet) subj.append(document.createTextNode(' · ' + t.snippet));
             row.append(subj);
             if (t.msg_count > 1) row.append(el('span', 'mcount', String(t.msg_count)));
-            if (t.rule) {
+            if (t.folder) {
+                const ft = el('span', 'mrule-tag', t.folder);
+                ft.title = 'Filed in the Gmail folder "' + t.folder + '"';
+                row.append(ft);
+            } else if (t.rule) {
                 const rt = el('span', 'mrule-tag', 'filter');
                 rt.title = 'Sorted by the filter "' + t.rule + '"';
                 row.append(rt);
@@ -8511,6 +8533,8 @@
                 if (r.assign === '_round') acts.push('share out between '
                     + (r.pool || []).map(u => teamNameOf(u) || '?').join(', '));
                 else if (r.assign) acts.push('give to ' + (teamNameOf(r.assign) || 'someone'));
+                if (r.folder) acts.push('file in "' + r.folder + '"'
+                    + (r.archive ? ' and take it out of the inbox' : ''));
                 if (r.done) acts.push('close on arrival');
                 row.append(el('div', 'mrule-do', acts.join(', ')
                     + (r.hits ? '  ·  used ' + r.hits + (r.hits === 1 ? ' time' : ' times') : '')));
@@ -8568,7 +8592,7 @@
         function mailRuleForm(m, data, rule) {
             const r = rule ? JSON.parse(JSON.stringify(rule))
                 : { name: '', mode: 'all', conditions: [{ field: 'from', op: 'contains', value: '' }],
-                    assign: '', pool: [], done: false, enabled: true };
+                    assign: '', pool: [], done: false, folder: '', archive: false, enabled: true };
             m.body.innerHTML = '';
             m.body.append(el('div', 'setting-title', rule ? 'Edit filter' : 'New filter'));
             const name = crmText(r.name, 'What is this filter for?');
@@ -8659,6 +8683,20 @@
             crmField(m.body, 'Owner', who);
             m.body.append(poolBox);
             paintPool();
+            const folder = crmText(r.folder || '', 'e.g. Newsletters, or Suppliers/Glass');
+            folder.oninput = () => { r.folder = folder.value; paintArch(); };
+            crmField(m.body, 'File it in a Gmail folder (optional)', folder);
+            const archL = el('label', 'tm-tabpick');
+            const archCb = document.createElement('input');
+            archCb.type = 'checkbox'; archCb.checked = !!r.archive;
+            archCb.onchange = () => { r.archive = archCb.checked; };
+            archL.append(archCb, document.createTextNode('and take it out of the Gmail inbox'));
+            const paintArch = () => { archL.style.display = folder.value.trim() ? '' : 'none'; };
+            paintArch();
+            m.body.append(archL);
+            m.body.append(el('div', 'setting-sub',
+                'A folder is a Gmail label, so it appears down the side in Gmail like any '
+                + 'other. Use a slash for a folder inside a folder.'));
             const doneL = el('label', 'tm-tabpick');
             const doneCb = document.createElement('input');
             doneCb.type = 'checkbox'; doneCb.checked = !!r.done;
@@ -8669,6 +8707,7 @@
             const save = el('button', 'btn btn-primary', 'Save filter');
             save.onclick = async () => {
                 r.name = name.value; r.mode = mode.value; r.assign = who.value;
+                r.folder = folder.value.trim();
                 save.disabled = true;
                 try {
                     const out = await api('/api/mail/rules', { op: 'save', rule: r });

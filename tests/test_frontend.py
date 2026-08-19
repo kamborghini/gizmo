@@ -418,6 +418,15 @@ def t_inbox_unread_filters_and_claude_reply():
        "and the app is explicit that it never sends the mail")
     ok("gaps like ____" in SCRIPT,
        "the panel explains why the draft has blanks in it")
+    ok("rows.sort((a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0))" in SCRIPT,
+       "unread rises to the top of the list")
+    ok(".mrow.unread { background:" in HTML and "inset 3px 0 0 var(--accent)" in HTML,
+       "and is unmistakable: its own tint and edge, not a 100-weight difference")
+    ok("'munread', 'New'" in SCRIPT, "with a word, for anyone who cannot see the tint")
+    ok("File it in a Gmail folder (optional)" in SCRIPT,
+       "a filter can file email into a Gmail folder")
+    ok("and take it out of the Gmail inbox" in SCRIPT,
+       "and optionally take it out of the inbox, as Gmail's own filters do")
 
 
 @test

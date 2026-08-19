@@ -8180,6 +8180,13 @@ def _mail_rule_apply(store: dict, t: dict, rule: dict) -> str:
         t["state"], t["done_at"] = "assigned", ""
         did.append("assigned to " + (_team_name(who) or "someone"))
         rule.pop("broken", None)
+    folder = str(rule.get("folder") or "").strip()
+    if folder and who != "_broken":
+        # The label is WANTED here and applied by the reconciler, so sorting a
+        # backlog never turns into hundreds of blocking Gmail calls.
+        t["folder"] = folder[:80]
+        t["folder_archive"] = bool(rule.get("archive"))
+        did.append("filed under " + folder[:40])
     if rule.get("done") and who != "_broken":
         # A broken assignment must never be followed by closing the mail: the
         # whole point of the rule was that a person would see it.
@@ -8426,6 +8433,7 @@ async def _mail_sync_now(force: bool = False) -> None:
             for tid, t in threads.items():
                 t["in_inbox"] = tid in inbox_ids
             _mail_prune(store)
+            await _mail_file_folders(store)
             await _mail_label_reconcile(store)
             if _mail_mem is not store:
                 # The reconciler is the SECOND network window in this function,
@@ -8456,6 +8464,44 @@ def _mail_want_label(t: dict) -> str:
 
 
 MAIL_LABEL_BACKOFF = 600      # a thread that refuses to sync waits this long
+
+
+async def _mail_file_folders(store: dict, limit: int = 10, budget: float = 5.0) -> None:
+    """Put filtered threads into their Gmail folder (label), a few per sync.
+
+    Same reasoning as the ownership labels: a filter that sorts three hundred
+    old threads must not become three hundred blocking API calls, so the
+    board records the intent and this carries it out in the background."""
+    if not google_mail.connected():
+        return
+    todo = [t for t in store.get("threads", {}).values()
+            if t.get("folder") and t.get("folder") != (t.get("folder_done") or "")
+            and time.time() >= float(t.get("folder_retry_at") or 0)]
+    if not todo:
+        return
+    labels = store.setdefault("labels", {})
+
+    async def one(t):
+        try:
+            lid = await google_mail.ensure_label(t["folder"], labels)
+            # "Take it out of the inbox" is Gmail's own Skip the Inbox: the
+            # thread keeps existing, it just stops sitting in the inbox.
+            drop = ["INBOX"] if t.get("folder_archive") else None
+            await google_mail.modify_thread(t["id"], add=[lid], remove=drop)
+            t["folder_done"] = t["folder"]
+            t.pop("folder_error", None)
+        except Exception as e:
+            logger.warning("mail: could not file %s under %s: %s",
+                           t.get("id"), t.get("folder"), e)
+            t["folder_error"] = str(e)[:200]
+            t["folder_retry_at"] = time.time() + MAIL_LABEL_BACKOFF
+            labels.pop(t.get("folder") or "", None)
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*(one(t) for t in todo[:limit]), return_exceptions=True),
+            timeout=budget)
+    except asyncio.TimeoutError:
+        logger.info("mail: filing hit its time budget; the rest waits for the next sync")
 
 
 async def _mail_label_reconcile(store: dict, limit: int = 12, budget: float = 6.0) -> None:
@@ -8552,6 +8598,7 @@ def _mail_board_shape(store: dict) -> list:
                     "notes": len(t.get("notes") or []),
                     "unread": bool(t.get("unread")),
                     "rule": t.get("rule") or "",
+                    "folder": t.get("folder") or "",
                     "label_error": bool(t.get("label_error"))})
     out.sort(key=lambda r: r.get("last_at") or "", reverse=True)
     return out
@@ -10413,6 +10460,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                  "mode": "any" if str(src.get("mode") or "all") == "any" else "all",
                  "conditions": conds, "assign": assign, "pool": pool,
                  "done": bool(src.get("done")),
+                 # A Gmail label name: slashes make a nested folder, which is
+                 # Gmail's own convention, but control characters are not a
+                 # folder name in anybody's language.
+                 "folder": "".join(ch for ch in str(src.get("folder") or "").strip()
+                                   if ch.isprintable())[:80],
+                 "archive": bool(src.get("archive")),
                  "hits": int((keep_stats or {}).get("hits") or 0),
                  "last_hit_at": (keep_stats or {}).get("last_hit_at") or "",
                  "_next": int((keep_stats or {}).get("_next") or 0)}
@@ -10442,9 +10495,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                        "switched off, or their Inbox tab is."}, 400)
             if r["assign"] == "_round" and not r["pool"]:
                 return _json({"error": "Choose at least one person to share the email between."}, 400)
-            if not r["assign"] and not r["done"]:
+            if r["archive"] and not r["folder"]:
+                return _json({"error": "Name the folder to file it in before taking it "
+                                       "out of the inbox, or it would be hard to find."}, 400)
+            if not r["assign"] and not r["done"] and not r["folder"]:
                 return _json({"error": "A filter needs to DO something: give it an owner, "
-                                       "or have it close the email on arrival."}, 400)
+                                       "file it in a folder, or close it on arrival."}, 400)
             r.pop("broken", None)     # a re-saved filter is given a clean slate
             if existing:
                 r["id"] = existing["id"]
