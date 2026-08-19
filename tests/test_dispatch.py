@@ -5940,6 +5940,30 @@ def t_mail_connect_ticket_is_master_only_and_single_use():
     with_mail(go)
 
 @test
+def t_mail_setup_aids_name_the_existing_project_master_only():
+    """The merchant could not find which Cloud project his app already uses.
+    The app knows: the client id's numeric prefix IS the project number."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        saved = _gm.OAUTH_CLIENT_ID
+        _gm.OAUTH_CLIENT_ID = "123456789012-abcdefg.apps.googleusercontent.com"
+        try:
+            j = post("/api/mail/board", {}).json()
+            eq(j["setup"]["project"], "123456789012", "the project number is derived, not asked for")
+            ok(j["setup"]["redirect_uri"].endswith("/oauth/gmail/callback"),
+               "and the EXACT callback is handed over, never retyped")
+            eq(post_s(sess, "/api/mail/board", {}).json()["setup"], {},
+               "setup aids are the master's business only")
+            # A connected mailbox has no setup left to do.
+            _gm.save_connection("rt-test", MBOX)
+            eq(post("/api/mail/board", {}).json()["setup"], {},
+               "and they disappear once it is connected")
+        finally:
+            _gm.OAUTH_CLIENT_ID = saved
+    with_mail(go)
+
+@test
 def t_mail_connect_ticket_expires():
     def go():
         ensure_auth()

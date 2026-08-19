@@ -7978,6 +7978,45 @@
                         card.append(el('div', 'setting-sub',
                             'Opens Google in a new tab. Nothing is stored until you approve it there.'));
                     }
+                    /* First-time setup: two switches inside the Google project
+                       this app ALREADY uses. Nothing else changes, so the
+                       Search Console and Analytics connections keep working. */
+                    const su = d.setup || {};
+                    if (d.client && su.project) {
+                        const box2 = el('div');
+                        box2.style.cssText = 'margin-top:14px;padding-top:12px;border-top:1px solid var(--border)';
+                        box2.append(el('div', 'setting-title', 'First time? Two switches in Google'));
+                        box2.append(el('div', 'setting-sub',
+                            'These open the Google project this app already uses (project '
+                            + su.project + '), so nothing you have already set up changes.'));
+                        const step = (n, text, href, linkText) => {
+                            const row = el('div', 'setting-sub');
+                            row.style.marginTop = '8px';
+                            row.append(document.createTextNode(n + '. ' + text + ' '));
+                            const a = el('a', null, linkText);
+                            a.href = href; a.target = '_blank'; a.rel = 'noopener';
+                            a.style.color = 'var(--accent)';
+                            row.append(a);
+                            box2.append(row);
+                            return row;
+                        };
+                        step(1, 'Switch on the Gmail API:',
+                            'https://console.cloud.google.com/apis/library/gmail.googleapis.com?project='
+                            + encodeURIComponent(su.project), 'open that page');
+                        const r2 = step(2, 'Open your existing web client and add one more address under Authorised redirect URIs:',
+                            'https://console.cloud.google.com/auth/clients?project='
+                            + encodeURIComponent(su.project), 'open your clients');
+                        const uri = el('div');
+                        uri.style.cssText = 'font-family:ui-monospace,monospace;font-size:12px;user-select:all;'
+                            + 'background:var(--surface-2);border:1px solid var(--line);border-radius:6px;'
+                            + 'padding:6px 8px;margin-top:6px;word-break:break-all';
+                        uri.textContent = su.redirect_uri || '';
+                        box2.append(uri);
+                        box2.append(el('div', 'setting-sub',
+                            'Keep the address that is already listed. Add this one alongside it, then come '
+                            + 'back here and press Connect mailbox.'));
+                        card.append(box2);
+                    }
                 } else {
                     card.append(el('div', 'setting-sub', 'Ask an admin to connect the shared mailbox. '
                         + 'Once it is linked, every email shows up here with an owner.'));

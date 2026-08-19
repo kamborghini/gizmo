@@ -9811,9 +9811,19 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if body.get("force"):
                     _mail_last_force["t"] = time.monotonic()
             store = _load_mail()
+            # Setup aids, master only: which Cloud project this app's existing
+            # OAuth client lives in, and the EXACT callback the server will
+            # send Google. Handing over the real value beats the merchant
+            # retyping it: a redirect URI that differs by one character is
+            # the single most common way this setup fails.
+            setup = {}
+            if _team_role(who) == "master" and not google_mail.connected():
+                setup = {"project": google_mail.project_number(),
+                         "redirect_uri": _gmail_redirect_uri(request)}
             return _json({"connected": google_mail.connected(),
                           "client": google_mail.client_configured(),
                           "address": google_mail.address() or None,
+                          "setup": setup,
                           "threads": _mail_board_shape(store),
                           "team": _mail_team_shape(),
                           "me": who, "lead": _mail_lead(who),

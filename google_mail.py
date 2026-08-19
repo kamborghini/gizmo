@@ -87,6 +87,15 @@ def disconnect() -> None:
     _access["token"], _access["exp"] = "", 0.0
 
 
+def project_number() -> str:
+    """The Cloud project an OAuth client belongs to is the numeric prefix of
+    its client id (1234567890-xxxx.apps.googleusercontent.com -> 1234567890).
+    That number drops straight into a console URL, which turns "find the
+    project your app already uses" from an archaeology exercise into a link."""
+    head = OAUTH_CLIENT_ID.split("-", 1)[0].strip()
+    return head if head.isdigit() else ""
+
+
 def status() -> dict:
     return {"client": client_configured(), "connected": connected(),
             "address": address() or None}

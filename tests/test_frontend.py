@@ -408,6 +408,13 @@ def t_inbox_board_owns_every_email():
        "the consent tab opens inside the click, or the popup blocker eats it")
     ok("if (!teamMe || teamMe.role === 'master')" in SCRIPT,
        "an unresolved role must not tell the master to ask an admin")
+    ok("console.cloud.google.com/apis/library/gmail.googleapis.com?project=" in SCRIPT
+       and "console.cloud.google.com/auth/clients?project=" in SCRIPT,
+       "setup links open the project the app ALREADY uses, no hunting")
+    ok("su.redirect_uri" in SCRIPT,
+       "the callback is the server's own value, never retyped by hand")
+    ok("nothing you have already set up changes" in SCRIPT,
+       "and the card promises what it does: two switches, nothing else touched")
 
 
 if __name__ == "__main__":
