@@ -7917,8 +7917,12 @@
                 const name = el('button', 'files-name', f.name);
                 name.onclick = () => { filesFolder = fid; paintCrumbs(); paintList(); };
                 row.append(name);
-                const inside = Object.values(filesCache.files).filter(x => (x.folder_id || '') === fid).length;
-                row.append(el('span', 'files-meta', inside === 1 ? '1 file' : inside + ' files'));
+                const subs = Object.values(filesCache.folders).filter(x => (x.parent_id || '') === fid).length;
+                const files = Object.values(filesCache.files).filter(x => (x.folder_id || '') === fid).length;
+                const bits = [];
+                if (subs) bits.push(subs === 1 ? '1 folder' : subs + ' folders');
+                if (files) bits.push(files === 1 ? '1 file' : files + ' files');
+                row.append(el('span', 'files-meta', bits.length ? bits.join(', ') : 'Empty'));
                 const acts = el('div', 'files-acts');
                 const rn = el('button', 'icon-btn'); rn.innerHTML = I.edit; rn.title = 'Rename folder';
                 rn.onclick = () => inlineRename(row, name, f.name, async (v) => {
