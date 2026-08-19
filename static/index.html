@@ -1034,6 +1034,29 @@
         .modal-body { padding: 20px; overflow-y: auto; }
         #toast-host { position: fixed; top: 14px; right: 14px; z-index: 100; display: flex;
             flex-direction: column; gap: 8px; max-width: min(430px, 92vw); }
+        /* Files: preview + selection */
+        .fprev-body { text-align: center; }
+        .fprev-body img { max-width: 100%; max-height: 68vh; border-radius: 8px; }
+        .fprev-body iframe { width: 100%; height: 68vh; border: 0; border-radius: 8px; background: var(--surface-2); }
+        .fprev-meta { font-size: 12px; color: var(--ink-2); margin-right: auto; }
+        .fslot { position: relative; width: 16px; height: 16px; flex: none; }
+        .fslot svg { width: 16px; height: 16px; color: var(--ink-3); display: block; }
+        .fslot input { position: absolute; inset: 0; width: 16px; height: 16px; margin: 0;
+            accent-color: var(--accent); cursor: pointer; opacity: 0; }
+        .files-row:hover .fslot input, .files-list.selecting .fslot input { opacity: 1; }
+        .files-row:hover .fslot svg, .files-list.selecting .fslot svg { opacity: 0; }
+        @media (hover: none) { .fslot input { opacity: 1; } .fslot svg { opacity: 0; } }
+        .files-row.selected { background: var(--accent-soft); }
+        .files-bulk { display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+            border: 1px solid var(--accent-line); border-radius: 8px; background: var(--accent-soft);
+            margin-bottom: 8px; font-size: 13px; color: var(--accent-ink); }
+        .fpick-row { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+            border: 0; background: none; font: inherit; font-size: 13px; color: var(--ink);
+            padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+        .fpick-row:hover { background: var(--surface-2); }
+        .fpick-row span { display: flex; flex: none; }
+        .fpick-row svg { width: 15px; height: 15px; color: var(--accent-ink); }
+
         /* Auth: the app's own front door */
         .auth-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center;
             justify-content: center; background: var(--bg); }
@@ -1396,6 +1419,10 @@
             helpCircle: SV('<circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line>'),
             card: SV('<rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line>'),
             logOut: SV('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line>'),
+            fileImg: SV('<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline>'),
+            fileZip: SV('<polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line>'),
+            penTool: SV('<path d="M12 19l7-7 3 3-7 7-3-3z"></path><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path><circle cx="11" cy="11" r="2"></circle>'),
+            moveTo: SV('<polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>'),
         };
         const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
         const loader = () => { const b = el('div', 'three-body'); b.append(el('div', 'three-body__dot'), el('div', 'three-body__dot'), el('div', 'three-body__dot')); return b; };
@@ -6597,7 +6624,7 @@
                 ['What it is', 'A shared file store for the whole team, reachable from anywhere the app is. The folder tree lives with the app; the files themselves live in a Cloudflare R2 bucket, which is durable storage costing well under a pound a month for 50 GB. Uploads and downloads travel straight between your browser and Cloudflare, so big files move at full speed.'],
                 ['Setting it up', 'In the Cloudflare dashboard open R2 Object Storage and press Continue to enable it (the free tier covers the first 10 GB). Then go to R2, then Manage API tokens, and press Create Account API token. Name it Store Copilot and set Permissions to Admin Read and Write. This level is needed because the app creates its own bucket and grants your browser permission to upload to it; an Object-only token is refused for both. It covers R2 alone, never the rest of the Cloudflare account. Press Create and copy the three values it shows: the Access Key ID, the Secret Access Key, and your Account ID (shown on the R2 overview page, right-hand side).'],
                 ['Connecting it', 'In Railway open the gizmo service, then Variables, and add R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY with those values. The app creates its own bucket and settings on first use; nothing else to click.'],
-                ['Using it', 'Drag files, or whole folders, onto the list to upload them where you stand: a dropped folder is recreated here, structure and all. Click a name to download. Drag a file onto a folder, or onto a step of the path, to move it. Deleting sends a file to the trash, where it waits 30 days before it is really gone.'],
+                ['Using it', 'Drag files, or whole folders, onto the list to upload them where you stand: a dropped folder is recreated here, structure and all. Click a picture or PDF to preview it on the spot; other types download. Hover a file and tick the box over its icon to select several, then move or trash them together; the Move button works everywhere a drag cannot, including phones. Uploading a name that already exists replaces it, with the old version kept in the trash. Deleting sends a file to the trash, where it waits 30 days before it is really gone.'],
                 ['What it costs', 'Cloudflare bills about 1p per 10 GB per month past the free tier, and downloads are free. At the full 50 GB that is roughly 60p a month.'],
                 ['Files in Finder', 'On a Mac, the whole file store mounts as a network drive: in Finder press Command K, enter https://gizmo-production-c8c1.up.railway.app/dav and sign in with your OWN app username and password. Save proofs straight into it from any program; everything lands in the same folders the Files tab shows, under your name, and deleting there is the same 30-day trash. Each person must use their own login: the drive records who did what.'],
             ]},
@@ -7682,6 +7709,7 @@
            30-day trash, never instant.
            ================================================================== */
         let filesCache = null, filesFolder = '', filesQ = '', filesSeg = 'files';
+        let filesSort = 'name', filesSel = new Set();
         let filesUploads = [], filesQueue = [], filesActive = 0, filesNewFolder = false;
 
         function showFilesView() {
@@ -7729,6 +7757,21 @@
             do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
             return (n >= 10 ? Math.round(n) : n.toFixed(1)) + ' ' + u[i];
         }
+        const FILE_EXT_ICON = [
+            [['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'tif', 'tiff', 'bmp'], 'fileImg'],
+            [['zip', 'rar', '7z', 'gz', 'tar'], 'fileZip'],
+            [['ai', 'eps', 'svg', 'sketch'], 'penTool'],
+            [['csv', 'xls', 'xlsx', 'numbers'], 'grid'],
+        ];
+        function fileGlyph(name) {
+            const ext = (String(name).split('.').pop() || '').toLowerCase();
+            const hit = FILE_EXT_ICON.find(([exts]) => exts.indexOf(ext) >= 0);
+            return I[hit ? hit[1] : 'fileDoc'];
+        }
+        function previewable(name) {
+            const ext = (String(name).split('.').pop() || '').toLowerCase();
+            return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf'].indexOf(ext) >= 0;
+        }
         function filesPathOf(folderId) {
             const names = []; let cur = folderId, hops = 0;
             while (cur && filesCache.folders[cur] && hops++ < 50) {
@@ -7746,8 +7789,9 @@
             const ht = el('div');
             ht.append(el('h2', null, 'Files'),
                 el('p', null, 'The office file server, reachable from anywhere. Drag files in to '
-                    + 'store them; click a name to download it. Everything deleted waits in the '
-                    + 'trash for 30 days before it is gone.'));
+                    + 'store them; click a picture or PDF to preview it right here, anything else '
+                    + 'to download. Everything deleted waits in the trash for 30 days before it '
+                    + 'is gone.'));
             hero.append(badge, ht);
             box.append(hero);
             // Storage meter: how much of the space is spoken for.
@@ -7787,11 +7831,29 @@
         function renderFilesTrash(host) {
             const rows = (filesCache.trash || []).slice()
                 .sort((a, b) => (b.trashed_at || '').localeCompare(a.trashed_at || ''));
+            if (rows.length) {
+                const bar = el('div', 'lbl-toolbar');
+                const total = rows.reduce((n, f) => n + (f.size || 0), 0);
+                bar.append(el('span', 'files-meta',
+                    (rows.length === 1 ? '1 file' : rows.length + ' files') + ' · ' + fmtBytes(total)));
+                const emp = el('button', 'btn'); emp.append(ico(I.trash), document.createTextNode('Empty the trash'));
+                emp.onclick = async () => {
+                    if (!(await uiConfirm('Delete everything in the trash for good? '
+                        + (rows.length === 1 ? '1 file' : rows.length + ' files') + ' ('
+                        + fmtBytes(total) + ') cannot be put back after this.',
+                        { okText: 'Empty the trash' }))) return;
+                    try { await filesOp('/api/files/file', { op: 'empty_trash' }); }
+                    catch (e) { toastError(e.message); }
+                    renderFiles();
+                };
+                bar.append(emp);
+                host.append(bar);
+            }
             const list = el('div', 'files-list');
             if (!rows.length) list.append(el('div', 'files-empty', 'The trash is empty.'));
             rows.forEach(f => {
                 const row = el('div', 'files-row');
-                row.append(ico(I.fileDoc));
+                row.append(ico(fileGlyph(f.name)));
                 const name = el('span', 'files-name still');
                 name.textContent = f.name;
                 const from = filesPathOf(f.folder_id);
@@ -7821,6 +7883,92 @@
                 + 'or Delete now to free its space at once.'));
         }
 
+        async function download(fid) {
+            try {
+                const r = await api('/api/files/download-url', { id: fid });
+                // The signed link is served as an attachment, so navigating to it
+                // triggers the download and the page stays put. A popup window
+                // would be blocked here (we run inside the admin's iframe).
+                const a = document.createElement('a');
+                a.href = r.url; a.rel = 'noopener';
+                document.body.append(a); a.click(); a.remove();
+            } catch (e) { toastError(e.message || 'Could not fetch the file.'); }
+        }
+        async function openPreview(fid, f) {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal disp-modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, f.name));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
+            const close = () => overlay.remove();
+            x.onclick = close;   // Backdrop clicks never close a window here; the X is the way out.
+            head.append(x);
+            const body = el('div', 'modal-body fprev-body');
+            body.append(loader());
+            const foot = el('div', 'modal-foot');
+            foot.append(el('span', 'fprev-meta',
+                fmtBytes(f.size) + ' · ' + fmtDate(f.uploaded_at || f.created_at)
+                + (byName(f.by) ? ' · ' + byName(f.by) : '')));
+            const dl = el('button', 'btn'); dl.append(ico(I.download), document.createTextNode('Download'));
+            dl.onclick = () => download(fid);
+            foot.append(dl);
+            modal.append(head, body, foot); overlay.append(modal); document.body.append(overlay);
+            try {
+                const r = await api('/api/files/download-url', { id: fid, preview: true });
+                body.innerHTML = '';
+                if (r.type === 'application/pdf') {
+                    const fr = document.createElement('iframe');
+                    fr.src = r.url; body.append(fr);
+                } else {
+                    const img = document.createElement('img');
+                    img.alt = f.name; img.src = r.url; body.append(img);
+                }
+            } catch (e) {
+                body.innerHTML = '';
+                body.append(el('div', 'msg error', e.message || 'Could not open the preview.'));
+            }
+        }
+        function openMovePicker(ids, after) {
+            /* Pick a destination folder; works everywhere a drag cannot. */
+            const overlay = el('div', 'modal-overlay show confirm-overlay');
+            const modal = el('div', 'modal confirm-modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, 'Move ' + (ids.length === 1 ? 'file' : ids.length + ' files') + ' to'));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
+            x.onclick = () => overlay.remove();
+            head.append(x);
+            const body = el('div', 'modal-body');
+            const pick = async (folderId) => {
+                overlay.remove();
+                try {
+                    await filesOp('/api/files/file', ids.length === 1
+                        ? { op: 'move', id: ids[0], folder_id: folderId }
+                        : { op: 'move', ids: ids, folder_id: folderId });
+                } catch (e) { toastError(e.message); }
+                filesSel.clear();
+                if (after) after();
+            };
+            const rootBtn = el('button', 'fpick-row');
+            rootBtn.append(ico(I.folder), document.createTextNode(' All files'));
+            rootBtn.onclick = () => pick('');
+            body.append(rootBtn);
+            const walk = (parent, depth) => {
+                Object.entries(filesCache.folders)
+                    .filter(([, fo]) => String(fo.parent_id || '') === parent)
+                    .sort((a, b) => a[1].name.localeCompare(b[1].name))
+                    .forEach(([fid2, fo]) => {
+                        const b = el('button', 'fpick-row');
+                        b.style.paddingLeft = (10 + depth * 18) + 'px';
+                        b.append(ico(I.folder), document.createTextNode(' ' + fo.name));
+                        b.onclick = () => pick(fid2);
+                        body.append(b);
+                        if (depth < 8) walk(fid2, depth + 1);
+                    });
+            };
+            walk('', 1);
+            modal.append(head, body);
+            overlay.append(modal); document.body.append(overlay);
+        }
         function renderFilesBrowser(host) {
             // A folder that vanished (another machine deleted it) must not
             // strand the view on an empty nowhere.
@@ -7842,6 +7990,13 @@
             q.type = 'search'; q.placeholder = 'Search files…'; q.className = 'lbl-size'; q.value = filesQ;
             q.oninput = () => { filesQ = q.value.trim(); paintCrumbs(); paintList(); };
             bar.append(q);
+            const srt = el('select', 'lbl-size');
+            srt.setAttribute('aria-label', 'Sort files');
+            [['name', 'Name'], ['newest', 'Newest first'], ['largest', 'Largest first']]
+                .forEach(([v, lab]) => { const o = el('option', null, lab); o.value = v;
+                    if (filesSort === v) o.selected = true; srt.append(o); });
+            srt.onchange = () => { filesSort = srt.value; paintList(); };
+            bar.append(srt);
             host.append(bar);
 
             const crumbsHost = el('div'); host.append(crumbsHost);
@@ -7885,17 +8040,7 @@
                 try { await filesOp('/api/files/file', { op: 'move', id: fid, folder_id: folderId }); paintList(); }
                 catch (e) { toastError(e.message || 'Could not move the file.'); }
             }
-            async function download(fid) {
-                try {
-                    const r = await api('/api/files/download-url', { id: fid });
-                    // The signed link is served as an attachment, so navigating to it
-                    // triggers the download and the page stays put. A popup window
-                    // would be blocked here (we run inside the admin's iframe).
-                    const a = document.createElement('a');
-                    a.href = r.url; a.rel = 'noopener';
-                    document.body.append(a); a.click(); a.remove();
-                } catch (e) { toastError(e.message || 'Could not fetch the file.'); }
-            }
+
             function inlineRename(row, nameEl, current, save) {
                 const inp = document.createElement('input');
                 inp.className = 'files-rename'; inp.value = current;
@@ -7947,23 +8092,42 @@
                 return row;
             }
             function fileRow(fid, f, showPath) {
-                const row = el('div', 'files-row');
-                row.append(ico(I.fileDoc));
+                const row = el('div', 'files-row' + (filesSel.has(fid) ? ' selected' : ''));
+                // The glyph doubles as the select box: hover (or touch) shows
+                // a checkbox in its place, and ticking one opens the bulk bar.
+                const slot = el('span', 'fslot');
+                const glyph = ico(fileGlyph(f.name));
+                const cb = document.createElement('input');
+                cb.type = 'checkbox'; cb.checked = filesSel.has(fid);
+                cb.setAttribute('aria-label', 'Select ' + f.name);
+                cb.onchange = () => {
+                    cb.checked ? filesSel.add(fid) : filesSel.delete(fid);
+                    paintList();
+                };
+                slot.append(glyph, cb);
+                row.append(slot);
                 const name = el('button', 'files-name');
                 name.textContent = f.name;
                 if (showPath) {
                     const p = filesPathOf(f.folder_id);
                     if (p) name.append(el('span', 'fpath', '  ·  ' + p));
                 }
-                name.title = 'Download'; name.onclick = () => download(fid);
+                const canPeek = previewable(f.name);
+                name.title = canPeek ? 'Preview' : 'Download';
+                name.onclick = () => canPeek ? openPreview(fid, f) : download(fid);
                 row.append(name);
                 row.append(el('span', 'files-meta',
                     fmtBytes(f.size) + ' · ' + fmtDate(f.uploaded_at || f.created_at) + (byName(f.by) ? ' · ' + byName(f.by) : '')));
                 const acts = el('div', 'files-acts');
                 const dl = el('button', 'icon-btn'); dl.innerHTML = I.download; dl.title = 'Download';
                 dl.onclick = () => download(fid);
+                const mv = el('button', 'icon-btn'); mv.innerHTML = I.moveTo; mv.title = 'Move to folder';
+                mv.onclick = () => openMovePicker([fid], () => { paintCrumbs(); paintList(); });
                 const rn = el('button', 'icon-btn'); rn.innerHTML = I.edit; rn.title = 'Rename';
                 rn.onclick = () => inlineRename(row, name, f.name, async (v) => {
+                    // A rename must not quietly cost the file its type.
+                    const oldExt = f.name.includes('.') ? f.name.split('.').pop() : '';
+                    if (oldExt && !v.includes('.')) v = v + '.' + oldExt;
                     try { await filesOp('/api/files/file', { op: 'rename', id: fid, name: v }); } catch (e) { toastError(e.message); }
                     paintList();
                 });
@@ -7972,7 +8136,7 @@
                     try { await filesOp('/api/files/file', { op: 'trash', id: fid }); renderFiles(); }
                     catch (e) { toastError(e.message || 'Could not delete the file.'); }
                 };
-                acts.append(dl, rn, del);
+                acts.append(dl, mv, rn, del);
                 row.append(acts);
                 row.draggable = true;
                 row.ondragstart = (e) => { dragFileId = fid; e.dataTransfer.effectAllowed = 'move'; };
@@ -7980,10 +8144,41 @@
                 return row;
             }
 
+            function sortFiles(entries) {
+                if (filesSort === 'newest') {
+                    return entries.sort((a, b) => String(b[1].uploaded_at || b[1].created_at || '')
+                        .localeCompare(String(a[1].uploaded_at || a[1].created_at || '')));
+                }
+                if (filesSort === 'largest') {
+                    return entries.sort((a, b) => (b[1].size || 0) - (a[1].size || 0));
+                }
+                return entries.sort((a, b) => a[1].name.localeCompare(b[1].name));
+            }
             function paintList() {
                 listHost.innerHTML = '';
                 dragFileId = null;   // a repaint may remove the row being dragged; its dragend never fires
-                const list = el('div', 'files-list');
+                // Selection can only reference what is on screen.
+                const live = new Set(Object.keys(filesCache.files));
+                filesSel.forEach(i => { if (!live.has(i)) filesSel.delete(i); });
+                if (filesSel.size) {
+                    const bar = el('div', 'files-bulk');
+                    bar.append(el('span', null, filesSel.size === 1 ? '1 file selected'
+                        : filesSel.size + ' files selected'));
+                    const mv = el('button', 'btn', 'Move');
+                    mv.onclick = () => openMovePicker([...filesSel], () => { paintCrumbs(); paintList(); });
+                    const tr = el('button', 'btn', 'Trash');
+                    tr.onclick = async () => {
+                        try { await filesOp('/api/files/file', { op: 'trash', ids: [...filesSel] }); }
+                        catch (e) { toastError(e.message); }
+                        filesSel.clear();
+                        renderFiles();
+                    };
+                    const clear = el('button', 'btn', 'Clear');
+                    clear.onclick = () => { filesSel.clear(); paintList(); };
+                    bar.append(mv, tr, clear);
+                    listHost.append(bar);
+                }
+                const list = el('div', 'files-list' + (filesSel.size ? ' selecting' : ''));
                 const fmap = filesCache.files;
                 // The list swallows drops in every mode: an unhandled drop makes
                 // the browser NAVIGATE to the dropped file, taking the app with it.
@@ -7997,8 +8192,8 @@
                 };
                 if (filesQ) {
                     const ql = filesQ.toLowerCase();
-                    const hits = Object.entries(fmap).filter(([, f]) => f.name.toLowerCase().includes(ql))
-                        .sort((a, b) => a[1].name.localeCompare(b[1].name));
+                    const hits = sortFiles(Object.entries(fmap)
+                        .filter(([, f]) => f.name.toLowerCase().includes(ql)));
                     if (!hits.length) list.append(el('div', 'files-empty', 'No file matches that search.'));
                     hits.forEach(([fid, f]) => list.append(fileRow(fid, f, true)));
                     listHost.append(list);
@@ -8028,9 +8223,8 @@
                 const folders = Object.entries(filesCache.folders)
                     .filter(([, f]) => (f.parent_id || '') === filesFolder)
                     .sort((a, b) => a[1].name.localeCompare(b[1].name));
-                const files = Object.entries(fmap)
-                    .filter(([, f]) => (f.folder_id || '') === filesFolder)
-                    .sort((a, b) => a[1].name.localeCompare(b[1].name));
+                const files = sortFiles(Object.entries(fmap)
+                    .filter(([, f]) => (f.folder_id || '') === filesFolder));
                 folders.forEach(([fid, f]) => list.append(folderRow(fid, f)));
                 files.forEach(([fid, f]) => list.append(fileRow(fid, f, false)));
                 if (!folders.length && !files.length && !filesNewFolder)

@@ -344,6 +344,19 @@ def t_the_clock_is_for_part_timers_and_sends_no_timestamps():
     ok("on the clock" in SCRIPT, "billable events are marked in the feed")
 
 
+@test
+def t_files_preview_select_and_move_exist():
+    """The file-manager feel: previews for proofs, a Move that works without a
+    drag (phones have no drag), multi-select, and extension-safe renames."""
+    ok("openPreview" in SCRIPT and "preview: true" in SCRIPT, "images and PDFs preview in place")
+    ok("openMovePicker" in SCRIPT, "an explicit Move exists for every pointer")
+    ok("filesSel" in SCRIPT and "'files-bulk'" in SCRIPT, "multi-select with a bulk bar")
+    ok("empty_trash" in SCRIPT, "the trash empties in one action")
+    ok("fileGlyph" in SCRIPT, "icons follow the file type")
+    ok(re.search(r"if \(oldExt && !v\.includes\('\.'\)\) v = v \+ '\.' \+ oldExt", SCRIPT),
+       "a rename keeps its extension")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

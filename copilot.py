@@ -7001,17 +7001,21 @@ def _frame_headers(request: Request) -> dict:
         "script-src 'self' 'unsafe-inline' https://cdn.shopify.com https://*.shopify.com; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
-        "img-src 'self' data: https:; "
+        "img-src 'self' data: https:"
+        + (" " + _files_endpoint() if _files_configured() else "")   # image preview from the bucket
+        + "; "
         # Files uploads/downloads go browser-to-bucket, so the page must be
         # allowed to talk to this account's R2 endpoint and nothing broader.
         # Without it the browser kills the PUT before it starts and the only
         # symptom is "the transfer failed".
         "connect-src 'self' https://*.shopify.com https://*.myshopify.com"
-        + (f" https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com" if _files_configured() else "")
+        + (" " + _files_endpoint() if _files_configured() else "")
         + "; "
         # The store's own quote domain is allowed so the Proof modal can embed
         # proposal pages; nothing else may be framed.
-        f"frame-src https://*.shopify.com https://{PROPOSAL_HOST}; "
+        f"frame-src https://*.shopify.com https://{PROPOSAL_HOST}"
+        + (" " + _files_endpoint() if _files_configured() else "")   # in-app PDF preview
+        + "; "
         "base-uri 'self'; form-action 'self'; object-src 'none'; "
         f"frame-ancestors {ancestors};"
     )
@@ -7754,8 +7758,7 @@ def _files_s3():
                 "s3",
                 # R2_ENDPOINT is a test-rig override; production always derives
                 # the real account endpoint.
-                endpoint_url=(os.environ.get("R2_ENDPOINT")
-                              or f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"),
+                endpoint_url=_files_endpoint(),
                 aws_access_key_id=R2_ACCESS_KEY_ID,
                 aws_secret_access_key=R2_SECRET_ACCESS_KEY,
                 region_name="auto",
@@ -7924,12 +7927,28 @@ def _files_origin() -> str:
     return url
 
 
-def _files_disposition(name: str) -> str:
+def _files_disposition(name: str, inline: bool = False) -> str:
     """Downloads keep their real filename even when it has accents or symbols:
     a plain-ASCII fallback plus the RFC 5987 encoded form."""
     from urllib.parse import quote
     ascii_name = re.sub(r"[^ -~]", "_", name).replace('"', "'")
-    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
+    kind = "inline" if inline else "attachment"
+    return f"{kind}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
+
+
+# Only these render safely in a browser tab; everything else stays a download.
+# SVG is deliberately absent: it can carry scripts, so it never serves inline.
+_PREVIEW_MIME = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                 "gif": "image/gif", "webp": "image/webp", "pdf": "application/pdf"}
+
+
+def _files_preview_mime(name: str) -> str:
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    return _PREVIEW_MIME.get(ext, "")
+
+
+def _files_endpoint() -> str:
+    return os.environ.get("R2_ENDPOINT") or f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 
 def _files_sign_put(key: str, ctype: str) -> str:
@@ -7946,12 +7965,15 @@ def _files_sign_put(key: str, ctype: str) -> str:
         ExpiresIn=900)
 
 
-def _files_sign_get(key: str, name: str) -> str:
-    return _files_s3().generate_presigned_url(
-        "get_object",
-        Params={"Bucket": R2_BUCKET, "Key": key,
-                "ResponseContentDisposition": _files_disposition(name)},
-        ExpiresIn=300)
+def _files_sign_get(key: str, name: str, inline: bool = False) -> str:
+    params = {"Bucket": R2_BUCKET, "Key": key,
+              "ResponseContentDisposition": _files_disposition(name, inline=inline)}
+    if inline:
+        # The stored type is whatever the uploader claimed (Finder says
+        # octet-stream for everything), so the preview type comes from the
+        # extension, and only from the safe list.
+        params["ResponseContentType"] = _files_preview_mime(name) or "application/octet-stream"
+    return _files_s3().generate_presigned_url("get_object", Params=params, ExpiresIn=300)
 
 
 def _files_head(key: str):
@@ -10066,10 +10088,21 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     logger.warning("files: presign failed: %s", e)
                     return _json({"error": "Storage isn't reachable right now. Check the R2 "
                                            "keys in Railway, then try again."}, 502)
-                d["files"][fid] = {"name": name, "folder_id": folder, "size": size,
-                                   "type": ctype, "r2_key": key, "status": "pending", "by": who,
-                                   "created_at": datetime.now(timezone.utc).isoformat()}
-                return _files_ok(d, {"id": fid, "url": url})
+                rec = {"name": name, "folder_id": folder, "size": size,
+                       "type": ctype, "r2_key": key, "status": "pending", "by": who,
+                       "created_at": datetime.now(timezone.utc).isoformat()}
+                # Uploading a name that already lives here REPLACES it, the way
+                # a save does: the old version waits in the 30-day trash. The
+                # target is pinned server-side, so the client cannot aim the
+                # retirement at some other file.
+                dup = next((k for k, v in d["files"].items()
+                            if v.get("status") == "active" and not v.get("hidden")
+                            and str(v.get("folder_id") or "") == folder
+                            and v.get("name", "").lower() == name.lower()), None)
+                if dup:
+                    rec["replaces"] = dup
+                d["files"][fid] = rec
+                return _files_ok(d, {"id": fid, "url": url, "replaces": bool(dup)})
         except RuntimeError:
             return _json({"error": _FILES_STORE_FAIL}, 500)
         except Exception:
@@ -10108,8 +10141,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                            "allows, so it has not been kept."}, 400)
                 f["status"] = "active"
                 f["uploaded_at"] = datetime.now(timezone.utc).isoformat()
+                rep = f.pop("replaces", None)
+                old = d["files"].get(rep) if rep else None
+                replaced = ""
+                if old is not None and old.get("status") == "active":
+                    old["status"] = "trashed"
+                    old["trashed_at"] = datetime.now(timezone.utc).isoformat()
+                    replaced = " (replaced the previous version)"
                 return _files_ok(d, action="uploaded a file",
-                                 detail=f"{f.get('name')} ({true_size} bytes)"[:200], who=_who)
+                                 detail=(f"{f.get('name')} ({true_size} bytes)" + replaced)[:200],
+                                 who=_who)
         except RuntimeError:
             return _json({"error": _FILES_STORE_FAIL}, 500)
         except Exception:
@@ -10127,8 +10168,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             f = d["files"].get(fid)
             if not f or f.get("status") == "pending":
                 return _json({"error": "That file no longer exists."}, 404)
-            url = await asyncio.to_thread(_files_sign_get, f["r2_key"], f.get("name") or "file")
-            return _json({"ok": True, "url": url, "name": f.get("name")})
+            preview = bool(body.get("preview"))
+            mime = _files_preview_mime(f.get("name") or "")
+            if preview and not mime:
+                return _json({"error": "That file type opens as a download, not a preview."}, 400)
+            url = await asyncio.to_thread(
+                lambda: _files_sign_get(f["r2_key"], f.get("name") or "file", inline=preview))
+            return _json({"ok": True, "url": url, "name": f.get("name"),
+                          "preview": preview, "type": (mime if preview else "")})
         except Exception:
             logger.exception("files download-url failed")
             return _json({"error": "Storage isn't reachable right now. Try again in a "
@@ -10144,6 +10191,39 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         try:
             async with _files_lock:
                 d = _load_files()
+                # Several files at once: the same trash and move, one write.
+                raw_ids = body.get("ids")
+                if op in ("trash", "move") and isinstance(raw_ids, list):
+                    ids = [str(i) for i in raw_ids][:100]
+                    folder = str(body.get("folder_id") or "")
+                    if op == "move" and not _files_folder_ok(d, folder):
+                        return _json({"error": "That folder no longer exists."}, 400)
+                    hit = 0
+                    for i in ids:
+                        v = d["files"].get(i)
+                        if not v or v.get("status") != "active":
+                            continue
+                        if op == "trash":
+                            v["status"] = "trashed"
+                            v["trashed_at"] = datetime.now(timezone.utc).isoformat()
+                        else:
+                            v["folder_id"] = folder
+                        hit += 1
+                    if not hit:
+                        return _json({"error": "None of those files exist any more."}, 400)
+                    label = ("1 file" if hit == 1 else f"{hit} files")
+                    return _files_ok(d, action=("put files in the trash" if op == "trash"
+                                                else "moved files"), detail=label, who=_who)
+                if op == "empty_trash":
+                    doomed = [k for k, v in d["files"].items() if v.get("trashed_at")]
+                    if not doomed:
+                        return _json({"error": "The trash is already empty."}, 400)
+                    for k in doomed:
+                        v = d["files"].pop(k)
+                        if v.get("r2_key"):
+                            d.setdefault("doomed", []).append(v["r2_key"])
+                    return _files_ok(d, action="emptied the trash",
+                                     detail=(f"{len(doomed)} file(s) deleted for good"), who=_who)
                 f = d["files"].get(fid)
                 if not f or f.get("status") == "pending":
                     return _json({"error": "That file no longer exists."}, 400)

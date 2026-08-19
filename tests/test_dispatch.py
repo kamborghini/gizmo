@@ -4058,6 +4058,8 @@ class FakeS3:
         self.cors = CORSConfiguration
     def generate_presigned_url(self, op, Params, ExpiresIn):
         self._guard("presign_" + op)
+        self.presigns = getattr(self, "presigns", [])
+        self.presigns.append(Params)
         return f"https://fake-r2.test/{Params['Key']}?op={op}&exp={ExpiresIn}"
     def head_object(self, Bucket, Key):
         self._guard("head_object")
@@ -4962,6 +4964,87 @@ def t_audit_demoting_a_clocked_in_parttime_closes_the_shift():
         eq(len(b["open"]), 0, "no open session hangs after the demotion")
         ok(any(s.get("corrected") for s in b["sessions"]), "it was closed as a correction")
     with_accounts(go)
+
+@test
+def t_files_preview_is_inline_typed_and_only_for_safe_types():
+    def go(fake):
+        up = post("/api/files/upload-url", {"name": "proof.png", "size": 10}).json()
+        key = up["url"].split("?")[0].replace("https://fake-r2.test/", "")
+        fake.objects[key] = 10
+        post("/api/files/complete", {"id": up["id"]})
+        r = post("/api/files/download-url", {"id": up["id"], "preview": True})
+        eq(r.status_code, 200, r.text)
+        eq(r.json()["type"], "image/png")
+        p = fake.presigns[-1]
+        ok(p["ResponseContentDisposition"].startswith("inline"), "served inline for the preview")
+        eq(p["ResponseContentType"], "image/png", "with the extension's type, not the claim")
+        up2 = post("/api/files/upload-url", {"name": "notes.txt", "size": 5}).json()
+        k2 = up2["url"].split("?")[0].replace("https://fake-r2.test/", "")
+        fake.objects[k2] = 5
+        post("/api/files/complete", {"id": up2["id"]})
+        eq(post("/api/files/download-url", {"id": up2["id"], "preview": True}).status_code, 400,
+           "unsafe types never serve inline")
+        r3 = post("/api/files/download-url", {"id": up2["id"]})
+        ok(fake.presigns[-1]["ResponseContentDisposition"].startswith("attachment"),
+           "plain downloads stay attachments")
+        eq(r3.status_code, 200)
+    with_files(go)
+
+@test
+def t_files_same_name_upload_replaces_never_duplicates():
+    def go(fake):
+        a = post("/api/files/upload-url", {"name": "proof.pdf", "size": 10}).json()
+        ka = a["url"].split("?")[0].replace("https://fake-r2.test/", "")
+        fake.objects[ka] = 10
+        post("/api/files/complete", {"id": a["id"]})
+        b = post("/api/files/upload-url", {"name": "Proof.PDF", "size": 12}).json()
+        ok(b["replaces"], "the second upload knows it is a replacement")
+        kb = b["url"].split("?")[0].replace("https://fake-r2.test/", "")
+        fake.objects[kb] = 12
+        st = post("/api/files/complete", {"id": b["id"]}).json()["store"]
+        active = [v for v in st["files"].values() if v["name"].lower() == "proof.pdf"]
+        eq(len(active), 1, "one live file with that name, never two")
+        eq(active[0]["size"], 12, "and it is the new one")
+        eq(len(st["trash"]), 1, "the old version waits in the trash")
+    with_files(go)
+
+@test
+def t_files_bulk_ops_and_empty_trash():
+    def go(fake):
+        folder = post("/api/files/folder", {"op": "add", "name": "Jobs"}).json()["id"]
+        ids = []
+        for n in ("a.pdf", "b.pdf", "c.pdf"):
+            up = post("/api/files/upload-url", {"name": n, "size": 5}).json()
+            k = up["url"].split("?")[0].replace("https://fake-r2.test/", "")
+            fake.objects[k] = 5
+            post("/api/files/complete", {"id": up["id"]})
+            ids.append(up["id"])
+        r = post("/api/files/file", {"op": "move", "ids": ids[:2], "folder_id": folder})
+        eq(r.status_code, 200, r.text)
+        st = r.json()["store"]
+        eq(sum(1 for v in st["files"].values() if v["folder_id"] == folder), 2, "two moved together")
+        r2 = post("/api/files/file", {"op": "trash", "ids": ids})
+        eq(r2.status_code, 200, r2.text)
+        eq(len(r2.json()["store"]["trash"]), 3, "all three in the trash at once")
+        r3 = post("/api/files/file", {"op": "empty_trash"})
+        eq(r3.status_code, 200, r3.text)
+        st3 = r3.json()["store"]
+        eq(st3["trash"], [], "the trash is empty")
+        eq(st3["used"], 0, "and the space is free")
+        d = copilot._load_files()
+        eq(len(d["doomed"]), 3, "the bytes wait for the reaper, never a route")
+        eq(post("/api/files/file", {"op": "empty_trash"}).status_code, 400,
+           "emptying an empty trash says so")
+    with_files(go)
+
+@test
+def t_files_preview_host_is_allowed_to_frame():
+    def go(fake):
+        csp = client.get("/?shop=test-store.myshopify.com").headers.get("content-security-policy", "")
+        frame = csp.split("frame-src", 1)[1].split(";")[0]
+        ok("https://acct.r2.cloudflarestorage.com" in frame,
+           "the bucket may render in the preview frame: " + frame)
+    with_files(go)
 
 # =========================== run ===========================================
 
