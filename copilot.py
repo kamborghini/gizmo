@@ -45,6 +45,7 @@ import anthropic
 import httpx
 import jwt
 import google_data
+import google_mail
 try:
     import worldoptions
 except Exception:                     # keep the app booting if the connector is unavailable
@@ -1112,6 +1113,7 @@ def _build_backup_zip():
     # repo-seed sheet cannot shadow the live uploaded one on restore.
     secrets_excluded = {
         os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
+        os.path.basename(getattr(google_mail, "TOKEN_PATH", "gmail_oauth.json")),
         os.path.basename(WO_SECRET_PATH),
         # Sessions are transient bearer state: never in a backup. The accounts
         # register IS included: it holds only scrypt hashes, and restoring it
@@ -8036,6 +8038,346 @@ def _files_head(key: str):
 
 
 # ---------------------------------------------------------------------------
+# Shared inbox: who owns which email. The mailbox itself stays in Gmail —
+# reading and replying happen there — this is the layer Gmail doesn't have:
+# every thread has exactly ONE owner, states age visibly, and a label synced
+# back to Gmail ("Copilot/<Name>") shows the ownership inside Gmail too.
+#
+# Sync is pull, not push: the board re-syncs when its picture is older than
+# MAIL_SYNC_SECONDS, so the person who opens the board pays a small refresh
+# and nobody needs a webhook. threads.list hands back a historyId per thread,
+# so an unchanged thread costs nothing beyond the one listing call.
+# ---------------------------------------------------------------------------
+MAILBOX_PATH = os.environ.get("MAILBOX_PATH", "/data/mailbox.json")
+MAIL_SYNC_SECONDS = 120        # board re-syncs when its picture is older than this
+MAIL_TRACK_DAYS = 60           # how far back the working set reaches
+MAIL_DONE_KEEP_DAYS = 180      # done threads stay searchable this long
+MAIL_THREADS_CAP = 1000        # hard cap; oldest done threads fall off first
+MAIL_MSGS_PER_THREAD = 50      # newest messages kept per thread record
+MAIL_STATES = ("unassigned", "assigned", "progress", "waiting", "done")
+MAIL_PRESENCE = ("office", "home", "out")
+
+_mail_mem: Optional[dict] = None
+_mail_lock = asyncio.Lock()     # one sync at a time; board reads never block
+_mail_viewers: dict = {}        # thread_id -> {uid: monotonic_ts}, collision warnings
+MAIL_VIEW_SECONDS = 25          # a heartbeat older than this no longer counts
+
+
+def _mail_default() -> dict:
+    return {"version": 1, "labels": {}, "threads": {}, "synced_at": "", "sync_error": ""}
+
+
+def _load_mail() -> dict:
+    global _mail_mem
+    if _mail_mem is None:
+        d = _load_json_store(MAILBOX_PATH, "mailbox", None)
+        _mail_mem = d if isinstance(d, dict) and "threads" in d else _mail_default()
+        for k, v in _mail_default().items():
+            _mail_mem.setdefault(k, v)
+    return _mail_mem
+
+
+def _write_mail(d: dict) -> None:
+    global _mail_mem
+    _mail_mem = d
+    if not _store_writable(MAILBOX_PATH):
+        raise RuntimeError("mailbox store is not writable")
+    os.makedirs(os.path.dirname(MAILBOX_PATH) or ".", exist_ok=True)
+    tmp = MAILBOX_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"mailbox": d}, fh, allow_nan=False)
+    os.replace(tmp, MAILBOX_PATH)
+
+
+def _mail_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _mail_log(t: dict, by: str, action: str, detail: str = "") -> None:
+    t.setdefault("activity", []).append(
+        {"at": _mail_now(), "by": str(by or ""), "action": str(action)[:60],
+         "detail": str(detail)[:200]})
+    if len(t["activity"]) > 60:
+        del t["activity"][:len(t["activity"]) - 60]
+
+
+def _mail_sender(t: dict, mailbox_addr: str) -> tuple:
+    """(name, email) of the customer side: the first message not from our own
+    address. An outbound-started thread falls back to whoever we wrote to
+    first appearing in replies, else the mailbox itself."""
+    for m in t.get("messages", []):
+        if m.get("from_email") and m["from_email"] != mailbox_addr:
+            return (m.get("from_name") or m["from_email"], m["from_email"])
+    m = (t.get("messages") or [{}])[0]
+    return (m.get("from_name") or m.get("from_email") or "", m.get("from_email") or "")
+
+
+def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str) -> None:
+    """Merge one freshly fetched thread into the store. Pure store logic, no
+    network: this is where new-message transitions live (waiting -> progress
+    when the customer replies, done -> reopened), so it is unit-testable."""
+    tid = str(full.get("id") or "")
+    msgs = list(full.get("messages") or [])
+    if not tid or not msgs:
+        return
+    msgs = msgs[-MAIL_MSGS_PER_THREAD:]
+    threads = store.setdefault("threads", {})
+    t = threads.get(tid)
+    known_ids = {m.get("id") for m in (t.get("messages") or [])} if t else set()
+    fresh = [m for m in msgs if m.get("id") not in known_ids]
+    if t is None:
+        t = {"id": tid, "state": "unassigned", "owner": "", "owner_since": "",
+             "done_at": "", "state_at": _mail_now(), "gmail_label": "",
+             "label_error": "", "notes": [], "activity": []}
+        threads[tid] = t
+        _mail_log(t, "", "arrived")
+        fresh = []    # the arrival IS the news; no per-message transitions
+    t["subject"] = str(full.get("subject") or t.get("subject") or "")[:300]
+    t["history_id"] = str(full.get("historyId") or "")
+    t["messages"] = msgs
+    t["msg_count"] = len(msgs)
+    t["snippet"] = str((msgs[-1].get("snippet") or ""))[:200]
+    # Stored value first: once the 50-message window slides past the real
+    # first message, msgs[0] is no longer the thread's beginning.
+    t["first_at"] = t.get("first_at") or msgs[0].get("at") or _mail_now()
+    t["last_at"] = msgs[-1].get("at") or _mail_now()
+    name, email = _mail_sender(t, mailbox_addr)
+    t["from_name"], t["from_email"] = str(name)[:120], str(email)[:200]
+    for m in fresh:
+        ours = mailbox_addr and m.get("from_email") == mailbox_addr
+        if ours:
+            _mail_log(t, "", "replied from Gmail")
+            continue
+        _mail_log(t, "", "customer replied")
+        if t["state"] == "waiting":
+            t["state"], t["state_at"] = "progress", _mail_now()
+        elif t["state"] == "done":
+            # A closed conversation that speaks again goes back to whoever
+            # had it; an owner who is gone, switched off, or locked out of
+            # the mail tab leaves it unassigned for the room instead of
+            # burying it on an account that cannot see it.
+            owner = t.get("owner") or ""
+            t["state"] = "assigned" if _mail_can_own(owner) else "unassigned"
+            if t["state"] == "unassigned":
+                t["owner"] = ""
+            t["done_at"], t["state_at"] = "", _mail_now()
+            _mail_log(t, "", "reopened")
+
+
+def _mail_can_own(uid: str) -> bool:
+    """An account can hold email only if it exists, is switched on, and can
+    open the mail tab: an owner who cannot see the board is a buried email."""
+    u = _team_user(uid)
+    if not u or not u.get("active", True):
+        return False
+    tabs = _user_tabs(uid)
+    return tabs is None or "mail" in tabs
+
+
+def _mail_release_owned(uid: str, why: str) -> None:
+    """When an account is switched off or deleted, its open email goes back
+    to the room. Leaving it owned would bury it on an account nobody can
+    log into: the exact failure the single-owner board exists to prevent.
+    Gmail-side labels are left as they are (best-effort, cleaned up by the
+    next state change); the BOARD must be right immediately."""
+    store = _load_mail()
+    touched = False
+    for t in store.get("threads", {}).values():
+        if t.get("owner") == uid and t.get("state") in ("assigned", "progress", "waiting"):
+            t["owner"], t["owner_since"] = "", ""
+            t["state"], t["state_at"] = "unassigned", _mail_now()
+            _mail_log(t, "", "released: " + why)
+            touched = True
+    if touched:
+        try:
+            _write_mail(store)
+        except Exception:
+            logger.exception("mail: release-on-%s could not be persisted", why)
+
+
+def _mail_prune(store: dict) -> None:
+    """Old done threads fall away; the cap keeps the store bounded even if
+    the shop has a very loud year."""
+    threads = store.get("threads", {})
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=MAIL_DONE_KEEP_DAYS)).isoformat()
+    for tid in [k for k, t in threads.items()
+                if t.get("state") == "done" and (t.get("done_at") or "") < cutoff and t.get("done_at")]:
+        threads.pop(tid, None)
+    if len(threads) > MAIL_THREADS_CAP:
+        done = sorted((k for k, t in threads.items() if t.get("state") == "done"),
+                      key=lambda k: threads[k].get("done_at") or "")
+        for tid in done[:len(threads) - MAIL_THREADS_CAP]:
+            threads.pop(tid, None)
+
+
+async def _mail_sync_now(force: bool = False) -> None:
+    """Refresh the working set from Gmail. Never raises: a failed sync leaves
+    the last good picture on the board with the error alongside it."""
+    store = _load_mail()
+    if not force and store.get("synced_at"):
+        try:
+            age = (datetime.now(timezone.utc)
+                   - datetime.fromisoformat(store["synced_at"])).total_seconds()
+            if age < MAIL_SYNC_SECONDS:
+                return
+        except ValueError:
+            pass
+    if not google_mail.connected():
+        return
+    async with _mail_lock:
+        # Re-check under the lock: a queued caller finds the sync just done.
+        store = _load_mail()
+        if not force and store.get("synced_at"):
+            try:
+                age = (datetime.now(timezone.utc)
+                       - datetime.fromisoformat(store["synced_at"])).total_seconds()
+                if age < MAIL_SYNC_SECONDS:
+                    return
+            except ValueError:
+                pass
+        try:
+            listed = await google_mail.list_threads(
+                f"in:inbox newer_than:{MAIL_TRACK_DAYS}d", 200)
+            addr = google_mail.address().lower()
+            threads = store.setdefault("threads", {})
+            changed = [t["id"] for t in listed
+                       if t["id"] not in threads
+                       or threads[t["id"]].get("history_id") != t.get("historyId")]
+            sem = asyncio.Semaphore(8)
+
+            async def fetch(tid):
+                async with sem:
+                    try:
+                        return await google_mail.get_thread(tid)
+                    except Exception as e:
+                        logger.warning(f"mail: thread {tid} fetch failed: {e}")
+                        return None
+            fetched = await asyncio.gather(*(fetch(t) for t in changed)) if changed else []
+            if _mail_mem is not store:
+                # A restore replaced the world while we were at Gmail. This
+                # sync photographed the PRE-restore board; writing it now
+                # would clobber what was just restored. Walk away.
+                logger.warning("mail sync abandoned: the store changed underneath it")
+                return
+            inbox_ids = {t["id"] for t in listed}
+            for full in fetched:
+                if full:
+                    _mail_apply_thread(store, full, addr)
+            for tid, t in threads.items():
+                t["in_inbox"] = tid in inbox_ids
+            _mail_prune(store)
+            store["synced_at"] = _mail_now()
+            store["sync_error"] = ""
+            _write_mail(store)
+        except Exception as e:
+            logger.warning(f"mail sync failed: {e}")
+            store["sync_error"] = str(e)[:300]
+            if _mail_mem is store:
+                try:
+                    _write_mail(store)
+                except Exception:
+                    pass
+
+
+async def _mail_sync_labels(t: dict, owner_name: str = "") -> None:
+    """Carry ownership back into Gmail as a label, best-effort and BOUNDED:
+    a Gmail hiccup must never hold a state change hostage, so the whole
+    label trip gets eight seconds and then the change proceeds without it.
+    The record notes any failure so the card can show it."""
+    if not google_mail.connected():
+        return
+    store = _load_mail()
+    want = ""
+    if t.get("state") == "done":
+        want = "Copilot/Done"
+    elif t.get("owner") and owner_name:
+        want = f"Copilot/{owner_name}"
+    have = t.get("gmail_label") or ""
+    if want == have:
+        return
+    labels = store.setdefault("labels", {})
+
+    async def run():
+        add, remove = [], []
+        if have and labels.get(have):
+            remove.append(labels[have])
+        if want:
+            add.append(await google_mail.ensure_label(want, labels))
+        await google_mail.modify_thread(t["id"], add=add, remove=remove)
+    try:
+        await asyncio.wait_for(run(), timeout=8)
+        t["gmail_label"] = want
+        t["label_error"] = ""
+    except Exception as e:
+        msg = "label sync timed out" if isinstance(e, asyncio.TimeoutError) else str(e)
+        logger.warning(f"mail: label sync failed on {t.get('id')}: {msg}")
+        t["label_error"] = str(msg)[:200]
+        # A cached label id may be the corpse of a label someone deleted in
+        # Gmail; served from cache it would fail this way forever. Evict the
+        # names involved so the next attempt re-lists and heals itself.
+        labels.pop(want, None)
+        labels.pop(have, None)
+
+
+def _mail_board_shape(store: dict) -> list:
+    out = []
+    for t in store.get("threads", {}).values():
+        out.append({"id": t.get("id"), "subject": t.get("subject") or "(no subject)",
+                    "from_name": t.get("from_name") or "", "from_email": t.get("from_email") or "",
+                    "state": t.get("state"), "owner": t.get("owner") or "",
+                    "owner_name": _team_name(t["owner"]) if t.get("owner") else "",
+                    "first_at": t.get("first_at"), "last_at": t.get("last_at"),
+                    "state_at": t.get("state_at"), "done_at": t.get("done_at") or "",
+                    "msg_count": t.get("msg_count", 0), "snippet": (t.get("snippet") or "")[:140],
+                    "notes": len(t.get("notes") or []),
+                    "label_error": bool(t.get("label_error"))})
+    out.sort(key=lambda r: r.get("last_at") or "", reverse=True)
+    return out
+
+
+def _mail_team_shape() -> list:
+    """Who's-doing-what: every active account with presence and open counts."""
+    counts: dict = {}
+    for t in _load_mail().get("threads", {}).values():
+        if t.get("owner") and t.get("state") in ("assigned", "progress", "waiting"):
+            c = counts.setdefault(t["owner"], {"assigned": 0, "progress": 0, "waiting": 0})
+            c[t["state"]] += 1
+    rows = []
+    for uid, u in _load_users()["users"].items():
+        if u.get("deleted") or not u.get("active", True):
+            continue
+        c = counts.get(uid, {})
+        rows.append({"uid": uid, "name": u.get("name") or u.get("username") or "",
+                     "lead": ROLE_LEVELS.get(u.get("role", "member"), 1) >= 2,
+                     "presence": u.get("presence") or "",
+                     "assigned": c.get("assigned", 0), "progress": c.get("progress", 0),
+                     "waiting": c.get("waiting", 0)})
+    rows.sort(key=lambda r: (-(r["assigned"] + r["progress"] + r["waiting"]), r["name"].lower()))
+    return rows
+
+
+def _mail_crm_match(email: str) -> Optional[dict]:
+    """The reason this lives here and not in a helpdesk: the sender might
+    already be in the CRM. A match puts the relationship beside the email."""
+    if not email:
+        return None
+    e = email.lower()
+    try:
+        d = _load_crm()
+        for pid, p in d.get("persons", {}).items():
+            if p.get("deleted_at"):
+                continue
+            emails = p.get("emails") or ([p["email"]] if p.get("email") else [])
+            if any(str(x).lower() == e for x in emails if x):
+                org = d.get("orgs", {}).get(p.get("org_id") or "", {})
+                return {"person_id": pid, "name": p.get("name") or "",
+                        "org": org.get("name") or ""}
+    except Exception:
+        pass
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Team: the app's own accounts. Shopify has no authority here.
 #
 # The embed token still gates the PERIMETER (a request must come from inside
@@ -8257,14 +8599,14 @@ def _master_reset_check(d: dict) -> None:
 # The master is never restricted. Enforcement is central (in _pre_checks) via
 # this path map, so hiding a tab in the page is never the only lock.
 TAB_KEYS = ("overview", "seo", "keywords", "products", "customers", "liability",
-            "crm", "files", "labels", "memory", "skills", "chat")
+            "crm", "mail", "files", "labels", "memory", "skills", "chat")
 _TAB_ROUTES = (
     ("/api/overview", "overview"), ("/api/seo", "seo"), ("/api/keyword", "keywords"),
     ("/api/products", "products"), ("/api/product", "products"),
     ("/api/customers", "customers"), ("/api/customer-history", "customers"),
     ("/api/customer-tags", "customers"), ("/api/reorder-radar", "customers"),
     ("/api/liability", "liability"),
-    ("/api/crm/", "crm"), ("/api/files/", "files"),
+    ("/api/crm/", "crm"), ("/api/mail/", "mail"), ("/api/files/", "files"),
     ("/api/production-labels", "labels"), ("/api/production-state", "labels"),
     ("/api/dispatch/", "labels"), ("/api/custom/", "labels"),
     ("/api/stock-usage", "labels"), ("/api/margin", "labels"), ("/api/gobo-sizes", "labels"),
@@ -9415,6 +9757,259 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             logger.exception("Customer history failed")
             return _json({"error": "Couldn't read customer history."}, 500)
 
+    # ----- Shared inbox: who owns which email ----------------------------
+    async def _mail_guard(request: Request):
+        """(error_response, body, actor_uid). Same shape as _crm_guard: the
+        inbox is buttons in the app's own UI behind the session auth."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre, None, ""
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401), None, ""
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413), None, ""
+        return None, body, str(who or "")
+
+    def _mail_thread_or_404(body: dict):
+        t = _load_mail().get("threads", {}).get(str(body.get("id") or ""))
+        return (t, None) if t else (None, _json({"error": "That thread is not on the board. "
+                                                          "Refresh and try again."}, 404))
+
+    def _mail_store_sick():
+        """Refuse a mutation BEFORE it happens when the store cannot be
+        persisted: a claim the whole team can see until a restart silently
+        reverts it is worse than a clean refusal."""
+        if _store_writable(MAILBOX_PATH):
+            return None
+        return _json({"error": "The inbox store cannot be written right now. "
+                               "Check Settings, Connections."}, 503)
+
+    def _mail_lead(uid: str) -> bool:
+        return _team_level(uid) >= 2
+
+    _mail_last_force = {"t": 0.0}
+
+    @mcp.custom_route("/api/mail/board", methods=["POST"])
+    async def mail_board_route(request: Request):
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        try:
+            if google_mail.connected():
+                await _mail_sync_now(force=bool(body.get("force"))
+                                     and time.monotonic() - _mail_last_force["t"] > 15)
+                if body.get("force"):
+                    _mail_last_force["t"] = time.monotonic()
+            store = _load_mail()
+            return _json({"connected": google_mail.connected(),
+                          "client": google_mail.client_configured(),
+                          "address": google_mail.address() or None,
+                          "threads": _mail_board_shape(store),
+                          "team": _mail_team_shape(),
+                          "me": who, "lead": _mail_lead(who),
+                          "synced_at": store.get("synced_at") or "",
+                          "sync_error": store.get("sync_error") or ""})
+        except Exception:
+            logger.exception("mail board failed")
+            return _json({"error": "Couldn't load the inbox board."}, 500)
+
+    @mcp.custom_route("/api/mail/thread", methods=["POST"])
+    async def mail_thread_route(request: Request):
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        t, missing = _mail_thread_or_404(body)
+        if missing:
+            return missing
+        # Opening the thread IS the viewing heartbeat: the collision warning
+        # never depends on the modal's poll having started.
+        now = time.monotonic()
+        v = _mail_viewers.setdefault(t["id"], {})
+        v[who] = now
+        viewers = [_team_name(u) for u, ts in v.items()
+                   if u != who and now - ts < MAIL_VIEW_SECONDS and _team_name(u)]
+        return _json({"thread": {**{k: t.get(k) for k in
+                                    ("id", "subject", "from_name", "from_email", "state",
+                                     "owner", "first_at", "last_at", "state_at", "done_at",
+                                     "msg_count", "notes", "activity", "label_error",
+                                     "in_inbox")},
+                                 "owner_name": _team_name(t["owner"]) if t.get("owner") else "",
+                                 "messages": t.get("messages", [])},
+                      "viewers": viewers,
+                      # The CRM chip honours the CRM tab gate: an account
+                      # locked out of the CRM does not learn membership,
+                      # org names, or ids through the side door of an email.
+                      "crm": (_mail_crm_match(t.get("from_email") or "")
+                              if (_user_tabs(who) is None or "crm" in _user_tabs(who)) else None),
+                      "me": who, "lead": _mail_lead(who)})
+
+    @mcp.custom_route("/api/mail/viewing", methods=["POST"])
+    async def mail_viewing_route(request: Request):
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        tid = str(body.get("id") or "")
+        if tid not in _load_mail().get("threads", {}):
+            return _json({"error": "That thread is not on the board."}, 404)
+        now = time.monotonic()
+        # Sweep the whole register, not just this thread: without this the
+        # dict keeps one entry per thread ever opened for the process's life.
+        for k in [k for k, vv in _mail_viewers.items()
+                  if all(now - ts > MAIL_VIEW_SECONDS * 4 for ts in vv.values()) or not vv]:
+            _mail_viewers.pop(k, None)
+        v = _mail_viewers.setdefault(tid, {})
+        v[who] = now
+        for u in [u for u, ts in v.items() if now - ts > MAIL_VIEW_SECONDS * 4]:
+            v.pop(u, None)
+        return _json({"viewers": [_team_name(u) for u, ts in v.items()
+                                  if u != who and now - ts < MAIL_VIEW_SECONDS and _team_name(u)]})
+
+    @mcp.custom_route("/api/mail/claim", methods=["POST"])
+    async def mail_claim_route(request: Request):
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        t, missing = _mail_thread_or_404(body)
+        if missing:
+            return missing
+        sick = _mail_store_sick()
+        if sick:
+            return sick
+        if t.get("owner"):
+            return _json({"error": f"{_team_name(t['owner']) or 'Someone'} already has this one. "
+                                   "Ask a lead to reassign it."}, 409)
+        t["owner"], t["owner_since"] = who, _mail_now()
+        t["state"], t["state_at"] = "assigned", _mail_now()
+        t["done_at"] = ""
+        _mail_log(t, who, "claimed")
+        # Durable FIRST, Gmail second: the ownership change must survive a
+        # restart even if the label trip hangs or fails.
+        _write_mail(_load_mail())
+        await _mail_sync_labels(t, _team_name(who))
+        _write_mail(_load_mail())
+        _track(who, "mail", "claimed an email", (t.get("subject") or "")[:60])
+        return _json({"ok": True})
+
+    @mcp.custom_route("/api/mail/assign", methods=["POST"])
+    async def mail_assign_route(request: Request):
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        t, missing = _mail_thread_or_404(body)
+        if missing:
+            return missing
+        sick = _mail_store_sick()
+        if sick:
+            return sick
+        target = str(body.get("uid") or "")
+        note = str(body.get("note") or "").strip()[:1000]
+        # Leads move anything anywhere. Staff have exactly one move here:
+        # handing their OWN thread back to the room.
+        if not _mail_lead(who) and not (target == "" and t.get("owner") == who):
+            return _json({"error": "Only a lead can assign emails to other people. "
+                                   "You can claim unowned ones, or release your own."}, 403)
+        if target and not _mail_can_own(target):
+            return _json({"error": "That account is switched off, gone, or has no Inbox "
+                                   "tab: their email would sit unread."}, 400)
+        prev = t.get("owner") or ""
+        t["owner"] = target
+        t["owner_since"] = _mail_now() if target else ""
+        if target:
+            if t.get("state") in ("unassigned", "done"):
+                t["state"] = "assigned"
+                t["done_at"] = ""
+        else:
+            t["state"] = "unassigned"
+            t["done_at"] = ""
+        t["state_at"] = _mail_now()
+        if note:
+            t.setdefault("notes", []).append({"at": _mail_now(), "by": who, "text": note})
+        if target:
+            _mail_log(t, who, "assigned to " + (_team_name(target) or "someone"),
+                      ("handover: " + note[:80]) if note else "")
+        else:
+            _mail_log(t, who, "released", ("note: " + note[:80]) if note else "")
+        _write_mail(_load_mail())
+        await _mail_sync_labels(t, _team_name(target) if target else "")
+        _write_mail(_load_mail())
+        _track(who, "mail",
+               ("assigned an email to " + (_team_name(target) or "someone")) if target
+               else "released an email",
+               (t.get("subject") or "")[:60] + ((" (was " + (_team_name(prev) or "?") + ")")
+                                                if prev and target and prev != target else ""))
+        return _json({"ok": True})
+
+    @mcp.custom_route("/api/mail/state", methods=["POST"])
+    async def mail_state_route(request: Request):
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        t, missing = _mail_thread_or_404(body)
+        if missing:
+            return missing
+        sick = _mail_store_sick()
+        if sick:
+            return sick
+        state = str(body.get("state") or "")
+        if state not in ("assigned", "progress", "waiting", "done"):
+            return _json({"error": "Pick a real state."}, 400)
+        if not _mail_lead(who) and t.get("owner") != who:
+            return _json({"error": "Only the owner or a lead can move this email."}, 403)
+        if state != "done" and not t.get("owner"):
+            return _json({"error": "Give it an owner first: claim it or have a lead assign it."}, 400)
+        if state == t.get("state"):
+            return _json({"ok": True})    # a double-click is not two moves
+        t["state"], t["state_at"] = state, _mail_now()
+        t["done_at"] = _mail_now() if state == "done" else ""
+        _mail_log(t, who, {"assigned": "moved it back to assigned", "progress": "started work",
+                           "waiting": "is waiting on the customer", "done": "marked it done"}[state])
+        _write_mail(_load_mail())
+        await _mail_sync_labels(t, _team_name(t.get("owner") or ""))
+        _write_mail(_load_mail())
+        _track(who, "mail", "email " + ("done" if state == "done" else "moved to " + state),
+               (t.get("subject") or "")[:60])
+        return _json({"ok": True})
+
+    @mcp.custom_route("/api/mail/note", methods=["POST"])
+    async def mail_note_route(request: Request):
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        t, missing = _mail_thread_or_404(body)
+        if missing:
+            return missing
+        sick = _mail_store_sick()
+        if sick:
+            return sick
+        text = str(body.get("text") or "").strip()[:2000]
+        if not text:
+            return _json({"error": "The note is empty."}, 400)
+        t.setdefault("notes", []).append({"at": _mail_now(), "by": who, "text": text})
+        if len(t["notes"]) > 100:
+            del t["notes"][:len(t["notes"]) - 100]
+        _mail_log(t, who, "left a note")
+        _write_mail(_load_mail())
+        _track(who, "mail", "noted an email", (t.get("subject") or "")[:60])
+        return _json({"ok": True, "notes": t["notes"]})
+
+    @mcp.custom_route("/api/mail/presence", methods=["POST"])
+    async def mail_presence_route(request: Request):
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        p = str(body.get("presence") or "")
+        if p not in MAIL_PRESENCE and p != "":
+            return _json({"error": "Pick a real presence."}, 400)
+        d = _load_users()
+        u = d["users"].get(who)
+        if not u:
+            return _json({"error": "Unauthorized"}, 401)
+        u["presence"] = p
+        _write_users(d)
+        return _json({"ok": True, "presence": p})
+
     @mcp.custom_route("/api/restore", methods=["POST"])
     async def restore_route(request: Request):
         """Master-only: put a downloaded backup zip back onto the volume. This
@@ -9445,7 +10040,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # Only what the backup itself writes, and never live credentials or
         # sessions: the same exclusions the backup applies, applied again.
         blocked = {os.path.basename(WO_SECRET_PATH), os.path.basename(SESSIONS_PATH),
-                   os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json"))}
+                   os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
+                   os.path.basename(getattr(google_mail, "TOKEN_PATH", "gmail_oauth.json"))}
         # (name, target_dir) for every restorable entry; everything else named
         # in the manifest as skipped, so nothing ever vanishes silently.
         todo, skipped = [], []
@@ -9492,9 +10088,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _dav_auth_cache.clear()
         restored_names = []
         def _drop_all_caches():
-            global _users_mem, _sessions_mem, _work_mem, _events_mem, _events_dirty, _files_mem
+            global _users_mem, _sessions_mem, _work_mem, _events_mem, _events_dirty, _files_mem, _mail_mem
             _users_mem = _work_mem = _events_mem = _files_mem = None
             _sessions_mem = None
+            _mail_mem = None
             _events_dirty = False
             _dav_auth_cache.clear()
         async with _files_lock:
@@ -10871,6 +11468,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if not on:
                     _drop_sessions(uid=target)   # off means off, this second
                     _dav_drop_cache(target)
+                    _mail_release_owned(target, "account switched off")
                 _track(who, "team", "changed access",
                        f"{label}'s access was switched {'on' if on else 'off'}")
             elif op == "tabs":
@@ -10886,6 +11484,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     tabs = [k for k in raw if k in TAB_KEYS]
                     u["tabs"] = tabs
                     detail = f"{label} can open: " + (", ".join(tabs) if tabs else "nothing")
+                    if "mail" not in tabs:
+                        _mail_release_owned(target, "mail tab switched off")
                 _write_users(d)
                 _track(who, "team", "changed tab access", detail)
             elif op == "reset_password":
@@ -10910,6 +11510,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _write_users(d)
                 _drop_sessions(uid=target)
                 _dav_drop_cache(target)
+                _mail_release_owned(target, "account deleted")
                 _track(who, "team", "deleted an account", label)
             else:
                 return _json({"error": "Unknown team action."}, 400)
@@ -12716,6 +13317,71 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Request too large."}, 413)
         return _json(google_data.status())
 
+    # ----- Gmail connect: same shape as the Google one, its own token -----
+    # The mailbox is a DIFFERENT Google account from the analytics one (the
+    # shared address, not the merchant's own), so it gets its own consent
+    # walk and its own token file. The connect URL is gated by the same
+    # server secret; whoever opens it signs in AS the shared mailbox.
+    def _gmail_redirect_uri(request: Request) -> str:
+        if APP_BASE_URL:
+            return APP_BASE_URL.rstrip("/") + "/oauth/gmail/callback"
+        host = request.headers.get("host", "")
+        return f"https://{host}/oauth/gmail/callback"
+
+    @mcp.custom_route("/oauth/gmail/start", methods=["GET"])
+    async def gmail_start(request: Request):
+        if not _window_ok(_rl_hits.setdefault("oauth:" + _client_key(request), []), RATE_MAX_CLIENT, time.monotonic()):
+            return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
+        if not google_mail.client_configured():
+            return _oauth_page("Not configured", "Set GOOGLE_OAUTH_CLIENT_ID / SECRET on the server first.")
+        key = request.query_params.get("key", "")
+        if not (google_data.CONNECT_SECRET and key and
+                secrets.compare_digest(key, google_data.CONNECT_SECRET)):
+            return PlainTextResponse("Forbidden", status_code=403, headers=_API_HEADERS)
+        now = time.time()
+        for s, exp in list(_oauth_states.items()):
+            if exp < now:
+                _oauth_states.pop(s, None)
+        state = secrets.token_urlsafe(24)
+        # Namespaced state: a Gmail consent walk can never finish the GSC flow.
+        _oauth_states["gm:" + state] = now + 900
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(google_mail.consent_url(_gmail_redirect_uri(request), state), status_code=302)
+
+    @mcp.custom_route("/oauth/gmail/callback", methods=["GET"])
+    async def gmail_callback(request: Request):
+        qp = request.query_params
+        if qp.get("error"):
+            return _oauth_page("Connection cancelled", f"Google returned: {qp.get('error')}")
+        state = qp.get("state", "")
+        exp = _oauth_states.pop("gm:" + state, None)   # single-use
+        if not state or exp is None or exp < time.time():
+            return _oauth_page("Link expired", "That connect link expired or was already used. Start again.")
+        code = qp.get("code", "")
+        if not code:
+            return _oauth_page("Connection failed", "No authorization code returned.")
+        try:
+            ok = await google_mail.exchange_code(code, _gmail_redirect_uri(request))
+        except Exception:
+            logger.exception("Gmail OAuth exchange error")
+            ok = False
+        if not ok:
+            return _oauth_page("Connection failed", "Couldn't complete the connection. Please try again.")
+        addr = google_mail.address() or "the mailbox"
+        return _oauth_page("✅ Mailbox connected", f"{addr} is now linked. The Inbox tab will "
+                           "fill on its next refresh. You can close this tab.")
+
+    @mcp.custom_route("/api/mail/disconnect", methods=["POST"])
+    async def mail_disconnect_route(request: Request):
+        err, _body, who = await _mail_guard(request)
+        if err:
+            return err
+        if _team_role(who) != "master":
+            return _json({"error": "Only the master account can disconnect the mailbox."}, 403)
+        google_mail.disconnect()
+        _track(who, "mail", "disconnected the mailbox")
+        return _json({"ok": True})
+
     @mcp.custom_route("/api/status", methods=["POST"])
     async def status_route(request: Request):
         """Connection-health summary for the Settings panel: Shopify, AI, and Google."""
@@ -12753,6 +13419,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         "down_since": watch.get("shopify_down")},
             "ai": {"ok": bool(ANTHROPIC_API_KEY)},
             "google": google_data.status(),
+            "gmail": google_mail.status(),
             "shipping": {"ok": bool(worldoptions and worldoptions.configured()),
                          "available": bool(worldoptions),
                          "fulfillment": bool(_fulfillment_writer is not None)},

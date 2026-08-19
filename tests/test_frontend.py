@@ -372,6 +372,36 @@ def t_stock_sheet_review_is_editable_and_honest():
        "lines can be added beyond the estimate")
 
 
+@test
+def t_inbox_board_owns_every_email():
+    """The Inbox tab: five state columns, a claim on every unowned card, the
+    who's-doing-what strip with self-set presence, and a collision warning
+    inside the thread. Ownership chrome, not another mail client."""
+    ok('data-view="mail"' in HTML, "the Inbox tab is in the nav")
+    ok('id="view-mail"' in HTML, "and has its view container")
+    ok("'unassigned', 'Unassigned'" in SCRIPT and "'waiting', 'Waiting on customer'" in SCRIPT,
+       "the five states are the board's columns")
+    ok("'/api/mail/claim'" in SCRIPT and "'/api/mail/assign'" in SCRIPT,
+       "claim and assign are wired to the server")
+    ok("mail-claim" in SCRIPT, "unowned cards carry a claim control")
+    ok("also viewing this email" in SCRIPT, "the collision warning exists")
+    ok("Handover note (optional)" in SCRIPT, "reassignment carries a handover note")
+    ok("the customer never sees these" in SCRIPT, "internal notes say they are internal")
+    ok("'/api/mail/presence'" in SCRIPT and "In office" in SCRIPT,
+       "presence is self-set from the who's-doing-what strip")
+    ok("mail: 'Inbox'" in SCRIPT, "the tab picker and title bar both name it")
+    ok("Open in Gmail" in SCRIPT, "replying stays in Gmail, one click away")
+    ok(re.search(r"overdue-hard", SCRIPT), "unclaimed email goes visibly red")
+    ok("ev.currentTarget.disabled = true" in SCRIPT,
+       "state buttons cannot double-submit")
+    ok("mailInputBusy" in SCRIPT,
+       "the quiet refresh never yanks focus from a typing user")
+    ok("go.disabled = false; return" in SCRIPT and "nbtn.disabled = false; return" in SCRIPT,
+       "a failed submit hands back the button and the typed text")
+    ok("mailFetchSeq" in SCRIPT,
+       "stale board responses cannot repaint over fresher ones")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

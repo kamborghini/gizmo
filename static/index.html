@@ -598,6 +598,55 @@
         .crm-ai.overdue { color: #d92c20; }
         .crm-ai.today { color: #108043; }
         .crm-ai.none { color: #b98900; }
+        /* ------------------------------------------------------------------
+           Inbox: the shared-mailbox ownership board. Columns and cards wear
+           the CRM board's clothes; only the ownership chrome is its own.
+           ------------------------------------------------------------------ */
+        .mail-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+        .mail-top .seg { margin: 0; }
+        .mail-sync { font-size: 12px; color: var(--ink-3); }
+        .mail-sync.err { color: #d92c20; }
+        .mail-search { flex: 1 1 160px; max-width: 260px; }
+        .mail-who { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 10px; }
+        .mail-who-card { flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+            background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px;
+            padding: 6px 12px; font-size: 12px; }
+        .mail-who-name { font-weight: 600; color: var(--ink); }
+        .mail-who-load { color: var(--ink-3); }
+        .mail-presence { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--border-3); }
+        .mail-presence.office { background: #108043; }
+        .mail-presence.home { background: #b98900; }
+        .mail-presence.out { background: #98a2b3; }
+        .mail-presence-pick { border: 1px solid var(--border-2); border-radius: 6px; background: var(--surface);
+            color: var(--ink); font: inherit; font-size: 12px; padding: 2px 6px; }
+        .mail-card-sub { font-size: 11px; color: var(--ink-3); margin-top: 1px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mail-card.overdue-soft { background: #fffaf0; border-color: #f0d9a8; }
+        .mail-card.overdue-hard { background: #fdf1f0; border-color: #efb9b3; }
+        .mail-owner { display: inline-flex; align-items: center; gap: 5px; font-size: 11px;
+            background: var(--surface-3); border-radius: 12px; padding: 2px 9px; color: var(--ink-2); }
+        .mail-claim { border: 1px solid var(--border-2); background: var(--surface); color: var(--accent);
+            font: inherit; font-size: 11px; font-weight: 600; border-radius: 12px; padding: 2px 10px; cursor: pointer; }
+        .mail-claim:hover { border-color: var(--accent); }
+        .mail-age { margin-left: auto; font-size: 11px; color: var(--ink-3); }
+        .mail-age.hot { color: #d92c20; font-weight: 600; }
+        .mail-viewwarn { background: #fffaf0; border: 1px solid #f0d9a8; color: #7a5c00;
+            border-radius: 8px; padding: 7px 10px; font-size: 12px; margin-bottom: 10px; }
+        .mail-msg { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+        .mail-msg.ours { background: var(--surface-2); }
+        .mail-msg-head { display: flex; gap: 8px; font-size: 12px; margin-bottom: 3px; }
+        .mail-msg-from { font-weight: 600; color: var(--ink); }
+        .mail-msg-at { margin-left: auto; color: var(--ink-3); }
+        .mail-msg-snip { font-size: 12px; color: var(--ink-2); }
+        .mail-note { background: #fffbea; border: 1px solid #f0e3b0; border-radius: 8px;
+            padding: 7px 10px; font-size: 12px; margin-bottom: 6px; }
+        .mail-note-meta { color: var(--ink-3); font-size: 11px; margin-bottom: 2px; }
+        .mail-act { font-size: 11px; color: var(--ink-3); padding: 2px 0; }
+        .mail-crmchip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px;
+            background: #eef4ff; border: 1px solid #c7d7fe; color: #3538cd;
+            border-radius: 12px; padding: 2px 9px; }
+        .mail-statebar { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+        .mail-labelerr { font-size: 11px; color: #b98900; }
         .crm-ai.future { color: var(--ink-3); }
         .crm-dropbar { position: fixed; left: 0; right: 0; bottom: 0; display: none; gap: 10px;
             padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--border);
@@ -1186,6 +1235,7 @@
                 <button class="nav-item" data-view="customers" id="nav-customers"></button>
                 <button class="nav-item" data-view="liability" id="nav-liability"></button>
                 <button class="nav-item" data-view="crm" id="nav-crm"></button>
+                <button class="nav-item" data-view="mail" id="nav-mail"></button>
                 <button class="nav-item" data-view="files" id="nav-files"></button>
                 <button class="nav-item" data-view="team" id="nav-team" style="display:none"></button>
                 <button class="nav-item" data-view="labels" id="nav-labels"></button>
@@ -1248,6 +1298,11 @@
             <!-- Production labels -->
             <section class="view" id="view-crm">
                 <div class="scroll"><div class="ov-wrap crm-wrap" id="crm-content"></div></div>
+            </section>
+
+            <!-- Inbox: shared-mailbox ownership board -->
+            <section class="view" id="view-mail">
+                <div class="scroll"><div class="ov-wrap crm-wrap" id="mail-content"></div></div>
             </section>
 
             <!-- Files -->
@@ -1371,6 +1426,7 @@
         // Feather Icons (https://feathericons.com), inlined so there are no extra requests.
         const SV = (inner) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
         const I = {
+            mail: SV('<rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>'),
             copy: SV('<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>'),
             phone: SV('<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>'),
             cal: SV('<rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line>'),
@@ -1454,6 +1510,7 @@
         $('nav-customers').append(ico(I.users), document.createTextNode('Customers'));
         $('nav-liability').append(ico(I.card), document.createTextNode('Liability'));
         $('nav-crm').append(ico(I.briefcase), document.createTextNode('CRM'));
+        $('nav-mail').append(ico(I.mail), document.createTextNode('Inbox'));
         $('nav-files').append(ico(I.folder), document.createTextNode('Files'));
         $('nav-team').append(ico(I.userCheck), document.createTextNode('Team'));
         $('nav-labels').append(ico(I.printer), document.createTextNode('Production Manager'));
@@ -7800,6 +7857,427 @@
         }
 
         /* ==================================================================
+           Inbox: the shared mailbox with an owner on every thread. Reading
+           and replying stay in Gmail; this board answers the question Gmail
+           cannot: who is dealing with each email, and what state is it in.
+           One owner per thread, always. Unclaimed threads age visibly.
+           ================================================================== */
+        let mailCache = null, mailFilter = 'everything', mailQ = '', mailTimer = null;
+        const MAIL_COLS = [['unassigned', 'Unassigned'], ['assigned', 'Assigned'],
+                           ['progress', 'In progress'], ['waiting', 'Waiting on customer'],
+                           ['done', 'Done']];
+        function mailAgo(iso) {
+            if (!iso) return '';
+            const m = Math.floor((Date.now() - Date.parse(iso)) / 60000);
+            if (isNaN(m)) return '';
+            if (m < 1) return 'now';
+            if (m < 60) return m + 'm';
+            if (m < 48 * 60) return Math.floor(m / 60) + 'h';
+            return Math.floor(m / 1440) + 'd';
+        }
+        function mailHours(iso) {
+            const h = (Date.now() - Date.parse(iso)) / 3600000;
+            return isNaN(h) ? 0 : h;
+        }
+        function mailAgoLong(iso) {
+            const a = mailAgo(iso);
+            return a === 'now' ? 'just now' : a ? a + ' ago' : '';
+        }
+        function showMailView() {
+            if (mailCache) { renderMail(); refreshMailQuiet(); } else { loadMail(); }
+            if (!mailTimer) mailTimer = setInterval(() => {
+                if (document.querySelector('#view-mail.active')) refreshMailQuiet();
+            }, 60000);
+        }
+        async function loadMail() {
+            const box = $('mail-content'); box.innerHTML = '';
+            const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Opening the inbox…'));
+            box.append(t);
+            try { mailCache = await api('/api/mail/board', {}); renderMail(); }
+            catch (e) {
+                box.innerHTML = '';
+                box.append(el('div', 'msg error', e.message || 'Could not load the inbox.'));
+            }
+        }
+        let mailFetchSeq = 0;
+        function mailInputBusy() {
+            const a = document.activeElement;
+            return !!(a && a.closest && a.closest('#mail-content')
+                && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA'));
+        }
+        async function refreshMailQuiet(force) {
+            const seq = ++mailFetchSeq;
+            let ok = true;
+            try {
+                const d = await api('/api/mail/board', force ? { force: true } : {});
+                if (seq !== mailFetchSeq) return true;   // an action's fresher fetch already landed
+                mailCache = d;
+                // Never yank the keyboard out from under someone: while an
+                // input in this view holds focus, keep the data and skip the
+                // repaint; the next tick or action paints it.
+                if (document.querySelector('#view-mail.active') && !mailInputBusy()) renderMail();
+            } catch (e) { ok = false; /* keep the last good board */ }
+            return ok;
+        }
+        async function mailAct(path, body) {
+            const r = await api(path, body);
+            await refreshMailQuiet();
+            return r;
+        }
+        function mailHero(box) {
+            const hero = el('div', 'ov-hero');
+            const badge = el('div', 'badge'); badge.innerHTML = I.mail;
+            const ht = el('div');
+            ht.append(el('h2', null, 'Inbox'),
+                el('p', null, 'The shared mailbox with an owner on every email. Claim what you are '
+                    + 'dealing with, and reply from Gmail as usual. Unclaimed emails go amber, '
+                    + 'then red.'));
+            hero.append(badge, ht);
+            box.append(hero);
+        }
+        function renderMail() {
+            const box = $('mail-content'); box.innerHTML = '';
+            const d = mailCache;
+            mailHero(box);
+            if (!d.connected) {
+                const card = el('div', 'card');
+                card.append(el('div', 'setting-title', 'Connect the shared mailbox'));
+                if (teamMe && teamMe.role === 'master') {
+                    const p1 = el('div', 'setting-sub');
+                    p1.textContent = d.client
+                        ? 'Open the connect link below in a browser where you are signed in as the '
+                          + 'shared mailbox (for example sales@), and approve access. The board fills itself after that.'
+                        : 'The server needs GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET set first, '
+                          + 'with the Gmail API enabled in the same Google Cloud project.';
+                    card.append(p1);
+                    if (d.client) {
+                        const code = el('div', 'setting-sub');
+                        code.style.cssText = 'font-family:ui-monospace,monospace;user-select:all;margin-top:6px';
+                        code.textContent = location.origin + '/oauth/gmail/start?key=YOUR-CONNECT-SECRET';
+                        card.append(code, el('div', 'setting-sub',
+                            'Replace YOUR-CONNECT-SECRET with the GOOGLE_CONNECT_SECRET value from the server settings.'));
+                    }
+                } else {
+                    card.append(el('div', 'setting-sub', 'Ask an admin to connect the shared mailbox. '
+                        + 'Once it is linked, every email shows up here with an owner.'));
+                }
+                box.append(card);
+                return;
+            }
+            /* ---- who's doing what ---- */
+            const who = el('div', 'mail-who');
+            (d.team || []).forEach(m => {
+                const c = el('div', 'mail-who-card');
+                if (m.uid === d.me) {
+                    const pick = document.createElement('select');
+                    pick.className = 'mail-presence-pick'; pick.title = 'Where are you working today?';
+                    [['office', 'In office'], ['home', 'At home'], ['out', 'Out']].forEach(([v, lab]) => {
+                        const o = document.createElement('option');
+                        o.value = v; o.textContent = lab; if ((m.presence || 'office') === v) o.selected = true;
+                        pick.append(o);
+                    });
+                    pick.onchange = async () => {
+                        try { await api('/api/mail/presence', { presence: pick.value }); refreshMailQuiet(); }
+                        catch (e) { toastError(e.message); }
+                    };
+                    c.append(el('span', 'mail-presence ' + (m.presence || 'office')),
+                             el('span', 'mail-who-name', m.name + ' (you)'), pick);
+                } else {
+                    c.append(el('span', 'mail-presence ' + (m.presence || '')),
+                             el('span', 'mail-who-name', m.name));
+                }
+                const active = (m.assigned || 0) + (m.progress || 0);
+                c.append(el('span', 'mail-who-load',
+                    active + ' active' + (m.waiting ? ', ' + m.waiting + ' waiting' : '')));
+                who.append(c);
+            });
+            box.append(who);
+            /* ---- toolbar ---- */
+            const top = el('div', 'mail-top');
+            top.append(segControl([{ value: 'everything', label: 'Everything' },
+                                   { value: 'mine', label: 'Mine' },
+                                   { value: 'unassigned', label: 'Unassigned' }],
+                mailFilter, v => { mailFilter = v; renderMail(); }));
+            const search = document.createElement('input');
+            search.type = 'search'; search.className = 'disp-text mail-search';
+            search.placeholder = 'Search sender or subject'; search.value = mailQ;
+            search.oninput = () => { mailQ = search.value; paintMailBoard(); };
+            top.append(search);
+            const sync = el('span', 'mail-sync' + (d.sync_error ? ' err' : ''),
+                d.sync_error ? 'Sync problem: ' + d.sync_error
+                             : (d.address || '') + (d.synced_at ? ' · synced ' + mailAgoLong(d.synced_at) : ''));
+            top.append(sync);
+            const rf = el('button', 'btn', 'Refresh');
+            rf.onclick = async () => {
+                rf.disabled = true;
+                const ok = await refreshMailQuiet(true);
+                /* Success repaints the toolbar with a fresh button; failure
+                   must hand this one back or Refresh dies exactly when the
+                   person is trying to recover from a bad patch. */
+                rf.disabled = false;
+                if (!ok) toastError('Could not refresh the inbox. Try again in a moment.');
+            };
+            top.append(rf);
+            box.append(top);
+            const boardHost = el('div'); boardHost.id = 'mail-board-host';
+            box.append(boardHost);
+            paintMailBoard();
+        }
+        function mailCardMatches(t) {
+            if (mailFilter === 'mine' && t.owner !== mailCache.me) return false;
+            if (mailFilter === 'unassigned' && t.state !== 'unassigned') return false;
+            if (mailQ) {
+                const q = mailQ.toLowerCase();
+                if ((t.subject || '').toLowerCase().indexOf(q) < 0
+                    && (t.from_name || '').toLowerCase().indexOf(q) < 0
+                    && (t.from_email || '').toLowerCase().indexOf(q) < 0) return false;
+            }
+            return true;
+        }
+        function paintMailBoard() {
+            const host = $('mail-board-host'); if (!host) return;
+            host.innerHTML = '';
+            const d = mailCache;
+            const board = el('div', 'crm-board');
+            MAIL_COLS.forEach(([state, label]) => {
+                const col = el('div', 'crm-col');
+                let rows = (d.threads || []).filter(t => t.state === state && mailCardMatches(t));
+                const total = rows.length;
+                if (state === 'done') rows = rows.slice(0, 30);
+                col.append(el('div', 'crm-col-name', label));
+                col.append(el('div', 'crm-col-sum',
+                    state === 'done' && total > 30 ? 'newest 30 of ' + total : String(total)));
+                rows.forEach(t => col.append(mailCard(t)));
+                board.append(col);
+            });
+            host.append(board);
+        }
+        function mailCard(t) {
+            const d = mailCache;
+            const card = el('div', 'crm-card mail-card');
+            card.style.cursor = 'pointer';
+            if (t.state === 'unassigned') {
+                const h = mailHours(t.last_at);
+                if (h > 8) card.classList.add('overdue-hard');
+                else if (h > 4) card.classList.add('overdue-soft');
+            }
+            card.append(el('div', 'crm-card-t', t.subject));
+            card.append(el('div', 'mail-card-sub', (t.from_name || t.from_email || '') +
+                (t.snippet ? ' · ' + t.snippet : '')));
+            const bot = el('div', 'crm-card-bot');
+            if (t.owner) {
+                bot.append(el('span', 'mail-owner', t.owner_name || 'Someone'));
+            } else if (t.state !== 'done') {
+                const b = el('button', 'mail-claim', 'Claim');
+                b.onclick = async (e) => {
+                    e.stopPropagation(); b.disabled = true;
+                    try { await mailAct('/api/mail/claim', { id: t.id }); }
+                    catch (err) { toastError(err.message); b.disabled = false; refreshMailQuiet(); }
+                };
+                bot.append(b);
+            }
+            if (t.notes) bot.append(el('span', 'mail-who-load', t.notes + (t.notes === 1 ? ' note' : ' notes')));
+            if (t.label_error) bot.append(el('span', 'mail-labelerr', 'label sync failed'));
+            const stale = (t.state === 'assigned' || t.state === 'progress')
+                && mailHours(t.state_at > t.last_at ? t.state_at : t.last_at) > 24;
+            const age = el('span', 'mail-age' + (stale ? ' hot' : ''), mailAgo(t.last_at));
+            if (stale) age.title = 'Quiet for over a day';
+            bot.append(age);
+            card.append(bot);
+            card.onclick = () => openMailThread(t.id);
+            return card;
+        }
+        function mailModal(title) {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal disp-modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, title));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
+            const body = el('div', 'modal-body');
+            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+            const close = () => {
+                overlay.remove();
+                if (overlay._timer) clearInterval(overlay._timer);
+                if (document.querySelector('#view-mail.active')) refreshMailQuiet();
+            };
+            x.onclick = close;   /* the X is the only way out, as everywhere else */
+            return { body: body, close: close, overlay: overlay };
+        }
+        async function openMailThread(id) {
+            let r;
+            try { r = await api('/api/mail/thread', { id: id }); }
+            catch (e) { toastError(e.message); return; }
+            const m = mailModal('Email');
+            m.overlay.querySelector('.modal').style.maxWidth = '680px';
+            paintMailThread(m, r);
+            m.overlay._timer = setInterval(async () => {
+                try {
+                    const v = await api('/api/mail/viewing', { id: id });
+                    const warn = m.body.querySelector('.mail-viewwarn');
+                    if (v.viewers && v.viewers.length) {
+                        const text = v.viewers.join(' and ') + (v.viewers.length === 1 ? ' is' : ' are')
+                            + ' also viewing this email right now.';
+                        if (warn) { warn.textContent = text; }
+                        else {
+                            const w = el('div', 'mail-viewwarn', text);
+                            m.body.prepend(w);
+                        }
+                    } else if (warn) warn.remove();
+                } catch (e) { /* heartbeat only */ }
+            }, 10000);
+        }
+        function paintMailThread(m, r) {
+            const t = r.thread;
+            m.body.innerHTML = '';
+            if (r.viewers && r.viewers.length) {
+                m.body.append(el('div', 'mail-viewwarn', r.viewers.join(' and ')
+                    + (r.viewers.length === 1 ? ' is' : ' are') + ' also viewing this email right now.'));
+            }
+            m.body.append(el('div', 'crm-card-t', t.subject));
+            const meta = el('div', 'setting-sub');
+            meta.textContent = (t.from_name || '') + (t.from_email ? ' <' + t.from_email + '>' : '')
+                + ' · ' + t.msg_count + (t.msg_count === 1 ? ' message' : ' messages')
+                + ' · last message ' + mailAgoLong(t.last_at);
+            m.body.append(meta);
+            if (r.crm) {
+                m.body.append(el('div', 'mail-crmchip', 'CRM: ' + r.crm.name
+                    + (r.crm.org ? ' (' + r.crm.org + ')' : '')));
+            }
+            const gm = el('a', 'setting-sub', 'Open in Gmail');
+            gm.href = 'https://mail.google.com/mail/#all/' + encodeURIComponent(t.id);
+            gm.target = '_blank'; gm.rel = 'noopener';
+            gm.style.cssText = 'display:inline-block;margin:4px 0;color:var(--accent)';
+            m.body.append(gm);
+            /* ---- ownership + state controls ---- */
+            const bar = el('div', 'mail-statebar');
+            const ownRow = el('div', 'setting-sub');
+            ownRow.textContent = t.owner ? 'Owner: ' + (t.owner_name || 'Someone') : 'Nobody owns this yet.';
+            m.body.append(ownRow);
+            const reload = async () => {
+                try { const r2 = await api('/api/mail/thread', { id: t.id }); paintMailThread(m, r2); }
+                catch (e) { toastError(e.message || 'This email is no longer on the board.'); m.close(); }
+                refreshMailQuiet();
+            };
+            const act = (path, body) => async (ev) => {
+                /* One click, one move. The repaint builds fresh buttons, so
+                   a disabled one never needs re-enabling. */
+                if (ev && ev.currentTarget) ev.currentTarget.disabled = true;
+                try { await api(path, body); } catch (e) { toastError(e.message); }
+                reload();
+            };
+            if (!t.owner && t.state !== 'done') {
+                const b = el('button', 'btn btn-primary', 'Claim this email');
+                b.onclick = act('/api/mail/claim', { id: t.id });
+                bar.append(b);
+            }
+            if (t.owner === r.me) {
+                if (t.state !== 'progress') {
+                    const b = el('button', 'btn', t.state === 'done' ? 'Reopen' : 'Start work');
+                    b.onclick = act('/api/mail/state', { id: t.id, state: 'progress' });
+                    bar.append(b);
+                }
+                if (t.state !== 'waiting' && t.state !== 'done') {
+                    const b = el('button', 'btn', 'Waiting on customer');
+                    b.onclick = act('/api/mail/state', { id: t.id, state: 'waiting' });
+                    bar.append(b);
+                }
+            }
+            if (t.owner && (t.owner === r.me || r.lead) && t.state !== 'done') {
+                const b = el('button', 'btn', 'Mark done');
+                b.onclick = act('/api/mail/state', { id: t.id, state: 'done' });
+                bar.append(b);
+            }
+            if (t.owner === r.me && !r.lead) {
+                const b = el('button', 'btn', 'Release');
+                b.title = 'Hand this back to the room';
+                b.onclick = act('/api/mail/assign', { id: t.id, uid: '' });
+                bar.append(b);
+            }
+            m.body.append(bar);
+            if (r.lead) {
+                const row = el('div', 'mail-statebar');
+                const pick = document.createElement('select');
+                pick.className = 'mail-presence-pick';
+                const none = document.createElement('option');
+                none.value = ''; none.textContent = 'Nobody (release)';
+                pick.append(none);
+                (mailCache && mailCache.team || []).forEach(u => {
+                    const o = document.createElement('option');
+                    o.value = u.uid; o.textContent = u.name; if (u.uid === t.owner) o.selected = true;
+                    pick.append(o);
+                });
+                const note = document.createElement('input');
+                note.type = 'text'; note.className = 'disp-text';
+                note.placeholder = 'Handover note (optional)'; note.style.flex = '1';
+                const go = el('button', 'btn', 'Assign');
+                go.onclick = async () => {
+                    go.disabled = true;
+                    /* Only a SUCCESS repaints: a failed submit must hand back
+                       the button and the typed handover note, not eat them. */
+                    try { await api('/api/mail/assign', { id: t.id, uid: pick.value, note: note.value.trim() }); }
+                    catch (e) { toastError(e.message); go.disabled = false; return; }
+                    reload();
+                };
+                row.append(pick, note, go);
+                m.body.append(row);
+            }
+            /* ---- the conversation ---- */
+            const msgs = el('div'); msgs.style.cssText = 'max-height:260px;overflow-y:auto;margin:10px 0';
+            const ourAddr = (mailCache && mailCache.address || '').toLowerCase();
+            (t.messages || []).forEach(msg => {
+                const box = el('div', 'mail-msg' + (ourAddr && msg.from_email === ourAddr ? ' ours' : ''));
+                const h = el('div', 'mail-msg-head');
+                h.append(el('span', 'mail-msg-from', msg.from_name || msg.from_email || ''),
+                         el('span', 'mail-msg-at', mailAgoLong(msg.at)));
+                box.append(h, el('div', 'mail-msg-snip', msg.snippet || ''));
+                msgs.append(box);
+            });
+            m.body.append(msgs);
+            msgs.scrollTop = msgs.scrollHeight;
+            /* ---- internal notes ---- */
+            m.body.append(el('div', 'setting-title', 'Internal notes'));
+            const notes = el('div');
+            (t.notes || []).forEach(n => {
+                const box = el('div', 'mail-note');
+                box.append(el('div', 'mail-note-meta',
+                    (teamNameOf(n.by) || 'Someone') + ' · ' + mailAgoLong(n.at)),
+                    el('div', null, n.text));
+                notes.append(box);
+            });
+            m.body.append(notes);
+            const nrow = el('div', 'mail-statebar');
+            const ninput = document.createElement('input');
+            ninput.type = 'text'; ninput.className = 'disp-text';
+            ninput.placeholder = 'Add a note for the team (the customer never sees these)';
+            ninput.style.flex = '1';
+            const nbtn = el('button', 'btn', 'Add note');
+            nbtn.onclick = async () => {
+                const text = ninput.value.trim();
+                if (!text) return;
+                nbtn.disabled = true;
+                try { await api('/api/mail/note', { id: t.id, text: text }); }
+                catch (e) { toastError(e.message); nbtn.disabled = false; return; }
+                reload();
+            };
+            nrow.append(ninput, nbtn);
+            m.body.append(nrow);
+            /* ---- activity ---- */
+            const actHead = el('div', 'setting-title', 'Activity');
+            actHead.style.marginTop = '10px';
+            m.body.append(actHead);
+            (t.activity || []).slice().reverse().slice(0, 20).forEach(a => {
+                m.body.append(el('div', 'mail-act',
+                    mailAgoLong(a.at) + ' · ' + (a.by ? (teamNameOf(a.by) || 'Someone') + ' ' : '')
+                    + a.action + (a.detail ? ' · ' + a.detail : '')));
+            });
+        }
+        function teamNameOf(uid) {
+            if (!uid) return '';
+            const m = mailCache && (mailCache.team || []).find(u => u.uid === uid);
+            return m ? m.name : '';
+        }
+
+        /* ==================================================================
            Files: the office file server, minus the office. The folder tree
            and names live on the app's own volume; the bytes live in a
            Cloudflare R2 bucket. Uploads and downloads run browser-to-bucket
@@ -8525,7 +9003,7 @@
             return data;
         }
         const TAB_KEYS = ['overview', 'seo', 'keywords', 'products', 'customers', 'liability',
-                          'crm', 'files', 'labels', 'memory', 'skills', 'chat'];
+                          'crm', 'mail', 'files', 'labels', 'memory', 'skills', 'chat'];
         function tabAllowed(v) {
             if (!teamMe || !Array.isArray(teamMe.tabs)) return true;
             if (TAB_KEYS.indexOf(v) < 0) return true;   // guide and team are governed elsewhere
@@ -8872,7 +9350,7 @@
                     panel.style.background = 'var(--bg-2)';
                     const NAMES = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords',
                         products: 'Products', customers: 'Customers', liability: 'Liability',
-                        crm: 'CRM', files: 'Files', labels: 'Production Manager',
+                        crm: 'CRM', mail: 'Inbox', files: 'Files', labels: 'Production Manager',
                         memory: 'Memory', skills: 'Skills', chat: 'Chat' };
                     const chosen = new Set(Array.isArray(u.tabs) ? u.tabs : TAB_KEYS);
                     const boxes = [];
@@ -9051,10 +9529,10 @@
         }
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
-            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'crm', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', crm: 'CRM', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
+            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'crm', 'mail', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', crm: 'CRM', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
-            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide' || v === 'crm' || v === 'files' || v === 'team') ? 'none' : '';
+            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide' || v === 'crm' || v === 'mail' || v === 'files' || v === 'team') ? 'none' : '';
             if (v === 'guide') renderGuide();
             // Only offer the PDF when there is actually a report to print: the print
             // stylesheet hides the Run gate, so printing an un-run tab yields a blank page.
@@ -9076,6 +9554,7 @@
             if (v === 'products') showProductsView();
             if (v === 'liability') showLiabilityView();
             if (v === 'crm') showCRMView();
+            if (v === 'mail') showMailView();
             if (v === 'files') showFilesView();
             if (v === 'team') showTeamView();
             if (v === 'labels') showLabelsView();
@@ -9131,6 +9610,12 @@
                 wh.ok ? ('Shopify pushes order changes to the app as they happen (' + evAge(wh.last_event_at) + ').')
                       : ('Not receiving order events yet' + (wh.detail ? ': ' + wh.detail : '.')
                          + ' The app falls back to refreshing on a short timer, which still works.')));
+            // The shared mailbox behind the Inbox tab.
+            const gm = s.gmail || {};
+            host.append(connRow('Shared mailbox', gm.connected ? 'on' : gm.client ? 'mid' : 'off',
+                gm.connected ? ((gm.address || 'Connected') + '. The Inbox tab tracks who owns each email.')
+                : gm.client ? 'Ready to connect: open the Inbox tab for the connect link.'
+                : 'Set GOOGLE_OAUTH_CLIENT_ID / SECRET and enable the Gmail API to use the Inbox tab.'));
             // The stock bridge: whether Mark made is reaching the stock app.
             const sb = s.stock_bridge || {};
             if (sb.configured || sb.pending) {
