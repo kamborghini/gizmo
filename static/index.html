@@ -6627,6 +6627,7 @@
                 ['Using it', 'Drag files, or whole folders, onto the list to upload them where you stand: a dropped folder is recreated here, structure and all. Click a picture or PDF to preview it on the spot; other types download. Hover a file and tick the box over its icon to select several, then move or trash them together; the Move button works everywhere a drag cannot, including phones. Uploading a name that already exists replaces it, with the old version kept in the trash. Deleting sends a file to the trash, where it waits 30 days before it is really gone.'],
                 ['What it costs', 'Cloudflare bills about 1p per 10 GB per month past the free tier, and downloads are free. At the full 50 GB that is roughly 60p a month.'],
                 ['Files in Finder', 'On a Mac, the whole file store mounts as a network drive: in Finder press Command K, enter https://gizmo-production-c8c1.up.railway.app/dav and sign in with your OWN app username and password. Save proofs straight into it from any program; everything lands in the same folders the Files tab shows, under your name, and deleting there is the same 30-day trash. Each person must use their own login: the drive records who did what.'],
+                ['If Finder keeps asking for the password', 'The drive only opens once you have chosen your OWN password in the app, so a brand-new account, or one whose password an admin just reset, must sign into Store Copilot first. Admins can see exactly why someone was refused: Team, then Activity, filtered to that person.'],
             ]},
             { h: 'The team', body: [
                 ['Your own accounts', 'The app keeps its own accounts: a username and password each, nothing to do with Shopify logins. Opening the app shows its sign-in screen; the very first open ever shows setup instead, where the master admin account is created. Passwords are stored scrambled and are never shown to anyone, including admins.'],
@@ -9120,9 +9121,9 @@
             bk.onclick = async () => {
                 bk.disabled = true;
                 try {
-                    const res = await fetch('/api/backup', { method: 'POST',
-                        headers: Object.assign({ 'Content-Type': 'application/json' }, await authHeaders()),
-                        body: '{}' });
+                    const hdrs = Object.assign({ 'Content-Type': 'application/json' }, await authHeaders());
+                    const sess = appSession(); if (sess) hdrs['X-App-Session'] = sess;
+                    const res = await fetch('/api/backup', { method: 'POST', headers: hdrs, body: '{}' });
                     if (!res.ok) throw new Error('Backup failed (' + res.status + ')');
                     const blob = await res.blob();
                     const a = document.createElement('a');
@@ -9134,6 +9135,36 @@
                 bk.disabled = false;
             };
             host.append(bk);
+            if (!teamMe || teamMe.role === 'master') {   // unknown role: show it; the server enforces master-only
+                const rsInput = document.createElement('input');
+                rsInput.type = 'file'; rsInput.accept = '.zip'; rsInput.style.display = 'none';
+                const rs = el('button', 'btn'); rs.style.cssText = 'margin-top:10px;margin-left:8px';
+                rs.append(ico(I.upload), document.createTextNode('Restore a backup'));
+                rs.title = 'Put a downloaded backup zip back: after a lost volume, or a region move.';
+                rsInput.onchange = async () => {
+                    const f = rsInput.files[0]; rsInput.value = '';
+                    if (!f) return;
+                    if (!(await uiConfirm('Restore "' + f.name + '"? Everything the app currently '
+                        + 'holds is replaced by the backup, and everyone signs in again with the '
+                        + 'accounts it contains.', { okText: 'Restore' }))) return;
+                    rs.disabled = true;
+                    try {
+                        const b64 = await new Promise((res2, rej) => {
+                            const r = new FileReader();
+                            r.onload = () => res2(String(r.result).split(',')[1] || '');
+                            r.onerror = () => rej(new Error('Could not read the file.'));
+                            r.readAsDataURL(f);
+                        });
+                        const out = await api('/api/restore', { zip: b64 });
+                        addToast('Restored ' + out.restored + ' files. Sign in again to carry on.', 'good');
+                        setAppSession('');
+                        setTimeout(() => authShow('login'), 800);
+                    } catch (e) { toastError(e.message || 'The restore failed.'); }
+                    rs.disabled = false;
+                };
+                rs.onclick = () => rsInput.click();
+                host.append(rs, rsInput);
+            }
         }
         function openSettings() {
             $('pf-voice').value = profile.brand_voice || '';

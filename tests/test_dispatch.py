@@ -4431,6 +4431,8 @@ def with_accounts(fn):
         copilot._users_mem = None
         copilot._sessions_mem = None
         copilot._work_mem = None
+        copilot._events_mem = None
+        copilot._events_dirty = False
         APP_AUTH["session"] = APP_AUTH["master"] = ""
         for p in (copilot.USERS_PATH, copilot.SESSIONS_PATH, copilot.ACTIVITY_PATH,
                   copilot.WORK_PATH):
@@ -5045,6 +5047,162 @@ def t_files_preview_host_is_allowed_to_frame():
         ok("https://acct.r2.cloudflarestorage.com" in frame,
            "the bucket may render in the preview frame: " + frame)
     with_files(go)
+
+@test
+def t_dav_refusals_explain_themselves_and_caches_die_with_the_password():
+    def go():
+        ensure_auth()
+        fake = FakeS3()
+        saved = (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
+                 copilot._files_s3_client)
+        copilot.R2_ACCOUNT_ID = copilot.R2_ACCESS_KEY_ID = copilot.R2_SECRET_ACCESS_KEY = "acct"
+        copilot._files_s3_client = fake
+        copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
+        copilot._files_mem = None
+        try:
+            os.remove(copilot.FILES_PATH)
+        except FileNotFoundError:
+            pass
+        try:
+            import base64 as b64
+            owen, starter = make_user("Owen", "owen")
+            # a starter-password mount attempt leaves an admin-readable reason
+            a0 = {"Authorization": "Basic " + b64.b64encode(f"owen:{starter}".encode()).decode()}
+            eq(client.request("PROPFIND", "/dav/", headers={**a0, "Depth": "0"}).status_code, 401)
+            ev = post("/api/team/board", {}).json()["events"]
+            ok(any(e["action"] == "drive refused" and "not chosen their own password" in e["detail"]
+                   for e in ev), "the refusal reason reaches the ledger")
+            # ...and the Finder retry storm writes one line, not hundreds
+            for _ in range(4):
+                client.request("PROPFIND", "/dav/", headers={**a0, "Depth": "0"})
+            ev2 = post("/api/team/board", {}).json()["events"]
+            eq(sum(1 for e in ev2 if e["action"] == "drive refused"), 1, "throttled to one line")
+            # choose a real password; the drive opens and caches the credential
+            s0 = login("owen", starter).json()["session"]
+            post_s(s0, "/api/auth/password", {"current": starter, "new": "owens-own-pw-1"})
+            a1 = {"Authorization": "Basic " + b64.b64encode(b"owen:owens-own-pw-1").decode()}
+            eq(client.request("PROPFIND", "/dav/", headers={**a1, "Depth": "0"}).status_code, 207)
+            # change the password again: the OLD credential must die at once
+            s1 = login("owen", "owens-own-pw-1").json()["session"]
+            post_s(s1, "/api/auth/password", {"current": "owens-own-pw-1", "new": "owens-own-pw-2"})
+            eq(client.request("PROPFIND", "/dav/", headers={**a1, "Depth": "0"}).status_code, 401,
+               "the drive's cached credential dies with the password")
+            a2 = {"Authorization": "Basic " + b64.b64encode(b"owen:owens-own-pw-2").decode()}
+            eq(client.request("PROPFIND", "/dav/", headers={**a2, "Depth": "0"}).status_code, 207,
+               "and the new one mounts")
+        finally:
+            (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
+             copilot._files_s3_client) = saved
+            copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
+            copilot._files_mem = None
+            try:
+                os.remove(copilot.FILES_PATH)
+            except FileNotFoundError:
+                pass
+    with_accounts(go)
+
+@test
+def t_ledger_is_write_behind_but_never_loses_reads():
+    def go():
+        ensure_auth()
+        copilot._track(APP_AUTH["master"], "production", "marked made", "#wb-test")
+        ev = post("/api/team/board", {}).json()["events"]
+        ok(any(e.get("detail") == "#wb-test" for e in ev),
+           "an event reads back instantly from memory")
+        copilot._events_flush()
+        rows = json.load(open(copilot.ACTIVITY_PATH))["events"]
+        ok(any(e.get("detail") == "#wb-test" for e in rows), "and the flush lands it on disk")
+    with_accounts(go)
+
+@test
+def t_restore_is_master_only_and_round_trips_the_volume():
+    def go():
+        ensure_auth()
+        import base64 as b64
+        owen, osess, opw = ready_user("Owen", "owen")
+        copilot._track(APP_AUTH["master"], "team", "marker", "#before-backup")
+        copilot._events_flush()
+        buf, added = copilot._build_backup_zip()
+        ok(added > 0, "the backup holds files")
+        blob = b64.b64encode(buf.getvalue()).decode()
+        eq(post_s(osess, "/api/restore", {"zip": blob}).status_code, 403,
+           "an admin below master cannot restore")
+        # simulate the fresh-volume world: wipe accounts and ledger
+        for p in (copilot.USERS_PATH, copilot.ACTIVITY_PATH):
+            os.remove(p)
+        copilot._users_mem = None
+        copilot._events_mem = None
+        copilot._events_dirty = False
+        APP_AUTH["session"] = APP_AUTH["master"] = ""
+        # first-run setup on the "new region", then restore
+        r = bare("/api/auth/setup", {"name": "Temp", "username": "temp", "password": "temporary-123"})
+        eq(r.status_code, 200, r.text)
+        temp_sess = r.json()["session"]
+        rr = post_s(temp_sess, "/api/restore", {"zip": blob})
+        eq(rr.status_code, 200, rr.text)
+        ok(rr.json()["restored"] >= 2, "the volume files came back")
+        eq(post_s(temp_sess, "/api/team/me", {}).status_code, 401,
+           "every session died with the restore")
+        # the RESTORED register answers, not the temp one
+        li = login("cameron", MASTER_PW)
+        eq(li.status_code, 200, "the original master signs back in")
+        APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
+        eq(login("owen", opw).status_code, 200, "and so does the team")
+        ev = post("/api/team/board", {}).json()["events"]
+        ok(any(e.get("detail") == "#before-backup" for e in ev), "history survived the move")
+        eq(post("/api/restore", {"zip": "not-base64!!"}).status_code, 400,
+           "junk is refused")
+    with_accounts(go)
+
+@test
+def t_dav_refusals_explain_themselves_and_caches_die_with_the_password():
+    def go():
+        ensure_auth()
+        fake = FakeS3()
+        saved = (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
+                 copilot._files_s3_client)
+        copilot.R2_ACCOUNT_ID = copilot.R2_ACCESS_KEY_ID = copilot.R2_SECRET_ACCESS_KEY = "acct"
+        copilot._files_s3_client = fake
+        copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
+        copilot._files_mem = None
+        try:
+            os.remove(copilot.FILES_PATH)
+        except FileNotFoundError:
+            pass
+        try:
+            import base64 as b64
+            owen, starter = make_user("Owen", "owen")
+            a0 = {"Authorization": "Basic " + b64.b64encode(f"owen:{starter}".encode()).decode()}
+            eq(client.request("PROPFIND", "/dav/", headers={**a0, "Depth": "0"}).status_code, 401,
+               "a starter password never mounts the drive")
+            for _ in range(4):
+                client.request("PROPFIND", "/dav/", headers={**a0, "Depth": "0"})
+            ev = post("/api/team/board", {}).json()["events"]
+            reasons = [e for e in ev if e["action"] == "drive refused"]
+            eq(len(reasons), 1, "a Finder retry storm writes ONE admin-readable line")
+            ok("not chosen their own password" in reasons[0]["detail"], reasons[0]["detail"])
+            s0 = login("owen", starter).json()["session"]
+            post_s(s0, "/api/auth/password", {"current": starter, "new": "owens-own-pw-1"})
+            a1 = {"Authorization": "Basic " + b64.b64encode(b"owen:owens-own-pw-1").decode()}
+            eq(client.request("PROPFIND", "/dav/", headers={**a1, "Depth": "0"}).status_code, 207,
+               "a chosen password mounts")
+            s1 = login("owen", "owens-own-pw-1").json()["session"]
+            post_s(s1, "/api/auth/password", {"current": "owens-own-pw-1", "new": "owens-own-pw-2"})
+            eq(client.request("PROPFIND", "/dav/", headers={**a1, "Depth": "0"}).status_code, 401,
+               "the drive's cached credential dies with the password")
+            a2 = {"Authorization": "Basic " + b64.b64encode(b"owen:owens-own-pw-2").decode()}
+            eq(client.request("PROPFIND", "/dav/", headers={**a2, "Depth": "0"}).status_code, 207,
+               "and the new one mounts at once")
+        finally:
+            (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
+             copilot._files_s3_client) = saved
+            copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
+            copilot._files_mem = None
+            try:
+                os.remove(copilot.FILES_PATH)
+            except FileNotFoundError:
+                pass
+    with_accounts(go)
 
 # =========================== run ===========================================
 

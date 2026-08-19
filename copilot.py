@@ -27,6 +27,7 @@ import json
 import time
 import hmac
 import threading
+import atexit
 import base64
 import hashlib
 import socket
@@ -7399,6 +7400,7 @@ async def _watchdog_tick(registry: dict) -> bool:
                                              "The app will show its first-run setup screen; recreate the "
                                              "master account, then the team's accounts."])
             _sessions_sweep()
+            _events_flush()   # belt for the debounced ledger writes
         except Exception:
             logger.exception("team register check failed")
         # Files trash past its 30-day window, and uploads that never finished.
@@ -8124,6 +8126,14 @@ def _session_uid(raw: Optional[str]) -> Optional[str]:
     return str(row.get("uid") or "") or None
 
 
+def _dav_drop_cache(uid: str) -> None:
+    """A password change or revocation must also forget the drive's cached
+    credential, or the OLD password could mount for up to ten more minutes."""
+    for k, v in list(_dav_auth_cache.items()):
+        if isinstance(v, tuple) and v and v[0] == uid:
+            _dav_auth_cache.pop(k, None)
+
+
 def _drop_sessions(uid: Optional[str] = None, token: Optional[str] = None) -> None:
     s = _load_sessions()
     if token:
@@ -8334,13 +8344,49 @@ def _user_public(uid: str, u: dict) -> dict:
                      else u.get("tabs"))}
 
 
-def _track(sub: Optional[str], area: str, action: str, detail: str = "") -> None:
-    """One line in the ledger. Synchronous and awaited by nothing, so two
-    concurrent routes cannot interleave around it on the single event loop."""
+_events_mem: Optional[list] = None
+_events_dirty = False
+_events_flush_pending = False
+
+
+def _load_events() -> list:
+    global _events_mem
+    if _events_mem is None:
+        d = _load_json_store(ACTIVITY_PATH, "events", [])
+        _events_mem = d if isinstance(d, list) else []
+    return _events_mem
+
+
+def _events_flush() -> None:
+    """Write the ledger to disk. Called a few seconds after activity (never
+    inline with a request), hourly from the watchdog, and at shutdown; a hard
+    crash can lose at most those few seconds of metrics, never work."""
+    global _events_dirty, _events_flush_pending
+    _events_flush_pending = False
+    if not _events_dirty:
+        return
     try:
-        rows = _load_json_store(ACTIVITY_PATH, "events", [])
-        if not isinstance(rows, list):
-            rows = []
+        rows = _load_events()
+        if _store_writable(ACTIVITY_PATH):
+            os.makedirs(os.path.dirname(ACTIVITY_PATH) or ".", exist_ok=True)
+            tmp = ACTIVITY_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"events": rows}, fh)
+            os.replace(tmp, ACTIVITY_PATH)
+        _events_dirty = False
+    except Exception:
+        logger.exception("activity ledger write failed")
+
+
+atexit.register(_events_flush)
+
+
+def _track(sub: Optional[str], area: str, action: str, detail: str = "") -> None:
+    """One line in the ledger. Appends in memory and lets a debounced flush
+    carry it to disk, so no request pays for a full-file rewrite."""
+    global _events_dirty, _events_flush_pending
+    try:
+        rows = _load_events()
         e = {"t": datetime.now(timezone.utc).isoformat(),
              "sub": str(sub or ""), "area": area,
              "action": str(action)[:80], "detail": str(detail)[:200]}
@@ -8352,13 +8398,15 @@ def _track(sub: Optional[str], area: str, action: str, detail: str = "") -> None
                 e["ws"] = ws.get("id")   # billable: on the clock
         rows.append(e)
         if len(rows) > ACTIVITY_MAX:
-            rows = rows[-ACTIVITY_MAX:]
-        if _store_writable(ACTIVITY_PATH):
-            os.makedirs(os.path.dirname(ACTIVITY_PATH) or ".", exist_ok=True)
-            tmp = ACTIVITY_PATH + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump({"events": rows}, fh)
-            os.replace(tmp, ACTIVITY_PATH)
+            del rows[:len(rows) - ACTIVITY_MAX]
+        _events_dirty = True
+        try:
+            loop = asyncio.get_running_loop()
+            if not _events_flush_pending:
+                _events_flush_pending = True
+                loop.call_later(3, _events_flush)
+        except RuntimeError:
+            _events_flush()    # no loop here (boot, threads): write now
     except Exception:
         logger.exception("activity ledger write failed")
 
@@ -8438,17 +8486,30 @@ def _dav_check_auth(header: str):
     uid = next((k for k, u in d["users"].items()
                 if not u.get("deleted") and u.get("username") == username), None)
     u = d["users"].get(uid) if uid else None
+    def refused(reason):
+        # One admin-readable line per reason per few minutes: Finder retries in
+        # storms, and the ledger should explain the refusal, not drown in it.
+        mark = ("davwhy", uid, reason)
+        last = _dav_fail_cache.get(mark)
+        if not last or last < now - 300:
+            _dav_fail_cache[mark] = now
+            _track(uid, "auth", "drive refused", reason)
     # Every live gate, checked every time -- the cache below only vouches for
     # the password, nothing else.
     if not u or not u.get("active", True):
+        if u is not None:
+            refused("their access is switched off")
         return None, 401
     if str(u.get("lock_until") or "") > datetime.now(timezone.utc).isoformat():
+        refused("their sign-in is paused after wrong passwords")
         return None, 401
     if _user_tabs(uid) is not None and "files" not in (_user_tabs(uid) or []):
+        refused("the Files tab is switched off for their account")
         return None, 403
     if u.get("must_change"):
         # A starter password is for the first web sign-in only; it never mounts
         # the drive. Once they have chosen their own, the drive opens.
+        refused("they have not chosen their own password in the app yet")
         return None, 401
     key = hashlib.sha256(raw.encode()).hexdigest()
     hit = _dav_auth_cache.get(key)
@@ -8464,7 +8525,11 @@ def _dav_check_auth(header: str):
     _dav_fail_cache.pop(username, None)
     if len(_dav_auth_cache) > 500:
         _dav_auth_cache.clear()
-    _dav_auth_cache[key] = (uid, now + 600)
+    # An hour, not ten minutes: the cache only vouches for the password, the
+    # live gates run every request, and a password change or revocation drops
+    # the entry at once -- so the long life costs nothing but saves the mount
+    # from paying scrypt again all day.
+    _dav_auth_cache[key] = (uid, now + 3600)
     return uid, None
 
 
@@ -9306,6 +9371,74 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except Exception:
             logger.exception("Customer history failed")
             return _json({"error": "Couldn't read customer history."}, 500)
+
+    @mcp.custom_route("/api/restore", methods=["POST"])
+    async def restore_route(request: Request):
+        """Master-only: put a downloaded backup zip back onto the volume. This
+        is how the shop survives a lost volume or moves the service between
+        regions: fresh volume, first-run setup, restore, sign back in. Only
+        the volume's own JSON/CSV files are accepted, by basename, so a
+        crafted zip cannot write anywhere else."""
+        big = 20 * 1024 * 1024
+        pre = _pre_checks(request, max_body=big)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        if _team_role(who) != "master":
+            return _json({"error": "Only the master admin can restore a backup."}, 403)
+        body = await _read_json_capped(request, cap=big)
+        if body is None:
+            return _json({"error": "That file is too large (20 MB cap)."}, 413)
+        import io as _io
+        import zipfile as _zip
+        try:
+            blob = base64.b64decode(str(body.get("zip") or ""), validate=True)
+            zf = _zip.ZipFile(_io.BytesIO(blob))
+        except Exception:
+            return _json({"error": "That is not a readable backup zip."}, 400)
+        data_dir = os.path.dirname(SCHEDULE_PATH) or "/data"
+        # Only what the backup itself writes, and never live credentials or
+        # sessions: the same exclusions the backup applies, applied again.
+        blocked = {os.path.basename(WO_SECRET_PATH), os.path.basename(SESSIONS_PATH),
+                   os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json"))}
+        restored = 0
+        try:
+            for info in zf.infolist():
+                if info.is_dir() or not info.filename.startswith("volume/"):
+                    continue
+                base = os.path.basename(info.filename)
+                if not base or base in blocked or not base.endswith((".json", ".csv")):
+                    continue
+                if info.file_size > 8 * 1024 * 1024:
+                    continue
+                payload = zf.read(info)
+                tmp = os.path.join(data_dir, base + ".tmp")
+                os.makedirs(data_dir, exist_ok=True)
+                with open(tmp, "wb") as fh:
+                    fh.write(payload)
+                os.replace(tmp, os.path.join(data_dir, base))
+                _poisoned_stores.discard(os.path.join(data_dir, base))
+                restored += 1
+        except OSError:
+            logger.exception("restore failed mid-write")
+            return _json({"error": "The volume refused the restore part-way. Check the "
+                                   "Railway service and try again."}, 500)
+        if not restored:
+            return _json({"error": "Nothing in that zip looked like this app's backup."}, 400)
+        # Every memory copy now lies; drop them all and start from disk truth.
+        global _users_mem, _sessions_mem, _work_mem, _events_mem, _events_dirty, _files_mem
+        _users_mem = _sessions_mem = _work_mem = _events_mem = _files_mem = None
+        _events_dirty = False
+        _dav_auth_cache.clear()
+        _sessions_mem = {}
+        _write_sessions({})          # everyone signs back in against the restored register
+        _track(who, "settings", "restored a backup", f"{restored} files")
+        _events_flush()
+        logger.warning("backup restored by %s: %d files; all sessions dropped", who, restored)
+        return _json({"ok": True, "restored": restored,
+                      "note": "Everyone signs in again now, with the accounts from the backup."})
 
     @mcp.custom_route("/api/backup", methods=["POST"])
     async def backup_route(request: Request):
@@ -10456,6 +10589,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "The change could not be saved. The data volume may be "
                                    "unwritable; check Settings, Connections."}, 500)
         _drop_sessions(uid=uid)          # every session dies with the old password
+        _dav_drop_cache(uid)             # and so does the drive's cached credential
         token = _new_session(uid)        # except this one, freshly minted
         _track(uid, "auth", "changed their password")
         return _json({"ok": True, "session": token})
@@ -10496,9 +10630,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         who, _body = packed
         try:
             d = _load_users()
-            events = _load_json_store(ACTIVITY_PATH, "events", [])
-            if not isinstance(events, list):
-                events = []
+            events = _load_events()
             users = [_user_public(uid, u) for uid, u in d["users"].items() if not u.get("deleted")]
             users.sort(key=lambda u: (-ROLE_LEVELS.get(u["role"], 0), u["name"] or "~"))
             return _json({"users": users, "events": events[-600:][::-1],
@@ -10629,6 +10761,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _write_users(d)
                 if not on:
                     _drop_sessions(uid=target)   # off means off, this second
+                    _dav_drop_cache(target)
                 _track(who, "team", "changed access",
                        f"{label}'s access was switched {'on' if on else 'off'}")
             elif op == "tabs":
@@ -10655,6 +10788,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 u["fails"], u["lock_until"] = 0, ""
                 _write_users(d)
                 _drop_sessions(uid=target)       # the old password's sessions die
+                _dav_drop_cache(target)
                 _track(who, "team", "reset a password", label)
                 return _json({"ok": True, "starter_password": starter,
                               "users": _team_public_list(d)})
@@ -10666,6 +10800,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 u["deleted"], u["active"] = True, False
                 _write_users(d)
                 _drop_sessions(uid=target)
+                _dav_drop_cache(target)
                 _track(who, "team", "deleted an account", label)
             else:
                 return _json({"error": "Unknown team action."}, 400)
@@ -11101,9 +11236,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 except Exception:
                     secs = 0
                 open_rows.append({**ws, "secs": secs})
-            events = _load_json_store(ACTIVITY_PATH, "events", [])
-            if not isinstance(events, list):
-                events = []
+            events = _load_events()
             by_ws: dict = {}
             for e in events:
                 if e.get("ws"):
@@ -11173,12 +11306,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     if (not uid or s.get("uid") == uid)
                     and (not frm or str(s.get("start") or "")[:10] >= frm)
                     and (not to or str(s.get("start") or "")[:10] <= to)]
-            events = _load_json_store(ACTIVITY_PATH, "events", [])
+            events = _load_events()
             counts = {}
-            if isinstance(events, list):
-                for e in events:
-                    if e.get("ws"):
-                        counts[e["ws"]] = counts.get(e["ws"], 0) + 1
+            for e in events:
+                if e.get("ws"):
+                    counts[e["ws"]] = counts.get(e["ws"], 0) + 1
             names = _team_names()
             total = sum(int(s.get("secs") or 0) for s in rows)
             lines = ["Name,Date,Clock in,Clock out,Hours,Actions,Corrected"]
