@@ -8170,27 +8170,53 @@
                 return;
             }
             bar.classList.add('armed');
-            bar.append(el('span', 'mail-bulk-hint', mailSel.size + ' selected'));
+            const count = el('span', 'mail-bulk-hint', mailSel.size + ' selected');
+            bar.append(count);
             const run = (label, body, confirmText) => {
                 const b = el('button', 'btn', label);
                 b.onclick = async () => {
                     if (confirmText && !(await uiConfirm(confirmText))) return;
                     b.disabled = true;
+                    const ids = [...mailSel];
+                    /* Sent in batches: the server caps a single request, and
+                       clearing a whole backlog is exactly the case where the
+                       selection is bigger than that cap. One refusal for the
+                       entire pile, with no way to trim it, would strand the
+                       person on the one action this feature exists for. */
+                    const CHUNK = 150;
+                    let changed = 0, skipped = [];
                     try {
-                        const r = await api('/api/mail/bulk',
-                            Object.assign({ ids: [...mailSel] }, body));
-                        mailSel.clear();
-                        if (r.skipped && r.skipped.length) {
-                            toastError(r.skipped.length + ' could not be changed: '
-                                + r.skipped.slice(0, 3).map(s => s.why).join(', '));
+                        for (let i = 0; i < ids.length; i += CHUNK) {
+                            if (ids.length > CHUNK) {
+                                count.textContent = 'working: ' + Math.min(i + CHUNK, ids.length)
+                                    + ' of ' + ids.length;
+                            }
+                            const r = await api('/api/mail/bulk',
+                                Object.assign({ ids: ids.slice(i, i + CHUNK) }, body));
+                            changed += (r.changed || 0);
+                            if (r.skipped) skipped = skipped.concat(r.skipped);
                         }
-                    } catch (e) { toastError(e.message); b.disabled = false; return; }
+                        mailSel.clear();
+                    } catch (e) {
+                        toastError(changed
+                            ? (changed + ' were changed, then it stopped: ' + e.message)
+                            : e.message);
+                        b.disabled = false;
+                        await refreshMailQuiet();
+                        return;
+                    }
+                    if (skipped.length) {
+                        toastError(skipped.length + ' could not be changed: '
+                            + skipped.slice(0, 3).map(s => s.why).join(', '));
+                    }
                     await refreshMailQuiet();
                 };
                 bar.append(b);
                 return b;
             };
-            run('Claim', { op: 'claim' });
+            /* Claim is hidden under Done: the per-row button is hidden there
+               too, and quietly reopening finished mail is not a bulk gesture. */
+            if (mailFilter !== 'done') run('Claim', { op: 'claim' });
             if (mailCache.lead) {
                 const pick = document.createElement('select');
                 pick.className = 'mail-presence-pick';
@@ -8203,16 +8229,19 @@
                 });
                 pick.onchange = async () => {
                     if (!pick.value) return;
-                    const uid = pick.value;
+                    const uid = pick.value, ids = [...mailSel];
                     pick.disabled = true;
+                    const CHUNK = 150;
+                    let skipped = [];
                     try {
-                        const r = await api('/api/mail/bulk',
-                            { op: 'assign', uid: uid, ids: [...mailSel] });
-                        mailSel.clear();
-                        if (r.skipped && r.skipped.length) {
-                            toastError(r.skipped.length + ' could not be assigned.');
+                        for (let i = 0; i < ids.length; i += CHUNK) {
+                            const r = await api('/api/mail/bulk',
+                                { op: 'assign', uid: uid, ids: ids.slice(i, i + CHUNK) });
+                            if (r.skipped) skipped = skipped.concat(r.skipped);
                         }
+                        mailSel.clear();
                     } catch (e) { toastError(e.message); pick.disabled = false; return; }
+                    if (skipped.length) toastError(skipped.length + ' could not be assigned.');
                     await refreshMailQuiet();
                 };
                 bar.append(pick);
@@ -8230,6 +8259,12 @@
         }
         function paintMailBody() {
             const rows = (mailCache.threads || []).filter(mailCardMatches);
+            /* A tick may only ever mean a row you can SEE. Without this, a
+               search that narrows the list, or a colleague closing a thread
+               between repaints, leaves ids armed that are nowhere on screen,
+               and the next bulk action quietly hits them. */
+            const visible = new Set(rows.map(t => t.id));
+            [...mailSel].forEach(id => { if (!visible.has(id)) mailSel.delete(id); });
             paintMailBulk(rows);
             if (mailView === 'board') { paintMailBoard(); return; }
             const host = $('mail-board-host'); if (!host) return;
@@ -8259,7 +8294,11 @@
             cb.onclick = (e) => e.stopPropagation();
             cb.onchange = () => {
                 cb.checked ? mailSel.add(t.id) : mailSel.delete(t.id);
-                paintMailBody();
+                /* Only the row and the bar redraw. Repainting the whole list
+                   would detach the very checkbox mid-event, so keyboard
+                   triage (tab, space, tab, space) lost focus on every tick. */
+                row.classList.toggle('selected', cb.checked);
+                paintMailBulk((mailCache.threads || []).filter(mailCardMatches));
             };
             row.append(cb);
             const dot = el('span', 'mdot ' + t.state);
@@ -8277,6 +8316,14 @@
                 const n = el('span', 'mnote'); n.innerHTML = I.bookmark;
                 n.title = t.notes + (t.notes === 1 ? ' internal note' : ' internal notes');
                 row.append(n);
+            }
+            if (t.label_error) {
+                /* The list is now the default view, so a label that never
+                   reached Gmail has to be visible HERE or it is invisible. */
+                const w = el('span', 'mail-labelerr', '!');
+                w.title = 'The ownership label could not be written into Gmail. '
+                    + 'The board is still right; it retries on its own.';
+                row.append(w);
             }
             if (t.owner) {
                 row.append(el('span', 'mail-owner', t.owner_name || 'Someone'));
@@ -8313,9 +8360,13 @@
             return mailTextMatches(t);
         }
         function mailBoardMatches(t) {
-            /* The board already separates states into columns, so it must not
-               also hide them by state or the Done column would always be bare. */
+            /* "Open" means every column here, Done included, or the board's own
+               Done column would always be bare. The narrower filters still
+               apply, because a chip that looks active and does nothing is
+               worse than not offering it. */
             if (mailFilter === 'mine' && t.owner !== mailCache.me) return false;
+            if (mailFilter === 'unassigned' && t.state !== 'unassigned') return false;
+            if (mailFilter === 'done' && t.state !== 'done') return false;
             return mailTextMatches(t);
         }
         function paintMailBoard() {

@@ -8249,9 +8249,15 @@ async def _mail_sync_now(force: bool = False) -> None:
                 f"in:inbox newer_than:{MAIL_TRACK_DAYS}d", 200)
             addr = google_mail.address().lower()
             threads = store.setdefault("threads", {})
+            # Refetch when the thread is new, when Gmail says it moved, or
+            # when we are missing a field a newer build added: without the
+            # last clause every thread already in the store from before the
+            # unread flag existed would read as "read" forever, because its
+            # historyId never changes again.
             changed = [t["id"] for t in listed
                        if t["id"] not in threads
-                       or threads[t["id"]].get("history_id") != t.get("historyId")]
+                       or threads[t["id"]].get("history_id") != t.get("historyId")
+                       or "unread" not in threads[t["id"]]]
             sem = asyncio.Semaphore(8)
 
             async def fetch(tid):
@@ -8276,6 +8282,13 @@ async def _mail_sync_now(force: bool = False) -> None:
                 t["in_inbox"] = tid in inbox_ids
             _mail_prune(store)
             await _mail_label_reconcile(store)
+            if _mail_mem is not store:
+                # The reconciler is the SECOND network window in this function,
+                # so the guard above is not enough: a restore can land during
+                # it just as easily. Re-check before the write or the restored
+                # board is overwritten by the picture we started with.
+                logger.warning("mail sync abandoned after reconcile: the store changed underneath it")
+                return
             store["synced_at"] = _mail_now()
             store["sync_error"] = ""
             _write_mail(store)
@@ -8297,19 +8310,48 @@ def _mail_want_label(t: dict) -> str:
     return f"Copilot/{_team_name(owner)}" if (owner and _team_name(owner)) else ""
 
 
-async def _mail_label_reconcile(store: dict, limit: int = 15) -> None:
+MAIL_LABEL_BACKOFF = 600      # a thread that refuses to sync waits this long
+
+
+async def _mail_label_reconcile(store: dict, limit: int = 12, budget: float = 6.0) -> None:
     """Catch Gmail up with the board, a few threads per sync.
 
     Bulk actions and released-on-deactivate deliberately do NOT call Gmail:
     clearing a 300-thread backlog must not become 300 blocking API calls.
     They just move the board, which is the record that matters, and this
-    reconciler walks the drift away in the background within a cycle or two."""
+    walks the drift away over the next cycle or two.
+
+    Two rules keep it from ever holding the Inbox hostage. It runs against a
+    WHOLE-JOB deadline, not a per-thread one, because this sits inside a
+    request the whole team is waiting on. And a thread that fails goes to the
+    back of the queue with a retry time on it: without that, one thread whose
+    label can never be written would camp at the head of the list and consume
+    a slot on every sync, so real drift behind it would never converge."""
     if not google_mail.connected():
         return
+    now = time.time()
     drifted = [t for t in store.get("threads", {}).values()
-               if _mail_want_label(t) != (t.get("gmail_label") or "")]
-    for t in drifted[:limit]:
-        await _mail_sync_labels(t, _team_name(t.get("owner") or ""))
+               if _mail_want_label(t) != (t.get("gmail_label") or "")
+               and now >= float(t.get("label_retry_at") or 0)]
+    if not drifted:
+        return
+    # Least-recently-attempted first: nothing can camp at the front.
+    drifted.sort(key=lambda t: float(t.get("label_tried_at") or 0))
+    sem = asyncio.Semaphore(4)
+
+    async def one(t):
+        async with sem:
+            before = t.get("gmail_label")
+            t["label_tried_at"] = time.time()
+            await _mail_sync_labels(t, _team_name(t.get("owner") or ""))
+            if t.get("gmail_label") == before:
+                t["label_retry_at"] = time.time() + MAIL_LABEL_BACKOFF
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*(one(t) for t in drifted[:limit]), return_exceptions=True),
+            timeout=budget)
+    except asyncio.TimeoutError:
+        logger.info("mail: label reconcile hit its time budget; the rest waits for the next sync")
 
 
 async def _mail_sync_labels(t: dict, owner_name: str = "") -> None:
@@ -10039,13 +10081,22 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Nothing was selected."}, 400)
         if len(raw) > 200:
             return _json({"error": "That is too many at once. Select 200 or fewer."}, 400)
-        ids = [str(x) for x in raw][:200]
+        seen_ids, ids = set(), []
+        for x in raw:                      # dedupe: the same id twice is one
+            s = str(x)                     # decision, not two, and the count
+            if s not in seen_ids:          # the ledger reports must be honest
+                seen_ids.add(s)
+                ids.append(s)
+        ids = ids[:200]
         lead = _mail_lead(who)
         target = str(body.get("uid") or "")
         state = str(body.get("state") or "")
         if op == "assign":
-            if not lead:
-                return _json({"error": "Only a lead can assign emails to other people."}, 403)
+            # Same carve-out as the single-thread route: staff cannot hand work
+            # to other people, but they can always hand their OWN back.
+            if not lead and target:
+                return _json({"error": "Only a lead can assign emails to other people. "
+                                       "You can claim unowned ones, or release your own."}, 403)
             if target and not _mail_can_own(target):
                 return _json({"error": "That account is switched off, gone, or has no Inbox "
                                        "tab: their email would sit unread."}, 400)
@@ -10068,10 +10119,20 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 t["state"], t["done_at"] = "assigned", ""
                 _mail_log(t, who, "claimed")
             elif op == "assign":
+                if not lead and t.get("owner") != who:
+                    skipped.append({"id": tid, "why": "not yours to release"})
+                    continue
                 t["owner"] = target
                 t["owner_since"] = _mail_now() if target else ""
-                t["state"] = "assigned" if target else "unassigned"
-                t["done_at"] = ""
+                if target:
+                    # Match the single-thread route exactly: a handover must
+                    # not erase how far the work had got. Flattening "waiting
+                    # on the customer" back to "assigned" would lose the one
+                    # signal that tells the new owner they are not blocked.
+                    if t.get("state") in ("unassigned", "done"):
+                        t["state"], t["done_at"] = "assigned", ""
+                else:
+                    t["state"], t["done_at"] = "unassigned", ""
                 _mail_log(t, who, ("assigned to " + (_team_name(target) or "someone"))
                           if target else "released")
             else:

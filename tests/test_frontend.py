@@ -387,6 +387,17 @@ def t_inbox_reads_as_a_list_with_bulk_triage():
        "done mail leaves the list but must NOT vanish from the board's own column")
     ok("clear old mail that was dealt with before" in SCRIPT,
        "and clearing the first import is named for what it is")
+    ok("i += CHUNK" in SCRIPT,
+       "a selection bigger than the server's cap is SENT in batches, never "
+       "refused whole: clearing a backlog is exactly the oversized case")
+    ok("if (!visible.has(id)) mailSel.delete(id)" in SCRIPT,
+       "a tick can only ever mean a row you can see")
+    ok("row.classList.toggle('selected', cb.checked)" in SCRIPT,
+       "ticking a row must not detach the checkbox that fired the event")
+    ok("if (mailFilter !== 'done') run('Claim'" in SCRIPT,
+       "bulk Claim is not offered where it would silently reopen finished mail")
+    ok("mailFilter === 'unassigned' && t.state !== 'unassigned'" in SCRIPT,
+       "a filter chip that looks active must actually filter the board")
 
 
 @test

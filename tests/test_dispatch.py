@@ -5980,6 +5980,158 @@ def t_mail_bulk_clears_a_backlog_and_reports_what_it_could_not_do():
     with_mail(go)
 
 @test
+def t_mail_bulk_assign_matches_the_single_route_exactly():
+    """A handover must not erase how far the work had got: flattening
+    'waiting on the customer' back to 'assigned' loses the one signal that
+    tells the new owner they are not the blocker."""
+    def go():
+        ensure_auth()
+        uid_a, sess_a, _ = ready_user("Ann", "ann")
+        uid_b, _sess_b, _ = ready_user("Bob", "bob")
+        _seed_thread("w1"); _seed_thread("w2"); _seed_thread("w3")
+        post_s(sess_a, "/api/mail/bulk", {"op": "claim", "ids": ["w1", "w2", "w3"]})
+        post_s(sess_a, "/api/mail/state", {"id": "w1", "state": "waiting"})
+        post_s(sess_a, "/api/mail/state", {"id": "w2", "state": "progress"})
+        post("/api/mail/bulk", {"op": "assign", "uid": uid_b, "ids": ["w1", "w2", "w3"]})
+        th = copilot._load_mail()["threads"]
+        eq(th["w1"]["state"], "waiting", "a handover keeps the waiting signal")
+        eq(th["w2"]["state"], "progress", "and keeps work already started")
+        eq(th["w3"]["state"], "assigned")
+        eq(th["w1"]["owner"], uid_b, "while still changing hands")
+        # Staff may release their OWN in bulk, exactly as the single route allows.
+        post("/api/mail/bulk", {"op": "assign", "uid": uid_a, "ids": ["w1", "w2"]})
+        r = post_s(sess_a, "/api/mail/bulk", {"op": "assign", "uid": "", "ids": ["w1", "w3"]})
+        eq(r.status_code, 200, r.text)
+        eq(r.json()["changed"], 1, "her own goes back to the room")
+        ok(any("not yours" in s["why"] for s in r.json()["skipped"]), r.text)
+        eq(copilot._load_mail()["threads"]["w1"]["state"], "unassigned")
+    with_mail(go)
+
+@test
+def t_mail_bulk_counts_each_thread_once():
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _seed_thread("d1")
+        r = post_s(sess, "/api/mail/bulk", {"op": "claim", "ids": ["d1", "d1", "d1"]})
+        eq(r.json()["changed"], 1, "the same id three times is one decision")
+        eq(len([a for a in copilot._load_mail()["threads"]["d1"]["activity"]
+                if a["action"] == "claimed"]), 1, "and one line in the history")
+    with_mail(go)
+
+@test
+def t_mail_reconciler_backs_off_a_thread_that_will_never_sync():
+    """One thread whose label can never be written must not camp at the head
+    of the queue and starve the real drift behind it."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        for i in range(4):
+            _seed_thread("s%d" % i)
+        tries = []
+        async def modify(tid, add=None, remove=None):
+            tries.append(tid)
+            if tid == "s0":
+                raise _gm.GmailError("Invalid label")     # permanently broken
+        async def label(name, known):
+            known[name] = "L1"
+            return "L1"
+        async def listing(q, n):
+            return []
+        saved = (_gm.modify_thread, _gm.ensure_label, _gm.list_threads)
+        _gm.modify_thread, _gm.ensure_label, _gm.list_threads = modify, label, listing
+        try:
+            post_s(sess, "/api/mail/bulk", {"op": "claim",
+                                            "ids": ["s0", "s1", "s2", "s3"]})
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            ok("s0" in tries, "the broken one is tried once")
+            eq(sorted(set(tries)), ["s0", "s1", "s2", "s3"], "and everything else lands")
+            tries.clear()
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            eq(tries, [], "the next sync retries nothing: the failure is backed off")
+            t0 = copilot._load_mail()["threads"]["s0"]
+            ok(float(t0.get("label_retry_at") or 0) > time.time(),
+               "the broken thread carries its own retry time")
+        finally:
+            _gm.modify_thread, _gm.ensure_label, _gm.list_threads = saved
+    with_mail(go)
+
+@test
+def t_mail_sync_abandons_a_restore_that_lands_during_the_reconciler():
+    """The reconciler is a SECOND network window: the guard before it is not
+    enough on its own."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("k1")
+        post_s(sess, "/api/mail/claim", {"id": "k1"})
+        async def listing(q, n):
+            return []
+        async def label(name, known):
+            copilot._mail_mem = None      # a restore lands mid-reconcile
+            known[name] = "L1"
+            return "L1"
+        async def modify(tid, add=None, remove=None):
+            return None
+        saved = (_gm.list_threads, _gm.ensure_label, _gm.modify_thread)
+        _gm.list_threads, _gm.ensure_label, _gm.modify_thread = listing, label, modify
+        try:
+            # Stamp the DISK with a world the abandoned sync must not overwrite,
+            # exactly as a restore would.
+            store = copilot._load_mail()
+            store["synced_at"] = ""
+            store["threads"]["k1"]["subject"] = "RESTORED"
+            copilot._write_mail(store)
+            r = post("/api/mail/board", {"force": True})
+            eq(r.status_code, 200, r.text)
+            disk = json.load(open(copilot.MAILBOX_PATH))["mailbox"]
+            eq(disk["threads"]["k1"]["subject"], "RESTORED",
+               "the orphaned sync wrote nothing over the restored world")
+            eq(disk["synced_at"], "", "and did not even stamp its own clock")
+        finally:
+            _gm.list_threads, _gm.ensure_label, _gm.modify_thread = saved
+    with_mail(go)
+
+@test
+def t_mail_unread_backfills_for_threads_that_predate_the_field():
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        # A thread already in the store from an older build: no unread key.
+        _seed_thread("old1")
+        copilot._load_mail()["threads"]["old1"].pop("unread", None)
+        copilot._load_mail()["threads"]["old1"]["history_id"] = "h1"
+        fetched = []
+        async def listing(q, n):
+            return [{"id": "old1", "snippet": "s", "historyId": "h1"}]
+        async def get_thread(tid):
+            fetched.append(tid)
+            return {"id": tid, "historyId": "h1", "subject": "Old",
+                    "messages": [{"id": "m1", "from_name": "Jo",
+                                  "from_email": "jo@customer.com",
+                                  "at": "2026-08-19T01:00:00+00:00",
+                                  "labels": ["INBOX", "UNREAD"], "snippet": "hi"}]}
+        saved = (_gm.list_threads, _gm.get_thread)
+        _gm.list_threads, _gm.get_thread = listing, get_thread
+        try:
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            eq(fetched, ["old1"], "an unchanged thread is refetched ONCE to fill the gap")
+            ok(copilot._load_mail()["threads"]["old1"]["unread"],
+               "so old mail does not read as already-read forever")
+            fetched.clear()
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            eq(fetched, [], "and never again after that")
+        finally:
+            _gm.list_threads, _gm.get_thread = saved
+    with_mail(go)
+
+@test
 def t_mail_unread_rides_along_from_gmail():
     def go():
         ensure_auth()
