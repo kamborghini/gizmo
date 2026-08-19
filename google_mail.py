@@ -265,6 +265,9 @@ async def get_thread(thread_id: str) -> dict:
         msgs.append({"id": str(m.get("id") or ""),
                      "from_name": name or email, "from_email": email.lower(),
                      "at": _msg_time(m),
+                     # Gmail's own labels ride along so the list can bold what
+                     # nobody has opened yet, the way an inbox is read.
+                     "labels": [str(x) for x in (m.get("labelIds") or [])],
                      "snippet": str(m.get("snippet") or "")})
     return {"id": str(data.get("id") or thread_id),
             "historyId": str(data.get("historyId") or ""),

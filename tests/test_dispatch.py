@@ -5940,6 +5940,98 @@ def t_mail_connect_ticket_is_master_only_and_single_use():
     with_mail(go)
 
 @test
+def t_mail_bulk_clears_a_backlog_and_reports_what_it_could_not_do():
+    """A sixty-day first import lands as a wall of unowned email. Triaging it
+    one row at a time is not a real option, so many-at-once has to work."""
+    def go():
+        ensure_auth()
+        uid_a, sess_a, _ = ready_user("Ann", "ann")
+        _uid_b, sess_b, _ = ready_user("Bob", "bob")
+        for i in range(5):
+            _seed_thread("b%d" % i, subject="Old enquiry %d" % i)
+        # Ann claims the lot in one gesture.
+        r = post_s(sess_a, "/api/mail/bulk", {"op": "claim", "ids": ["b0", "b1", "b2"]})
+        eq(r.status_code, 200, r.text)
+        eq(r.json()["changed"], 3)
+        threads = copilot._load_mail()["threads"]
+        eq(threads["b0"]["owner"], uid_a)
+        eq(threads["b0"]["state"], "assigned")
+        # Bob claiming the same ones is told why, per thread, not just refused.
+        r2 = post_s(sess_b, "/api/mail/bulk", {"op": "claim", "ids": ["b0", "b3"]})
+        eq(r2.json()["changed"], 1, "the free one still gets claimed")
+        ok(any("Ann" in s["why"] for s in r2.json()["skipped"]), r2.text)
+        # Bob cannot move Ann's threads, and is told so per thread.
+        r3 = post_s(sess_b, "/api/mail/bulk", {"op": "state", "state": "done",
+                                               "ids": ["b0", "b3"]})
+        eq(r3.json()["changed"], 1, "his own, yes; hers, no")
+        ok(any("not yours" in s["why"] for s in r3.json()["skipped"]), r3.text)
+        # A lead closes the whole backlog: this is the clean-slate gesture.
+        r4 = post("/api/mail/bulk", {"op": "state", "state": "done",
+                                     "ids": ["b0", "b1", "b2", "b4", "gone"]})
+        eq(r4.json()["changed"], 4)
+        ok(any(s["id"] == "gone" for s in r4.json()["skipped"]), "a vanished id is named")
+        eq(copilot._load_mail()["threads"]["b1"]["state"], "done")
+        # Staff cannot mass-assign to other people.
+        eq(post_s(sess_a, "/api/mail/bulk", {"op": "assign", "uid": uid_a,
+                                             "ids": ["b0"]}).status_code, 403)
+        eq(post("/api/mail/bulk", {"op": "claim", "ids": []}).status_code, 400)
+        eq(post("/api/mail/bulk", {"op": "nonsense", "ids": ["b0"]}).status_code, 400)
+        eq(post("/api/mail/bulk", {"op": "claim", "ids": ["x"] * 201}).status_code, 400)
+    with_mail(go)
+
+@test
+def t_mail_unread_rides_along_from_gmail():
+    def go():
+        ensure_auth()
+        store = copilot._load_mail()
+        msgs = [{"id": "m1", "from_name": "Jo", "from_email": "jo@customer.com",
+                 "at": "2026-08-19T01:00:00+00:00", "snippet": "hi",
+                 "labels": ["INBOX", "UNREAD"]}]
+        copilot._mail_apply_thread(store, {"id": "t1", "historyId": "h1",
+                                           "subject": "New one", "messages": msgs}, MBOX)
+        ok(store["threads"]["t1"]["unread"], "an unopened thread is marked unread")
+        ok(post("/api/mail/board", {}).json()["threads"][0]["unread"], "and reaches the list")
+        msgs[0]["labels"] = ["INBOX"]
+        copilot._mail_apply_thread(store, {"id": "t1", "historyId": "h2",
+                                           "subject": "New one", "messages": msgs}, MBOX)
+        ok(not store["threads"]["t1"]["unread"], "reading it in Gmail clears the bold")
+    with_mail(go)
+
+@test
+def t_mail_label_reconciler_catches_gmail_up_after_bulk():
+    """Bulk does not call Gmail: three hundred threads must not become three
+    hundred blocking calls. The sync walks the drift away instead."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        for i in range(3):
+            _seed_thread("r%d" % i)
+        calls = []
+        async def fake_modify(tid, add=None, remove=None):
+            calls.append(tid)
+        async def fake_label(name, known):
+            known[name] = "L1"
+            return "L1"
+        async def fake_list(q, n):
+            return []
+        saved = (_gm.modify_thread, _gm.ensure_label, _gm.list_threads)
+        _gm.modify_thread, _gm.ensure_label, _gm.list_threads = fake_modify, fake_label, fake_list
+        try:
+            post_s(sess, "/api/mail/bulk", {"op": "claim", "ids": ["r0", "r1", "r2"]})
+            eq(calls, [], "bulk never touches Gmail")
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            eq(sorted(calls), ["r0", "r1", "r2"], "the next sync catches Gmail up")
+            calls.clear()
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            eq(calls, [], "and stops once there is no drift left")
+        finally:
+            _gm.modify_thread, _gm.ensure_label, _gm.list_threads = saved
+    with_mail(go)
+
+@test
 def t_mail_setup_aids_name_the_existing_project_master_only():
     """The merchant could not find which Cloud project his app already uses.
     The app knows: the client id's numeric prefix IS the project number."""

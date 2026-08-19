@@ -8148,6 +8148,7 @@ def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str) -> None:
     # Stored value first: once the 50-message window slides past the real
     # first message, msgs[0] is no longer the thread's beginning.
     t["first_at"] = t.get("first_at") or msgs[0].get("at") or _mail_now()
+    t["unread"] = any("UNREAD" in (m.get("labels") or []) for m in msgs)
     t["last_at"] = msgs[-1].get("at") or _mail_now()
     name, email = _mail_sender(t, mailbox_addr)
     t["from_name"], t["from_email"] = str(name)[:120], str(email)[:200]
@@ -8274,6 +8275,7 @@ async def _mail_sync_now(force: bool = False) -> None:
             for tid, t in threads.items():
                 t["in_inbox"] = tid in inbox_ids
             _mail_prune(store)
+            await _mail_label_reconcile(store)
             store["synced_at"] = _mail_now()
             store["sync_error"] = ""
             _write_mail(store)
@@ -8285,6 +8287,29 @@ async def _mail_sync_now(force: bool = False) -> None:
                     _write_mail(store)
                 except Exception:
                     pass
+
+
+def _mail_want_label(t: dict) -> str:
+    """The Gmail label this thread's ownership SHOULD be wearing."""
+    if t.get("state") == "done":
+        return "Copilot/Done"
+    owner = t.get("owner") or ""
+    return f"Copilot/{_team_name(owner)}" if (owner and _team_name(owner)) else ""
+
+
+async def _mail_label_reconcile(store: dict, limit: int = 15) -> None:
+    """Catch Gmail up with the board, a few threads per sync.
+
+    Bulk actions and released-on-deactivate deliberately do NOT call Gmail:
+    clearing a 300-thread backlog must not become 300 blocking API calls.
+    They just move the board, which is the record that matters, and this
+    reconciler walks the drift away in the background within a cycle or two."""
+    if not google_mail.connected():
+        return
+    drifted = [t for t in store.get("threads", {}).values()
+               if _mail_want_label(t) != (t.get("gmail_label") or "")]
+    for t in drifted[:limit]:
+        await _mail_sync_labels(t, _team_name(t.get("owner") or ""))
 
 
 async def _mail_sync_labels(t: dict, owner_name: str = "") -> None:
@@ -8338,6 +8363,7 @@ def _mail_board_shape(store: dict) -> list:
                     "state_at": t.get("state_at"), "done_at": t.get("done_at") or "",
                     "msg_count": t.get("msg_count", 0), "snippet": (t.get("snippet") or "")[:140],
                     "notes": len(t.get("notes") or []),
+                    "unread": bool(t.get("unread")),
                     "label_error": bool(t.get("label_error"))})
     out.sort(key=lambda r: r.get("last_at") or "", reverse=True)
     return out
@@ -9989,6 +10015,87 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _track(who, "mail", "email " + ("done" if state == "done" else "moved to " + state),
                (t.get("subject") or "")[:60])
         return _json({"ok": True})
+
+    @mcp.custom_route("/api/mail/bulk", methods=["POST"])
+    async def mail_bulk_route(request: Request):
+        """Many threads, one decision. A sixty-day first import lands as a
+        wall of unowned email, and triaging it one row at a time is not a
+        realistic ask. Gmail's own gesture: tick a run of them, act once.
+
+        Gmail labels are NOT pushed here on purpose (see the reconciler):
+        clearing three hundred threads must not become three hundred
+        blocking API calls. The board moves now; Gmail catches up."""
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        sick = _mail_store_sick()
+        if sick:
+            return sick
+        op = str(body.get("op") or "")
+        if op not in ("claim", "assign", "state"):
+            return _json({"error": "Unknown bulk action."}, 400)
+        raw = body.get("ids")
+        if not isinstance(raw, list) or not raw:
+            return _json({"error": "Nothing was selected."}, 400)
+        if len(raw) > 200:
+            return _json({"error": "That is too many at once. Select 200 or fewer."}, 400)
+        ids = [str(x) for x in raw][:200]
+        lead = _mail_lead(who)
+        target = str(body.get("uid") or "")
+        state = str(body.get("state") or "")
+        if op == "assign":
+            if not lead:
+                return _json({"error": "Only a lead can assign emails to other people."}, 403)
+            if target and not _mail_can_own(target):
+                return _json({"error": "That account is switched off, gone, or has no Inbox "
+                                       "tab: their email would sit unread."}, 400)
+        if op == "state" and state not in ("assigned", "progress", "waiting", "done"):
+            return _json({"error": "Pick a real state."}, 400)
+        threads = _load_mail().get("threads", {})
+        done = 0
+        skipped = []
+        for tid in ids:
+            t = threads.get(tid)
+            if not t:
+                skipped.append({"id": tid, "why": "no longer on the board"})
+                continue
+            if op == "claim":
+                if t.get("owner"):
+                    skipped.append({"id": tid,
+                                    "why": (_team_name(t["owner"]) or "someone") + " already has it"})
+                    continue
+                t["owner"], t["owner_since"] = who, _mail_now()
+                t["state"], t["done_at"] = "assigned", ""
+                _mail_log(t, who, "claimed")
+            elif op == "assign":
+                t["owner"] = target
+                t["owner_since"] = _mail_now() if target else ""
+                t["state"] = "assigned" if target else "unassigned"
+                t["done_at"] = ""
+                _mail_log(t, who, ("assigned to " + (_team_name(target) or "someone"))
+                          if target else "released")
+            else:
+                if not lead and t.get("owner") != who:
+                    skipped.append({"id": tid, "why": "not yours to move"})
+                    continue
+                if state != "done" and not t.get("owner"):
+                    skipped.append({"id": tid, "why": "nobody owns it yet"})
+                    continue
+                t["state"] = state
+                t["done_at"] = _mail_now() if state == "done" else ""
+                _mail_log(t, who, {"assigned": "moved it back to assigned",
+                                   "progress": "started work",
+                                   "waiting": "is waiting on the customer",
+                                   "done": "marked it done"}[state])
+            t["state_at"] = _mail_now()
+            done += 1
+        _write_mail(_load_mail())
+        label = {"claim": "claimed", "assign": ("assigned to " + (_team_name(target) or "the room")
+                                                if target else "released"),
+                 "state": ("marked done" if state == "done" else "moved to " + state)}[op]
+        if done:
+            _track(who, "mail", f"{label} {done} emails at once")
+        return _json({"ok": True, "changed": done, "skipped": skipped})
 
     @mcp.custom_route("/api/mail/note", methods=["POST"])
     async def mail_note_route(request: Request):

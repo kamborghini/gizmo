@@ -647,6 +647,45 @@
             border-radius: 12px; padding: 2px 9px; }
         .mail-statebar { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
         .mail-labelerr { font-size: 11px; color: #b98900; }
+        /* ---- the list: an inbox reads as rows, not columns ---- */
+        .mlist { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden; }
+        .mrow { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+            border-top: 0.5px solid var(--line); font-size: 13px; cursor: pointer; }
+        .mrow:first-child { border-top: 0; }
+        .mrow:hover { background: var(--bg-2); }
+        .mrow.selected { background: var(--accent-soft); }
+        .mail-check { width: 15px; height: 15px; flex: none; margin: 0; accent-color: var(--accent); cursor: pointer; }
+        .mdot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--border-3); }
+        .mdot.unassigned { background: #b98900; }
+        .mdot.assigned { background: var(--accent); }
+        .mdot.progress { background: #108043; }
+        .mdot.waiting { background: #98a2b3; }
+        .mdot.done { background: transparent; box-shadow: inset 0 0 0 1px var(--border-3); }
+        .mfrom { flex: 0 0 148px; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; color: var(--ink-2); }
+        .msubj { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; color: var(--ink-3); }
+        .msubj b { font-weight: 500; color: var(--ink); }
+        .mrow.unread .mfrom { color: var(--ink); font-weight: 600; }
+        .mrow.unread .msubj b { font-weight: 600; }
+        .mcount { flex: none; font-size: 11px; color: var(--ink-3); background: var(--surface-3);
+            border-radius: 12px; padding: 0 6px; }
+        .mnote { flex: none; display: inline-flex; color: var(--ink-3); }
+        .mnote svg { width: 13px; height: 13px; }
+        .mage { flex: 0 0 46px; text-align: right; font-size: 12px; color: var(--ink-3); }
+        .mage.hot { color: #d92c20; font-weight: 600; }
+        .mail-empty { border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+            padding: 28px; text-align: center; font-size: 13px; color: var(--ink-3); }
+        .mail-bulkbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+            padding: 7px 12px; margin-bottom: 8px; border: 1px solid var(--line);
+            border-radius: 8px; background: var(--surface-2); font-size: 12px; }
+        .mail-bulkbar.armed { border-color: var(--accent-line); background: var(--accent-soft);
+            color: var(--accent-ink); }
+        .mail-bulk-hint { color: inherit; }
+        @media (max-width: 700px) {
+            .mfrom { flex-basis: 96px; }
+            .mail-owner, .mcount { display: none; }
+        }
         .crm-ai.future { color: var(--ink-3); }
         .crm-dropbar { position: fixed; left: 0; right: 0; bottom: 0; display: none; gap: 10px;
             padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--border);
@@ -7862,7 +7901,12 @@
            cannot: who is dealing with each email, and what state is it in.
            One owner per thread, always. Unclaimed threads age visibly.
            ================================================================== */
-        let mailCache = null, mailFilter = 'everything', mailQ = '', mailTimer = null;
+        let mailCache = null, mailFilter = 'open', mailQ = '', mailTimer = null;
+        /* List is the default: a real inbox arrives with weeks of history in
+           it, and five columns of that is a wall, not a view. The board stays
+           one click away for seeing how work is spread across people. */
+        let mailView = 'list';
+        const mailSel = new Set();
         const MAIL_COLS = [['unassigned', 'Unassigned'], ['assigned', 'Assigned'],
                            ['progress', 'In progress'], ['waiting', 'Waiting on customer'],
                            ['done', 'Done']];
@@ -7982,13 +8026,20 @@
                        this app ALREADY uses. Nothing else changes, so the
                        Search Console and Analytics connections keep working. */
                     const su = d.setup || {};
-                    if (d.client && su.project) {
+                    /* Gated on the REDIRECT URI, not the project number: the
+                       URI is the load-bearing value (it must match Google
+                       exactly), while the project number is only a
+                       convenience for the deep links. A client id the parser
+                       cannot read must not take the address down with it. */
+                    if (d.client && su.redirect_uri) {
                         const box2 = el('div');
                         box2.style.cssText = 'margin-top:14px;padding-top:12px;border-top:1px solid var(--border)';
                         box2.append(el('div', 'setting-title', 'First time? Two switches in Google'));
-                        box2.append(el('div', 'setting-sub',
-                            'These open the Google project this app already uses (project '
-                            + su.project + '), so nothing you have already set up changes.'));
+                        box2.append(el('div', 'setting-sub', su.project
+                            ? 'These open the Google project this app already uses (project '
+                              + su.project + '), so nothing you have already set up changes.'
+                            : 'Do these in the Google project this app already uses, so nothing '
+                              + 'you have already set up changes.'));
                         const step = (n, text, href, linkText) => {
                             const row = el('div', 'setting-sub');
                             row.style.marginTop = '8px';
@@ -8000,12 +8051,12 @@
                             box2.append(row);
                             return row;
                         };
+                        const proj = su.project ? '?project=' + encodeURIComponent(su.project) : '';
                         step(1, 'Switch on the Gmail API:',
-                            'https://console.cloud.google.com/apis/library/gmail.googleapis.com?project='
-                            + encodeURIComponent(su.project), 'open that page');
-                        const r2 = step(2, 'Open your existing web client and add one more address under Authorised redirect URIs:',
-                            'https://console.cloud.google.com/auth/clients?project='
-                            + encodeURIComponent(su.project), 'open your clients');
+                            'https://console.cloud.google.com/apis/library/gmail.googleapis.com' + proj,
+                            'open that page');
+                        step(2, 'Open your existing web client and add one more address under Authorised redirect URIs:',
+                            'https://console.cloud.google.com/auth/clients' + proj, 'open your clients');
                         const uri = el('div');
                         uri.style.cssText = 'font-family:ui-monospace,monospace;font-size:12px;user-select:all;'
                             + 'background:var(--surface-2);border:1px solid var(--line);border-radius:6px;'
@@ -8054,19 +8105,30 @@
             box.append(who);
             /* ---- toolbar ---- */
             const top = el('div', 'mail-top');
-            top.append(segControl([{ value: 'everything', label: 'Everything' },
-                                   { value: 'mine', label: 'Mine' },
-                                   { value: 'unassigned', label: 'Unassigned' }],
-                mailFilter, v => { mailFilter = v; renderMail(); }));
+            const counts = { open: 0, mine: 0, unassigned: 0, done: 0 };
+            (d.threads || []).forEach(t => {
+                if (t.state === 'done') { counts.done++; return; }
+                counts.open++;
+                if (t.owner === d.me) counts.mine++;
+                if (t.state === 'unassigned') counts.unassigned++;
+            });
+            const lab = (text, n) => text + (n ? ' (' + n + ')' : '');
+            top.append(segControl([{ value: 'open', label: lab('Open', counts.open) },
+                                   { value: 'mine', label: lab('Mine', counts.mine) },
+                                   { value: 'unassigned', label: lab('Unassigned', counts.unassigned) },
+                                   { value: 'done', label: 'Done' }],
+                mailFilter, v => { mailFilter = v; mailSel.clear(); renderMail(); }));
             const search = document.createElement('input');
             search.type = 'search'; search.className = 'disp-text mail-search';
             search.placeholder = 'Search sender or subject'; search.value = mailQ;
-            search.oninput = () => { mailQ = search.value; paintMailBoard(); };
+            search.oninput = () => { mailQ = search.value; paintMailBody(); };
             top.append(search);
             const sync = el('span', 'mail-sync' + (d.sync_error ? ' err' : ''),
                 d.sync_error ? 'Sync problem: ' + d.sync_error
                              : (d.address || '') + (d.synced_at ? ' · synced ' + mailAgoLong(d.synced_at) : ''));
             top.append(sync);
+            top.append(segControl([{ value: 'list', label: 'List' }, { value: 'board', label: 'Board' }],
+                mailView, v => { mailView = v; mailSel.clear(); renderMail(); }));
             const rf = el('button', 'btn', 'Refresh');
             rf.onclick = async () => {
                 rf.disabled = true;
@@ -8079,20 +8141,182 @@
             };
             top.append(rf);
             box.append(top);
-            const boardHost = el('div'); boardHost.id = 'mail-board-host';
-            box.append(boardHost);
-            paintMailBoard();
+            const bulkHost = el('div'); bulkHost.id = 'mail-bulk-host';
+            box.append(bulkHost);
+            const bodyHost = el('div'); bodyHost.id = 'mail-board-host';
+            box.append(bodyHost);
+            paintMailBody();
+        }
+        /* ---- bulk actions: the only realistic way through a first import ---- */
+        function paintMailBulk(rows) {
+            const host = $('mail-bulk-host'); if (!host) return;
+            host.innerHTML = '';
+            if (mailView !== 'list') return;
+            const bar = el('div', 'mail-bulkbar');
+            const all = document.createElement('input');
+            all.type = 'checkbox'; all.className = 'mail-check';
+            all.checked = rows.length > 0 && rows.every(t => mailSel.has(t.id));
+            all.title = 'Select everything shown';
+            all.onchange = () => {
+                rows.forEach(t => all.checked ? mailSel.add(t.id) : mailSel.delete(t.id));
+                paintMailBody();
+            };
+            bar.append(all);
+            if (!mailSel.size) {
+                bar.append(el('span', 'mail-bulk-hint',
+                    rows.length + (rows.length === 1 ? ' email' : ' emails')
+                    + '. Tick a few to claim or close them together.'));
+                host.append(bar);
+                return;
+            }
+            bar.classList.add('armed');
+            bar.append(el('span', 'mail-bulk-hint', mailSel.size + ' selected'));
+            const run = (label, body, confirmText) => {
+                const b = el('button', 'btn', label);
+                b.onclick = async () => {
+                    if (confirmText && !(await uiConfirm(confirmText))) return;
+                    b.disabled = true;
+                    try {
+                        const r = await api('/api/mail/bulk',
+                            Object.assign({ ids: [...mailSel] }, body));
+                        mailSel.clear();
+                        if (r.skipped && r.skipped.length) {
+                            toastError(r.skipped.length + ' could not be changed: '
+                                + r.skipped.slice(0, 3).map(s => s.why).join(', '));
+                        }
+                    } catch (e) { toastError(e.message); b.disabled = false; return; }
+                    await refreshMailQuiet();
+                };
+                bar.append(b);
+                return b;
+            };
+            run('Claim', { op: 'claim' });
+            if (mailCache.lead) {
+                const pick = document.createElement('select');
+                pick.className = 'mail-presence-pick';
+                const none = document.createElement('option');
+                none.value = ''; none.textContent = 'Assign to...';
+                pick.append(none);
+                (mailCache.team || []).forEach(u => {
+                    const o = document.createElement('option');
+                    o.value = u.uid; o.textContent = u.name; pick.append(o);
+                });
+                pick.onchange = async () => {
+                    if (!pick.value) return;
+                    const uid = pick.value;
+                    pick.disabled = true;
+                    try {
+                        const r = await api('/api/mail/bulk',
+                            { op: 'assign', uid: uid, ids: [...mailSel] });
+                        mailSel.clear();
+                        if (r.skipped && r.skipped.length) {
+                            toastError(r.skipped.length + ' could not be assigned.');
+                        }
+                    } catch (e) { toastError(e.message); pick.disabled = false; return; }
+                    await refreshMailQuiet();
+                };
+                bar.append(pick);
+            }
+            if (mailFilter !== 'done') {
+                run('Mark done', { op: 'state', state: 'done' },
+                    'Mark ' + mailSel.size + ' email' + (mailSel.size === 1 ? '' : 's')
+                    + ' as done? Use this to clear old mail that was dealt with before '
+                    + 'the app existed. They stay searchable under Done.');
+            }
+            const clear = el('button', 'btn', 'Clear');
+            clear.onclick = () => { mailSel.clear(); paintMailBody(); };
+            bar.append(clear);
+            host.append(bar);
+        }
+        function paintMailBody() {
+            const rows = (mailCache.threads || []).filter(mailCardMatches);
+            paintMailBulk(rows);
+            if (mailView === 'board') { paintMailBoard(); return; }
+            const host = $('mail-board-host'); if (!host) return;
+            host.innerHTML = '';
+            if (!rows.length) {
+                const empty = el('div', 'mail-empty');
+                empty.textContent = mailQ ? 'Nothing matches that search.'
+                    : mailFilter === 'done' ? 'Nothing has been marked done yet.'
+                    : mailFilter === 'mine' ? 'You are not holding any email right now.'
+                    : mailFilter === 'unassigned' ? 'Every email has an owner. Good.'
+                    : 'This inbox is clear.';
+                host.append(empty);
+                return;
+            }
+            const list = el('div', 'mlist');
+            rows.forEach(t => list.append(mailRow(t)));
+            host.append(list);
+        }
+        function mailRow(t) {
+            const d = mailCache;
+            const row = el('div', 'mrow'
+                + (t.unread ? ' unread' : '')
+                + (mailSel.has(t.id) ? ' selected' : ''));
+            const cb = document.createElement('input');
+            cb.type = 'checkbox'; cb.className = 'mail-check';
+            cb.checked = mailSel.has(t.id);
+            cb.onclick = (e) => e.stopPropagation();
+            cb.onchange = () => {
+                cb.checked ? mailSel.add(t.id) : mailSel.delete(t.id);
+                paintMailBody();
+            };
+            row.append(cb);
+            const dot = el('span', 'mdot ' + t.state);
+            dot.title = { unassigned: 'Nobody has this yet', assigned: 'Assigned',
+                          progress: 'In progress', waiting: 'Waiting on the customer',
+                          done: 'Done' }[t.state] || '';
+            row.append(dot);
+            row.append(el('span', 'mfrom', t.from_name || t.from_email || ''));
+            const subj = el('span', 'msubj');
+            subj.append(el('b', null, t.subject));
+            if (t.snippet) subj.append(document.createTextNode(' · ' + t.snippet));
+            row.append(subj);
+            if (t.msg_count > 1) row.append(el('span', 'mcount', String(t.msg_count)));
+            if (t.notes) {
+                const n = el('span', 'mnote'); n.innerHTML = I.bookmark;
+                n.title = t.notes + (t.notes === 1 ? ' internal note' : ' internal notes');
+                row.append(n);
+            }
+            if (t.owner) {
+                row.append(el('span', 'mail-owner', t.owner_name || 'Someone'));
+            } else if (t.state !== 'done') {
+                const b = el('button', 'mail-claim', 'Claim');
+                b.onclick = async (e) => {
+                    e.stopPropagation(); b.disabled = true;
+                    try { await mailAct('/api/mail/claim', { id: t.id }); }
+                    catch (err) { toastError(err.message); b.disabled = false; refreshMailQuiet(); }
+                };
+                row.append(b);
+            }
+            const stale = t.state === 'unassigned' && mailHours(t.last_at) > 8;
+            const age = el('span', 'mage' + (stale ? ' hot' : ''), mailAgo(t.last_at));
+            age.title = mailAgoLong(t.last_at);
+            row.append(age);
+            row.onclick = () => openMailThread(t.id);
+            return row;
+        }
+        function mailTextMatches(t) {
+            if (!mailQ) return true;
+            const q = mailQ.toLowerCase();
+            return (t.subject || '').toLowerCase().indexOf(q) >= 0
+                || (t.from_name || '').toLowerCase().indexOf(q) >= 0
+                || (t.from_email || '').toLowerCase().indexOf(q) >= 0;
         }
         function mailCardMatches(t) {
+            /* The list is an inbox: done mail leaves it, the way archived mail
+               leaves Gmail's, and lives under its own filter. */
+            if (mailFilter === 'done') { if (t.state !== 'done') return false; }
+            else if (t.state === 'done') return false;
             if (mailFilter === 'mine' && t.owner !== mailCache.me) return false;
             if (mailFilter === 'unassigned' && t.state !== 'unassigned') return false;
-            if (mailQ) {
-                const q = mailQ.toLowerCase();
-                if ((t.subject || '').toLowerCase().indexOf(q) < 0
-                    && (t.from_name || '').toLowerCase().indexOf(q) < 0
-                    && (t.from_email || '').toLowerCase().indexOf(q) < 0) return false;
-            }
-            return true;
+            return mailTextMatches(t);
+        }
+        function mailBoardMatches(t) {
+            /* The board already separates states into columns, so it must not
+               also hide them by state or the Done column would always be bare. */
+            if (mailFilter === 'mine' && t.owner !== mailCache.me) return false;
+            return mailTextMatches(t);
         }
         function paintMailBoard() {
             const host = $('mail-board-host'); if (!host) return;
@@ -8101,7 +8325,7 @@
             const board = el('div', 'crm-board');
             MAIL_COLS.forEach(([state, label]) => {
                 const col = el('div', 'crm-col');
-                let rows = (d.threads || []).filter(t => t.state === state && mailCardMatches(t));
+                let rows = (d.threads || []).filter(t => t.state === state && mailBoardMatches(t));
                 const total = rows.length;
                 if (state === 'done') rows = rows.slice(0, 30);
                 col.append(el('div', 'crm-col-name', label));

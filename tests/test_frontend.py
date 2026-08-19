@@ -373,6 +373,23 @@ def t_stock_sheet_review_is_editable_and_honest():
 
 
 @test
+def t_inbox_reads_as_a_list_with_bulk_triage():
+    """The merchant's own words after first connecting: it imported all mail,
+    nothing is assigned, and it needs to look like a Gmail inbox. So: rows by
+    default, done mail out of the way, and many-at-once triage."""
+    ok("let mailView = 'list'" in SCRIPT, "the list is what opens, not the board")
+    ok(".mrow {" in HTML and ".mfrom {" in HTML and ".msubj {" in HTML and ".mage {" in HTML,
+       "rows are sender, subject and age, the way an inbox reads")
+    ok(".mrow.unread .mfrom" in HTML, "unopened mail is bold, as in Gmail")
+    ok("'/api/mail/bulk'" in SCRIPT, "many threads can be triaged in one gesture")
+    ok("Select everything shown" in SCRIPT, "including all of them at once")
+    ok("mailFilter = 'open'" in SCRIPT and "mailBoardMatches" in SCRIPT,
+       "done mail leaves the list but must NOT vanish from the board's own column")
+    ok("clear old mail that was dealt with before" in SCRIPT,
+       "and clearing the first import is named for what it is")
+
+
+@test
 def t_inbox_board_owns_every_email():
     """The Inbox tab: five state columns, a claim on every unowned card, the
     who's-doing-what strip with self-set presence, and a collision warning
@@ -408,11 +425,13 @@ def t_inbox_board_owns_every_email():
        "the consent tab opens inside the click, or the popup blocker eats it")
     ok("if (!teamMe || teamMe.role === 'master')" in SCRIPT,
        "an unresolved role must not tell the master to ask an admin")
-    ok("console.cloud.google.com/apis/library/gmail.googleapis.com?project=" in SCRIPT
-       and "console.cloud.google.com/auth/clients?project=" in SCRIPT,
+    ok("console.cloud.google.com/apis/library/gmail.googleapis.com" in SCRIPT
+       and "console.cloud.google.com/auth/clients" in SCRIPT
+       and "'?project=' + encodeURIComponent(su.project)" in SCRIPT,
        "setup links open the project the app ALREADY uses, no hunting")
-    ok("su.redirect_uri" in SCRIPT,
-       "the callback is the server's own value, never retyped by hand")
+    ok("if (d.client && su.redirect_uri)" in SCRIPT,
+       "the callback is the server's own value and never hidden by a "
+       "client id the project parser could not read")
     ok("nothing you have already set up changes" in SCRIPT,
        "and the card promises what it does: two switches, nothing else touched")
 
