@@ -8432,6 +8432,17 @@ async def _mail_sync_now(force: bool = False) -> None:
                     _mail_apply_thread(store, full, addr)
             for tid, t in threads.items():
                 t["in_inbox"] = tid in inbox_ids
+            # Ask Gmail outright which threads are unread rather than trusting
+            # a label on a thread we may not have refetched. Marking an email
+            # unread in Gmail changes almost nothing else about the thread, so
+            # inferring it from our own cached copy is where staleness hides.
+            try:
+                unread_ids = await google_mail.list_thread_ids("in:inbox is:unread")
+                for tid, t in threads.items():
+                    if tid in inbox_ids:
+                        t["unread"] = tid in unread_ids
+            except Exception as e:
+                logger.warning("mail: unread lookup failed, keeping what we had: %s", e)
             _mail_prune(store)
             await _mail_file_folders(store)
             await _mail_label_reconcile(store)

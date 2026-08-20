@@ -230,6 +230,29 @@ async def list_threads(query: str = "in:inbox", max_results: int = 100) -> list:
             for t in (data.get("threads") or []) if t.get("id")]
 
 
+async def list_thread_ids(query: str, max_results: int = 500) -> set:
+    """Just the ids matching a query.
+
+    Used to ask Gmail point blank which threads are unread, rather than
+    inferring it from a label on a thread we may not have refetched. Reading
+    or unreading an email in Gmail changes almost nothing else about the
+    thread, so inference is exactly where staleness hides."""
+    out, token, pages = set(), None, 0
+    while pages < 3:
+        params = {"q": query, "maxResults": max(1, min(int(max_results), 500))}
+        if token:
+            params["pageToken"] = token
+        data = await _call("GET", "threads", params=params)
+        for t in (data.get("threads") or []):
+            if t.get("id"):
+                out.add(str(t["id"]))
+        token = data.get("nextPageToken")
+        pages += 1
+        if not token:
+            break
+    return out
+
+
 def _header(msg: dict, name: str) -> str:
     for h in ((msg.get("payload") or {}).get("headers") or []):
         if str(h.get("name", "")).lower() == name.lower():

@@ -6603,6 +6603,66 @@ def t_mail_unread_backfills_for_threads_that_predate_the_field():
     with_mail(go)
 
 @test
+def t_mail_unread_comes_from_gmail_not_from_our_own_stale_copy():
+    """Marking an email unread in Gmail changes almost nothing else about the
+    thread, so a sync that only refetches CHANGED threads would never notice.
+    The sync asks Gmail which threads are unread, every time."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("u1", subject="One")
+        _seed_thread("u2", subject="Two")
+        copilot._load_mail()["threads"]["u1"]["history_id"] = "h1"
+        copilot._load_mail()["threads"]["u2"]["history_id"] = "h1"
+        queries = []
+        unread = {"ids": set()}
+        async def listing(q, n):
+            queries.append(q)
+            return [{"id": "u1", "snippet": "s", "historyId": "h1"},
+                    {"id": "u2", "snippet": "s", "historyId": "h1"}]
+        async def ids(q, max_results=500):
+            queries.append(q)
+            return set(unread["ids"])
+        saved = (_gm.list_threads, _gm.list_thread_ids)
+        _gm.list_threads, _gm.list_thread_ids = listing, ids
+        try:
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            ok(any("is:unread" in q for q in queries), "Gmail is asked outright")
+            eq(copilot._load_mail()["threads"]["u1"]["unread"], False)
+            # Now it is marked unread in Gmail. Nothing else about the thread
+            # changes: same historyId, no new message.
+            unread["ids"] = {"u2"}
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            eq(copilot._load_mail()["threads"]["u2"]["unread"], True,
+               "the app notices without the thread having changed at all")
+            eq(copilot._load_mail()["threads"]["u1"]["unread"], False)
+            # And reading it in Gmail clears it again.
+            unread["ids"] = set()
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            eq(copilot._load_mail()["threads"]["u2"]["unread"], False)
+        finally:
+            _gm.list_threads, _gm.list_thread_ids = saved
+    with_mail(go)
+
+@test
+def t_mail_unread_survives_being_marked_done():
+    """The backlog-clearing gesture marks everything done. An email marked
+    unread in Gmail afterwards must still be findable, or it is invisible."""
+    def go():
+        ensure_auth()
+        _seed_thread("d1", subject="Cleared then reopened by the customer")
+        post("/api/mail/bulk", {"op": "state", "state": "done", "ids": ["d1"]})
+        copilot._load_mail()["threads"]["d1"]["unread"] = True
+        row = [t for t in post("/api/mail/board", {}).json()["threads"]
+               if t["id"] == "d1"][0]
+        eq(row["state"], "done")
+        ok(row["unread"], "the board still reports it as unread")
+    with_mail(go)
+
+@test
 def t_mail_unread_rides_along_from_gmail():
     def go():
         ensure_auth()

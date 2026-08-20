@@ -423,6 +423,11 @@ def t_inbox_unread_filters_and_claude_reply():
     ok(".mrow.unread { background:" in HTML and "inset 3px 0 0 var(--accent)" in HTML,
        "and is unmistakable: its own tint and edge, not a 100-weight difference")
     ok("'munread', 'New'" in SCRIPT, "with a word, for anyone who cannot see the tint")
+    ok("if (mailFilter === 'unread') {" in SCRIPT and "if (!t.unread) return false;" in SCRIPT,
+       "unread ignores state: a done email marked unread in Gmail is still findable")
+    ok("unread emails are' : ' unread email is'" in SCRIPT
+       or "unread email is' : ' unread emails are'" in SCRIPT,
+       "and a view that hides unread mail says so rather than staying silent")
     ok("File it in a Gmail folder (optional)" in SCRIPT,
        "a filter can file email into a Gmail folder")
     ok("and take it out of the Gmail inbox" in SCRIPT,

@@ -691,6 +691,12 @@
         .mail-bulkbar.armed { border-color: var(--accent-line); background: var(--accent-soft);
             color: var(--accent-ink); }
         .mail-bulk-hint { color: inherit; }
+        .mail-hidden-note { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+            font-size: 12px; color: var(--accent-ink); background: var(--accent-soft);
+            border: 1px solid var(--accent-line); border-radius: 8px;
+            padding: 7px 11px; margin-bottom: 8px; }
+        .linkish { border: 0; background: none; padding: 0; font: inherit; font-size: 12px;
+            font-weight: 600; color: var(--accent-ink); text-decoration: underline; cursor: pointer; }
         .mrule { border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; }
         .mrule-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
         .mrule-name { font-size: 13px; font-weight: 600; color: var(--ink); }
@@ -8145,11 +8151,11 @@
             const top = el('div', 'mail-top');
             const counts = { open: 0, mine: 0, unassigned: 0, unread: 0, done: 0 };
             (d.threads || []).forEach(t => {
+                if (t.unread) counts.unread++;       // whatever state it is in
                 if (t.state === 'done') { counts.done++; return; }
                 counts.open++;
                 if (t.owner === d.me) counts.mine++;
                 if (t.state === 'unassigned') counts.unassigned++;
-                if (t.unread) counts.unread++;
             });
             const lab = (text, n) => text + (n ? ' (' + n + ')' : '');
             top.append(segControl([{ value: 'open', label: lab('Open', counts.open) },
@@ -8316,12 +8322,28 @@
             if (mailView === 'board') { paintMailBoard(); return; }
             const host = $('mail-board-host'); if (!host) return;
             host.innerHTML = '';
+            /* Unread mail this view is hiding gets said out loud, BEFORE the
+               empty state: "this inbox is clear" must never be the last word
+               while unread email sits in Done. */
+            const shown = new Set(rows.map(t => t.id));
+            const hidden = (mailCache.threads || []).filter(t => t.unread && !shown.has(t.id));
+            if (hidden.length && mailFilter !== 'unread') {
+                const note = el('div', 'mail-hidden-note');
+                note.append(document.createTextNode(hidden.length
+                    + (hidden.length === 1 ? ' unread email is' : ' unread emails are')
+                    + ' not in this view. '));
+                const go = el('button', 'linkish', 'Show unread');
+                go.onclick = () => { mailFilter = 'unread'; mailSel.clear(); renderMail(); };
+                note.append(go);
+                host.append(note);
+            }
             if (!rows.length) {
                 const empty = el('div', 'mail-empty');
                 empty.textContent = mailQ ? 'Nothing matches that search.'
                     : mailFilter === 'done' ? 'Nothing has been marked done yet.'
                     : mailFilter === 'mine' ? 'You are not holding any email right now.'
                     : mailFilter === 'unassigned' ? 'Every email has an owner. Good.'
+                    : hidden.length ? 'Nothing open. The unread ones are above.'
                     : 'This inbox is clear.';
                 host.append(empty);
                 return;
@@ -8414,11 +8436,18 @@
         function mailCardMatches(t) {
             /* The list is an inbox: done mail leaves it, the way archived mail
                leaves Gmail's, and lives under its own filter. */
+            if (mailFilter === 'unread') {
+                /* Unread is a property of the EMAIL, not a stage of work. It
+                   deliberately ignores state: an email marked unread in Gmail
+                   is someone saying "look at this again", and hiding it
+                   because the thread was closed is how it goes unanswered. */
+                if (!t.unread) return false;
+                return mailTextMatches(t);
+            }
             if (mailFilter === 'done') { if (t.state !== 'done') return false; }
             else if (t.state === 'done') return false;
             if (mailFilter === 'mine' && t.owner !== mailCache.me) return false;
             if (mailFilter === 'unassigned' && t.state !== 'unassigned') return false;
-            if (mailFilter === 'unread' && !t.unread) return false;
             return mailTextMatches(t);
         }
         function mailBoardMatches(t) {
