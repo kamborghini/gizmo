@@ -425,6 +425,9 @@ def t_inbox_unread_filters_and_claude_reply():
     ok("'munread', 'New'" in SCRIPT, "with a word, for anyone who cannot see the tint")
     ok("if (mailFilter === 'unread') {" in SCRIPT and "if (!t.unread) return false;" in SCRIPT,
        "unread ignores state: a done email marked unread in Gmail is still findable")
+    ok("'/api/mail/read'" in SCRIPT, "read state can be changed from here")
+    ok("'Mark unread'" in SCRIPT and "Puts it back to unread in Gmail too" in SCRIPT,
+       "and an accidental open is one click to undo, in Gmail as well")
     ok("unread emails are' : ' unread email is'" in SCRIPT
        or "unread email is' : ' unread emails are'" in SCRIPT,
        "and a view that hides unread mail says so rather than staying silent")

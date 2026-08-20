@@ -8221,12 +8221,24 @@
             bar.classList.add('armed');
             const count = el('span', 'mail-bulk-hint', mailSel.size + ' selected');
             bar.append(count);
-            const run = (label, body, confirmText) => {
+            const run = (label, body, confirmText, readMode) => {
                 const b = el('button', 'btn', label);
                 b.onclick = async () => {
                     if (confirmText && !(await uiConfirm(confirmText))) return;
                     b.disabled = true;
                     const ids = [...mailSel];
+                    if (readMode !== undefined && readMode !== null) {
+                        /* Read state lives in Gmail, so it takes its own route. */
+                        try {
+                            for (let i = 0; i < ids.length; i += 150) {
+                                await api('/api/mail/read',
+                                    { ids: ids.slice(i, i + 150), unread: !readMode });
+                            }
+                            mailSel.clear();
+                        } catch (e) { toastError(e.message); b.disabled = false; return; }
+                        await refreshMailQuiet();
+                        return;
+                    }
                     /* Sent in batches: the server caps a single request, and
                        clearing a whole backlog is exactly the case where the
                        selection is bigger than that cap. One refusal for the
@@ -8301,6 +8313,8 @@
                     + ' as done? Use this to clear old mail that was dealt with before '
                     + 'the app existed. They stay searchable under Done.');
             }
+            const anyUnread = rows.some(t => mailSel.has(t.id) && t.unread);
+            run(anyUnread ? 'Mark read' : 'Mark unread', null, null, anyUnread);
             const clear = el('button', 'btn', 'Clear');
             clear.onclick = () => { mailSel.clear(); paintMailBody(); };
             bar.append(clear);
@@ -8902,6 +8916,16 @@
                     'a draft was saved into Gmail ' + mailAgoLong(t.draft_at)));
             }
             m.body.append(draftBar);
+            const unreadBtn = el('button', 'btn', 'Mark unread');
+            unreadBtn.title = 'Puts it back to unread in Gmail too';
+            unreadBtn.onclick = async () => {
+                unreadBtn.disabled = true;
+                try { await api('/api/mail/read', { id: t.id, unread: true }); }
+                catch (e) { toastError(e.message); unreadBtn.disabled = false; return; }
+                toastOk('Marked unread in Gmail');
+                refreshMailQuiet();
+            };
+            draftBar.append(unreadBtn);
             const gm = el('a', 'setting-sub', 'Open in Gmail');
             gm.href = 'https://mail.google.com/mail/#all/' + encodeURIComponent(t.id);
             gm.target = '_blank'; gm.rel = 'noopener';

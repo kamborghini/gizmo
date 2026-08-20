@@ -6648,6 +6648,76 @@ def t_mail_unread_comes_from_gmail_not_from_our_own_stale_copy():
     with_mail(go)
 
 @test
+def t_mail_read_state_is_bidirectional_with_gmail():
+    """Reading here marks it read THERE, and back again. Read state belongs
+    to the mailbox, so the Gmail call is what counts and the board follows."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        copilot._load_mail()["threads"]["t1"]["unread"] = True
+        calls = []
+        async def modify(tid, add=None, remove=None):
+            calls.append({"id": tid, "add": add, "remove": remove})
+        saved = _gm.modify_thread
+        _gm.modify_thread = modify
+        try:
+            # Opening the thread in the app marks it read in Gmail.
+            r = post_s(sess, "/api/mail/thread", {"id": "t1"})
+            eq(r.status_code, 200, r.text)
+            eq(calls, [{"id": "t1", "add": None, "remove": ["UNREAD"]}],
+               "Gmail is told, the same as opening it there")
+            eq(copilot._load_mail()["threads"]["t1"]["unread"], False)
+            # Opening it again does not nag Gmail a second time.
+            calls.clear()
+            post_s(sess, "/api/mail/thread", {"id": "t1"})
+            eq(calls, [], "an already-read thread is left alone")
+            # And it can be put back, which is how an accidental open is undone.
+            r2 = post_s(sess, "/api/mail/read", {"id": "t1", "unread": True})
+            eq(r2.status_code, 200, r2.text)
+            eq(calls, [{"id": "t1", "add": ["UNREAD"], "remove": None}])
+            ok(copilot._load_mail()["threads"]["t1"]["unread"])
+        finally:
+            _gm.modify_thread = saved
+    with_mail(go)
+
+@test
+def t_mail_read_reports_when_gmail_refuses():
+    """The board must never claim a read state Gmail did not accept: the two
+    would disagree the moment anybody opened Gmail."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        copilot._load_mail()["threads"]["t1"]["unread"] = True
+        async def boom(tid, add=None, remove=None):
+            raise _gm.GmailError("backend error")
+        saved = _gm.modify_thread
+        _gm.modify_thread = boom
+        try:
+            r = post("/api/mail/read", {"id": "t1", "unread": False})
+            eq(r.status_code, 502, "a refusal is reported, not swallowed")
+            ok(copilot._load_mail()["threads"]["t1"]["unread"],
+               "and the board keeps the state Gmail still holds")
+            # Bulk: some succeed, some do not, and the answer says so.
+            _seed_thread("t2")
+            copilot._load_mail()["threads"]["t2"]["unread"] = True
+            async def half(tid, add=None, remove=None):
+                if tid == "t1":
+                    raise _gm.GmailError("nope")
+            _gm.modify_thread = half
+            r2 = post("/api/mail/read", {"ids": ["t1", "t2"], "unread": False})
+            eq(r2.status_code, 200, r2.text)
+            eq(r2.json()["changed"], 1)
+            eq(r2.json()["failed"], 1)
+            ok(copilot._load_mail()["threads"]["t1"]["unread"], "the failed one is untouched")
+            ok(not copilot._load_mail()["threads"]["t2"]["unread"], "the other one moved")
+        finally:
+            _gm.modify_thread = saved
+    with_mail(go)
+
+@test
 def t_mail_unread_survives_being_marked_done():
     """The backlog-clearing gesture marks everything done. An email marked
     unread in Gmail afterwards must still be findable, or it is invisible."""

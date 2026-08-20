@@ -8477,6 +8477,45 @@ def _mail_want_label(t: dict) -> str:
 MAIL_LABEL_BACKOFF = 600      # a thread that refuses to sync waits this long
 
 
+async def _mail_set_unread(store: dict, ids: list, unread: bool) -> dict:
+    """Mark threads read or unread in GMAIL and on the board together.
+
+    Read state belongs to the mailbox, not to this app: if it only moved
+    here, the two would disagree the moment anybody opened Gmail. So the
+    Gmail call is what counts, and the board follows it. A thread whose
+    call fails keeps its old state rather than showing a lie."""
+    threads = store.get("threads", {})
+    todo = [tid for tid in ids if tid in threads]
+    if not todo:
+        return {"changed": 0, "failed": 0}
+    if not google_mail.connected():
+        return {"changed": 0, "failed": len(todo)}
+    done, failed = 0, 0
+    sem = asyncio.Semaphore(6)
+
+    async def one(tid):
+        nonlocal done, failed
+        async with sem:
+            try:
+                await google_mail.modify_thread(
+                    tid,
+                    add=["UNREAD"] if unread else None,
+                    remove=None if unread else ["UNREAD"])
+                threads[tid]["unread"] = unread
+                done += 1
+            except Exception as e:
+                logger.warning("mail: could not mark %s %s: %s",
+                               tid, "unread" if unread else "read", e)
+                failed += 1
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*(one(t) for t in todo), return_exceptions=True),
+            timeout=12)
+    except asyncio.TimeoutError:
+        logger.warning("mail: read/unread push hit its time budget")
+    return {"changed": done, "failed": failed}
+
+
 async def _mail_file_folders(store: dict, limit: int = 10, budget: float = 5.0) -> None:
     """Put filtered threads into their Gmail folder (label), a few per sync.
 
@@ -10117,6 +10156,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return missing
         # Opening the thread IS the viewing heartbeat: the collision warning
         # never depends on the modal's poll having started.
+        # Opening it here IS reading it, so Gmail is told, the same as if the
+        # person had opened it there. Bounded and best effort: a Gmail hiccup
+        # must not stop somebody looking at their email, and the next sync
+        # re-reads the truth from Gmail anyway.
+        if t.get("unread") and not body.get("peek"):
+            try:
+                await _mail_set_unread(_load_mail(), [t["id"]], False)
+                _write_mail(_load_mail())
+            except Exception:
+                logger.exception("mail: marking read on open failed")
         now = time.monotonic()
         v = _mail_viewers.setdefault(t["id"], {})
         v[who] = now
@@ -10434,6 +10483,34 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "The AI returned nothing. Try again."}, 502)
         _track(who, "mail", "drafted a reply with Claude", (t.get("subject") or "")[:60])
         return _json({"draft": draft})
+
+    @mcp.custom_route("/api/mail/read", methods=["POST"])
+    async def mail_read_route(request: Request):
+        """Mark threads read or unread, in Gmail and here at once.
+
+        Anyone with the Inbox tab may do this: read state is the mailbox's,
+        not the owner's. It is also how somebody undoes an accidental open."""
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        sick = _mail_store_sick()
+        if sick:
+            return sick
+        raw = body.get("ids")
+        ids = [str(x) for x in raw][:200] if isinstance(raw, list) else [str(body.get("id") or "")]
+        ids = [i for i in dict.fromkeys(ids) if i]
+        if not ids:
+            return _json({"error": "Nothing was selected."}, 400)
+        unread = bool(body.get("unread"))
+        out = await _mail_set_unread(_load_mail(), ids, unread)
+        _write_mail(_load_mail())
+        if out["changed"]:
+            _track(who, "mail", "marked " + str(out["changed"]) + " email"
+                   + ("" if out["changed"] == 1 else "s")
+                   + (" unread" if unread else " read"))
+        if out["failed"] and not out["changed"]:
+            return _json({"error": "Gmail would not accept that change. Try again in a moment."}, 502)
+        return _json({"ok": True, **out})
 
     @mcp.custom_route("/api/mail/rules", methods=["POST"])
     async def mail_rules_route(request: Request):
