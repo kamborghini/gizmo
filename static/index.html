@@ -638,6 +638,8 @@
         .mail-msg-from { font-weight: 600; color: var(--ink); }
         .mail-msg-at { margin-left: auto; color: var(--ink-3); }
         .mail-msg-snip { font-size: 12px; color: var(--ink-2); }
+        .mail-msg-full { font-size: 12px; color: var(--ink-2); line-height: 1.55;
+            white-space: pre-wrap; word-break: break-word; }
         .mail-note { background: #fffbea; border: 1px solid #f0e3b0; border-radius: 8px;
             padding: 7px 10px; font-size: 12px; margin-bottom: 6px; }
         .mail-note-meta { color: var(--ink-3); font-size: 11px; margin-bottom: 2px; }
@@ -654,6 +656,7 @@
         .mrow:first-child { border-top: 0; }
         .mrow:hover { background: var(--bg-2); }
         .mrow.selected { background: var(--accent-soft); }
+        .mrow.cursor { box-shadow: inset 0 0 0 2px var(--accent); }
         .mail-check { width: 15px; height: 15px; flex: none; margin: 0; accent-color: var(--accent); cursor: pointer; }
         .mdot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--border-3); }
         .mdot.unassigned { background: #b98900; }
@@ -691,6 +694,30 @@
         .mail-bulkbar.armed { border-color: var(--accent-line); background: var(--accent-soft);
             color: var(--accent-ink); }
         .mail-bulk-hint { color: inherit; }
+        .mail-files { border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
+            margin: 10px 0; background: var(--surface-2); }
+        .mail-file { display: flex; align-items: center; gap: 8px; font-size: 12px;
+            border-top: 0.5px solid var(--line); padding: 6px 0 4px; }
+        .mail-file:first-of-type { border-top: 0; padding-top: 0; }
+        .mail-file-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 500; }
+        .mail-orders { border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
+            margin: 10px 0; background: var(--surface-2); }
+        .mail-orders-head { font-size: 12px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
+        .mail-order { border-top: 0.5px solid var(--line); padding: 7px 0 5px; }
+        .mail-order:first-of-type { border-top: 0; padding-top: 0; }
+        .mail-order-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+        .mail-order-name { font-size: 13px; font-weight: 600; color: var(--accent-ink);
+            text-decoration: none; }
+        .mail-order-name:hover { text-decoration: underline; }
+        .mail-order-stage { font-size: 11px; font-weight: 600; border-radius: 12px; padding: 0 8px; }
+        .mail-order-stage.shipped { background: #e3f4e9; color: #108043; }
+        .mail-order-stage.made { background: var(--accent-soft); color: var(--accent-ink); }
+        .mail-order-stage.in-production { background: #fdf3dd; color: #b98900; }
+        .mail-order-stage.not-started { background: var(--surface-3); color: var(--ink-3); }
+        .mail-order-meta { font-size: 11px; color: var(--ink-3); }
+        .mail-order-track { display: flex; align-items: center; gap: 8px; font-size: 12px;
+            color: var(--ink-2); margin-top: 3px; font-family: ui-monospace, monospace; }
         .mail-hidden-note { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
             font-size: 12px; color: var(--accent-ink); background: var(--accent-soft);
             border: 1px solid var(--accent-line); border-radius: 8px;
@@ -1501,6 +1528,7 @@
         const SV = (inner) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
         const I = {
             mail: SV('<rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>'),
+            clip: SV('<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>'),
             copy: SV('<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>'),
             phone: SV('<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>'),
             cal: SV('<rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line>'),
@@ -7950,6 +7978,7 @@
            it, and five columns of that is a wall, not a view. The board stays
            one click away for seeing how work is spread across people. */
         let mailView = 'list';
+        let mailFound = null;   /* a whole-mailbox search result set, when one is showing */
         const mailSel = new Set();
         const MAIL_COLS = [['unassigned', 'Unassigned'], ['assigned', 'Assigned'],
                            ['progress', 'In progress'], ['waiting', 'Waiting on customer'],
@@ -7971,6 +8000,35 @@
             const a = mailAgo(iso);
             return a === 'now' ? 'just now' : a ? a + ' ago' : '';
         }
+        let mailCursor = -1;
+        function mailRowsOnScreen() { return [...document.querySelectorAll('#mail-board-host .mrow')]; }
+        function mailMoveCursor(delta) {
+            const rows = mailRowsOnScreen();
+            if (!rows.length) return;
+            rows.forEach(r => r.classList.remove('cursor'));
+            mailCursor = Math.max(0, Math.min(rows.length - 1, mailCursor + delta));
+            const row = rows[mailCursor];
+            row.classList.add('cursor');
+            row.scrollIntoView({ block: 'nearest' });
+        }
+        document.addEventListener('keydown', (e) => {
+            if (!document.querySelector('#view-mail.active')) return;
+            if (document.querySelector('.modal-overlay.show')) return;
+            const a = document.activeElement;
+            if (a && ['INPUT', 'SELECT', 'TEXTAREA'].indexOf(a.tagName) >= 0) {
+                if (e.key === 'Escape') a.blur();
+                return;
+            }
+            if (e.metaKey || e.ctrlKey || e.altKey) return;
+            const rows = mailRowsOnScreen();
+            const cur = rows[mailCursor];
+            if (e.key === 'j') { e.preventDefault(); mailMoveCursor(mailCursor < 0 ? 0 : 1); }
+            else if (e.key === 'k') { e.preventDefault(); mailMoveCursor(-1); }
+            else if (e.key === '/') { e.preventDefault(); const s = document.querySelector('.mail-search'); if (s) s.focus(); }
+            else if (e.key === 'x' && cur) { e.preventDefault(); const cb = cur.querySelector('.mail-check'); cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
+            else if ((e.key === 'o' || e.key === 'Enter') && cur) { e.preventDefault(); cur.click(); }
+            else if (e.key === 'c' && cur) { e.preventDefault(); const b = cur.querySelector('.mail-claim'); if (b) b.click(); }
+        });
         function showMailView() {
             if (mailCache) { renderMail(); refreshMailQuiet(); } else { loadMail(); }
             if (!mailTimer) mailTimer = setInterval(() => {
@@ -8167,7 +8225,21 @@
             const search = document.createElement('input');
             search.type = 'search'; search.className = 'disp-text mail-search';
             search.placeholder = 'Search sender or subject'; search.value = mailQ;
-            search.oninput = () => { mailQ = search.value; paintMailBody(); };
+            search.oninput = () => { mailQ = search.value; mailFound = null; paintMailBody(); };
+            search.onkeydown = async (e) => {
+                if (e.key !== 'Enter') return;
+                const q = search.value.trim();
+                if (!q) { mailFound = null; paintMailBody(); return; }
+                search.disabled = true;
+                try {
+                    const r = await api('/api/mail/search', { q: q });
+                    mailFound = { q: q, rows: r.results || [] };
+                } catch (err) { toastError(err.message); }
+                search.disabled = false;
+                paintMailBody();
+                search.focus();
+            };
+            search.placeholder = 'Search, then Enter for the whole mailbox';
             top.append(search);
             const sync = el('span', 'mail-sync' + (d.sync_error ? ' err' : ''),
                 d.sync_error ? 'Sync problem: ' + d.sync_error
@@ -8245,7 +8317,7 @@
                        entire pile, with no way to trim it, would strand the
                        person on the one action this feature exists for. */
                     const CHUNK = 150;
-                    let changed = 0, skipped = [];
+                    let changed = 0, skipped = [], undoToken = '', what = '';
                     try {
                         for (let i = 0; i < ids.length; i += CHUNK) {
                             if (ids.length > CHUNK) {
@@ -8256,6 +8328,7 @@
                                 Object.assign({ ids: ids.slice(i, i + CHUNK) }, body));
                             changed += (r.changed || 0);
                             if (r.skipped) skipped = skipped.concat(r.skipped);
+                            if (r.undo) { undoToken = r.undo; what = r.what || 'that'; }
                         }
                         mailSel.clear();
                     } catch (e) {
@@ -8270,6 +8343,7 @@
                         toastError(skipped.length + ' could not be changed: '
                             + skipped.slice(0, 3).map(s => s.why).join(', '));
                     }
+                    if (undoToken && changed) mailOfferUndo(undoToken, changed, what);
                     await refreshMailQuiet();
                 };
                 bar.append(b);
@@ -8284,7 +8358,7 @@
                 const none = document.createElement('option');
                 none.value = ''; none.textContent = 'Assign to...';
                 pick.append(none);
-                (mailCache.team || []).forEach(u => {
+                (mailCache.team || []).filter(u => u.can_own !== false).forEach(u => {
                     const o = document.createElement('option');
                     o.value = u.uid; o.textContent = u.name; pick.append(o);
                 });
@@ -8321,6 +8395,7 @@
             host.append(bar);
         }
         function paintMailBody() {
+            if (mailFound) { paintMailSearch(); return; }
             const rows = (mailCache.threads || []).filter(mailCardMatches);
             /* Anything nobody has opened rises to the top. The board already
                arrives newest-first, so within each group the order is
@@ -8366,6 +8441,47 @@
             rows.forEach(t => list.append(mailRow(t)));
             host.append(list);
         }
+        function mailOfferUndo(token, n, what) {
+            /* One mis-click can move 150 emails. The offer is short-lived and
+               deliberately loud, because it is only useful in the seconds
+               after somebody realises. */
+            const host = $('mail-bulk-host'); if (!host) return;
+            const bar = el('div', 'mail-hidden-note');
+            bar.append(document.createTextNode(
+                n + ' email' + (n === 1 ? '' : 's') + ' ' + what + '. '));
+            const go = el('button', 'linkish', 'Undo');
+            go.onclick = async () => {
+                go.disabled = true;
+                try { await api('/api/mail/undo', { token: token }); toastOk('Put back'); }
+                catch (e) { toastError(e.message); }
+                bar.remove();
+                refreshMailQuiet();
+            };
+            bar.append(go);
+            host.prepend(bar);
+            setTimeout(() => bar.remove(), 30000);
+        }
+        function paintMailSearch() {
+            const host = $('mail-board-host'); if (!host) return;
+            $('mail-bulk-host').innerHTML = '';
+            host.innerHTML = '';
+            const bar = el('div', 'mail-hidden-note');
+            const n = mailFound.rows.length;
+            bar.append(document.createTextNode(
+                (n === 40 ? '40+' : n) + ' result' + (n === 1 ? '' : 's')
+                + ' in the whole mailbox for "' + mailFound.q + '". '));
+            const back = el('button', 'linkish', 'Back to the board');
+            back.onclick = () => {
+                mailFound = null; mailQ = '';
+                renderMail();
+            };
+            bar.append(back);
+            host.append(bar);
+            if (!n) { host.append(el('div', 'mail-empty', 'Gmail found nothing for that.')); return; }
+            const list = el('div', 'mlist');
+            mailFound.rows.forEach(t => list.append(mailRow(t)));
+            host.append(list);
+        }
         function mailRow(t) {
             const d = mailCache;
             const row = el('div', 'mrow'
@@ -8400,6 +8516,11 @@
             if (t.snippet) subj.append(document.createTextNode(' · ' + t.snippet));
             row.append(subj);
             if (t.msg_count > 1) row.append(el('span', 'mcount', String(t.msg_count)));
+            if (t.files) {
+                const cl = el('span', 'mnote'); cl.innerHTML = I.clip;
+                cl.title = t.files + (t.files === 1 ? ' attachment' : ' attachments');
+                row.append(cl);
+            }
             if (t.folder) {
                 const ft = el('span', 'mrule-tag', t.folder);
                 ft.title = 'Filed in the Gmail folder "' + t.folder + '"';
@@ -8432,6 +8553,11 @@
                     catch (err) { toastError(err.message); b.disabled = false; refreshMailQuiet(); }
                 };
                 row.append(b);
+            }
+            if (t.archive) {
+                const a = el('span', 'mrule-tag', 'archive');
+                a.title = 'Older than the board keeps. Read only.';
+                row.append(a);
             }
             const stale = t.state === 'unassigned' && mailHours(t.last_at) > 8;
             const age = el('span', 'mage' + (stale ? ' hot' : ''), mailAgo(t.last_at));
@@ -8810,10 +8936,14 @@
             const save = el('button', 'btn btn-primary', 'Save to Gmail as a draft');
             save.onclick = async () => {
                 save.disabled = true;
+                let res;
                 try {
-                    await api('/api/mail/draft', { id: t.id, op: 'save', text: ta.value });
+                    res = await api('/api/mail/draft', { id: t.id, op: 'save', text: ta.value });
                 } catch (e) { toastError(e.message); save.disabled = false; return; }
-                toastOk('Saved into Gmail. Open the conversation there to check it and send.');
+                toastOk(res && res.kept_previous
+                    ? 'Saved. Your earlier draft had been edited in Gmail, so that one was '
+                      + 'kept too: there are now two drafts on this conversation.'
+                    : 'Saved into Gmail. Open the conversation there to check it and send.');
                 host.remove();
                 refreshMailQuiet();
             };
@@ -8838,6 +8968,59 @@
             host.append(steer);
             host.append(el('div', 'setting-sub',
                 'Saving puts it in Gmail as a draft. Nothing is sent: you send it yourself.'));
+        }
+
+        async function mailLoadOrders(host, t, m) {
+            let r;
+            try { r = await api('/api/mail/orders', { id: t.id }); }
+            catch (e) { return; }                 /* context is a bonus, never a blocker */
+            const list = (r.orders || []);
+            if (!list.length) {
+                if (r.error) host.append(el('div', 'setting-sub', r.error));
+                return;
+            }
+            const head = el('div', 'mail-orders-head');
+            head.textContent = (r.customer && r.customer.name ? r.customer.name : 'This sender')
+                + (r.customer && r.customer.orders_count
+                    ? '  ·  ' + r.customer.orders_count + ' order'
+                      + (r.customer.orders_count === 1 ? '' : 's') + ' with us' : '');
+            host.append(head);
+            list.forEach(o => {
+                const row = el('div', 'mail-order');
+                const top = el('div', 'mail-order-top');
+                const a = el('a', 'mail-order-name', o.name || 'Order');
+                a.href = o.admin_url; a.target = '_blank'; a.rel = 'noopener';
+                top.append(a);
+                const stage = o.tracking ? 'shipped' : o.made_at ? 'made'
+                    : o.printed_at ? 'in production' : 'not started';
+                top.append(el('span', 'mail-order-stage ' + stage.replace(/ /g, '-'), stage));
+                if (o.total) top.append(el('span', 'mail-order-meta',
+                    (o.currency === 'GBP' ? '£' : '') + o.total));
+                top.append(el('span', 'mail-order-meta', (o.at || '').slice(0, 10)));
+                row.append(top);
+                if (o.tracking) {
+                    const tr = el('div', 'mail-order-track');
+                    tr.append(el('span', null, (o.carrier || 'Courier') + '  ' + o.tracking));
+                    const cp = el('button', 'linkish', 'Copy');
+                    cp.onclick = async () => {
+                        try { await navigator.clipboard.writeText(o.tracking); toastOk('Tracking copied'); }
+                        catch (e) { toastError('Could not copy. Select it by hand.'); }
+                    };
+                    tr.append(cp);
+                    row.append(tr);
+                }
+                const use = el('button', 'linkish', 'Put this in the reply');
+                use.onclick = () => {
+                    const ta = m.body.querySelector('.mail-draft textarea');
+                    const line = o.sentence.charAt(0).toUpperCase() + o.sentence.slice(1) + '.';
+                    if (ta) { ta.value = (ta.value ? ta.value + '\n\n' : '') + line; ta.focus(); }
+                    else { navigator.clipboard.writeText(line).then(
+                        () => toastOk('Copied. Press Compose reply with Claude to write around it.'),
+                        () => toastError('Could not copy.')); }
+                };
+                row.append(use);
+                host.append(row);
+            });
         }
 
         function mailModal(title) {
@@ -8926,8 +9109,52 @@
                 refreshMailQuiet();
             };
             draftBar.append(unreadBtn);
+            if ((t.files || []).length) {
+                const fbox = el('div', 'mail-files');
+                fbox.append(el('div', 'mail-orders-head',
+                    t.files.length + (t.files.length === 1 ? ' attachment' : ' attachments')));
+                t.files.forEach(f => {
+                    const row = el('div', 'mail-file');
+                    const nm = el('span', 'mail-file-name', f.name);
+                    const kb = f.size > 1048576 ? (f.size / 1048576).toFixed(1) + ' MB'
+                        : Math.max(1, Math.round(f.size / 1024)) + ' KB';
+                    row.append(nm, el('span', 'mail-order-meta', kb));
+                    const already = (t.saved_files || []).some(x => x.name === f.name);
+                    if (already) {
+                        row.append(el('span', 'mail-order-stage made', 'saved'));
+                    } else {
+                        const save = el('button', 'linkish', 'Save to Files');
+                        save.onclick = async () => {
+                            const where = prompt('Save "' + f.name + '" into which folder?\n'
+                                + 'Use a slash for folders inside folders.', 'Artwork');
+                            if (where === null) return;
+                            save.disabled = true; save.textContent = 'Saving...';
+                            try {
+                                const r = await api('/api/mail/attachment',
+                                    { id: t.id, msg: f.msg, att: f.id, name: f.name, folder: where });
+                                toastOk('Saved to ' + r.where + '. It is on the Finder drive now.');
+                                save.replaceWith(el('span', 'mail-order-stage made', 'saved'));
+                            } catch (e) {
+                                toastError(e.message);
+                                save.disabled = false; save.textContent = 'Save to Files';
+                            }
+                        };
+                        row.append(save);
+                    }
+                    fbox.append(row);
+                });
+                m.body.append(fbox);
+            }
+            /* What this app knows that Gmail cannot: their orders, whether we
+               made them, and whether they shipped. Loaded after the thread so
+               a slow Shopify never holds up reading the email. */
+            const orders = el('div', 'mail-orders');
+            m.body.append(orders);
+            mailLoadOrders(orders, t, m);
             const gm = el('a', 'setting-sub', 'Open in Gmail');
-            gm.href = 'https://mail.google.com/mail/#all/' + encodeURIComponent(t.id);
+            gm.href = 'https://mail.google.com/mail/u/?authuser='
+                + encodeURIComponent(mailCache.address || '')
+                + '#all/' + encodeURIComponent(t.id);
             gm.target = '_blank'; gm.rel = 'noopener';
             gm.style.cssText = 'display:inline-block;margin:4px 0;color:var(--accent)';
             m.body.append(gm);
@@ -9015,6 +9242,34 @@
                 box.append(h, el('div', 'mail-msg-snip', msg.snippet || ''));
                 msgs.append(box);
             });
+            /* Previews are all the board stores. The real text is fetched on
+               demand and never kept: it is customer correspondence, and the
+               board has no need to hold it. */
+            const full = el('button', 'linkish', 'Read the full emails');
+            full.onclick = async () => {
+                full.disabled = true; full.textContent = 'Reading\u2026';
+                let r;
+                try { r = await api('/api/mail/body', { id: t.id, archive: !!t.archive }); }
+                catch (e) {
+                    toastError(e.message);
+                    full.disabled = false; full.textContent = 'Read the full emails';
+                    return;
+                }
+                msgs.innerHTML = '';
+                (r.messages || []).forEach(msg => {
+                    const box = el('div', 'mail-msg' + (msg.ours ? ' ours' : ''));
+                    const h = el('div', 'mail-msg-head');
+                    h.append(el('span', 'mail-msg-from', msg.from_name || msg.from_email || ''),
+                             el('span', 'mail-msg-at', mailAgoLong(msg.at)));
+                    const bodyEl = el('div', 'mail-msg-full');
+                    bodyEl.textContent = msg.text || '(no text in this message)';
+                    box.append(h, bodyEl);
+                    msgs.append(box);
+                });
+                full.remove();
+                msgs.style.maxHeight = '360px';
+            };
+            m.body.append(full);
             m.body.append(msgs);
             msgs.scrollTop = msgs.scrollHeight;
             /* ---- internal notes ---- */

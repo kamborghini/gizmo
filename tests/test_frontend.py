@@ -428,6 +428,18 @@ def t_inbox_unread_filters_and_claude_reply():
     ok("'/api/mail/read'" in SCRIPT, "read state can be changed from here")
     ok("'Mark unread'" in SCRIPT and "Puts it back to unread in Gmail too" in SCRIPT,
        "and an accidental open is one click to undo, in Gmail as well")
+    ok("'/api/mail/orders'" in SCRIPT and "mail-order-track" in HTML,
+       "the order, whether we made it and its tracking sit beside the email")
+    ok("Put this in the reply" in SCRIPT, "and drop into the draft in one click")
+    ok("'/api/mail/attachment'" in SCRIPT and "Save to Files" in SCRIPT,
+       "artwork goes from the email to the Finder drive in one click")
+    ok("'/api/mail/search'" in SCRIPT and "for the whole mailbox" in SCRIPT,
+       "search asks Gmail rather than filtering our own previews")
+    ok("'/api/mail/body'" in SCRIPT and "Read the full emails" in SCRIPT,
+       "the real text can be read here, fetched on demand and not stored")
+    ok("'/api/mail/undo'" in SCRIPT, "a bulk action can be put back")
+    ok("e.key === 'j'" in SCRIPT and "e.key === 'k'" in SCRIPT,
+       "and the keyboard works for people who live in the list")
     ok("unread emails are' : ' unread email is'" in SCRIPT
        or "unread email is' : ' unread emails are'" in SCRIPT,
        "and a view that hides unread mail says so rather than staying silent")

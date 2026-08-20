@@ -277,9 +277,11 @@ def _msg_time(msg: dict) -> str:
 async def get_thread(thread_id: str) -> dict:
     """Normalized thread: subject + per-message sender/time/snippet. Metadata
     format only; bodies stay in Gmail where replies happen."""
-    data = await _call("GET", f"threads/{thread_id}",
-                       params={"format": "metadata",
-                               "metadataHeaders": ["From", "Subject", "Date"]})
+    # format=full rather than metadata: metadata omits the part tree, so the
+    # app could not tell an email with artwork attached from one without.
+    # Bodies are ignored here; only names and sizes are read, and attachment
+    # bytes stay behind their attachmentId either way.
+    data = await _call("GET", f"threads/{thread_id}", params={"format": "full"})
     msgs = []
     subject = ""
     for m in (data.get("messages") or []):
@@ -291,8 +293,13 @@ async def get_thread(thread_id: str) -> dict:
             continue
         name, email = parseaddr(_header(m, "From"))
         subject = subject or _header(m, "Subject")
+        files: list = []
+        _walk_files(m.get("payload") or {}, files)
+        for f in files:
+            f["msg"] = str(m.get("id") or "")
         msgs.append({"id": str(m.get("id") or ""),
                      "from_name": name or email, "from_email": email.lower(),
+                     "files": [f for f in files if f["id"]][:20],
                      "at": _msg_time(m),
                      # Gmail's own labels ride along so the list can bold what
                      # nobody has opened yet, the way an inbox is read.
@@ -334,6 +341,23 @@ def _b64url(data: str, charset: str = "") -> str:
         except (UnicodeDecodeError, LookupError):
             continue
     return raw.decode("utf-8", "replace")
+
+
+def _walk_files(part: dict, out: list) -> None:
+    """Attachment names and sizes from the part tree. The BYTES are never
+    touched here: an attachmentId is a pointer, and fetching it is a separate,
+    deliberate act (a 20MB artwork file has no business in a board refresh)."""
+    name = str(part.get("filename") or "").strip()
+    body = part.get("body") or {}
+    if name:
+        out.append({"name": name[:200],
+                    "size": int(body.get("size") or 0),
+                    "mime": str(part.get("mimeType") or "").split(";")[0].strip(),
+                    "id": str(body.get("attachmentId") or ""),
+                    "msg": ""})
+        return                       # do not descend into an attached .eml
+    for k in (part.get("parts") or []):
+        _walk_files(k, out)
 
 
 def _walk_body(part: dict, out: dict) -> None:
@@ -406,6 +430,17 @@ async def read_thread(thread_id: str, per_msg_chars: int = 4000) -> dict:
     return {"id": str(data.get("id") or thread_id), "messages": msgs}
 
 
+async def draft_body(draft_id: str) -> str:
+    """The current text of a draft, so a replace can tell whether the person
+    rewrote it in Gmail first. Deleting somebody's edited reply because they
+    pressed Save twice is not a trade worth making."""
+    data = await _call("GET", f"drafts/{draft_id}", params={"format": "full"})
+    payload = ((data.get("message") or {}).get("payload")) or {}
+    found: dict = {}
+    _walk_body(payload, found)
+    return (found.get("plain") or _strip_html(found.get("html") or "") or "").strip()
+
+
 async def delete_draft(draft_id: str) -> None:
     """Best effort: a leftover draft is clutter, not a crisis."""
     try:
@@ -462,6 +497,21 @@ async def create_draft(thread_id: str, to_addr: str, subject: str, body_text: st
         # near-identical ones that all look ready to send.
         await delete_draft(replaces)
     return {"id": str(out.get("id") or ""), "thread_id": landed or str(thread_id)}
+
+
+async def attachment_bytes(message_id: str, attachment_id: str, cap: int = 25 * 1024 * 1024) -> bytes:
+    """One attachment's bytes, fetched deliberately and capped."""
+    import base64
+    data = await _call("GET", f"messages/{message_id}/attachments/{attachment_id}")
+    size = int(data.get("size") or 0)
+    if size > cap:
+        raise GmailError("That file is " + str(round(size / 1048576, 1))
+                         + "MB, which is too big to bring across. Save it from Gmail.")
+    raw = str(data.get("data") or "")
+    out = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+    if len(out) > cap:
+        raise GmailError("That file is too big to bring across.")
+    return out
 
 
 async def modify_thread(thread_id: str, add: list = None, remove: list = None) -> None:

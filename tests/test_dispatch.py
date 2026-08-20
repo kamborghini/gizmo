@@ -4076,6 +4076,12 @@ class FakeS3:
     def delete_object(self, Bucket, Key):
         self._guard("delete_object")
         self.objects.pop(Key, None)
+    def upload_fileobj(self, Fileobj, Bucket, Key):
+        self._guard("upload_fileobj")
+        data = Fileobj.read()
+        self.objects[Key] = len(data)
+        self.bodies = getattr(self, "bodies", {})
+        self.bodies[Key] = data
 
 def with_files(fn, configured=True, s3=None):
     """Run fn(fake_s3) with the file store configured against a fake bucket."""
@@ -6034,7 +6040,7 @@ def t_mail_draft_is_saved_never_sent_and_threaded_to_the_customer():
             captured.update({"thread_id": thread_id, "to": to_addr, "subject": subject,
                              "body": body_text, "irt": in_reply_to, "replaces": replaces})
             return {"id": "d%d" % (len(captured.get("ids", [])) + 1), "thread_id": thread_id}
-        saved = (_gm.read_thread, _gm.create_draft)
+        saved = (_gm.read_thread, _gm.create_draft, _gm.draft_body)
         _gm.read_thread, _gm.create_draft = fake_read, fake_draft
         try:
             r = post_s(sess, "/api/mail/draft", {"id": "t1", "op": "save",
@@ -6050,10 +6056,21 @@ def t_mail_draft_is_saved_never_sent_and_threaded_to_the_customer():
             eq(post_s(sess, "/api/mail/draft", {"id": "t1", "op": "save", "text": ""}).status_code,
                400, "an empty draft is not saved")
             # Saving again REPLACES: one draft per conversation, not a pile.
-            post_s(sess, "/api/mail/draft", {"id": "t1", "op": "save", "text": "Second go."})
+            async def unchanged(draft_id):
+                return "Hello Jo, they ship Friday."     # still exactly ours
+            _gm.draft_body = unchanged
+            r2 = post_s(sess, "/api/mail/draft", {"id": "t1", "op": "save", "text": "Second go."})
             eq(captured["replaces"], "d1", "the previous draft is cleared up")
+            ok(not r2.json().get("kept_previous"))
+            # But a draft the person rewrote IN GMAIL is never deleted.
+            async def edited(draft_id):
+                return "I rewrote this myself in Gmail."
+            _gm.draft_body = edited
+            r3 = post_s(sess, "/api/mail/draft", {"id": "t1", "op": "save", "text": "Third go."})
+            eq(captured["replaces"], "", "their edited version is left alone")
+            ok(r3.json()["kept_previous"], "and the app says so rather than pretending")
         finally:
-            _gm.read_thread, _gm.create_draft = saved
+            _gm.read_thread, _gm.create_draft, _gm.draft_body = saved
     with_mail(go)
 
 @test
@@ -6645,6 +6662,154 @@ def t_mail_unread_comes_from_gmail_not_from_our_own_stale_copy():
             eq(copilot._load_mail()["threads"]["u2"]["unread"], False)
         finally:
             _gm.list_threads, _gm.list_thread_ids = saved
+    with_mail(go)
+
+@test
+def t_mail_bulk_can_be_undone():
+    """One mis-click moves 150 emails. That has to be recoverable."""
+    def go():
+        ensure_auth()
+        uid_a, sess_a, _ = ready_user("Ann", "ann")
+        _uid_b, sess_b, _ = ready_user("Bob", "bob")
+        for i in range(3):
+            _seed_thread("u%d" % i)
+        post_s(sess_a, "/api/mail/bulk", {"op": "claim", "ids": ["u0", "u1", "u2"]})
+        post_s(sess_a, "/api/mail/state", {"id": "u0", "state": "waiting"})
+        r = post_s(sess_a, "/api/mail/bulk", {"op": "state", "state": "done",
+                                              "ids": ["u0", "u1", "u2"]})
+        eq(r.status_code, 200, r.text)
+        token = r.json()["undo"]
+        ok(token, "an undo is offered")
+        eq(copilot._load_mail()["threads"]["u0"]["state"], "done")
+        eq(post_s(sess_b, "/api/mail/undo", {"token": token}).status_code, 403,
+           "somebody else's mis-click is not theirs to undo")
+        u = post_s(sess_a, "/api/mail/undo", {"token": token})
+        eq(u.status_code, 200, u.text)
+        eq(u.json()["restored"], 3)
+        th = copilot._load_mail()["threads"]
+        eq(th["u0"]["state"], "waiting", "the exact state before, not a guess at it")
+        eq(th["u0"]["owner"], uid_a)
+        eq(th["u1"]["state"], "assigned", "and the ones she had just claimed are back to that")
+        eq(post_s(sess_a, "/api/mail/undo", {"token": token}).status_code, 404,
+           "an undo is a second chance, not a version history")
+    with_mail(go)
+
+@test
+def t_mail_attachments_are_listed_without_touching_the_bytes():
+    """A 20MB artwork file has no business in a board refresh: the listing
+    reads names and sizes from the part tree, never the bytes."""
+    import base64 as _b64
+    enc = lambda x: _b64.urlsafe_b64encode(x.encode()).decode().rstrip("=")
+    payload = {"mimeType": "multipart/mixed", "headers": [
+        {"name": "From", "value": "Jo <jo@customer.com>"},
+        {"name": "Subject", "value": "Artwork attached"}], "parts": [
+        {"mimeType": "text/plain", "body": {"data": enc("here is the logo")}},
+        {"mimeType": "application/postscript", "filename": "logo.eps",
+         "body": {"attachmentId": "att1", "size": 240000}},
+        {"mimeType": "message/rfc822", "filename": "forwarded.eml", "parts": [
+            {"mimeType": "image/png", "filename": "inner.png",
+             "body": {"attachmentId": "att9", "size": 10}}]}]}
+    files = []
+    _gm._walk_files(payload, files)
+    names = [f["name"] for f in files]
+    eq(names, ["logo.eps", "forwarded.eml"],
+       "the attached email is one file, not a door into its contents")
+    eq(files[0]["size"], 240000)
+    ok(all("data" not in f for f in files), "no bytes are carried")
+
+@test
+def t_mail_attachment_save_lands_in_the_files_store():
+    def go():
+        ensure_auth()
+        def inner(fake):
+            _seed_thread("t1")
+            copilot._load_mail()["threads"]["t1"]["files"] = [
+                {"name": "logo.eps", "size": 12, "mime": "application/postscript",
+                 "id": "att1", "msg": "m1"}]
+            async def bytes_for(msg_id, att_id, cap=None):
+                eq((msg_id, att_id), ("m1", "att1"))
+                return b"EPS-BYTES"
+            saved = _gm.attachment_bytes
+            _gm.attachment_bytes = bytes_for
+            try:
+                r = post("/api/mail/attachment", {"id": "t1", "msg": "m1", "att": "att1",
+                                                  "name": "logo.eps", "folder": "Artwork/#1201"})
+                eq(r.status_code, 200, r.text)
+                eq(r.json()["where"], "Artwork/#1201")
+                d = copilot._load_files()
+                rec = [f for f in d["files"].values() if f["name"] == "logo.eps"]
+                eq(len(rec), 1, "one file record")
+                eq(rec[0]["status"], "active")
+                # The folders were made on the way, so nobody has to first.
+                names = [f["name"] for f in d["folders"].values()]
+                ok("Artwork" in names and "#1201" in names, names)
+                t = copilot._load_mail()["threads"]["t1"]
+                ok(any(x["name"] == "logo.eps" for x in t.get("saved_files") or []),
+                   "the thread records that it was filed")
+                ok(any("logo.eps" in a["action"] for a in t["activity"]))
+            finally:
+                _gm.attachment_bytes = saved
+        with_files(inner)
+    with_mail(go)
+
+@test
+def t_mail_order_context_matches_only_the_exact_sender():
+    """Showing one customer another customer's address and tracking is the
+    failure that matters here, so the match is the exact address or nothing."""
+    def go():
+        ensure_auth()
+        _seed_thread("t1", frm=("Jo Bloggs", "jo@customer.com"))
+        calls = []
+        async def fake_tool(reg, name, args):
+            calls.append((name, args))
+            if name == "shopify_search_customers":
+                # Shopify search is fuzzy and returns near misses: the route
+                # must throw those away rather than trust the first row.
+                return {"customers": [
+                    {"id": 9, "email": "jo@customer.com.evil.net", "first_name": "Not", "last_name": "Them"},
+                    {"id": 1, "email": "Jo@Customer.com", "first_name": "Jo", "last_name": "Bloggs",
+                     "orders_count": 3, "total_spent": "740.00"}]}
+            return {"orders": [
+                {"id": 501, "name": "#1201", "created_at": "2026-08-10T09:00:00Z",
+                 "total_price": "248.00", "currency": "GBP"},
+                {"id": 502, "name": "#1188", "created_at": "2026-07-02T09:00:00Z",
+                 "total_price": "96.00", "currency": "GBP"}]}
+        saved = copilot._tool_json
+        copilot._tool_json = fake_tool
+        prod = copilot._load_prod_state()
+        disp = copilot._load_dispatch()
+        try:
+            prod["501"] = {"made_at": "2026-08-12T10:00:00Z", "printed_at": "2026-08-11T10:00:00Z"}
+            disp["501"] = {"tracking_number": "4512339981", "carrier_label": "DPD",
+                           "dispatched_at": "2026-08-13T10:00:00Z"}
+            copilot._write_prod_state(prod)
+            copilot._write_dispatch(disp)
+            r = post("/api/mail/orders", {"id": "t1"})
+            eq(r.status_code, 200, r.text)
+            j = r.json()
+            eq(j["customer"]["name"], "Jo Bloggs", "the lookalike address was discarded")
+            eq(len(j["orders"]), 2)
+            top = j["orders"][0]
+            eq(top["name"], "#1201")
+            eq(top["tracking"], "4512339981", "what WE know, not just what Shopify knows")
+            ok("shipped" in top["sentence"] and "DPD" in top["sentence"], top["sentence"])
+            ok("not yet in production" in j["orders"][1]["sentence"], j["orders"][1]["sentence"])
+            # A sender we have never traded with produces nothing, not a guess.
+            _seed_thread("t2", frm=("Stranger", "nobody@elsewhere.com"))
+            eq(post("/api/mail/orders", {"id": "t2"}).json()["orders"], [])
+        finally:
+            copilot._tool_json = saved
+    with_mail(go)
+
+@test
+def t_mail_order_context_honours_the_customers_tab():
+    def go():
+        ensure_auth()
+        uid, sess, _ = ready_user("Ann", "ann")
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["mail"]})
+        _seed_thread("t1")
+        eq(post_s(sess, "/api/mail/orders", {"id": "t1"}).json()["orders"], [],
+           "no customers tab, no order history through the side door")
     with_mail(go)
 
 @test
