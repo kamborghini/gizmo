@@ -8027,7 +8027,7 @@
             else if (e.key === '/') { e.preventDefault(); const s = document.querySelector('.mail-search'); if (s) s.focus(); }
             else if (e.key === 'x' && cur) { e.preventDefault(); const cb = cur.querySelector('.mail-check'); cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
             else if ((e.key === 'o' || e.key === 'Enter') && cur) { e.preventDefault(); cur.click(); }
-            else if (e.key === 'c' && cur) { e.preventDefault(); const b = cur.querySelector('.mail-claim'); if (b) b.click(); }
+            else if (e.key === 'c' && cur) { e.preventDefault(); const b = cur.querySelector('.mail-claim'); if (b && !b.disabled) b.click(); }
         });
         function showMailView() {
             if (mailCache) { renderMail(); refreshMailQuiet(); } else { loadMail(); }
@@ -8490,6 +8490,7 @@
             const cb = document.createElement('input');
             cb.type = 'checkbox'; cb.className = 'mail-check';
             cb.checked = mailSel.has(t.id);
+            if (t.archive) { cb.disabled = true; cb.title = 'Older than the board keeps'; }
             cb.onclick = (e) => e.stopPropagation();
             cb.onchange = () => {
                 cb.checked ? mailSel.add(t.id) : mailSel.delete(t.id);
@@ -8497,7 +8498,7 @@
                    would detach the very checkbox mid-event, so keyboard
                    triage (tab, space, tab, space) lost focus on every tick. */
                 row.classList.toggle('selected', cb.checked);
-                paintMailBulk((mailCache.threads || []).filter(mailCardMatches));
+                if (!mailFound) paintMailBulk((mailCache.threads || []).filter(mailCardMatches));
             };
             row.append(cb);
             const dot = el('span', 'mdot ' + t.state);
@@ -8545,7 +8546,7 @@
             }
             if (t.owner) {
                 row.append(el('span', 'mail-owner', t.owner_name || 'Someone'));
-            } else if (t.state !== 'done') {
+            } else if (t.state !== 'done' && !t.archive) {
                 const b = el('button', 'mail-claim', 'Claim');
                 b.onclick = async (e) => {
                     e.stopPropagation(); b.disabled = true;
@@ -8563,7 +8564,7 @@
             const age = el('span', 'mage' + (stale ? ' hot' : ''), mailAgo(t.last_at));
             age.title = mailAgoLong(t.last_at);
             row.append(age);
-            row.onclick = () => openMailThread(t.id);
+            row.onclick = () => t.archive ? openMailArchive(t) : openMailThread(t.id);
             return row;
         }
         function mailTextMatches(t) {
@@ -9023,6 +9024,41 @@
             });
         }
 
+        async function openMailArchive(t) {
+            /* Older than the board keeps. Readable, and nothing else: it is not
+               on the board, so it has no owner, no state and no actions. */
+            const m = mailModal('Email (from the archive)');
+            m.overlay.querySelector('.modal').style.maxWidth = '680px';
+            m.body.append(el('div', 'crm-card-t', t.subject));
+            m.body.append(el('div', 'setting-sub',
+                (t.from_name || '') + (t.from_email ? ' <' + t.from_email + '>' : '')
+                + ' · ' + mailAgoLong(t.last_at)));
+            m.body.append(el('div', 'setting-sub',
+                'This one is older than the board keeps, so it is read only here.'));
+            const gm = el('a', 'setting-sub', 'Open in Gmail');
+            gm.href = 'https://mail.google.com/mail/u/?authuser='
+                + encodeURIComponent(mailCache.address || '')
+                + '#all/' + encodeURIComponent(t.id);
+            gm.target = '_blank'; gm.rel = 'noopener';
+            gm.style.cssText = 'display:inline-block;margin:4px 0;color:var(--accent)';
+            m.body.append(gm);
+            const msgs = el('div');
+            msgs.style.cssText = 'max-height:360px;overflow-y:auto;margin:10px 0';
+            m.body.append(msgs);
+            let r;
+            try { r = await api('/api/mail/body', { id: t.id, archive: true }); }
+            catch (e) { msgs.append(el('div', 'setting-sub', e.message)); return; }
+            (r.messages || []).forEach(msg => {
+                const box = el('div', 'mail-msg' + (msg.ours ? ' ours' : ''));
+                const h = el('div', 'mail-msg-head');
+                h.append(el('span', 'mail-msg-from', msg.from_name || msg.from_email || ''),
+                         el('span', 'mail-msg-at', mailAgoLong(msg.at)));
+                const b = el('div', 'mail-msg-full');
+                b.textContent = msg.text || '(no text in this message)';
+                box.append(h, b);
+                msgs.append(box);
+            });
+        }
         function mailModal(title) {
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal disp-modal');

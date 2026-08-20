@@ -7921,7 +7921,10 @@ def _files_id(d: dict, prefix: str) -> str:
     return f"{prefix}{d['seq']}"
 
 
-_FILENAME_BAD = re.compile(r"[\\/\x00-\x1f]")
+# Bidi overrides and isolates let a stranger send "artworkfdp.eps" that
+# DISPLAYS as "artwork.pdf" on the Finder drive. Names used to come only
+# from staff uploads; attachments changed that.
+_FILENAME_BAD = re.compile(r"[\\/\x00-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]")
 
 
 def _files_clean_name(name: str) -> str:
@@ -8093,6 +8096,7 @@ _mail_connect_tickets: dict = {}     # ticket -> expiry (wall clock)
 MAIL_TICKET_SECONDS = 300
 _mail_undo: dict = {}                # token -> what a bulk action changed, for putting back
 MAIL_UNDO_SECONDS = 600
+MAIL_ATTACH_CAP = 25 * 1024 * 1024   # what we will pull out of Gmail in one go
 
 
 def _mail_default() -> dict:
@@ -8422,8 +8426,10 @@ async def _mail_sync_now(force: bool = False) -> None:
             except ValueError:
                 pass
         try:
-            listed = await google_mail.list_threads(
-                f"in:inbox newer_than:{MAIL_TRACK_DAYS}d", 200)
+            listing = await google_mail.list_threads(
+                f"in:inbox newer_than:{MAIL_TRACK_DAYS}d", 500)
+            listed = listing.get("threads") or []
+            listing_complete = bool(listing.get("complete"))
             addr = google_mail.address().lower()
             threads = store.setdefault("threads", {})
             # Refetch when the thread is new, when Gmail says it moved, or
@@ -8455,16 +8461,38 @@ async def _mail_sync_now(force: bool = False) -> None:
             for full in fetched:
                 if full:
                     _mail_apply_thread(store, full, addr)
+            cutoff = (datetime.now(timezone.utc)
+                      - timedelta(days=MAIL_TRACK_DAYS - 1)).isoformat()
             for tid, t in threads.items():
-                was_in = t.get("in_inbox", True)
-                t["in_inbox"] = tid in inbox_ids
-                if was_in and not t["in_inbox"] and t.get("state") != "done":
-                    # Archiving in Gmail is a person saying "dealt with", and
-                    # our own file-it-away filters archive too. Leaving the
-                    # thread on the board to age amber contradicts both.
-                    t["state"], t["done_at"] = "done", _mail_now()
+                was_in, now_in = t.get("in_inbox", True), tid in inbox_ids
+                t["in_inbox"] = now_in
+                if now_in and not was_in and t.get("state") == "done" \
+                        and t.get("closed_by") == "archive":
+                    # It came BACK to the inbox. Gmail's own snooze does
+                    # exactly this with no new message, so a one-way rule
+                    # would close a snoozed customer email permanently.
+                    t["state"], t["done_at"] = "unassigned" if not t.get("owner") else "assigned", ""
                     t["state_at"] = _mail_now()
-                    _mail_log(t, "", "archived in Gmail")
+                    t.pop("closed_by", None)
+                    _mail_log(t, "", "back in the Gmail inbox")
+                    continue
+                if now_in or t.get("state") == "done":
+                    continue
+                # A STATE test, not an edge: basing it on the was-in/now-out
+                # transition meant a thread first seen during a truncated
+                # listing could never be closed afterwards, however certain
+                # we later became.
+                # Absence from the listing only means "archived" when we can
+                # be sure we SAW the whole listing, and when the thread is
+                # still inside the window the query asks for. Otherwise a
+                # thread that merely fell off the end, or aged past
+                # newer_than:, would be closed while the customer waits.
+                if not listing_complete or (t.get("last_at") or "") < cutoff:
+                    continue
+                t["state"], t["done_at"] = "done", _mail_now()
+                t["state_at"] = _mail_now()
+                t["closed_by"] = "archive"
+                _mail_log(t, "", "archived in Gmail")
             # Ask Gmail outright which threads are unread rather than trusting
             # a label on a thread we may not have refetched. Marking an email
             # unread in Gmail changes almost nothing else about the thread, so
@@ -10414,15 +10442,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"error": "Could not read the conversation from Gmail."}, 502)
             msgs = convo.get("messages") or []
             addr = google_mail.address().lower()
-            # Reply to the last message that is NOT ours, so the draft goes to
-            # the customer rather than back to ourselves.
-            parent = next((m for m in reversed(msgs) if m.get("from_email") != addr),
-                          msgs[-1] if msgs else None)
+            tgt = _mail_reply_target(msgs, addr)
+            parent = tgt.get("msg")
             if not parent:
                 return _json({"error": "That conversation has no message to reply to."}, 400)
-            raw_to = parent.get("reply_to") or parent.get("from_email") or ""
-            from email.utils import parseaddr as _parseaddr
-            to_addr = _parseaddr(raw_to)[1].strip()
+            to_addr = tgt.get("to") or ""
             # Refuse rather than quietly write a reply addressed to ourselves
             # or to nobody: both look like success and neither reaches anyone.
             if "@" not in to_addr:
@@ -10506,14 +10530,28 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             facts.append("This sender is in the CRM as " + crm["name"]
                          + (" at " + crm["org"] if crm.get("org") else "") + ".")
         # The orders, so the model stops leaving blanks it does not need to
-        # leave. These are stored facts, not guesses: a tracking number here
-        # came off a booked shipment, and a made date off the production
-        # floor. It is still told never to go beyond them.
-        try:
-            ctx = await _mail_orders_for(t.get("from_email") or "")
-        except Exception:
-            logger.exception("mail draft: order context failed")
-            ctx = {}
+        # leave. These are stored facts, not guesses: a tracking number came
+        # off a real shipment and a made date off the production floor.
+        #
+        # They are looked up for the address the REPLY WILL GO TO, and only
+        # when that agrees with who the thread is from. From and Reply-To are
+        # both chosen by whoever sent the email; looking up one and writing to
+        # the other is exactly how one customer's tracking number ends up in
+        # somebody else's inbox.
+        ctx = {}
+        tgt = _mail_reply_target(msgs, addr)
+        same = tgt.get("to") and tgt["to"] == (t.get("from_email") or "").strip().lower()
+        if not (_user_tabs(who) is not None and "customers" not in _user_tabs(who)):
+            if same:
+                try:
+                    ctx = await _mail_orders_for(tgt["to"])
+                except Exception:
+                    logger.exception("mail draft: order context failed")
+            elif tgt.get("to"):
+                facts.append("Do NOT state any order, delivery or tracking detail in this "
+                             "reply: it is going to " + tgt["to"] + ", which is not the "
+                             "address the conversation came from, so the staff member must "
+                             "confirm what may be shared.")
         for o in (ctx.get("orders") or [])[:4]:
             facts.append("Order " + _mail_order_sentence(o)
                          + " (placed " + (o.get("at") or "")[:10] + ")")
@@ -10598,6 +10636,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 "carrier": d.get("carrier_label") or d.get("carrier_name") or "",
                 "tracking": "" if d.get("canceled") else (d.get("tracking_number") or ""),
                 "dispatched_at": "" if d.get("canceled") else (d.get("dispatched_at") or ""),
+                # dispatched_at is stamped when the LABEL is booked, which this
+                # app is careful to say is not shipping: the gobo may still be
+                # on the floor. Only fulfilled means it went.
+                "fulfilled": bool(d.get("fulfilled")),
+                "cancelled_at": o.get("cancelled_at") or "",
                 "admin_url": _admin_order_url(o.get("id")),
             })
         return {"customer": {"name": " ".join(x for x in [cust.get("first_name"),
@@ -10606,20 +10649,50 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                              "spent": cust.get("total_spent")},
                 "orders": out}
 
+    def _mail_reply_target(msgs: list, addr: str) -> dict:
+        """The message a reply would actually go to, and the address it would
+        go to. Everything downstream (order facts, the draft, the card) has to
+        agree with THIS, or the app looks up one person's orders and writes
+        them to another."""
+        from email.utils import parseaddr as _pa
+        parent = next((m for m in reversed(msgs) if m.get("from_email") != addr),
+                      msgs[-1] if msgs else None)
+        if not parent:
+            return {}
+        to = _pa(parent.get("reply_to") or parent.get("from_email") or "")[1].strip().lower()
+        return {"msg": parent, "to": to,
+                "from_email": (parent.get("from_email") or "").strip().lower()}
+
     def _mail_order_sentence(o: dict) -> str:
-        """One order, as a line a person could paste into a reply. Built from
-        stored facts only, so there is nothing here to invent."""
-        bits = [o.get("name") or "your order"]
-        if o.get("dispatched_at") and o.get("tracking"):
-            bits.append("shipped " + (o["dispatched_at"] or "")[:10]
+        """One order, as a line a person could paste into a reply.
+
+        Every branch has to be something the shop can stand behind, because
+        the model is told to use these verbatim. "Shipped" therefore means
+        FULFILLED, not "a label was booked": booking happens before the gobo
+        is made, and telling a customer it shipped when it is still on the
+        floor sends them chasing a courier that has nothing."""
+        name = o.get("name") or "your order"
+        if o.get("cancelled_at"):
+            return name + ", cancelled " + (o["cancelled_at"] or "")[:10]
+        bits = [name]
+        shipped = o.get("fulfilled") or str(o.get("fulfillment") or "").lower() == "fulfilled"
+        if shipped and o.get("tracking"):
+            bits.append("shipped " + ((o.get("dispatched_at") or "")[:10] or "already")
                         + " on " + (o.get("carrier") or "the courier")
                         + ", tracking " + o["tracking"])
+        elif shipped:
+            bits.append("shipped")
+        elif o.get("tracking"):
+            bits.append("label booked with " + (o.get("carrier") or "the courier")
+                        + " (tracking " + o["tracking"] + "), not handed over yet")
         elif o.get("made_at"):
             bits.append("made " + (o["made_at"] or "")[:10] + ", not yet shipped")
         elif o.get("printed_at"):
             bits.append("in production")
+        elif str(o.get("fulfillment") or "").lower() in ("partial", "partially_fulfilled"):
+            bits.append("part shipped")
         else:
-            bits.append("received, not yet in production")
+            bits.append("with us, not yet shipped")
         return ", ".join(bits)
 
     def _mail_folder_path(d: dict, segs: list, who: str) -> str:
@@ -10666,8 +10739,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         folder = [p for p in str(body.get("folder") or "").split("/") if p.strip()][:4]
         if not msg_id or not att_id:
             return _json({"error": "That attachment is no longer on this email."}, 400)
+        known = next((f for f in (t.get("files") or [])
+                      if f.get("id") == att_id and f.get("msg") == msg_id), None)
+        if not known:
+            return _json({"error": "That attachment is not on this email."}, 400)
+        if int(known.get("size") or 0) > MAIL_ATTACH_CAP:
+            return _json({"error": "That file is "
+                                   + str(round(int(known["size"]) / 1048576, 1))
+                                   + "MB, which is too big to bring across. "
+                                     "Save it from Gmail instead."}, 413)
         try:
-            raw = await google_mail.attachment_bytes(msg_id, att_id)
+            raw = await google_mail.attachment_bytes(msg_id, att_id, cap=MAIL_ATTACH_CAP)
         except google_mail.GmailError as e:
             return _json({"error": str(e)}, 400)
         except Exception:
@@ -10681,11 +10763,19 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if used + len(raw) > int(FILES_QUOTA_GB * 1024 * 1024 * 1024):
                 return _json({"error": "The files store is full."}, 507)
             parent = _mail_folder_path(d, folder, who)
+            # proof-v2.pdf arriving three times is the normal case here, and
+            # two active records with one name in one folder make the newer
+            # unreachable on the Finder drive. Supersede, as the browser
+            # upload and the WebDAV PUT both do.
+            dup = next((k for k, f in d["files"].items()
+                        if f.get("status") == "active"
+                        and str(f.get("folder_id") or "") == parent
+                        and (f.get("name") or "").lower() == name.lower()), "")
             fid = _files_id(d, "f")
             key = f"{fid}/{name}"
             d["files"][fid] = {"name": name, "folder_id": parent, "size": len(raw),
                                "type": "application/octet-stream", "r2_key": key,
-                               "status": "pending", "by": who,
+                               "status": "pending", "by": who, "replaces": dup,
                                "created_at": datetime.now(timezone.utc).isoformat()}
             _write_files(d)
         try:
@@ -10705,6 +10795,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if rec is not None:
                 rec.update({"status": "active",
                             "uploaded_at": datetime.now(timezone.utc).isoformat()})
+                prior = rec.pop("replaces", "")
+                if prior and prior in d["files"] and prior != fid:
+                    d["files"][prior]["status"] = "trashed"
+                    d["files"][prior]["trashed_at"] = datetime.now(timezone.utc).isoformat()
                 _write_files(d)
         where = "/".join(folder) or "Files"
         _mail_log(t, who, "saved " + name + " to " + where)
@@ -10734,7 +10828,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not google_mail.connected():
             return _json({"error": "The mailbox is not connected."}, 400)
         try:
-            ids = await google_mail.list_thread_ids(q, max_results=40)
+            # One page: the slice below would otherwise throw away most of a
+            # multi-page result in hash order, which reads as "these are the
+            # newest 40" when it is nothing of the kind.
+            ids = await google_mail.list_thread_ids(q, max_results=40, pages=1)
         except google_mail.GmailError as e:
             return _json({"error": "Gmail could not run that search: " + str(e)}, 400)
         except Exception:
@@ -11109,6 +11206,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, body, who = await _mail_guard(request)
         if err:
             return err
+        sick = _mail_store_sick()
+        if sick:
+            return sick       # never spend the one chance on an unwritable store
         token = str(body.get("token") or "")
         entry = _mail_undo.get(token)
         if not entry or time.time() - entry["at"] > MAIL_UNDO_SECONDS:
@@ -11127,6 +11227,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 continue
             for k in ("owner", "owner_since", "state", "done_at", "state_at"):
                 t[k] = snap.get(k, "")
+            if t.get("owner") and not _mail_can_own(t["owner"]):
+                # The person may have been switched off since. Putting their
+                # threads back on them would bury the email that the release
+                # was protecting.
+                t["owner"], t["owner_since"] = "", ""
+                t["state"], t["state_at"] = "unassigned", _mail_now()
             _mail_log(t, who, "undone")
             back += 1
         _write_mail(store)

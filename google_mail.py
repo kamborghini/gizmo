@@ -220,25 +220,43 @@ async def _call(method: str, path: str, *, params: dict = None, body: dict = Non
 # Threads
 # ---------------------------------------------------------------------------
 
-async def list_threads(query: str = "in:inbox", max_results: int = 100) -> list:
-    """[{id, snippet, historyId}] newest first. One page is plenty: the board
-    tracks the working set, not the whole archive."""
-    data = await _call("GET", "threads",
-                       params={"q": query, "maxResults": max(1, min(int(max_results), 200))})
-    return [{"id": str(t.get("id") or ""), "snippet": str(t.get("snippet") or ""),
-             "historyId": str(t.get("historyId") or "")}
-            for t in (data.get("threads") or []) if t.get("id")]
+async def list_threads(query: str = "in:inbox", max_results: int = 100) -> dict:
+    """{"threads": [...], "complete": bool}.
+
+    Paginated, and it SAYS whether it saw everything. That flag is
+    load-bearing: the caller treats "not in this listing" as "archived in
+    Gmail", and on a truncated page that would mean silently closing live
+    customer email that merely fell off the end."""
+    out, token, pages, complete = [], None, 0, True
+    per = max(1, min(int(max_results), 500))
+    while True:
+        params = {"q": query, "maxResults": min(per, 500)}
+        if token:
+            params["pageToken"] = token
+        data = await _call("GET", "threads", params=params)
+        for t in (data.get("threads") or []):
+            if t.get("id"):
+                out.append({"id": str(t["id"]), "snippet": str(t.get("snippet") or ""),
+                            "historyId": str(t.get("historyId") or "")})
+        token = data.get("nextPageToken")
+        pages += 1
+        if not token:
+            break
+        if pages >= 6 or len(out) >= 3000:
+            complete = False       # a mailbox bigger than we will walk
+            break
+    return {"threads": out, "complete": complete}
 
 
-async def list_thread_ids(query: str, max_results: int = 500) -> set:
+async def list_thread_ids(query: str, max_results: int = 500, pages: int = 3) -> set:
     """Just the ids matching a query.
 
     Used to ask Gmail point blank which threads are unread, rather than
     inferring it from a label on a thread we may not have refetched. Reading
     or unreading an email in Gmail changes almost nothing else about the
     thread, so inference is exactly where staleness hides."""
-    out, token, pages = set(), None, 0
-    while pages < 3:
+    out, token, done = set(), None, 0
+    while done < max(1, pages):
         params = {"q": query, "maxResults": max(1, min(int(max_results), 500))}
         if token:
             params["pageToken"] = token
@@ -247,7 +265,7 @@ async def list_thread_ids(query: str, max_results: int = 500) -> set:
             if t.get("id"):
                 out.add(str(t["id"]))
         token = data.get("nextPageToken")
-        pages += 1
+        done += 1
         if not token:
             break
     return out
@@ -350,6 +368,14 @@ def _walk_files(part: dict, out: list) -> None:
     name = str(part.get("filename") or "").strip()
     body = part.get("body") or {}
     if name:
+        # A corporate signature ships its logo as an inline part WITH a
+        # filename, so counting those puts a paperclip on half the inbox and
+        # offers image001.png as if it were artwork. Inline parts carry a
+        # Content-ID and say "inline" in their disposition.
+        hdrs = {str(h.get("name", "")).lower(): str(h.get("value") or "")
+                for h in (part.get("headers") or [])}
+        if "content-id" in hdrs or "inline" in hdrs.get("content-disposition", "").lower():
+            return
         out.append({"name": name[:200],
                     "size": int(body.get("size") or 0),
                     "mime": str(part.get("mimeType") or "").split(";")[0].strip(),

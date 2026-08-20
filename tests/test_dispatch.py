@@ -5693,7 +5693,7 @@ def t_mail_sync_pipeline_and_history_short_circuit():
         listing = [{"id": "t1", "snippet": "s", "historyId": "h1"}]
         async def fake_list(q, n):
             calls["list"] += 1
-            return list(listing)
+            return {"threads": list(listing), "complete": True}
         async def fake_get(tid):
             calls["get"] += 1
             return {"id": tid, "historyId": listing[0]["historyId"], "subject": "Order query",
@@ -5896,7 +5896,8 @@ def t_mail_sync_abandons_when_the_store_is_replaced_under_it():
         _gm.save_connection("rt-test", MBOX)
         async def swapping_list(q, n):
             copilot._mail_mem = None    # what a restore does mid-await
-            return [{"id": "tX", "snippet": "s", "historyId": "h1"}]
+            return {"threads": [{"id": "tX", "snippet": "s", "historyId": "h1"}],
+                    "complete": True}
         async def fake_get(tid):
             return {"id": tid, "historyId": "h1", "subject": "S",
                     "messages": [_mk_msg("m1", "Jo", "jo@customer.com",
@@ -6242,7 +6243,7 @@ def t_mail_rule_files_into_a_gmail_folder():
             known[name] = "L_" + name
             return known[name]
         async def listing(q, n):
-            return []
+            return {"threads": [], "complete": True}
         saved = (_gm.modify_thread, _gm.ensure_label, _gm.list_threads)
         _gm.modify_thread, _gm.ensure_label, _gm.list_threads = modify, label, listing
         try:
@@ -6526,7 +6527,7 @@ def t_mail_reconciler_backs_off_a_thread_that_will_never_sync():
             known[name] = "L1"
             return "L1"
         async def listing(q, n):
-            return []
+            return {"threads": [], "complete": True}
         saved = (_gm.modify_thread, _gm.ensure_label, _gm.list_threads)
         _gm.modify_thread, _gm.ensure_label, _gm.list_threads = modify, label, listing
         try:
@@ -6558,7 +6559,7 @@ def t_mail_sync_abandons_a_restore_that_lands_during_the_reconciler():
         _seed_thread("k1")
         post_s(sess, "/api/mail/claim", {"id": "k1"})
         async def listing(q, n):
-            return []
+            return {"threads": [], "complete": True}
         async def label(name, known):
             copilot._mail_mem = None      # a restore lands mid-reconcile
             known[name] = "L1"
@@ -6595,7 +6596,8 @@ def t_mail_unread_backfills_for_threads_that_predate_the_field():
         copilot._load_mail()["threads"]["old1"]["history_id"] = "h1"
         fetched = []
         async def listing(q, n):
-            return [{"id": "old1", "snippet": "s", "historyId": "h1"}]
+            return {"threads": [{"id": "old1", "snippet": "s", "historyId": "h1"}],
+                    "complete": True}
         async def get_thread(tid):
             fetched.append(tid)
             return {"id": tid, "historyId": "h1", "subject": "Old",
@@ -6635,9 +6637,10 @@ def t_mail_unread_comes_from_gmail_not_from_our_own_stale_copy():
         unread = {"ids": set()}
         async def listing(q, n):
             queries.append(q)
-            return [{"id": "u1", "snippet": "s", "historyId": "h1"},
-                    {"id": "u2", "snippet": "s", "historyId": "h1"}]
-        async def ids(q, max_results=500):
+            return {"threads": [{"id": "u1", "snippet": "s", "historyId": "h1"},
+                                {"id": "u2", "snippet": "s", "historyId": "h1"}],
+                    "complete": True}
+        async def ids(q, max_results=500, pages=3):
             queries.append(q)
             return set(unread["ids"])
         saved = (_gm.list_threads, _gm.list_thread_ids)
@@ -6781,7 +6784,7 @@ def t_mail_order_context_matches_only_the_exact_sender():
         try:
             prod["501"] = {"made_at": "2026-08-12T10:00:00Z", "printed_at": "2026-08-11T10:00:00Z"}
             disp["501"] = {"tracking_number": "4512339981", "carrier_label": "DPD",
-                           "dispatched_at": "2026-08-13T10:00:00Z"}
+                           "dispatched_at": "2026-08-13T10:00:00Z", "fulfilled": True}
             copilot._write_prod_state(prod)
             copilot._write_dispatch(disp)
             r = post("/api/mail/orders", {"id": "t1"})
@@ -6793,12 +6796,182 @@ def t_mail_order_context_matches_only_the_exact_sender():
             eq(top["name"], "#1201")
             eq(top["tracking"], "4512339981", "what WE know, not just what Shopify knows")
             ok("shipped" in top["sentence"] and "DPD" in top["sentence"], top["sentence"])
-            ok("not yet in production" in j["orders"][1]["sentence"], j["orders"][1]["sentence"])
+            ok("not yet shipped" in j["orders"][1]["sentence"], j["orders"][1]["sentence"])
             # A sender we have never traded with produces nothing, not a guess.
             _seed_thread("t2", frm=("Stranger", "nobody@elsewhere.com"))
             eq(post("/api/mail/orders", {"id": "t2"}).json()["orders"], [])
         finally:
             copilot._tool_json = saved
+    with_mail(go)
+
+@test
+def t_mail_booked_label_is_not_shipped():
+    """Booking a courier label happens BEFORE the gobo is made. Telling a
+    customer it shipped sends them chasing a courier that has nothing."""
+    def go():
+        ensure_auth()
+        _seed_thread("t1", frm=("Jo", "jo@customer.com"))
+        async def fake_tool(reg, name, args):
+            if name == "shopify_search_customers":
+                return {"customers": [{"id": 1, "email": "jo@customer.com",
+                                       "first_name": "Jo", "orders_count": 1}]}
+            return {"orders": [{"id": 700, "name": "#1300",
+                                "created_at": "2026-08-18T09:00:00Z"}]}
+        saved = copilot._tool_json
+        copilot._tool_json = fake_tool
+        disp = copilot._load_dispatch()
+        try:
+            disp["700"] = {"tracking_number": "TRK1", "carrier_label": "DPD",
+                           "dispatched_at": "2026-08-19T09:00:00Z", "fulfilled": False}
+            copilot._write_dispatch(disp)
+            sent = post("/api/mail/orders", {"id": "t1"}).json()["orders"][0]["sentence"]
+            ok("not handed over yet" in sent, sent)
+            ok("shipped" not in sent.replace("not handed over", ""), sent)
+            disp["700"]["fulfilled"] = True
+            copilot._write_dispatch(disp)
+            sent2 = post("/api/mail/orders", {"id": "t1"}).json()["orders"][0]["sentence"]
+            ok(sent2.startswith("#1300, shipped"), sent2)
+        finally:
+            copilot._tool_json = saved
+    with_mail(go)
+
+@test
+def t_mail_draft_withholds_order_facts_when_the_reply_goes_elsewhere():
+    """From and Reply-To are both chosen by whoever sent the email. Looking
+    up one and writing to the other is how one customer's tracking number
+    reaches somebody else."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1", frm=("Jo", "jo@customer.com"))
+        async def fake_read(tid, per_msg_chars=4000):
+            return {"id": tid, "messages": [
+                {"id": "m1", "from_name": "Jo", "from_email": "jo@customer.com",
+                 "reply_to": "somebody-else@elsewhere.com", "subject": "Order",
+                 "message_id": "<a@b>", "references": "",
+                 "at": "2026-08-19T01:00:00+00:00", "text": "where is it?"}]}
+        seen = {}
+        class _Blk:
+            type = "text"
+            def __init__(self, t): self.text = t
+        class _Resp:
+            content = [_Blk("Hi, checking now.")]
+            usage = None
+        async def fake_create(client, **kw):
+            seen.update(kw)
+            return _Resp()
+        looked_up = []
+        async def fake_tool(reg, name, args):
+            looked_up.append(args)
+            return {"customers": [], "orders": []}
+        saved = (_gm.read_thread, copilot._xcreate, copilot.ANTHROPIC_API_KEY, copilot._tool_json)
+        _gm.read_thread, copilot._xcreate = fake_read, fake_create
+        copilot.ANTHROPIC_API_KEY, copilot._tool_json = "x", fake_tool
+        try:
+            r = post("/api/mail/draft", {"id": "t1", "op": "compose"})
+            eq(r.status_code, 200, r.text)
+            prompt = seen["messages"][0]["content"]
+            ok("Do NOT state any order, delivery or tracking detail" in prompt,
+               "the model is told to hold back")
+            ok("somebody-else@elsewhere.com" in prompt, prompt[:300])
+            eq(looked_up, [], "and no orders were even fetched")
+        finally:
+            _gm.read_thread, copilot._xcreate, copilot.ANTHROPIC_API_KEY, copilot._tool_json = saved
+    with_mail(go)
+
+@test
+def t_mail_sync_only_closes_what_it_can_prove_was_archived():
+    """Falling off the end of one Gmail page is not the same as being
+    archived. Treating it as archived silently closes live customer email."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("keep1"); _seed_thread("keep2")
+        import datetime as _dtm
+        fresh = _dtm.datetime.now(_dtm.timezone.utc).isoformat()
+        for tid in ("keep1", "keep2"):
+            copilot._load_mail()["threads"][tid]["in_inbox"] = True
+            copilot._load_mail()["threads"][tid]["last_at"] = fresh
+        state = {"complete": False}
+        async def listing(q, n):
+            # keep2 is missing, but the listing admits it is truncated.
+            return {"threads": [{"id": "keep1", "snippet": "s", "historyId": "h1"}],
+                    "complete": state["complete"]}
+        async def ids(q, max_results=500, pages=3):
+            return set()
+        saved = (_gm.list_threads, _gm.list_thread_ids)
+        _gm.list_threads, _gm.list_thread_ids = listing, ids
+        try:
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            eq(copilot._load_mail()["threads"]["keep2"]["state"], "unassigned",
+               "a truncated listing never closes anything")
+            # Now the listing is complete, so absence really does mean archived.
+            state["complete"] = True
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            t = copilot._load_mail()["threads"]["keep2"]
+            eq(t["state"], "done", "a complete listing is proof")
+            eq(t["closed_by"], "archive")
+            # And it comes BACK when the thread returns, which is what Gmail's
+            # own snooze does with no new message.
+            async def listing2(q, n):
+                return {"threads": [{"id": "keep1", "snippet": "s", "historyId": "h1"},
+                                    {"id": "keep2", "snippet": "s", "historyId": "h1"}],
+                        "complete": True}
+            _gm.list_threads = listing2
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            eq(copilot._load_mail()["threads"]["keep2"]["state"], "unassigned",
+               "a snoozed email is not closed forever")
+        finally:
+            _gm.list_threads, _gm.list_thread_ids = saved
+    with_mail(go)
+
+@test
+def t_mail_attachment_supersedes_the_same_name():
+    def go():
+        ensure_auth()
+        def inner(fake):
+            _seed_thread("t1")
+            copilot._load_mail()["threads"]["t1"]["files"] = [
+                {"name": "proof.pdf", "size": 9, "id": "att1", "msg": "m1"}]
+            async def bytes_for(msg_id, att_id, cap=None):
+                return b"PDF-BYTES"
+            saved = _gm.attachment_bytes
+            _gm.attachment_bytes = bytes_for
+            try:
+                for _ in range(2):
+                    r = post("/api/mail/attachment", {"id": "t1", "msg": "m1", "att": "att1",
+                                                      "name": "proof.pdf", "folder": "Artwork"})
+                    eq(r.status_code, 200, r.text)
+                d = copilot._load_files()
+                live = [f for f in d["files"].values()
+                        if f["name"] == "proof.pdf" and f["status"] == "active"]
+                eq(len(live), 1, "one live proof.pdf, so the drive can reach it")
+                gone = [f for f in d["files"].values()
+                        if f["name"] == "proof.pdf" and f["status"] == "trashed"]
+                eq(len(gone), 1, "and the earlier one is in the 30-day trash, not deleted")
+            finally:
+                _gm.attachment_bytes = saved
+        with_files(inner)
+    with_mail(go)
+
+@test
+def t_mail_undo_never_restores_an_owner_who_cannot_hold_email():
+    def go():
+        ensure_auth()
+        uid_a, sess_a, _ = ready_user("Ann", "ann")
+        _seed_thread("u1")
+        post_s(sess_a, "/api/mail/claim", {"id": "u1"})
+        r = post("/api/mail/bulk", {"op": "assign", "uid": "", "ids": ["u1"]})
+        token = r.json()["undo"]
+        post("/api/team/user", {"op": "active", "id": uid_a, "active": False})
+        u = post("/api/mail/undo", {"token": token})
+        eq(u.status_code, 200, u.text)
+        t = copilot._load_mail()["threads"]["u1"]
+        eq(t["owner"], "", "the email is not buried on a switched-off account")
+        eq(t["state"], "unassigned")
     with_mail(go)
 
 @test
@@ -6932,7 +7105,7 @@ def t_mail_label_reconciler_catches_gmail_up_after_bulk():
             known[name] = "L1"
             return "L1"
         async def fake_list(q, n):
-            return []
+            return {"threads": [], "complete": True}
         saved = (_gm.modify_thread, _gm.ensure_label, _gm.list_threads)
         _gm.modify_thread, _gm.ensure_label, _gm.list_threads = fake_modify, fake_label, fake_list
         try:

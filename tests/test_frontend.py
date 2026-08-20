@@ -440,6 +440,10 @@ def t_inbox_unread_filters_and_claude_reply():
     ok("'/api/mail/undo'" in SCRIPT, "a bulk action can be put back")
     ok("e.key === 'j'" in SCRIPT and "e.key === 'k'" in SCRIPT,
        "and the keyboard works for people who live in the list")
+    ok("openMailArchive" in SCRIPT and "read only here" in SCRIPT,
+       "an archive hit opens read-only rather than 404ing on a board lookup")
+    ok("if (t.archive) { cb.disabled = true;" in SCRIPT,
+       "and cannot be ticked into a bulk action aimed at the board")
     ok("unread emails are' : ' unread email is'" in SCRIPT
        or "unread email is' : ' unread emails are'" in SCRIPT,
        "and a view that hides unread mail says so rather than staying silent")
