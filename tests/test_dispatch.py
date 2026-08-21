@@ -3833,6 +3833,95 @@ def crm_wipe():
 
 
 @test
+def t_pipedrive_export_reads_real_v2_shapes():
+    """Every test here faked export() wholesale, so the NORMALISERS were never
+    exercised. That is exactly where the wrong archive path, the missing rot
+    switch, the dict-shaped location and the lost primary all lived."""
+    calls = []
+    async def fake_get(path, params=None, version="v2"):
+        calls.append((path, version))
+        if path == "pipelines":
+            return {"data": [{"id": 1, "name": "Sales", "is_deal_probability_enabled": True}]}
+        if path == "stages":
+            return {"data": [
+                {"id": 10, "name": "Enquiry", "order_nr": 1, "deal_probability": 20,
+                 "is_deal_rot_enabled": True, "days_to_rotten": 14, "pipeline_id": 1},
+                {"id": 11, "name": "Quoted", "order_nr": 2, "deal_probability": 60,
+                 "is_deal_rot_enabled": False, "days_to_rotten": 30, "pipeline_id": 1}]}
+        if path == "dealFields":
+            return {"data": [{"key": "label", "name": "Label", "options": [
+                {"id": 5, "label": "Hot", "color": "red"},
+                {"id": 6, "label": "Trade", "color": "blue"}]}]}
+        if path == "deals":
+            return {"data": [{"id": 30, "title": "Live one", "value": 100, "currency": "GBP",
+                              "stage_id": 11, "status": "open", "label_ids": [5, 6]}]}
+        if path == "deals/archived":
+            return {"data": [{"id": 31, "title": "Old one", "value": 200, "currency": "GBP",
+                              "stage_id": 11, "status": "won", "is_archived": True,
+                              "won_time": "2024-03-04 09:00:00"}]}
+        if path == "persons":
+            return {"data": [{"id": 20, "name": "Sarah", "job_title": "Buyer",
+                              "emails": [{"value": "second@x.com", "primary": False},
+                                         {"value": "main@x.com", "primary": True}],
+                              "phones": [{"value": "0191 000", "primary": False, "label": "work"},
+                                         {"value": "07700 900", "primary": True, "label": "mobile"}]}]}
+        if path == "organizations":
+            return {"data": [{"id": 40, "name": "Lumen", "website": "lumen.co.uk",
+                              "address": {"value": "Newcastle"}}]}
+        if path == "activities":
+            return {"data": [{"id": 50, "type": "call", "subject": "Ring back",
+                              "location": {"value": "12 High St, Durham"},
+                              "duration": "01:00:00", "done": True}]}
+        if path == "notes":
+            return {"data": [{"id": 60, "deal_id": 30, "content": "<p>Wants it <b>Friday</b></p>",
+                              "pinned_to_deal_flag": True, "active_flag": True},
+                             {"id": 61, "deal_id": 30, "content": "deleted one",
+                              "active_flag": False}]}
+        if path == "users/me":
+            return {"data": {"name": "Cam", "is_admin": True, "company_name": "PI",
+                             "default_currency": "GBP", "company_domain": "pi"}}
+        return {"data": []}
+    saved = (pipedrive._get, pipedrive.API_TOKEN)
+    pipedrive._get, pipedrive.API_TOKEN = fake_get, "t"
+    try:
+        out = run_async(pipedrive.export())
+    finally:
+        pipedrive._get, pipedrive.API_TOKEN = saved
+
+    paths = [p for p, v in calls]
+    ok("deals/archived" in paths, "the back catalogue has its OWN path: " + str(paths))
+    ok(("stages", "v2") in calls and ("pipelines", "v2") in calls,
+       "stages and pipelines come from v2, which is the only place they exist now")
+    # the rot switch, both ways round
+    st = {x["name"]: x for x in out["stages"]}
+    eq(st["Enquiry"]["rot_days"], 14, "a stage with rotting ON keeps its days")
+    eq(st["Quoted"]["rot_days"], 0,
+       "a stage with rotting OFF gets no timer, however stale the number behind it")
+    eq(st["Quoted"]["rot_days_stored"], 30, "but the number is kept so it can be switched on")
+    ok(out["complete"]["stages"], "an empty stage list would be reported, not shrugged off")
+    # archived comes from the deal's own flag
+    deals = {d["title"]: d for d in out["deals"]}
+    ok(deals["Old one"]["archived"] and not deals["Live one"]["archived"])
+    eq(deals["Old one"]["won_at"], "2024-03-04T09:00:00Z", "and its real won date")
+    eq(deals["Live one"]["label"], "Hot", "the label is resolved to its name")
+    eq(out["not_migrated"]["extra_labels_dropped"], 1,
+       "and the second label is counted, not silently dropped")
+    # primary first
+    p = out["persons"][0]
+    eq(p["emails"][0], "main@x.com", "the PRIMARY address comes first")
+    ok(p["phones"][0].startswith("07700 900"), p["phones"])
+    eq(p["job_title"], "Buyer")
+    eq(out["orgs"][0]["website"], "lumen.co.uk")
+    # location is an object in v2
+    eq(out["activities"][0]["location"], "12 High St, Durham",
+       "not a Python dict printed into the record")
+    eq(out["activities"][0]["duration"], "01:00:00")
+    # notes: html stripped, pinned carried, deleted skipped
+    eq(len(out["notes"]), 1, "a deleted note is not imported")
+    eq(out["notes"][0]["text"], "Wants it Friday")
+    ok(out["notes"][0]["pinned"], "and what was pinned stays pinned")
+
+@test
 def t_pipedrive_import_previews_then_copies_without_duplicating():
     """The import must be safe to run twice, must not touch anything typed in
     by hand, and must keep the REAL dates or the history it was imported for
@@ -3879,8 +3968,8 @@ def t_pipedrive_import_previews_then_copies_without_duplicating():
             names = [s["name"] for s in d["stages"]]
             eq(names, ["Enquiry", "Quoted"], "the real pipeline replaced the defaults")
             act = [x for x in d["activities"].values() if x["pd_id"] == "41"][0]
-            eq(act["due_date"], "2025-05-06",
-               "an undated activity keeps the day it was made, not today")
+            eq(act["due_date"], "",
+               "an undated activity stays undated: giving it one invents a job")
             deal30 = [x for x in d["deals"].values() if x["pd_id"] == "30"][0]
             eq(len(deal30["notes"]), 1)
             eq(deal30["notes"][0]["text"], "Wants them before the show")
@@ -4001,9 +4090,10 @@ def t_pipedrive_survey_names_what_would_not_survive_an_import():
             ("users/me", "v1"): {"data": {"name": "Cam", "email": "c@p.com", "is_admin": True,
                                           "company_name": "Projected Image",
                                           "default_currency": "GBP"}},
-            ("pipelines", "v1"): {"data": [{"id": 1, "name": "Trade"}, {"id": 2, "name": "Retail"}]},
-            ("stages", "v1"): {"data": [{"id": 10, "name": "Qualified", "pipeline_id": 1,
-                                         "order_nr": 1, "deal_probability": 50, "rotten_days": 14}]},
+            ("pipelines", "v2"): {"data": [{"id": 1, "name": "Trade"}, {"id": 2, "name": "Retail"}]},
+            ("stages", "v2"): {"data": [{"id": 10, "name": "Qualified", "pipeline_id": 1,
+                                         "order_nr": 1, "deal_probability": 50,
+                                         "is_deal_rot_enabled": True, "days_to_rotten": 14}]},
             ("users", "v1"): {"data": [{"id": 7, "name": "Ann", "email": "a@p.com",
                                         "active_flag": True, "is_admin": False},
                                        {"id": 8, "name": "Bob", "email": "b@p.com",
@@ -4016,7 +4106,7 @@ def t_pipedrive_survey_names_what_would_not_survive_an_import():
                                                {"key_string": "site", "name": "Site visit"}]},
             ("deals", "v2"): {"data": [
                 {"id": 1, "pipeline_id": 1, "currency": "GBP", "owner_id": 7, "status": "won",
-                 "a" * 40: "B size"},
+                 "custom_fields": {"a" * 40: "B size"}},
                 {"id": 2, "pipeline_id": 2, "currency": "EUR", "owner_id": 8, "status": "open"}]},
             ("persons", "v2"): {"data": []},
             ("organizations", "v2"): {"data": []},
@@ -4024,7 +4114,7 @@ def t_pipedrive_survey_names_what_would_not_survive_an_import():
             ("leads", "v1"): {"data": []},
         }
         async def fake_get(path, params=None, version="v2"):
-            if path == "deals" and (params or {}).get("archived_status") == "archived":
+            if path == "deals/archived":
                 return {"data": [{"id": 3, "pipeline_id": 1, "status": "won"}]}
             return pages.get((path, version), {"data": []})
         saved = (pipedrive._get, pipedrive.API_TOKEN)
@@ -4380,6 +4470,24 @@ class FakeS3:
         self.objects[Key] = len(data)
         self.bodies = getattr(self, "bodies", {})
         self.bodies[Key] = data
+
+def run_async(coro):
+    """Run a coroutine without disturbing the loop the rest of the suite uses.
+    asyncio.run() CLOSES the loop and leaves the thread without one, which
+    breaks every test after it."""
+    import asyncio as _a
+    try:
+        prev = _a.get_event_loop()
+    except RuntimeError:
+        prev = None
+    loop = _a.new_event_loop()
+    _a.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        _a.set_event_loop(prev)
+
 
 def with_files(fn, configured=True, s3=None):
     """Run fn(fake_s3) with the file store configured against a fake bucket."""
@@ -6491,10 +6599,10 @@ def t_mail_own_unsent_drafts_are_not_part_of_the_conversation():
         saved = _gm._call
         _gm._call = fake_call
         try:
-            got = asyncio.run(_gm.get_thread("t1"))
+            got = run_async(_gm.get_thread("t1"))
             eq(len(got["messages"]), 1, "the unsent draft is not a message on the board")
             eq(got["messages"][0]["from_email"], "jo@customer.com")
-            read = asyncio.run(_gm.read_thread("t1"))
+            read = run_async(_gm.read_thread("t1"))
             eq(len(read["messages"]), 1, "and Claude never reads our own draft back")
         finally:
             _gm._call = saved

@@ -7388,10 +7388,18 @@
         function crmVisibleDeals() {
             const q = crmQ.toLowerCase();
             return Object.values(crmCache.deals).filter(x => {
+                /* Archived means gone from the pipeline, as it does in
+                   Pipedrive: otherwise the back catalogue sits in the columns
+                   and inflates the open pipeline total. It has its own filter. */
+                if (crmStatus === 'archived') return !!x.archived && matchQ(x, q);
+                if (x.archived && crmStatus !== 'all') return false;
                 if (crmStatus !== 'all' && x.status !== crmStatus) return false;
                 if (!q) return true;
                 return (x.title + ' ' + crmWho(x)).toLowerCase().includes(q);
             });
+        }
+        function matchQ(x, q) {
+            return !q || (x.title + ' ' + crmWho(x)).toLowerCase().includes(q);
         }
         function renderCRMDeals(host) {
             const d = crmCache;
@@ -7404,7 +7412,8 @@
             q.oninput = () => { crmQ = q.value.trim(); paint(); };
             bar.append(q);
             const st = el('select', 'lbl-size');
-            [['open', 'Open deals'], ['won', 'Won deals'], ['lost', 'Lost deals'], ['all', 'Everything']]
+            [['open', 'Open deals'], ['won', 'Won deals'], ['lost', 'Lost deals'],
+             ['all', 'Everything'], ['archived', 'Archived']]
                 .forEach(([v, l]) => { const o = el('option', null, l); o.value = v; if (crmStatus === v) o.selected = true; st.append(o); });
             st.onchange = () => { crmStatus = st.value; paint(); };
             bar.append(st);

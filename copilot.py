@@ -7589,11 +7589,11 @@ CRM_DELETED_KEEP_DAYS = 30          # Pipedrive's restore window
 # Pipedrive seeds a new pipeline with these five stages; renaming them to the
 # merchant's own language is the first thing the stage editor is for.
 _CRM_DEFAULT_STAGES = [
-    {"id": "s1", "name": "Qualified", "probability": 100, "rot_days": 0},
-    {"id": "s2", "name": "Contact Made", "probability": 100, "rot_days": 0},
-    {"id": "s3", "name": "Demo Scheduled", "probability": 100, "rot_days": 0},
-    {"id": "s4", "name": "Proposal Made", "probability": 100, "rot_days": 0},
-    {"id": "s5", "name": "Negotiations Started", "probability": 100, "rot_days": 0},
+    {"id": "s1", "name": "Qualified", "probability": 100, "rot_days": 0, "rot_on": False},
+    {"id": "s2", "name": "Contact Made", "probability": 100, "rot_days": 0, "rot_on": False},
+    {"id": "s3", "name": "Demo Scheduled", "probability": 100, "rot_days": 0, "rot_on": False},
+    {"id": "s4", "name": "Proposal Made", "probability": 100, "rot_days": 0, "rot_on": False},
+    {"id": "s5", "name": "Negotiations Started", "probability": 100, "rot_days": 0, "rot_on": False},
 ]
 _CRM_ACTIVITY_TYPES = ("call", "meeting", "task", "deadline", "email", "lunch")
 _CRM_LOST_REASONS = ["Too expensive", "No response", "Went with someone else", "Timing", "Other"]
@@ -7734,9 +7734,12 @@ def _crm_shape(d: dict) -> dict:
         state, next_due = _crm_activity_state(k, d["activities"], today)
         st = stages.get(v.get("stage_id")) or (d["stages"][0] if d["stages"] else {})
         prob = v.get("probability") if v.get("probability") is not None else st.get("probability", 100)
-        rot_days = int(st.get("rot_days") or 0)
+        # A stage can hold a leftover day count behind a switched-off timer.
+        # Honouring the number without the switch turns cards red that the
+        # CRM this came from never rotted.
+        rot_days = int(st.get("rot_days") or 0) if st.get("rot_on", True) else 0
         rotten = False
-        if v.get("status") == "open" and rot_days > 0:
+        if v.get("status") == "open" and not v.get("archived") and rot_days > 0:
             try:
                 touched = datetime.fromisoformat(v.get("touched_at") or v.get("created_at"))
                 rotten = (datetime.now(timezone.utc) - touched).days >= rot_days
@@ -11662,7 +11665,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             seen_stage[st["pd_id"]] = sid
             new_stages.append({"id": sid, "name": st["name"] or ("Stage " + str(i + 1)),
                                "probability": st.get("probability") if st.get("probability") is not None else 100,
+                               "rot_on": bool(st.get("rot_on")),
                                "rot_days": int(st.get("rot_days") or 0),
+                               "rot_days_stored": int(st.get("rot_days_stored") or 0),
                                "pd_id": st["pd_id"]})
             report["stages"]["updated" if prev else "new"] += 1
         if len(new_stages) > 12:
@@ -11686,7 +11691,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 report["orgs"]["new"] += 1
             else:
                 report["orgs"]["updated"] += 1
-            rec.update({"name": o["name"], "address": o["address"], "label": rec.get("label", ""),
+            rec.update({"name": o["name"], "address": o["address"],
+                        "website": o.get("website", ""),
+                        "label": (data.get("labels") or {}).get(
+                            (o.get("label_ids") or [""])[0], {}).get("name", rec.get("label", "")),
                         "created_at": o["created_at"] or rec.get("created_at") or _crm_now(),
                         "updated_at": o["updated_at"] or _crm_now(), "pd_id": o["pd_id"]})
             rec.setdefault("notes", [])
@@ -11704,8 +11712,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             else:
                 report["persons"]["updated"] += 1
             rec.update({"name": p["name"], "emails": p["emails"], "phones": p["phones"],
+                        "job_title": p.get("job_title", ""),
                         "org_id": org_of.get(p["org_pd_id"], rec.get("org_id", "")),
-                        "label": rec.get("label", ""),
+                        "label": (data.get("labels") or {}).get(
+                            (p.get("label_ids") or [""])[0], {}).get("name", rec.get("label", "")),
                         "created_at": p["created_at"] or rec.get("created_at") or _crm_now(),
                         "updated_at": p["updated_at"] or _crm_now(), "pd_id": p["pd_id"]})
             rec.setdefault("notes", [])
@@ -11725,6 +11735,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             else:
                 report["deals"]["updated"] += 1
             closed = dl.get("won_at") if dl["status"] == "won" else dl.get("lost_at")
+            # won_at is what the Insights tab reads. Folding it into closed_at
+            # made an imported sales history report "no wins yet".
             rec.update({
                 "title": dl["title"], "value": dl["value"], "currency": dl["currency"],
                 "stage_id": seen_stage.get(dl["stage_pd_id"])
@@ -11739,6 +11751,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 "updated_at": dl["updated_at"] or _crm_now(),
                 "stage_entered_at": dl["stage_entered_at"] or dl["created_at"] or _crm_now(),
                 "closed_at": closed or "",
+                "won_at": dl.get("won_at") or "", "lost_at": dl.get("lost_at") or "",
+                "label": dl.get("label", rec.get("label", "")),
                 "touched_at": dl["updated_at"] or dl["created_at"] or _crm_now(),
                 "pd_id": dl["pd_id"],
             })
@@ -11751,6 +11765,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 d["deals"][gid] = rec
         if not dry:
             d["lost_reasons"] = sorted(lost_reasons)[:40]
+            # Their label names and colours, not the three this app shipped with:
+            # a label the board cannot colour renders as a grey dot.
+            labs = [v.get("name") for v in (data.get("labels") or {}).values() if v.get("name")]
+            if labs:
+                d["labels"] = labs[:20]
+                d["label_colors"] = {v["name"]: v.get("color", "")
+                                     for v in (data.get("labels") or {}).values() if v.get("name")}
 
         act_ix = index("activities")
         for a in data.get("activities") or []:
@@ -11767,12 +11788,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 "deal_id": deal_of.get(a["deal_pd_id"], ""),
                 "person_id": person_of.get(a["person_pd_id"], ""),
                 "org_id": org_of.get(a["org_pd_id"], ""),
-                # An activity with no due date must not land on today and
-                # invent a job for somebody: it keeps the day it was made.
-                "due_date": a["due_date"] or (a["created_at"] or _crm_now())[:10],
+                # An activity with no due date stays undated. Giving it one
+                # makes the app invent a job: either overdue today, or a task
+                # that was never scheduled appearing in somebody's week.
+                "due_date": a["due_date"] or "",
                 "due_time": a["due_time"], "note": a["note"][:CRM_NOTE_CAP],
                 "location": a["location"], "priority": "",
-                "done": a["done"], "done_at": a["done_at"] or ("" if not a["done"] else _crm_now()),
+                # Likewise a done date: stamping today would drop years of
+                # completed work into "activities completed, last 30 days".
+                "done": a["done"], "done_at": a["done_at"] or "",
+                "duration": a.get("duration", ""),
                 "created_at": a["created_at"] or _crm_now(), "pd_id": a["pd_id"],
             })
             if not dry:
@@ -11796,7 +11821,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             notes = target.setdefault("notes", [])
             if any(str(x.get("pd_id")) == n["pd_id"] for x in notes):
                 continue
-            notes.append({"at": n["at"] or _crm_now(), "by": "", "text": n["text"][:CRM_NOTE_CAP],
+            notes.append({"id": _crm_id(d, "n"), "at": n["at"] or _crm_now(), "by": "",
+                          "text": n["text"][:CRM_NOTE_CAP], "pinned": bool(n.get("pinned")),
                           "pd_id": n["pd_id"]})
 
         after = {"deals": len(d["deals"]) + (report["deals"]["new"] if dry else 0),
