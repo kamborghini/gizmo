@@ -1195,14 +1195,17 @@ def _note_backup(kind: str) -> None:
         logger.exception("could not record the backup time")
 
 
-def _weekly_snapshot() -> bool:
+def _weekly_snapshot(force: bool = False) -> bool:
     """A dated snapshot kept in the volume, newest few retained. This survives a
     bad write or a corrupted store; it does NOT survive losing the volume, which
-    is why the app also nags for a real download."""
+    is why the app also nags for a real download.
+
+    force=True takes one regardless of when the last was: used immediately
+    before something irreversible, like replacing the CRM with an import."""
     try:
         st = _load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}
         last = str(st.get("snapshot_at") or "")
-        if last:
+        if last and not force:
             try:
                 when = datetime.fromisoformat(last)
                 if when.tzinfo is None:
@@ -11625,6 +11628,232 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if extra:
             out.update(extra)
         return _json(out)
+
+    def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
+        """Merge a Pipedrive export into the CRM store.
+
+        Idempotent by construction: every imported record keeps its Pipedrive
+        id, and a second run finds that id and UPDATES rather than making a
+        second copy. Anything typed into gizmo by hand has no Pipedrive id and
+        is never touched.
+
+        With dry=True nothing is written and the counts describe exactly what
+        a real run would do."""
+        report = {"stages": {"new": 0, "updated": 0}, "orgs": {"new": 0, "updated": 0},
+                  "persons": {"new": 0, "updated": 0}, "deals": {"new": 0, "updated": 0},
+                  "activities": {"new": 0, "updated": 0}, "notes": {"added": 0},
+                  "kept": {"deals": 0, "persons": 0, "orgs": 0}, "problems": []}
+
+        def index(coll):
+            return {str(v.get("pd_id")): k for k, v in d[coll].items() if v.get("pd_id")}
+
+        # Records with no pd_id were typed in here; they survive untouched.
+        for coll, key in (("deals", "deals"), ("persons", "persons"), ("orgs", "orgs")):
+            report["kept"][key] = len([1 for v in d[coll].values() if not v.get("pd_id")])
+
+        # --- stages: the pipeline is the board, so it is replaced wholesale,
+        # but only the imported ones. A stage nobody imported and nobody uses
+        # would leave an empty column forever.
+        by_pd = {str(s.get("pd_id")): s for s in (d.get("stages") or []) if s.get("pd_id")}
+        new_stages, seen_stage = [], {}
+        for i, st in enumerate(data.get("stages") or []):
+            prev = by_pd.get(st["pd_id"])
+            sid = prev["id"] if prev else ("s_pd" + st["pd_id"])
+            seen_stage[st["pd_id"]] = sid
+            new_stages.append({"id": sid, "name": st["name"] or ("Stage " + str(i + 1)),
+                               "probability": st.get("probability") if st.get("probability") is not None else 100,
+                               "rot_days": int(st.get("rot_days") or 0),
+                               "pd_id": st["pd_id"]})
+            report["stages"]["updated" if prev else "new"] += 1
+        if len(new_stages) > 12:
+            report["problems"].append(
+                "Pipedrive has " + str(len(new_stages)) + " stages and this board holds 12. "
+                "The extra ones would have nowhere to go.")
+        if not dry and new_stages:
+            d["stages"] = new_stages
+
+        org_ix, person_ix, deal_ix = index("orgs"), index("persons"), index("deals")
+        org_of, person_of, deal_of = {}, {}, {}
+
+        # --- organisations, then people, then deals, then their activities and
+        # notes: each one links to the one before, so the order is the order.
+        for o in data.get("orgs") or []:
+            gid = org_ix.get(o["pd_id"])
+            rec = d["orgs"].get(gid) if gid else None
+            if rec is None:
+                gid = "o_pd" + o["pd_id"]
+                rec = {"id": gid, "notes": []}
+                report["orgs"]["new"] += 1
+            else:
+                report["orgs"]["updated"] += 1
+            rec.update({"name": o["name"], "address": o["address"], "label": rec.get("label", ""),
+                        "created_at": o["created_at"] or rec.get("created_at") or _crm_now(),
+                        "updated_at": o["updated_at"] or _crm_now(), "pd_id": o["pd_id"]})
+            rec.setdefault("notes", [])
+            org_of[o["pd_id"]] = gid
+            if not dry:
+                d["orgs"][gid] = rec
+
+        for p in data.get("persons") or []:
+            gid = person_ix.get(p["pd_id"])
+            rec = d["persons"].get(gid) if gid else None
+            if rec is None:
+                gid = "p_pd" + p["pd_id"]
+                rec = {"id": gid, "notes": [], "shopify_customer_id": None}
+                report["persons"]["new"] += 1
+            else:
+                report["persons"]["updated"] += 1
+            rec.update({"name": p["name"], "emails": p["emails"], "phones": p["phones"],
+                        "org_id": org_of.get(p["org_pd_id"], rec.get("org_id", "")),
+                        "label": rec.get("label", ""),
+                        "created_at": p["created_at"] or rec.get("created_at") or _crm_now(),
+                        "updated_at": p["updated_at"] or _crm_now(), "pd_id": p["pd_id"]})
+            rec.setdefault("notes", [])
+            rec.setdefault("shopify_customer_id", None)
+            person_of[p["pd_id"]] = gid
+            if not dry:
+                d["persons"][gid] = rec
+
+        lost_reasons = set(d.get("lost_reasons") or [])
+        for dl in data.get("deals") or []:
+            gid = deal_ix.get(dl["pd_id"])
+            rec = d["deals"].get(gid) if gid else None
+            if rec is None:
+                gid = "d_pd" + dl["pd_id"]
+                rec = {"id": gid, "notes": [], "changelog": []}
+                report["deals"]["new"] += 1
+            else:
+                report["deals"]["updated"] += 1
+            closed = dl.get("won_at") if dl["status"] == "won" else dl.get("lost_at")
+            rec.update({
+                "title": dl["title"], "value": dl["value"], "currency": dl["currency"],
+                "stage_id": seen_stage.get(dl["stage_pd_id"])
+                            or (d["stages"][0]["id"] if d.get("stages") else ""),
+                "person_id": person_of.get(dl["person_pd_id"], ""),
+                "org_id": org_of.get(dl["org_pd_id"], ""),
+                "status": dl["status"], "probability": dl.get("probability"),
+                "expected_close": dl["expected_close"],
+                "lost_reason": dl["lost_reason"], "source": dl["source"],
+                "archived": dl["archived"],
+                "created_at": dl["created_at"] or _crm_now(),
+                "updated_at": dl["updated_at"] or _crm_now(),
+                "stage_entered_at": dl["stage_entered_at"] or dl["created_at"] or _crm_now(),
+                "closed_at": closed or "",
+                "touched_at": dl["updated_at"] or dl["created_at"] or _crm_now(),
+                "pd_id": dl["pd_id"],
+            })
+            rec.setdefault("notes", [])
+            rec.setdefault("changelog", [])
+            if dl["lost_reason"]:
+                lost_reasons.add(dl["lost_reason"][:60])
+            deal_of[dl["pd_id"]] = gid
+            if not dry:
+                d["deals"][gid] = rec
+        if not dry:
+            d["lost_reasons"] = sorted(lost_reasons)[:40]
+
+        act_ix = index("activities")
+        for a in data.get("activities") or []:
+            gid = act_ix.get(a["pd_id"])
+            rec = d["activities"].get(gid) if gid else None
+            if rec is None:
+                gid = "a_pd" + a["pd_id"]
+                rec = {"id": gid}
+                report["activities"]["new"] += 1
+            else:
+                report["activities"]["updated"] += 1
+            rec.update({
+                "type": a["type"], "subject": a["subject"],
+                "deal_id": deal_of.get(a["deal_pd_id"], ""),
+                "person_id": person_of.get(a["person_pd_id"], ""),
+                "org_id": org_of.get(a["org_pd_id"], ""),
+                # An activity with no due date must not land on today and
+                # invent a job for somebody: it keeps the day it was made.
+                "due_date": a["due_date"] or (a["created_at"] or _crm_now())[:10],
+                "due_time": a["due_time"], "note": a["note"][:CRM_NOTE_CAP],
+                "location": a["location"], "priority": "",
+                "done": a["done"], "done_at": a["done_at"] or ("" if not a["done"] else _crm_now()),
+                "created_at": a["created_at"] or _crm_now(), "pd_id": a["pd_id"],
+            })
+            if not dry:
+                d["activities"][gid] = rec
+
+        for n in data.get("notes") or []:
+            if not n["text"]:
+                continue
+            target = None
+            if n["deal_pd_id"] and deal_of.get(n["deal_pd_id"]):
+                target = d["deals"].get(deal_of[n["deal_pd_id"]]) if not dry else True
+            elif n["person_pd_id"] and person_of.get(n["person_pd_id"]):
+                target = d["persons"].get(person_of[n["person_pd_id"]]) if not dry else True
+            elif n["org_pd_id"] and org_of.get(n["org_pd_id"]):
+                target = d["orgs"].get(org_of[n["org_pd_id"]]) if not dry else True
+            if target is None:
+                continue
+            report["notes"]["added"] += 1
+            if dry or target is True:
+                continue
+            notes = target.setdefault("notes", [])
+            if any(str(x.get("pd_id")) == n["pd_id"] for x in notes):
+                continue
+            notes.append({"at": n["at"] or _crm_now(), "by": "", "text": n["text"][:CRM_NOTE_CAP],
+                          "pd_id": n["pd_id"]})
+
+        after = {"deals": len(d["deals"]) + (report["deals"]["new"] if dry else 0),
+                 "activities": len(d["activities"]) + (report["activities"]["new"] if dry else 0)}
+        if after["deals"] > CRM_DEALS_MAX or after["activities"] > CRM_ACTIVITIES_MAX:
+            report["problems"].append(
+                "This would put the CRM over its size guard. Nothing would be deleted, "
+                "but the limits should be raised first.")
+        report["totals"] = after
+        return report
+
+    @mcp.custom_route("/api/crm/import", methods=["POST"])
+    async def crm_import_route(request: Request):
+        """Copy Pipedrive into gizmo's CRM. Dry run unless told otherwise.
+
+        Read-only against Pipedrive in both modes: this only ever writes into
+        gizmo's own store, and only when {"go": true} is sent."""
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        if _team_role(who) != "master":
+            return _json({"error": "Only the master account can import."}, 403)
+        if not pipedrive.configured():
+            return _json({"error": "No Pipedrive token is set on the server."}, 400)
+        go = bool(body.get("go"))
+        if go and not _store_writable(CRM_PATH):
+            return _json({"error": "The CRM store is not writable, so nothing was "
+                                   "changed. Check Settings, Connections."}, 503)
+        try:
+            data = await pipedrive.export()
+        except pipedrive.PipedriveError as e:
+            return _json({"error": str(e)}, 400)
+        except Exception:
+            logger.exception("pipedrive export failed")
+            return _json({"error": "Could not read the Pipedrive account."}, 502)
+        missing = [k for k, v in (data.get("complete") or {}).items() if not v]
+        if missing and go:
+            return _json({"error": "Only part of the Pipedrive account could be read ("
+                                   + ", ".join(missing) + "), so nothing was imported. "
+                                   "Run the preview and try again."}, 502)
+        if go:
+            # The one irreversible moment gets a snapshot immediately before it.
+            try:
+                _weekly_snapshot(force=True)
+            except Exception:
+                logger.exception("pre-import snapshot failed")
+        d = _load_crm()
+        report = _crm_import_apply(d, data, dry=not go)
+        if go:
+            _write_crm(d)
+            _track(who, "crm", "imported from Pipedrive",
+                   str(report["deals"]["new"]) + " new deals, "
+                   + str(report["persons"]["new"]) + " new people")
+        return _json({"ok": True, "dry_run": not go, "report": report,
+                      "account": data.get("account"),
+                      "not_migrated": data.get("not_migrated"),
+                      "incomplete": missing})
 
     @mcp.custom_route("/api/crm/pipedrive", methods=["POST"])
     async def crm_pipedrive_route(request: Request):

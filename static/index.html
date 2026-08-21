@@ -7302,6 +7302,86 @@
                 }
             };
             host.append(copy);
+            /* The import lives behind the survey deliberately: nobody should
+               reach it without first seeing what is in the account. */
+            const imp = el('button', 'btn');
+            imp.style.cssText = 'margin-top:10px;margin-left:8px';
+            imp.textContent = 'Preview the import';
+            imp.onclick = () => runPipedriveImport(host, imp, false);
+            host.append(imp);
+        }
+
+        async function runPipedriveImport(host, btn, go) {
+            btn.disabled = true;
+            btn.textContent = go ? 'Importing\u2026' : 'Reading Pipedrive\u2026';
+            const out = el('div', 'crm-focus');
+            out.style.marginTop = '10px';
+            out.append((() => { const t = el('div', 'thinking');
+                t.append(loader(), el('span', null, go
+                    ? 'Copying it in. Do not close this tab.'
+                    : 'Working out exactly what would change. Nothing is being written.'));
+                return t; })());
+            host.append(out);
+            let r;
+            try { r = await api('/api/crm/import', go ? { go: true } : {}); }
+            catch (e) {
+                out.innerHTML = '';
+                out.append(el('div', 'msg error', e.message || 'The import could not run.'));
+                btn.disabled = false;
+                btn.textContent = go ? 'Import it for real' : 'Preview the import';
+                return;
+            }
+            out.innerHTML = '';
+            const rep = r.report || {};
+            out.append(el('div', 'disp-subhead', go ? 'Imported' : 'What the import would do'));
+            const line = (label, o, unit) => {
+                const row = el('div', 'crm-sub');
+                row.textContent = label + ': ' + (o.new || 0) + ' new'
+                    + (o.updated ? ', ' + o.updated + ' updated' : '')
+                    + (unit ? ' ' + unit : '');
+                out.append(row);
+            };
+            line('Stages', rep.stages || {});
+            line('Organisations', rep.orgs || {});
+            line('People', rep.persons || {});
+            line('Deals', rep.deals || {});
+            line('Activities', rep.activities || {});
+            out.append(el('div', 'crm-sub', 'Notes: ' + ((rep.notes || {}).added || 0)));
+            const kept = rep.kept || {};
+            if ((kept.deals || 0) + (kept.persons || 0) + (kept.orgs || 0)) {
+                out.append(el('div', 'crm-sub', 'Left untouched, because they were typed in here: '
+                    + (kept.deals || 0) + ' deals, ' + (kept.persons || 0) + ' people, '
+                    + (kept.orgs || 0) + ' organisations'));
+            }
+            const nm = r.not_migrated || {};
+            const losses = [];
+            if (nm.files) losses.push(nm.files + ' files and attachments stay in Pipedrive');
+            if (nm.products) losses.push(nm.products + ' products are not brought across');
+            Object.entries(nm.activity_types_flattened || {}).forEach(([k, v]) =>
+                losses.push(v + ' "' + k + '" activities become tasks'));
+            losses.forEach(l => out.append(el('div', 'msg error', l)));
+            (rep.problems || []).forEach(pb => out.append(el('div', 'msg error', pb)));
+            btn.disabled = false;
+            if (go) {
+                btn.textContent = 'Import again';
+                toastOk('Imported. The CRM tab now holds your Pipedrive data.');
+                crmCache = null;
+                loadCRM();
+                return;
+            }
+            btn.textContent = 'Preview again';
+            const doIt = el('button', 'btn btn-primary', 'Import it for real');
+            doIt.style.marginTop = '10px';
+            doIt.onclick = async () => {
+                if (!(await uiConfirm('Copy ' + ((rep.deals || {}).new || 0) + ' deals, '
+                    + ((rep.persons || {}).new || 0) + ' people and '
+                    + ((rep.orgs || {}).new || 0) + ' organisations into gizmo?\n\n'
+                    + 'A backup is taken first. Anything typed into gizmo by hand is left '
+                    + 'alone, and running this again later updates rather than duplicates.'))) return;
+                doIt.remove();
+                runPipedriveImport(host, btn, true);
+            };
+            out.append(doIt);
         }
 
         /* ---------------- deals: board and list ---------------- */

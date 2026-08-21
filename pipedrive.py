@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-Pipedrive connector: SURVEY ONLY.
+Pipedrive connector: read the account, never write to it.
 
-This module reads and never writes. Its whole job, for now, is to answer the
-questions nobody can answer from outside the account: how many pipelines are
-in use, which custom fields actually carry data, how many deals are archived,
-which activity types exist, what currencies appear, and who owns what.
+Two jobs, both read-only against Pipedrive:
 
-That survey is what decides the shape of the import, so it comes first and on
-its own. Nothing here creates, updates or deletes anything in Pipedrive.
+  survey()   answers the questions that decide the shape of an import, so
+             nobody has to guess at the account from outside it.
+  export()   pulls everything an import needs and normalises it into the
+             shapes gizmo's CRM already uses.
+
+Nothing here creates, updates or deletes anything in Pipedrive. Writing
+happens only into gizmo's own store, and only when somebody asks for it.
 
 Env:
   PIPEDRIVE_API_TOKEN   an ADMIN's personal API token
@@ -272,3 +274,216 @@ async def survey() -> dict:
             out["warnings"].append("The " + label + " count hit the survey's ceiling, so the "
                                                     "real number is higher.")
     return out
+
+
+# ---------------------------------------------------------------------------
+# Export: the account, in gizmo's shapes
+# ---------------------------------------------------------------------------
+
+def _iso(v) -> str:
+    """Pipedrive hands back "2026-03-04 09:11:22" or an ISO string. gizmo
+    stores ISO with a timezone, and a date that silently becomes today is how
+    an imported history loses the thing it was imported for."""
+    s = str(v or "").strip()
+    if not s:
+        return ""
+    s = s.replace(" ", "T", 1)
+    if s.endswith("Z"):
+        return s
+    return s + "Z" if len(s) == 19 else s
+
+
+def _day(v) -> str:
+    s = str(v or "").strip()
+    return s[:10] if len(s) >= 10 else ""
+
+
+def _num(v) -> float:
+    try:
+        return round(float(v or 0), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+# Pipedrive's built-in activity keys that gizmo already understands. Anything
+# else becomes a task, and the export SAYS how many, rather than quietly
+# flattening a "Site visit" into something else.
+_TYPE_MAP = {"call": "call", "meeting": "meeting", "task": "task",
+             "deadline": "deadline", "email": "email", "lunch": "lunch"}
+
+
+async def export(progress=None) -> dict:
+    """Everything an import needs, normalised. Read-only.
+
+    Records keep their Pipedrive id so a second run can update rather than
+    duplicate, and so anything imported can always be traced back."""
+    def say(msg):
+        if progress:
+            try:
+                progress(msg)
+            except Exception:
+                pass
+
+    me = await whoami()
+    say("reading stages")
+    stages, _ = await _count("stages", version="v1")
+    say("reading organisations")
+    orgs, orgs_ok = await _count("organizations")
+    say("reading people")
+    persons, persons_ok = await _count("persons")
+    say("reading deals")
+    deals, deals_ok = await _count("deals")
+    say("reading archived deals")
+    try:
+        archived, arch_ok = await _count("deals", {"archived_status": "archived"})
+    except PipedriveError:
+        archived, arch_ok = [], False
+    say("reading activities")
+    acts, acts_ok = await _count("activities")
+    say("reading notes")
+    try:
+        notes, notes_ok = await _count("notes", version="v1")
+    except PipedriveError:
+        notes, notes_ok = [], False
+    say("checking products and files")
+    try:
+        products, _ = await _count("products", version="v1", cap=500)
+    except PipedriveError:
+        products = []
+    try:
+        files, _ = await _count("files", version="v1", cap=2000)
+    except PipedriveError:
+        files = []
+
+    stage_rows = [{"pd_id": str(s.get("id")), "name": str(s.get("name") or "")[:60],
+                   "order": s.get("order_nr") or 0,
+                   "probability": s.get("deal_probability"),
+                   "rot_days": s.get("rotten_days") or 0,
+                   "pipeline_id": str(s.get("pipeline_id") or "")}
+                  for s in stages]
+    stage_rows.sort(key=lambda x: (x["order"] or 0))
+
+    org_rows = [{"pd_id": str(o.get("id")), "name": str(o.get("name") or "")[:120],
+                 "address": str((o.get("address") or "") if isinstance(o.get("address"), str)
+                                else (o.get("address") or {}).get("value") or "")[:300],
+                 "created_at": _iso(o.get("add_time")),
+                 "updated_at": _iso(o.get("update_time"))}
+                for o in orgs if o.get("id")]
+
+    def _contacts(row, key):
+        vals = row.get(key)
+        out = []
+        if isinstance(vals, list):
+            for v in vals:
+                got = v.get("value") if isinstance(v, dict) else v
+                if got and str(got).strip():
+                    out.append(str(got).strip()[:200])
+        elif vals:
+            out.append(str(vals).strip()[:200])
+        seen, uniq = set(), []
+        for v in out:
+            if v.lower() not in seen:
+                seen.add(v.lower())
+                uniq.append(v)
+        return uniq[:8]
+
+    person_rows = [{"pd_id": str(p.get("id")),
+                    "name": str(p.get("name") or "")[:120],
+                    "org_pd_id": str((p.get("org_id") or {}).get("value")
+                                     if isinstance(p.get("org_id"), dict) else (p.get("org_id") or "")),
+                    "emails": _contacts(p, "emails") or _contacts(p, "email"),
+                    "phones": _contacts(p, "phones") or _contacts(p, "phone"),
+                    "created_at": _iso(p.get("add_time")),
+                    "updated_at": _iso(p.get("update_time"))}
+                   for p in persons if p.get("id")]
+
+    seen_deal = set()
+    deal_rows = []
+    for src, is_arch in ((deals, False), (archived, True)):
+        for dd in src:
+            pid = str(dd.get("id") or "")
+            if not pid or pid in seen_deal:
+                continue
+            seen_deal.add(pid)
+            status = str(dd.get("status") or "open")
+            deal_rows.append({
+                "pd_id": pid,
+                "title": str(dd.get("title") or "Untitled")[:200],
+                "value": _num(dd.get("value")),
+                "currency": str(dd.get("currency") or me.get("currency") or "GBP")[:8],
+                "stage_pd_id": str(dd.get("stage_id") or ""),
+                "person_pd_id": str((dd.get("person_id") or {}).get("value")
+                                    if isinstance(dd.get("person_id"), dict) else (dd.get("person_id") or "")),
+                "org_pd_id": str((dd.get("org_id") or {}).get("value")
+                                 if isinstance(dd.get("org_id"), dict) else (dd.get("org_id") or "")),
+                "status": status if status in ("open", "won", "lost") else "open",
+                "archived": is_arch,
+                "probability": dd.get("probability"),
+                "expected_close": _day(dd.get("expected_close_date")),
+                "lost_reason": str(dd.get("lost_reason") or "")[:120],
+                "created_at": _iso(dd.get("add_time")),
+                "updated_at": _iso(dd.get("update_time")),
+                "stage_entered_at": _iso(dd.get("stage_change_time") or dd.get("add_time")),
+                "won_at": _iso(dd.get("won_time")),
+                "lost_at": _iso(dd.get("lost_time")),
+                "source": str(dd.get("origin") or dd.get("source_name") or "Pipedrive")[:40],
+            })
+
+    unmapped_types = {}
+    act_rows = []
+    for a in acts:
+        if not a.get("id"):
+            continue
+        raw = str(a.get("type") or "task")
+        mapped = _TYPE_MAP.get(raw)
+        if not mapped:
+            unmapped_types[raw] = unmapped_types.get(raw, 0) + 1
+            mapped = "task"
+        act_rows.append({
+            "pd_id": str(a.get("id")),
+            "type": mapped, "raw_type": raw,
+            "subject": str(a.get("subject") or mapped.capitalize())[:200],
+            "deal_pd_id": str(a.get("deal_id") or ""),
+            "person_pd_id": str(a.get("person_id") or ""),
+            "org_pd_id": str(a.get("org_id") or ""),
+            "due_date": _day(a.get("due_date")),
+            "due_time": str(a.get("due_time") or "")[:5],
+            "note": str(a.get("note") or "")[:20000],
+            "location": str(a.get("location") or "")[:200],
+            "done": bool(a.get("done")),
+            "done_at": _iso(a.get("marked_as_done_time")),
+            "created_at": _iso(a.get("add_time")),
+        })
+
+    note_rows = [{"pd_id": str(n.get("id")),
+                  "deal_pd_id": str(n.get("deal_id") or ""),
+                  "person_pd_id": str(n.get("person_id") or ""),
+                  "org_pd_id": str(n.get("org_id") or ""),
+                  "text": _strip_note(n.get("content")),
+                  "at": _iso(n.get("add_time"))}
+                 for n in notes if n.get("id")]
+
+    return {
+        "account": me,
+        "stages": stage_rows, "orgs": org_rows, "persons": person_rows,
+        "deals": deal_rows, "activities": act_rows, "notes": note_rows,
+        "complete": {"orgs": orgs_ok, "persons": persons_ok, "deals": deals_ok,
+                     "archived": arch_ok, "activities": acts_ok, "notes": notes_ok},
+        "not_migrated": {
+            "products": len(products),
+            "files": len(files),
+            "activity_types_flattened": unmapped_types,
+        },
+    }
+
+
+def _strip_note(html_text) -> str:
+    """Pipedrive notes are HTML. gizmo stores plain text."""
+    import re as _re
+    import html as _html
+    t = str(html_text or "")
+    t = _re.sub(r"(?is)<(script|style)[^>]*>.*?(</\1>|$)", " ", t)
+    t = _re.sub(r"(?i)<br\s*/?>|</p>|</div>|</li>|</tr>", "\n", t)
+    t = _re.sub(r"<[^>]+>", " ", t)
+    t = _html.unescape(t)
+    return _re.sub(r"[ \t]{2,}", " ", _re.sub(r"\n{3,}", "\n\n", t)).strip()[:20000]

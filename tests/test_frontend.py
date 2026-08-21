@@ -382,6 +382,18 @@ def t_the_pipedrive_survey_is_reachable_and_says_it_is_read_only():
 
 
 @test
+def t_the_pipedrive_import_previews_before_it_writes():
+    ok("'/api/crm/import'" in SCRIPT, "the import is reachable from the CRM tab")
+    ok("Preview the import" in SCRIPT and "Import it for real" in SCRIPT,
+       "and the preview comes first: nobody reaches the write without seeing the counts")
+    ok("Nothing is being written" in SCRIPT, "which the preview says while it runs")
+    ok("A backup is taken first" in SCRIPT and "typed into gizmo by hand is left" in SCRIPT,
+       "and the confirmation says what protects them")
+    ok("stay in Pipedrive" in SCRIPT and "become tasks" in SCRIPT,
+       "what cannot come across is shown, not silently dropped")
+
+
+@test
 def t_custom_shipments_have_a_home_on_the_desk():
     """A pasted-address shipment has no order to be a row of, so without its
     own queue the only way back to its label was to reopen the booking window,

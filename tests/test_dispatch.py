@@ -3782,6 +3782,152 @@ def t_editing_a_contact_keeps_the_addresses_the_form_cannot_show():
                               "emails": ["a@b.com", "c@d.com"]})
     eq(copilot._load_crm()["persons"][pid]["emails"], ["a@b.com", "c@d.com"])
 
+PD_EXPORT = {
+    "account": {"name": "Projected Image", "admin": True, "company": "Projected Image UK Ltd",
+                "currency": "GBP"},
+    "stages": [{"pd_id": "1", "name": "Enquiry", "order": 1, "probability": 20, "rot_days": 14},
+               {"pd_id": "2", "name": "Quoted", "order": 2, "probability": 60, "rot_days": 7}],
+    "orgs": [{"pd_id": "10", "name": "Lumen Events", "address": "Newcastle",
+              "created_at": "2024-02-01T09:00:00Z", "updated_at": "2025-01-01T09:00:00Z"}],
+    "persons": [{"pd_id": "20", "name": "Sarah Whitfield", "org_pd_id": "10",
+                 "emails": ["sarah@lumen.co.uk", "s.whitfield@lumen.co.uk"],
+                 "phones": ["0191 111"], "created_at": "2024-02-01T09:00:00Z",
+                 "updated_at": "2025-01-01T09:00:00Z"}],
+    "deals": [{"pd_id": "30", "title": "12 steel gobos", "value": 480.0, "currency": "GBP",
+               "stage_pd_id": "2", "person_pd_id": "20", "org_pd_id": "10", "status": "won",
+               "archived": True, "probability": None, "expected_close": "2024-03-01",
+               "lost_reason": "", "created_at": "2024-02-02T09:00:00Z",
+               "updated_at": "2024-03-04T09:00:00Z", "stage_entered_at": "2024-02-20T09:00:00Z",
+               "won_at": "2024-03-04T09:00:00Z", "lost_at": "", "source": "Pipedrive"},
+              {"pd_id": "31", "title": "Glass sample", "value": 60.0, "currency": "GBP",
+               "stage_pd_id": "1", "person_pd_id": "20", "org_pd_id": "10", "status": "lost",
+               "archived": False, "probability": None, "expected_close": "",
+               "lost_reason": "Too expensive", "created_at": "2025-05-05T09:00:00Z",
+               "updated_at": "2025-06-06T09:00:00Z", "stage_entered_at": "2025-05-05T09:00:00Z",
+               "won_at": "", "lost_at": "2025-06-06T09:00:00Z", "source": "Pipedrive"}],
+    "activities": [{"pd_id": "40", "type": "call", "raw_type": "call", "subject": "Chase quote",
+                    "deal_pd_id": "30", "person_pd_id": "20", "org_pd_id": "10",
+                    "due_date": "2024-02-20", "due_time": "10:00", "note": "rang, no answer",
+                    "location": "", "done": True, "done_at": "2024-02-20T11:00:00Z",
+                    "created_at": "2024-02-19T09:00:00Z"},
+                   {"pd_id": "41", "type": "task", "raw_type": "site", "subject": "Site visit",
+                    "deal_pd_id": "31", "person_pd_id": "", "org_pd_id": "",
+                    "due_date": "", "due_time": "", "note": "", "location": "",
+                    "done": False, "done_at": "", "created_at": "2025-05-06T09:00:00Z"}],
+    "notes": [{"pd_id": "50", "deal_pd_id": "30", "person_pd_id": "", "org_pd_id": "",
+               "text": "Wants them before the show", "at": "2024-02-10T09:00:00Z"}],
+    "complete": {"orgs": True, "persons": True, "deals": True, "archived": True,
+                 "activities": True, "notes": True},
+    "not_migrated": {"products": 0, "files": 3, "activity_types_flattened": {"site": 1}},
+}
+
+
+def crm_wipe():
+    """A clean CRM store. Other tests leave deals behind, and an import test is
+    about counts."""
+    try:
+        os.remove(copilot.CRM_PATH)
+    except FileNotFoundError:
+        pass
+    copilot._poisoned_stores.discard(copilot.CRM_PATH)
+
+
+@test
+def t_pipedrive_import_previews_then_copies_without_duplicating():
+    """The import must be safe to run twice, must not touch anything typed in
+    by hand, and must keep the REAL dates or the history it was imported for
+    is worthless."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        # Something somebody typed into gizmo before the migration.
+        mine = post("/api/crm/contact", {"op": "org_add", "name": "Typed by hand"}).json()["id"]
+        async def fake_export(progress=None):
+            return dict(PD_EXPORT)
+        saved = (pipedrive.export, pipedrive.API_TOKEN)
+        pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
+        try:
+            # 1. The preview writes NOTHING.
+            r = post("/api/crm/import", {})
+            eq(r.status_code, 200, r.text)
+            j = r.json()
+            ok(j["dry_run"])
+            eq(j["report"]["deals"]["new"], 2)
+            eq(j["report"]["persons"]["new"], 1)
+            eq(j["report"]["orgs"]["new"], 1)
+            eq(j["report"]["kept"]["orgs"], 1, "the hand-typed org is counted as kept")
+            eq(len(copilot._load_crm()["deals"]), 0, "and nothing was written")
+            # 2. The real run.
+            r2 = post("/api/crm/import", {"go": True})
+            eq(r2.status_code, 200, r2.text)
+            ok(not r2.json()["dry_run"])
+            d = copilot._load_crm()
+            eq(len(d["deals"]), 2)
+            eq(len(d["persons"]), 1)
+            ok(mine in d["orgs"], "the hand-typed record survived the import")
+            won = [x for x in d["deals"].values() if x["pd_id"] == "30"][0]
+            eq(won["status"], "won")
+            eq(won["created_at"], "2024-02-02T09:00:00Z", "the REAL date, not today")
+            eq(won["closed_at"], "2024-03-04T09:00:00Z")
+            ok(won["archived"], "the back catalogue is marked as such")
+            eq(won["value"], 480.0)
+            person = [x for x in d["persons"].values() if x["pd_id"] == "20"][0]
+            eq(len(person["emails"]), 2, "both addresses came across")
+            eq(d["orgs"][person["org_id"]]["name"], "Lumen Events", "and the links hold")
+            eq([x["title"] for x in d["deals"].values() if x["pd_id"] == "30"][0], "12 steel gobos")
+            ok("Too expensive" in d["lost_reasons"], "lost reasons are seeded from real data")
+            names = [s["name"] for s in d["stages"]]
+            eq(names, ["Enquiry", "Quoted"], "the real pipeline replaced the defaults")
+            act = [x for x in d["activities"].values() if x["pd_id"] == "41"][0]
+            eq(act["due_date"], "2025-05-06",
+               "an undated activity keeps the day it was made, not today")
+            deal30 = [x for x in d["deals"].values() if x["pd_id"] == "30"][0]
+            eq(len(deal30["notes"]), 1)
+            eq(deal30["notes"][0]["text"], "Wants them before the show")
+            # 3. Running it AGAIN updates rather than duplicating.
+            r3 = post("/api/crm/import", {"go": True})
+            eq(r3.json()["report"]["deals"]["new"], 0, "nothing new the second time")
+            eq(r3.json()["report"]["deals"]["updated"], 2)
+            d2 = copilot._load_crm()
+            eq(len(d2["deals"]), 2, "and no duplicates")
+            eq(len(d2["persons"]), 1)
+            eq(len([n for n in d2["deals"][deal30["id"]]["notes"]]), 1, "nor duplicate notes")
+            # 4. What could not come across is reported, never silently dropped.
+            eq(r3.json()["not_migrated"]["files"], 3)
+            eq(r3.json()["not_migrated"]["activity_types_flattened"], {"site": 1})
+        finally:
+            pipedrive.export, pipedrive.API_TOKEN = saved
+    with_accounts(go)
+
+@test
+def t_pipedrive_import_refuses_a_partial_read():
+    def go():
+        ensure_auth()
+        crm_wipe()
+        async def half(progress=None):
+            bad = dict(PD_EXPORT)
+            bad["complete"] = dict(PD_EXPORT["complete"], persons=False)
+            return bad
+        saved = (pipedrive.export, pipedrive.API_TOKEN)
+        pipedrive.export, pipedrive.API_TOKEN = half, "t"
+        try:
+            r = post("/api/crm/import", {"go": True})
+            eq(r.status_code, 502, "half an account is not an import")
+            ok("persons" in r.json()["error"], r.text)
+            eq(len(copilot._load_crm()["deals"]), 0, "and nothing was written")
+            ok(post("/api/crm/import", {}).json()["dry_run"], "the preview still runs")
+        finally:
+            pipedrive.export, pipedrive.API_TOKEN = saved
+    with_accounts(go)
+
+@test
+def t_pipedrive_import_is_master_only():
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        eq(post_s(sess, "/api/crm/import", {}).status_code, 403)
+    with_accounts(go)
+
 @test
 def t_pipedrive_urls_go_to_the_api_not_the_web_app():
     """Both API versions live under /api/. Without that prefix the request
