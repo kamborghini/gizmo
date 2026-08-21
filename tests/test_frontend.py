@@ -373,6 +373,20 @@ def t_stock_sheet_review_is_editable_and_honest():
 
 
 @test
+def t_custom_shipments_have_a_home_on_the_desk():
+    """A pasted-address shipment has no order to be a row of, so without its
+    own queue the only way back to its label was to reopen the booking window,
+    which reads like spending money again."""
+    ok("['shipments', 'Shipments', 'Shipments']" in SCRIPT,
+       "Shipments is a queue on the desk, beside the order queues")
+    ok("renderCustomQueue" in SCRIPT, "with a list of its own")
+    ok("Search reference, name or tracking" in SCRIPT,
+       "searchable by whatever the person remembers months later")
+    ok("No stored label for this one" in SCRIPT,
+       "and a shipment whose label was never stored says so BEFORE the button is pressed")
+
+
+@test
 def t_inbox_reads_as_a_list_with_bulk_triage():
     """The merchant's own words after first connecting: it imported all mail,
     nothing is assigned, and it needs to look like a Gmail inbox. So: rows by

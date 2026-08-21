@@ -3967,7 +3967,7 @@
         const LABEL_TAG = 'IP';
         // The production lifecycle, as tag-filtered queues. Making an order moves it
         // IP -> PC (Mark made); fulfilling moves it PC -> Complete.
-        const QUEUE = [['unprocessed', 'Unprocessed', 'Unprocessed'], ['make', 'To make', 'IP'], ['ship', 'To ship', 'PC'], ['dispatched', 'Complete', 'Complete']];
+        const QUEUE = [['unprocessed', 'Unprocessed', 'Unprocessed'], ['make', 'To make', 'IP'], ['ship', 'To ship', 'PC'], ['dispatched', 'Complete', 'Complete'], ['shipments', 'Shipments', 'Shipments']];
         let queueMode = 'make';
         function queueTag() { const q = QUEUE.find(x => x[0] === queueMode); return q ? q[2] : LABEL_TAG; }
         function dispatchStateOf(o) {
@@ -4051,6 +4051,7 @@
         //          whole reason the server keeps a snapshot.
         async function loadLabels(force, fresh) {
             const box = $('labels-content');
+            if (queueMode === 'shipments') { renderCustomQueue(box); return; }
             if (labelsCache && !force) { renderLabels(); return; }
             box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
@@ -4400,6 +4401,126 @@
             }
         }
 
+        let customQ = '';
+        async function renderCustomQueue(box) {
+            /* Shipments booked to a pasted address. They are not orders, so
+               they never appear in the order queues, and until now the only
+               way back to one was to reopen the booking window: a button that
+               reads like "spend money again". */
+            box.innerHTML = '';
+            const hero = el('div', 'ov-hero');
+            const badge = el('div', 'badge'); badge.innerHTML = I.truck;
+            const ht = el('div');
+            ht.append(el('h2', null, 'Production Manager'),
+                el('p', null, 'Shipments booked to an address you pasted in, with no Shopify '
+                    + 'order behind them. Reprint a label or check a tracking number here.'));
+            hero.append(badge, ht);
+            box.append(hero);
+            const seg = el('div', 'lbl-seg');
+            QUEUE.forEach(([k, lab]) => {
+                const b = el('button', 'lbl-segbtn' + (queueMode === k ? ' on' : ''), lab);
+                b.onclick = () => { if (queueMode === k) return; queueMode = k; labelsCache = null; labelSel = null; loadLabels(true); };
+                seg.append(b);
+            });
+            box.append(seg);
+            const bar = el('div', 'lbl-toolbar');
+            const reload = el('button', 'btn');
+            reload.append(ico(I.refresh), document.createTextNode('Refresh'));
+            reload.onclick = () => renderCustomQueue(box);
+            bar.append(reload);
+            const newShip = el('button', 'btn');
+            newShip.append(ico(I.truck), document.createTextNode('New shipment'));
+            newShip.onclick = openCustomShip;
+            bar.append(newShip);
+            const find = document.createElement('input');
+            find.type = 'search'; find.className = 'disp-text';
+            find.placeholder = 'Search reference, name or tracking';
+            find.value = customQ;
+            find.style.cssText = 'max-width:260px;margin-left:auto';
+            bar.append(find);
+            box.append(bar);
+            const host = el('div');
+            box.append(host);
+            let rows = [];
+            const paint = () => {
+                host.innerHTML = '';
+                const q = customQ.toLowerCase();
+                const shown = !q ? rows : rows.filter(sh =>
+                    ((sh.reference || '') + ' ' + (sh.customer || '') + ' '
+                     + (sh.tracking || '') + ' ' + (sh.carrier || '')).toLowerCase().indexOf(q) >= 0);
+                if (!shown.length) {
+                    host.append(el('div', 'mail-empty', rows.length
+                        ? 'Nothing matches that.'
+                        : 'No shipments booked to a pasted address yet. Press New shipment to book one.'));
+                    return;
+                }
+                const list = el('div', 'files-list');
+                shown.forEach(sh => {
+                    const row = el('div', 'files-row');
+                    const left = el('div');
+                    left.style.cssText = 'flex:1 1 auto;min-width:0';
+                    const t = el('div', 'files-name still');
+                    t.textContent = (sh.reference || 'Shipment')
+                        + (sh.customer ? '  ·  ' + sh.customer : '');
+                    left.append(t);
+                    const sub = el('div', 'files-meta');
+                    sub.style.whiteSpace = 'normal';
+                    sub.textContent = [sh.carrier, sh.service, sh.tracking,
+                        sh.at ? fmtDate(sh.at) : '',
+                        sh.amount != null ? fmtPrice(sh.amount, sh.currency) : '']
+                        .filter(Boolean).join('  ·  ');
+                    left.append(sub);
+                    if (sh.contents) {
+                        const c = el('div', 'files-meta');
+                        c.style.whiteSpace = 'normal';
+                        c.textContent = sh.contents;
+                        left.append(c);
+                    }
+                    row.append(left);
+                    if (sh.canceled) {
+                        row.append(el('span', 'mail-order-stage not-started', 'cancelled'));
+                    } else if (sh.tracking) {
+                        const cp = el('button', 'btn');
+                        cp.textContent = 'Copy tracking';
+                        cp.onclick = async () => {
+                            try { await navigator.clipboard.writeText(sh.tracking); toastOk('Tracking copied'); }
+                            catch (e) { toastError('Could not copy it.'); }
+                        };
+                        row.append(cp);
+                    }
+                    const rp = el('button', 'btn btn-primary');
+                    rp.append(ico(I.printer), document.createTextNode('Reprint label'));
+                    if (sh.has_label === false) {
+                        rp.disabled = true;
+                        rp.title = 'No stored label for this one. It is in your World Options '
+                            + 'portal under the tracking number.';
+                    }
+                    rp.onclick = async () => {
+                        rp.disabled = true;
+                        try {
+                            const r = await api('/api/dispatch/label', { id: sh.id });
+                            if (!printLabelImages(r.labels || [])) labelButtons(row, r.labels, 'Print label');
+                        } catch (e) { toastError(e.message || 'Could not fetch the label'); }
+                        rp.disabled = false;
+                    };
+                    row.append(rp);
+                    list.append(row);
+                });
+                host.append(list);
+            };
+            find.oninput = () => { customQ = find.value; paint(); };
+            host.append((() => { const t = el('div', 'thinking');
+                t.append(loader(), el('span', null, 'Reading booked shipments…')); return t; })());
+            try {
+                const r = await api('/api/custom/list', { limit: 200 });
+                rows = r.shipments || [];
+            } catch (e) {
+                host.innerHTML = '';
+                host.append(el('div', 'msg error', e.message || 'Could not read the shipments.'));
+                return;
+            }
+            paint();
+        }
         function renderLabels() {
             if (!labelsCache) return;   // e.g. a coverage callback after the cache was cleared for a reload
             const box = $('labels-content'); box.innerHTML = '';
@@ -4417,6 +4538,7 @@
                 shown = shown.filter(o => (String(orderNo(o)) + ' ' + (o.display_name || '') + ' '
                     + ((dispatchStateOf(o) || {}).tracking_number || '')).toLowerCase().indexOf(q) >= 0);
             }
+            if (queueMode === 'shipments') { renderCustomQueue(box); return; }
             const dispatched = queueMode === 'dispatched';
             const shipMode = queueMode === 'ship';
             const unproc = queueMode === 'unprocessed';

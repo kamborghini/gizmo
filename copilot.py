@@ -13732,14 +13732,35 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/custom/list", methods=["POST"])
     async def custom_list_route(request: Request):
-        """Pasted-address shipments already booked. Read-only."""
+        """Pasted-address shipments already booked. Read-only.
+
+        These have no order to be a row of, so without this they are only
+        reachable from inside the booking window: a person looking for last
+        month's label had to press a button that reads like "spend money
+        again". They get their own queue on the desk instead."""
         pre = _pre_checks(request)
         if pre:
             return pre
         ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
-        return _json({"shipments": _custom_shipments()})
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        try:
+            limit = max(1, min(int(body.get("limit") or 200), 500))
+        except (TypeError, ValueError):
+            limit = 200
+        rows = _custom_shipments(limit)
+        q = str(body.get("q") or "").strip().lower()[:80]
+        if q:
+            rows = [r for r in rows if q in " ".join(str(r.get(k) or "") for k in
+                    ("reference", "customer", "tracking", "carrier", "contents")).lower()]
+        # Whether the label is still on disk decides whether Reprint can work,
+        # so say it here rather than letting the button fail.
+        for r in rows:
+            r["has_label"] = bool(_load_dispatch_labels(r.get("id")))
+        return _json({"shipments": rows})
 
     @mcp.custom_route("/api/dispatch/quote", methods=["POST"])
     async def dispatch_quote_route(request: Request):

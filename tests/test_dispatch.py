@@ -5461,6 +5461,52 @@ def t_stock_sheet_failure_records_nothing():
             (copilot._zeta_send_sheet, copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN) = saved
     with_accounts(go)
 
+@test
+def t_custom_shipments_are_findable_and_reprintable_later():
+    """A pasted-address shipment has no order to be a row of. Without a list
+    of its own the only way back to its label was to reopen the booking
+    window, which reads like spending money again."""
+    def go():
+        ensure_auth()
+        orders = copilot._load_dispatch()
+        orders["adhoc:shipone01"] = {
+            "tracking_number": "TRK-AAA", "carrier_label": "DPD",
+            "service_name": "Next day", "order_name": "Trade show stand",
+            "customer": "Lumen Events", "amount": 12.4, "currency": "GBP",
+            "dispatched_at": "2026-08-19T10:00:00Z", "contents": "2 gobos",
+        }
+        orders["adhoc:shiptwo02"] = {
+            "tracking_number": "TRK-BBB", "carrier_label": "UPS",
+            "order_name": "Replacement glass", "customer": "Theatre Royal",
+            "dispatched_at": "2026-08-18T10:00:00Z",
+        }
+        orders["991144"] = {"tracking_number": "ORDER-ONE", "order_name": "#1201"}
+        copilot._write_dispatch(orders)
+        copilot._save_dispatch_labels("adhoc:shipone01", [{"type": "png", "data": "AAA"}])
+        r = post("/api/custom/list", {})
+        eq(r.status_code, 200, r.text)
+        rows = r.json()["shipments"]
+        ids = [x["id"] for x in rows]
+        ok("adhoc:shipone01" in ids and "adhoc:shiptwo02" in ids, str(ids))
+        ok("991144" not in ids, "a real order is not a pasted-address shipment")
+        one = [x for x in rows if x["id"] == "adhoc:shipone01"][0]
+        eq(one["reference"], "Trade show stand")
+        eq(one["tracking"], "TRK-AAA")
+        ok(one["has_label"], "and the desk knows the label is still there")
+        two = [x for x in rows if x["id"] == "adhoc:shiptwo02"][0]
+        ok(not two["has_label"], "and knows when it is not, before the button fails")
+        eq([x["id"] for x in post("/api/custom/list", {"q": "theatre"}).json()["shipments"]],
+           ["adhoc:shiptwo02"], "searchable by whoever it went to")
+        eq([x["id"] for x in post("/api/custom/list", {"q": "TRK-AAA"}).json()["shipments"]],
+           ["adhoc:shipone01"], "or by the tracking number")
+        lab = post("/api/dispatch/label", {"id": "adhoc:shipone01"})
+        eq(lab.status_code, 200, lab.text)
+        eq(lab.json()["labels"][0]["data"], "AAA", "and the label really comes back")
+        eq(post("/api/dispatch/label", {"id": "adhoc:shiptwo02"}).status_code, 404,
+           "a shipment with no stored label says so plainly")
+    with_accounts(go)
+
+
 # =========================== shared inbox ==================================
 # The Gmail connector is a seam: these tests drive the store, the ownership
 # rules and the sync pipeline with a faked google_mail, never the network.
