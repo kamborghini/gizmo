@@ -7258,6 +7258,50 @@
             section('Currencies', cur.map(([k, v]) => [k, v + ' deals']));
             const st = Object.entries(r.deal_status || {}).filter(([k]) => k);
             section('Deal status', st.map(([k, v]) => [k, String(v)]));
+            /* The survey is only useful if it can be handed to somebody. This
+               copies the SHAPE of the account, never its contents: counts,
+               field names, pipeline names and who owns how much. No deal
+               titles, no customer names, no email addresses. */
+            const copy = el('button', 'btn');
+            copy.style.marginTop = '10px';
+            copy.append(ico(I.copy), document.createTextNode('Copy summary'));
+            copy.onclick = async () => {
+                const L = [];
+                L.push('PIPEDRIVE SURVEY');
+                L.push('Account: ' + (acc.company || '?') + ' | token belongs to '
+                    + (acc.name || '?') + (acc.admin ? ' (admin)' : ' (NOT ADMIN)')
+                    + ' | default currency ' + (acc.currency || '?'));
+                L.push('Counts: deals ' + c.deals + (c.deals_complete ? '' : '+')
+                    + ', archived ' + c.archived_deals + (c.archived_complete ? '' : '+')
+                    + ', people ' + c.persons + (c.persons_complete ? '' : '+')
+                    + ', orgs ' + c.organizations + (c.orgs_complete ? '' : '+')
+                    + ', activities ' + c.activities + (c.activities_complete ? '' : '+')
+                    + ', leads ' + c.leads + ', pipelines ' + c.pipelines
+                    + ', users ' + c.users);
+                (r.pipelines || []).forEach(p => L.push('Pipeline: ' + p.name + ' - '
+                    + p.deals + ' deals, ' + p.stages + ' stages'));
+                ((r.custom_fields || {}).deals || []).filter(f => f.used_on).forEach(f =>
+                    L.push('Deal field: ' + f.name + ' (' + f.type + ') on ' + f.used_on + ' deals'));
+                ((r.custom_fields || {}).persons || []).filter(f => f.used_on).forEach(f =>
+                    L.push('Person field: ' + f.name + ' (' + f.type + ') on ' + f.used_on + ' people'));
+                (r.activity_types || []).filter(t => t.used).forEach(t =>
+                    L.push('Activity type: ' + t.name + ' x' + t.used));
+                (r.users || []).filter(u => u.deals).forEach(u =>
+                    L.push('Owner: ' + u.name + ' - ' + u.deals + ' deals'));
+                cur.forEach(([k, v]) => L.push('Currency: ' + k + ' x' + v));
+                st.forEach(([k, v]) => L.push('Status: ' + k + ' x' + v));
+                (r.warnings || []).forEach(w => L.push('WARNING: ' + w));
+                const txt = L.join('\n');
+                try { await navigator.clipboard.writeText(txt); toastOk('Copied. Paste it to Claude.'); }
+                catch (e) {
+                    const ta = document.createElement('textarea');
+                    ta.className = 'mail-draft-text'; ta.rows = 12; ta.value = txt;
+                    host.append(el('div', 'crm-sub', 'Could not copy automatically. '
+                        + 'Select the text below and copy it.'), ta);
+                    ta.select();
+                }
+            };
+            host.append(copy);
         }
 
         /* ---------------- deals: board and list ---------------- */
