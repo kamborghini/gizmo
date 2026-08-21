@@ -44,7 +44,7 @@ for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
     os.environ.pop(v, None)
 
 import jwt
-import server, copilot, worldoptions
+import server, copilot, worldoptions, pipedrive
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
 
@@ -3736,21 +3736,128 @@ def t_rescheduling_an_activity_resets_rotting():
        "a reschedule is a touch, so the rot resets")
 
 @test
-def t_evicting_a_capped_deal_takes_its_activities_with_it():
+def t_the_size_guard_reports_rather_than_shredding_history():
+    """This used to DELETE the oldest closed deals and their activities when
+    the store passed a cap: silently, and biting precisely on the won/lost
+    record a business keeps a CRM for. A size guard is a fault to report, not
+    a licence to destroy data."""
     _org, _per, deal = crm_seed()
     aid = post("/api/crm/activity", {"op": "add", "type": "call", "deal_id": deal,
                                      "due_date": "2020-01-01"}).json()["id"]
     post("/api/crm/deal", {"op": "won", "id": deal})
     saved = copilot.CRM_DEALS_MAX
-    copilot.CRM_DEALS_MAX = 0        # force the cap eviction on the next write
+    copilot.CRM_DEALS_MAX = 0        # as if the store were far over its guard
     try:
         crm = post("/api/crm/contact", {"op": "org_add", "name": "Trigger"}).json()["crm"]
-        ok(deal not in crm["deals"], "the closed deal was evicted")
-        ok(aid not in crm["activities"], "and its activity went with it")
-        eq(crm["badge"], 0, "so no orphan inflates the badge")
+        ok(deal in crm["deals"], "the closed deal is still there")
+        ok(aid in crm["activities"], "and so is its history")
+        d = copilot._load_crm()
+        ok(d.get("over_cap"), "the fault is recorded instead")
+        ok(d["over_cap"]["deals"] > 0, d["over_cap"])
     finally:
         copilot.CRM_DEALS_MAX = saved
+        d = copilot._load_crm(); d.pop("over_cap", None); copilot._write_crm(d)
 
+
+@test
+def t_editing_a_contact_keeps_the_addresses_the_form_cannot_show():
+    """The contact form shows ONE email and ONE phone. An imported contact can
+    have four. Sending back what the form displays must not delete the rest."""
+    pid = post("/api/crm/contact", {"op": "person_add", "name": "Jo Bloggs",
+                                    "emails": ["jo@work.com", "jo@home.com", "jo@old.com"],
+                                    "phones": ["0191 111", "07700 900"]}).json()["id"]
+    # The form round-trips only the first of each, as it does today.
+    post("/api/crm/contact", {"op": "person_update", "id": pid, "name": "Jo Bloggs",
+                              "emails": ["jo@work.com"], "phones": ["0191 111"]})
+    p = copilot._load_crm()["persons"][pid]
+    eq(p["emails"], ["jo@work.com", "jo@home.com", "jo@old.com"], "the others survived")
+    eq(p["phones"], ["0191 111", "07700 900"])
+    # Genuinely changing the first one still works, and does not duplicate it.
+    post("/api/crm/contact", {"op": "person_update", "id": pid, "name": "Jo Bloggs",
+                              "emails": ["jo@new.com"], "phones": ["0191 111"]})
+    p = copilot._load_crm()["persons"][pid]
+    eq(p["emails"], ["jo@new.com", "jo@home.com", "jo@old.com"], "changed, not wiped")
+    # And a real multi-value edit still replaces the lot.
+    post("/api/crm/contact", {"op": "person_update", "id": pid, "name": "Jo Bloggs",
+                              "emails": ["a@b.com", "c@d.com"]})
+    eq(copilot._load_crm()["persons"][pid]["emails"], ["a@b.com", "c@d.com"])
+
+@test
+def t_pipedrive_survey_is_master_only_and_reads_nothing_without_a_token():
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        eq(post_s(sess, "/api/crm/pipedrive", {}).status_code, 403,
+           "somebody else's CRM is not a member's to survey")
+        saved = pipedrive.API_TOKEN
+        pipedrive.API_TOKEN = ""
+        try:
+            r = post("/api/crm/pipedrive", {})
+            eq(r.status_code, 400)
+            ok("PIPEDRIVE_API_TOKEN" in r.json()["error"], r.text)
+            ok(r.json()["configured"] is False)
+        finally:
+            pipedrive.API_TOKEN = saved
+    with_accounts(go)
+
+@test
+def t_pipedrive_survey_names_what_would_not_survive_an_import():
+    """The survey exists to answer the questions that decide the job. It has
+    to SAY the awkward ones, not just count rows."""
+    def go():
+        ensure_auth()
+        pages = {
+            ("users/me", "v1"): {"data": {"name": "Cam", "email": "c@p.com", "is_admin": True,
+                                          "company_name": "Projected Image",
+                                          "default_currency": "GBP"}},
+            ("pipelines", "v1"): {"data": [{"id": 1, "name": "Trade"}, {"id": 2, "name": "Retail"}]},
+            ("stages", "v1"): {"data": [{"id": 10, "name": "Qualified", "pipeline_id": 1,
+                                         "order_nr": 1, "deal_probability": 50, "rotten_days": 14}]},
+            ("users", "v1"): {"data": [{"id": 7, "name": "Ann", "email": "a@p.com",
+                                        "active_flag": True, "is_admin": False},
+                                       {"id": 8, "name": "Bob", "email": "b@p.com",
+                                        "active_flag": True, "is_admin": False}]},
+            ("dealFields", "v1"): {"data": [
+                {"key": "title", "name": "Title", "field_type": "varchar"},
+                {"key": "a" * 40, "name": "Gobo size", "field_type": "varchar"}]},
+            ("personFields", "v1"): {"data": []},
+            ("activityTypes", "v1"): {"data": [{"key_string": "call", "name": "Call"},
+                                               {"key_string": "site", "name": "Site visit"}]},
+            ("deals", "v2"): {"data": [
+                {"id": 1, "pipeline_id": 1, "currency": "GBP", "owner_id": 7, "status": "won",
+                 "a" * 40: "B size"},
+                {"id": 2, "pipeline_id": 2, "currency": "EUR", "owner_id": 8, "status": "open"}]},
+            ("persons", "v2"): {"data": []},
+            ("organizations", "v2"): {"data": []},
+            ("activities", "v2"): {"data": [{"id": 5, "type": "site"}]},
+            ("leads", "v1"): {"data": []},
+        }
+        async def fake_get(path, params=None, version="v2"):
+            if path == "deals" and (params or {}).get("archived_status") == "archived":
+                return {"data": [{"id": 3, "pipeline_id": 1, "status": "won"}]}
+            return pages.get((path, version), {"data": []})
+        saved = (pipedrive._get, pipedrive.API_TOKEN)
+        pipedrive._get = fake_get
+        pipedrive.API_TOKEN = "test-token"    # configured() gates the route
+        try:
+            r = post("/api/crm/pipedrive", {})
+            eq(r.status_code, 200, r.text)
+            j = r.json()
+            eq(j["account"]["company"], "Projected Image")
+            eq(j["counts"]["deals"], 2)
+            eq(j["counts"]["archived_deals"], 1, "the back catalogue is counted separately")
+            warn = " ".join(j["warnings"])
+            ok("2 pipelines are in use" in warn, warn)
+            ok("more than one currency" in warn, warn)
+            ok("Gobo size" in warn, warn)
+            ok("owner" in warn.lower(), warn)
+            eq(j["custom_fields"]["deals"][0]["name"], "Gobo size")
+            eq(j["custom_fields"]["deals"][0]["used_on"], 1)
+            ok(any(t["name"] == "Site visit" and t["used"] == 1 for t in j["activity_types"]),
+               j["activity_types"])
+        finally:
+            pipedrive._get, pipedrive.API_TOKEN = saved
+    with_accounts(go)
 
 # ---- Stock bridge (gizmo -> zeta) -------------------------------------------
 

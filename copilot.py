@@ -46,6 +46,7 @@ import httpx
 import jwt
 import google_data
 import google_mail
+import pipedrive
 try:
     import worldoptions
 except Exception:                     # keep the app booting if the connector is unavailable
@@ -1102,6 +1103,11 @@ def _recent_errors(hours: int = 24) -> list:
 BACKUP_STATE_PATH = os.environ.get("BACKUP_STATE_PATH", "/data/backup_state.json")
 BACKUP_SNAPSHOT_DIR = os.environ.get("BACKUP_SNAPSHOT_DIR", "/data/snapshots")
 BACKUP_KEEP = 4
+# Per-file ceiling inside a backup. It exists so one runaway store cannot make
+# the whole archive un-downloadable, NOT as a retention rule: a CRM holding an
+# imported sales history will pass 10MB, and the backup meant to protect it
+# must not be the thing that quietly stops including it.
+BACKUP_FILE_MAX = int(os.environ.get("BACKUP_FILE_MAX", str(60 * 1024 * 1024)))
 
 
 def _build_backup_zip():
@@ -1158,7 +1164,7 @@ def _build_backup_zip():
                     continue
                 try:
                     size = os.path.getsize(p)
-                    if size > 10 * 1024 * 1024:
+                    if size > BACKUP_FILE_MAX:
                         # Named, never silent: a store that outgrew the backup
                         # is exactly what the merchant must hear about.
                         skipped.append({"name": n, "reason": f"too large ({size // (1024 * 1024)}MB)"})
@@ -7567,9 +7573,14 @@ def _ensure_scheduler(registry: dict) -> None:
 # is visible to the AI chat.
 # ---------------------------------------------------------------------------
 CRM_PATH = os.environ.get("CRM_PATH", "/data/crm.json")
-CRM_DEALS_MAX = 2000
-CRM_ACTIVITIES_MAX = 6000
-CRM_NOTE_CAP = 4000                 # characters per note
+# These are a guard against an unbounded file, not a retention policy. They
+# were set when the CRM held what somebody typed in by hand; once it holds an
+# imported sales history they are the difference between keeping your won/lost
+# record and quietly shredding it. Raised, and the eviction below now REFUSES
+# to touch anything rather than deleting the oldest.
+CRM_DEALS_MAX = int(os.environ.get("CRM_DEALS_MAX", "60000"))
+CRM_ACTIVITIES_MAX = int(os.environ.get("CRM_ACTIVITIES_MAX", "200000"))
+CRM_NOTE_CAP = 20000                # characters per note
 CRM_DELETED_KEEP_DAYS = 30          # Pipedrive's restore window
 
 # Pipedrive seeds a new pipeline with these five stages; renaming them to the
@@ -7691,23 +7702,19 @@ def _crm_purge(d: dict) -> None:
         d["deals"].pop(k, None)
         for ak in [ak for ak, a in d["activities"].items() if a.get("deal_id") == k]:
             d["activities"].pop(ak, None)
-    while len(d["deals"]) > CRM_DEALS_MAX:
-        closed = sorted((k for k, v in d["deals"].items() if v.get("status") != "open"),
-                        key=lambda k: str(d["deals"][k].get("updated_at") or ""))
-        if not closed:
-            break
-        gone = closed[0]
-        d["deals"].pop(gone, None)
-        # Its activities go with it, or an open one becomes an immortal orphan
-        # inflating the badge for a deal that no longer exists.
-        for ak in [ak for ak, a in d["activities"].items() if a.get("deal_id") == gone]:
-            d["activities"].pop(ak, None)
-    while len(d["activities"]) > CRM_ACTIVITIES_MAX:
-        done = sorted((k for k, v in d["activities"].items() if v.get("done")),
-                      key=lambda k: str(d["activities"][k].get("done_at") or ""))
-        if not done:
-            break
-        d["activities"].pop(done[0], None)
+    # Over the cap, the CRM used to DELETE the oldest closed deals and their
+    # activities: silently, with no error, and biting precisely on the won/lost
+    # history a business keeps a CRM for. Nothing here deletes a real record any
+    # more. Passing the cap is a fault to be reported, not a licence to shred.
+    over_d = len(d["deals"]) - CRM_DEALS_MAX
+    over_a = len(d["activities"]) - CRM_ACTIVITIES_MAX
+    if over_d > 0 or over_a > 0:
+        d["over_cap"] = {"deals": max(0, over_d), "activities": max(0, over_a),
+                         "at": datetime.now(timezone.utc).isoformat()}
+        logger.error("CRM is over its size guard by %d deals / %d activities. Nothing has "
+                     "been deleted. Raise CRM_DEALS_MAX / CRM_ACTIVITIES_MAX.", over_d, over_a)
+    else:
+        d.pop("over_cap", None)
 
 
 def _crm_shape(d: dict) -> dict:
@@ -11619,6 +11626,36 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             out.update(extra)
         return _json(out)
 
+    @mcp.custom_route("/api/crm/pipedrive", methods=["POST"])
+    async def crm_pipedrive_route(request: Request):
+        """Look at the Pipedrive account, read-only.
+
+        This writes NOTHING, to either system. It exists to answer the
+        questions that decide the shape of an import and that nobody can
+        answer from outside the account: how many pipelines are really in
+        use, which custom fields carry data, how much is archived, and who
+        owns what."""
+        err, _body, who = await _mail_guard(request)
+        if err:
+            return err
+        if _team_role(who) != "master":
+            return _json({"error": "Only the master account can look at Pipedrive."}, 403)
+        if not pipedrive.configured():
+            return _json({"error": "No Pipedrive token is set on the server. Add "
+                                   "PIPEDRIVE_API_TOKEN in Railway, from an ADMIN's "
+                                   "Pipedrive account, then try again.",
+                          "configured": False}, 400)
+        try:
+            out = await pipedrive.survey()
+        except pipedrive.PipedriveError as e:
+            return _json({"error": str(e), "configured": True}, 400)
+        except Exception:
+            logger.exception("pipedrive survey failed")
+            return _json({"error": "Could not read the Pipedrive account."}, 502)
+        _track(who, "crm", "surveyed the Pipedrive account",
+               str((out.get("counts") or {}).get("deals", 0)) + " deals")
+        return _json({"configured": True, **out})
+
     @mcp.custom_route("/api/crm/board", methods=["POST"])
     async def crm_board_route(request: Request):
         err, _body = await _crm_guard(request)
@@ -11892,9 +11929,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     for f, cap in (("name", 120), ("label", 40), ("org_id", 40)):
                         if f in body:
                             p[f] = str(body.get(f) or "").strip()[:cap]
+                    # A form that shows ONE email must not be able to delete the
+                    # other three. It sends what it displays, so treat that as a
+                    # change to the FIRST entry and keep the rest.
                     for f in ("emails", "phones"):
                         if f in body and isinstance(body[f], list):
-                            p[f] = [str(x).strip()[:120] for x in body[f] if str(x).strip()][:4]
+                            sent = [str(x).strip()[:200] for x in body[f] if str(x).strip()]
+                            kept = [str(x).strip()[:200] for x in (p.get(f) or []) if str(x).strip()]
+                            if len(sent) <= 1 and len(kept) > 1:
+                                rest = [x for x in kept[1:] if x.lower() != (sent[0].lower() if sent else "")]
+                                p[f] = (sent + rest)[:8]
+                            else:
+                                p[f] = sent[:8]
                     p["updated_at"] = _crm_now()
                 elif op == "link_shopify":
                     p["shopify_customer_id"] = body.get("shopify_customer_id") or None
