@@ -3967,7 +3967,7 @@
         const LABEL_TAG = 'IP';
         // The production lifecycle, as tag-filtered queues. Making an order moves it
         // IP -> PC (Mark made); fulfilling moves it PC -> Complete.
-        const QUEUE = [['unprocessed', 'Unprocessed', 'Unprocessed'], ['make', 'To make', 'IP'], ['ship', 'To ship', 'PC'], ['dispatched', 'Complete', 'Complete'], ['shipments', 'Shipments', 'Shipments']];
+        const QUEUE = [['unprocessed', 'Unprocessed', 'Unprocessed'], ['make', 'To make', 'IP'], ['ship', 'To ship', 'PC'], ['dispatched', 'Complete', 'Complete'], ['shipments', 'Custom Shipments', 'Custom Shipments']];
         let queueMode = 'make';
         function queueTag() { const q = QUEUE.find(x => x[0] === queueMode); return q ? q[2] : LABEL_TAG; }
         function dispatchStateOf(o) {

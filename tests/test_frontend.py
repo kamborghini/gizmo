@@ -377,8 +377,8 @@ def t_custom_shipments_have_a_home_on_the_desk():
     """A pasted-address shipment has no order to be a row of, so without its
     own queue the only way back to its label was to reopen the booking window,
     which reads like spending money again."""
-    ok("['shipments', 'Shipments', 'Shipments']" in SCRIPT,
-       "Shipments is a queue on the desk, beside the order queues")
+    ok("['shipments', 'Custom Shipments', 'Custom Shipments']" in SCRIPT,
+       "Custom Shipments is a queue on the desk, beside the order queues")
     ok("renderCustomQueue" in SCRIPT, "with a list of its own")
     ok("Search reference, name or tracking" in SCRIPT,
        "searchable by whatever the person remembers months later")
