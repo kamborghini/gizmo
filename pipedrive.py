@@ -43,11 +43,19 @@ def configured() -> bool:
     return bool(API_TOKEN)
 
 
+_discovered = {"domain": ""}
+
+
 def _base(version: str) -> str:
+    """Both API versions live under /api/. Without that prefix the request
+    lands on the Pipedrive WEB APP, which cheerfully returns a page of HTML
+    with a 200, so the failure looks like a parsing problem rather than a
+    wrong URL."""
     if API_BASE:
-        return f"{API_BASE}/{version}"
-    host = f"https://{DOMAIN}.pipedrive.com" if DOMAIN else "https://api.pipedrive.com"
-    return f"{host}/{version}"
+        return f"{API_BASE}/api/{version}"
+    dom = DOMAIN or _discovered["domain"]
+    host = f"https://{dom}.pipedrive.com" if dom else "https://api.pipedrive.com"
+    return f"{host}/api/{version}"
 
 
 async def _get(path: str, params: dict = None, version: str = "v2") -> dict:
@@ -76,6 +84,13 @@ async def _get(path: str, params: dict = None, version: str = "v2") -> dict:
         except Exception:
             detail = r.text[:300]
         raise PipedriveError(f"Pipedrive said: {str(detail)[:300]}")
+    ctype = (r.headers.get("content-type") or "").lower()
+    if "json" not in ctype:
+        # A page instead of data. Say which page and why, rather than handing
+        # somebody a mouthful of markup to puzzle over.
+        raise PipedriveError(
+            "That request reached a Pipedrive web page rather than the API ("
+            + url + "). Usually this means the address or the token is wrong.")
     try:
         return r.json()
     except Exception:
@@ -117,11 +132,19 @@ async def _count(path: str, params: dict = None, version: str = "v2",
 
 
 async def whoami() -> dict:
+    """Who the token belongs to, and which company domain to use for the rest.
+
+    Pipedrive advises requests go to the company's own domain, and the account
+    itself is the only thing that knows what that is, so the first call finds
+    it and everything afterwards uses it. No configuration required."""
     d = await _get("users/me", version="v1")
     u = d.get("data") or {}
+    dom = str(u.get("company_domain") or "").strip()
+    if dom and not DOMAIN:
+        _discovered["domain"] = dom
     return {"name": u.get("name") or "", "email": u.get("email") or "",
             "admin": bool(u.get("is_admin")), "company": u.get("company_name") or "",
-            "domain": u.get("company_domain") or "", "currency": u.get("default_currency") or ""}
+            "domain": dom, "currency": u.get("default_currency") or ""}
 
 
 def _field_summary(fields: list, rows: list) -> list:

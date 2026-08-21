@@ -3783,6 +3783,51 @@ def t_editing_a_contact_keeps_the_addresses_the_form_cannot_show():
     eq(copilot._load_crm()["persons"][pid]["emails"], ["a@b.com", "c@d.com"])
 
 @test
+def t_pipedrive_urls_go_to_the_api_not_the_web_app():
+    """Both API versions live under /api/. Without that prefix the request
+    lands on the Pipedrive web app, which returns a page of HTML with a 200,
+    so the failure reads as a parsing problem rather than a wrong address."""
+    saved_dom, saved_base = pipedrive.DOMAIN, pipedrive.API_BASE
+    pipedrive.DOMAIN, pipedrive.API_BASE = "", ""
+    pipedrive._discovered["domain"] = ""
+    try:
+        ok(pipedrive._base("v1").endswith("/api/v1"), pipedrive._base("v1"))
+        ok(pipedrive._base("v2").endswith("/api/v2"), pipedrive._base("v2"))
+        # The account tells us its own domain, so nobody has to configure one.
+        pipedrive._discovered["domain"] = "acme"
+        eq(pipedrive._base("v2"), "https://acme.pipedrive.com/api/v2")
+    finally:
+        pipedrive.DOMAIN, pipedrive.API_BASE = saved_dom, saved_base
+        pipedrive._discovered["domain"] = ""
+
+@test
+def t_pipedrive_html_response_is_explained_not_dumped():
+    def go():
+        ensure_auth()
+        class _R:
+            status_code = 200
+            headers = {"content-type": "text/html; charset=utf-8"}
+            text = "<!DOCTYPE html><html><head><script>var w=localStorage..."
+            def json(self): raise ValueError("not json")
+        class _C:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def get(self, *a, **k): return _R()
+        saved = (pipedrive.httpx.AsyncClient, pipedrive.API_TOKEN)
+        pipedrive.httpx.AsyncClient = lambda **k: _C()
+        pipedrive.API_TOKEN = "t"
+        try:
+            r = post("/api/crm/pipedrive", {})
+            eq(r.status_code, 400, r.text)
+            msg = r.json()["error"]
+            ok("web page rather than the API" in msg, msg)
+            ok("<html" not in msg and "DOCTYPE" not in msg,
+               "and the markup itself is never handed to the reader")
+        finally:
+            pipedrive.httpx.AsyncClient, pipedrive.API_TOKEN = saved
+    with_accounts(go)
+
+@test
 def t_pipedrive_survey_is_master_only_and_reads_nothing_without_a_token():
     def go():
         ensure_auth()
