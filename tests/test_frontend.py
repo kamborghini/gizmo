@@ -373,6 +373,15 @@ def t_stock_sheet_review_is_editable_and_honest():
 
 
 @test
+def t_the_pipedrive_survey_is_reachable_and_says_it_is_read_only():
+    ok("'/api/crm/pipedrive'" in SCRIPT, "the survey can be run from the CRM tab")
+    ok("writes nothing, to either system" in SCRIPT,
+       "and says plainly that it changes nothing before anyone presses it")
+    ok("runPipedriveSurvey" in SCRIPT and "crm-statgrid" in HTML,
+       "with the counts rendered rather than left in a console")
+
+
+@test
 def t_custom_shipments_have_a_home_on_the_desk():
     """A pasted-address shipment has no order to be a row of, so without its
     own queue the only way back to its label was to reopen the booking window,

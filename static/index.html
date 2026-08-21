@@ -592,6 +592,11 @@
         .crm-card-who { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
         .crm-card-bot { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 12px; }
         .crm-card-val { font-weight: 600; }
+        .crm-statgrid { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+        .crm-stat { flex: 1 1 100px; background: var(--surface-2); border: 1px solid var(--line);
+            border-radius: 8px; padding: 8px 12px; }
+        .crm-stat-n { font-size: 20px; font-weight: 600; color: var(--ink); }
+        .crm-stat-l { font-size: 11px; color: var(--ink-3); }
         .crm-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
         .crm-ai { margin-left: auto; display: inline-flex; }
         .crm-ai svg { width: 14px; height: 14px; }
@@ -7159,12 +7164,100 @@
                 seg.append(b);
             });
             box.append(seg);
+            /* Moving off Pipedrive: the survey is read-only and writes nothing
+               to either system, so it is safe to press at any time. */
+            if (!teamMe || teamMe.role === 'master') {
+                const pd = el('div', 'crm-focus');
+                pd.style.margin = '10px 0 0';
+                const row = el('div');
+                row.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap';
+                row.append(el('div', 'disp-subhead', 'Moving from Pipedrive'));
+                const go = el('button', 'btn btn-primary', 'Look at my Pipedrive');
+                const out = el('div');
+                go.onclick = () => runPipedriveSurvey(out, go);
+                row.append(go);
+                row.append(el('span', 'crm-sub',
+                    'Reads your Pipedrive account and writes nothing, to either system.'));
+                pd.append(row, out);
+                box.append(pd);
+            }
             const host = el('div'); host.style.marginTop = '12px'; box.append(host);
             if (crmSeg === 'deals') renderCRMDeals(host);
             else if (crmSeg === 'activities') renderCRMActivities(host);
             else if (crmSeg === 'contacts') renderCRMContacts(host);
             else if (crmSeg === 'leads') renderCRMLeads(host);
             else renderCRMInsights(host);
+        }
+
+        async function runPipedriveSurvey(host, btn) {
+            btn.disabled = true; btn.textContent = 'Reading\u2026';
+            host.innerHTML = '';
+            const wait = el('div', 'thinking');
+            wait.append(loader(), el('span', null,
+                'Counting deals, people, activities and custom fields. This can take a minute '
+                + 'on a big account.'));
+            host.append(wait);
+            let r;
+            try { r = await api('/api/crm/pipedrive', {}); }
+            catch (e) {
+                host.innerHTML = '';
+                host.append(el('div', 'msg error', e.message || 'Could not read Pipedrive.'));
+                btn.disabled = false; btn.textContent = 'Look at my Pipedrive';
+                return;
+            }
+            btn.disabled = false; btn.textContent = 'Look at my Pipedrive again';
+            host.innerHTML = '';
+            const acc = r.account || {};
+            host.append(el('div', 'crm-sub', 'Connected to ' + (acc.company || 'Pipedrive')
+                + ' as ' + (acc.name || '?') + (acc.admin ? ' (administrator)' : ' (NOT an administrator)')
+                + (acc.currency ? '  ·  default currency ' + acc.currency : '')));
+            (r.warnings || []).forEach(w => host.append(el('div', 'msg error', w)));
+            const c = r.counts || {};
+            const grid = el('div', 'crm-statgrid');
+            const stat = (label, n, warn) => {
+                const b = el('div', 'crm-stat');
+                b.append(el('div', 'crm-stat-n', String(n == null ? '?' : n)));
+                b.append(el('div', 'crm-stat-l', label + (warn ? ' (at least)' : '')));
+                grid.append(b);
+            };
+            stat('Deals', c.deals, !c.deals_complete);
+            stat('Archived deals', c.archived_deals, !c.archived_complete);
+            stat('People', c.persons, !c.persons_complete);
+            stat('Organisations', c.organizations, !c.orgs_complete);
+            stat('Activities', c.activities, !c.activities_complete);
+            stat('Leads', c.leads, !c.leads_complete);
+            stat('Pipelines', c.pipelines);
+            stat('Users', c.users);
+            host.append(grid);
+            const section = (title, rows) => {
+                if (!rows.length) return;
+                host.append(el('div', 'disp-subhead', title));
+                const list = el('div', 'files-list');
+                rows.forEach(([a, b]) => {
+                    const row = el('div', 'files-row');
+                    const l = el('div', 'files-name still'); l.textContent = a;
+                    row.append(l, el('span', 'files-meta', b));
+                    list.append(row);
+                });
+                host.append(list);
+            };
+            section('Pipelines', (r.pipelines || []).map(p =>
+                [p.name, p.deals + ' deals  ·  ' + p.stages + ' stages']));
+            section('Custom fields on deals', (r.custom_fields || {}).deals
+                ? r.custom_fields.deals.filter(f => f.used_on).map(f =>
+                    [f.name, 'on ' + f.used_on + ' deals  ·  ' + f.type
+                     + (f.options ? '  ·  ' + f.options + ' options' : '')]) : []);
+            section('Custom fields on people', (r.custom_fields || {}).persons
+                ? r.custom_fields.persons.filter(f => f.used_on).map(f =>
+                    [f.name, 'on ' + f.used_on + ' people  ·  ' + f.type]) : []);
+            section('Activity types in use', (r.activity_types || [])
+                .filter(t => t.used).map(t => [t.name, t.used + ' activities']));
+            section('Who owns the deals', (r.users || []).filter(u => u.deals)
+                .map(u => [u.name + (u.active ? '' : ' (inactive)'), u.deals + ' deals']));
+            const cur = Object.entries(r.currencies || {}).filter(([k, v]) => k && v);
+            section('Currencies', cur.map(([k, v]) => [k, v + ' deals']));
+            const st = Object.entries(r.deal_status || {}).filter(([k]) => k);
+            section('Deal status', st.map(([k, v]) => [k, String(v)]));
         }
 
         /* ---------------- deals: board and list ---------------- */
