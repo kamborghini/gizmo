@@ -4882,6 +4882,19 @@ class FakeS3:
     def delete_object(self, Bucket, Key):
         self._guard("delete_object")
         self.objects.pop(Key, None)
+    def delete_objects(self, Bucket, Delete):
+        # The reaper batches (1000 keys per call) so an R2 outage cannot hold
+        # the files lock one round trip at a time. Per-key failures come back
+        # in Errors, exactly as S3 reports them.
+        self._guard("delete_objects")
+        errors = []
+        for o in (Delete or {}).get("Objects") or []:
+            k = o.get("Key")
+            if k in getattr(self, "undeletable", set()):
+                errors.append({"Key": k, "Code": "AccessDenied"})
+                continue
+            self.objects.pop(k, None)
+        return {"Errors": errors} if errors else {}
     def upload_fileobj(self, Fileobj, Bucket, Key):
         self._guard("upload_fileobj")
         data = Fileobj.read()
@@ -8238,6 +8251,47 @@ def t_an_enquiry_email_cannot_edit_an_existing_contact():
         note = " ".join(n["text"] for n in deal["notes"])
         ok("07000 000000" in note, "the claim is kept in the deal note for a human to judge")
     with_mail(go)
+
+@test
+def t_the_drive_cannot_be_filled_or_confused_by_duplicate_names():
+    """Two Files findings. COPY on the mounted drive was the one write path
+    with no quota (a server-side copy, so a `cp` loop bills storage without a
+    byte crossing the wire), and rename/move/restore could leave two ACTIVE
+    files with one name in one folder - which makes the newer unreachable on
+    the Finder drive, because WebDAV resolves by name."""
+    def go(_fake):
+        ensure_auth()
+        d = copilot._load_files()
+        d["files"]["fA"] = {"id": "fA", "name": "proof.pdf", "folder_id": "", "status": "active",
+                            "size": 10, "r2_key": "fA/proof.pdf"}
+        d["files"]["fB"] = {"id": "fB", "name": "other.pdf", "folder_id": "", "status": "active",
+                            "size": 10, "r2_key": "fB/other.pdf"}
+        d["files"]["fC"] = {"id": "fC", "name": "proof.pdf", "folder_id": "", "status": "trashed",
+                            "trashed_at": "2026-08-01T00:00:00+00:00", "size": 10,
+                            "r2_key": "fC/proof.pdf"}
+        copilot._write_files(d)
+        r = post("/api/files/file", {"op": "rename", "id": "fB", "name": "proof.pdf"})
+        eq(r.status_code, 409, "a rename onto an existing name is refused")
+        r2 = post("/api/files/file", {"op": "restore", "id": "fC"})
+        eq(r2.status_code, 409, "and so is restoring onto one")
+        ok(copilot._load_files()["files"]["fC"]["status"] == "trashed", "the file stays put")
+        # Renaming to a free name still works.
+        eq(post("/api/files/file", {"op": "rename", "id": "fB", "name": "spec.pdf"}).status_code,
+           200, "an unused name is fine")
+    with_files(go)
+
+@test
+def t_the_reaper_batches_and_gives_up_before_it_wedges_the_lock():
+    """One key per round trip with no cap meant an R2 outage held the files
+    lock ~30s per key, stalling Files, the drive and the scheduler."""
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "copilot.py"), encoding="utf-8").read()
+    fn = src[src.index("def _files_reap("):]
+    fn = fn[:fn.index("\ndef ", 1)]
+    ok("delete_objects" in fn, "the reaper deletes in batches")
+    ok("FILES_REAP_MAX" in fn and "FILES_REAP_SECONDS" in fn,
+       "with a per-tick cap and a deadline")
+    ok("delete_object(" not in fn, "and no one-at-a-time path remains")
 
 @test
 def t_deleting_a_contact_respects_open_leads_and_tombstones_the_import():

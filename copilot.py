@@ -7925,6 +7925,8 @@ R2_BUCKET = os.environ.get("R2_BUCKET", "gizmo-files").strip()
 FILES_PATH = os.environ.get("FILES_PATH", "/data/files.json")
 FILES_QUOTA_GB = float(os.environ.get("FILES_QUOTA_GB", "50"))
 FILES_MAX_UPLOAD = 4 * 1024 * 1024 * 1024      # a single presigned PUT tops out near 5GB
+FILES_REAP_MAX = int(os.environ.get("FILES_REAP_MAX", "4000"))     # keys per reaper tick
+FILES_REAP_SECONDS = float(os.environ.get("FILES_REAP_SECONDS", "20"))  # and its deadline
 FILES_TRASH_DAYS = 30
 _files_s3_client = None
 _files_s3_birth = threading.Lock()   # boto3's default session is not thread-safe to build on
@@ -8048,7 +8050,24 @@ def _files_id(d: dict, prefix: str) -> str:
 # Bidi overrides and isolates let a stranger send "artworkfdp.eps" that
 # DISPLAYS as "artwork.pdf" on the Finder drive. Names used to come only
 # from staff uploads; attachments changed that.
-_FILENAME_BAD = re.compile(r"[\\/\x00-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]")
+_FILENAME_BAD = re.compile(
+    r"[\\/\x00-\x1f\x7f-\x9f؜‎‏‪-‮⁦-⁩  "
+    # Zero-width and soft hyphen: invisible, and NOT stripped as whitespace, so
+    # "proof<ZWSP>.pdf" renders in Finder as exactly "proof.pdf".
+    r"­​‌‍⁠﻿]")
+
+
+def _files_name_taken(d: dict, folder_id: str, name: str, skip_id: str = "") -> bool:
+    """Is an ACTIVE file already called this in this folder? Two active records
+    with one name in one folder make the newer unreachable on the Finder drive
+    (WebDAV resolves by name), so rename, move and restore have to refuse it -
+    the upload paths already supersede on the same condition."""
+    want = (name or "").strip().lower()
+    fol = str(folder_id or "")
+    return any(v.get("status") == "active" and str(k) != str(skip_id)
+               and str(v.get("folder_id") or "") == fol
+               and str(v.get("name") or "").strip().lower() == want
+               for k, v in d.get("files", {}).items())
 
 
 def _files_clean_name(name: str) -> str:
@@ -8092,12 +8111,28 @@ def _files_reap(d: dict, s3) -> bool:
     bucket confirms, so a failed delete is retried next hour instead of
     orphaning a billed object forever. Returns True when the list changed."""
     done = []
-    for key in list(d.get("doomed") or []):
+    # Batched, capped and deadlined. One key at a time with no ceiling meant an
+    # R2 outage held _files_lock for ~30s per key, stalling Files, the Finder
+    # drive and the whole scheduler tick behind a bucket that was not answering.
+    todo = list(d.get("doomed") or [])[:FILES_REAP_MAX]
+    started = time.monotonic()
+    for i in range(0, len(todo), 1000):
+        if time.monotonic() - started > FILES_REAP_SECONDS:
+            logger.info("files: reaper hit its deadline, %d keys left for the next tick",
+                        len(todo) - len(done))
+            break
+        chunk = todo[i:i + 1000]
         try:
-            s3.delete_object(Bucket=R2_BUCKET, Key=key)
-            done.append(key)
+            res = s3.delete_objects(Bucket=R2_BUCKET,
+                                    Delete={"Objects": [{"Key": k} for k in chunk],
+                                            "Quiet": True})
+            failed = {e.get("Key") for e in ((res or {}).get("Errors") or [])}
+            done.extend(k for k in chunk if k not in failed)
+            if failed:
+                logger.warning("files: %d keys refused deletion, next tick retries", len(failed))
         except Exception:
-            logger.warning("files: could not delete %s from the bucket; next tick retries", key)
+            logger.warning("files: batch delete failed for %d keys, next tick retries", len(chunk))
+            break
     if done:
         d["doomed"] = [k for k in d["doomed"] if k not in done]
         return True
@@ -13577,7 +13612,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     if f.get("status") != "active":
                         return _json({"error": "Restore the file from the trash first."}, 400)
                     old_name = f.get("name") or ""
-                    f["name"] = _files_clean_name(body.get("name"))
+                    new_name = _files_clean_name(body.get("name"))
+                    if _files_name_taken(d, f.get("folder_id"), new_name, fid):
+                        return _json({"error": "There is already a file called that in this "
+                                               "folder. Rename the other one first."}, 409)
+                    f["name"] = new_name
                     return _files_ok(d, action="renamed a file",
                                      detail=f"{old_name} to {f['name']}", who=_who)
                 if op == "move":
@@ -13586,6 +13625,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     folder = str(body.get("folder_id") or "")
                     if not _files_folder_ok(d, folder):
                         return _json({"error": "That folder no longer exists."}, 400)
+                    if _files_name_taken(d, folder, f.get("name"), fid):
+                        return _json({"error": "That folder already holds a file with this "
+                                               "name. Rename one of them first."}, 409)
                     f["folder_id"] = folder
                     return _files_ok(d, action="moved a file", detail=f.get("name") or "", who=_who)
                 if op == "trash":
@@ -13597,10 +13639,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if op == "restore":
                     if not f.get("trashed_at"):
                         return _json({"error": "The file isn't in the trash."}, 400)
-                    f.pop("trashed_at", None)
-                    f["status"] = "active"
                     if not _files_folder_ok(d, str(f.get("folder_id") or "")):
                         f["folder_id"] = ""   # its folder went away; restore to the top level
+                    if _files_name_taken(d, f.get("folder_id"), f.get("name"), fid):
+                        return _json({"error": "A file with this name is already in that "
+                                               "folder. Rename it before restoring this one."}, 409)
+                    f.pop("trashed_at", None)
+                    f["status"] = "active"
                     return _files_ok(d, action="restored a file from the trash", detail=f.get("name") or "", who=_who)
                 if op == "destroy":
                     # "Delete now" from the trash: the record goes at once (so
@@ -14332,6 +14377,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     _write_files(d)
                     _track(uid, "files", "moved a file from Finder", dname)
                     return Response(status_code=201, headers=hdrs)
+                # COPY was the one write path with no ceiling: a `cp` loop on
+                # the mounted drive is a server-side copy, so a 4GB file could
+                # be duplicated to the quota's limit without a byte crossing
+                # the wire, and the bill is per stored byte.
+                if _files_usage(d) + int(f.get("size") or 0) > int(FILES_QUOTA_GB * 1024 * 1024 * 1024):
+                    return Response(status_code=507, headers=hdrs)
                 nid = _files_id(d, "f")
                 nkey = f"{nid}/{dname}"
                 try:
