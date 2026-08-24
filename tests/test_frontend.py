@@ -377,8 +377,8 @@ def t_the_pipedrive_survey_is_reachable_and_says_it_is_read_only():
     ok("'/api/crm/pipedrive'" in SCRIPT, "the survey can be run from the CRM tab")
     ok("writes nothing, to either system" in SCRIPT,
        "and says plainly that it changes nothing before anyone presses it")
-    ok("runPipedriveSurvey" in SCRIPT and "crm-statgrid" in HTML,
-       "with the counts rendered rather than left in a console")
+    ok("runPipedriveSurvey" in SCRIPT and "lia-card" in SCRIPT,
+       "with the counts rendered as the house stat cards, not left in a console")
 
 
 @test
@@ -590,6 +590,17 @@ def t_crm_background_refresh_and_namesakes():
     ok("function crmPicked" in SCRIPT and SCRIPT.count("crmPicked(") >= 5,
        "every contact-typing form resolves the PICKED record, not a namesake")
     ok("dataset.pickedId" in SCRIPT, "the typeahead records WHICH row was picked")
+
+
+@test
+def t_website_enquiries_link_both_ways():
+    """A filed enquiry is one click from email to deal and back - a reference
+    that does not open is a dead reference."""
+    ok("Filed in the CRM - open the deal" in SCRIPT,
+       "the email modal links to the deal it became")
+    ok(re.search(r"crmDealModal\(t\.crm_deal_id\)", SCRIPT), "and actually opens it")
+    ok(re.search(r"openMailThread\(x\.mail_thread_id\)", SCRIPT),
+       "while the deal links back to the email it came from")
 
 
 if __name__ == "__main__":

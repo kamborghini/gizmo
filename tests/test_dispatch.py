@@ -7971,6 +7971,90 @@ def t_mail_connect_ticket_expires():
             copilot._mail_connect_tickets.clear()
     with_mail(go)
 
+@test
+def t_website_enquiries_are_flagged_and_parsed():
+    """The storefront contact form arrives as Shopify's notification email;
+    the subject flags it on arrival, and the body's labelled lines parse
+    tolerantly - a miss degrades to the sender, never to a lost enquiry."""
+    def go():
+        ensure_auth()
+        store = copilot._load_mail()
+        _seed_thread("q1", "New customer message on 24 Aug 2026 at 11:02 am",
+                     frm=("Projected Image", "no-reply@shopifyemail.com"))
+        ok(store["threads"]["q1"].get("enquiry") == "new", "flagged on arrival")
+        _seed_thread("q2", "Re: your gobo order")
+        ok(not store["threads"]["q2"].get("enquiry"), "an ordinary email is not")
+        p = copilot._mail_parse_enquiry(
+            "You received a new message from your online store's contact form.\n\n"
+            "Name: Dana Voss\nEmail: dana@venue.co.uk\nPhone Number: 07700 900123\n"
+            "Company: The Venue\nBody:\nWe need two B-size glass gobos\nfor the 12th.\n")
+        eq(p["name"], "Dana Voss")
+        eq(p["email"], "dana@venue.co.uk")
+        eq(p["phone"], "07700 900123")
+        eq(p["company"], "The Venue")
+        ok(p["message"].startswith("We need two B-size glass gobos"), p["message"])
+        ok("for the 12th." in p["message"], "the message keeps its later lines")
+        # A theme that renames every field still yields the address.
+        p2 = copilot._mail_parse_enquiry("someone wrote in: reach them at kim@a.com please")
+        eq(p2["email"], "kim@a.com")
+    with_mail(go)
+
+@test
+def t_a_website_enquiry_becomes_a_contact_made_deal_once():
+    def go():
+        ensure_auth()
+        crm_wipe()
+        # The pipeline has a Contact Made column, as the user's does.
+        org = post("/api/crm/contact", {"op": "org_add", "name": "Seed"}).json()["id"]
+        stages = post("/api/crm/board", {}).json()["crm"]["stages"]
+        ok(any(s["name"] == "Contact Made" for s in stages), "default pipeline carries it")
+        store = copilot._load_mail()
+        _seed_thread("wq1", "New customer message on 24 Aug 2026",
+                     frm=("Projected Image", "no-reply@shopifyemail.com"))
+        async def fake_read(tid, per_msg_chars=4000):
+            return {"id": tid, "messages": [{
+                "text": ("You received a new message from your online store's contact form.\n"
+                         "Name: Dana Voss\nEmail: dana@venue.co.uk\nPhone: 07700 900123\n"
+                         "Body:\nTwo B-size glass gobos please.\n"),
+                "reply_to": "Dana Voss <dana@venue.co.uk>"}]}
+        saved = copilot.google_mail.read_thread
+        copilot.google_mail.read_thread = fake_read
+        try:
+            run_async(copilot._mail_enquiries_file(store))
+            d = copilot._load_crm()
+            deals = [x for x in d["deals"].values() if x.get("mail_thread_id") == "wq1"]
+            eq(len(deals), 1, "one enquiry, one deal")
+            deal = deals[0]
+            stage = next(s for s in d["stages"] if s["id"] == deal["stage_id"])
+            eq(stage["name"], "Contact Made", "it lands in the Contact Made column")
+            eq(deal["source"], "Website form")
+            person = d["persons"][deal["person_id"]]
+            eq(person["emails"], ["dana@venue.co.uk"])
+            eq(person["phones"], ["07700 900123"])
+            ok(any("B-size glass gobos" in n["text"] for n in deal["notes"]),
+               "the message is the deal's first note")
+            eq(store["threads"]["wq1"].get("crm_deal_id"), deal["id"])
+            # Run it again: the flag is done AND the filing is thread-idempotent.
+            store["threads"]["wq1"]["enquiry"] = "new"
+            store["threads"]["wq1"].pop("crm_deal_id")
+            run_async(copilot._mail_enquiries_file(store))
+            eq(len([x for x in copilot._load_crm()["deals"].values()
+                    if x.get("mail_thread_id") == "wq1"]), 1, "never filed twice")
+            # A SECOND enquiry from a KNOWN address reuses the person.
+            _seed_thread("wq2", "New customer message on 25 Aug 2026",
+                         frm=("Projected Image", "no-reply@shopifyemail.com"))
+            run_async(copilot._mail_enquiries_file(store))
+            d2 = copilot._load_crm()
+            eq(len([p for p in d2["persons"].values()
+                    if "dana@venue.co.uk" in (p.get("emails") or [])]), 1,
+               "a repeat enquirer is matched by email, not duplicated")
+            eq(len([x for x in d2["deals"].values()
+                    if x.get("source") == "Website form"]), 2,
+               "but each enquiry is its own piece of work")
+        finally:
+            copilot.google_mail.read_thread = saved
+    with_mail(go)
+
 # =========================== run ===========================================
 
 passed = failed = 0

@@ -8442,9 +8442,182 @@ def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str) -> None:
             t["done_at"], t["state_at"] = "", _mail_now()
             _mail_log(t, "", "reopened")
     if arrived:
+        # A storefront contact-form submission is flagged on arrival; the
+        # sync files it into the CRM once it can read the body. The flag is
+        # set here (sync store logic, unit-testable), the filing happens
+        # where the network lives.
+        if _mail_looks_like_enquiry(t.get("subject")):
+            t["enquiry"] = "new"
         # Rules run on ARRIVAL only. A later message must never re-triage a
         # conversation out from under whoever is already holding it.
         _mail_rules_run(store, t)
+
+
+# ---------------------------------------------------------------------------
+# Website enquiries -> the CRM. The storefront contact form has no API: Shopify
+# sends each submission as a notification email into the shared inbox this app
+# already syncs. Recognised threads become a deal in the "Contact Made" stage,
+# with the sender as a person and the message as the deal's first note - so an
+# enquiry is pipeline the moment it lands, not an email waiting to be retyped.
+# ---------------------------------------------------------------------------
+_MAIL_ENQUIRY_SUBJECT = re.compile(
+    r"(?i)^\s*(?:fwd?:\s*)?(?:new customer message"
+    r"|new message from your (?:online )?store"
+    r"|contact form(?: submission)?)")
+
+
+def _mail_looks_like_enquiry(subject) -> bool:
+    return bool(_MAIL_ENQUIRY_SUBJECT.search(str(subject or "")))
+
+
+_MAIL_EMAIL_RX = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def _mail_parse_enquiry(text: str) -> dict:
+    """Shopify's notification body is labelled lines (Name: / Email: /
+    Phone: / Body:) with the message underneath. Parsed tolerantly: themes
+    rename fields, and a miss must degrade to the sender's address, never to
+    a lost enquiry."""
+    out = {"name": "", "email": "", "phone": "", "company": "", "message": ""}
+    msg_lines, in_msg = [], False
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not in_msg:
+            m = re.match(r"(?i)^(name|e-?mail(?: address)?|phone(?: number)?"
+                         r"|company|organisation|organization)\s*:\s*(.*)$", line)
+            if m:
+                key, val = m.group(1).lower(), m.group(2).strip()
+                if key.startswith(("e", "e-")):
+                    hit = _MAIL_EMAIL_RX.search(val)
+                    out["email"] = out["email"] or (hit.group(0) if hit else val[:200])
+                elif key.startswith("phone"):
+                    out["phone"] = out["phone"] or val[:40]
+                elif key.startswith(("company", "org")):
+                    out["company"] = out["company"] or val[:120]
+                else:
+                    out["name"] = out["name"] or val[:120]
+                continue
+            m2 = re.match(r"(?i)^(body|message|comments?)\s*:\s*(.*)$", line)
+            if m2:
+                in_msg = True
+                if m2.group(2).strip():
+                    msg_lines.append(m2.group(2).strip())
+                continue
+        else:
+            msg_lines.append(raw.rstrip())
+    out["message"] = "\n".join(msg_lines).strip()[:CRM_NOTE_CAP]
+    if not out["email"]:
+        hit = _MAIL_EMAIL_RX.search(str(text or ""))
+        out["email"] = hit.group(0) if hit else ""
+    return out
+
+
+def _crm_enquiry_stage(d: dict) -> str:
+    """The 'Contact Made' column by name, however the pipeline spells it;
+    an enquiry with no such column still lands somewhere visible."""
+    for s in d.get("stages") or []:
+        if str(s.get("name") or "").strip().lower() == "contact made":
+            return s["id"]
+    for s in d.get("stages") or []:
+        if "contact" in str(s.get("name") or "").lower():
+            return s["id"]
+    return d["stages"][0]["id"] if d.get("stages") else ""
+
+
+def _crm_file_enquiry(t: dict, parsed: dict) -> str:
+    """One enquiry thread into the CRM. Idempotent by thread id: a sync that
+    dies between the CRM write and the mail write must not file it twice."""
+    d = _load_crm()
+    for v in d["deals"].values():
+        if v.get("mail_thread_id") == t.get("id") and not v.get("deleted"):
+            return v["id"]
+    email = str(parsed.get("email") or t.get("from_email") or "").strip()[:200]
+    name = str(parsed.get("name") or t.get("from_name") or email or "Website enquiry").strip()[:120]
+    phone = str(parsed.get("phone") or "").strip()[:40]
+    company = str(parsed.get("company") or "").strip()[:120]
+    org_id = ""
+    if company:
+        org = next((o for o in d["orgs"].values()
+                    if str(o.get("name") or "").lower() == company.lower()), None)
+        if org is None:
+            org = {"id": _crm_id(d, "o"), "name": company, "address": "", "website": "",
+                   "label": "", "created_at": _crm_now(), "updated_at": _crm_now(), "notes": []}
+            d["orgs"][org["id"]] = org
+        org_id = org["id"]
+    person = None
+    if email:
+        low = email.lower()
+        person = next((p for p in d["persons"].values()
+                       if any(str(e).lower() == low for e in (p.get("emails") or []))), None)
+    if person is None:
+        person = {"id": _crm_id(d, "p"), "name": name, "org_id": org_id,
+                  "emails": [email] if email else [],
+                  "phones": [phone] if phone else [],
+                  "label": "", "shopify_customer_id": None,
+                  "created_at": _crm_now(), "updated_at": _crm_now(), "notes": []}
+        d["persons"][person["id"]] = person
+    else:
+        # A known customer enquiring again: enrich, never overwrite. New
+        # details are gizmo edits and protected as such.
+        changed = False
+        if phone and phone.lower() not in [str(x).lower() for x in (person.get("phones") or [])]:
+            person.setdefault("phones", []).append(phone)
+            person["phones"] = person["phones"][:8]
+            changed = True
+        if org_id and not person.get("org_id"):
+            person["org_id"] = org_id
+            changed = True
+        if changed:
+            person["updated_at"], person["edited_here"] = _crm_now(), True
+    stage = _crm_enquiry_stage(d)
+    note = str(parsed.get("message") or t.get("snippet") or "").strip()[:CRM_NOTE_CAP]
+    deal = {"id": _crm_id(d, "d"), "title": (name + " - website enquiry")[:200],
+            "value": 0.0, "currency": "GBP", "stage_id": stage,
+            "person_id": person["id"], "org_id": org_id or person.get("org_id") or "",
+            "label": "", "status": "open", "probability": None,
+            "expected_close": "", "source": "Website form", "owner": "",
+            "mail_thread_id": str(t.get("id") or ""),
+            "created_at": _crm_now(), "updated_at": _crm_now(),
+            "stage_entered_at": _crm_now(), "touched_at": _crm_now(),
+            "notes": ([{"id": _crm_id(d, "n"), "text": note, "at": _crm_now(),
+                        "pinned": False}] if note else []),
+            "changelog": []}
+    _crm_log(deal, "created", "", "from the website form")
+    d["deals"][deal["id"]] = deal
+    _crm_purge(d)
+    _write_crm(d)
+    _track("", "crm", "filed a website enquiry", deal["title"][:60])
+    return deal["id"]
+
+
+async def _mail_enquiries_file(store: dict) -> None:
+    """Read each flagged thread's body and file it. Bounded and best-effort:
+    a Gmail hiccup leaves the flag for the next sync, and three strikes
+    parks the thread as failed rather than retrying forever."""
+    todo = [t for t in store.get("threads", {}).values()
+            if t.get("enquiry") == "new" and not t.get("crm_deal_id")][:5]
+    for t in todo:
+        try:
+            parsed = {}
+            try:
+                full = await google_mail.read_thread(t["id"], per_msg_chars=6000)
+                first = (full.get("messages") or [{}])[0]
+                parsed = _mail_parse_enquiry(first.get("text") or "")
+                if not parsed.get("email"):
+                    # Shopify puts the customer in Reply-To; the From is the store.
+                    hit = _MAIL_EMAIL_RX.search(str(first.get("reply_to") or ""))
+                    if hit:
+                        parsed["email"] = hit.group(0)
+            except Exception as e:
+                logger.warning("mail: enquiry body read failed for %s: %s", t.get("id"), e)
+            deal_id = _crm_file_enquiry(t, parsed)
+            t["crm_deal_id"], t["enquiry"] = deal_id, "done"
+            _mail_log(t, "", "filed in the CRM")
+        except Exception:
+            logger.exception("mail: enquiry filing failed for %s", t.get("id"))
+            t["enquiry_tries"] = int(t.get("enquiry_tries") or 0) + 1
+            if t["enquiry_tries"] >= 3:
+                t["enquiry"] = "failed"
 
 
 def _mail_can_own(uid: str) -> bool:
@@ -8554,6 +8727,8 @@ async def _mail_sync_now(force: bool = False) -> None:
             for full in fetched:
                 if full:
                     _mail_apply_thread(store, full, addr)
+            # Website enquiries file into the CRM as soon as they land.
+            await _mail_enquiries_file(store)
             cutoff = (datetime.now(timezone.utc)
                       - timedelta(days=MAIL_TRACK_DAYS - 1)).isoformat()
             for tid, t in threads.items():
@@ -10333,7 +10508,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                     ("id", "subject", "from_name", "from_email", "state",
                                      "owner", "first_at", "last_at", "state_at", "done_at",
                                      "msg_count", "notes", "activity", "label_error", "draft_at",
-                                     "files", "saved_files",
+                                     "files", "saved_files", "crm_deal_id",
                                      "in_inbox")},
                                  "owner_name": _team_name(t["owner"]) if t.get("owner") else "",
                                  "messages": t.get("messages", [])},

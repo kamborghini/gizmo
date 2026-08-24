@@ -571,38 +571,39 @@
            only mid-drag, rotten deals tinted red as a whole card.
            ------------------------------------------------------------------ */
         .crm-wrap { max-width: 1600px; }
-        .crm-board { display: flex; gap: 10px; overflow-x: auto; align-items: flex-start;
-            padding-bottom: 12px; min-height: 300px; }
+        /* The board earns the width; lists and charts read best at the house
+           measure, so every other segment caps itself back to it. */
+        .crm-narrow { max-width: 1120px; }
+        .crm-board { display: flex; gap: var(--sp-2); overflow-x: auto; align-items: flex-start;
+            padding-bottom: var(--sp-3); min-height: 300px; }
         .crm-col { min-width: 228px; flex: 1 0 228px; background: var(--surface-2);
-            border: 1px solid var(--line); border-radius: 12px; padding: 8px;
+            border: 1px solid var(--line); border-radius: var(--r); padding: var(--sp-2);
             min-height: 380px; display: flex; flex-direction: column; }
         .crm-col .crm-col-add { margin-top: auto; }
         .crm-col.dragover { border-color: var(--accent); background: var(--surface-3); }
         .crm-col-name { font-size: 12px; font-weight: 600; color: var(--ink); padding: 2px 4px 0; }
         .crm-col-sum { font-size: 11px; color: var(--ink-3); padding: 0 4px 8px; }
         .crm-col-add { width: 100%; border: 1px dashed var(--border-2); background: none;
-            border-radius: 8px; color: var(--ink-3); font: inherit; font-size: 12px;
-            padding: 5px 0; cursor: pointer; }
+            border-radius: var(--r-sm); color: var(--ink-3); font: inherit; font-size: 12px;
+            padding: var(--sp-1) 0; cursor: pointer; }
         .crm-col-add:hover { color: var(--accent); border-color: var(--accent); }
-        .crm-card { background: var(--surface); border: 1px solid var(--border-2); border-radius: 8px;
-            padding: 8px 10px; margin-bottom: 8px; cursor: grab; }
+        .crm-card { background: var(--surface); border: 1px solid var(--border-2); border-radius: var(--r-sm);
+            padding: var(--sp-2) 10px; margin-bottom: var(--sp-2); cursor: grab; }
         .crm-card:hover { border-color: var(--border-3); }
-        .crm-card.rotten { background: #fdf1f0; border-color: #efb9b3; }
+        .crm-card.rotten { background: var(--danger-bg); border-color: var(--border-2); }
         .crm-card-t { font-size: 13px; font-weight: 600; color: var(--ink); }
         .crm-card-who { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
-        .crm-card-bot { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 12px; }
+        .crm-card-bot { display: flex; align-items: center; gap: 6px; margin-top: var(--sp-1); font-size: 12px; }
         .crm-card-val { font-weight: 600; }
-        .crm-statgrid { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
-        .crm-stat { flex: 1 1 100px; background: var(--surface-2); border: 1px solid var(--line);
-            border-radius: 8px; padding: 8px 12px; }
-        .crm-stat-n { font-size: 20px; font-weight: 600; color: var(--ink); }
-        .crm-stat-l { font-size: 11px; color: var(--ink-3); }
         .crm-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+        .crm-av { width: 20px; height: 20px; border-radius: 50%; background: var(--surface-3);
+            color: var(--ink-2); font-size: 11px; font-weight: 600; display: grid;
+            place-items: center; flex: none; }
         .crm-ai { margin-left: auto; display: inline-flex; }
-        .crm-ai svg { width: 14px; height: 14px; }
-        .crm-ai.overdue { color: #d92c20; }
-        .crm-ai.today { color: #108043; }
-        .crm-ai.none { color: #b98900; }
+        .crm-ai svg { width: 15px; height: 15px; }
+        .crm-ai.overdue { color: var(--danger); }
+        .crm-ai.today { color: var(--win); }
+        .crm-ai.none { color: var(--warn); }
         /* ------------------------------------------------------------------
            Inbox: the shared-mailbox ownership board. Columns and cards wear
            the CRM board's clothes; only the ownership chrome is its own.
@@ -754,84 +755,96 @@
             .mail-owner, .mcount { display: none; }
         }
         .crm-ai.future { color: var(--ink-3); }
-        .crm-dropbar { position: fixed; left: 0; right: 0; bottom: 0; display: none; gap: 10px;
-            padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--border);
-            box-shadow: 0 -4px 16px rgba(0,0,0,.08); z-index: 60; }
+        .crm-dropbar { position: fixed; left: 0; right: 0; bottom: 0; display: none; gap: var(--sp-2);
+            padding: var(--sp-3) var(--sp-4); background: var(--surface); border-top: 1px solid var(--border);
+            box-shadow: var(--sh-2); z-index: 60; }
         .crm-dropbar.show { display: flex; }
-        .crm-zone { flex: 1; text-align: center; padding: 16px 0; border-radius: 8px;
+        .crm-zone { flex: 1; text-align: center; padding: var(--sp-4) 0; border-radius: var(--r-sm);
             border: 2px dashed var(--border-3); font-weight: 600; font-size: 13px; color: var(--ink-2); }
-        .crm-zone.won { border-color: #108043; color: #108043; }
-        .crm-zone.lost { border-color: #d92c20; color: #d92c20; }
+        .crm-zone.won { border-color: var(--win); color: var(--win); }
+        .crm-zone.lost { border-color: var(--danger); color: var(--danger); }
         .crm-zone.dragover { background: var(--surface-3); }
-        .crm-badge { background: #d92c20; color: #fff; border-radius: 8px; font-size: 11px;
+        .crm-badge { background: var(--danger); color: #fff; border-radius: var(--r-xs); font-size: 11px;
             font-weight: 600; padding: 0 6px; margin-left: 6px; }
         .crm-new-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
-        .crm-chev { display: flex; gap: 2px; margin: 10px 0 4px; }
-        .crm-chev-s { flex: 1; padding: 7px 2px 6px; background: var(--surface-3); cursor: pointer;
+        .crm-chev { display: flex; gap: 2px; margin: var(--sp-2) 0 var(--sp-1); }
+        .crm-chev-s { flex: 1; padding: var(--sp-2) 2px; background: var(--surface-3); cursor: pointer;
             font-size: 11px; text-align: center; color: var(--ink-2); white-space: nowrap;
             overflow: hidden; text-overflow: ellipsis;
             clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 50%, calc(100% - 7px) 100%, 0 100%, 7px 50%); }
         .crm-chev-s:first-child { clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 50%, calc(100% - 7px) 100%, 0 100%); }
-        .crm-chev-s.done { background: var(--accent-soft, #e8e5fb); color: var(--accent); }
+        .crm-chev-s.done { background: var(--accent-soft); color: var(--accent); }
         .crm-chev-s.on { background: var(--accent); color: #fff; font-weight: 600; }
         .crm-chev-s.frozen { cursor: default; }
         .crm-sub { font-size: 11px; color: var(--ink-3); }
-        .crm-act-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px;
+        /* Activities live in a card like every other list in the app; naked
+           hairline rows on the page background read as a draft. */
+        .crm-act-list { background: var(--surface); border: 1px solid var(--line);
+            border-radius: var(--r); padding: 0 var(--sp-3); }
+        .crm-act-list .crm-group { margin: var(--sp-3) 0 0; }
+        .crm-act-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0;
             border-bottom: 1px solid var(--line); font-size: 13px; }
         .crm-act-row:last-child { border-bottom: 0; }
-        .crm-act-row.done .crm-act-sub { text-decoration: line-through; color: var(--ink-3); }
-        .crm-act-due.overdue { color: #d92c20; font-weight: 600; }
-        .crm-act-due.today { color: #108043; font-weight: 600; }
-        .crm-ticon { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border-2);
+        .crm-act-sub { font-size: 14px; font-weight: 600; color: var(--ink); }
+        .crm-act-row.done .crm-act-sub { text-decoration: line-through; color: var(--ink-3); font-weight: 400; }
+        .crm-act-due { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+        .crm-act-due.overdue { color: var(--danger); font-weight: 600; }
+        .crm-act-due.today { color: var(--win); font-weight: 600; }
+        .crm-ticon { width: 32px; height: 32px; border-radius: var(--r-sm); border: 1px solid var(--border-2);
             background: var(--surface); cursor: pointer; display: inline-flex; align-items: center;
             justify-content: center; color: var(--ink-3); }
         .crm-ticon svg { width: 15px; height: 15px; }
-        .crm-ticon.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft, #efecfd); }
-        .crm-prio { font-size: 11px; font-weight: 600; border-radius: 6px; padding: 1px 5px; }
-        .crm-prio.high { background: #fde8e6; color: #d92c20; }
-        .crm-prio.medium { background: #fdf3dd; color: #b98900; }
+        .crm-ticon.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+        /* One chip geometry for the whole tab: the lbl-chip recipe. */
+        .crm-prio { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600;
+            border-radius: var(--r-xs); padding: 0 var(--sp-2); letter-spacing: .06em; }
+        .crm-prio.high { background: var(--danger-bg); color: var(--danger); }
+        .crm-prio.medium { background: var(--warn-bg); color: var(--warn); }
         .crm-prio.low { background: var(--surface-3); color: var(--ink-3); }
-        .crm-bar-row { display: flex; align-items: center; gap: 10px; margin: 5px 0; font-size: 12px; }
+        .crm-bar-row { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-1) 0; font-size: 12px; }
         .crm-bar-lab { width: 150px; flex: none; color: var(--ink-2); white-space: nowrap;
             overflow: hidden; text-overflow: ellipsis; text-align: right; }
-        .crm-bar-track { flex: 1; background: var(--surface-3); border-radius: 6px; height: 16px; }
-        .crm-bar-fill { height: 100%; border-radius: 6px; background: var(--accent); min-width: 2px; }
+        .crm-bar-track { flex: 1; background: var(--surface-3); border-radius: var(--r-xs); height: 16px; }
+        .crm-bar-fill { height: 100%; border-radius: var(--r-xs); background: var(--accent); min-width: 2px; }
         .crm-bar-val { width: 90px; flex: none; font-weight: 600; }
-        .crm-focus { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 12px 0; }
-        .crm-hist-row { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+        .crm-focus { border: 1px solid var(--line); border-radius: var(--r); padding: var(--sp-3); margin: var(--sp-3) 0; }
+        .crm-focus.plain { border: 0; padding: 0; }
+        .crm-hist-row { padding: var(--sp-2) 0; border-bottom: 1px solid var(--line); font-size: 13px; }
         .crm-hist-row:last-child { border-bottom: 0; }
-        .crm-hist-row.pinned { background: var(--surface-2); border-radius: 8px; padding: 8px; }
+        .crm-hist-row.pinned { background: var(--surface-2); border-radius: var(--r-sm); padding: var(--sp-2); }
         .crm-hist-when { font-size: 11px; color: var(--ink-3); }
         .crm-list-row { cursor: pointer; }
         /* Rotting is its own signal: a red left edge on the whole card, never
            to be confused with an overdue activity's red icon or a red label dot. */
-        .crm-card.rotten { border-left: 3px solid #d92c20; }
+        .crm-card.rotten { border-left: 3px solid var(--danger); }
+        /* Tinted, not white-on-colour: an amber or grey label must still read. */
         .crm-chip { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600;
-            border-radius: 6px; padding: 1px 7px; color: #fff; }
-        .crm-updated { font-size: 11px; color: var(--ink-3); margin-left: auto; align-self: center; }
+            border-radius: var(--r-xs); padding: 0 var(--sp-2); letter-spacing: .06em; }
         .crm-group { font-size: 11px; font-weight: 600; color: var(--ink-3);
-            text-transform: uppercase; letter-spacing: .04em; margin: 14px 0 2px; }
-        .crm-act-note { font-size: 12px; color: var(--ink-2); margin-top: 2px; white-space: pre-wrap; }
+            text-transform: uppercase; letter-spacing: .06em; margin: var(--sp-4) 0 2px; }
+        .crm-act-note { font-size: 12px; color: var(--ink-2); margin-top: 2px; white-space: pre-wrap;
+            font-weight: 400; }
         .crm-ta { position: relative; }
         .crm-ta-drop { position: absolute; z-index: 60; left: 0; right: 0; top: 100%;
-            background: var(--surface); border: 1px solid var(--border-2); border-radius: 8px;
-            box-shadow: 0 8px 24px rgba(0,0,0,.12); max-height: 220px; overflow-y: auto; }
-        .crm-ta-drop button { display: block; width: 100%; text-align: left; padding: 8px 10px;
+            background: var(--surface); border: 1px solid var(--border-2); border-radius: var(--r-sm);
+            box-shadow: var(--sh-2); max-height: 220px; overflow-y: auto; }
+        .crm-ta-drop button { display: block; width: 100%; text-align: left; padding: var(--sp-2) 10px;
             background: none; border: 0; border-bottom: 1px solid var(--line); cursor: pointer;
             font-size: 13px; color: var(--ink); }
         .crm-ta-drop button:last-child { border-bottom: 0; }
         .crm-ta-drop button:hover, .crm-ta-drop button.hot { background: var(--surface-2); }
         .crm-ta-sub { font-size: 11px; color: var(--ink-3); }
-        .crm-cline { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; }
-        .crm-cline svg { width: 14px; height: 14px; color: var(--ink-3); flex: none; }
+        .crm-cline { display: flex; align-items: center; gap: var(--sp-2); padding: 6px 0; font-size: 13px; }
+        .crm-cline svg { width: 15px; height: 15px; color: var(--ink-3); flex: none; }
         .crm-cline a { color: var(--accent); text-decoration: none; word-break: break-all; }
-        .crm-cf { display: grid; grid-template-columns: minmax(90px, 150px) 1fr; gap: 4px 10px;
+        .crm-cf { display: grid; grid-template-columns: minmax(90px, 150px) 1fr; gap: var(--sp-1) 10px;
             font-size: 13px; }
         .crm-cf-k { color: var(--ink-3); font-size: 12px; padding-top: 2px; }
-        .crm-onboard { border: 1px dashed var(--border-2); border-radius: 12px; padding: 22px;
-            margin: 10px 0; text-align: left; max-width: 560px; }
+        .crm-onboard { border: 1px dashed var(--border-2); border-radius: var(--r); padding: 20px;
+            margin: var(--sp-2) 0; text-align: left; max-width: 560px; }
         .crm-onboard h3 { margin: 0 0 6px; font-size: 16px; }
         .crm-onboard p { margin: 0 0 10px; font-size: 13px; color: var(--ink-2); }
+        .crm-listfoot { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
         .crm-act-row .crm-mid { flex: 1; min-width: 0; cursor: pointer; }
         .crm-act-row input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--accent);
             flex: none; cursor: pointer; }
@@ -7166,9 +7179,11 @@
             return [p && p.name, o && o.name].filter(Boolean).join(' · ');
         }
         /* Pipedrive colour NAMES to paint; the store carries the names so the
-           imported labels keep the colours they had. */
-        const CRM_COLOR_CSS = { red: '#d92c20', orange: '#e8641b', yellow: '#b98900',
-                                green: '#108043', blue: '#2a6ecb', purple: '#7047eb',
+           imported labels keep the colours they had. Where a name collides
+           with a house semantic (red, green, yellow) it wears the house
+           token's value, so a Hot label and a lost chip are the SAME red. */
+        const CRM_COLOR_CSS = { red: '#c4320a', orange: '#e8641b', yellow: '#8a5a00',
+                                green: '#0e7c5a', blue: '#2a6ecb', purple: '#5b4bdb',
                                 pink: '#c9317e', brown: '#8b6242', gray: '#8a94a6',
                                 'dark-gray': '#5b6472' };
         function crmLabelColor(name) {
@@ -7176,8 +7191,11 @@
             return CRM_COLOR_CSS[c] || c || 'var(--ink-3)';
         }
         function crmChip(name) {
+            /* Tinted ground, full-strength text: white-on-amber was 2.4:1. */
             const s = el('span', 'crm-chip', name.toUpperCase());
-            s.style.background = crmLabelColor(name);
+            const c = crmLabelColor(name);
+            if (/^#/.test(c)) { s.style.background = c + '22'; s.style.color = c; }
+            else { s.style.background = 'var(--surface-3)'; s.style.color = 'var(--ink-2)'; }
             return s;
         }
         function crmUname(uid) {
@@ -7300,24 +7318,24 @@
             if (!teamMe || teamMe.role === 'master') {
                 const hasData = Object.keys(d.deals || {}).length > 0;
                 if (hasData && !crmPdOpen) {
-                    const link = el('a', 'miss-open', 'Pipedrive import…');
-                    link.style.cssText = 'display:inline-block;margin:8px 0 0;font-size:12px';
+                    const link = el('a', 'miss-open', 'Pipedrive import');
+                    link.className = 'miss-open crm-sub';
                     link.onclick = () => { crmPdOpen = true; renderCRM(); };
                     box.append(link);
                 } else {
-                    const pd = el('div', 'crm-focus');
-                    pd.style.margin = '10px 0 0';
-                    const row = el('div');
-                    row.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap';
-                    row.append(el('div', 'disp-subhead', 'Moving from Pipedrive'));
+                    /* The house "connect an integration" card, exactly as the
+                       Files and Inbox tabs draw theirs. */
+                    const pd = el('div', 'card');
+                    pd.append(el('div', 'setting-title', 'Moving from Pipedrive'));
+                    pd.append(el('div', 'setting-sub',
+                        'Reads your Pipedrive account and writes nothing, to either system.'));
+                    const row = el('div', 'lbl-toolbar');
                     const go = el('button', 'btn btn-primary', 'Look at my Pipedrive');
                     const out = el('div');
                     go.onclick = () => runPipedriveSurvey(out, go);
                     row.append(go);
-                    row.append(el('span', 'crm-sub',
-                        'Reads your Pipedrive account and writes nothing, to either system.'));
                     if (hasData) {
-                        const hide = el('a', 'miss-open', 'Hide');
+                        const hide = el('button', 'btn', 'Hide');
                         hide.onclick = () => { crmPdOpen = false; renderCRM(); };
                         row.append(hide);
                     }
@@ -7325,7 +7343,10 @@
                     box.append(pd);
                 }
             }
-            const host = el('div'); host.style.marginTop = '12px'; box.append(host);
+            /* Only the board earns 1600px; everything else keeps the house
+               measure, or five stat cards stretch into near-empty bands. */
+            const host = el('div', crmSeg === 'deals' ? '' : 'crm-narrow');
+            host.style.marginTop = '12px'; box.append(host);
             if (crmSeg === 'deals') renderCRMDeals(host);
             else if (crmSeg === 'activities') renderCRMActivities(host);
             else if (crmSeg === 'contacts') renderCRMContacts(host);
@@ -7360,11 +7381,11 @@
                 + (acc.currency ? '  ·  default currency ' + acc.currency : '')));
             (r.warnings || []).forEach(w => host.append(el('div', 'msg error', w)));
             const c = r.counts || {};
-            const grid = el('div', 'crm-statgrid');
+            const grid = el('div', 'lia-grid');
             const stat = (label, n, warn) => {
-                const b = el('div', 'crm-stat');
-                b.append(el('div', 'crm-stat-n', String(n == null ? '?' : n)));
-                b.append(el('div', 'crm-stat-l', label + (warn ? ' (at least)' : '')));
+                const b = el('div', 'lia-card');
+                b.append(el('div', 'lia-k', label + (warn ? ' (at least)' : '')));
+                b.append(el('div', 'lia-v', String(n == null ? '?' : n)));
                 grid.append(b);
             };
             stat('Deals', c.deals, !c.deals_complete);
@@ -7379,14 +7400,16 @@
             const section = (title, rows) => {
                 if (!rows.length) return;
                 host.append(el('div', 'disp-subhead', title));
-                const list = el('div', 'files-list');
+                /* The house two-column data table, not the file browser's rows. */
+                const wrap = el('div', 'ktable-wrap');
+                const tb = el('table', 'ktable');
+                const tbody = el('tbody');
                 rows.forEach(([a, b]) => {
-                    const row = el('div', 'files-row');
-                    const l = el('div', 'files-name still'); l.textContent = a;
-                    row.append(l, el('span', 'files-meta', b));
-                    list.append(row);
+                    const tr = el('tr');
+                    tr.append(el('td', 'kw', a), el('td', null, b));
+                    tbody.append(tr);
                 });
-                host.append(list);
+                tb.append(tbody); wrap.append(tb); host.append(wrap);
             };
             section('Pipelines', (r.pipelines || []).map(p =>
                 [p.name, p.deals + ' deals  ·  ' + p.stages + ' stages']));
@@ -7571,7 +7594,7 @@
             add.onclick = () => crmDealForm();
             bar.append(add);
             const q = document.createElement('input');
-            q.type = 'search'; q.placeholder = 'Search deals…'; q.className = 'lbl-size'; q.value = crmQ;
+            q.type = 'search'; q.placeholder = 'Search deals…'; q.className = 'lbl-size lbl-find'; q.value = crmQ;
             q.oninput = () => { crmQ = q.value.trim(); paint(); };
             bar.append(q);
             const st = el('select', 'lbl-size');
@@ -7597,16 +7620,13 @@
                 of.onchange = () => { crmOwnerF = of.value; paint(); };
                 bar.append(of);
             }
-            const mode = el('button', 'btn');
-            mode.textContent = crmDealsMode === 'board' ? 'List' : 'Board';
-            mode.title = 'Switch to the ' + mode.textContent.toLowerCase() + ' view';
-            mode.onclick = () => { crmDealsMode = crmDealsMode === 'board' ? 'list' : 'board'; renderCRM(); };
-            bar.append(mode);
+            bar.append(segControl([{ value: 'board', label: 'Board' }, { value: 'list', label: 'List' }],
+                crmDealsMode, v => { crmDealsMode = v; renderCRM(); }));
             const stagesBtn = el('button', 'btn'); stagesBtn.append(ico(I.settings), document.createTextNode('Pipeline'));
             stagesBtn.onclick = crmStageEditor;
             bar.append(stagesBtn);
             host.append(bar);
-            const paintHost = el('div'); paintHost.style.marginTop = '10px'; host.append(paintHost);
+            const paintHost = el('div'); host.append(paintHost);
             function paint() {
                 paintHost.innerHTML = '';
                 if (crmStatus === 'bin') paintBin(paintHost);
@@ -7709,7 +7729,7 @@
             if (x.label) { const dot = el('span', 'crm-dot'); dot.style.background = crmLabelColor(x.label); dot.title = x.label; bot.append(dot); }
             if (crmMulti() && x.owner && x.owner !== crmMe()) {
                 const ini = (crmUname(x.owner) || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
-                const av = el('span', 'crm-sub', ini);
+                const av = el('span', 'crm-av', ini);
                 av.title = crmUname(x.owner);
                 bot.append(av);
             }
@@ -7736,7 +7756,7 @@
                     const id = e.dataTransfer.getData('text/deal');
                     if (!id) return;
                     try {
-                        if (k === 'won') { await crmOp('/api/crm/deal', { op: 'won', id: id }); addToast('Deal won.'); }
+                        if (k === 'won') { await crmOp('/api/crm/deal', { op: 'won', id: id }); toastOk('Deal won - ' + crmMoney((crmCache.deals[id] || {}).value) + '.'); }
                         else if (k === 'lost') { crmLostPrompt(id); return; }
                         else {
                             if (!await uiConfirm('Delete this deal? It can be restored for 30 days.', { title: 'Delete deal', okText: 'Delete' })) { renderCRM(); return; }
@@ -7768,7 +7788,7 @@
                     : x.status === 'lost' && x.lost_at ? 'lost ' + fmtDate(x.lost_at)
                     : (x.status === 'open' ? 'none scheduled' : '')));
                 const stTd = el('td');
-                stTd.append(el('span', 'lbl-chip' + (x.status === 'won' ? ' made' : x.status === 'lost' ? ' bad' : ''),
+                stTd.append(el('span', 'lbl-chip' + (x.status === 'won' ? ' made' : x.status === 'lost' ? ' bad' : ' note'),
                     (x.archived ? 'ARCHIVED · ' : '') + x.status.toUpperCase()));
                 tr.append(stTd);
                 tr.onclick = () => crmDealModal(x.id);
@@ -7777,9 +7797,9 @@
             tb.append(tbody); wrap.append(tb); host.append(wrap);
             /* The way OUT matters when the way in was a migration: the data is
                the user's, and a spreadsheet is the lingua franca. */
+            const foot = el('div', 'crm-listfoot');
             const exp = el('button', 'btn');
-            exp.style.marginTop = '10px';
-            exp.append(ico(I.download || I.copy), document.createTextNode('Export CSV'));
+            exp.append(ico(I.download), document.createTextNode('Export CSV'));
             exp.onclick = () => {
                 crmCSV('deals.csv',
                     ['Title', 'Value', 'Status', 'Stage', 'Person', 'Organisation', 'Label',
@@ -7791,7 +7811,7 @@
                         (x.lost_at || '').slice(0, 10), x.lost_reason || '',
                         (x.created_at || '').slice(0, 10)]));
             };
-            host.append(exp);
+            foot.append(exp); host.append(foot);
         }
 
         /* ---------------- modal scaffolding ---------------- */
@@ -7805,7 +7825,15 @@
             modal.append(head, body); overlay.append(modal); document.body.append(overlay);
             const close = () => { overlay.remove(); if (document.querySelector('#view-crm.active')) renderCRM(); };
             x.onclick = close;   /* the X is the only way out, as everywhere else */
-            return { body: body, close: close, head: head };
+            /* The house action bar: right-aligned, outside the scroll, one per
+               modal. Composer bars beside their textareas stay in the body. */
+            let footEl = null;
+            const foot = () => {
+                if (!footEl) { footEl = el('div', 'modal-foot'); modal.append(footEl); }
+                footEl.innerHTML = '';
+                return footEl;
+            };
+            return { body: body, close: close, head: head, foot: foot };
         }
         function crmField(host, label, input) {
             const w = el('label', 'disp-addr-f');
@@ -7936,7 +7964,7 @@
             }
             paintChev();
             m.body.append(chev);
-            const bar = el('div', 'disp-actions');
+            const bar = m.foot();
             const save = el('button', 'btn btn-primary', dealId ? 'Save' : 'Add deal');
             save.onclick = async () => {
                 save.disabled = true;
@@ -7985,7 +8013,7 @@
                     }
                 } catch (e) { save.disabled = false; toastError(e.message); }
             };
-            bar.append(save); m.body.append(bar);
+            bar.append(save);
         }
 
         function crmLostPrompt(dealId) {
@@ -7998,14 +8026,14 @@
             crmField(grid, 'Reason', sel);
             const com = crmText('', 'Optional comment');
             crmField(grid, 'Comment', com);
-            const bar = el('div', 'disp-actions');
+            const bar = m.foot();
             const go = el('button', 'btn btn-primary', 'Mark as lost');
             go.onclick = async () => {
                 go.disabled = true;
                 try { await crmOp('/api/crm/deal', { op: 'lost', id: dealId, reason: sel.value, comment: com.value.trim() }); m.close(); }
                 catch (e) { go.disabled = false; toastError(e.message); }
             };
-            bar.append(go); m.body.append(bar);
+            bar.append(go);
         }
 
         /* ---------------- the deal detail ---------------- */
@@ -8037,7 +8065,7 @@
                 top.append(el('span', 'crm-sub', x.effective_probability + '% · weighted ' + crmMoney(x.weighted_value)));
             if (x.label) top.append(crmChip(x.label));
             if (x.rotten) top.append(el('span', 'lbl-chip bad', 'ROTTING'));
-            if (x.archived) top.append(el('span', 'lbl-chip', 'ARCHIVED'));
+            if (x.archived) top.append(el('span', 'lbl-chip note', 'ARCHIVED'));
             if (x.status === 'open') {
                 const won = el('button', 'btn btn-primary', 'Won');
                 won.onclick = async () => {
@@ -8103,13 +8131,20 @@
             if (x.expected_close) bits.push('expected close ' + fmtDate(x.expected_close));
             if (crmMulti() && x.owner && crmUname(x.owner)) bits.push('owned by ' + crmUname(x.owner));
             if (x.source && x.source !== 'Manual') bits.push('from ' + x.source);
-            m.body.append(el('div', 'crm-sub', bits.join(' · ')));
+            const subLine = el('div', 'crm-sub', bits.join(' · '));
+            if (x.mail_thread_id) {
+                subLine.append(document.createTextNode(' · '));
+                const em = el('a', 'miss-open', 'open the email');
+                em.onclick = () => { m.close(); setView('mail'); openMailThread(x.mail_thread_id); };
+                subLine.append(em);
+            }
+            m.body.append(subLine);
             /* Who to actually RING: the linked person with dialable numbers.
                A deal modal that shows a name but hides the phone number sends
                the caller back out to the Contacts tab mid-call. */
             const p = crmPerson(x.person_id), o = crmOrg(x.org_id);
             if (p || o) {
-                const cc = el('div', 'crm-focus');
+                const cc = el('div', 'crm-focus plain');
                 const nameRow = el('div', 'crm-cline');
                 nameRow.append(ico(I.users));
                 const pa = el('a', 'miss-open', [p && p.name, o && o.name].filter(Boolean).join(' · '));
@@ -8352,7 +8387,7 @@
                 lw.append(doneNow, document.createTextNode(' Already done - just logging it'));
                 m.body.append(lw);
             }
-            const bar = el('div', 'disp-actions');
+            const bar = m.foot();
             const save = el('button', 'btn btn-primary', 'Save');
             save.onclick = async () => {
                 save.disabled = true;
@@ -8383,38 +8418,42 @@
                 };
                 bar.append(del);
             }
-            m.body.append(bar);
         }
 
         /* ---------------- activities segment ---------------- */
         function renderCRMActivities(host) {
+            /* Thirteen controls in one wrapping row read as clutter. The
+               house order: primary action, then the segmented filter on its
+               own track, then the subordinate type toggles in a tools strip. */
             const bar = el('div', 'lbl-toolbar');
             const add = el('button', 'btn btn-primary'); add.append(ico(I.plus), document.createTextNode('Activity'));
             add.onclick = () => crmActivityForm({}, renderCRM);
             bar.append(add);
+            const seg = el('div', 'lbl-seg');
+            [['upcoming', 'To do'], ['overdue', 'Overdue'], ['today', 'Today'],
+             ['week', 'This week'], ['done', 'Done']].forEach(([k, lab]) => {
+                const b = el('button', 'lbl-segbtn' + (crmActPeriod === k ? ' on' : ''), lab);
+                b.onclick = () => { crmActPeriod = k; renderCRM(); };
+                seg.append(b);
+            });
+            if (crmMulti()) {
+                const mine = el('button', 'lbl-segbtn' + (crmActMine ? ' on' : ''), 'Mine');
+                mine.title = 'Only activities assigned to me';
+                mine.onclick = () => { crmActMine = !crmActMine; renderCRM(); };
+                seg.append(mine);
+            }
+            bar.append(seg);
+            host.append(bar);
+            const tools = el('div', 'lbl-tools');
             /* Type toggles: lit means included, exactly the Pipedrive read. */
             CRM_TYPES.forEach(([k, lab]) => {
                 const b = el('button', 'crm-ticon' + (crmActTypesOff[k] ? '' : ' on'));
                 b.append(ico(crmTypeIcon(k))); b.title = lab;
                 b.onclick = () => { crmActTypesOff[k] = !crmActTypesOff[k]; renderCRM(); };
-                bar.append(b);
+                tools.append(b);
             });
-            [['upcoming', 'To do'], ['overdue', 'Overdue'], ['today', 'Today'],
-             ['week', 'This week'], ['done', 'Done']].forEach(([k, lab]) => {
-                const b = el('button', 'lbl-segbtn' + (crmActPeriod === k ? ' on' : ''), lab);
-                b.style.flex = 'none';
-                b.onclick = () => { crmActPeriod = k; renderCRM(); };
-                bar.append(b);
-            });
-            if (crmMulti()) {
-                const mine = el('button', 'lbl-segbtn' + (crmActMine ? ' on' : ''), 'Mine');
-                mine.style.flex = 'none';
-                mine.title = 'Only activities assigned to me';
-                mine.onclick = () => { crmActMine = !crmActMine; renderCRM(); };
-                bar.append(mine);
-            }
-            host.append(bar);
-            const list = el('div'); list.style.marginTop = '8px'; host.append(list);
+            host.append(tools);
+            const list = el('div', 'crm-act-list'); host.append(list);
             const today = crmCache.today;
             const weekEnd = new Date(Date.parse(today) + 6 * 86400000).toISOString().slice(0, 10);
             let acts = Object.values(crmCache.activities).filter(a => !crmActTypesOff[a.type]);
@@ -8435,9 +8474,9 @@
                 ? String(b.done_at).localeCompare(String(a.done_at))
                 : String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')));
             if (!acts.length) {
-                list.append(el('div', 'empty', crmActPeriod === 'done' ? 'Nothing completed yet.'
-                    : 'Nothing here. A quiet desk, or deals with no next step: check the cards '
-                    + 'wearing the amber warning.'));
+                list.remove();
+                host.append(el('div', 'empty', crmActPeriod === 'done'
+                    ? 'Nothing completed yet.' : 'Nothing scheduled.'));
                 return;
             }
             /* Day groups, so a run of Tuesdays reads as a day plan, not a wall. */
@@ -8469,26 +8508,27 @@
         /* ---------------- contacts ---------------- */
         function renderCRMContacts(host) {
             const bar = el('div', 'lbl-toolbar');
+            const add = el('button', 'btn btn-primary');
+            add.append(ico(I.plus), document.createTextNode(crmContactsMode === 'people' ? 'Person' : 'Organisation'));
+            add.onclick = () => crmContactForm(crmContactsMode === 'people' ? 'person' : 'org');
+            bar.append(add);
+            const seg = el('div', 'lbl-seg');
             [['people', 'People'], ['orgs', 'Organisations']].forEach(([k, lab]) => {
                 const b = el('button', 'lbl-segbtn' + (crmContactsMode === k ? ' on' : ''), lab);
-                b.style.flex = 'none';
                 b.onclick = () => { crmContactsMode = k; crmContactsCap = 60; renderCRM(); };
-                bar.append(b);
+                seg.append(b);
             });
+            bar.append(seg);
             /* Finding a person while they are ON THE PHONE is the single most
                common contact operation: name, email, phone and company all
                match, because whichever fragment is to hand must work. */
             const q = document.createElement('input');
             q.type = 'search'; q.placeholder = 'Search name, email, phone, company…';
-            q.className = 'lbl-size'; q.value = crmContactsQ;
+            q.className = 'lbl-size lbl-find'; q.value = crmContactsQ;
             q.oninput = () => { crmContactsQ = q.value.trim(); crmContactsCap = 60; paint(); };
             bar.append(q);
-            const add = el('button', 'btn btn-primary');
-            add.append(ico(I.plus), document.createTextNode(crmContactsMode === 'people' ? 'Person' : 'Organisation'));
-            add.onclick = () => crmContactForm(crmContactsMode === 'people' ? 'person' : 'org');
-            bar.append(add);
             host.append(bar);
-            const list = el('div'); list.style.marginTop = '8px'; host.append(list);
+            const list = el('div'); host.append(list);
             const people = crmContactsMode === 'people';
             function paint() {
                 list.innerHTML = '';
@@ -8525,15 +8565,14 @@
                     row.onclick = () => crmContactModal(people ? 'person' : 'org', c.id);
                     list.append(row);
                 });
+                const foot = el('div', 'crm-listfoot');
                 if (items.length > crmContactsCap) {
                     const more = el('button', 'btn');
-                    more.style.marginTop = '8px';
                     more.textContent = 'Show more (' + (items.length - crmContactsCap) + ' remaining)';
                     more.onclick = () => { crmContactsCap += 120; paint(); };
-                    list.append(more);
+                    foot.append(more);
                 }
                 const exp = el('button', 'btn');
-                exp.style.cssText = 'margin-top:8px;margin-left:8px';
                 exp.append(ico(I.download), document.createTextNode('Export CSV'));
                 exp.onclick = () => {
                     if (people) crmCSV('people.csv',
@@ -8544,7 +8583,7 @@
                         ['Name', 'Address', 'Website', 'Label'],
                         items.map(c => [c.name, c.address || '', c.website || '', c.label || '']));
                 };
-                list.append(exp);
+                foot.append(exp); list.append(foot);
             }
             paint();
         }
@@ -8570,7 +8609,7 @@
                 const edit = el('button', 'btn'); edit.append(ico(I.edit), document.createTextNode('Edit'));
                 edit.onclick = () => { m.close(); crmContactForm(kind, id); };
                 top.append(edit);
-                const merge = el('button', 'btn', 'Merge…');
+                const merge = el('button', 'btn', 'Merge');
                 merge.title = 'Fold a duplicate of this contact into this one';
                 merge.onclick = () => crmMergePrompt(kind, id, () => {
                     notes = null; paint(); loadNotes();   /* the loser's notes just arrived */
@@ -8578,7 +8617,7 @@
                 top.append(merge);
                 m.body.append(top);
                 /* Ways to reach them, all live links. */
-                const reach = el('div', 'crm-focus');
+                const reach = el('div', 'crm-focus plain');
                 let any = false;
                 (cc.phones || []).forEach((ph, i) => {
                     any = true;
@@ -8715,7 +8754,7 @@
             const dupIn = crmText('', 'Type the duplicate’s name');
             const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
             crmField(grid, 'Duplicate', crmTypeahead(dupIn, people ? crmPersonRows : crmOrgRows));
-            const bar = el('div', 'disp-actions');
+            const bar = m.foot();
             const go = el('button', 'btn btn-primary', 'Merge');
             go.onclick = async () => {
                 /* The picked ID wins over the typed name: with two "Priya
@@ -8738,7 +8777,7 @@
                     m.close(); if (onDone) onDone();
                 } catch (e) { go.disabled = false; toastError(e.message); }
             };
-            bar.append(go); m.body.append(bar);
+            bar.append(go);
         }
         function crmContactForm(kind, id) {
             const existing = id ? (kind === 'person' ? crmCache.persons[id] : crmCache.orgs[id]) : null;
@@ -8809,7 +8848,7 @@
                 };
                 sWrap.append(status, sIn, results); m.body.append(sWrap);
             }
-            const bar = el('div', 'disp-actions');
+            const bar = m.foot();
             const save = el('button', 'btn btn-primary', existing ? 'Save' : 'Add');
             save.onclick = async () => {
                 save.disabled = true;
@@ -8864,7 +8903,6 @@
                 };
                 bar.append(del);
             }
-            m.body.append(bar);
         }
 
         /* ---------------- leads inbox ---------------- */
@@ -8873,12 +8911,13 @@
             const add = el('button', 'btn btn-primary'); add.append(ico(I.plus), document.createTextNode('Lead'));
             add.onclick = () => crmLeadForm();
             bar.append(add);
+            const seg = el('div', 'lbl-seg');
             [['active', 'Inbox'], ['archived', 'Archive']].forEach(([k, lab]) => {
                 const b = el('button', 'lbl-segbtn' + (crmLeadsMode === k ? ' on' : ''), lab);
-                b.style.flex = 'none';
                 b.onclick = () => { crmLeadsMode = k; renderCRM(); };
-                bar.append(b);
+                seg.append(b);
             });
+            bar.append(seg);
             host.append(bar);
             host.append(el('p', 'field-help', 'A lead is an enquiry that is not yet a deal: it waits '
                 + 'here so the pipeline holds only real, qualified work. Convert it when it firms up.'));
@@ -8901,7 +8940,7 @@
                 const who = crmWho(l); if (who) bits.push(who);
                 bits.push(fmtDate(l.created_at));
                 mid.append(el('span', 'sub', bits.join(' · ')));
-                if (l.label) mid.append(el('span', 'lbl-chip', l.label.toUpperCase()));
+                if (l.label) mid.append(crmChip(l.label));
                 row.append(mid);
                 row.onclick = () => crmLeadModal(l.id);
                 list.append(row);
@@ -8915,6 +8954,14 @@
             crmField(grid, 'Contact person', crmTypeahead(personIn, crmPersonRows));
             crmField(grid, 'Organisation', crmTypeahead(orgIn, crmOrgRows));
             const titleIn = crmText('', 'Autofills from the contact');
+            let ltTouched = false;
+            titleIn.oninput = () => { ltTouched = true; };
+            function lAutofill() {
+                if (ltTouched) return;
+                const src = orgIn.value.trim() || personIn.value.trim();
+                titleIn.value = src ? src + ' lead' : '';
+            }
+            [personIn, orgIn].forEach(i => { i.addEventListener('input', lAutofill); i.addEventListener('picked', lAutofill); });
             crmField(grid, 'Title', titleIn);
             const valIn = crmText('', '0'); valIn.type = 'number'; valIn.min = '0';
             crmField(grid, 'Value (£)', valIn);
@@ -8922,7 +8969,7 @@
             labSel.append(new Option('No label', ''));
             crmCache.labels.forEach(l => labSel.append(new Option(l, l)));
             crmField(grid, 'Label', labSel);
-            const bar = el('div', 'disp-actions');
+            const bar = m.foot();
             const save = el('button', 'btn btn-primary', 'Add lead');
             save.onclick = async () => {
                 save.disabled = true;
@@ -8942,33 +8989,42 @@
                     m.close();
                 } catch (e) { save.disabled = false; toastError(e.message); }
             };
-            bar.append(save); m.body.append(bar);
+            bar.append(save);
         }
         function crmLeadModal(leadId) {
             const l = crmCache.leads[leadId];
             if (!l) return;
             if (!l.seen) crmOp('/api/crm/lead', { op: 'seen', id: leadId }).catch(() => {});
             const m = crmModal(l.title);
-            const bits = [];
-            if (l.value) bits.push(crmMoney(l.value));
-            const who = crmWho(l); if (who) bits.push(who);
-            bits.push('arrived ' + fmtDate(l.created_at));
-            m.body.append(el('div', 'crm-sub', bits.join(' · ')));
+            /* The same anatomy as the deal and contact modals: a status row
+               up top, titled panels below, actions in the footer. */
+            const top = el('div', 'lbl-toolbar');
+            if (l.value) top.append(el('b', null, crmMoney(l.value)));
+            if (l.label) top.append(crmChip(l.label));
+            const who = crmWho(l);
+            top.append(el('span', 'crm-sub', (who ? who + ' · ' : '') + 'arrived ' + fmtDate(l.created_at)));
+            m.body.append(top);
+            const nn = el('div', 'crm-focus');
+            nn.append(el('div', 'disp-subhead', 'Notes'));
+            if (!(l.notes || []).length) nn.append(el('div', 'crm-sub', 'Nothing yet.'));
             (l.notes || []).forEach(n => {
                 const r = el('div', 'crm-hist-row');
                 r.append(document.createTextNode(n.text), el('div', 'crm-hist-when', fmtDate(n.at)));
-                m.body.append(r);
+                nn.append(r);
             });
             const ta = document.createElement('textarea');
             ta.className = 'lia-chase-body'; ta.rows = 2; ta.placeholder = 'A note about this lead…';
-            m.body.append(ta);
-            const bar = el('div', 'disp-actions');
+            nn.append(ta);
+            const nbar = el('div', 'disp-actions');
             const noteBtn = el('button', 'btn', 'Save note');
             noteBtn.onclick = async () => {
                 if (!ta.value.trim()) return;
                 try { await crmOp('/api/crm/lead', { op: 'note_add', id: leadId, text: ta.value.trim() }); m.close(); crmLeadModal(leadId); }
                 catch (e) { toastError(e.message); }
             };
+            nbar.append(noteBtn); nn.append(nbar);
+            m.body.append(nn);
+            const bar = m.foot();
             if (!l.archived) {
                 const conv = el('button', 'btn btn-primary', 'Convert to deal');
                 conv.onclick = async () => {
@@ -9015,15 +9071,16 @@
                 };
                 bar.append(del);
             }
-            bar.append(noteBtn); m.body.append(bar);
         }
 
         /* ---------------- pipeline settings: stages, labels, reasons ------- */
         function crmStageEditor() {
             const m = crmModal('Pipeline');
-            m.body.append(el('p', 'field-help', 'Rename the stages to your own process. Probability '
+            const sb = el('div', 'crm-focus');
+            sb.append(el('div', 'disp-subhead', 'Stages'));
+            sb.append(el('p', 'field-help', 'Rename the stages to your own process. Probability '
                 + 'weights the pipeline value; rotting turns a deal red after sitting untouched that many days.'));
-            const rows = el('div'); m.body.append(rows);
+            const rows = el('div'); sb.append(rows);
             const working = crmCache.stages.map(s => ({ ...s }));
             function paint() {
                 rows.innerHTML = '';
@@ -9047,7 +9104,7 @@
             paint();
             const addBtn = el('button', 'btn disp-addbox'); addBtn.append(ico(I.plus), document.createTextNode('Add a stage'));
             addBtn.onclick = () => { working.push({ name: '', probability: 100, rot_days: 0 }); paint(); };
-            m.body.append(addBtn);
+            sb.append(addBtn);
             const bar = el('div', 'disp-actions');
             const save = el('button', 'btn btn-primary', 'Save stages');
             save.onclick = async () => {
@@ -9055,7 +9112,8 @@
                 try { await crmOp('/api/crm/stages', { stages: working }); m.close(); }
                 catch (e) { save.disabled = false; toastError(e.message); }
             };
-            bar.append(save); m.body.append(bar);
+            bar.append(save); sb.append(bar);
+            m.body.append(sb);
 
             /* ---- labels, with their colours ---- */
             const lb = el('div', 'crm-focus');
@@ -9088,7 +9146,7 @@
             addLab.onclick = () => { labs.push({ name: '', color: 'gray' }); paintLabs(); };
             lb.append(addLab);
             const lbar = el('div', 'disp-actions');
-            const lsave = el('button', 'btn', 'Save labels');
+            const lsave = el('button', 'btn btn-primary', 'Save labels');
             lsave.onclick = async () => {
                 lsave.disabled = true;
                 try { await crmOp('/api/crm/stages', { labels: labs.filter(l => l.name.trim()) }); m.close(); }
@@ -9106,7 +9164,7 @@
             lrTa.value = (crmCache.lost_reasons || []).join('\n');
             lr.append(lrTa);
             const rbar = el('div', 'disp-actions');
-            const rsave = el('button', 'btn', 'Save reasons');
+            const rsave = el('button', 'btn btn-primary', 'Save reasons');
             rsave.onclick = async () => {
                 rsave.disabled = true;
                 try {
@@ -9119,6 +9177,8 @@
             m.body.append(lr);
 
             /* ---- the follow-up nag ---- */
+            const fp = el('div', 'crm-focus');
+            fp.append(el('div', 'disp-subhead', 'Follow-ups'));
             const fu = el('label', 'crm-cline');
             const fcb = document.createElement('input'); fcb.type = 'checkbox';
             fcb.checked = crmCache.settings.followup_popup !== false;
@@ -9128,7 +9188,8 @@
             };
             fu.append(fcb, document.createTextNode(
                 ' Prompt for the next activity when a deal’s last one is completed'));
-            m.body.append(fu);
+            fp.append(fu);
+            m.body.append(fp);
         }
 
         /* ---------------- insights ---------------- */
@@ -10369,7 +10430,21 @@
                 + ' · ' + t.msg_count + (t.msg_count === 1 ? ' message' : ' messages')
                 + ' · last message ' + mailAgoLong(t.last_at);
             m.body.append(meta);
-            if (r.crm) {
+            if (t.crm_deal_id) {
+                /* A website enquiry that already became pipeline: one click
+                   lands on its deal, no retyping, no hunting. */
+                const chip = el('div', 'mail-crmchip');
+                const a = el('a', 'miss-open', 'Filed in the CRM - open the deal');
+                a.onclick = async () => {
+                    m.close();
+                    setView('crm');
+                    if (!crmCache) { try { const rr = await api('/api/crm/board', {}); crmCache = rr.crm; crmLoadedAt = Date.now(); } catch (e) { toastError(e.message); return; } }
+                    renderCRM();
+                    crmDealModal(t.crm_deal_id);
+                };
+                chip.append(a);
+                m.body.append(chip);
+            } else if (r.crm) {
                 m.body.append(el('div', 'mail-crmchip', 'CRM: ' + r.crm.name
                     + (r.crm.org ? ' (' + r.crm.org + ')' : '')));
             }
