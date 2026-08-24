@@ -113,20 +113,28 @@
         .icon-btn { border: 0; background: transparent; color: var(--ink-3); padding: 4px; border-radius: 6px;
             min-width: 28px; min-height: 28px; display: grid; place-items: center; transition: all .14s; }
         .icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+        .icon-btn:disabled { background: transparent; color: var(--border-3); cursor: not-allowed; }
         .icon-btn svg { width: 16px; height: 16px; }
         .convos { flex: 1; overflow-y: auto; padding: 0px 12px 8px; display: flex; flex-direction: column; gap: 0px; }
         .convo { display: flex; align-items: center; gap: 8px; padding: 8px 8px; border-radius: var(--r-sm); color: var(--ink-2);
             font-size: 13px; cursor: pointer; border: 0; background: transparent; width: 100%; text-align: left; transition: all .14s; }
         .convo:hover { background: var(--surface-2); color: var(--ink); }
         .convo.active { background: var(--surface-2); color: var(--ink); font-weight: 500; box-shadow: inset 0 0 0 1px var(--border-2); }
-        .convo .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .convo .del { opacity: 0; color: var(--ink-3); padding: 4px; border-radius: 6px; display: grid; place-items: center; transition: all .14s; }
+        .convo .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+            /* The padding is the hit area the whole-row button used to give;
+               the negative margin cancels its effect on the row height. */
+            padding: 8px; margin: -8px 0 -8px -8px; }
+        .convo .del { opacity: 0; color: var(--ink-3); padding: 4px; border-radius: 6px; display: grid; place-items: center; transition: all .14s;
+            border: 0; background: transparent; min-width: 24px; min-height: 24px; }
         .convo .del svg { width: 14px; height: 14px; }
-        .convo:hover .del { opacity: .65; }
-        .convo .del:hover { opacity: 1; color: var(--danger); background: rgba(251,113,133,.12); }
+        .convo:hover .del, .convo:focus-within .del { opacity: .65; }
+        /* Hover-reveal alone leaves the trash invisible but still tappable. */
+        @media (hover: none) { .convo .del { opacity: .65; } }
+        .convo .del:hover { opacity: 1; color: var(--danger); background: var(--danger-bg); }
         .convo-empty { color: var(--ink-3); font-size: 12px; padding: 8px 8px; }
         .side-foot { padding: 12px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--ink-3); display: flex; align-items: center; gap: 8px; }
-        .side-foot .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--win); box-shadow: 0 0 0 3px rgba(52,211,153,.18); }
+        .side-foot .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--win); box-shadow: 0 0 0 3px var(--win-bg); }
 
         /* ---------- Main ---------- */
         .main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
@@ -193,7 +201,6 @@
         .stat .delta { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; margin-top: 8px; padding: 4px 8px; border-radius: 6px; position: relative; }
         .stat .delta svg { width: 12px; height: 12px; }
         .delta.up { color: var(--win); background: var(--win-bg); } .delta.down { color: var(--danger); background: var(--danger-bg); } .delta.flat { color: var(--ink-3); background: var(--surface-3); }
-        .stat.warn { border-color: rgba(251,191,36,.32); }
         .stat.warn .value { color: var(--warn); }
         .stat-spark { margin-top: 12px; position: relative; opacity: .92; }
         .stat-spark .spark { height: 30px; }
@@ -674,6 +681,7 @@
         .mail-claim { border: 1px solid var(--border-2); background: var(--surface); color: var(--accent);
             font: inherit; font-size: 11px; font-weight: 600; border-radius: 12px; padding: 2px 10px; cursor: pointer; }
         .mail-claim:hover { border-color: var(--accent); }
+        .mail-claim:disabled { background: var(--surface-2); color: var(--ink-3); border-color: var(--border); cursor: not-allowed; }
         .mail-age { margin-left: auto; font-size: 11px; color: var(--ink-3); }
         .mail-age.hot { color: var(--danger); font-weight: 600; }
         .mail-viewwarn { background: var(--warn-bg); border: 1px solid var(--border); color: var(--warn);
@@ -1072,7 +1080,7 @@
         .lia-dot.o3 { background: #e07a5f; }
         .lia-dot.o4 { background: var(--danger); }
         .lia-name { font-size: 14px; font-weight: 600; min-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .lbl-chip.deep { background: var(--danger-bg); color: var(--danger); border-color: rgba(239,68,68,.6); }
+        .lbl-chip.deep { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
         .cov-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
         .cov-head h3 { font-size: 14px; font-weight: 600; }
         .cov-line { font-size: 13px; color: var(--ink-2); margin-top: 4px; }
@@ -2675,10 +2683,14 @@
             const box = $('convos'); box.innerHTML = '';
             if (!convos.length) { box.append(el('div', 'convo-empty', 'No conversations yet.')); return; }
             convos.forEach(c => {
-                const b = el('button', 'convo' + (c.id === activeId ? ' active' : ''));
-                b.append(el('span', 'title', c.title || 'Conversation'));
-                const del = el('span', 'del'); del.innerHTML = I.trash; del.title = 'Delete'; del.onclick = (e) => deleteConvo(c.id, e);
-                b.append(del); b.onclick = () => selectConvo(c.id); box.append(b);
+                // Delete has to be a real button to be reachable by keyboard, so the
+                // row cannot be one: a button may not contain another.
+                const row = el('div', 'convo' + (c.id === activeId ? ' active' : ''));
+                const b = el('button', 'title', c.title || 'Conversation');
+                b.onclick = () => selectConvo(c.id);
+                const del = el('button', 'del'); del.innerHTML = I.trash; del.title = 'Delete';
+                del.setAttribute('aria-label', 'Delete conversation'); del.onclick = (e) => deleteConvo(c.id, e);
+                row.append(b, del); box.append(row);
             });
         }
 
@@ -6414,7 +6426,7 @@
                     book.disabled = true; booking = true;
                     book.textContent = 'Booking with ' + (carrierLabel(chosen.carrier_name || '') || optionName(chosen))
                         + '… do not close this window';
-                    x.disabled = true; x.style.opacity = '.35';
+                    x.disabled = true;
                     const doBook = (force) => api('/api/dispatch/book', {
                         order_id: o.id, name: orderNo(o), option: chosen, boxes: lastBoxes, notify: nb.checked, force: !!force,
                         insurance: lastInsurance, signature: sigSel ? sigSel.value : '',
@@ -6429,13 +6441,13 @@
                             if (!await uiConfirm('Shopify already shows this order as fulfilled, which usually means it has already shipped. Book a courier anyway?', { title: 'Order looks already shipped', okText: 'Book anyway' })) { book.disabled = false; setLabel(); return; }
                             res = await doBook(true);
                         }
-                        booking = false; x.disabled = false; x.style.opacity = '';
+                        booking = false; x.disabled = false;
                         quoteCache.delete(String(o.id));
                         setDispatchState(o.id, res.dispatch || {});
                         renderResult(res);
                         if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
                     } catch (e) {
-                        booking = false; x.disabled = false; x.style.opacity = '';
+                        booking = false; x.disabled = false;
                         const msg = String(e.message || 'Booking failed');
                         // If the outcome is unknown the courier MAY already be booked and
                         // charged: do not re-arm the button into a second charge.
@@ -9841,6 +9853,7 @@
             }
             /* ---- who's doing what ---- */
             const who = el('div', 'mail-who');
+            const PRESENCE_LABEL = { office: 'In office', home: 'At home', out: 'Out' };
             (d.team || []).forEach(m => {
                 const c = el('div', 'mail-who-card');
                 if (m.uid === d.me) {
@@ -9855,15 +9868,21 @@
                         try { await api('/api/mail/presence', { presence: pick.value }); refreshMailQuiet(); }
                         catch (e) { toastError(e.message); }
                     };
-                    c.append(el('span', 'mail-presence ' + (m.presence || 'office')),
-                             el('span', 'mail-who-name', m.name + ' (you)'), pick);
+                    const meDot = el('span', 'mail-presence ' + (m.presence || 'office'));
+                    meDot.title = PRESENCE_LABEL[m.presence || 'office'];
+                    c.append(meDot, el('span', 'mail-who-name', m.name + ' (you)'), pick);
                 } else {
-                    c.append(el('span', 'mail-presence ' + (m.presence || '')),
-                             el('span', 'mail-who-name', m.name));
+                    /* Office green against home amber is exactly the pair a
+                       colour-blind reader cannot separate, and the dot carried
+                       no other signal at all. */
+                    const dot = el('span', 'mail-presence ' + (m.presence || ''));
+                    dot.title = PRESENCE_LABEL[m.presence] || 'Presence unknown';
+                    c.append(dot, el('span', 'mail-who-name', m.name));
                 }
                 const active = (m.assigned || 0) + (m.progress || 0);
+                const load = active + ' active' + (m.waiting ? ', ' + m.waiting + ' waiting' : '');
                 c.append(el('span', 'mail-who-load',
-                    active + ' active' + (m.waiting ? ', ' + m.waiting + ' waiting' : '')));
+                    m.uid === d.me ? load : (PRESENCE_LABEL[m.presence] || 'Presence unknown') + ' · ' + load));
                 who.append(c);
             });
             box.append(who);

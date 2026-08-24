@@ -912,6 +912,50 @@ def t_one_component_per_role_across_tabs():
        "and a long account name truncates like every other child of its row")
 
 
+@test
+def t_no_dark_theme_colour_literals_survive():
+    """The app was repainted from dark to light. Four rgba literals from the old
+    palette came through, and one of them inverted its own signal: the warning
+    KPI card ended up with a PALER border than an ordinary card."""
+    stray = [ln for ln in HTML.splitlines()
+             if re.search(r"rgba\(\s*\d+", ln)
+             and not re.search(r"rgba\(\s*(26,\s*26,\s*26|0,\s*0,\s*0|255,\s*255,\s*255|91,\s*75,\s*219)", ln)]
+    ok(not stray, "off-palette rgba survives: " + "; ".join(x.strip()[:70] for x in stray[:3]))
+    ok(".stat.warn { border-color" not in HTML,
+       "the warn card takes the ordinary card border rather than a paler one")
+
+
+@test
+def t_a_disabled_control_looks_disabled():
+    """Two of the app's own button recipes had no :disabled state, so a control
+    that could not be pressed looked exactly like one that could. One call site
+    had noticed and patched it with an inline opacity of its own."""
+    ok(re.search(r"\.icon-btn:disabled \{[^}]*cursor: not-allowed", HTML),
+       "icon buttons have a disabled recipe")
+    ok(re.search(r"\.mail-claim:disabled \{[^}]*cursor: not-allowed", HTML),
+       "so does Claim, which is disabled while a claim is in flight")
+    ok("x.style.opacity = '.35'" not in SCRIPT,
+       "and the one-off inline patch is retired now the class carries the state")
+
+
+@test
+def t_deleting_a_conversation_is_reachable_and_visible():
+    """The row was a <button>, so delete could not be one - a button may not
+    contain another - which left it a hover-only <span>: no keyboard path, and
+    on a tablet an invisible but fully live target next to the row you meant
+    to open."""
+    fn = re.search(r"const box = \$\('convos'\).*?\n        \}", SCRIPT, re.S).group(0)
+    ok("el('div', 'convo'" in fn, "the row is a div so its children can be real buttons")
+    ok("el('button', 'title'" in fn and "el('button', 'del')" in fn,
+       "both the open and the delete control are real buttons")
+    ok("aria-label" in fn, "and delete says what it deletes")
+    ok(":focus-within .del" in HTML, "keyboard focus reveals it")
+    ok(re.search(r"@media \(hover: none\) \{ \.convo \.del", HTML),
+       "and touch, which has no hover, does not leave it invisible-but-live")
+    rule = re.search(r"\.convo \.del \{[^}]*\}", HTML, re.S).group(0)
+    ok("min-width: 24px" in rule, "it also clears the minimum target size")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
