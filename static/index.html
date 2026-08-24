@@ -56,7 +56,6 @@
                hairline, not by a shadow. Only things that float get depth. */
             --sh-1: 0 1px 0 rgba(26,26,26,.05);
             --sh-2: 0 12px 32px -8px rgba(26,26,26,.18), 0 2px 6px rgba(26,26,26,.06);
-            --hair: none;
             --focus: 0 0 0 3px rgba(91,75,219,.28);
 
             /* Type scale: 7 steps */
@@ -178,6 +177,8 @@
            its sentence 138px of a 300px row - a four-line ribbon. The stamp
            takes its own line instead, and the text gets the width. */
         @media (max-width: 640px) {
+            /* 32px gutters spend 64px of a 390px screen on nothing. */
+            .ov-wrap { padding: var(--sp-5) var(--sp-4) 56px; }
             .ov-hero { flex-wrap: wrap; gap: 12px; }
             .ov-hero > div:not(.badge) { flex: 1 1 200px; min-width: 0; }
             .ov-updated { margin-left: 56px; padding-top: 0; flex-basis: 100%; }
@@ -230,7 +231,7 @@
         .seo-score.mid .num { color: var(--warn); }
         .seo-score.mid .bar > i { background: linear-gradient(90deg, #e0a020, var(--warn)); }
         .seo-score.low .num { color: var(--danger); }
-        .seo-score.low .bar > i { background: linear-gradient(90deg, #e05670, var(--danger)); }
+        .seo-score.low .bar > i { background: linear-gradient(90deg, #e05a34, var(--danger)); }
         .mem-card { display: flex; align-items: flex-start; gap: 12px; background: var(--surface); border: 1px solid var(--border);
             border-radius: var(--r); padding: 12px 16px; margin-bottom: 8px; box-shadow: var(--sh-1); animation: fadeUp .3s ease backwards; }
         .mem-left { display: flex; align-items: flex-start; gap: 12px; flex: 1; min-width: 0; }
@@ -289,7 +290,7 @@
         select.psel { cursor: pointer; } .pnum { width: 110px; }
         .btn.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); font-weight: 600; }
         .btn.ghost:hover { background: var(--surface-2); }
-        .pfilters { display: none; flex-wrap: wrap; gap: 12px 12px; padding: 16px 16px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); box-shadow: var(--hair); }
+        .pfilters { display: none; flex-wrap: wrap; gap: 12px 12px; padding: 16px 16px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); box-shadow: var(--sh-1); }
         .pfilters.show { display: flex; }
         .pfield { display: flex; flex-direction: column; gap: 4px; }
         .pfield label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); }
@@ -380,7 +381,7 @@
         .sk-field { margin-bottom: 12px; }
         .sk-field label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); margin-bottom: 4px; }
         .sk-input, .sk-textarea { width: 100%; background: var(--surface); border: 1px solid var(--border-2); border-radius: var(--r-sm); color: var(--ink); font: inherit; font-size: 13px; padding: 8px 12px; transition: border-color .14s, box-shadow .14s; }
-        .sk-input:focus, .sk-textarea:focus { outline: none; border-color: var(--accent-line); box-shadow: var(--focus); }
+        .sk-input:focus, .sk-textarea:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus); }
         .sk-textarea { resize: vertical; min-height: 104px; line-height: 1.55; }
         .sk-form-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
         .sk-spacer { flex: 1; }
@@ -411,7 +412,7 @@
         .pchat-thread .msg.assistant { align-self: stretch; }
         .pchat-input { display: flex; gap: 8px; align-items: flex-end; padding: 12px 12px; border-top: 1px solid var(--border); background: var(--surface-2); }
         .pchat-ta { flex: 1; resize: none; max-height: 140px; background: var(--bg-2); border: 1px solid var(--border-2); border-radius: 8px; color: var(--ink); font: inherit; font-size: 13px; padding: 8px 12px; line-height: 1.5; outline: none; transition: border-color .14s, box-shadow .14s; }
-        .pchat-ta:focus { border-color: var(--accent-line); box-shadow: var(--focus); }
+        .pchat-ta:focus { border-color: var(--accent); box-shadow: var(--focus); }
         .pchat-send { flex-shrink: 0; padding: 0; width: 40px; height: 40px; display: grid; place-items: center; }
         .pchat-send svg { width: 16px; height: 16px; }
         /* customer sector selector */
@@ -427,7 +428,7 @@
         .changes-head { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
         .changes-head svg { width: 13px; height: 13px; }
         /* scheduled-change alerts */
-        .alerts-banner { background: var(--warn-bg); border: 1px solid var(--warn); border-radius: var(--r); padding: 12px 16px; margin-bottom: 20px; }
+        .alerts-banner { background: var(--warn-bg); border: 1px solid var(--border); border-radius: var(--r); padding: 12px 16px; margin-bottom: 20px; }
         .alerts-head { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--warn); margin-bottom: 8px; }
         .alerts-head svg { width: 15px; height: 15px; }
         .alerts-clear { margin-left: auto; background: transparent; border: 0; color: var(--ink-3); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
@@ -514,7 +515,7 @@
            it read as a squashed "thin" control when it had its own padding. */
         .lbl-size { background: var(--surface); border: 1px solid var(--border-2); border-radius: var(--r-sm);
             color: var(--ink); font: inherit; font-size: 13px; font-weight: 500; padding: 8px 12px;
-            line-height: 1.35; box-shadow: var(--hair); cursor: pointer; transition: all .14s; }
+            line-height: 1.35; cursor: pointer; transition: all .14s; }
         .lbl-size:hover { background: var(--surface-3); border-color: var(--border-3); }
         .lbl-find { min-width: 190px; font-weight: 400; }
         .lbl-nameline { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
@@ -548,7 +549,7 @@
             border-radius: var(--r-sm); padding: 4px; margin-bottom: 12px; }
         .lbl-segbtn { background: transparent; border: 0; color: var(--ink-3); font: inherit; font-size: 12px;
             font-weight: 600; padding: 4px 12px; border-radius: 6px; cursor: pointer; }
-        .lbl-segbtn.on { background: var(--surface); color: var(--ink); box-shadow: var(--hair); }
+        .lbl-segbtn.on { background: var(--surface); color: var(--ink); box-shadow: var(--sh-1); }
         .lbl-segbtn:hover { color: var(--ink); }
         .modal.disp-modal { max-width: 720px; width: 94vw; }
         .disp-dest { padding: 12px 12px; background: var(--bg-2); border: 1px solid var(--border-2);
@@ -1018,7 +1019,7 @@
             border-radius: var(--r-sm); padding: 4px; }
         .lbl-filt { background: transparent; border: 0; color: var(--ink-3); font: inherit; font-size: 12px;
             font-weight: 600; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
-        .lbl-filt.on { background: var(--surface); color: var(--ink); box-shadow: var(--hair); }
+        .lbl-filt.on { background: var(--surface); color: var(--ink); box-shadow: var(--sh-1); }
         .lbl-filt:hover { color: var(--ink); }
         .miss-strip { border: 1px solid var(--border); background: var(--warn-bg);
             border-radius: var(--r-sm); padding: 12px 16px; margin-bottom: 12px; }
@@ -1040,9 +1041,9 @@
         .label-sheet .ls-onote { font-size: .9em; font-weight: 500; color: #111; margin-top: .55em; overflow-wrap: break-word; }
         .label-sheet .ls-onote b { font-weight: 800; }
         /* liability / accounts receivable */
-        .lia-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; }
+        .lia-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--sp-3); margin-bottom: 12px; }
         .lia-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm);
-            padding: 12px 16px; box-shadow: var(--hair); }
+            padding: 12px 16px; box-shadow: var(--sh-1); }
         .lia-k { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); }
         .lia-v { font-size: 20px; font-weight: 600; letter-spacing: -.02em; margin-top: 4px; font-variant-numeric: tabular-nums; }
         .lia-card.ok .lia-v { color: var(--win); }
@@ -1070,7 +1071,7 @@
         .lia-dot.o2 { background: #f6bdb0; }
         .lia-dot.o3 { background: #e07a5f; }
         .lia-dot.o4 { background: var(--danger); }
-        .lia-name { font-size: 14px; font-weight: 600; min-width: 150px; }
+        .lia-name { font-size: 14px; font-weight: 600; min-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .lbl-chip.deep { background: var(--danger-bg); color: var(--danger); border-color: rgba(239,68,68,.6); }
         .cov-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
         .cov-head h3 { font-size: 14px; font-weight: 600; }
@@ -1365,7 +1366,7 @@
         .auth-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center;
             justify-content: center; background: var(--bg); }
         .auth-card { width: min(380px, calc(100vw - 48px)); background: var(--surface);
-            border: 1px solid var(--border); border-radius: 12px; padding: 28px; box-shadow: var(--hair); }
+            border: 1px solid var(--border); border-radius: 12px; padding: 28px; box-shadow: var(--sh-1); }
         .auth-brand { width: 40px; height: 40px; border-radius: 12px; margin-bottom: 14px;
             background: linear-gradient(140deg, var(--accent), var(--accent-2)); color: #fff;
             display: flex; align-items: center; justify-content: center; }
@@ -1437,7 +1438,7 @@
            mixing inputs, a select and a button lines up. */
         .tm-field { flex: 1 1 120px; min-width: 0; background: var(--surface); color: var(--ink);
             font: inherit; font-size: 13px; padding: 8px 12px; line-height: 1.35;
-            border: 1px solid var(--border-2); border-radius: var(--r-sm); box-shadow: var(--hair); }
+            border: 1px solid var(--border-2); border-radius: var(--r-sm); }
         .tm-field:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
         .tm-tabpick { display: inline-flex; align-items: center; gap: 6px; margin: 0 10px 8px 0;
             cursor: pointer; font-size: 13px; color: var(--ink-2); min-height: 32px; }
@@ -2328,7 +2329,7 @@
         const sumv = (arr) => (arr || []).reduce((a, b) => a + (+(b && b.value) || 0), 0);
         function trendsHeader(title, range, onRange) {
             const row = el('div'); row.style.cssText = 'display:flex;align-items:center;gap:12px;margin:26px 0 13px;';
-            const t = el('div', null, title); t.style.cssText = 'font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);';
+            const t = el('div', null, title); t.style.cssText = 'font-size:11px;font-weight:var(--w-bold);text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);';
             const sp = el('div'); sp.style.flex = '1'; row.append(t, sp);
             if (onRange) row.append(segControl(RANGE_OPTS, range, onRange));
             return row;
@@ -2363,7 +2364,7 @@
             // --- Search Console: clicks, impressions, CTR, position ---
             const g3 = el('div', 'charts-grid');
             if (has('clicks')) { const a = S('clicks'); g3.append(trendChart({ title: 'Search clicks', source: 'Google Search Console', yUnit: 'Clicks', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Clicks', color: '#0e7c5a', values: V(a) }], format: fmtCompact, height: 230 })); }
-            if (has('impressions')) { const a = S('impressions'); g3.append(trendChart({ title: 'Impressions', source: 'Google Search Console', yUnit: 'Impressions', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Impressions', color: '#0e7c5a', values: V(a) }], format: fmtCompact, height: 230 })); }
+            if (has('impressions')) { const a = S('impressions'); g3.append(trendChart({ title: 'Impressions', source: 'Google Search Console', yUnit: 'Impressions', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Impressions', color: '#5b4bdb', values: V(a) }], format: fmtCompact, height: 230 })); }
             if (g3.children.length) box.append(g3);
             const g4 = el('div', 'charts-grid');
             if (has('ctr')) { const a = S('ctr'); g4.append(trendChart({ title: 'Search click-through rate', source: 'Google Search Console', yUnit: 'CTR %', value: pct(_avg(V(a))), labels: L(a), series: [{ name: 'CTR', color: '#8a5a00', values: V(a) }], format: pct, height: 230, annotate: false })); }
@@ -4702,7 +4703,7 @@
                     ((sh.reference || '') + ' ' + (sh.customer || '') + ' '
                      + (sh.tracking || '') + ' ' + (sh.carrier || '')).toLowerCase().indexOf(q) >= 0);
                 if (!shown.length) {
-                    host.append(el('div', 'mail-empty', rows.length
+                    host.append(el('div', 'empty', rows.length
                         ? 'Nothing matches that.'
                         : 'No shipments booked to a pasted address yet. Press New shipment to book one.'));
                     return;
@@ -4731,7 +4732,7 @@
                     }
                     row.append(left);
                     if (sh.canceled) {
-                        row.append(el('span', 'mail-order-stage not-started', 'cancelled'));
+                        row.append(el('span', 'lbl-chip bad', 'CANCELLED'));
                     } else if (sh.tracking) {
                         const cp = el('button', 'btn');
                         cp.textContent = 'Copy tracking';
@@ -5230,7 +5231,7 @@
                     head2.append(el('div', null, tt.counted + ' of ' + tt.orders + ' dispatched orders costed'));
                     head2.append(el('div', 'sub', 'Revenue ' + money(tt.revenue) + ' \u00b7 goods ' + money(tt.goods_cost)
                         + ' \u00b7 couriers ' + money(tt.courier_cost)));
-                    const m = el('div'); m.style.cssText = 'font-weight:800;font-size:17px;margin-top:6px';
+                    const m = el('div'); m.style.cssText = 'font-weight:var(--w-bold);font-size:var(--t-lg);margin-top:6px';
                     m.textContent = 'Kept ' + money(tt.margin) + (tt.margin_pct != null ? '  (' + tt.margin_pct + '%)' : '');
                     head2.append(m);
                     out.append(head2);
@@ -9911,7 +9912,8 @@
             const filt = el('button', 'btn', 'Filters' + (d.rules ? ' (' + d.rules + ')' : ''));
             filt.onclick = () => openMailRules();
             top.append(filt);
-            const rf = el('button', 'btn', 'Refresh');
+            const rf = el('button', 'btn');
+            rf.append(ico(I.refresh), document.createTextNode('Refresh'));
             rf.onclick = async () => {
                 rf.disabled = true;
                 const ok = await refreshMailQuiet(true);
@@ -10711,7 +10713,7 @@
                 + encodeURIComponent(mailCache.address || '')
                 + '#all/' + encodeURIComponent(t.id);
             gm.target = '_blank'; gm.rel = 'noopener';
-            gm.style.cssText = 'display:inline-block;margin:4px 0;color:var(--accent)';
+            gm.style.cssText = 'display:inline-block;margin:4px 0;color:var(--accent-ink)';
             m.body.append(gm);
             const msgs = el('div');
             msgs.style.cssText = 'max-height:360px;overflow-y:auto;margin:10px 0';
@@ -10877,7 +10879,7 @@
                 + encodeURIComponent(mailCache.address || '')
                 + '#all/' + encodeURIComponent(t.id);
             gm.target = '_blank'; gm.rel = 'noopener';
-            gm.style.cssText = 'display:inline-block;margin:4px 0;color:var(--accent)';
+            gm.style.cssText = 'display:inline-block;margin:4px 0;color:var(--accent-ink)';
             m.body.append(gm);
             /* ---- ownership + state controls ---- */
             const bar = el('div', 'mail-statebar');
@@ -12161,7 +12163,7 @@
                 const nm = (uid) => (d.names || {})[uid] || uid;
                 const fd = (s) => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
                     return h ? h + 'h ' + String(m).padStart(2, '0') + 'm' : m + 'm'; };
-                wrap.append(el('div', 'disp-subhead', 'On the clock now'));
+                wrap.append(el('div', 'section-title', 'On the clock now'));
                 const openList = el('div', 'files-list');
                 if (!d.open.length) openList.append(el('div', 'files-empty', 'Nobody is clocked in.'));
                 d.open.forEach(ws => {
@@ -12183,7 +12185,7 @@
                     openList.append(row);
                 });
                 wrap.append(openList);
-                wrap.append(el('div', 'disp-subhead', 'Hours per person'));
+                wrap.append(el('div', 'section-title', 'Hours per person'));
                 const tl = el('div', 'files-list');
                 const uids = Object.keys(d.totals);
                 if (!uids.length) tl.append(el('div', 'files-empty',
@@ -12199,7 +12201,7 @@
                     tl.append(row);
                 });
                 wrap.append(tl);
-                wrap.append(el('div', 'disp-subhead', 'Recent sessions'));
+                wrap.append(el('div', 'section-title', 'Recent sessions'));
                 const sl = el('div', 'files-list');
                 if (!d.sessions.length) sl.append(el('div', 'files-empty', 'No completed sessions yet.'));
                 d.sessions.slice(0, 40).forEach(s => {

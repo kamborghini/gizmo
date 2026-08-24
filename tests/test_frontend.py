@@ -875,6 +875,43 @@ def t_a_failed_question_is_not_dressed_as_an_answer():
     ok("Ask again" in render, "and offers the question back rather than making them retype it")
 
 
+@test
+def t_the_dead_elevation_token_is_gone():
+    """--hair only ever resolved to `none`, and a var() that resolves to none
+    invalidates the whole shadow list it appears in. That is how six card
+    components silently lost their elevation with no error anywhere. The token
+    is retired rather than left as a trap for the next edit."""
+    ok("--hair" not in HTML, "the token and its last user are both gone")
+    for cls in ("card", "lia-card", "auth-card", "pfilters"):
+        rule = re.search(r"\." + cls + r" \{[^}]*\}", HTML, re.S)
+        ok(rule and "var(--sh-1)" in rule.group(0),
+           ".%s carries the house card elevation like every other card" % cls)
+    for seg in ("lbl-segbtn.on", "lbl-filt.on"):
+        rule = re.search(r"\." + re.escape(seg) + r" \{[^}]*\}", HTML)
+        ok(rule and "var(--sh-1)" in rule.group(0),
+           ".%s is lifted off its track, which is the whole point of the control" % seg)
+
+
+@test
+def t_one_component_per_role_across_tabs():
+    """Each of these was a component borrowed from another tab, so the same
+    meaning rendered two different ways depending on where you were standing."""
+    ok("el('span', 'mail-order-stage not-started', 'cancelled')" not in SCRIPT,
+       "Production Manager no longer borrows the Inbox's pill for its cancelled chip")
+    ok("el('div', 'mail-empty', rows.length" not in SCRIPT,
+       "and no longer borrows the Inbox's empty state")
+    ok("el('div', 'disp-subhead', 'On the clock now')" not in SCRIPT,
+       "Team uses the page-level heading, not the dispatch modal's field label")
+    ok(SCRIPT.count("el('div', 'section-title', 'Recent sessions')") == 1,
+       "and all three of its headings moved together")
+    banner = re.search(r"\.alerts-banner \{[^}]*\}", HTML).group(0)
+    ok("1px solid var(--border)" in banner,
+       "the alerts banner wears the hairline every other tinted notice wears")
+    lia = re.search(r"\.lia-name \{[^}]*\}", HTML).group(0)
+    ok("text-overflow: ellipsis" in lia,
+       "and a long account name truncates like every other child of its row")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
