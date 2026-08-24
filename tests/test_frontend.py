@@ -616,6 +616,26 @@ def t_website_enquiries_link_both_ways():
        "while the deal links back to the email it came from")
 
 
+@test
+def t_printing_cannot_waste_stock_or_print_invisible_text():
+    """Physical-output bugs: a courier label forced onto gobo stock prints a
+    barcode that will not scan; a label whose rows do not fit is cut off in
+    silence; and the label typeface is font-display:block, so printing before
+    it loads prints nothing at all."""
+    ok("const CARRIER_LABEL" in SCRIPT and "const dims = CARRIER_LABEL;" in SCRIPT,
+       "courier labels print at the carrier's own 4x6, not the chosen gobo stock")
+    ok("const dims = labelDims()" not in
+       re.search(r"function printLabelImages.*?\n        \}", SCRIPT, re.S).group(0),
+       "printLabelImages no longer reads the production stock size")
+    fit = re.search(r"function fitLabel.*?\n        \}", SCRIPT, re.S).group(0)
+    ok("scrollWidth" in fit, "fitLabel measures WIDTH too, not only height")
+    ok("clipped" in fit, "and reports when the content still does not fit")
+    ok("does NOT fit on" in SCRIPT, "the preview warns instead of printing a short cut list")
+    ok("function labelFontReady" in SCRIPT, "one shared font gate")
+    ok(SCRIPT.count("labelFontReady()") >= 5,
+       "every print path waits for the label typeface (%d)" % SCRIPT.count("labelFontReady()"))
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

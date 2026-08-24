@@ -888,6 +888,21 @@
             .mfrom { min-width: 0; flex: 1 1 auto; }
         }
         @media (max-width: 640px) { .disp-addr-grid { grid-template-columns: 1fr; } }
+        /* The parcel and customs rows are built from unshrinkable fixed widths
+           (~466px) inside a ~310px modal on a phone, so the weight field and the
+           remove button sat outside the modal entirely. Let them wrap. */
+        @media (max-width: 560px) {
+            .disp-boxedit { flex-wrap: wrap; }
+            .disp-boxedit > select.psel { min-width: 0; flex: 1 1 100%; }
+            .disp-boxedit > input[type=text] { flex: 1 1 100%; }
+            .disp-boxdim { width: 58px; }
+            /* An actual-size label preview is 102mm (384px) or A4 (794px) wide:
+               it juts past the card and drags the whole tab sideways. Scroll it
+               inside its own box, and scale it down to fit the phone - the mm
+               geometry the printer uses is untouched. */
+            .lbl-preview { overflow-x: auto; }
+            .lbl-preview .label-sheet { transform: scale(.78); transform-origin: top left; }
+        }
         .disp-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
             margin: 0 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
         .disp-pick-name { font-weight: 600; color: var(--ink); }
@@ -1039,6 +1054,7 @@
         .cov-ok { font-size: 13px; color: var(--win); margin-top: 8px; font-weight: 600; }
         .cov-note { font-size: 11px; color: var(--ink-3); margin-top: 8px; }
         .lbl-preview-note { font-size: 11px; color: var(--ink-3); margin: 8px 0 0; }
+        .lbl-preview-note.bad { color: var(--danger); font-weight: 600; }
         /* Off-screen staging area: it must have real layout (not display:none) so the
            shrink-to-fit measurement is accurate before printing. */
         #label-print { position: absolute; left: -10000px; top: 0; }
@@ -2137,7 +2153,12 @@
         }
         function trendChart(opts) {
             opts = opts || {};
-            const W = 760, H = opts.height || 220, padL = 56, padR = 18, padT = 18, padB = 40;
+            // The viewBox width IS the user-unit scale: at 760 on a 390px phone
+            // every 11px label painted at ~4px. Narrow viewports get a narrow
+            // coordinate system so the ratio stays near 1:1.
+            const narrow = window.innerWidth < 700;
+            const W = narrow ? 340 : 760, H = opts.height || 220,
+                  padL = narrow ? 38 : 56, padR = 18, padT = 18, padB = narrow ? 34 : 40;
             const labels = opts.labels || [];
             const series = (opts.series || []).filter(s => s && Array.isArray(s.values) && s.values.length);
             const fmt = opts.format || fmtCompact;
@@ -2182,7 +2203,9 @@
         }
         function barChart(opts) {
             opts = opts || {};
-            const W = 760, H = opts.height || 230, padL = 56, padR = 18, padT = 18, padB = 40;
+            const narrow = window.innerWidth < 700;
+            const W = narrow ? 340 : 760, H = opts.height || 230,
+                  padL = narrow ? 38 : 56, padR = 18, padT = 18, padB = narrow ? 34 : 40;
             const labels = opts.labels || [], vals = (opts.values || []).map(v => +v || 0);
             const fmt = opts.format || fmtCompact, color = opts.color || '#5b4bdb';
             const card = el('div', 'chart-card' + (REDUCE_MOTION ? '' : ' chart-anim'));
@@ -4099,6 +4122,19 @@
             '2x4': { w: 50.8, h: 101.6, label: '2 x 4 in (51 x 102 mm)' },
             'a4': { w: 210, h: 297, label: 'A4 page' },
         };
+        // Courier labels come from World Options as 4x6 portrait artwork and are
+        // printed at that size whatever gobo stock is loaded for production labels.
+        const CARRIER_LABEL = { w: 101.6, h: 152.4 };
+        // Every print path must wait for the label typeface: it is declared
+        // font-display:block, so until the file lands the text is INVISIBLE -
+        // a cold cache printed a day sheet with missing text. 2s cap, because
+        // a slow font must not mean no printout.
+        function labelFontReady() {
+            return (document.fonts && document.fonts.load)
+                ? Promise.race([document.fonts.load("15px 'Bricolage Grotesque'"),
+                                new Promise(res => setTimeout(res, 2000))])
+                : Promise.resolve();
+        }
         // Option types that are not needed on a production label. They eat the space a
         // small label does not have; the quantity of each product matters more.
         const LABEL_SKIP_OPTIONS = ['projection type', 'artwork type', 'gobo type'];
@@ -4120,19 +4156,27 @@
             const base = parseFloat(getComputedStyle(sheet).fontSize) || 15;
             let size = base;
             const soft = base * 0.75, floor = base * 0.6;
-            while (sheet.scrollHeight > sheet.clientHeight && size > soft) {
+            // WIDTH as well as height: on narrow 2x4 stock the rows overflow
+            // sideways, and .label-sheet hides the overflow - so a gobo size or
+            // glass chip walked off the edge of the printed label in silence.
+            const over = () => sheet.scrollHeight > sheet.clientHeight + 1
+                            || sheet.scrollWidth > sheet.clientWidth + 1;
+            while (over() && size > soft) {
                 size -= 0.5;
                 sheet.style.fontSize = size + 'px';
             }
-            if (sheet.scrollHeight > sheet.clientHeight) {
+            if (over()) {
                 // The review strip goes before legibility does.
                 sheet.classList.add('shed');
-                while (sheet.scrollHeight > sheet.clientHeight && size > floor) {
+                while (over() && size > floor) {
                     size -= 0.5;
                     sheet.style.fontSize = size + 'px';
                 }
             }
-            return Math.round(size / base * 100);
+            // Below the floor the sheet simply cannot hold the content. Say so:
+            // an incomplete cut list that nobody knows is incomplete is worse
+            // than a label that admits it.
+            return { pct: Math.round(size / base * 100), clipped: over() };
         }
         let skipLabelsAutoLoad = false;   // set by the admin deep link, which fetches its own order
         function showLabelsView() {
@@ -4888,7 +4932,7 @@
                 row.onclick = () => { labelSel = (labelSel === o.id ? null : o.id); renderLabels(); };
                 box.append(row);
                 if (labelSel === o.id) {
-                    const wrap = el('div'); wrap.style.margin = '4px 0 16px';
+                    const wrap = el('div', 'lbl-preview'); wrap.style.margin = '4px 0 16px';
                     if (o.customer_id) wrap.append(histLine(o));
                     const sheet = labelSheet(o);
                     wrap.append(sheet);
@@ -4902,10 +4946,19 @@
                     // Re-measured once the label typeface arrives: until then the metrics
                     // are the fallback font's and the shrink figure would be wrong.
                     const applyFit = () => {
-                        const pct = fitLabel(sheet);
+                        const fit = fitLabel(sheet);
                         const d = labelDims();
                         note.textContent = 'Actual size preview: ' + d.label
-                            + (pct < 100 ? '. Text shrunk to ' + pct + '% so the whole order fits one label.' : '.');
+                            + (fit.pct < 100 ? '. Text shrunk to ' + fit.pct
+                               + '% so the whole order fits one label.' : '.');
+                        note.classList.toggle('bad', fit.clipped);
+                        if (fit.clipped) {
+                            // Never let the bench print a cut list that is missing
+                            // rows without knowing it.
+                            note.textContent = 'This order does NOT fit on ' + d.label
+                                + ' - some rows would be cut off the printed label. '
+                                + 'Choose a larger stock size before printing.';
+                        }
                     };
                     applyFit();
                     if (document.fonts && document.fonts.load) {
@@ -5240,7 +5293,8 @@
                 if (r && r.parentNode) r.parentNode.removeChild(r);
             };
             if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
-            setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);
+            labelFontReady().then(() => setTimeout(() => {
+                window.print(); setTimeout(cleanup, 800); }, 40), () => cleanup());
         }
         function openStockUsage() {
             const overlay = el('div', 'modal-overlay show');
@@ -5447,7 +5501,8 @@
                 if (r && r.parentNode) r.parentNode.removeChild(r);
             };
             if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
-            setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);
+            labelFontReady().then(() => setTimeout(() => {
+                window.print(); setTimeout(cleanup, 800); }, 40), () => cleanup());
         }
         /* One A4 cut list of everything live and not yet made: sizes and glass
            types summed across the queue, with tick boxes for the bench. */
@@ -5496,7 +5551,8 @@
                 if (r && r.parentNode) r.parentNode.removeChild(r);
             };
             if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
-            setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);
+            labelFontReady().then(() => setTimeout(() => {
+                window.print(); setTimeout(cleanup, 800); }, 40), () => cleanup());
         }
 
         /* ---------- dispatch (World Options) ---------- */
@@ -5651,7 +5707,10 @@
             if (!pages.length) return false;
             const fr = document.createElement('iframe');
             fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0';
-            const dims = labelDims();
+            // The COURIER sheet, never labelDims(): that select chooses the gobo
+            // label stock. With 4x2 selected, object-fit shrank a 4x6 shipping
+            // label to a third scale and its barcode would not scan.
+            const dims = CARRIER_LABEL;
             fr.srcdoc = '<!doctype html><html><head><style>'
                 + '@page{size:' + dims.w + 'mm ' + dims.h + 'mm;margin:0}'
                 + 'html,body{margin:0;padding:0}'
@@ -7052,10 +7111,7 @@
             };
             // The label typeface must be in before measuring or printing (2s cap), or
             // the fit runs against fallback metrics and the printout differs.
-            const fontReady = (document.fonts && document.fonts.load)
-                ? Promise.race([document.fonts.load("15px 'Bricolage Grotesque'"),
-                                new Promise(res => setTimeout(res, 2000))])
-                : Promise.resolve();
+            const fontReady = labelFontReady();
             fontReady.then(() => {
                 if (seq !== printSeq) return;
                 sheets.forEach(fitLabel);
@@ -7188,7 +7244,8 @@
                 if (r && r.parentNode) r.parentNode.removeChild(r);
             };
             if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
-            setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);
+            labelFontReady().then(() => setTimeout(() => {
+                window.print(); setTimeout(cleanup, 800); }, 40), () => cleanup());
         }
 
         /* ==================================================================
