@@ -7944,6 +7944,17 @@
             bot.append(ai);
             card.append(bot);
             card.onclick = () => crmDealModal(x.id);
+            /* A div because it has to be draggable between columns, so it gets
+               the keyboard path a button would have given it for free. The whole
+               board was otherwise mouse-only. */
+            card.setAttribute('role', 'button');
+            card.tabIndex = 0;
+            card.setAttribute('aria-label', x.title + ', ' + crmMoney(x.value)
+                + (x.activity_state === 'none' ? ', no next activity scheduled'
+                   : x.activity_state === 'overdue' ? ', next activity overdue' : ''));
+            card.onkeydown = (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); crmDealModal(x.id); }
+            };
             return card;
         }
         function crmDropbar() {

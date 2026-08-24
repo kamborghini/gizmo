@@ -822,6 +822,20 @@ def t_icon_only_buttons_clear_the_minimum():
        "so does the toast dismiss, which sits on its own over the page")
 
 
+@test
+def t_the_deal_board_can_be_worked_without_a_mouse():
+    """A deal card has to be a div because it drags between columns, and it was
+    left as a bare div: the whole board was the one place in the app with no
+    keyboard path at all. Verified in the browser - Enter and Space on a focused
+    card open that card's own deal."""
+    fn = re.search(r"function crmCard\(x\).*?\n        \}", SCRIPT, re.S).group(0)
+    ok("card.draggable = true" in fn, "it is still a draggable div, not a button")
+    ok("setAttribute('role', 'button')" in fn, "and it announces itself as a button")
+    ok("card.tabIndex = 0" in fn, "and it can be tabbed to")
+    ok("aria-label" in fn, "and it says which deal it is, plus the state the colour encodes")
+    ok("e.key === 'Enter' || e.key === ' '" in fn, "Enter and Space open it")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
