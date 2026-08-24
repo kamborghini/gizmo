@@ -30,8 +30,13 @@
             --border: #e3e3e3; --border-2: #d9d9d9; --border-3: #b9b9b9;
             --line: var(--border);
 
-            /* Text: primary, secondary, tertiary/placeholder */
-            --ink: #1a1a1a; --ink-2: #616161; --ink-3: #767676;
+            /* Text: primary, secondary, tertiary/placeholder.
+               --ink-3 was #767676, which clears 4.5:1 on pure white and on
+               nothing else. It is the colour of every muted label in the app,
+               and those labels sit on the page ground, on sunken fills and on
+               all four tinted chips - measured 3.90 to 4.35 there. #6b6b6b
+               clears 4.5:1 on every ground the app actually paints. */
+            --ink: #1a1a1a; --ink-2: #616161; --ink-3: #6b6b6b;
 
             /* The brand accent, retuned for contrast on white */
             --accent: #5b4bdb; --accent-2: #4a3cc4; --accent-ink: #4a3cc4;

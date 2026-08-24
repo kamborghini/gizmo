@@ -747,6 +747,52 @@ def t_losing_money_is_said_in_words_not_only_in_red():
        "and the colour-only inline style is gone")
 
 
+def _token(name):
+    m = re.search(r"--" + name + r":\s*(#[0-9a-fA-F]{6})", HTML)
+    assert m, "token --%s not found" % name
+    return m.group(1)
+
+
+def _contrast(a, b):
+    def chan(c):
+        v = c / 255
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+    def lum(h):
+        h = h.lstrip("#")
+        r, g, bl = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+        return 0.2126 * chan(r) + 0.7152 * chan(g) + 0.0722 * chan(bl)
+
+    la, lb = lum(a), lum(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+@test
+def t_muted_text_is_readable_on_every_ground_the_app_paints():
+    """--ink-3 is the colour of every muted label in the app. It was #767676,
+    which clears 4.5:1 on pure white and on nothing else - and those labels sit
+    on the page ground, on sunken fills and inside all four tinted chips, where
+    it measured 3.90 to 4.35. Checked against the real tokens so a palette
+    tweak cannot quietly put it back."""
+    ink3 = _token("ink-3")
+    grounds = ["surface", "surface-2", "surface-3", "bg", "bg-2",
+               "danger-bg", "warn-bg", "win-bg", "accent-soft"]
+    for g in grounds:
+        r = _contrast(ink3, _token(g))
+        ok(r >= 4.5, "--ink-3 %s on --%s is %.2f:1, under the 4.5 needed" % (ink3, g, r))
+
+
+@test
+def t_each_semantic_ink_is_readable_on_its_own_tint_and_on_the_page():
+    """A win/warn/danger chip is a colour pair. Retuning one half without the
+    other is how a status chip becomes unreadable."""
+    for ink, tint in [("danger", "danger-bg"), ("win", "win-bg"), ("warn", "warn-bg"),
+                      ("accent-ink", "accent-soft")]:
+        for ground in (tint, "bg", "surface"):
+            r = _contrast(_token(ink), _token(ground))
+            ok(r >= 4.5, "--%s on --%s is %.2f:1, under 4.5" % (ink, ground, r))
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
