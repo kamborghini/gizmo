@@ -7550,7 +7550,9 @@ def t_mail_unread_comes_from_gmail_not_from_our_own_stale_copy():
             return {"threads": [{"id": "u1", "snippet": "s", "historyId": "h1"},
                                 {"id": "u2", "snippet": "s", "historyId": "h1"}],
                     "complete": True}
-        async def ids(q, max_results=500, pages=3):
+        async def ids(q, max_results=500, pages=8, out_complete=None):
+            if out_complete is not None:
+                out_complete.append(True)   # the walk saw the whole result set
             queries.append(q)
             return set(unread["ids"])
         saved = (_gm.list_threads, _gm.list_thread_ids)
@@ -7807,7 +7809,9 @@ def t_mail_sync_only_closes_what_it_can_prove_was_archived():
             # keep2 is missing, but the listing admits it is truncated.
             return {"threads": [{"id": "keep1", "snippet": "s", "historyId": "h1"}],
                     "complete": state["complete"]}
-        async def ids(q, max_results=500, pages=3):
+        async def ids(q, max_results=500, pages=8, out_complete=None):
+            if out_complete is not None:
+                out_complete.append(True)   # the walk saw the whole result set
             return set()
         saved = (_gm.list_threads, _gm.list_thread_ids)
         _gm.list_threads, _gm.list_thread_ids = listing, ids

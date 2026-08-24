@@ -5239,6 +5239,10 @@
                     }
                     out.append(el('div', 'cov-note', bits.join(' \u00b7 ')
                         + '. Margin compares what customers paid for delivery with the ex VAT courier cost.'));
+                    // This sheet is checked against the World Options invoice: a
+                    // total that silently omits unpriced shipments reconciles and
+                    // is wrong.
+                    if (tt.totals_note) out.append(el('div', 'msg error', tt.totals_note));
                     const people = [...new Set(d.rows.filter(r => !r.canceled && r.by).map(r => r.by))];
                     if (people.length > 1) out.append(el('div', 'cov-note',
                         'Booked by ' + people.length + ' different people today.'));

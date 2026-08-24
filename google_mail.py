@@ -252,7 +252,8 @@ async def list_threads(query: str = "in:inbox", max_results: int = 100) -> dict:
     return {"threads": out, "complete": complete}
 
 
-async def list_thread_ids(query: str, max_results: int = 500, pages: int = 3) -> set:
+async def list_thread_ids(query: str, max_results: int = 500, pages: int = 8,
+                          out_complete=None) -> set:
     """Just the ids matching a query.
 
     Used to ask Gmail point blank which threads are unread, rather than
@@ -272,6 +273,11 @@ async def list_thread_ids(query: str, max_results: int = 500, pages: int = 3) ->
         done += 1
         if not token:
             break
+    # Say whether the walk saw everything. The unread sweep uses this set to
+    # decide what is READ, so a silently truncated answer marks live unread
+    # email as read on the board - the caller must be able to tell.
+    if out_complete is not None:
+        out_complete.append(not token)
     return out
 
 
