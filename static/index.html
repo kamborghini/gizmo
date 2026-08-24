@@ -225,7 +225,7 @@
         .data-src-pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--ink-2); white-space: pre-wrap; word-break: break-word; background: var(--surface-3); border-radius: 8px; padding: 8px 8px; line-height: 1.5; }
 
         .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3);
-            margin: 26px 0 13px; display: flex; align-items: center; gap: 8px; }
+            margin: var(--sp-6) 0 var(--sp-3); display: flex; align-items: center; gap: var(--sp-2); }
         .section-title::after { content: ""; flex: 1; height: 1px; background: var(--border); }
         /* ::after is always the last flex item, so a control inside the heading has
            to be ordered past it to leave the hairline in between. The heading
@@ -565,6 +565,10 @@
             font-weight: 600; padding: 4px 12px; border-radius: 6px; cursor: pointer; }
         .lbl-segbtn.on { background: var(--surface); color: var(--ink); box-shadow: var(--sh-1); }
         .lbl-segbtn:hover { color: var(--ink); }
+        /* Inside a toolbar row the track sits beside .btn controls, so it drops
+           the standalone bottom margin and tightens its thumbs. */
+        .lbl-seg.tight { margin-bottom: 0; }
+        .lbl-seg.tight .lbl-segbtn { padding: 4px var(--sp-2); }
         .modal.disp-modal { max-width: 720px; width: 94vw; }
         .disp-dest { padding: 12px 12px; background: var(--bg-2); border: 1px solid var(--border-2);
             border-radius: var(--r-sm); margin-bottom: 16px; }
@@ -690,7 +694,7 @@
         .mail-age { margin-left: auto; font-size: 11px; color: var(--ink-3); }
         .mail-age.hot { color: var(--danger); font-weight: 600; }
         .mail-viewwarn { background: var(--warn-bg); border: 1px solid var(--border); color: var(--warn);
-            border-radius: 8px; padding: 7px 10px; font-size: 12px; margin-bottom: 10px; }
+            border-radius: 8px; padding: var(--sp-2) var(--sp-3); font-size: 12px; margin-bottom: var(--sp-3); }
         .mail-msg { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
         .mail-msg.ours { background: var(--surface-2); }
         .mail-msg-head { display: flex; gap: 8px; font-size: 12px; margin-bottom: 3px; }
@@ -760,15 +764,15 @@
         .mail-bulkbar.armed { border-color: var(--accent-line); background: var(--accent-soft);
             color: var(--accent-ink); }
         .mail-bulk-hint { color: inherit; }
-        .mail-files { border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
-            margin: 10px 0; background: var(--surface-2); }
+        .mail-files { border: 1px solid var(--line); border-radius: 8px; padding: var(--sp-2) var(--sp-3);
+            margin: var(--sp-3) 0; background: var(--surface-2); }
         .mail-file { display: flex; align-items: center; gap: 8px; font-size: 12px;
             border-top: 0.5px solid var(--line); padding: 6px 0 4px; }
         .mail-file:first-of-type { border-top: 0; padding-top: 0; }
         .mail-file-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
             text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 500; }
-        .mail-orders { border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
-            margin: 10px 0; background: var(--surface-2); }
+        .mail-orders { border: 1px solid var(--line); border-radius: 8px; padding: var(--sp-2) var(--sp-3);
+            margin: var(--sp-3) 0; background: var(--surface-2); }
         .mail-orders-head { font-size: 12px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
         .mail-order { border-top: 0.5px solid var(--line); padding: 7px 0 5px; }
         .mail-order:first-of-type { border-top: 0; padding-top: 0; }
@@ -787,10 +791,10 @@
         .mail-hidden-note { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
             font-size: 12px; color: var(--accent-ink); background: var(--accent-soft);
             border: 1px solid var(--accent-line); border-radius: 8px;
-            padding: 7px 11px; margin-bottom: 8px; }
+            padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-2); }
         .linkish { border: 0; background: none; padding: 0; font: inherit; font-size: 12px;
             font-weight: 600; color: var(--accent-ink); text-decoration: underline; cursor: pointer; }
-        .mrule { border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; }
+        .mrule { border: 1px solid var(--line); border-radius: 8px; padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-2); }
         .mrule-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
         .mrule-name { font-size: 13px; font-weight: 600; color: var(--ink); }
         .mrule-name.off { color: var(--ink-3); text-decoration: line-through; }
@@ -804,9 +808,9 @@
         .mrule-tag { flex: none; font-size: 11px; color: var(--ink-3); background: var(--surface-3);
             border-radius: var(--r-xs); padding: 0 6px; }
         .mail-draft { border: 1px solid var(--accent-line); background: var(--accent-soft);
-            border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+            border-radius: 8px; padding: var(--sp-2) var(--sp-3); margin: var(--sp-3) 0; }
         .mail-draft-text { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px;
-            line-height: 1.55; padding: 9px 11px; margin-top: 8px; border-radius: 6px;
+            line-height: 1.55; padding: var(--sp-2) var(--sp-3); margin-top: var(--sp-2); border-radius: 6px;
             border: 1px solid var(--border-2); background: var(--surface); color: var(--ink);
             resize: vertical; }
         .mail-draft-text:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -1030,12 +1034,6 @@
         .disp-breakdown summary { cursor: pointer; color: var(--ink-3); font-weight: 600; }
         .disp-breakdown[open] summary { color: var(--ink-2); }
         @media (max-width: 560px) { .disp-dims { grid-template-columns: repeat(2, 1fr); } .disp-origin { grid-template-columns: 1fr; } }
-        .lbl-filts { display: flex; gap: 4px; background: var(--bg-2); border: 1px solid var(--border-2);
-            border-radius: var(--r-sm); padding: 4px; }
-        .lbl-filt { background: transparent; border: 0; color: var(--ink-3); font: inherit; font-size: 12px;
-            font-weight: 600; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
-        .lbl-filt.on { background: var(--surface); color: var(--ink); box-shadow: var(--sh-1); }
-        .lbl-filt:hover { color: var(--ink); }
         .miss-strip { border: 1px solid var(--border); background: var(--warn-bg);
             border-radius: var(--r-sm); padding: 12px 16px; margin-bottom: 12px; }
         .miss-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
@@ -1638,7 +1636,7 @@
                 <button class="icon-btn" id="settings-close" title="Close"></button>
             </div>
             <div class="modal-body">
-                <div class="section-title" style="margin: 0 0 6px;">Store profile</div>
+                <div class="section-title" style="margin: 0 0 var(--sp-2);">Store profile</div>
                 <p class="field-help" style="margin-top:0">Saved to your store and applied to every chat and every report as authoritative context.</p>
 
                 <label class="field-label" for="pf-voice">Brand voice</label>
@@ -1653,7 +1651,7 @@
                 <label class="field-label" for="pf-notes">Other notes</label>
                 <textarea id="pf-notes" class="pf-input" rows="2" placeholder="Anything else the copilot should always know: business model, constraints, audience."></textarea>
 
-                <div class="section-title" style="margin: 22px 0 6px;">Preferences</div>
+                <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Preferences</div>
                 <div class="settings-toggles">
                     <div class="setting-row">
                         <div><div class="setting-title">Track inventory</div><div class="setting-sub">Show low-stock metrics & advice. Turn off for unlimited stock.</div></div>
@@ -1672,7 +1670,7 @@
                         <div class="toggle" data-pref="flag_anomalies"><span class="sw"></span></div>
                     </div>
                 </div>
-                <div class="section-title" style="margin: 22px 0 6px;">Automatic refresh</div>
+                <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Automatic refresh</div>
                 <div class="setting-row">
                     <div><div class="setting-title">Auto-refresh reports</div><div class="setting-sub">Re-run your audits on a schedule so they stay fresh, and flag big changes as alerts. Off by default; uses AI credits on each run.</div></div>
                     <div class="toggle" id="sched-toggle"><span class="sw"></span></div>
@@ -1685,9 +1683,9 @@
                         <option value="168">Weekly</option>
                     </select>
                 </div>
-                <div class="section-title" style="margin: 22px 0 6px;">Connections</div>
+                <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Connections</div>
                 <div id="connections"><div class="setting-sub">Checking connections…</div></div>
-                <div class="section-title" style="margin: 22px 0 6px;">AI usage (last 30 days)</div>
+                <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">AI usage (last 30 days)</div>
                 <div id="usage"><div class="setting-sub">Loading usage…</div></div>
             </div>
             <div class="modal-foot">
@@ -4871,9 +4869,9 @@
                 bar.append(all);
             }
             if (!dispatched) {
-                const filt = el('div', 'lbl-filts');
+                const filt = el('div', 'lbl-seg tight');
                 [['all', 'All'], ['unprinted', 'Unprinted (' + unprinted.length + ')'], ['unmade', 'Not made (' + unmade.length + ')']].forEach(([k, lab]) => {
-                    const b = el('button', 'lbl-filt' + (labelsFilter === k ? ' on' : ''), lab);
+                    const b = el('button', 'lbl-segbtn' + (labelsFilter === k ? ' on' : ''), lab);
                     b.onclick = () => { labelsFilter = k; renderLabels(); };
                     filt.append(b);
                 });

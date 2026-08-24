@@ -886,10 +886,11 @@ def t_the_dead_elevation_token_is_gone():
         rule = re.search(r"\." + cls + r" \{[^}]*\}", HTML, re.S)
         ok(rule and "var(--sh-1)" in rule.group(0),
            ".%s carries the house card elevation like every other card" % cls)
-    for seg in ("lbl-segbtn.on", "lbl-filt.on"):
-        rule = re.search(r"\." + re.escape(seg) + r" \{[^}]*\}", HTML)
-        ok(rule and "var(--sh-1)" in rule.group(0),
-           ".%s is lifted off its track, which is the whole point of the control" % seg)
+    rule = re.search(r"\.lbl-segbtn\.on \{[^}]*\}", HTML)
+    ok(rule and "var(--sh-1)" in rule.group(0),
+       "the active segment is lifted off its track, which is the point of the control")
+    ok(".lbl-filt" not in HTML,
+       "and the second, near-identical segmented track has been folded into it")
 
 
 @test
