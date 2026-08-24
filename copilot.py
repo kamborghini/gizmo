@@ -3529,9 +3529,13 @@ def _dispatch_lock(order_id) -> "asyncio.Lock":
 
 
 def _tag_lock(order_id) -> "asyncio.Lock":
-    lock = _tag_locks.get(int(order_id))
+    key = int(order_id)
+    lock = _tag_locks.get(key)
     if lock is None:
-        lock = _tag_locks[int(order_id)] = asyncio.Lock()
+        if len(_tag_locks) > 500:   # one per order ever tagged; prune the idle ones
+            for k, l in [(k, l) for k, l in _tag_locks.items() if not l.locked()][:250]:
+                _tag_locks.pop(k, None)
+        lock = _tag_locks[key] = asyncio.Lock()
     return lock
 
 
@@ -7591,6 +7595,9 @@ CRM_DEALS_MAX = int(os.environ.get("CRM_DEALS_MAX", "60000"))
 CRM_ACTIVITIES_MAX = int(os.environ.get("CRM_ACTIVITIES_MAX", "200000"))
 CRM_NOTE_CAP = 20000                # characters per note
 CRM_DELETED_KEEP_DAYS = 30          # Pipedrive's restore window
+# The website-enquiry subject is attacker-controllable; this bounds how many
+# auto-filed CRM deals a spam run can mint in a day. Real volume is single digits.
+CRM_ENQUIRY_DAILY_CAP = int(os.environ.get("CRM_ENQUIRY_DAILY_CAP", "50"))
 
 # Pipedrive seeds a new pipeline with these five stages; renaming them to the
 # merchant's own language is the first thing the stage editor is for.
@@ -7705,15 +7712,32 @@ def _crm_touch(deal: dict) -> None:
     deal["edited_here"] = True
 
 
-def _crm_activity_state(deal_id: str, activities: dict, today) -> tuple:
+def _crm_next_due_by_deal(activities: dict) -> dict:
+    """deal_id -> earliest open due date, in ONE pass over the activities.
+    _crm_shape calls the per-deal state for every deal after every write; a
+    per-deal scan of all activities made that O(deals x activities), which at
+    the imported Pipedrive scale (thousands of deals, tens of thousands of
+    activities) is a multi-second event-loop stall on a checkbox tick."""
+    out: dict = {}
+    for a in activities.values():
+        if a.get("done"):
+            continue
+        due = a.get("due_date") or ""
+        if not due:
+            continue
+        did = a.get("deal_id") or ""
+        if did and (did not in out or due < out[did]):
+            out[did] = due
+    return out
+
+
+def _crm_activity_state(deal_id: str, next_by_deal: dict, today) -> tuple:
     """(state, next_due) for a deal: the four-colour discipline.
     overdue < today < none < future is also the column sort order, so a deal
     with no next step floats above one that is merely waiting."""
-    due = [a.get("due_date") or "" for a in activities.values()
-           if a.get("deal_id") == deal_id and not a.get("done") and a.get("due_date")]
-    if not due:
+    nxt = next_by_deal.get(deal_id)
+    if not nxt:
         return "none", ""
-    nxt = min(due)
     iso = today.isoformat()
     return ("overdue" if nxt < iso else "today" if nxt == iso else "future"), nxt
 
@@ -7763,11 +7787,12 @@ def _crm_shape(d: dict) -> dict:
     today = _crm_today()
     iso = today.isoformat()
     stages = {s["id"]: s for s in d["stages"]}
+    next_by_deal = _crm_next_due_by_deal(d["activities"])   # one pass, not per deal
     deals_out = {}
     for k, v in d["deals"].items():
         if v.get("deleted"):
             continue
-        state, next_due = _crm_activity_state(k, d["activities"], today)
+        state, next_due = _crm_activity_state(k, next_by_deal, today)
         st = stages.get(v.get("stage_id")) or (d["stages"][0] if d["stages"] else {})
         prob = v.get("probability") if v.get("probability") is not None else st.get("probability", 100)
         # A stage can hold a leftover day count behind a switched-off timer.
@@ -8615,9 +8640,21 @@ async def _mail_enquiries_file(store: dict) -> None:
     """Read each flagged thread's body and file it. Bounded and best-effort:
     a Gmail hiccup leaves the flag for the next sync, and three strikes
     parks the thread as failed rather than retrying forever."""
+    # The enquiry subject is attacker-controllable (anyone can email the public
+    # shared address), so a spammer could otherwise mint unlimited CRM deals.
+    # A per-day ceiling caps the blast radius; real enquiry volume is a handful
+    # a day. Over the cap, threads keep their 'new' flag (visible on the board,
+    # filed once volume normalises) rather than flooding the CRM.
+    today = _crm_today().isoformat()
+    stamp = store.get("enquiry_day") or ""
+    filed_today = int(store.get("enquiry_day_count") or 0) if stamp == today else 0
+    if filed_today >= CRM_ENQUIRY_DAILY_CAP:
+        return
     todo = [t for t in store.get("threads", {}).values()
             if t.get("enquiry") == "new" and not t.get("crm_deal_id")][:5]
     for t in todo:
+        if filed_today >= CRM_ENQUIRY_DAILY_CAP:
+            break
         try:
             parsed = {}
             try:
@@ -8633,7 +8670,15 @@ async def _mail_enquiries_file(store: dict) -> None:
                 logger.warning("mail: enquiry body read failed for %s: %s", t.get("id"), e)
             deal_id = _crm_file_enquiry(t, parsed)
             t["crm_deal_id"], t["enquiry"] = deal_id, "done"
+            filed_today += 1
+            store["enquiry_day"], store["enquiry_day_count"] = today, filed_today
             _mail_log(t, "", "filed in the CRM")
+        except RuntimeError:
+            # The CRM store was unwritable (poisoned/read-only): a TRANSIENT
+            # condition that clears itself. This must NOT burn a try, or a brief
+            # blip parks every enquiry in that window as permanently failed.
+            # Leave it 'new' so the next sync, once the store is back, retries.
+            logger.warning("mail: CRM not writable, enquiry %s left for retry", t.get("id"))
         except Exception:
             logger.exception("mail: enquiry filing failed for %s", t.get("id"))
             t["enquiry_tries"] = int(t.get("enquiry_tries") or 0) + 1
@@ -9059,6 +9104,31 @@ def _crm_deal_threads(d: dict, deal: dict) -> list:
     return rows[:20]
 
 
+def _crm_contact_open_ref(d: dict, kind: str, cid: str) -> int:
+    """How many OPEN deals or leads still point at this contact. Leads are a
+    first-class reference (a lead must belong to someone), so a contact held
+    only by a live enquiry must not be deletable out from under it."""
+    ref = "person_id" if kind == "persons" else "org_id"
+    deals = sum(1 for v in d["deals"].values()
+                if v.get(ref) == cid and v.get("status") == "open" and not v.get("deleted"))
+    leads = sum(1 for l in d["leads"].values()
+                if l.get(ref) == cid and not l.get("archived"))
+    return deals + leads
+
+
+def _crm_tombstone_contact(d: dict, kind: str, rec: dict) -> None:
+    """Remove a contact AND remember its Pipedrive id(s), so a later import
+    cannot resurrect it - the same anti-resurrection discipline merge, notes
+    and activities already use."""
+    store_key = "pd_deleted_persons" if kind == "persons" else "pd_deleted_orgs"
+    for pid in [rec.get("pd_id")] + list(rec.get("pd_merged_ids") or []):
+        if pid:
+            d.setdefault(store_key, []).append(str(pid))
+    if d.get(store_key):
+        d[store_key] = d[store_key][-20000:]
+    d[kind].pop(rec["id"], None)
+
+
 async def _crm_shopify_link_sweep(registry: dict, max_pages: int = 40) -> dict:
     """Fill in person.shopify_customer_id by email, in bulk. One paginated
     customer crawl indexed in memory, then a single pass over the people -
@@ -9083,7 +9153,10 @@ async def _crm_shopify_link_sweep(registry: dict, max_pages: int = 40) -> dict:
         for c in rows:
             e = str(c.get("email") or "").strip().lower()
             if e and c.get("id"):
-                by_email[e] = c["id"]
+                if e in by_email and by_email[e] != c["id"]:
+                    by_email[e] = None   # two customers share this email: never guess
+                elif e not in by_email:
+                    by_email[e] = c["id"]
             try:
                 since = max(since, int(c.get("id") or 0))
             except (TypeError, ValueError):
@@ -9099,12 +9172,15 @@ async def _crm_shopify_link_sweep(registry: dict, max_pages: int = 40) -> dict:
         if p.get("shopify_customer_id"):
             report["already"] += 1
             continue
-        hits = {by_email[e] for e in (str(x).strip().lower() for x in (p.get("emails") or []))
-                if e in by_email}
-        if not hits:
-            report["unmatched"] += 1
-        elif len(hits) > 1:
+        addrs = [str(x).strip().lower() for x in (p.get("emails") or [])]
+        # None in by_email marks an address two customers share: it makes the
+        # match ambiguous rather than silently linking whichever paginated last.
+        matched = [e for e in addrs if e in by_email]
+        hits = {by_email[e] for e in matched}
+        if any(by_email[e] is None for e in matched) or len(hits) > 1:
             report["ambiguous"] += 1
+        elif not hits:
+            report["unmatched"] += 1
         else:
             p["shopify_customer_id"] = next(iter(hits))
             report["linked"] += 1
@@ -12141,10 +12217,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
         org_ix, person_ix, deal_ix = index("orgs"), index("persons"), index("deals")
         org_of, person_of, deal_of = {}, {}, {}
+        # Contacts deleted here are tombstoned: a later import must not
+        # resurrect them, the way it already refuses deleted notes/activities.
+        dead_orgs = set(d.get("pd_deleted_orgs") or [])
+        dead_persons = set(d.get("pd_deleted_persons") or [])
 
         # --- organisations, then people, then deals, then their activities and
         # notes: each one links to the one before, so the order is the order.
         for o in data.get("orgs") or []:
+            if o["pd_id"] in dead_orgs:
+                continue
             gid = org_ix.get(o["pd_id"])
             rec = d["orgs"].get(gid) if gid else None
             if rec is not None and edited_here(rec):
@@ -12170,6 +12252,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 d["orgs"][gid] = rec
 
         for p in data.get("persons") or []:
+            if p["pd_id"] in dead_persons:
+                continue
             gid = person_ix.get(p["pd_id"])
             rec = d["persons"].get(gid) if gid else None
             if rec is not None and edited_here(rec):
@@ -12762,13 +12846,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     p["shopify_customer_id"] = body.get("shopify_customer_id") or None
                     p["updated_at"], p["edited_here"] = _crm_now(), True
                 else:
-                    linked = [v for v in d["deals"].values()
-                              if v.get("person_id") == p["id"] and v.get("status") == "open"
-                              and not v.get("deleted")]
-                    if linked:
-                        return _json({"error": "This person is on " + str(len(linked))
-                                               + " open deal(s). Close or relink those first."}, 400)
-                    d["persons"].pop(p["id"], None)
+                    n = _crm_contact_open_ref(d, "persons", p["id"])
+                    if n:
+                        return _json({"error": "This person is on " + str(n)
+                                               + " open deal(s) or lead(s). Close or relink those first."}, 400)
+                    _crm_tombstone_contact(d, "persons", p)
                 return _crm_ok(d, action=("contact " + op).replace("_", " "), who=actor)
             if op in ("org_update", "org_delete"):
                 o = d["orgs"].get(str(body.get("id") or ""))
@@ -12789,13 +12871,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         o["custom"] = cust
                     o["updated_at"], o["edited_here"] = _crm_now(), True
                 else:
-                    linked = [v for v in d["deals"].values()
-                              if v.get("org_id") == o["id"] and v.get("status") == "open"
-                              and not v.get("deleted")]
-                    if linked:
-                        return _json({"error": "This organisation is on " + str(len(linked))
-                                               + " open deal(s). Close or relink those first."}, 400)
-                    d["orgs"].pop(o["id"], None)
+                    n = _crm_contact_open_ref(d, "orgs", o["id"])
+                    if n:
+                        return _json({"error": "This organisation is on " + str(n)
+                                               + " open deal(s) or lead(s). Close or relink those first."}, 400)
+                    _crm_tombstone_contact(d, "orgs", o)
                 return _crm_ok(d, action=("contact " + op).replace("_", " "), who=actor)
 
             if op == "detail":
@@ -12847,11 +12927,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     rec = d[kind].get(cid)
                     if not rec:
                         continue
-                    if any(v.get(ref) == cid and v.get("status") == "open"
-                           and not v.get("deleted") for v in d["deals"].values()):
+                    if _crm_contact_open_ref(d, kind, cid):
                         skipped.append(rec.get("name") or cid)
                         continue
-                    d[kind].pop(cid, None)
+                    _crm_tombstone_contact(d, kind, rec)
                     deleted.append(cid)
                 if not deleted and skipped:
                     return _json({"error": "None deleted: all "
@@ -14357,11 +14436,19 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     counts[e["ws"]] = counts.get(e["ws"], 0) + 1
             names = _team_names()
             total = sum(int(s.get("secs") or 0) for s in rows)
+            def _csv_cell(v) -> str:
+                # A team display name is free text and unsanitised; without the
+                # armour a name like =HYPERLINK(...) runs as a formula in Excel,
+                # and an embedded quote breaks the row. Matches the client crmCSV.
+                v = str(v if v is not None else "")
+                if v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+                    v = "'" + v
+                return '"' + v.replace('"', '""') + '"' if any(c in v for c in ',"\n\r') else v
             lines = ["Name,Date,Clock in,Clock out,Hours,Actions,Corrected"]
             for s in rows:
                 st, en = str(s.get("start") or ""), str(s.get("end") or "")
                 lines.append(",".join([
-                    '"' + (names.get(s.get("uid")) or s.get("uid") or "") + '"',
+                    _csv_cell(names.get(s.get("uid")) or s.get("uid") or ""),
                     st[:10], st[11:16], en[11:16],
                     f"{int(s.get('secs') or 0) / 3600:.2f}",
                     str(counts.get(s.get("id"), 0)),
@@ -15350,17 +15437,22 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _verify_session_token(token)
             except Exception:
                 return deny("Unauthorized. Open this from your Shopify admin.")
-            # The admin print action runs on the Shopify order page, outside
-            # the app and its login, so it authenticates with the embed token
-            # alone. It can only render labels and stamp printed. If an app
-            # session header happens to be present, the print is attributed --
-            # and that account's Production Manager access is enforced, so a
-            # labels-denied user cannot print by hand-driving this URL.
+            # The embed token proves the request comes from inside the store's
+            # Shopify admin, but NOT which gizmo account, so the Production
+            # Manager tab restriction cannot be enforced from it alone. The
+            # session-less entry is the SIGNED url (minted by /sign, which is
+            # itself labels-gated); a bare id_token must carry a valid app
+            # session with the labels tab, or a labels-denied Shopify admin
+            # could hand-drive this URL to read orders and release them to
+            # production. Earlier this check only ran "if doc_who" - so
+            # omitting the header skipped it entirely.
             doc_who = _session_uid(request.headers.get("x-app-session")) or ""
-            if doc_who:
-                tabs = _user_tabs(doc_who)
-                if tabs is not None and "labels" not in tabs:
-                    return deny("Production Manager is switched off for your account.")
+            if not doc_who:
+                return deny("Open this from the Store Copilot app, or use the "
+                            "print button on the order.")
+            tabs = _user_tabs(doc_who)
+            if tabs is not None and "labels" not in tabs:
+                return deny("Production Manager is switched off for your account.")
 
         ids = []
         for part in str(request.query_params.get("ids") or "").split(","):
@@ -15796,13 +15888,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/status", methods=["POST"])
     async def status_route(request: Request):
-        """Connection-health summary for the Settings panel: Shopify, AI, and Google."""
+        """Connection-health summary for the Settings panel: Shopify, AI, and Google.
+        Admin+ only: the health detail carries internal error strings (the R2
+        endpoint with the account id, the stock-app URL, the /data path), which
+        a restricted part-time member has no business reading."""
         pre = _pre_checks(request)
         if pre:
             return pre
-        ok, _who = _authorize(request)
+        ok, who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        if _team_role(who) not in ("master", "admin"):
+            return _json({"error": "Connection status is for admins."}, 403)
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)

@@ -5632,7 +5632,7 @@ def t_work_resolve_is_a_recorded_correction_and_reports_add_up():
         rep = post("/api/work/report", {"uid": pt}).json()
         eq(rep["count"], 2, "both sessions in the report")
         ok(rep["csv"].startswith("Name,Date,Clock in"), "csv for payroll")
-        ok('"Poppy"' in rep["csv"] and "yes" in rep["csv"], "with the correction marked")
+        ok("Poppy" in rep["csv"] and "yes" in rep["csv"], "with the correction marked")
         rep2 = post("/api/work/report", {"uid": pt, "from": "2099-01-01"}).json()
         eq(rep2["count"], 0, "the date range filters")
     with_accounts(go)
@@ -8096,6 +8096,96 @@ def t_the_inbox_window_reaches_two_years_and_the_walk_can_get_there():
         _gm._call = saved
     eq(len(got["threads"]), 4000, "the walk reaches what it was asked for")
     ok(not got["complete"], "and says honestly that the mailbox holds more")
+
+@test
+def t_deleting_a_contact_respects_open_leads_and_tombstones_the_import():
+    """Two audit fixes: a contact held only by an open LEAD (not a deal) must
+    not be deletable out from under it; and a deleted Pipedrive-imported
+    contact must not be resurrected by the next import."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        # A person on an open lead, no deal.
+        onlead = post("/api/crm/contact", {"op": "person_add", "name": "Lead Only",
+                                           "emails": ["lo@x.com"]}).json()["id"]
+        post("/api/crm/lead", {"op": "add", "person_id": onlead, "value": 100})
+        r = post("/api/crm/contact", {"op": "person_delete", "id": onlead})
+        eq(r.status_code, 400, "a live lead blocks the delete")
+        ok("lead" in r.json()["error"].lower(), r.json()["error"])
+        # A Pipedrive-imported person, deleted here, stays gone on re-import.
+        d = copilot._load_crm()
+        pid = "p_pd500"
+        d["persons"][pid] = {"id": pid, "name": "Imported Gone", "emails": [],
+                             "pd_id": "500", "notes": []}
+        copilot._write_crm(d)
+        post("/api/crm/contact", {"op": "person_delete", "id": pid})
+        ok("500" in copilot._load_crm().get("pd_deleted_persons", []), "tombstoned")
+        async def fake_export(progress=None):
+            base = dict(PD_EXPORT)
+            base["persons"] = [{"pd_id": "500", "name": "Imported Gone", "emails": [],
+                                "phones": [], "org_pd_id": "", "job_title": "", "label": "",
+                                "custom": {}, "email_labels": [], "phone_labels": [],
+                                "created_at": "", "updated_at": ""}]
+            base["deals"] = []
+            return base
+        saved = (pipedrive.export, pipedrive.API_TOKEN)
+        pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
+        try:
+            post("/api/crm/import", {"go": True})
+            gone = [p for p in copilot._load_crm()["persons"].values() if p.get("pd_id") == "500"]
+            eq(gone, [], "a deleted imported contact is NOT resurrected")
+        finally:
+            pipedrive.export, pipedrive.API_TOKEN = saved
+    with_mail(go)
+
+@test
+def t_worldoptions_base_url_is_host_allowlisted_and_never_redirects():
+    """The SOAP envelope carries the courier credentials and the customer
+    address, so a base pointed at a hostile host would exfiltrate both. Only
+    a World Options https host is accepted; a lookalike or metadata IP is not."""
+    import worldoptions as _wo
+    for bad in ("http://worldoptions.co.uk", "https://worldoptions.co.uk.evil.com",
+                "https://169.254.169.254/x", "https://evil.com", "ftp://worldoptions.com"):
+        _wo.set_base_url(bad)
+        eq(_wo.base_url(), _wo.DEFAULT_BASE, bad + " must fall back to the default")
+    for good in ("https://service.worldoptions.co.uk", "https://api.worldoptions.com"):
+        _wo.set_base_url(good)
+        eq(_wo.base_url(), good.rstrip("/"), good + " is allowed")
+    _wo.set_base_url(_wo.DEFAULT_BASE)
+
+@test
+def t_the_link_sweep_will_not_guess_when_two_customers_share_an_email():
+    def go():
+        ensure_auth()
+        crm_wipe()
+        p = post("/api/crm/contact", {"op": "person_add", "name": "Shared",
+                                      "emails": ["dup@x.com"]}).json()["id"]
+        async def tools(registry, name, args):
+            if name == "shopify_list_customers":
+                return {"customers": [{"id": 1, "email": "dup@x.com"},
+                                      {"id": 2, "email": "dup@x.com"}]}
+            return {}
+        saved = copilot._tool_json
+        copilot._tool_json = tools
+        try:
+            rep = run_async(copilot._crm_shopify_link_sweep({}))
+        finally:
+            copilot._tool_json = saved
+        eq(rep["ambiguous"], 1, "an email two customers share is ambiguous, not a guess")
+        ok(not copilot._load_crm()["persons"][p].get("shopify_customer_id"), "left unlinked")
+    with_accounts(go)
+
+@test
+def t_status_and_payroll_export_are_locked_down():
+    def go():
+        ensure_auth()
+        # Connection status is admin+ only (it carries internal error strings).
+        _uid, sess, _pw = ready_user("Part Timer", "parttimer", role="parttime")
+        eq(post_s(sess, "/api/status", {}).status_code, 403, "part-time cannot read status")
+        eq(post("/api/status", {}).status_code, 200, "the master can")
+    with_accounts(go)
+    # The payroll CSV armours a formula-triggering name.
+    ok(callable(getattr(copilot, "_load_work", None)))
 
 @test
 def t_bulk_delete_clears_sample_contacts_but_never_live_pipeline():

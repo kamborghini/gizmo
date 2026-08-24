@@ -433,10 +433,31 @@ def set_credentials(meter=None, key=None, password=None, plugin=None) -> None:
         _state["plugin"] = (plugin or "").strip() or "Web_Service"
 
 
+def _base_allowed(b: str) -> bool:
+    """The SOAP base may only be a World Options host over https. The envelope
+    carries the account Key/Password and the recipient's address, so a base
+    pointed at an attacker host (or a link-local metadata IP) would exfiltrate
+    both on every quote and booking - and that string is settable from the
+    Settings form. Host allowlist, not substring: 'worldoptions.co.uk.evil.com'
+    must not pass."""
+    try:
+        from urllib.parse import urlparse
+        u = urlparse(b)
+        if u.scheme != "https" or not u.hostname:
+            return False
+        host = u.hostname.lower()
+        return host == "worldoptions.co.uk" or host == "worldoptions.com" \
+            or host.endswith(".worldoptions.co.uk") or host.endswith(".worldoptions.com")
+    except Exception:
+        return False
+
+
 def set_base_url(url) -> None:
     b = ((url or DEFAULT_BASE).strip() or DEFAULT_BASE).rstrip("/")
-    # Never point the SOAP client at the REST host (a stale value from an earlier build).
-    if _REST_HOST in b:
+    # A base that is not a World Options https host (stale REST host, a typo,
+    # or a hostile value pasted into Settings) falls back to the default rather
+    # than being trusted with the credentials the envelope carries.
+    if _REST_HOST in b or not _base_allowed(b):
         b = DEFAULT_BASE
     _state["base_url"] = b
 
@@ -577,7 +598,11 @@ async def _soap_call(service: str, action: str, inner: str, retryable: bool = Tr
         last_exc = None
         for attempt in range(attempts):
             try:
-                async with httpx.AsyncClient(follow_redirects=True) as client:
+                # No redirects: a courier SOAP endpoint never legitimately
+                # redirects, and following one to an internal/attacker host
+                # would carry the credentials and address in the envelope
+                # straight there. The base is host-allowlisted; keep it that way.
+                async with httpx.AsyncClient(follow_redirects=False) as client:
                     resp = await client.post(url, content=payload, headers=headers, timeout=45.0)
             except (httpx.ConnectError, httpx.ConnectTimeout) as e:
                 # Connection never opened: nothing reached World Options, safe to say so
