@@ -7599,11 +7599,17 @@ _CRM_ACTIVITY_TYPES = ("call", "meeting", "task", "deadline", "email", "lunch")
 _CRM_LOST_REASONS = ["Too expensive", "No response", "Went with someone else", "Timing", "Other"]
 # Pipedrive ships Hot/Warm/Cold as lead labels and colour chips on deals.
 _CRM_LABELS = ["Hot", "Warm", "Cold"]
+# Colour names as Pipedrive uses them; the browser maps names to paint. An
+# import overlays this with the account's real labels and their real colours.
+_CRM_LABEL_COLORS = {"Hot": "red", "Warm": "yellow", "Cold": "blue"}
+_CRM_COLOR_NAMES = ("red", "orange", "yellow", "green", "blue", "purple",
+                    "pink", "brown", "gray", "dark-gray")
 
 
 def _crm_default() -> dict:
     return {"seq": 0, "stages": [dict(s) for s in _CRM_DEFAULT_STAGES],
             "deals": {}, "activities": {}, "persons": {}, "orgs": {}, "leads": {},
+            "label_colors": dict(_CRM_LABEL_COLORS),
             "lost_reasons": list(_CRM_LOST_REASONS), "labels": list(_CRM_LABELS),
             "settings": {"followup_popup": True}}
 
@@ -7622,6 +7628,13 @@ def _load_crm() -> dict:
         d["seq"] = max(int(d.get("seq") or 0), peak)
     except (TypeError, ValueError):
         pass
+    # A store imported before the edit-protection existed has records but no
+    # stamp. Draw the line HERE: everything before this moment is fair game
+    # for the next import (the data predates the protection and cannot be
+    # told apart from import writes), and every edit made from now on carries
+    # the edited_here flag, which the import honours forever.
+    if "pd_imported_at" not in d and any(v.get("pd_id") for v in d.get("deals", {}).values()):
+        d["pd_imported_at"] = _crm_now()
     return d
 
 
@@ -7677,8 +7690,13 @@ def _crm_log(deal: dict, field: str, old, new) -> None:
 
 def _crm_touch(deal: dict) -> None:
     """Any edit resets rotting; Pipedrive's rule, including note and activity
-    writes, and deliberately ignoring how far out the next activity is."""
+    writes, and deliberately ignoring how far out the next activity is.
+    The edited_here flag is PERMANENT: once a record is worked on in gizmo,
+    no Pipedrive import ever overwrites it again. A timestamp guard looked
+    equivalent but was not — the import re-stamps its own high-water mark, so
+    a timestamp only protected an edit for one import cycle."""
     deal["touched_at"] = deal["updated_at"] = _crm_now()
+    deal["edited_here"] = True
 
 
 def _crm_activity_state(deal_id: str, activities: dict, today) -> tuple:
@@ -7720,6 +7738,18 @@ def _crm_purge(d: dict) -> None:
         d.pop("over_cap", None)
 
 
+def _crm_slim(rec: dict, drop: tuple) -> dict:
+    """A record without its heavy fields, carrying counts instead. At the
+    imported scale (2,800 contacts, years of notes) shipping every note and
+    changelog line on EVERY response turned a checkbox tick into a megabyte;
+    the modal fetches the full record on open instead."""
+    out = {k: v for k, v in rec.items() if k not in drop}
+    for k in drop:
+        if k in ("notes", "changelog"):
+            out[k + "_n"] = len(rec.get(k) or [])
+    return out
+
+
 def _crm_shape(d: dict) -> dict:
     """The whole CRM as one payload the tab renders from. Derived state
     (activity colours, rotting, weighted values, badges) is computed here so
@@ -7745,7 +7775,7 @@ def _crm_shape(d: dict) -> dict:
                 rotten = (datetime.now(timezone.utc) - touched).days >= rot_days
             except (TypeError, ValueError):
                 rotten = False
-        deals_out[k] = {**{kk: vv for kk, vv in v.items() if kk != "deleted"},
+        deals_out[k] = {**_crm_slim(v, ("deleted", "notes", "changelog")),
                         "activity_state": state, "next_activity": next_due,
                         "effective_probability": prob,
                         "weighted_value": round(float(v.get("value") or 0) * prob / 100.0, 2),
@@ -7760,14 +7790,47 @@ def _crm_shape(d: dict) -> dict:
                  else "overdue" if due and due < iso
                  else "today" if due == iso else "future")
         acts_out[k] = {**a, "state": state}
-    badge = sum(1 for a in acts_out.values() if a["state"] in ("overdue", "today"))
+    # An archived deal's leftover to-dos must not nag: archiving is how a
+    # quiet deal leaves the desk without polluting the lost reasons.
+    badge = sum(1 for a in acts_out.values()
+                if a["state"] in ("overdue", "today")
+                and not (d["deals"].get(a.get("deal_id") or "") or {}).get("archived"))
     new_leads = sum(1 for l in d["leads"].values() if not l.get("archived") and not l.get("seen"))
+    trash = sorted((v for v in d["deals"].values() if v.get("deleted")),
+                   key=lambda v: str(v.get("deleted_at") or ""), reverse=True)
     return {"stages": d["stages"], "deals": deals_out, "activities": acts_out,
-            "persons": d["persons"], "orgs": d["orgs"], "leads": d["leads"],
+            "persons": {k: _crm_slim(p, ("notes",)) for k, p in d["persons"].items()},
+            "orgs": {k: _crm_slim(o, ("notes",)) for k, o in d["orgs"].items()},
+            "leads": d["leads"],
             "lost_reasons": d["lost_reasons"], "labels": d["labels"],
+            "label_colors": d.get("label_colors") or dict(_CRM_LABEL_COLORS),
             "settings": d["settings"], "today": iso,
             "badge": badge, "new_leads": new_leads,
-            "trash": sum(1 for v in d["deals"].values() if v.get("deleted"))}
+            "team": _crm_team_list(), "names": _team_names(),
+            "imported_at": d.get("pd_imported_at") or "",
+            "trash": len(trash),
+            "trash_items": [{"id": v["id"], "title": v.get("title") or "",
+                             "value": v.get("value") or 0,
+                             "deleted_at": v.get("deleted_at") or ""}
+                            for v in trash[:50]]}
+
+
+def _crm_team_list() -> list:
+    """Accounts that can open the CRM tab: the owner pick-list. Small on
+    purpose — a name and an id, nothing an account page holds."""
+    rows = []
+    try:
+        for uid, u in _load_users()["users"].items():
+            if u.get("deleted") or not u.get("active", True):
+                continue
+            tabs = _user_tabs(uid)
+            if tabs is not None and "crm" not in tabs:
+                continue
+            rows.append({"uid": uid, "name": u.get("name") or u.get("username") or ""})
+    except Exception:
+        logger.exception("CRM team list failed")
+    rows.sort(key=lambda r: r["name"].lower())
+    return rows
 
 
 def _crm_deal_fields(body: dict, d: dict, deal: dict) -> None:
@@ -7779,15 +7842,32 @@ def _crm_deal_fields(body: dict, d: dict, deal: dict) -> None:
                         ("expected_close", lambda x: str(x).strip()[:10]),
                         ("person_id", lambda x: str(x).strip()[:40]),
                         ("org_id", lambda x: str(x).strip()[:40]),
+                        ("owner", lambda x: str(x).strip()[:60]),
                         ("probability", lambda x: (None if x in (None, "") else max(0, min(100, int(x)))))):
         if field in body:
             try:
                 new = cast(body.get(field))
             except (TypeError, ValueError):
                 continue
-            if field in ("value", "label", "expected_close", "person_id", "org_id"):
+            if field in ("value", "label", "expected_close", "person_id", "org_id", "owner"):
                 _crm_log(deal, field, deal.get(field), new)
             deal[field] = new
+    # Custom fields ride as one dict: names from Pipedrive or typed here,
+    # values always text. An empty value removes the field from this deal.
+    if isinstance(body.get("custom"), dict):
+        cust = dict(deal.get("custom") or {})
+        for k, v in list(body["custom"].items())[:30]:
+            # None-safe, not falsy-safe: 0 is a value, not a delete.
+            k = str(k).strip()[:60]
+            v = ("" if v is None else str(v)).strip()[:500]
+            if not k or cust.get(k, "") == v:
+                continue
+            _crm_log(deal, k, cust.get(k, ""), v)
+            if v:
+                cust[k] = v
+            else:
+                cust.pop(k, None)
+        deal["custom"] = cust
 
 
 # ---------------------------------------------------------------------------
@@ -8998,7 +9078,9 @@ TAB_KEYS = ("overview", "seo", "keywords", "products", "customers", "liability",
 _TAB_ROUTES = (
     ("/api/overview", "overview"), ("/api/seo", "seo"), ("/api/keyword", "keywords"),
     ("/api/products", "products"), ("/api/product", "products"),
-    ("/api/customers", "customers"), ("/api/customer-history", "customers"),
+    # customer-history also serves the CRM's deal modal (the Shopify card on a
+    # linked person), so either tab opens it.
+    ("/api/customers", "customers"), ("/api/customer-history", ("customers", "crm")),
     ("/api/customer-tags", "customers"), ("/api/reorder-radar", "customers"),
     ("/api/liability", "liability"),
     ("/api/crm/", "crm"), ("/api/mail/", "mail"), ("/api/files/", "files"),
@@ -9037,7 +9119,8 @@ def _tab_denied(request: Request) -> Optional[JSONResponse]:
     if not uid:
         return None            # not our concern here; _authorize answers 401
     tabs = _user_tabs(uid)
-    if tabs is None or tab in tabs:
+    allowed = (tab,) if isinstance(tab, str) else tab
+    if tabs is None or any(t in tabs for t in allowed):
         return None
     return _json({"error": "That part of the app is switched off for your account. "
                            "Ask an admin if you need it."}, 403)
@@ -11645,18 +11728,46 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         report = {"stages": {"new": 0, "updated": 0}, "orgs": {"new": 0, "updated": 0},
                   "persons": {"new": 0, "updated": 0}, "deals": {"new": 0, "updated": 0},
                   "activities": {"new": 0, "updated": 0}, "notes": {"added": 0},
-                  "kept": {"deals": 0, "persons": 0, "orgs": 0}, "problems": []}
+                  "custom_values": 0,
+                  "kept": {"deals": 0, "persons": 0, "orgs": 0},
+                  "kept_edited": {"deals": 0, "persons": 0, "orgs": 0, "activities": 0},
+                  "problems": []}
 
         def index(coll):
-            return {str(v.get("pd_id")): k for k, v in d[coll].items() if v.get("pd_id")}
+            # A merge absorbs the loser's Pipedrive identity: its rows must
+            # keep resolving to the winner, or the next import would recreate
+            # the duplicate and re-point every deal back at it.
+            ix = {}
+            for k, v in d[coll].items():
+                if v.get("pd_id"):
+                    ix[str(v["pd_id"])] = k
+                for m in (v.get("pd_merged_ids") or []):
+                    ix[str(m)] = k
+            return ix
 
         # Records with no pd_id were typed in here; they survive untouched.
         for coll, key in (("deals", "deals"), ("persons", "persons"), ("orgs", "orgs")):
             report["kept"][key] = len([1 for v in d[coll].values() if not v.get("pd_id")])
 
-        # --- stages: the pipeline is the board, so it is replaced wholesale,
-        # but only the imported ones. A stage nobody imported and nobody uses
-        # would leave an empty column forever.
+        # A record EDITED IN GIZMO also survives untouched: without this rule,
+        # pressing Import reverts every stage move, every won, and every
+        # ticked task back to whatever Pipedrive last knew — months of work
+        # undone by one button. The flag is set by every gizmo write and never
+        # cleared: once worked on here, a record is gizmo's. The timestamp
+        # fallback covers edits made before the flag existed.
+        last_import = str(d.get("pd_imported_at") or "")
+
+        def edited_here(rec) -> bool:
+            if rec is None:
+                return False
+            if rec.get("edited_here"):
+                return True
+            return bool(last_import and str(rec.get("updated_at") or "") > last_import)
+
+        # --- stages: the imported pipeline replaces the imported stages, in
+        # Pipedrive's order. Stages MADE IN GIZMO (no pd_id) are kept, after
+        # the imported ones: dropping them would orphan every deal that had
+        # been moved into them, silently, off the board.
         by_pd = {str(s.get("pd_id")): s for s in (d.get("stages") or []) if s.get("pd_id")}
         new_stages, seen_stage = [], {}
         for i, st in enumerate(data.get("stages") or []):
@@ -11670,6 +11781,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                "rot_days_stored": int(st.get("rot_days_stored") or 0),
                                "pd_id": st["pd_id"]})
             report["stages"]["updated" if prev else "new"] += 1
+        # Any old stage still holding deals rides along — gizmo-made stages,
+        # and stages Pipedrive itself deleted. Binned deals count too: a deal
+        # restored inside its 30-day window must land back in a real column.
+        if new_stages:
+            final_ids = {s["id"] for s in new_stages}
+            holdovers = [s for s in (d.get("stages") or [])
+                         if s["id"] not in final_ids
+                         and any(v.get("stage_id") == s["id"] for v in d["deals"].values())]
+            new_stages = new_stages + holdovers
         if len(new_stages) > 12:
             report["problems"].append(
                 "Pipedrive has " + str(len(new_stages)) + " stages and this board holds 12. "
@@ -11685,16 +11805,21 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         for o in data.get("orgs") or []:
             gid = org_ix.get(o["pd_id"])
             rec = d["orgs"].get(gid) if gid else None
+            if rec is not None and edited_here(rec):
+                report["kept_edited"]["orgs"] = report["kept_edited"].get("orgs", 0) + 1
+                org_of[o["pd_id"]] = gid
+                continue
             if rec is None:
                 gid = "o_pd" + o["pd_id"]
                 rec = {"id": gid, "notes": []}
                 report["orgs"]["new"] += 1
             else:
                 report["orgs"]["updated"] += 1
+            report["custom_values"] += len(o.get("custom") or {})
             rec.update({"name": o["name"], "address": o["address"],
                         "website": o.get("website", ""),
-                        "label": (data.get("labels") or {}).get(
-                            (o.get("label_ids") or [""])[0], {}).get("name", rec.get("label", "")),
+                        "label": o.get("label") or rec.get("label", ""),
+                        "custom": o.get("custom") or rec.get("custom") or {},
                         "created_at": o["created_at"] or rec.get("created_at") or _crm_now(),
                         "updated_at": o["updated_at"] or _crm_now(), "pd_id": o["pd_id"]})
             rec.setdefault("notes", [])
@@ -11705,17 +11830,24 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         for p in data.get("persons") or []:
             gid = person_ix.get(p["pd_id"])
             rec = d["persons"].get(gid) if gid else None
+            if rec is not None and edited_here(rec):
+                report["kept_edited"]["persons"] += 1
+                person_of[p["pd_id"]] = gid
+                continue
             if rec is None:
                 gid = "p_pd" + p["pd_id"]
                 rec = {"id": gid, "notes": [], "shopify_customer_id": None}
                 report["persons"]["new"] += 1
             else:
                 report["persons"]["updated"] += 1
+            report["custom_values"] += len(p.get("custom") or {})
             rec.update({"name": p["name"], "emails": p["emails"], "phones": p["phones"],
+                        "email_labels": p.get("email_labels") or [],
+                        "phone_labels": p.get("phone_labels") or [],
                         "job_title": p.get("job_title", ""),
                         "org_id": org_of.get(p["org_pd_id"], rec.get("org_id", "")),
-                        "label": (data.get("labels") or {}).get(
-                            (p.get("label_ids") or [""])[0], {}).get("name", rec.get("label", "")),
+                        "label": p.get("label") or rec.get("label", ""),
+                        "custom": p.get("custom") or rec.get("custom") or {},
                         "created_at": p["created_at"] or rec.get("created_at") or _crm_now(),
                         "updated_at": p["updated_at"] or _crm_now(), "pd_id": p["pd_id"]})
             rec.setdefault("notes", [])
@@ -11728,12 +11860,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         for dl in data.get("deals") or []:
             gid = deal_ix.get(dl["pd_id"])
             rec = d["deals"].get(gid) if gid else None
+            if rec is not None and edited_here(rec):
+                report["kept_edited"]["deals"] += 1
+                deal_of[dl["pd_id"]] = gid
+                continue
             if rec is None:
                 gid = "d_pd" + dl["pd_id"]
                 rec = {"id": gid, "notes": [], "changelog": []}
                 report["deals"]["new"] += 1
             else:
                 report["deals"]["updated"] += 1
+            report["custom_values"] += len(dl.get("custom") or {})
             closed = dl.get("won_at") if dl["status"] == "won" else dl.get("lost_at")
             # won_at is what the Insights tab reads. Folding it into closed_at
             # made an imported sales history report "no wins yet".
@@ -11753,6 +11890,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 "closed_at": closed or "",
                 "won_at": dl.get("won_at") or "", "lost_at": dl.get("lost_at") or "",
                 "label": dl.get("label", rec.get("label", "")),
+                "custom": dl.get("custom") or rec.get("custom") or {},
                 "touched_at": dl["updated_at"] or dl["created_at"] or _crm_now(),
                 "pd_id": dl["pd_id"],
             })
@@ -11766,17 +11904,29 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not dry:
             d["lost_reasons"] = sorted(lost_reasons)[:40]
             # Their label names and colours, not the three this app shipped with:
-            # a label the board cannot colour renders as a grey dot.
+            # a label the board cannot colour renders as a grey dot. Deal labels
+            # feed the deal picker; person and org label colours join the map so
+            # every chip paints, whichever entity it sits on.
             labs = [v.get("name") for v in (data.get("labels") or {}).values() if v.get("name")]
             if labs:
                 d["labels"] = labs[:20]
-                d["label_colors"] = {v["name"]: v.get("color", "")
-                                     for v in (data.get("labels") or {}).values() if v.get("name")}
+            colors = dict(d.get("label_colors") or {})
+            colors.update({k: v for k, v in (data.get("label_colors") or {}).items() if k and v})
+            colors.update({v["name"]: v.get("color", "")
+                           for v in (data.get("labels") or {}).values() if v.get("name")})
+            if colors:
+                d["label_colors"] = colors
 
         act_ix = index("activities")
+        dead_acts = set(d.get("pd_deleted_activities") or [])
         for a in data.get("activities") or []:
+            if a["pd_id"] in dead_acts:
+                continue
             gid = act_ix.get(a["pd_id"])
             rec = d["activities"].get(gid) if gid else None
+            if rec is not None and edited_here(rec):
+                report["kept_edited"]["activities"] += 1
+                continue
             if rec is None:
                 gid = "a_pd" + a["pd_id"]
                 rec = {"id": gid}
@@ -11821,6 +11971,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             notes = target.setdefault("notes", [])
             if any(str(x.get("pd_id")) == n["pd_id"] for x in notes):
                 continue
+            # Deleted here means deleted: the tombstone stops every later
+            # import from quietly resurrecting a note somebody removed.
+            if n["pd_id"] in set(target.get("pd_deleted_notes") or []):
+                continue
             notes.append({"id": _crm_id(d, "n"), "at": n["at"] or _crm_now(), "by": "",
                           "text": n["text"][:CRM_NOTE_CAP], "pinned": bool(n.get("pinned")),
                           "pd_id": n["pd_id"]})
@@ -11832,6 +11986,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 "This would put the CRM over its size guard. Nothing would be deleted, "
                 "but the limits should be raised first.")
         report["totals"] = after
+        if not dry:
+            d["pd_imported_at"] = _crm_now()
         return report
 
     @mcp.custom_route("/api/crm/import", methods=["POST"])
@@ -11950,6 +12106,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         "status": "open", "probability": None,
                         "expected_close": str(body.get("expected_close") or "").strip()[:10],
                         "source": str(body.get("source") or "Manual")[:40],
+                        "owner": str(body.get("owner") or actor or "").strip()[:60],
                         "created_at": _crm_now(), "updated_at": _crm_now(),
                         "stage_entered_at": _crm_now(), "touched_at": _crm_now(),
                         "notes": [], "changelog": []}
@@ -11965,6 +12122,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             deal = d["deals"].get(str(body.get("id") or ""))
             if not deal:
                 return _json({"error": "That deal no longer exists."}, 404)
+            if op == "detail":
+                # A read: the notes and changelog the board payload leaves out.
+                # No write, no ledger line.
+                return _json({"ok": True, "notes": deal.get("notes") or [],
+                              "changelog": deal.get("changelog") or []})
             if op == "update":
                 _crm_deal_fields(body, d, deal)
                 _crm_touch(deal)
@@ -12001,17 +12163,37 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 deal.pop("lost_reason", None); deal.pop("lost_comment", None)
                 _crm_log(deal, "status", old, "open")
                 _crm_touch(deal)
+            elif op == "archive":
+                # Pipedrive's third door: not won, not lost, just off the desk.
+                # This account had used it 257 times before it had a button.
+                # An archive is a gizmo edit like any other — without the flag
+                # (and no touch, since archiving must not reset rot) the very
+                # next import would quietly put the deal back on the board.
+                deal["archived"], deal["archived_at"] = True, _crm_now()
+                deal["updated_at"], deal["edited_here"] = _crm_now(), True
+                _crm_log(deal, "archive", "", "archived")
+            elif op == "unarchive":
+                deal.pop("archived", None); deal.pop("archived_at", None)
+                _crm_log(deal, "archive", "archived", "")
+                _crm_touch(deal)
             elif op == "delete":
                 deal["deleted"], deal["deleted_at"] = True, _crm_now()
+                deal["edited_here"] = True
             elif op == "restore":
                 deal.pop("deleted", None); deal.pop("deleted_at", None)
+                # Its stage can have gone while it sat in the bin; an open
+                # deal in no column exists nowhere. First column catches it.
+                if deal.get("stage_id") not in {s["id"] for s in d["stages"]} and d["stages"]:
+                    _crm_log(deal, "stage", deal.get("stage_id"), d["stages"][0]["name"])
+                    deal["stage_id"] = d["stages"][0]["id"]
+                    deal["stage_entered_at"] = _crm_now()
             elif op == "note_add":
                 text = str(body.get("text") or "").strip()[:CRM_NOTE_CAP]
                 if not text:
                     return _json({"error": "The note is empty."}, 400)
                 deal.setdefault("notes", []).append(
                     {"id": _crm_id(d, "n"), "text": text, "at": _crm_now(), "pinned": False})
-                deal["notes"] = deal["notes"][-200:]
+                deal["notes"] = deal["notes"][-500:]
                 _crm_touch(deal)
             elif op == "note_pin":
                 for n in deal.get("notes", []):
@@ -12019,8 +12201,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         n["pinned"] = not n.get("pinned")
                 _crm_touch(deal)
             elif op == "note_del":
-                deal["notes"] = [n for n in deal.get("notes", [])
-                                 if n["id"] != str(body.get("note_id") or "")]
+                nid = str(body.get("note_id") or "")
+                for n in deal.get("notes", []):
+                    if n["id"] == nid and n.get("pd_id"):
+                        deal.setdefault("pd_deleted_notes", []).append(str(n["pd_id"]))
+                deal["notes"] = [n for n in deal.get("notes", []) if n["id"] != nid]
+                deal["edited_here"] = True
             else:
                 return _json({"error": "Unknown operation."}, 400)
             return _crm_ok(d, action=("deal " + op).replace("_", " "), detail=(deal.get("title") or "")[:60], who=actor)
@@ -12069,6 +12255,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                        "priority": (str(body.get("priority") or "") if str(body.get("priority") or "")
                                     in ("high", "medium", "low") else ""),
                        "location": str(body.get("location") or "").strip()[:200],
+                       "assignee": str(body.get("assignee") or actor or "").strip()[:60],
                        "done": bool(body.get("done")),
                        "done_at": _crm_now() if body.get("done") else "",
                        "created_at": _crm_now(), "updated_at": _crm_now()}
@@ -12082,23 +12269,25 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"error": "That activity no longer exists."}, 404)
             if op == "update":
                 for f, cap in (("subject", 200), ("due_date", 10), ("due_time", 5),
-                               ("note", CRM_NOTE_CAP), ("location", 200)):
+                               ("note", CRM_NOTE_CAP), ("location", 200),
+                               ("assignee", 60), ("duration", 8)):
                     if f in body:
                         act[f] = str(body.get(f) or "").strip()[:cap]
                 if "type" in body and str(body["type"]) in _CRM_ACTIVITY_TYPES:
                     act["type"] = str(body["type"])
                 if "priority" in body and str(body.get("priority") or "") in ("high", "medium", "low", ""):
                     act["priority"] = str(body.get("priority") or "")
-                if "deal_id" in body:
-                    act["deal_id"] = str(body.get("deal_id") or "")
-                act["updated_at"] = _crm_now()
+                for f in ("deal_id", "person_id", "org_id"):
+                    if f in body:
+                        act[f] = str(body.get(f) or "")
+                act["updated_at"], act["edited_here"] = _crm_now(), True
                 if act.get("deal_id") and act["deal_id"] in d["deals"]:
                     _crm_touch(d["deals"][act["deal_id"]])   # a reschedule is a touch
             elif op == "done":
                 # The due date is never rewritten: done three days late still
                 # shows its original date in History. done_at is its own stamp.
                 act["done"], act["done_at"] = True, _crm_now()
-                act["updated_at"] = _crm_now()
+                act["updated_at"], act["edited_here"] = _crm_now(), True
                 deal_id = act.get("deal_id") or ""
                 if deal_id and deal_id in d["deals"]:
                     _crm_touch(d["deals"][deal_id])
@@ -12112,12 +12301,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         followup = deal_id
             elif op == "undone":
                 act["done"], act["done_at"] = False, ""
-                act["updated_at"] = _crm_now()
+                act["updated_at"], act["edited_here"] = _crm_now(), True
                 if act.get("deal_id") and act["deal_id"] in d["deals"]:
                     _crm_touch(d["deals"][act["deal_id"]])
             elif op == "delete":
                 if act.get("deal_id") and act["deal_id"] in d["deals"]:
                     _crm_touch(d["deals"][act["deal_id"]])
+                # An imported activity leaves a tombstone, or the next import
+                # would put it straight back.
+                if act.get("pd_id"):
+                    d.setdefault("pd_deleted_activities", []).append(str(act["pd_id"]))
+                    d["pd_deleted_activities"] = d["pd_deleted_activities"][-2000:]
                 d["activities"].pop(act["id"], None)
             else:
                 return _json({"error": "Unknown operation."}, 400)
@@ -12158,9 +12352,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     return _json({"error": "The person needs a name."}, 400)
                 p = {"id": _crm_id(d, "p"), "name": name,
                      "org_id": str(body.get("org_id") or ""),
-                     "emails": [str(e).strip()[:120] for e in (body.get("emails") or []) if str(e).strip()][:4],
-                     "phones": [str(x).strip()[:40] for x in (body.get("phones") or []) if str(x).strip()][:4],
+                     "emails": [str(e).strip()[:120] for e in (body.get("emails") or []) if str(e).strip()][:8],
+                     "phones": [str(x).strip()[:40] for x in (body.get("phones") or []) if str(x).strip()][:8],
                      "label": str(body.get("label") or "").strip()[:40],
+                     "job_title": str(body.get("job_title") or "").strip()[:120],
                      "shopify_customer_id": body.get("shopify_customer_id") or None,
                      "created_at": _crm_now(), "updated_at": _crm_now(), "notes": []}
                 d["persons"][p["id"]] = p
@@ -12171,6 +12366,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     return _json({"error": "The organisation needs a name."}, 400)
                 o = {"id": _crm_id(d, "o"), "name": name,
                      "address": str(body.get("address") or "").strip()[:300],
+                     "website": str(body.get("website") or "").strip()[:200],
                      "label": str(body.get("label") or "").strip()[:40],
                      "created_at": _crm_now(), "updated_at": _crm_now(), "notes": []}
                 d["orgs"][o["id"]] = o
@@ -12181,25 +12377,41 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if not p:
                     return _json({"error": "That person no longer exists."}, 404)
                 if op == "person_update":
-                    for f, cap in (("name", 120), ("label", 40), ("org_id", 40)):
+                    for f, cap in (("name", 120), ("label", 40), ("org_id", 40),
+                                   ("job_title", 120)):
                         if f in body:
                             p[f] = str(body.get(f) or "").strip()[:cap]
+                    if isinstance(body.get("custom"), dict):
+                        cust = dict(p.get("custom") or {})
+                        for ck, cv in list(body["custom"].items())[:30]:
+                            # None-safe, not falsy-safe: 0 is a value, not a delete.
+                            ck = str(ck).strip()[:60]
+                            cv = ("" if cv is None else str(cv)).strip()[:500]
+                            if ck:
+                                (cust.__setitem__(ck, cv) if cv else cust.pop(ck, None))
+                        p["custom"] = cust
                     # A form that shows ONE email must not be able to delete the
                     # other three. It sends what it displays, so treat that as a
-                    # change to the FIRST entry and keep the rest.
+                    # change to the FIRST entry and keep the rest. A form that
+                    # shows them ALL says contacts_full, and its list is the
+                    # whole truth — including a deliberate prune to one.
                     for f in ("emails", "phones"):
                         if f in body and isinstance(body[f], list):
                             sent = [str(x).strip()[:200] for x in body[f] if str(x).strip()]
                             kept = [str(x).strip()[:200] for x in (p.get(f) or []) if str(x).strip()]
-                            if len(sent) <= 1 and len(kept) > 1:
+                            if (not body.get("contacts_full")
+                                    and len(sent) <= 1 and len(kept) > 1):
                                 rest = [x for x in kept[1:] if x.lower() != (sent[0].lower() if sent else "")]
                                 p[f] = (sent + rest)[:8]
                             else:
                                 p[f] = sent[:8]
-                    p["updated_at"] = _crm_now()
+                        lf = f[:-1] + "_labels"
+                        if lf in body and isinstance(body[lf], list):
+                            p[lf] = [str(x).strip()[:20] for x in body[lf]][:8]
+                    p["updated_at"], p["edited_here"] = _crm_now(), True
                 elif op == "link_shopify":
                     p["shopify_customer_id"] = body.get("shopify_customer_id") or None
-                    p["updated_at"] = _crm_now()
+                    p["updated_at"], p["edited_here"] = _crm_now(), True
                 else:
                     linked = [v for v in d["deals"].values()
                               if v.get("person_id") == p["id"] and v.get("status") == "open"
@@ -12214,10 +12426,19 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if not o:
                     return _json({"error": "That organisation no longer exists."}, 404)
                 if op == "org_update":
-                    for f, cap in (("name", 120), ("label", 40), ("address", 300)):
+                    for f, cap in (("name", 120), ("label", 40), ("address", 300),
+                                   ("website", 200)):
                         if f in body:
                             o[f] = str(body.get(f) or "").strip()[:cap]
-                    o["updated_at"] = _crm_now()
+                    if isinstance(body.get("custom"), dict):
+                        cust = dict(o.get("custom") or {})
+                        for ck, cv in list(body["custom"].items())[:30]:
+                            ck = str(ck).strip()[:60]
+                            cv = ("" if cv is None else str(cv)).strip()[:500]
+                            if ck:
+                                (cust.__setitem__(ck, cv) if cv else cust.pop(ck, None))
+                        o["custom"] = cust
+                    o["updated_at"], o["edited_here"] = _crm_now(), True
                 else:
                     linked = [v for v in d["deals"].values()
                               if v.get("org_id") == o["id"] and v.get("status") == "open"
@@ -12227,6 +12448,105 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                                + " open deal(s). Close or relink those first."}, 400)
                     d["orgs"].pop(o["id"], None)
                 return _crm_ok(d, action=("contact " + op).replace("_", " "), who=actor)
+
+            if op == "detail":
+                # A read: the notes the board payload leaves out.
+                kind = "orgs" if str(body.get("kind") or "") == "org" else "persons"
+                rec = d[kind].get(str(body.get("id") or ""))
+                if not rec:
+                    return _json({"error": "That contact no longer exists."}, 404)
+                return _json({"ok": True, "notes": rec.get("notes") or []})
+
+            if op in ("note_add", "note_pin", "note_del"):
+                kind = "orgs" if str(body.get("kind") or "") == "org" else "persons"
+                rec = d[kind].get(str(body.get("id") or ""))
+                if not rec:
+                    return _json({"error": "That contact no longer exists."}, 404)
+                if op == "note_add":
+                    text = str(body.get("text") or "").strip()[:CRM_NOTE_CAP]
+                    if not text:
+                        return _json({"error": "The note is empty."}, 400)
+                    rec.setdefault("notes", []).append(
+                        {"id": _crm_id(d, "n"), "text": text, "at": _crm_now(), "pinned": False})
+                    rec["notes"] = rec["notes"][-500:]
+                elif op == "note_pin":
+                    for n in rec.get("notes", []):
+                        if n["id"] == str(body.get("note_id") or ""):
+                            n["pinned"] = not n.get("pinned")
+                else:
+                    nid = str(body.get("note_id") or "")
+                    for n in rec.get("notes", []):
+                        if n["id"] == nid and n.get("pd_id"):
+                            rec.setdefault("pd_deleted_notes", []).append(str(n["pd_id"]))
+                    rec["notes"] = [n for n in rec.get("notes", []) if n["id"] != nid]
+                rec["updated_at"], rec["edited_here"] = _crm_now(), True
+                return _crm_ok(d, action=("contact " + op).replace("_", " "), who=actor)
+
+            if op in ("person_merge", "org_merge"):
+                # 1,951 imported people guarantee duplicates, and deleting the
+                # spare is blocked while deals point at it — merge is the only
+                # honest exit. The WINNER keeps every field it has; the loser
+                # fills the gaps, hands over its notes, and every deal, lead
+                # and activity that pointed at it is re-pointed. Nothing ends
+                # up dangling, because the loser is only removed after.
+                kind = "persons" if op == "person_merge" else "orgs"
+                ref = "person_id" if op == "person_merge" else "org_id"
+                loser = d[kind].get(str(body.get("id") or ""))
+                winner = d[kind].get(str(body.get("into") or ""))
+                if not loser or not winner:
+                    return _json({"error": "Both contacts must still exist."}, 404)
+                if loser["id"] == winner["id"]:
+                    return _json({"error": "Pick two different contacts to merge."}, 400)
+                for coll in ("deals", "activities", "leads"):
+                    for v in d[coll].values():
+                        if v.get(ref) == loser["id"]:
+                            v[ref] = winner["id"]
+                if kind == "orgs":
+                    for v in d["persons"].values():
+                        if v.get("org_id") == loser["id"]:
+                            v["org_id"] = winner["id"]
+                for f in ("emails", "phones"):
+                    have = [x.lower() for x in (winner.get(f) or [])]
+                    keep_v = list(winner.get(f) or [])
+                    keep_l = list(winner.get(f[:-1] + "_labels") or [])[:len(keep_v)]
+                    keep_l += [""] * (len(keep_v) - len(keep_l))
+                    lose_l = list(loser.get(f[:-1] + "_labels") or [])
+                    for i, x in enumerate(loser.get(f) or []):
+                        if x.lower() not in have and len(keep_v) < 8:
+                            keep_v.append(x)
+                            keep_l.append(lose_l[i] if i < len(lose_l) else "")
+                    winner[f] = keep_v
+                    winner[f[:-1] + "_labels"] = keep_l
+                for f in ("job_title", "label", "org_id", "address", "website",
+                          "shopify_customer_id", "pd_id"):
+                    if not winner.get(f) and loser.get(f):
+                        winner[f] = loser[f]
+                # The winner absorbs the loser's Pipedrive IDENTITY too, and
+                # tombstones ride along: without this the next import would
+                # recreate the duplicate and re-point its deals back at it.
+                merged = list(winner.get("pd_merged_ids") or [])
+                for m in [loser.get("pd_id")] + list(loser.get("pd_merged_ids") or []):
+                    if m and str(m) != str(winner.get("pd_id") or "") and str(m) not in merged:
+                        merged.append(str(m))
+                if merged:
+                    winner["pd_merged_ids"] = merged
+                dead = list(winner.get("pd_deleted_notes") or []) + list(loser.get("pd_deleted_notes") or [])
+                if dead:
+                    winner["pd_deleted_notes"] = dead
+                cust = dict(loser.get("custom") or {})
+                cust.update(winner.get("custom") or {})
+                if cust:
+                    winner["custom"] = cust
+                # Chronological, so a cap trims the OLDEST of both histories,
+                # never the winner's whole past just for being concatenated first.
+                winner.setdefault("notes", []).extend(loser.get("notes") or [])
+                winner["notes"] = sorted(winner["notes"], key=lambda n: str(n.get("at") or ""))[-500:]
+                winner["updated_at"], winner["edited_here"] = _crm_now(), True
+                d[kind].pop(loser["id"], None)
+                return _crm_ok(d, action="merged two contacts",
+                               detail=(loser.get("name") or "") + " into " + (winner.get("name") or ""),
+                               who=actor)
+
             return _json({"error": "Unknown operation."}, 400)
         except RuntimeError:
             return _json({"error": "The CRM could not be saved. The data volume may be "
@@ -12331,9 +12651,53 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return err
         try:
             d = _load_crm()
+            # The route is the CRM's settings desk: stages, labels, lost
+            # reasons and the follow-up nag all save here, each key on its own.
+            if "labels" in body and "stages" not in body:
+                raw = body.get("labels")
+                if not isinstance(raw, list) or not raw or len(raw) > 20:
+                    return _json({"error": "Between 1 and 20 labels."}, 400)
+                names, colors = [], {}
+                for l in raw:
+                    if not isinstance(l, dict) or not str(l.get("name") or "").strip():
+                        return _json({"error": "Every label needs a name."}, 400)
+                    nm = str(l["name"]).strip()[:40]
+                    if nm in names:
+                        continue
+                    names.append(nm)
+                    col = str(l.get("color") or "").strip()
+                    colors[nm] = col if col in _CRM_COLOR_NAMES else "gray"
+                # The colour map also paints PERSON and ORG labels, which this
+                # editor does not manage: merge, never replace, or saving the
+                # deal labels greys out every imported contact chip. Only a
+                # deal label actually deleted here leaves the map.
+                merged_colors = dict(d.get("label_colors") or {})
+                for gone in set(d.get("labels") or []) - set(names):
+                    merged_colors.pop(gone, None)
+                merged_colors.update(colors)
+                d["labels"], d["label_colors"] = names, merged_colors
+                return _crm_ok(d, action="edited the deal labels", who=_crm_actor["sub"])
+            if "lost_reasons" in body and "stages" not in body:
+                raw = body.get("lost_reasons")
+                if not isinstance(raw, list) or not raw or len(raw) > 40:
+                    return _json({"error": "Between 1 and 40 lost reasons."}, 400)
+                seen = []
+                for r in raw:
+                    nm = str(r or "").strip()[:60]
+                    if nm and nm not in seen:
+                        seen.append(nm)
+                if not seen:
+                    return _json({"error": "Between 1 and 40 lost reasons."}, 400)
+                d["lost_reasons"] = seen
+                return _crm_ok(d, action="edited the lost reasons", who=_crm_actor["sub"])
+            if "followup_popup" in body and "stages" not in body:
+                d.setdefault("settings", {})["followup_popup"] = bool(body.get("followup_popup"))
+                return _crm_ok(d, action="changed the follow-up prompt", who=_crm_actor["sub"])
+
             raw = body.get("stages")
             if not isinstance(raw, list) or not raw or len(raw) > 12:
                 return _json({"error": "A pipeline needs between 1 and 12 stages."}, 400)
+            old_by_id = {s["id"]: s for s in (d.get("stages") or [])}
             new = []
             for s in raw:
                 if not isinstance(s, dict) or not str(s.get("name") or "").strip():
@@ -12344,8 +12708,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     rot = max(0, min(365, int(s.get("rot_days", 0) or 0)))
                 except (TypeError, ValueError):
                     prob, rot = 100, 0
-                new.append({"id": sid, "name": str(s["name"]).strip()[:60],
-                            "probability": prob, "rot_days": rot})
+                # The editor shows one rot number; the switch follows it. The
+                # imported bookkeeping (pd_id, the stored day count behind a
+                # switched-off timer) rides along untouched — stripping it made
+                # the next Pipedrive import duplicate every edited stage.
+                prev = old_by_id.get(sid) or {}
+                row = {"id": sid, "name": str(s["name"]).strip()[:60],
+                       "probability": prob, "rot_days": rot,
+                       "rot_on": rot > 0,
+                       "rot_days_stored": rot if rot > 0 else int(prev.get("rot_days_stored") or 0)}
+                if prev.get("pd_id"):
+                    row["pd_id"] = prev["pd_id"]
+                new.append(row)
             # Pipedrive deletes a stage's deals after a warning. Refusing and
             # asking to move them first loses nothing and cannot surprise:
             # these are real deals, not sample data.

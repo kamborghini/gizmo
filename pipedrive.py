@@ -344,11 +344,19 @@ async def export(progress=None) -> dict:
     say("reading the pipeline and stages")
     pipes, _ = await _count("pipelines")
     stages, stages_ok = await _count("stages")
-    say("reading label definitions")
+    say("reading field definitions")
     try:
         deal_fields, _ = await _count("dealFields", version="v1")
     except PipedriveError:
         deal_fields = []
+    try:
+        person_fields, _ = await _count("personFields", version="v1")
+    except PipedriveError:
+        person_fields = []
+    try:
+        org_fields, _ = await _count("organizationFields", version="v1")
+    except PipedriveError:
+        org_fields = []
     say("reading organisations")
     orgs, orgs_ok = await _count("organizations")
     say("reading people")
@@ -408,18 +416,90 @@ async def export(progress=None) -> dict:
             "pipeline_id": str(st.get("pipeline_id") or "")})
     stage_rows.sort(key=lambda x: (x["order"] or 0))
 
-    # Deal labels are an option list on the built-in "label" field.
-    label_opts = {}
-    for f in deal_fields:
-        if str(f.get("key")) == "label":
-            for o in (f.get("options") or []):
-                label_opts[str(o.get("id"))] = {"name": str(o.get("label") or "")[:40],
-                                                "color": str(o.get("color") or "")[:20]}
-            break
+    # Labels are option lists on the built-in "label" field — but each entity
+    # keeps its OWN option list: a person label id means nothing in the deal
+    # field's options, which is how person and org labels once vanished while
+    # the import reported success.
+    def _label_map(fields):
+        for f in fields:
+            if str(f.get("key")) in ("label", "label_ids"):
+                return {str(o.get("id")): {"name": str(o.get("label") or "")[:40],
+                                           "color": str(o.get("color") or "")[:20]}
+                        for o in (f.get("options") or [])}
+        return {}
+
+    label_opts = _label_map(deal_fields)
+    person_labels = _label_map(person_fields)
+    org_labels = _label_map(org_fields)
+    label_colors = {}
+    for src in (label_opts, person_labels, org_labels):
+        for v in src.values():
+            if v.get("name"):
+                label_colors.setdefault(v["name"], v.get("color", ""))
+
+    def _own_label(row, opts):
+        ids = [str(x) for x in (row.get("label_ids") or [])]
+        if not ids and row.get("label") not in (None, ""):
+            ids = [str(row.get("label"))]
+        return opts.get(ids[0], {}).get("name", "") if ids else ""
+
+    _HEX = set("0123456789abcdef")
+
+    def _cf_value(row, f):
+        """One custom field's display value: option ids become their labels,
+        money keeps its currency, everything else becomes a short string.
+        Reads the RAW nested value itself — _cf unwraps dicts, which would
+        strip a monetary value's currency before this ever saw it."""
+        key = str(f.get("key") or "")
+        cf = row.get("custom_fields")
+        v = cf.get(key) if isinstance(cf, dict) and key in cf else row.get(key)
+        if v in (None, "", [], {}):
+            return ""
+        ftype = str(f.get("field_type") or "")
+        opts = {str(o.get("id")): str(o.get("label") or "")
+                for o in (f.get("options") or [])}
+        def _oid(x):
+            return str(x.get("id", x.get("value", ""))) if isinstance(x, dict) else str(x)
+        if ftype == "enum":
+            return (opts.get(_oid(v)) or _oid(v))[:200]
+        if ftype == "set":
+            vals = v if isinstance(v, list) else [v]
+            return ", ".join(x for x in ((opts.get(_oid(y)) or _oid(y)) for y in vals) if x)[:300]
+        if ftype == "monetary" and isinstance(v, dict):
+            cur = str(v.get("currency") or "")
+            return (str(v.get("value") or "") + (" " + cur if cur else "")).strip()[:60]
+        if isinstance(v, dict):
+            got = v.get("value")
+            if got in (None, ""):
+                got = " ".join(str(x) for x in v.values()
+                               if isinstance(x, (str, int, float)) and str(x).strip())
+            return str(got or "").strip()[:300]
+        if isinstance(v, list):
+            return ", ".join(str(x)[:100] for x in v[:10])[:300]
+        return str(v).strip()[:300]
+
+    def _custom(row, fields):
+        """The row's custom-field values by field NAME, resolved to text.
+        A custom field's key is a 40-hex hash; anything else is built in."""
+        out = {}
+        for f in fields:
+            key = str(f.get("key") or "")
+            if len(key) != 40 or not set(key) <= _HEX:
+                continue
+            name = str(f.get("name") or "").strip()[:60]
+            if not name:
+                continue
+            val = _cf_value(row, f)
+            if val:
+                out[name] = val
+            if len(out) >= 20:
+                break
+        return out
 
     org_rows = [{"pd_id": str(o.get("id")), "name": str(o.get("name") or "")[:120],
                  "website": str(o.get("website") or "")[:200],
-                 "label_ids": [str(x) for x in (o.get("label_ids") or [])][:5],
+                 "label": _own_label(o, org_labels),
+                 "custom": _custom(o, org_fields),
                  "address": str((o.get("address") or "") if isinstance(o.get("address"), str)
                                 else (o.get("address") or {}).get("value") or "")[:300],
                  "created_at": _iso(o.get("add_time")),
@@ -427,45 +507,56 @@ async def export(progress=None) -> dict:
                 for o in orgs if o.get("id")]
 
     def _contacts(row, key):
-        """Values with the PRIMARY one first. gizmo shows the first entry and
+        """(values, labels), PRIMARY first. gizmo shows the first entry and
         treats it as the address to use, so losing which one Pipedrive marked
-        primary means ringing the wrong number."""
+        primary means ringing the wrong number. Labels ride in their own list:
+        folded into the value string they poison every tel:/mailto use and
+        break the Mail tab's address matching."""
         vals = row.get(key)
         prim, rest = [], []
         if isinstance(vals, list):
             for v in vals:
                 if isinstance(v, dict):
                     got, is_p = v.get("value"), bool(v.get("primary"))
-                    lab = str(v.get("label") or "").strip()
+                    lab = str(v.get("label") or "").strip()[:20]
                 else:
                     got, is_p, lab = v, False, ""
                 if not got or not str(got).strip():
                     continue
-                txt = str(got).strip()[:200]
-                if lab and lab.lower() not in ("work", "email", "phone"):
-                    txt = txt + " (" + lab[:20] + ")"
-                (prim if is_p else rest).append(txt)
+                if lab.lower() in ("work", "email", "phone"):
+                    lab = ""
+                (prim if is_p else rest).append((str(got).strip()[:200], lab))
         elif vals:
-            prim.append(str(vals).strip()[:200])
-        seen, uniq = set(), []
-        for v in prim + rest:
-            k = v.split(" (")[0].lower()
+            prim.append((str(vals).strip()[:200], ""))
+        seen, out_v, out_l = set(), [], []
+        for v, lab in prim + rest:
+            k = v.lower()
             if k not in seen:
                 seen.add(k)
-                uniq.append(v)
-        return uniq[:8]
+                out_v.append(v)
+                out_l.append(lab)
+        return out_v[:8], out_l[:8]
 
-    person_rows = [{"pd_id": str(p.get("id")),
-                    "name": str(p.get("name") or "")[:120],
-                    "job_title": str(p.get("job_title") or "")[:120],
-                    "label_ids": [str(x) for x in (p.get("label_ids") or [])][:5],
-                    "org_pd_id": str((p.get("org_id") or {}).get("value")
-                                     if isinstance(p.get("org_id"), dict) else (p.get("org_id") or "")),
-                    "emails": _contacts(p, "emails") or _contacts(p, "email"),
-                    "phones": _contacts(p, "phones") or _contacts(p, "phone"),
-                    "created_at": _iso(p.get("add_time")),
-                    "updated_at": _iso(p.get("update_time"))}
-                   for p in persons if p.get("id")]
+    def _person_row(p):
+        emails, email_labels = _contacts(p, "emails")
+        if not emails:
+            emails, email_labels = _contacts(p, "email")
+        phones, phone_labels = _contacts(p, "phones")
+        if not phones:
+            phones, phone_labels = _contacts(p, "phone")
+        return {"pd_id": str(p.get("id")),
+                "name": str(p.get("name") or "")[:120],
+                "job_title": str(p.get("job_title") or "")[:120],
+                "label": _own_label(p, person_labels),
+                "custom": _custom(p, person_fields),
+                "org_pd_id": str((p.get("org_id") or {}).get("value")
+                                 if isinstance(p.get("org_id"), dict) else (p.get("org_id") or "")),
+                "emails": emails, "email_labels": email_labels,
+                "phones": phones, "phone_labels": phone_labels,
+                "created_at": _iso(p.get("add_time")),
+                "updated_at": _iso(p.get("update_time"))}
+
+    person_rows = [_person_row(p) for p in persons if p.get("id")]
 
     seen_deal = set()
     extra_labels = [0]
@@ -506,6 +597,7 @@ async def export(progress=None) -> dict:
                 "won_at": _iso(dd.get("won_time")),
                 "lost_at": _iso(dd.get("lost_time")),
                 "source": str(dd.get("origin") or dd.get("source_name") or "Pipedrive")[:40],
+                "custom": _custom(dd, deal_fields),
             })
 
     unmapped_types = {}
@@ -552,7 +644,7 @@ async def export(progress=None) -> dict:
         "account": me,
         "stages": stage_rows, "orgs": org_rows, "persons": person_rows,
         "deals": deal_rows, "activities": act_rows, "notes": note_rows,
-        "labels": label_opts,
+        "labels": label_opts, "label_colors": label_colors,
         "probability_on": prob_on,
         # stages joins the completeness check deliberately: an empty stage list
         # is not a harmless nothing, it drops every deal into the first column.

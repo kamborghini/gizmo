@@ -3660,7 +3660,11 @@ def t_a_lead_converts_into_a_deal_carrying_everything_and_leaves_the_inbox():
     deal = crm["deals"][did]
     eq(deal["value"], 900.0, "value carried")
     eq(deal["label"], "Hot", "label carried")
-    ok(any("PLASA" in n["text"] for n in deal["notes"]), "notes carried")
+    # The board payload is slim: notes ride as a count, the modal fetches them.
+    eq(deal["notes_n"], 1, "the board payload carries the note count, not the note")
+    ok("notes" not in deal, "the note text stays out of the board payload")
+    detail = post("/api/crm/deal", {"op": "detail", "id": did}).json()
+    ok(any("PLASA" in n["text"] for n in detail["notes"]), "notes carried, served by detail")
 
 @test
 def t_weighted_value_follows_stage_probability_and_deal_probability_overrides():
@@ -3851,22 +3855,34 @@ def t_pipedrive_export_reads_real_v2_shapes():
         if path == "dealFields":
             return {"data": [{"key": "label", "name": "Label", "options": [
                 {"id": 5, "label": "Hot", "color": "red"},
-                {"id": 6, "label": "Trade", "color": "blue"}]}]}
+                {"id": 6, "label": "Trade", "color": "blue"}]},
+                {"key": "a" * 40, "name": "Gobo size", "field_type": "enum",
+                 "options": [{"id": 9, "label": "B size"}]},
+                {"key": "b" * 40, "name": "Glass type", "field_type": "varchar"}]}
+        if path == "personFields":
+            return {"data": [{"key": "label_ids", "name": "Label", "options": [
+                {"id": 71, "label": "Customer", "color": "green"}]}]}
+        if path == "organizationFields":
+            return {"data": [{"key": "label_ids", "name": "Label", "options": [
+                {"id": 81, "label": "Venue", "color": "purple"}]}]}
         if path == "deals":
             return {"data": [{"id": 30, "title": "Live one", "value": 100, "currency": "GBP",
-                              "stage_id": 11, "status": "open", "label_ids": [5, 6]}]}
+                              "stage_id": 11, "status": "open", "label_ids": [5, 6],
+                              "custom_fields": {"a" * 40: 9, "b" * 40: "Borofloat"}}]}
         if path == "deals/archived":
             return {"data": [{"id": 31, "title": "Old one", "value": 200, "currency": "GBP",
                               "stage_id": 11, "status": "won", "is_archived": True,
                               "won_time": "2024-03-04 09:00:00"}]}
         if path == "persons":
             return {"data": [{"id": 20, "name": "Sarah", "job_title": "Buyer",
+                              "label_ids": [71],
                               "emails": [{"value": "second@x.com", "primary": False},
                                          {"value": "main@x.com", "primary": True}],
                               "phones": [{"value": "0191 000", "primary": False, "label": "work"},
                                          {"value": "07700 900", "primary": True, "label": "mobile"}]}]}
         if path == "organizations":
             return {"data": [{"id": 40, "name": "Lumen", "website": "lumen.co.uk",
+                              "label_ids": [81],
                               "address": {"value": "Newcastle"}}]}
         if path == "activities":
             return {"data": [{"id": 50, "type": "call", "subject": "Ring back",
@@ -3906,11 +3922,19 @@ def t_pipedrive_export_reads_real_v2_shapes():
     eq(deals["Live one"]["label"], "Hot", "the label is resolved to its name")
     eq(out["not_migrated"]["extra_labels_dropped"], 1,
        "and the second label is counted, not silently dropped")
-    # primary first
+    # primary first, labels ride separately, never folded into the value
     p = out["persons"][0]
     eq(p["emails"][0], "main@x.com", "the PRIMARY address comes first")
-    ok(p["phones"][0].startswith("07700 900"), p["phones"])
+    eq(p["phones"][0], "07700 900", "the phone is the phone, dialable as stored")
+    eq(p["phone_labels"][0], "mobile", "its label rides beside it")
     eq(p["job_title"], "Buyer")
+    eq(p["label"], "Customer", "a person label resolves against the PERSON field's options")
+    eq(out["orgs"][0]["label"], "Venue", "and an org label against the org field's")
+    eq(out["label_colors"].get("Customer"), "green")
+    eq(out["label_colors"].get("Venue"), "purple")
+    # custom fields: nested in v2, enums resolved to their labels
+    eq(deals["Live one"]["custom"], {"Gobo size": "B size", "Glass type": "Borofloat"},
+       "custom field VALUES arrive, with option ids resolved to words")
     eq(out["orgs"][0]["website"], "lumen.co.uk")
     # location is an object in v2
     eq(out["activities"][0]["location"], "12 High St, Durham",
@@ -4139,6 +4163,337 @@ def t_pipedrive_survey_names_what_would_not_survive_an_import():
         finally:
             pipedrive._get, pipedrive.API_TOKEN = saved
     with_accounts(go)
+
+@test
+def t_reimport_never_reverts_what_was_edited_in_gizmo():
+    """The trap: import, work in gizmo for a month, press Import again — and
+    every stage move, won and ticked task snaps back to what Pipedrive last
+    knew. A record edited HERE since the last import is kept, and said so."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        async def fake_export(progress=None):
+            return dict(PD_EXPORT)
+        saved = (pipedrive.export, pipedrive.API_TOKEN)
+        pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
+        try:
+            post("/api/crm/import", {"go": True})
+            d = copilot._load_crm()
+            lost = [x for x in d["deals"].values() if x["pd_id"] == "31"][0]
+            act = [x for x in d["activities"].values() if x["pd_id"] == "41"][0]
+            # A month of gizmo work: the lost deal reopens, the task gets done.
+            post("/api/crm/deal", {"op": "reopen", "id": lost["id"]})
+            post("/api/crm/activity", {"op": "done", "id": act["id"]})
+            # Pipedrive moves on too.
+            changed = dict(PD_EXPORT)
+            changed["deals"] = [dict(x, title=x["title"] + " v2") for x in PD_EXPORT["deals"]]
+            async def fake2(progress=None):
+                return changed
+            pipedrive.export = fake2
+            r = post("/api/crm/import", {"go": True}).json()
+            eq(r["report"]["kept_edited"]["deals"], 1, r["report"])
+            eq(r["report"]["kept_edited"]["activities"], 1, r["report"])
+            d2 = copilot._load_crm()
+            mine = [x for x in d2["deals"].values() if x["pd_id"] == "31"][0]
+            eq(mine["status"], "open", "the reopen SURVIVED the re-import")
+            eq(mine["title"], "Glass sample", "kept whole, not half-merged")
+            theirs = [x for x in d2["deals"].values() if x["pd_id"] == "30"][0]
+            eq(theirs["title"], "12 steel gobos v2", "an untouched record still updates")
+            act2 = [x for x in d2["activities"].values() if x["pd_id"] == "41"][0]
+            ok(act2["done"], "the ticked task stays ticked")
+            # A THIRD import: the protection must not expire after one cycle.
+            # A timestamp guard did exactly that — the import re-stamped its
+            # high-water mark past the edit, and import #3 reverted everything.
+            post("/api/crm/import", {"go": True})
+            d3 = copilot._load_crm()
+            eq([x for x in d3["deals"].values() if x["pd_id"] == "31"][0]["status"], "open",
+               "the edit survives EVERY later import, not just the next one")
+            ok([x for x in d3["activities"].values() if x["pd_id"] == "41"][0]["done"])
+        finally:
+            pipedrive.export, pipedrive.API_TOKEN = saved
+    with_accounts(go)
+
+@test
+def t_archiving_and_deleting_in_gizmo_survive_the_next_import():
+    """Archive never called _crm_touch (touching resets rot), so nothing
+    stamped the record and the next import quietly put the deal back on the
+    board. Deleted notes and activities were resurrected the same way."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        async def fake_export(progress=None):
+            return dict(PD_EXPORT)
+        saved = (pipedrive.export, pipedrive.API_TOKEN)
+        pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
+        try:
+            post("/api/crm/import", {"go": True})
+            d = copilot._load_crm()
+            lost = [x for x in d["deals"].values() if x["pd_id"] == "31"][0]
+            deal30 = [x for x in d["deals"].values() if x["pd_id"] == "30"][0]
+            act = [x for x in d["activities"].values() if x["pd_id"] == "41"][0]
+            post("/api/crm/deal", {"op": "archive", "id": lost["id"]})
+            nid = [n for n in deal30["notes"] if n.get("pd_id")][0]["id"]
+            post("/api/crm/deal", {"op": "note_del", "id": deal30["id"], "note_id": nid})
+            post("/api/crm/activity", {"op": "delete", "id": act["id"]})
+            post("/api/crm/import", {"go": True})
+            d2 = copilot._load_crm()
+            ok([x for x in d2["deals"].values() if x["pd_id"] == "31"][0].get("archived"),
+               "archived in gizmo stays archived through an import")
+            eq([n for n in d2["deals"][deal30["id"]]["notes"] if n.get("pd_id")], [],
+               "a deleted imported note leaves a tombstone, not a gap to refill")
+            eq([x for x in d2["activities"].values() if x.get("pd_id") == "41"], [],
+               "and a deleted imported activity is not resurrected")
+        finally:
+            pipedrive.export, pipedrive.API_TOKEN = saved
+    with_accounts(go)
+
+@test
+def t_a_merge_holds_through_the_next_import():
+    """The winner absorbs the loser's Pipedrive identity: without that, the
+    next import recreated the duplicate and re-pointed its deals back at it."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        async def fake_export(progress=None):
+            return dict(PD_EXPORT)
+        saved = (pipedrive.export, pipedrive.API_TOKEN)
+        pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
+        try:
+            post("/api/crm/import", {"go": True})
+            d = copilot._load_crm()
+            imported = [p for p in d["persons"].values() if p["pd_id"] == "20"][0]
+            dup = post("/api/crm/contact", {"op": "person_add", "name": "Sarah W."}).json()["id"]
+            # Merge the IMPORTED person into the hand-made one: the winner has
+            # no pd identity of its own, the loser's must carry across whole.
+            post("/api/crm/contact", {"op": "person_merge", "id": imported["id"], "into": dup})
+            post("/api/crm/import", {"go": True})
+            d2 = copilot._load_crm()
+            eq(len([p for p in d2["persons"].values() if p.get("name") == "Sarah Whitfield"]), 0,
+               "the merged duplicate is NOT recreated by the import")
+            keeper = d2["persons"][dup]
+            deal = [x for x in d2["deals"].values() if x["pd_id"] == "30"][0]
+            eq(deal["person_id"], dup, "and the imported deal points at the keeper")
+            ok(keeper.get("edited_here"), "a merge is a gizmo edit, protected like one")
+        finally:
+            pipedrive.export, pipedrive.API_TOKEN = saved
+    with_accounts(go)
+
+@test
+def t_label_editor_spares_the_contact_label_colours():
+    reset_crm()
+    org = post("/api/crm/contact", {"op": "org_add", "name": "Acme"}).json()["id"]
+    post("/api/crm/deal", {"op": "add", "title": "Acme deal", "org_id": org})
+    # An imported person label sits in the colour map beside the deal labels.
+    d = copilot._load_crm()
+    d["label_colors"]["Repeat customer"] = "green"
+    copilot._write_crm(d)
+    r = post("/api/crm/stages", {"labels": [{"name": "VIP", "color": "purple"}]}).json()
+    eq(r["crm"]["label_colors"].get("Repeat customer"), "green",
+       "saving the deal labels must not grey out every contact chip")
+    eq(r["crm"]["label_colors"]["VIP"], "purple")
+    ok("Hot" not in r["crm"]["label_colors"], "but a deleted DEAL label does leave the map")
+
+@test
+def t_zero_is_a_custom_value_not_a_deletion():
+    _org, _per, deal = crm_seed()
+    post("/api/crm/deal", {"op": "update", "id": deal, "custom": {"Discount %": 0}})
+    b = post("/api/crm/board", {}).json()["crm"]["deals"][deal]
+    eq(b["custom"], {"Discount %": "0"}, "a numeric zero is stored, not silently removed")
+
+@test
+def t_restoring_a_deal_whose_stage_vanished_lands_on_the_board():
+    _org, _per, deal = crm_seed()
+    stages = post("/api/crm/board", {}).json()["crm"]["stages"]
+    stages.append({"name": "Waiting", "probability": 100, "rot_days": 0})
+    post("/api/crm/stages", {"stages": stages})
+    waiting = post("/api/crm/board", {}).json()["crm"]["stages"][-1]["id"]
+    post("/api/crm/deal", {"op": "move", "id": deal, "stage_id": waiting})
+    post("/api/crm/deal", {"op": "delete", "id": deal})
+    # With its only deal binned, the stage can be removed...
+    post("/api/crm/stages", {"stages": stages[:-1]})
+    back = post("/api/crm/deal", {"op": "restore", "id": deal}).json()["crm"]
+    ok(back["deals"][deal]["stage_id"] in {s["id"] for s in back["stages"]},
+       "a restored deal must land in a REAL column, not render nowhere")
+
+@test
+def t_the_full_contact_form_can_prune_addresses():
+    """The single-field compensation guards forms that show one email. The
+    detail form shows them all, says so, and its prune must stick."""
+    reset_crm()
+    per = post("/api/crm/contact", {"op": "person_add", "name": "Multi",
+                                    "emails": ["a@x.com", "b@x.com", "c@x.com"]}).json()["id"]
+    r = post("/api/crm/contact", {"op": "person_update", "id": per,
+                                  "emails": ["a@x.com"], "contacts_full": True}).json()
+    eq(r["crm"]["persons"][per]["emails"], ["a@x.com"],
+       "the full form's list is the whole truth, prune included")
+    # And the one-field compensation still guards forms that DON'T say so.
+    post("/api/crm/contact", {"op": "person_update", "id": per,
+                              "emails": ["a@x.com", "b@x.com"], "contacts_full": True})
+    r2 = post("/api/crm/contact", {"op": "person_update", "id": per,
+                                   "emails": ["z@x.com"]}).json()
+    eq(sorted(r2["crm"]["persons"][per]["emails"]), ["b@x.com", "z@x.com"],
+       "a one-field form still cannot shred the addresses it cannot show")
+
+@test
+def t_reimport_spares_stages_made_here_and_the_editor_keeps_their_identity():
+    """Two halves of one trap. The stage editor used to strip pd_id, so the
+    next import saw strangers and duplicated every stage; and the import used
+    to replace the stage list wholesale, dropping gizmo-made stages and
+    orphaning their deals off the board."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        async def fake_export(progress=None):
+            return dict(PD_EXPORT)
+        saved = (pipedrive.export, pipedrive.API_TOKEN)
+        pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
+        try:
+            post("/api/crm/import", {"go": True})
+            stages = post("/api/crm/board", {}).json()["crm"]["stages"]
+            # The editor round-trip, exactly as the browser sends it.
+            stages.append({"name": "Install booked", "probability": 100, "rot_days": 0})
+            r = post("/api/crm/stages", {"stages": stages})
+            eq(r.status_code, 200, r.text)
+            after = post("/api/crm/board", {}).json()["crm"]["stages"]
+            ok(after[0].get("pd_id"), "an imported stage keeps its Pipedrive identity")
+            install = after[-1]["id"]
+            # A deal moves into the gizmo-made stage...
+            d = copilot._load_crm()
+            lost = [x for x in d["deals"].values() if x["pd_id"] == "31"][0]
+            post("/api/crm/deal", {"op": "reopen", "id": lost["id"]})
+            post("/api/crm/deal", {"op": "move", "id": lost["id"], "stage_id": install})
+            # ...and the next import keeps both the stage and the deal in it.
+            r2 = post("/api/crm/import", {"go": True}).json()
+            eq(r2["report"]["stages"]["updated"], 2, "the imported stages matched, not duplicated")
+            d2 = copilot._load_crm()
+            names = [s["name"] for s in d2["stages"]]
+            eq(names, ["Enquiry", "Quoted", "Install booked"], names)
+            mine = [x for x in d2["deals"].values() if x["pd_id"] == "31"][0]
+            eq(mine["stage_id"], install, "and the deal is still in it")
+        finally:
+            pipedrive.export, pipedrive.API_TOKEN = saved
+    with_accounts(go)
+
+@test
+def t_archiving_is_a_third_door_and_quiets_the_nagging():
+    # Not won, not lost, off the desk: this account had archived 257 deals
+    # before the button existed. An archived deal's to-dos stop counting.
+    from datetime import date, timedelta as td
+    _org, _per, deal = crm_seed()
+    yesterday = (date.today() - td(days=1)).isoformat()
+    post("/api/crm/activity", {"op": "add", "type": "task", "deal_id": deal,
+                               "due_date": yesterday})
+    eq(post("/api/crm/board", {}).json()["crm"]["badge"], 1, "an overdue task nags")
+    r = post("/api/crm/deal", {"op": "archive", "id": deal}).json()["crm"]
+    ok(r["deals"][deal]["archived"], "archived, still on the payload for its own filter")
+    eq(r["badge"], 0, "but its task stops nagging")
+    r2 = post("/api/crm/deal", {"op": "unarchive", "id": deal}).json()["crm"]
+    ok(not r2["deals"][deal].get("archived"))
+    eq(r2["badge"], 1, "and starts again when it returns")
+
+@test
+def t_custom_fields_arrive_render_and_edit():
+    def go():
+        ensure_auth()
+        crm_wipe()
+        rich = dict(PD_EXPORT)
+        rich["deals"] = [dict(PD_EXPORT["deals"][0], custom={"Gobo size": "B size"}),
+                         PD_EXPORT["deals"][1]]
+        async def fake_export(progress=None):
+            return rich
+        saved = (pipedrive.export, pipedrive.API_TOKEN)
+        pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
+        try:
+            r = post("/api/crm/import", {"go": True}).json()
+            eq(r["report"]["custom_values"], 1, "the preview counts what arrives")
+            crm = post("/api/crm/board", {}).json()["crm"]
+            did = [k for k, v in crm["deals"].items() if v.get("pd_id") == "30"][0]
+            eq(crm["deals"][did]["custom"], {"Gobo size": "B size"},
+               "the value is ON the deal the board ships")
+            # Editable, and an empty value removes the field from this deal.
+            post("/api/crm/deal", {"op": "update", "id": did,
+                                   "custom": {"Gobo size": "E size", "Fitting": "M size"}})
+            post("/api/crm/deal", {"op": "update", "id": did, "custom": {"Fitting": ""}})
+            crm2 = post("/api/crm/board", {}).json()["crm"]
+            eq(crm2["deals"][did]["custom"], {"Gobo size": "E size"})
+            log = post("/api/crm/deal", {"op": "detail", "id": did}).json()["changelog"]
+            ok(any(c["field"] == "Gobo size" and c["to"] == "E size" for c in log),
+               "a custom edit is history like any other")
+        finally:
+            pipedrive.export, pipedrive.API_TOKEN = saved
+    with_accounts(go)
+
+@test
+def t_contact_notes_live_behind_detail_and_the_payload_stays_slim():
+    _org, per, _deal = crm_seed()
+    r = post("/api/crm/contact", {"op": "note_add", "id": per, "text": "prefers glass"}).json()
+    p = r["crm"]["persons"][per]
+    ok("notes" not in p, "the board payload ships a count, not two years of notes")
+    eq(p["notes_n"], 1)
+    det = post("/api/crm/contact", {"op": "detail", "id": per}).json()
+    eq(det["notes"][0]["text"], "prefers glass")
+    nid = det["notes"][0]["id"]
+    post("/api/crm/contact", {"op": "note_pin", "id": per, "note_id": nid})
+    ok(post("/api/crm/contact", {"op": "detail", "id": per}).json()["notes"][0]["pinned"])
+    post("/api/crm/contact", {"op": "note_del", "id": per, "note_id": nid})
+    eq(post("/api/crm/contact", {"op": "detail", "id": per}).json()["notes"], [])
+
+@test
+def t_merging_a_duplicate_repoints_everything_and_removes_it():
+    # 1,951 imported people guarantee duplicates, and delete is blocked while
+    # deals point at one: merge is the only honest exit.
+    _org, per, _deal = crm_seed()
+    dup = post("/api/crm/contact", {"op": "person_add", "name": "S. Fielding",
+                                    "emails": ["sf@ns.co.uk"]}).json()["id"]
+    deal2 = post("/api/crm/deal", {"op": "add", "title": "Dup deal",
+                                   "person_id": dup, "value": 100}).json()["id"]
+    r = post("/api/crm/contact", {"op": "person_merge", "id": dup, "into": per})
+    eq(r.status_code, 200, r.text)
+    crm = r.json()["crm"]
+    ok(dup not in crm["persons"], "the duplicate is gone")
+    eq(crm["deals"][deal2]["person_id"], per, "its deal now points at the keeper")
+    ok("sf@ns.co.uk" in crm["persons"][per]["emails"], "and its email came across")
+    eq(post("/api/crm/contact", {"op": "person_merge", "id": per, "into": per}).status_code,
+       400, "merging a contact into itself is refused")
+
+@test
+def t_labels_lost_reasons_and_the_nag_are_editable_settings():
+    reset_crm()
+    org = post("/api/crm/contact", {"op": "org_add", "name": "Acme"}).json()["id"]
+    post("/api/crm/deal", {"op": "add", "title": "Acme deal", "org_id": org})
+    r = post("/api/crm/stages", {"labels": [{"name": "VIP", "color": "purple"},
+                                            {"name": "Trade", "color": "not-a-colour"}]}).json()
+    eq(r["crm"]["labels"], ["VIP", "Trade"])
+    eq(r["crm"]["label_colors"]["VIP"], "purple")
+    eq(r["crm"]["label_colors"]["Trade"], "gray", "an unknown colour falls to grey, not garbage")
+    r2 = post("/api/crm/stages", {"lost_reasons": ["Too dear", "Ghosted"]}).json()
+    eq(r2["crm"]["lost_reasons"], ["Too dear", "Ghosted"])
+    r3 = post("/api/crm/stages", {"followup_popup": False}).json()
+    eq(r3["crm"]["settings"]["followup_popup"], False)
+    eq(post("/api/crm/stages", {"labels": []}).status_code, 400)
+
+@test
+def t_deals_and_activities_carry_an_owner():
+    _org, per, deal = crm_seed()
+    crm = post("/api/crm/board", {}).json()["crm"]
+    ok(crm["deals"][deal].get("owner"), "a new deal belongs to whoever added it")
+    ok(isinstance(crm.get("team"), list), "and the payload carries the pick-list")
+    post("/api/crm/deal", {"op": "update", "id": deal, "owner": "u_ann"})
+    a = post("/api/crm/activity", {"op": "add", "type": "call", "deal_id": deal,
+                                   "assignee": "u_ann"}).json()
+    crm2 = post("/api/crm/board", {}).json()["crm"]
+    eq(crm2["deals"][deal]["owner"], "u_ann")
+    eq(crm2["activities"][a["id"]]["assignee"], "u_ann")
+    log = post("/api/crm/deal", {"op": "detail", "id": deal}).json()["changelog"]
+    ok(any(c["field"] == "owner" for c in log), "a handover is history")
+
+@test
+def t_the_bin_lists_what_it_holds():
+    _org, _per, deal = crm_seed()
+    r = post("/api/crm/deal", {"op": "delete", "id": deal}).json()["crm"]
+    eq(r["trash"], 1)
+    eq(r["trash_items"][0]["id"], deal, "the bin is a list the browser can render")
+    ok(r["trash_items"][0]["deleted_at"])
 
 # ---- Stock bridge (gizmo -> zeta) -------------------------------------------
 

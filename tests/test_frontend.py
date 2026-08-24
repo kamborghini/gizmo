@@ -535,6 +535,63 @@ def t_inbox_board_owns_every_email():
        "and the card promises what it does: two switches, nothing else touched")
 
 
+@test
+def t_crm_contacts_are_searchable_and_open_a_detail_not_a_form():
+    """1,951 imported people arrived into an unsearchable scroll whose only
+    click was a five-field edit form: the phone number you needed mid-call was
+    stored but unreachable."""
+    ok("Search name, email, phone, company" in SCRIPT,
+       "the contacts view carries a search box over every reachable field")
+    ok("crmContactModal(people ? 'person' : 'org'" in SCRIPT,
+       "a contact row opens the detail view, not the edit form")
+    ok(re.search(r"a\.href = 'tel:' \+ ph", SCRIPT), "phone numbers are dialable links")
+    ok(re.search(r"a\.href = 'mailto:' \+ em", SCRIPT), "emails are mailto links")
+    ok("'Show more ('" in SCRIPT, "the list caps its render and says what it held back")
+
+
+@test
+def t_crm_activities_open_an_editor_and_the_bin_keeps_its_promise():
+    """Rescheduling a call meant faking it done and adding a copy, and the
+    delete confirm promised a 30-day restore that had no UI."""
+    ok("crmActivityForm({ id: a.id }" in SCRIPT, "tapping an activity row opens it for editing")
+    ok(re.search(r"op: 'update', id: editing\.id", SCRIPT), "the form saves through the update op")
+    ok("Already done — just logging it" in SCRIPT, "a call that already happened is one tick")
+    ok("paintBin" in SCRIPT and re.search(r"op: 'restore', id: t\.id", SCRIPT),
+       "the Bin view exists and restores")
+
+
+@test
+def t_crm_money_reads_like_money_and_labels_wear_their_colours():
+    """The board said £48750.00 and every imported label rendered as a grey
+    dot because the colours stopped in the store."""
+    ok("toLocaleString('en-GB'" in SCRIPT, "sums are grouped: £48,750, not £48750.00")
+    ok("crmLabelColor" in SCRIPT and "label_colors" in SCRIPT,
+       "label colours come from the store the import wrote them to")
+    ok("CRM_LABEL_COLORS = {" not in SCRIPT, "the three hardcoded label colours are gone")
+
+
+@test
+def t_crm_leaves_by_csv_and_archives_by_button():
+    ok(SCRIPT.count("Export CSV") >= 2, "deals AND contacts can leave as CSV")
+    ok(re.search(r"op: x\.archived \? 'unarchive' : 'archive'", SCRIPT),
+       "archiving is a button on the deal, the door this account used 257 times")
+    crm_csv = re.search(r"function crmCSV.*?\n        \}", SCRIPT, re.S).group(0)
+    ok(re.search(r"\^\[=\+\\-@", crm_csv) or "^[=+\\-@\\t\\r]" in crm_csv,
+       "the CRM export armours formula triggers, like the product exporter")
+
+
+@test
+def t_crm_background_refresh_and_namesakes():
+    """Two quiet failure modes: the refresh guard matched the always-present
+    settings overlay so colleagues' edits never arrived; and forms resolved
+    picked contacts by NAME, so two Priya Khans could swap records."""
+    ok(".modal-overlay.show" in SCRIPT,
+       "the refresh pauses for a VISIBLE modal, not for one merely in the DOM")
+    ok("function crmPicked" in SCRIPT and SCRIPT.count("crmPicked(") >= 5,
+       "every contact-typing form resolves the PICKED record, not a namesake")
+    ok("dataset.pickedId" in SCRIPT, "the typeahead records WHICH row was picked")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
