@@ -636,6 +636,117 @@ def t_printing_cannot_waste_stock_or_print_invisible_text():
        "every print path waits for the label typeface (%d)" % SCRIPT.count("labelFontReady()"))
 
 
+@test
+def t_a_destructive_question_cannot_be_answered_by_reflex():
+    """Every confirm looked the same, focused Confirm, and took Enter - so the
+    Enter used to dismiss the previous toast deleted the next thing asked about."""
+    fn = re.search(r"function uiConfirm.*?\n        \}", SCRIPT, re.S).group(0)
+    ok("const DESTRUCTIVE" in SCRIPT, "destructive intent is classified, not left to each call site")
+    ok("e.key === 'Enter' && !danger" in fn, "Enter answers only the reversible dialogs")
+    ok("(danger ? no : yes).focus()" in fn, "a destructive dialog opens with Cancel selected")
+    ok("btn-danger" in fn, "and its confirming button is the danger button, not the primary one")
+    ok(re.search(r"\.btn-danger \{[^}]*background:\s*var\(--danger\)", HTML),
+       "the danger button is painted from the semantic token")
+
+
+def _destructive_re():
+    src = re.search(r"const DESTRUCTIVE = /(.*?)/i;", SCRIPT).group(1)
+    return re.compile(src.replace("\\b", r"\b"), re.I)
+
+
+@test
+def t_the_destructive_classifier_sorts_the_real_dialogs_correctly():
+    """The classifier reads the dialog's own words, so a wording change can
+    silently move a delete into the safe bucket, or a routine action into red."""
+    rx = _destructive_re()
+    must_be_danger = [
+        ("Delete", "Delete deal", "Delete this deal? It can be restored for 30 days."),
+        ("Delete", "Delete conversation", 'Delete "x"? This cannot be undone.'),
+        ("Cancel shipment", "Cancel shipment", "Cancel this shipment at World Options?"),
+        ("Empty the trash", "", "Delete everything in the trash for good?"),
+        ("Delete the account", "", "Delete x's account for good?"),
+        ("Merge", "Merge contacts", 'Merge "x" into this contact and remove it?'),
+    ]
+    must_be_safe = [
+        ("Refresh all", "Refresh all reports", "Re-run the Overview, SEO, Keywords and Customers audits now?"),
+        ("Book & dispatch", "Book this courier", "Book Express for 12.40 inc VAT?"),
+        ("Book anyway", "Order looks already shipped", "Shopify already shows this order as fulfilled."),
+        ("Replace", "Replace size list", 'Replace the size list with "x"? The current sheet is kept as a backup.'),
+    ]
+    for ok_text, title, msg in must_be_danger:
+        ok(rx.search(" ".join([x for x in (ok_text, title, msg) if x])),
+           "%r is a one-way door and must open red" % (title or ok_text))
+    for ok_text, title, msg in must_be_safe:
+        ok(not rx.search(" ".join([x for x in (ok_text, title, msg) if x])),
+           "%r is routine and must not be dressed as a destruction" % (title or ok_text))
+
+
+@test
+def t_restore_from_backup_is_treated_as_destructive():
+    """It reads as a repair, but it overwrites everything the app currently holds,
+    and its own wording contains none of the words the classifier looks for."""
+    i = SCRIPT.find("uiConfirm('Restore ")
+    ok(i > 0, "the restore confirm is still there")
+    call = SCRIPT[i:i + 600]
+    ok("danger: true" in call,
+       "restore opts in explicitly, because its wording does not trip the classifier")
+
+
+@test
+def t_a_switch_reports_its_state():
+    """Toggles were given role=switch but never aria-checked, so a screen reader
+    announced 'switch' and stopped. They are also built inside modals long after
+    load, so a one-shot pass at startup missed most of them."""
+    ok("function syncToggles" in SCRIPT, "one shared pass sets role, tabindex and state")
+    ok("aria-checked" in SCRIPT, "and it actually reports the state")
+    ok("MutationObserver" in SCRIPT and "syncToggles()" in SCRIPT,
+       "toggles built after load are covered too")
+    ok("requestAnimationFrame" in re.search(
+        r"new MutationObserver\(\(\) => \{.*?\}\)\.observe", SCRIPT, re.S).group(0),
+       "batched, or one tab repaint would run it hundreds of times")
+
+
+@test
+def t_the_print_sheet_fits_its_own_page_box():
+    """The sheet was pinned to 186mm: 4mm wider than A4 portrait's print box, so
+    the right edge clipped, and only 68% of A4 landscape, so the manifest wasted
+    a third of the sheet."""
+    rule = re.search(r"\.day-sheet \{[^}]*\}", HTML).group(0)
+    ok("width: 100%" in rule, "the sheet fills whatever page box it is given")
+    ok("max-width: 186mm" in rule, "with a readable ceiling for portrait documents")
+    ok(re.search(r"\.day-sheet\.wide \{[^}]*max-width:\s*none", HTML),
+       "and a landscape variant that uses the whole sheet")
+    ok("el('div', 'day-sheet wide')" in SCRIPT, "the landscape manifest asks for it")
+    ok(re.search(r"\.day-sheet h2 \{", HTML),
+       "the guide's section headings are styled, not left to the UA's 1.5em")
+
+
+@test
+def t_a_report_exported_to_pdf_carries_no_screen_furniture():
+    """A toast that happened to be up printed into the middle of the report, and
+    the tap chevrons printed as meaningless arrows beside every row."""
+    blocks = [b for b in re.findall(r"@media print \{.*?\n        \}", HTML, re.S)
+              if "@page" in b]
+    ok(len(blocks) == 1, "one print block owns the report page, found %d" % len(blocks))
+    block = blocks[0]
+    ok("#toast-host" in block, "toasts are hidden on paper")
+    ok(".prod-go" in block, "so are the affordances that only mean something under a finger")
+    ok(".prod-row" in block and "break-inside: avoid" in block,
+       "and a row is not split across a page break")
+    ok("--ink:" not in block,
+       "the print block no longer repaints a dark theme the app does not have")
+
+
+@test
+def t_losing_money_is_said_in_words_not_only_in_red():
+    """A campaign below break-even was flagged by colour alone, which survives
+    neither a black-and-white print nor a colour-blind reader."""
+    ok("roas-flag" in SCRIPT and "below cost" in SCRIPT,
+       "a sub-1 ROAS is labelled, not only tinted")
+    ok("roas.style.color = 'var(--danger)'" not in SCRIPT,
+       "and the colour-only inline style is gone")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
