@@ -964,6 +964,7 @@
         .disp-confirm { margin-top: 12px; }
         .disp-notify { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--ink-2);
             padding: 8px 0; cursor: pointer; }
+        .disp-book.needs-requote { background: var(--warn); border-color: var(--warn); }
         .disp-charge { font-size: 12px; color: var(--warn); margin: 4px 0 10px; }
         .disp-book { width: 100%; justify-content: center; }
         .disp-result-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; margin-bottom: 8px; }
@@ -6258,6 +6259,18 @@
                         const lab = v.replace(/^[^_]+_/, '').replace(/_/g, ' ');
                         const op2 = el('option', null, lab); op2.value = v; sigSel.append(op2);
                     });
+                    // A signature upgrade is a PRICED option: the quote on the
+                    // button was fetched without it, so booking after changing
+                    // this charged a price nobody was shown. Say so, and make
+                    // the button re-quote rather than book a stale figure.
+                    sigSel.onchange = () => {
+                        const changed = !!sigSel.value;
+                        book.classList.toggle('needs-requote', changed);
+                        if (changed) {
+                            book.innerHTML = '';
+                            book.append(ico(I.refresh), document.createTextNode('Re-check the price'));
+                        } else { setLabel(); }
+                    };
                     sigF.append(sigSel); conf.append(sigF);
                 }
                 if (chosen.delivery_dropoff) {
@@ -6277,6 +6290,15 @@
                 const setLabel = () => { book.innerHTML = ''; book.append(ico(I.truck), document.createTextNode('Book & dispatch · ' + fmtPrice(chosen.amount, chosen.currency) + ' inc VAT')); };
                 setLabel();
                 book.onclick = async () => {
+                    // The signature was changed after this price was quoted:
+                    // re-quote instead of booking a figure that was never for
+                    // this service.
+                    if (book.classList.contains('needs-requote')) {
+                        book.classList.remove('needs-requote');
+                        quoteCache.delete(String(o.id));   // the cached price was for no signature
+                        quoteBtn.click();                  // re-price with the option chosen
+                        return;
+                    }
                     const cprob = customsProblem();
                     if (cprob) { addToast(cprob); return; }
                     if (!await uiConfirm('Book ' + optionName(chosen) + ' for ' + fmtPrice(chosen.amount, chosen.currency) + ' inc VAT?\n\nThis books the courier and charges your World Options account.', { title: 'Book this courier', okText: 'Book & dispatch' })) return;
@@ -12316,7 +12338,10 @@
                     + (sl.dead_aliases ? ' · ' + sl.dead_aliases + ' alias(es) no longer match and need attention' : '')
                     + (s.coverage && s.coverage.pct != null ? ' · last auto check ' + s.coverage.pct + '%' : '')));
             }
+            // Master only, matching the server: the zip carries the accounts
+            // register, so it is not an admin-level thing to walk off with.
             const bk = el('button', 'btn'); bk.style.marginTop = '10px';
+            bk.style.display = (!teamMe || teamMe.role === 'master') ? '' : 'none';
             bk.append(ico(I.download), document.createTextNode('Download backup'));
             bk.title = 'A zip of everything the app has learned: rulings, aliases, state, usage.';
             bk.onclick = async () => {
