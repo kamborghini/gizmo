@@ -1288,9 +1288,16 @@ PRODUCTION_ARCHIVE_PATH = os.environ.get(
     os.path.join(os.path.dirname(PRODUCTION_STATE_PATH) or ".", "production_state_archive.jsonl"))
 
 
+class ProdStateUnwritable(RuntimeError):
+    """The production state could not be saved. Raised rather than returned,
+    because the caller has usually ALREADY fulfilled Shopify and booked glass
+    by this point - reporting success would leave the merchant believing a
+    stamp exists that will vanish on the next reload."""
+
+
 def _write_prod_state(orders: dict) -> dict:
     if not _store_writable(PRODUCTION_STATE_PATH):
-        return orders
+        raise ProdStateUnwritable("the production state store is not writable")
     if len(orders) > PRODUCTION_STATE_MAX:
         # Evict the least-recently-touched entries. Sort by the NEWEST stamp so an
         # order printed months ago but made yesterday is treated as recent, not
@@ -1357,6 +1364,8 @@ def _mark_printed(order_ids: list) -> bool:
             entry["printed_at"] = now
         _write_prod_state(state)
         return True
+    except ProdStateUnwritable:
+        return False          # the caller already reports this to the merchant
     except Exception:
         logger.exception("production state: printed stamp failed")
         return False
@@ -3967,7 +3976,12 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
     fields = ("id,order_number,name,created_at,tags,email,customer,billing_address,"
               "shipping_address,line_items,note,cancelled_at,fulfillment_status,"
               "financial_status,shipping_lines")
-    orders = await _orders_snapshot(registry, days=days, fields=fields, force=fresh)
+    # meta carries {failed, truncated} from the pagination. Without it a sweep
+    # that died on page 2 returned the pages it had and the queue rendered as
+    # though the missing orders simply did not exist - a short list nobody
+    # could tell was short.
+    meta = {}
+    orders = await _orders_snapshot(registry, days=days, fields=fields, force=fresh, meta=meta)
     want = [tag] + ([t for t in LEGACY_DISPATCHED_TAGS]
                     if tag.strip().lower() == DISPATCHED_TAG.strip().lower() else [])
     tagged = [o for o in orders if any(_has_tag(o, t) for t in want)]
@@ -3981,7 +3995,12 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
     shaped = [_shape_label_order(o, names, cache=sheet) for o in tagged]
     state = _load_prod_state()
     disp = _load_dispatch()
+    partial = ""
+    if meta.get("failed") or meta.get("truncated"):
+        partial = ("Shopify did not answer for the whole window, so this list may be "
+                   "missing orders. Press Refresh in a moment.")
     return {"tag": tag, "days": days, "count": len(tagged), "orders": shaped,
+            "partial_note": partial,
             "state": {str(s["id"]): state[str(s["id"])] for s in shaped if str(s["id"]) in state},
             "dispatch": {str(s["id"]): disp[str(s["id"])] for s in shaped if str(s["id"]) in disp}}
 
@@ -6111,6 +6130,9 @@ async def run_liability(registry: dict) -> dict:
 ZETA_URL = os.environ.get("ZETA_URL", "").strip().rstrip("/")
 ZETA_SYNC_TOKEN = os.environ.get("ZETA_SYNC_TOKEN", "").strip()
 ZETA_SYNC_PATH = os.environ.get("ZETA_SYNC_PATH", "/data/zeta_sync.json")
+ZETA_DRAIN_MAX = int(os.environ.get("ZETA_DRAIN_MAX", "40"))        # retries per tick
+ZETA_DRAIN_SECONDS = float(os.environ.get("ZETA_DRAIN_SECONDS", "45"))  # and its deadline
+ZETA_MAX_TRIES = int(os.environ.get("ZETA_MAX_TRIES", "20"))        # then park for a human
 _zeta_last = {"ok_at": 0.0, "error": ""}
 
 
@@ -6268,12 +6290,36 @@ async def _zeta_drain(registry: dict) -> None:
     changed their mind, and the LATEST intent is the only one that may run."""
     if not _zeta_configured():
         return
-    for oid in list(_load_zeta_pending().keys()):
+    # Capped and deadlined. Each retry is a full Shopify order read plus a
+    # POST, so an unbounded backlog monopolised the hourly tick and starved
+    # every other scheduled job behind it.
+    started = time.monotonic()
+    for oid in list(_load_zeta_pending().keys())[:ZETA_DRAIN_MAX]:
+        if time.monotonic() - started > ZETA_DRAIN_SECONDS:
+            logger.info("stock bridge: drain hit its deadline; the rest waits for the next tick")
+            break
         try:
             async with _zeta_lock(oid):
                 entry = _load_zeta_pending().get(str(oid))
                 if not entry:
                     continue   # settled by a fresh click while we waited
+                # An entry that has failed this many times is not going to
+                # settle by being retried forever. Park it as needing a human
+                # and stop spending the tick on it - it stays in the store, so
+                # nothing is lost and Settings can still show it.
+                pend = _load_zeta_pending()
+                cur = pend.get(str(oid)) or entry
+                tries = int(cur.get("tries") or 0) + 1
+                if tries > ZETA_MAX_TRIES:
+                    if not cur.get("stuck"):
+                        cur["stuck"] = True
+                        pend[str(oid)] = cur
+                        _write_zeta_pending(pend)
+                        logger.error("stock bridge: %s parked after %d attempts", oid, tries - 1)
+                    continue
+                cur["tries"] = tries
+                pend[str(oid)] = cur
+                _write_zeta_pending(pend)
                 await _zeta_push_locked(registry, oid, str(entry.get("op") or "book"))
         except Exception:
             logger.exception("stock bridge: drain failed for %s", oid)
@@ -8433,15 +8479,28 @@ def _load_mail() -> dict:
 
 
 def _write_mail(d: dict) -> None:
+    """Memory never outlives a failed write - the same rule _write_files
+    follows. Publishing the mutation first and only then discovering the disk
+    refused it left the board showing changes that were never saved, and every
+    later reader trusted that copy until the process restarted."""
     global _mail_mem
-    _mail_mem = d
     if not _store_writable(MAILBOX_PATH):
+        # Callers mutate the object _load_mail handed them, which IS the shared
+        # cache - so by the time a refusal happens the in-memory board already
+        # carries the change. Drop it, or every later reader serves an edit
+        # that was never saved.
+        _mail_mem = None
         raise RuntimeError("mailbox store is not writable")
-    os.makedirs(os.path.dirname(MAILBOX_PATH) or ".", exist_ok=True)
-    tmp = MAILBOX_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"mailbox": d}, fh, allow_nan=False)
-    os.replace(tmp, MAILBOX_PATH)
+    try:
+        os.makedirs(os.path.dirname(MAILBOX_PATH) or ".", exist_ok=True)
+        tmp = MAILBOX_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"mailbox": d}, fh, allow_nan=False)
+        os.replace(tmp, MAILBOX_PATH)
+    except Exception:
+        _mail_mem = None      # force a re-read; never serve an unsaved board
+        raise
+    _mail_mem = d
 
 
 def _mail_now() -> str:
@@ -12007,13 +12066,20 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     os.replace(tmp, os.path.join(target, base))
                     _poisoned_stores.discard(os.path.join(target, base))
                     restored_names.append(base)
-            except OSError:
+            except Exception:
+                # NOT just OSError: zf.read() decompresses, so a truncated or
+                # corrupted member raises BadZipFile / zlib.error / RuntimeError,
+                # none of which are OSError - and those escaped this handler,
+                # leaving a half-restored volume with the pre-restore world
+                # still live in memory and no cache drop.
                 logger.exception("restore failed mid-write")
                 # Disk is part-new: memory must never serve (or later flush)
                 # the pre-restore world over it.
                 _drop_all_caches()
-                return _json({"error": "The volume refused the restore part-way. Check the "
-                                       "Railway service and try again."}, 500)
+                return _json({"error": "The backup could not be read all the way through, so "
+                                       "the restore stopped part-way. The data volume now holds "
+                                       "a mix: restore again from a known-good backup before "
+                                       "using the app."}, 500)
             # A backup is a photograph of an earlier clock. Ages must not be
             # trusted: an upload that was mid-flight at backup time would read
             # as days-stale and the sweep would DELETE its bytes, and old
@@ -12125,7 +12191,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         entry.pop("printed_at", None)
                         if not entry:
                             state.pop(str(oid), None)
-                _write_prod_state(state)
+                try:
+                    _write_prod_state(state)
+                except ProdStateUnwritable:
+                    return _json({"error": "The print stamps could not be cleared. Check the "
+                                           "data volume in Settings, Connections."}, 503)
                 _track(_who, "production", "undid a print",
                        str(len(ids)) + (" order" if len(ids) == 1 else " orders"))
                 notes = []
@@ -12142,7 +12212,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if not oid:
                     return _json({"error": "No order id given."}, 400)
                 on = bool(body.get("on", True))
-                state = _mark_made(oid, on)
+                # BEFORE anything is fulfilled at Shopify or booked at the stock
+                # app: if the stamp cannot be saved, stop here rather than doing
+                # the irreversible half and reporting success.
+                try:
+                    state = _mark_made(oid, on)
+                except ProdStateUnwritable:
+                    logger.exception("made: production state unwritable for %s", oid)
+                    return _json({"error": "The made stamp could not be saved, so nothing "
+                                           "was fulfilled or booked. Check the data volume "
+                                           "in Settings, Connections, then try again."}, 503)
                 nm = re.sub(r"[^#\w-]", "", str(body.get("name") or ""))[:20] or f"order {oid}"
                 _track(_who, "production", "marked made" if on else "un-marked made", nm)
                 # Made is the moment an order actually ships: if a courier label is

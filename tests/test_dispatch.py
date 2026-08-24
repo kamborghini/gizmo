@@ -8253,6 +8253,62 @@ def t_an_enquiry_email_cannot_edit_an_existing_contact():
     with_mail(go)
 
 @test
+def t_the_app_never_reports_success_for_a_write_that_did_not_happen():
+    """Four honesty findings. A store that cannot be written must fail loudly
+    BEFORE the irreversible half (fulfilling Shopify, booking glass), and an
+    in-memory copy must never outlive a write that failed."""
+    reset_dispatch(); reset_prod()
+    # 1. Mark made refuses rather than half-completing. A CORRUPT store is the
+    # real scenario: loading it is what marks it unwritable.
+    with open(copilot.PRODUCTION_STATE_PATH, "w", encoding="utf-8") as fh:
+        fh.write("{ this is not json")
+    try:
+        copilot._load_prod_state()          # poisons the store, as in production
+        r = post("/api/production-state", {"op": "made", "id": 12345, "name": "#104239"})
+        eq(r.status_code, 503, "an unwritable state store stops the whole operation")
+        ok("nothing was fulfilled" in r.json()["error"], r.json()["error"])
+    finally:
+        copilot._poisoned_stores.discard(copilot.PRODUCTION_STATE_PATH)
+        reset_prod()
+    # 2. A failed mailbox write must not leave the mutation live in memory.
+    def go():
+        copilot._load_mail()
+        with open(copilot.MAILBOX_PATH, "w", encoding="utf-8") as fh:
+            fh.write("{ not json either")
+        copilot._mail_mem = None
+        copilot._load_mail()               # poisons it the way production does
+        try:
+            d = copilot._load_mail()
+            d["threads"]["ghost"] = {"id": "ghost", "state": "unassigned"}
+            try:
+                copilot._write_mail(d)
+                ok(False, "the write should have raised")
+            except RuntimeError:
+                pass
+        finally:
+            copilot._poisoned_stores.discard(copilot.MAILBOX_PATH)
+        ok("ghost" not in copilot._load_mail().get("threads", {}),
+           "memory was dropped, so nothing serves an unsaved board")
+    with_mail(go)
+
+@test
+def t_a_short_sweep_says_so_instead_of_looking_like_a_quiet_day():
+    reset_prod()
+    async def flaky(registry, name, args):
+        # _failed is the house marker for a swallowed tool failure (_ok reads it).
+        if name == "shopify_list_orders":
+            return {"_failed": True, "error": "429 throttled"}
+        return await fake_tool_json(registry, name, args)
+    saved = copilot._tool_json
+    copilot._tool_json = flaky
+    copilot._bust_orders()
+    try:
+        out = run_async(copilot.run_production_labels({}, tag="IP", fresh=True))
+        ok(out.get("partial_note"), "a failed sweep is reported, not rendered as an empty queue")
+    finally:
+        copilot._tool_json = saved
+
+@test
 def t_the_drive_cannot_be_filled_or_confused_by_duplicate_names():
     """Two Files findings. COPY on the mounted drive was the one write path
     with no quota (a server-side copy, so a `cp` loop bills storage without a

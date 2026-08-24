@@ -4704,6 +4704,10 @@
             hero.append(badge, ht);
             hero.append(el('div', 'ov-updated', freshLabel(labelsCache.at)));
             box.append(hero);
+            // A sweep that Shopify cut short renders as a SHORT list, which is
+            // indistinguishable from a quiet day. Say so rather than let the
+            // bench work from a queue that is quietly missing orders.
+            if (data.partial_note) box.append(el('div', 'msg error', data.partial_note));
 
             // Lifecycle queue: To make -> To ship -> Complete.
             const seg = el('div', 'lbl-seg');
