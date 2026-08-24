@@ -857,6 +857,24 @@ def t_a_failed_load_is_not_reported_as_an_empty_list():
        "and the copy says the list is unknown rather than empty")
 
 
+@test
+def t_a_failed_question_is_not_dressed_as_an_answer():
+    """pageAsk pushed the exception straight in as an assistant turn, so a
+    transport failure rendered in the same bubble as a real answer, under the
+    same model line - the copilot appeared to have replied 'Failed to fetch'.
+    Worse, that text then went back up as assistant history on the next turn."""
+    fn = re.search(r"async function pageAsk.*?\n        \}", SCRIPT, re.S).group(0)
+    ok("role: 'error'" in fn, "a failure is its own kind of turn, not an assistant turn")
+    ok("structured: { summary: e.message" not in fn,
+       "and it is no longer packed into the answer shape")
+    ok("filter(t => t.role !== 'error')" in fn,
+       "the failure is not replayed to the model as something it said")
+    render = re.search(r"function renderPageThread.*?\n        \}", SCRIPT, re.S).group(0)
+    ok("t.role === 'error'" in render, "and it renders through the error path")
+    ok("did not reach the copilot" in render, "which says what actually happened")
+    ok("Ask again" in render, "and offers the question back rather than making them retype it")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

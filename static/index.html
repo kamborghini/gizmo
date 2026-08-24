@@ -1266,7 +1266,7 @@
         .msg.error:not(:has(.bubble)) { background: var(--danger-bg); border: 1px solid var(--border);
             color: var(--danger); padding: 12px 16px; border-radius: var(--r); font-size: 13px; }
 
-        .load-failed { display: flex; align-items: center; justify-content: space-between;
+        .load-failed, .pchat-err { display: flex; align-items: center; justify-content: space-between;
             gap: 12px; flex-wrap: wrap; margin: 4px 0 0; }
         .thinking { display: flex; align-items: center; gap: 12px; color: var(--ink-2); font-size: 13px; }
         .thinking .three-body { --uib-size: 24px; --uib-speed: .8s; --uib-color: var(--accent);
@@ -2592,8 +2592,17 @@
                 else thread.append(el('div', 'pchat-hint', 'Ask anything about the numbers and recommendations on this page.'));
                 return;
             }
-            items.forEach(t => {
+            items.forEach((t, i) => {
                 if (t.role === 'user') { const m = el('div', 'msg user'); m.append(el('div', 'bubble', t.text)); thread.append(m); }
+                else if (t.role === 'error') {
+                    const m = el('div', 'msg error pchat-err');
+                    m.append(el('div', null, 'That question did not reach the copilot. ' + t.text));
+                    const again = el('button', 'btn'); again.textContent = 'Ask again';
+                    const q = (items[i - 1] || {}).text || '';
+                    again.onclick = () => { pageThreads[threadKey(page)].splice(i - 1, 2); pageAsk(page, q, data); };
+                    if (q) m.append(again);
+                    thread.append(m);
+                }
                 else thread.append(pageAssistant(page, t, data));
             });
         }
@@ -2623,7 +2632,9 @@
             const tm = el('div', 'msg assistant'); const th = el('div', 'thinking'); th.append(loader(), el('span', null, 'Thinking…')); tm.append(th); thread.append(tm);
             try { tm.scrollIntoView({ block: 'nearest' }); } catch (e) {}
             pageBusy[tk] = true;
-            const history = pageThreads[tk].map(t => t.role === 'user' ? { role: 'user', content: t.text } : { role: 'assistant', content: structuredToText(t.structured) });
+            const history = pageThreads[tk].filter(t => t.role !== 'error')
+                .map(t => t.role === 'user' ? { role: 'user', content: t.text }
+                                            : { role: 'assistant', content: structuredToText(t.structured) });
             const payload = { messages: history, deep: false, context: { page, report: pageReport(page, data) } };
             try {
                 let res;
@@ -2632,7 +2643,9 @@
                 pageThreads[tk].push({ role: 'assistant', structured: res.structured || { summary: '(no response)' }, model: res.model, data_used: res.data_used });
                 loadMemory();
             } catch (e) {
-                pageThreads[tk].push({ role: 'assistant', structured: { summary: e.message || String(e) } });
+                // NOT an assistant turn: an answer bubble carrying the words
+                // "Failed to fetch" reads as the copilot's considered opinion.
+                pageThreads[tk].push({ role: 'error', text: e.message || String(e) });
             } finally {
                 pageBusy[tk] = false;
                 const th2 = $('pchat-thread-' + tk);
