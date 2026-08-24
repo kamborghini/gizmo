@@ -555,7 +555,7 @@ def t_crm_activities_open_an_editor_and_the_bin_keeps_its_promise():
     delete confirm promised a 30-day restore that had no UI."""
     ok("crmActivityForm({ id: a.id }" in SCRIPT, "tapping an activity row opens it for editing")
     ok(re.search(r"op: 'update', id: editing\.id", SCRIPT), "the form saves through the update op")
-    ok("Already done — just logging it" in SCRIPT, "a call that already happened is one tick")
+    ok("Already done - just logging it" in SCRIPT, "a call that already happened is one tick")
     ok("paintBin" in SCRIPT and re.search(r"op: 'restore', id: t\.id", SCRIPT),
        "the Bin view exists and restores")
 

@@ -7151,7 +7151,7 @@
         const crmTypeIcon = t => ({ call: I.phone, meeting: I.users, task: I.check,
                                     deadline: I.flag, email: I.send, lunch: I.coffee }[t] || I.check);
         /* Money the way Pipedrive prints it: grouped thousands, pennies only
-           when a value actually has them. £48,750 — never £48750.00. */
+           when a value actually has them. £48,750 - never £48750.00. */
         function crmMoney(n) {
             n = Number(n) || 0;
             const opts = Math.abs(n % 1) > 0.004
@@ -7235,7 +7235,7 @@
         async function crmFetchDeal(dealId) {
             /* Only the LATEST fetch may land: a slow modal-open response
                arriving after a fresh post-edit one would resurrect the
-               pre-edit history — or another deal's entirely. */
+               pre-edit history - or another deal's entirely. */
             const my = ++crmDealXSeq;
             try {
                 const r = await api('/api/crm/deal', { op: 'detail', id: dealId });
@@ -7250,7 +7250,7 @@
                 v = String(v == null ? '' : v);
                 /* An imported name can be =HYPERLINK(...): a leading formula
                    trigger gets the apostrophe armour, same as the product
-                   exporter. A +44 phone number counts — Excel sees a formula. */
+                   exporter. A +44 phone number counts - Excel sees a formula. */
                 if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;
                 return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
             };
@@ -7295,7 +7295,7 @@
             box.append(seg);
             /* Moving off Pipedrive: the survey is read-only and writes nothing
                to either system, so it is safe to press at any time. Once real
-               data lives here the panel folds to one quiet line — it must not
+               data lives here the panel folds to one quiet line - it must not
                squat between the tabs and the pipeline forever. */
             if (!teamMe || teamMe.role === 'master') {
                 const hasData = Object.keys(d.deals || {}).length > 0;
@@ -7820,7 +7820,7 @@
         function crmTypeahead(input, getRows) {
             /* A datalist with 1,951 people in it builds 1,951 nodes every time
                a form opens. This builds eight, as typed. getRows(q) returns
-               [{name, sub}] — picking one puts the name in the input. */
+               [{name, sub}] - picking one puts the name in the input. */
             const wrap = el('div', 'crm-ta');
             input.autocomplete = 'off';
             wrap.append(input);
@@ -8043,7 +8043,7 @@
                 won.onclick = async () => {
                     try {
                         await crmOp('/api/crm/deal', { op: 'won', id: dealId });
-                        toastOk('Deal won — ' + crmMoney(x.value) + '.');
+                        toastOk('Deal won - ' + crmMoney(x.value) + '.');
                         paintDealFresh(m, dealId);
                     } catch (e) { toastError(e.message); }
                 };
@@ -8063,7 +8063,7 @@
                 top.append(re);
             }
             /* The quiet doors: archive (Pipedrive's third outcome) and the
-               30-day bin, both reachable by TAP — drag is a desktop luxury. */
+               30-day bin, both reachable by TAP - drag is a desktop luxury. */
             const arch = el('button', 'btn', x.archived ? 'Unarchive' : 'Archive');
             arch.onclick = async () => {
                 try {
@@ -8236,7 +8236,7 @@
                     : c.field + ': ' + (c.from || 'none') + ' → ' + (c.to || 'none')));
                 r.append(el('div', 'crm-hist-when', fmtDate(c.at)));
                 return r; } }));
-            /* Pinned notes surface first — that is what pinning is FOR. */
+            /* Pinned notes surface first - that is what pinning is FOR. */
             const rows = done.concat(notes, log).sort((a, b) =>
                 (b.pin - a.pin) || String(b.at).localeCompare(String(a.at)));
             if (!rows.length) hist.append(el('div', 'crm-sub', 'Nothing yet.'));
@@ -8349,7 +8349,7 @@
                    add-then-hunt-it-down-and-tick-it. */
                 const lw = el('label', 'crm-cline');
                 doneNow = document.createElement('input'); doneNow.type = 'checkbox';
-                lw.append(doneNow, document.createTextNode(' Already done — just logging it'));
+                lw.append(doneNow, document.createTextNode(' Already done - just logging it'));
                 m.body.append(lw);
             }
             const bar = el('div', 'disp-actions');
@@ -8419,7 +8419,7 @@
             const weekEnd = new Date(Date.parse(today) + 6 * 86400000).toISOString().slice(0, 10);
             let acts = Object.values(crmCache.activities).filter(a => !crmActTypesOff[a.type]);
             /* An archived deal's leftovers stay out of the working lists: the
-               deal left the desk, its nagging goes with it. Done keeps them —
+               deal left the desk, its nagging goes with it. Done keeps them  - 
                history is history. */
             if (crmActPeriod !== 'done')
                 acts = acts.filter(a => !((crmCache.deals[a.deal_id || ''] || {}).archived));
@@ -8725,7 +8725,7 @@
                 let dup = coll[dupIn.dataset.pickedId || ''];
                 if (!dup || dup.name.toLowerCase() !== nm) {
                     const byName = Object.values(coll).filter(x => x.name.toLowerCase() === nm && x.id !== keepId);
-                    if (byName.length > 1) { toastError('Two contacts share that name — pick one from the list.'); return; }
+                    if (byName.length > 1) { toastError('Two contacts share that name - pick one from the list.'); return; }
                     dup = byName[0];
                 }
                 if (!dup || dup.id === keepId) { toastError('Type the duplicate’s exact name and pick it from the list.'); return; }
@@ -8748,7 +8748,7 @@
             crmField(grid, 'Name', nameIn);
             let emailIn, phoneIn, orgIn, addrIn, jobIn, webIn;
             if (kind === 'person') {
-                /* One address per line: the second and third are real data —
+                /* One address per line: the second and third are real data  - 
                    a form that can only see the first once trapped the rest. */
                 emailIn = document.createElement('textarea');
                 emailIn.className = 'disp-text'; emailIn.rows = Math.max(1, (existing && (existing.emails || []).length) || 1);
@@ -8833,7 +8833,7 @@
                             job_title: jobIn.value.trim(), label: labSel.value,
                             emails: emails, phones: phones,
                             /* this form shows EVERY address, so its list is the
-                               whole truth — pruning to one must stick */
+                               whole truth - pruning to one must stick */
                             contacts_full: true };
                         if (existing) {
                             payload.email_labels = relabel(emails, existing.emails, existing.email_labels);
@@ -9138,7 +9138,7 @@
             /* The split that keeps the numbers honest: the OPEN pipeline is
                only what is actually on the desk (archived-but-open deals left
                it), while won/lost HISTORY includes the archived back catalogue
-               — that history is the whole point of having imported it. */
+               - that history is the whole point of having imported it. */
             const open = deals.filter(x => x.status === 'open' && !x.archived);
             const won = deals.filter(x => x.status === 'won');
             const lost = deals.filter(x => x.status === 'lost');
