@@ -136,6 +136,11 @@
         .btn[disabled], .btn:disabled { background: var(--surface-2); color: var(--ink-3);
             border-color: var(--border); cursor: not-allowed; }
         .btn svg { width: 15px; height: 15px; }
+        /* Icon wrapper: the svg becomes a block inside a shrink-wrapped flex
+           span, so flex parents centre it truly and inline contexts sit it on
+           the text's middle instead of its baseline. */
+        .ic { display: inline-flex; align-items: center; vertical-align: middle; }
+        .ic svg { display: block; }
         .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
         .btn-primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
         .btn-primary:active { background: #3f33a8; border-color: #3f33a8; }
@@ -1643,7 +1648,10 @@
         };
         const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
         const loader = () => { const b = el('div', 'three-body'); b.append(el('div', 'three-body__dot'), el('div', 'three-body__dot'), el('div', 'three-body__dot')); return b; };
-        const ico = (svg) => { const s = el('span'); s.innerHTML = svg; return s; };
+        /* The .ic class is the whole fix for icons floating above button text:
+           a bare span leaves the svg sitting ON the text baseline inside the
+           button's 20px line box, ~3px above the text's optical middle. */
+        const ico = (svg) => { const s = el('span', 'ic'); s.innerHTML = svg; return s; };
         const $ = (id) => document.getElementById(id);
         function fmtDate(iso) {
             const d = new Date(iso);
