@@ -9006,6 +9006,38 @@ def _mail_team_shape() -> list:
     return rows
 
 
+def _crm_deal_threads(d: dict, deal: dict) -> list:
+    """The email history behind a deal: every shared-inbox thread whose
+    correspondent is the deal's linked person (any of their addresses), plus
+    the thread the deal was born from if it came off the website form. Compact
+    rows only - subject, snippet, state - the full conversation stays behind
+    the Inbox, where reading marks it read and viewers are counted."""
+    person = d.get("persons", {}).get(deal.get("person_id") or "") or {}
+    addrs = {str(e).lower() for e in (person.get("emails") or []) if str(e).strip()}
+    born = str(deal.get("mail_thread_id") or "")
+    if not addrs and not born:
+        return []
+    try:
+        store = _load_mail()
+    except Exception:
+        return []
+    rows = []
+    for t in store.get("threads", {}).values():
+        hit = (t.get("id") == born
+               or str(t.get("from_email") or "").lower() in addrs
+               or any(str(m.get("from_email") or "").lower() in addrs
+                      for m in (t.get("messages") or [])))
+        if not hit:
+            continue
+        rows.append({"id": t.get("id"), "subject": t.get("subject") or "(no subject)",
+                     "snippet": t.get("snippet") or "", "last_at": t.get("last_at") or "",
+                     "msg_count": t.get("msg_count") or 0,
+                     "state": t.get("state") or "", "unread": bool(t.get("unread")),
+                     "owner_name": _team_name(t.get("owner")) if t.get("owner") else ""})
+    rows.sort(key=lambda r: r["last_at"], reverse=True)
+    return rows[:20]
+
+
 def _mail_crm_match(email: str) -> Optional[dict]:
     """The reason this lives here and not in a helpdesk: the sender might
     already be in the CRM. A match puts the relationship beside the email."""
@@ -12299,9 +12331,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"error": "That deal no longer exists."}, 404)
             if op == "detail":
                 # A read: the notes and changelog the board payload leaves out.
-                # No write, no ledger line.
-                return _json({"ok": True, "notes": deal.get("notes") or [],
-                              "changelog": deal.get("changelog") or []})
+                # No write, no ledger line. The email history rides along ONLY
+                # for accounts that can open the Inbox: a CRM-only login must
+                # not read correspondence through the side door of a deal.
+                out = {"ok": True, "notes": deal.get("notes") or [],
+                       "changelog": deal.get("changelog") or []}
+                tabs = _user_tabs(actor)
+                if tabs is None or "mail" in tabs:
+                    out["threads"] = _crm_deal_threads(d, deal)
+                    out["mail_days"] = MAIL_TRACK_DAYS
+                return _json(out)
             if op == "update":
                 _crm_deal_fields(body, d, deal)
                 _crm_touch(deal)

@@ -7256,7 +7256,7 @@
         }
         /* The deal's notes and changelog stay out of the board payload at
            imported scale; the modal fetches them on open and after each edit. */
-        let crmDealX = { id: null, notes: [], changelog: [] };
+        let crmDealX = { id: null, notes: [], changelog: [], threads: null, mailDays: 60 };
         let crmDealXSeq = 0;
         async function crmFetchDeal(dealId) {
             /* Only the LATEST fetch may land: a slow modal-open response
@@ -7266,9 +7266,11 @@
             try {
                 const r = await api('/api/crm/deal', { op: 'detail', id: dealId });
                 if (my === crmDealXSeq)
-                    crmDealX = { id: dealId, notes: r.notes || [], changelog: r.changelog || [] };
+                    crmDealX = { id: dealId, notes: r.notes || [], changelog: r.changelog || [],
+                                 threads: ('threads' in r) ? (r.threads || []) : null,
+                                 mailDays: r.mail_days || 60 };
             } catch (e) {
-                if (my === crmDealXSeq) crmDealX = { id: dealId, notes: [], changelog: [] };
+                if (my === crmDealXSeq) crmDealX = { id: dealId, notes: [], changelog: [], threads: null, mailDays: 60 };
             }
         }
         function crmCSV(name, header, rows) {
@@ -8197,6 +8199,36 @@
                 });
                 cf.append(grid);
                 m.body.append(cf);
+            }
+            /* The email history: every shared-inbox thread with this deal's
+               contact, one click from the deal. Reading and replying stay in
+               the Inbox, where opening marks the email read. Absent entirely
+               for accounts locked out of the mail tab. */
+            if (crmDealX.id === dealId && crmDealX.threads !== null
+                    && (crmDealX.threads.length || (p && (p.emails || []).length))) {
+                const em = el('div', 'crm-focus');
+                em.append(el('div', 'disp-subhead', 'Email'));
+                if (!crmDealX.threads.length) {
+                    em.append(el('div', 'crm-sub', 'Nothing in the shared inbox from '
+                        + ((p.emails || [])[0] || 'this contact') + ' in the last '
+                        + crmDealX.mailDays + ' days.'));
+                } else {
+                    crmDealX.threads.forEach(t => {
+                        const r = el('div', 'crm-hist-row');
+                        const a = el('a', 'miss-open', t.subject);
+                        if (t.unread) a.style.fontWeight = '600';
+                        a.onclick = () => { m.close(); setView('mail'); openMailThread(t.id); };
+                        r.append(a);
+                        const bits = [t.msg_count + (t.msg_count === 1 ? ' message' : ' messages'),
+                                      fmtDate(t.last_at)];
+                        if (t.owner_name) bits.push(t.owner_name);
+                        if (t.state === 'done') bits.push('closed');
+                        r.append(el('div', 'crm-hist-when', bits.join(' · ')));
+                        if (t.snippet) r.append(el('div', 'crm-act-note', t.snippet.slice(0, 140)));
+                        em.append(r);
+                    });
+                }
+                m.body.append(em);
             }
             /* Shopify card: live order history for the linked customer. */
             if (p && p.shopify_customer_id) {

@@ -7989,6 +7989,41 @@ def t_mail_connect_ticket_expires():
     with_mail(go)
 
 @test
+def t_a_deal_carries_its_email_history_behind_the_inbox_gate():
+    """The deal modal shows every shared-inbox thread with the deal's contact
+    - matched on ANY of their addresses, plus the thread a website enquiry was
+    born from - and shows NONE of it to an account locked out of the Inbox."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        org = post("/api/crm/contact", {"op": "org_add", "name": "Customer Co"}).json()["id"]
+        per = post("/api/crm/contact", {"op": "person_add", "name": "Jo Bloggs", "org_id": org,
+                                        "emails": ["jo@customer.com", "jo.b@customer.com"]}).json()["id"]
+        deal = post("/api/crm/deal", {"op": "add", "title": "Customer Co gobos",
+                                      "person_id": per, "value": 300}).json()["id"]
+        _seed_thread("m1", "Gobo order", frm=("Jo Bloggs", "jo@customer.com"))
+        _seed_thread("m2", "Invoice query", frm=("Jo B", "jo.b@customer.com"))
+        _seed_thread("m3", "Unrelated", frm=("Someone Else", "x@elsewhere.com"))
+        det = post("/api/crm/deal", {"op": "detail", "id": deal}).json()
+        subs = sorted(t["subject"] for t in det["threads"])
+        eq(subs, ["Gobo order", "Invoice query"],
+           "every address matches, a stranger's thread does not")
+        ok(det["threads"][0]["snippet"] is not None and det["threads"][0]["msg_count"] >= 1)
+        # A website-enquiry deal keeps its birth thread even with no address match.
+        d = copilot._load_crm()
+        d["deals"][deal]["mail_thread_id"] = "m3"
+        copilot._write_crm(d)
+        det2 = post("/api/crm/deal", {"op": "detail", "id": deal}).json()
+        ok(any(t["id"] == "m3" for t in det2["threads"]), "the birth thread rides along")
+        # An account with the CRM but NOT the Inbox sees no correspondence.
+        uid, sess, _pw = ready_user("Crm Only", "crmonly")
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["crm"]})
+        det3 = post_s(sess, "/api/crm/deal", {"op": "detail", "id": deal}).json()
+        ok("threads" not in det3,
+           "email must not leak through a deal to an account the Inbox refuses")
+    with_mail(go)
+
+@test
 def t_website_enquiries_are_flagged_and_parsed():
     """The storefront contact form arrives as Shopify's notification email;
     the subject flags it on arrival, and the body's labelled lines parse

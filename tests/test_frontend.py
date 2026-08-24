@@ -593,6 +593,19 @@ def t_crm_background_refresh_and_namesakes():
 
 
 @test
+def t_the_deal_modal_shows_the_email_thread_history():
+    """A deal without its correspondence is half a record: the modal lists the
+    shared-inbox threads with the deal's contact, each a door into the Inbox."""
+    ok("'Email'" in SCRIPT and "crmDealX.threads" in SCRIPT,
+       "the deal modal renders an Email panel from the detail fetch")
+    ok(re.search(r"openMailThread\(t\.id\)", SCRIPT), "each thread row opens the Inbox")
+    ok("Nothing in the shared inbox from" in SCRIPT,
+       "an empty history says so instead of hiding the panel")
+    ok("crmDealX.threads !== null" in SCRIPT,
+       "and the panel is absent entirely when the server withheld email")
+
+
+@test
 def t_website_enquiries_link_both_ways():
     """A filed enquiry is one click from email to deal and back - a reference
     that does not open is a dead reference."""
