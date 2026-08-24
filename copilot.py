@@ -7543,7 +7543,13 @@ async def _watchdog_tick(registry: dict) -> bool:
                 await asyncio.to_thread(_files_tick)
         except Exception:
             logger.exception("files purge failed")
-        _save_watch(state)
+        # MERGE rather than write the snapshot taken minutes ago: this tick has
+        # been awaiting Shopify, emails, coverage and the bucket the whole time,
+        # and anything written meanwhile (team_established, for one) would be
+        # erased by writing our stale copy back wholesale.
+        fresh = _load_watch()
+        fresh.update(state)
+        _save_watch(fresh)
         return up or fails < 3
     except Exception:
         logger.exception("watchdog tick failed")
@@ -8252,18 +8258,25 @@ def _files_endpoint() -> str:
     return os.environ.get("R2_ENDPOINT") or f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 
-def _files_sign_put(key: str, ctype: str) -> str:
-    """Blocking (network on first use); call off the event loop."""
+def _files_sign_put(key: str, ctype: str, size: int = 0) -> str:
+    """Blocking (network on first use); call off the event loop.
+
+    The signature BINDS the length when one is known: without it the URL
+    authorised a PUT of any size R2 accepts, so a client could declare 1KB,
+    pass the quota check, and then store gigabytes against a record that says
+    1KB - and the presign stayed valid for a quarter of an hour after the
+    upload was confirmed, long enough to swap the object afterwards."""
     _files_ensure_bucket(_files_origin())
     if not _files_ready["bucket"]:
         raise RuntimeError(_files_ready["error"] or "bucket unavailable")
+    params = {"Bucket": R2_BUCKET, "Key": key, "ContentType": ctype}
+    if size > 0:
+        params["ContentLength"] = int(size)
     # 15 minutes: the browser PUTs immediately, and a PUT that starts before
     # the deadline may finish after it, so this does not cut off big files.
     # What it does shrink is how long a leaked URL could replay an overwrite.
     return _files_s3().generate_presigned_url(
-        "put_object",
-        Params={"Bucket": R2_BUCKET, "Key": key, "ContentType": ctype},
-        ExpiresIn=900)
+        "put_object", Params=params, ExpiresIn=900)
 
 
 def _files_sign_get(key: str, name: str, inline: bool = False) -> str:
@@ -10148,7 +10161,12 @@ def _files_tick() -> None:
     """Hourly housekeeping: move expired trash and abandoned uploads to the
     doomed list, persist that, and only then reap doomed bytes from the
     bucket. Blocking; the scheduler runs it in a thread under the store lock."""
-    d = _load_files()
+    # A COPY: this runs in a worker thread while event-loop readers iterate
+    # the shared store, and popping entries under them raises "dictionary
+    # changed size during iteration" in whichever request happened to be
+    # reading. The swap at the end is a single assignment, which is atomic.
+    import copy as _copy
+    d = _copy.deepcopy(_load_files())
     before = (len(d["files"]), len(d.get("doomed") or []))
     _files_purge(d)
     if (len(d["files"]), len(d["doomed"])) != before:
@@ -13647,7 +13665,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 ctype = str(body.get("type") or "application/octet-stream").strip()[:100] \
                     or "application/octet-stream"
                 try:
-                    url = await asyncio.to_thread(_files_sign_put, key, ctype)
+                    url = await asyncio.to_thread(_files_sign_put, key, ctype, size)
                 except RuntimeError as e:
                     logger.warning("files: presign failed: %s", e)
                     return _json({"error": "Storage isn't reachable right now. Check the R2 "
@@ -14404,6 +14422,20 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # data PUT open until the sidecar answers, so reading under the
             # lock deadlocks the pair (seen live as "zero KB" forever).
             import tempfile as _tf
+            # Refuse on the DECLARED length before a byte is spooled. The body
+            # has to be read outside the lock (see above), which meant a client
+            # could fill the container's disk with a file the quota was always
+            # going to reject. Finder sends Content-Length for a real save.
+            try:
+                declared = int(request.headers.get("content-length") or 0)
+            except (TypeError, ValueError):
+                declared = 0
+            if declared > FILES_MAX_UPLOAD:
+                return Response(status_code=413, headers=hdrs)
+            if declared > 0:
+                async with _files_lock:
+                    if _files_usage(_load_files()) + declared > int(FILES_QUOTA_GB * 1024 * 1024 * 1024):
+                        return Response(status_code=507, headers=hdrs)
             spool = _tf.TemporaryFile()
             try:
                 total = 0
