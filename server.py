@@ -1044,6 +1044,70 @@ async def update_order_tags(order_id: int, tags: str) -> dict:
                           body={"order": {"id": int(order_id), "tags": tags}})
 
 
+_net30_template = {"id": ""}    # found once, remembered for the process's life
+
+async def set_order_payment_terms_net30(order_id: int) -> dict:
+    """Attach NET-30 payment terms to an order. GraphQL, because payment terms
+    have no REST surface: paymentTermsTemplates to find the store's Net 30
+    template, then paymentTermsCreate against the order (verified against the
+    Admin API references; needs the write_payment_terms scope).
+
+    Deliberately NOT in COPILOT_TOOLS - the AI chat stays read-only; only the
+    app's own Ready-to-make path calls this, via the writer handed to
+    copilot.add_routes. Returns {ok, ...} and never raises for the expected
+    cases, so the release flow can report instead of break."""
+    async def gql(query: str, variables: dict) -> dict:
+        return await _request("POST", "graphql.json",
+                              body={"query": query, "variables": variables})
+    try:
+        if not _net30_template["id"]:
+            t = await gql("query { paymentTermsTemplates { id name paymentTermsType dueInDays } }", {})
+            rows = ((t.get("data") or {}).get("paymentTermsTemplates")) or []
+            hit = next((x for x in rows
+                        if x.get("paymentTermsType") == "NET" and x.get("dueInDays") == 30), None)
+            if not hit:
+                for e in (t.get("errors") or []):
+                    if "access" in str(e.get("message", "")).lower():
+                        return {"ok": False, "reason": "permission",
+                                "detail": "The access token lacks the payment terms scopes "
+                                          "(read_payment_terms / write_payment_terms)."}
+                return {"ok": False, "reason": "no_template",
+                        "detail": "No Net 30 payment terms template exists on this store."}
+            _net30_template["id"] = str(hit["id"])
+        m = await gql(
+            "mutation($referenceId: ID!, $paymentTermsAttributes: PaymentTermsCreateInput!) {"
+            " paymentTermsCreate(referenceId: $referenceId,"
+            "                    paymentTermsAttributes: $paymentTermsAttributes) {"
+            "   paymentTerms { id }"
+            "   userErrors { field message } } }",
+            {"referenceId": f"gid://shopify/Order/{int(order_id)}",
+             "paymentTermsAttributes": {"paymentTermsTemplateId": _net30_template["id"]}})
+        for e in (m.get("errors") or []):
+            msg = str(e.get("message") or "")
+            if "access" in msg.lower():
+                return {"ok": False, "reason": "permission",
+                        "detail": "The access token lacks write_payment_terms."}
+            return {"ok": False, "reason": "graphql", "detail": msg[:200]}
+        errs = (((m.get("data") or {}).get("paymentTermsCreate") or {}).get("userErrors")) or []
+        if errs:
+            msg = "; ".join(str(e.get("message") or "") for e in errs)[:200]
+            # An order that already carries terms is the goal state, not a fault:
+            # re-releasing an order must stay idempotent.
+            if "already" in msg.lower() or "exist" in msg.lower():
+                return {"ok": True, "already": True}
+            return {"ok": False, "reason": "user_error", "detail": msg}
+        return {"ok": True}
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code if e.response is not None else 0
+        if code in (401, 403):
+            return {"ok": False, "reason": "permission",
+                    "detail": "The access token lacks write_payment_terms."}
+        return {"ok": False, "reason": "http", "detail": f"Shopify answered {code}."}
+    except Exception as e:
+        logger.exception("payment terms: net-30 attach failed for order %s", order_id)
+        return {"ok": False, "reason": "error", "detail": str(e)[:200]}
+
+
 async def create_order_fulfillment(
     order_id: int,
     tracking_number: Optional[str] = None,
@@ -1177,7 +1241,8 @@ try:
                        order_tag_writer=update_order_tags,
                        fulfillment_writer=create_order_fulfillment,
                        fulfillment_canceler=cancel_order_fulfillment,
-                       webhook_ensurer=ensure_order_webhooks)
+                       webhook_ensurer=ensure_order_webhooks,
+                       payment_terms_writer=set_order_payment_terms_net30)
 except Exception as e:
     logger.error(f"Store Copilot disabled (chat UI unavailable): {e}")
 

@@ -2191,6 +2191,52 @@ def t_a_source_four_junior_is_a_66mm_gobo_however_it_is_spelled():
         eq(hit["production_size"], "66", model + " must cut at 66 mm, got " + hit["production_size"])
 
 @test
+def t_releasing_an_unpaid_purchase_order_starts_its_30_day_clock():
+    """Pressing Ready to make on an order tagged 'purchase order unpaid' must
+    ALSO attach NET-30 payment terms in Shopify - and say the outcome either
+    way, because a purchase order quietly missing its terms is an invoice
+    nobody chases. An untagged order gets no terms; a failed attach never
+    fails the release itself."""
+    reset_dispatch(); reset_prod()
+    calls = []
+    async def fake_terms(order_id):
+        calls.append(int(order_id)); return {"ok": True}
+    saved_terms = copilot._payment_terms_writer
+    saved_tags = ORDER["tags"]
+    copilot._payment_terms_writer = fake_terms
+    try:
+        # Tag spelled with different case and spacing still counts.
+        ORDER["tags"] = "Unprocessed, Purchase Order  Unpaid"
+        r = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"}).json()
+        eq(calls, [12345], "the tagged order gets its terms")
+        ok(r["po_unpaid"] and r["terms_ok"], r)
+        eq(r["terms_note"], "30-day payment terms added.")
+        # Releasing again after Shopify says terms exist stays calm.
+        async def already(order_id):
+            calls.append(int(order_id)); return {"ok": True, "already": True}
+        copilot._payment_terms_writer = already
+        r2 = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"}).json()
+        ok(r2["terms_ok"] and "already" in r2["terms_note"], r2)
+        # An ordinary order: no terms call at all.
+        ORDER["tags"] = "Unprocessed"
+        calls.clear()
+        post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"})
+        eq(calls, [], "no unpaid tag, no payment terms")
+        # A refused attach reports and never fails the release.
+        ORDER["tags"] = "Unprocessed, purchase order unpaid"
+        async def refused(order_id):
+            return {"ok": False, "reason": "permission",
+                    "detail": "The access token lacks write_payment_terms."}
+        copilot._payment_terms_writer = refused
+        r3 = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"})
+        eq(r3.status_code, 200, "the release still succeeds")
+        j3 = r3.json()
+        ok(not j3["terms_ok"] and "write_payment_terms" in j3["terms_note"], j3)
+    finally:
+        copilot._payment_terms_writer = saved_terms
+        ORDER["tags"] = saved_tags
+
+@test
 def t_gobo_projectors_are_projectors_not_gobos():
     # The regression the merchant caught live: projector products are NAMED
     # "Projected Image ... Gobo Projector", so a naive "contains gobo" rule

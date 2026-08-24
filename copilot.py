@@ -3502,6 +3502,10 @@ MADE_TAG = os.environ.get("MADE_TAG", "PC")
 PROPOSAL_HOST = os.environ.get("PROPOSAL_HOST", "quote.projectedimage.com")
 _PROPOSAL_RE = re.compile(r"https://" + re.escape(PROPOSAL_HOST) + r"/proof/[A-Za-z0-9]+")
 _order_tag_writer = None
+_payment_terms_writer = None
+# The tag that marks an order sold on account: releasing one to production is
+# the moment its 30-day clock should start ticking in Shopify.
+PO_UNPAID_TAG = os.environ.get("PO_UNPAID_TAG", "purchase order unpaid")
 _fulfillment_writer = None
 _fulfillment_canceler = None
 _webhook_ensurer = None
@@ -9729,15 +9733,18 @@ def _files_tick() -> None:
 # ---------------------------------------------------------------------------
 
 def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=None,
-               fulfillment_canceler=None, webhook_ensurer=None) -> None:
+               fulfillment_canceler=None, webhook_ensurer=None,
+               payment_terms_writer=None) -> None:
     # The write capabilities the server hands over. None of them ever joins any
     # tool registry: the AI can read the store; only the app's own print / Mark
     # made / Dispatch actions can touch tags or fulfillments.
     global _order_tag_writer, _fulfillment_writer, _fulfillment_canceler, _webhook_ensurer
+    global _payment_terms_writer
     _order_tag_writer = order_tag_writer
     _fulfillment_writer = fulfillment_writer
     _fulfillment_canceler = fulfillment_canceler
     _webhook_ensurer = webhook_ensurer
+    _payment_terms_writer = payment_terms_writer
     _wo_boot()
     # Shopify tools + live SEO tools + Google data tools (the last only if configured)
     chat_registry = {**registry, **_build_seo_tools(registry), **_build_google_tools()}
@@ -14340,13 +14347,42 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not oid:
             return _json({"error": "No order id given."}, 400)
         try:
+            # Read the order BEFORE the tag move: releasing an account order
+            # (the "purchase order unpaid" tag) is the moment its 30-day
+            # payment clock starts in Shopify.
+            po_unpaid = False
+            try:
+                o = await _tool_json(registry, "shopify_get_order", {"order_id": oid})
+                po_unpaid = _ok(o) and any(_norm_key(t) == _norm_key(PO_UNPAID_TAG)
+                                           for t in _order_tags(o))
+            except Exception:
+                logger.exception("queue: pre-release order read failed for %s", oid)
             okd, note = await _sync_order_tags(registry, oid,
                                                add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG])
             if not okd:
                 return _json({"error": note or "Couldn't tag the order."}, 502)
             nm = re.sub(r"[^#\w-]", "", str(body.get("name") or ""))[:20] or f"order {oid}"
             _track(_who, "production", "released to make", nm)
-            return _json({"ok": True})
+            terms_note = ""
+            if po_unpaid:
+                # Best-effort and SAID OUT LOUD either way: the release is the
+                # primary action and must not fail with it, but a purchase
+                # order silently missing its payment terms is an unpaid
+                # invoice nobody chases.
+                if _payment_terms_writer is None:
+                    terms_note = "Payment terms are not enabled on this server."
+                else:
+                    r = await _payment_terms_writer(oid)
+                    if r.get("ok"):
+                        terms_note = ("30-day payment terms were already on the order."
+                                      if r.get("already") else "30-day payment terms added.")
+                        _track(_who, "production", "added 30-day payment terms", nm)
+                    else:
+                        terms_note = ("Released, but the 30-day payment terms could not "
+                                      "be added: " + str(r.get("detail") or "unknown error"))
+                        logger.warning("payment terms failed for %s: %s", oid, r)
+            return _json({"ok": True, "po_unpaid": po_unpaid, "terms_note": terms_note,
+                          "terms_ok": (not po_unpaid) or terms_note.startswith("30-day")})
         except Exception:
             logger.exception("Queue tagging failed")
             return _json({"error": "Couldn't tag the order."}, 500)

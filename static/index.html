@@ -4215,8 +4215,13 @@
         async function readyToMake(o, btn) {
             btn.disabled = true;
             try {
-                await api('/api/production-labels/queue', { order_id: o.id, name: orderNo(o) });
-                addToast(orderNo(o) + ' moved to To make.');
+                const r = await api('/api/production-labels/queue', { order_id: o.id, name: orderNo(o) });
+                /* An account order's payment clock starts here: the outcome is
+                   said either way, because a purchase order quietly missing
+                   its terms is an invoice nobody chases. */
+                if (r.po_unpaid && !r.terms_ok) toastError(orderNo(o) + ': ' + r.terms_note);
+                else addToast(orderNo(o) + ' moved to To make.'
+                    + (r.terms_note ? ' ' + r.terms_note : ''));
                 loadLabels(true);
             } catch (e) {
                 btn.disabled = false;
