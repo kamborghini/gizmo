@@ -2182,7 +2182,10 @@ def t_a_source_four_junior_is_a_66mm_gobo_however_it_is_spelled():
     (the M-size glass the GH64 holder takes); the override carries it over
     ANY size sheet, and the aliases catch the spellings the sheet lacks."""
     for model in ("Source Four Jr", "Source Four Junior", "Source Four Junior - M size",
-                  "Source 4 Jr", "Source 4 Junior", "S4 Jr", "S4 Junior", "Source Four Jnr"):
+                  "Source 4 Jr", "Source 4 Junior", "S4 Jr", "S4 Junior", "Source Four Jnr",
+                  # The Revolution had the identical twin-row disease: 53.3 on
+                  # 'Source Four Revolution', 66 on 'Revolution'. Ruled: 66.
+                  "Source Four Revolution", "Revolution", "S4 Revolution"):
         hit, review = copilot._gobo_lookup("ETC", model)
         ok(hit is not None and review is None, model + " -> " + repr(review))
         eq(hit["production_size"], "66", model + " must cut at 66 mm, got " + hit["production_size"])
