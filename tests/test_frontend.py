@@ -793,6 +793,35 @@ def t_each_semantic_ink_is_readable_on_its_own_tint_and_on_the_page():
             ok(r >= 4.5, "--%s on --%s is %.2f:1, under 4.5" % (ink, ground, r))
 
 
+@test
+def t_the_targets_a_finger_has_to_hit_are_big_enough():
+    """Measured in a touch-emulating browser: the only way into a folder was the
+    20px line box of its name, and the tick that arms a bulk action was 15-16px.
+    Both fixes had to leave the row heights alone, so they pair padding with a
+    cancelling negative margin, or grow only where there is no mouse."""
+    name = re.search(r"\.files-name \{.*?\}", HTML, re.S).group(0)
+    ok("padding: 5px 0; margin: -5px 0" in name,
+       "the folder name's hit box is padded out, and the row keeps its height")
+    touch = re.search(r"@media \(hover: none\) \{\s*\.fslot input.*?\n        \}", HTML, re.S)
+    ok(touch, "there is a touch-only rule for the file tick")
+    ok("width: 24px; height: 24px" in touch.group(0), "and it reaches 24px there")
+    ok(re.search(r"@media \(hover: none\) \{ \.mail-check \{ width: 24px; height: 24px; \} \}", HTML),
+       "the Inbox tick reaches 24px under a finger too")
+    base = re.search(r"\.fslot input \{[^}]*\}", HTML).group(0)
+    ok("width: 16px; height: 16px" in base,
+       "a mouse still gets the small one, so the list is not covered in boxes")
+
+
+@test
+def t_icon_only_buttons_clear_the_minimum():
+    """An icon button was the 16px glyph plus 4px of padding: 24px, on the line."""
+    rule = re.search(r"\.icon-btn \{.*?\}", HTML, re.S).group(0)
+    ok("min-width: 28px" in rule and "min-height: 28px" in rule,
+       "icon buttons carry an explicit floor rather than inheriting one from their glyph")
+    ok(re.search(r"\.toast-x \{ min-width: 24px; min-height: 24px", HTML),
+       "so does the toast dismiss, which sits on its own over the page")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
