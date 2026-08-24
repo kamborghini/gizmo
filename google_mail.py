@@ -20,6 +20,7 @@ Env:
 Unconfigured -> connected() is False and the Inbox tab shows a connect card.
 """
 import os
+import html as _htm
 import json
 import time
 import logging
@@ -239,7 +240,7 @@ async def list_threads(query: str = "in:inbox", max_results: int = 100) -> dict:
         data = await _call("GET", "threads", params=params)
         for t in (data.get("threads") or []):
             if t.get("id"):
-                out.append({"id": str(t["id"]), "snippet": str(t.get("snippet") or ""),
+                out.append({"id": str(t["id"]), "snippet": _htm.unescape(str(t.get("snippet") or "")),
                             "historyId": str(t.get("historyId") or "")})
         token = data.get("nextPageToken")
         pages += 1
@@ -296,7 +297,9 @@ def _msg_time(msg: dict) -> str:
 
 
 async def get_thread(thread_id: str) -> dict:
-    """Normalized thread: subject + per-message sender/time/snippet. Metadata
+    """Normalized thread: subject + per-message sender/time/snippet. Gmail
+    HTML-escapes snippets (&#39; for an apostrophe), so they are unescaped
+    HERE, once, at the boundary - the app renders text, never HTML. Metadata
     format only; bodies stay in Gmail where replies happen."""
     # format=full rather than metadata: metadata omits the part tree, so the
     # app could not tell an email with artwork attached from one without.
@@ -325,7 +328,7 @@ async def get_thread(thread_id: str) -> dict:
                      # Gmail's own labels ride along so the list can bold what
                      # nobody has opened yet, the way an inbox is read.
                      "labels": [str(x) for x in (m.get("labelIds") or [])],
-                     "snippet": str(m.get("snippet") or "")})
+                     "snippet": _htm.unescape(str(m.get("snippet") or ""))})
     return {"id": str(data.get("id") or thread_id),
             "historyId": str(data.get("historyId") or ""),
             "subject": subject, "messages": msgs}
@@ -454,7 +457,7 @@ async def read_thread(thread_id: str, per_msg_chars: int = 4000) -> dict:
             "message_id": _header(m, "Message-ID") or _header(m, "Message-Id"),
             "references": _header(m, "References"),
             "at": _msg_time(m),
-            "text": (text or str(m.get("snippet") or ""))[:per_msg_chars],
+            "text": (text or _htm.unescape(str(m.get("snippet") or "")))[:per_msg_chars],
         })
     return {"id": str(data.get("id") or thread_id), "messages": msgs}
 

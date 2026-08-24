@@ -7989,6 +7989,43 @@ def t_mail_connect_ticket_expires():
     with_mail(go)
 
 @test
+def t_gmail_snippets_lose_their_html_entities_at_the_boundary_and_in_the_store():
+    """Gmail HTML-escapes snippets, so the board said &#39; where an
+    apostrophe belonged - in the list, on cards, and in a deal's Email panel.
+    Unescaped once at the connector; and snippets stored escaped by earlier
+    builds are cleaned as the store loads, because a thread whose historyId
+    never changes again would keep the &#39; forever."""
+    def go():
+        async def fake_call(method, path, params=None, **kw):
+            if path == "threads":
+                return {"threads": [{"id": "t1", "historyId": "h",
+                                     "snippet": "It&#39;s Jo &amp; Co&#39;s order"}]}
+            return {"id": "t1", "historyId": "h", "messages": [
+                {"id": "m1", "snippet": "We&#39;d like a quote", "labelIds": [],
+                 "payload": {"headers": [{"name": "From", "value": "Jo <jo@x.com>"},
+                                         {"name": "Subject", "value": "Quote"}]}}]}
+        saved = _gm._call
+        _gm._call = fake_call
+        try:
+            lst = run_async(_gm.list_threads("in:inbox", 10))
+            eq(lst["threads"][0]["snippet"], "It's Jo & Co's order")
+            th = run_async(_gm.get_thread("t1"))
+            eq(th["messages"][0]["snippet"], "We'd like a quote")
+        finally:
+            _gm._call = saved
+        # The migration: a store written by an earlier build heals on load.
+        copilot._mail_mem = None
+        os.makedirs(os.path.dirname(copilot.MAILBOX_PATH) or ".", exist_ok=True)
+        with open(copilot.MAILBOX_PATH, "w", encoding="utf-8") as fh:
+            json.dump({"mailbox": {"version": 1, "labels": {}, "rules": [], "seq": 0,
+                       "threads": {"old1": {"id": "old1", "snippet": "Jo&#39;s gobos",
+                                            "messages": [{"id": "m", "snippet": "it&#39;s fine"}]}}}}, fh)
+        store = copilot._load_mail()
+        eq(store["threads"]["old1"]["snippet"], "Jo's gobos")
+        eq(store["threads"]["old1"]["messages"][0]["snippet"], "it's fine")
+    with_mail(go)
+
+@test
 def t_the_inbox_window_reaches_two_years_and_the_walk_can_get_there():
     """60 days was a triage window; with deals carrying their correspondence
     the inbox is the shop's email HISTORY. The window, the done-keep and the

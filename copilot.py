@@ -8352,6 +8352,17 @@ def _load_mail() -> dict:
         _mail_mem = d if isinstance(d, dict) and "threads" in d else _mail_default()
         for k, v in _mail_default().items():
             _mail_mem.setdefault(k, v)
+        # Gmail HTML-escapes snippets; the connector unescapes them now, but
+        # snippets stored by earlier builds carry &#39; baked in, and a thread
+        # whose historyId never changes again would show it forever. One pass
+        # at load, only when an entity is actually present.
+        import html as _htm
+        for t in _mail_mem.get("threads", {}).values():
+            if "&#" in (t.get("snippet") or "") or "&amp;" in (t.get("snippet") or ""):
+                t["snippet"] = _htm.unescape(t["snippet"])
+            for m in (t.get("messages") or []):
+                if "&#" in (m.get("snippet") or "") or "&amp;" in (m.get("snippet") or ""):
+                    m["snippet"] = _htm.unescape(m["snippet"])
     return _mail_mem
 
 
