@@ -5510,12 +5510,30 @@ def t_auth_counts_mean_work_not_events():
 
 @test
 def t_auth_the_print_document_needs_only_the_perimeter():
-    # The admin print action lives on the Shopify order page, outside the
-    # app's login; the embed token alone must keep it working.
+    """The admin print action lives on the Shopify order page, outside the
+    app's login, and App Bridge can only give it an embed token - so the
+    embed token alone must keep BOTH halves working: signing the URL and
+    rendering the document. This assertion is deliberately positive: an
+    earlier version only checked that the word "Unauthorized" was absent,
+    which stayed green while a refusal worded differently killed the whole
+    feature."""
     def go():
         ensure_auth()
-        r = client.get("/print/production-labels?ids=12345&id_token=" + tok())
-        ok("Unauthorized" not in r.text, "the print document renders with the embed token")
+        # 1. The extension signs a URL with the embed token and NO app session.
+        r = client.post("/print/production-labels/sign",
+                        json={"ids": "12345", "size": "4x6"},
+                        headers={"Authorization": "Bearer " + tok()})
+        eq(r.status_code, 200, "the print-action extension can sign: " + r.text[:200])
+        url = r.json().get("path") or ""
+        ok(url.startswith("/print/production-labels?ids="), url)
+        ok("sig=" in url and "exp=" in url, "and gets a signed, expiring url")
+        # 2. That signed URL renders the document with no session at all.
+        r2 = client.get(url)
+        eq(r2.status_code, 200, r2.text[:200])
+        ok("<html" in r2.text.lower(), "a real document, not a refusal")
+        # 3. A forged signature is refused outright.
+        bad = client.get(url[:-4] + "dead")
+        ok(bad.status_code in (401, 403), "a tampered signature is refused: " + str(bad.status_code))
     with_accounts(go)
 
 @test
@@ -5577,6 +5595,11 @@ def t_work_the_clock_is_the_servers_and_only_for_parttime():
         eq(post_s(sess, "/api/work/clock", {"op": "in"}).status_code, 400, "no double clock-in")
         copilot._track("SYS-TEST-NOBODY", "production", "marked made", "#x")
         copilot._track("", "production", "marked made", "#hook")
+        # Backdate the open session so it reads as a real shift: a sub-minute
+        # clock cycle is a mis-tap and is deliberately not recorded.
+        _w = copilot._load_work()
+        _w["open"][pt]["start"] = "2026-08-01T09:00:00+00:00"
+        copilot._write_work(_w)
         eq(post_s(sess, "/api/work/clock", {"op": "out"}).status_code, 200)
         eq(post_s(sess, "/api/work/clock", {"op": "out"}).status_code, 400,
            "no clock-out when not clocked in")
@@ -5627,8 +5650,12 @@ def t_work_resolve_is_a_recorded_correction_and_reports_add_up():
            "the closure wears its author and the original start stands")
         ev = post("/api/team/board", {}).json()["events"]
         ok(any(e["action"] == "resolved a work session" for e in ev), "and is on the ledger")
-        post_s(login("poppy", pw).json()["session"], "/api/work/clock", {"op": "in"})
-        post_s(login("poppy", pw).json()["session"], "/api/work/clock", {"op": "out"})
+        s2 = login("poppy", pw).json()["session"]
+        post_s(s2, "/api/work/clock", {"op": "in"})
+        _w = copilot._load_work()          # a real shift, not a sub-minute mis-tap
+        _w["open"][pt]["start"] = "2026-08-01T09:00:00+00:00"
+        copilot._write_work(_w)
+        post_s(s2, "/api/work/clock", {"op": "out"})
         rep = post("/api/work/report", {"uid": pt}).json()
         eq(rep["count"], 2, "both sessions in the report")
         ok(rep["csv"].startswith("Name,Date,Clock in"), "csv for payroll")
@@ -8096,6 +8123,121 @@ def t_the_inbox_window_reaches_two_years_and_the_walk_can_get_there():
         _gm._call = saved
     eq(len(got["threads"]), 4000, "the walk reaches what it was asked for")
     ok(not got["complete"], "and says honestly that the mailbox holds more")
+
+@test
+def t_every_release_path_starts_the_30_day_clock():
+    """Printing the labels IS a release - it is the ordinary way an order
+    reaches the workbench - so an account order's payment clock must start
+    there too, not only on the Ready-to-make button."""
+    reset_dispatch(); reset_prod()
+    calls = []
+    async def fake_terms(order_id):
+        calls.append(int(order_id)); return {"ok": True}
+    saved_terms, saved_tags = copilot._payment_terms_writer, ORDER["tags"]
+    copilot._payment_terms_writer = fake_terms
+    try:
+        ORDER["tags"] = "Unprocessed, purchase order unpaid"
+        r = post("/api/production-state", {"op": "printed", "ids": [12345]}).json()
+        eq(calls, [12345], "printing an unpaid PO attaches its terms")
+        ok("30-day" in r.get("terms_note", ""), r)
+        # An ordinary order still gets nothing.
+        calls.clear(); ORDER["tags"] = "Unprocessed"
+        post("/api/production-state", {"op": "printed", "ids": [12345]})
+        eq(calls, [], "no unpaid tag, no terms")
+    finally:
+        copilot._payment_terms_writer, ORDER["tags"] = saved_terms, saved_tags
+
+@test
+def t_a_missing_payment_terms_template_is_reported_not_swallowed():
+    """"does not exist" contains "exist", so the idempotency shortcut used to
+    report a deleted template as "already on the order" - an invoice with no
+    due date, reported as done."""
+    import server as _srv
+    async def fake_req(method, path, params=None, body=None, **kw):
+        if "paymentTermsTemplates" in str((body or {}).get("query") or ""):
+            return {"data": {"paymentTermsTemplates": [
+                {"id": "gid://shopify/PaymentTermsTemplate/4", "name": "Net 30",
+                 "paymentTermsType": "NET", "dueInDays": 30}]}}
+        return {"data": {"paymentTermsCreate": {"paymentTerms": None, "userErrors": [
+            {"field": ["paymentTermsAttributes"], "message": "Payment terms template does not exist"}]}}}
+    saved = _srv._request
+    _srv._request = fake_req
+    _srv._net30_template["id"] = ""
+    try:
+        r = run_async(_srv.set_order_payment_terms_net30(12345))
+        ok(not r["ok"], "a missing template is a FAILURE, not a quiet success: " + str(r))
+        ok("does not exist" in (r.get("detail") or ""), r)
+        eq(_srv._net30_template["id"], "", "and the stale id is dropped so the next try re-discovers")
+    finally:
+        _srv._request = saved
+        _srv._net30_template["id"] = ""
+
+@test
+def t_cancelling_a_shipment_is_bound_to_the_order_current_tracking():
+    """A stale tab could void T1 and stamp 'cancelled' on T2 - a live, paid
+    label - which then unblocked a third booking."""
+    def go():
+        ensure_auth()
+        reset_dispatch()
+        copilot._update_dispatch(12345, lambda e: {**e, "tracking_number": "T2",
+                                                   "order_name": "#104239"})
+        voided = []
+        async def fake_cancel(tn):
+            voided.append(tn); return {"ok": True}
+        saved = copilot.worldoptions.cancel
+        copilot.worldoptions.cancel = fake_cancel
+        try:
+            r = post("/api/dispatch/cancel", {"order_id": 12345, "tracking_number": "T1"})
+            eq(r.status_code, 409, "a tracking number that is not the current one is refused")
+            eq(voided, [], "and nothing was voided at the courier")
+            ok(not copilot._load_dispatch()["12345"].get("canceled"), "T2 is untouched")
+            r2 = post("/api/dispatch/cancel", {"order_id": 12345, "tracking_number": "T2"})
+            eq(r2.status_code, 200, r2.text)
+            eq(voided, ["T2"], "the current shipment cancels normally")
+        finally:
+            copilot.worldoptions.cancel = saved
+    with_accounts(go)
+
+@test
+def t_a_sub_minute_clock_cycle_cannot_flush_the_payroll_log():
+    def go():
+        ensure_auth()
+        pt, sess, _pw = ready_user("Flick", "flick", role="parttime")
+        before = len(copilot._load_work()["sessions"])
+        for _ in range(3):
+            post_s(sess, "/api/work/clock", {"op": "in"})
+            r = post_s(sess, "/api/work/clock", {"op": "out"}).json()
+            ok(r.get("dropped"), "a sub-minute cycle is not recorded: " + str(r))
+        eq(len(copilot._load_work()["sessions"]), before,
+           "so the fixed-size work log cannot be evicted by clocking in and out")
+    with_accounts(go)
+
+@test
+def t_an_enquiry_email_cannot_edit_an_existing_contact():
+    """Anyone can email the public address claiming to be a customer. A
+    website enquiry may CREATE a contact, but it must never mutate one - and
+    above all never stamp edited_here, which is permanent and would freeze
+    that contact against every future Pipedrive import."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        per = post("/api/crm/contact", {"op": "person_add", "name": "Real Customer",
+                                        "emails": ["real@customer.com"],
+                                        "phones": ["0191 111 1111"]}).json()["id"]
+        before = dict(copilot._load_crm()["persons"][per])
+        copilot._crm_file_enquiry({"id": "spam1", "from_email": "x@spam.com"},
+                                  {"email": "real@customer.com", "name": "Not Them",
+                                   "phone": "07000 000000", "company": "Fake Ltd",
+                                   "message": "please call this number"})
+        after = copilot._load_crm()["persons"][per]
+        eq(after["phones"], before["phones"], "the forged phone number is NOT added")
+        ok(not after.get("edited_here"), "and the contact is not frozen against imports")
+        eq(after.get("org_id", ""), before.get("org_id", ""), "nor re-orged")
+        deal = [d for d in copilot._load_crm()["deals"].values()
+                if d.get("mail_thread_id") == "spam1"][0]
+        note = " ".join(n["text"] for n in deal["notes"])
+        ok("07000 000000" in note, "the claim is kept in the deal note for a human to judge")
+    with_mail(go)
 
 @test
 def t_deleting_a_contact_respects_open_leads_and_tombstones_the_import():

@@ -1091,15 +1091,19 @@ async def set_order_payment_terms_net30(order_id: int) -> dict:
         errs = (((m.get("data") or {}).get("paymentTermsCreate") or {}).get("userErrors")) or []
         if errs:
             msg = "; ".join(str(e.get("message") or "") for e in errs)[:200]
-            # An order that already carries terms is the goal state, not a fault:
-            # re-releasing an order must stay idempotent.
-            if "already" in msg.lower() or "exist" in msg.lower():
-                return {"ok": True, "already": True}
-            # A cached template id that Shopify no longer accepts (deleted and
-            # recreated with a new gid) would otherwise fail every release for
-            # the life of the process. Drop it so the next call re-discovers.
-            if "template" in msg.lower() or "not found" in msg.lower() or "invalid" in msg.lower():
+            low = msg.lower()
+            # Order matters. A cached template id Shopify no longer accepts
+            # (deleted and recreated with a new gid) must be dropped and
+            # REPORTED - not swallowed. "does not exist" contains "exist", so
+            # testing the success case first turned every missing-template
+            # failure into a cheerful "already on the order".
+            if "template" in low or "not found" in low or "invalid" in low or "does not exist" in low:
                 _net30_template["id"] = ""
+                return {"ok": False, "reason": "user_error", "detail": msg}
+            # An order that already carries terms IS the goal state: re-releasing
+            # must stay idempotent.
+            if "already" in low:
+                return {"ok": True, "already": True}
             return {"ok": False, "reason": "user_error", "detail": msg}
         return {"ok": True}
     except httpx.HTTPStatusError as e:

@@ -8603,20 +8603,22 @@ def _crm_file_enquiry(t: dict, parsed: dict) -> str:
                   "created_at": _crm_now(), "updated_at": _crm_now(), "notes": []}
         d["persons"][person["id"]] = person
     else:
-        # A known customer enquiring again: enrich, never overwrite. New
-        # details are gizmo edits and protected as such.
-        changed = False
-        if phone and phone.lower() not in [str(x).lower() for x in (person.get("phones") or [])]:
-            person.setdefault("phones", []).append(phone)
-            person["phones"] = person["phones"][:8]
-            changed = True
-        if org_id and not person.get("org_id"):
-            person["org_id"] = org_id
-            changed = True
-        if changed:
-            person["updated_at"], person["edited_here"] = _crm_now(), True
+        # A known customer enquiring again. Everything here was parsed out of
+        # an email ANYONE can send to the public shared address while claiming
+        # to be them, so it does not touch the existing record: no appended
+        # phone number, no org, and above all no edited_here stamp, which is
+        # permanent and would freeze that contact against every future
+        # Pipedrive import. The claim lives in the deal's note instead, where
+        # a human can act on it.
+        pass
     stage = _crm_enquiry_stage(d)
     note = str(parsed.get("message") or t.get("snippet") or "").strip()[:CRM_NOTE_CAP]
+    # Details the form claimed that were NOT written onto the contact record
+    # ride in the note, so nothing is lost and nothing is trusted.
+    claimed = [x for x in (("phone " + phone) if phone else "",
+                           ("company " + company) if company else "") if x]
+    if claimed:
+        note = (note + "\n\nGiven on the form: " + ", ".join(claimed)).strip()[:CRM_NOTE_CAP]
     deal = {"id": _crm_id(d, "d"), "title": (name + " - website enquiry")[:200],
             "value": 0.0, "currency": "GBP", "stage_id": stage,
             "person_id": person["id"], "org_id": org_id or person.get("org_id") or "",
@@ -8667,7 +8669,13 @@ async def _mail_enquiries_file(store: dict) -> None:
                     if hit:
                         parsed["email"] = hit.group(0)
             except Exception as e:
+                # Without the body there is nothing to file but the envelope,
+                # which for a Shopify notification is the STORE's own address:
+                # filing it would mint a bogus contact and a deal named after
+                # the shop, then mark the thread done so it never retried.
+                # Leave the flag alone and let the next sync try again.
                 logger.warning("mail: enquiry body read failed for %s: %s", t.get("id"), e)
+                continue
             deal_id = _crm_file_enquiry(t, parsed)
             t["crm_deal_id"], t["enquiry"] = deal_id, "done"
             filed_today += 1
@@ -9397,6 +9405,59 @@ def _session_uid(raw: Optional[str]) -> Optional[str]:
     return str(row.get("uid") or "") or None
 
 
+async def _net30_on_release(registry: dict, order_id) -> str:
+    """Start an account order's 30-day clock when it is released to production.
+
+    Every path that moves Unprocessed -> IP is a release: the Ready-to-make
+    button, the missed-orders strip, AND printing the labels (which is the
+    ordinary way an order enters the workbench). Attaching terms on only one
+    of them meant the normal lifecycle produced an invoice with no due date.
+    Returns a note for the caller to surface; '' when the order is not an
+    account order. Never raises: the release itself must not fail with this."""
+    if _payment_terms_writer is None:
+        return ""
+    try:
+        o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+        if not _ok(o):
+            # A read that FAILED is not proof the order is not on account.
+            return "Could not check whether this order needs 30-day payment terms."
+        if not any(_norm_key(t) == _norm_key(PO_UNPAID_TAG) for t in _order_tags(o)):
+            return ""
+    except Exception:
+        logger.exception("net30: pre-release order read failed for %s", order_id)
+        return "Could not check whether this order needs 30-day payment terms."
+    try:
+        r = await _payment_terms_writer(int(order_id))
+    except Exception:
+        logger.exception("net30: attach failed for %s", order_id)
+        return "Released, but the 30-day payment terms could not be added."
+    if r.get("ok"):
+        return ("30-day payment terms were already on the order."
+                if r.get("already") else "30-day payment terms added.")
+    return ("Released, but the 30-day payment terms could not be added: "
+            + str(r.get("detail") or "unknown error"))
+
+
+def _live_uid(request) -> str:
+    """The caller's gizmo account id from the app session, but ONLY if that
+    account is still real: present, switched on, not deleted, and past the
+    forced first-password change. _session_uid alone answers "this token
+    parses", which is not the same question - reading it raw let a starter
+    password reach a route that _authorize would have refused."""
+    uid = _session_uid(request.headers.get("x-app-session")) or ""
+    if not uid:
+        return ""
+    u = _team_user(uid)
+    if not u or u.get("deleted") or not u.get("active", True) or u.get("must_change"):
+        return ""
+    return uid
+
+
+def _uid_has_tab(uid: str, tab: str) -> bool:
+    tabs = _user_tabs(uid)
+    return tabs is None or tab in tabs
+
+
 def _dav_drop_cache(uid: str) -> None:
     """A password change or revocation must also forget the drive's cached
     credential, or the OLD password could mount for up to ten more minutes."""
@@ -9547,6 +9608,9 @@ def _tab_denied(request: Request) -> Optional[JSONResponse]:
 # ---------------------------------------------------------------------------
 WORK_PATH = os.environ.get("WORK_PATH", "/data/worklog.json")
 WORK_KEEP = int(os.environ.get("WORK_KEEP", "2000"))
+# Shorter than this is a mis-tap, not a shift. It also stops the fixed-size
+# work log being flushed by anyone willing to clock in and out repeatedly.
+WORK_MIN_SECS = int(os.environ.get("WORK_MIN_SECS", "60"))
 _work_mem: Optional[dict] = None
 
 
@@ -9653,6 +9717,28 @@ def _events_flush() -> None:
 
 
 atexit.register(_events_flush)
+
+
+_login_noise = {"hour": "", "count": 0, "logged": 0}
+LOGIN_NOISE_ROWS = 10      # ledger rows per hour for unknown-username failures
+
+
+def _track_login_noise(username: str) -> None:
+    """Failed logins for usernames that do not exist are the one ledger write
+    an unauthenticated caller can drive. Log the first few an hour in full,
+    then count silently and say so once - the audit history must not be
+    evictable by anyone who can reach the login form."""
+    hour = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
+    if _login_noise["hour"] != hour:
+        _login_noise.update({"hour": hour, "count": 0, "logged": 0})
+    _login_noise["count"] += 1
+    if _login_noise["logged"] < LOGIN_NOISE_ROWS:
+        _login_noise["logged"] += 1
+        _track("", "auth", "failed login", f"unknown username {username[:40]}")
+    elif _login_noise["logged"] == LOGIN_NOISE_ROWS:
+        _login_noise["logged"] += 1
+        _track("", "auth", "failed logins continuing",
+               "further unknown-username attempts this hour are not being listed")
 
 
 def _track(sub: Optional[str], area: str, action: str, detail: str = "") -> None:
@@ -11973,13 +12059,21 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     _track(_who, "production", "printed labels",
                            str(len(ids)) + (" order" if len(ids) == 1 else " orders"))
                 # Printing moves the order into production: Unprocessed -> IP.
-                notes = []
+                # That IS a release, so an account order's 30-day clock starts
+                # here too - this is the ordinary way an order reaches the
+                # workbench, and it used to be the path that forgot.
+                notes, terms_notes = [], []
                 for oid in ids:
                     okd, note = await _sync_order_tags(registry, oid,
                                                        add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG])
                     if not okd and note:
                         notes.append(note)
+                        continue
+                    tn = await _net30_on_release(registry, oid)
+                    if tn:
+                        terms_notes.append(tn)
                 return _json({"ok": True, "state": {str(i): _load_prod_state().get(str(i), {}) for i in ids},
+                              "terms_note": ("  ".join(terms_notes[:3]) if terms_notes else ""),
                               "tag_note": (notes[0] if notes else ""),
                               "state_note": ("" if stamped else "Printed stamps couldn't be saved; "
                                              "the list may show these as unprinted after a reload.")})
@@ -13634,7 +13728,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # business at the door.
         vague = _json({"error": "That username and password do not match."}, 401)
         if not u:
-            _track("", "auth", "failed login", f"unknown username {username[:40]}")
+            # Coalesced, not one row per attempt. The ledger is a fixed-size
+            # FIFO, and this endpoint is reachable by any Shopify staff user of
+            # the store with no gizmo account at all - unbounded rows here let
+            # a burst of bad logins flush the whole audit history out of it.
+            _track_login_noise(username)
             return vague
         if str(u.get("lock_until") or "") > now.isoformat():
             # Locked answers exactly like wrong: a different reply would tell
@@ -14302,6 +14400,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     ws["secs"] = max(0, int((now - datetime.fromisoformat(ws["start"])).total_seconds()))
                 except Exception:
                     ws["secs"] = 0
+                # A shift shorter than a minute is a mis-tap, not work. It is
+                # dropped rather than appended, because the log is a fixed-size
+                # FIFO: without this, anyone could clock in and out a couple of
+                # thousand times and quietly evict every real shift for every
+                # member of staff from the payroll record.
+                if ws["secs"] < WORK_MIN_SECS:
+                    _write_work(d)
+                    _track(who, "work", "clocked out", "under a minute, not recorded")
+                    return _json({"ok": True, "session": ws, "dropped": True,
+                                  "note": "That was under a minute, so it was not added to "
+                                          "the work log."})
                 d["sessions"].append(ws)
                 if len(d["sessions"]) > WORK_KEEP:
                     d["sessions"] = d["sessions"][-WORK_KEEP:]
@@ -14590,42 +14699,21 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not oid:
             return _json({"error": "No order id given."}, 400)
         try:
-            # Read the order BEFORE the tag move: releasing an account order
-            # (the "purchase order unpaid" tag) is the moment its 30-day
-            # payment clock starts in Shopify.
-            po_unpaid = False
-            try:
-                o = await _tool_json(registry, "shopify_get_order", {"order_id": oid})
-                po_unpaid = _ok(o) and any(_norm_key(t) == _norm_key(PO_UNPAID_TAG)
-                                           for t in _order_tags(o))
-            except Exception:
-                logger.exception("queue: pre-release order read failed for %s", oid)
             okd, note = await _sync_order_tags(registry, oid,
                                                add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG])
             if not okd:
                 return _json({"error": note or "Couldn't tag the order."}, 502)
             nm = re.sub(r"[^#\w-]", "", str(body.get("name") or ""))[:20] or f"order {oid}"
             _track(_who, "production", "released to make", nm)
-            terms_note = ""
-            if po_unpaid:
-                # Best-effort and SAID OUT LOUD either way: the release is the
-                # primary action and must not fail with it, but a purchase
-                # order silently missing its payment terms is an unpaid
-                # invoice nobody chases.
-                if _payment_terms_writer is None:
-                    terms_note = "Payment terms are not enabled on this server."
-                else:
-                    r = await _payment_terms_writer(oid)
-                    if r.get("ok"):
-                        terms_note = ("30-day payment terms were already on the order."
-                                      if r.get("already") else "30-day payment terms added.")
-                        _track(_who, "production", "added 30-day payment terms", nm)
-                    else:
-                        terms_note = ("Released, but the 30-day payment terms could not "
-                                      "be added: " + str(r.get("detail") or "unknown error"))
-                        logger.warning("payment terms failed for %s: %s", oid, r)
-            return _json({"ok": True, "po_unpaid": po_unpaid, "terms_note": terms_note,
-                          "terms_ok": (not po_unpaid) or terms_note.startswith("30-day")})
+            # Best-effort and SAID OUT LOUD either way: the release is the
+            # primary action and must not fail with it, but a purchase order
+            # silently missing its payment terms is an unpaid invoice nobody
+            # chases. Shared with the print path so every release behaves alike.
+            terms_note = await _net30_on_release(registry, oid)
+            if terms_note.startswith("30-day"):
+                _track(_who, "production", "added 30-day payment terms", nm)
+            return _json({"ok": True, "po_unpaid": bool(terms_note), "terms_note": terms_note,
+                          "terms_ok": (not terms_note) or terms_note.startswith("30-day")})
         except Exception:
             logger.exception("Queue tagging failed")
             return _json({"error": "Couldn't tag the order."}, 500)
@@ -15211,14 +15299,32 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         tn = str(body.get("tracking_number") or "").strip()
         if not tn:
             return _json({"error": "No tracking number given."}, 400)
-        try:
-            res = await worldoptions.cancel(tn)
-        except worldoptions.WorldOptionsError as e:
-            return _json({"error": str(e)}, 400)
-        except Exception:
-            logger.exception("dispatch cancel failed")
-            return _json({"error": "Couldn't cancel the shipment."}, 500)
         oid = _shipment_key(body)
+        # The tracking number and the order key arrive as two INDEPENDENT
+        # client values, and the shipment modal is built once at open time. A
+        # stale tab could therefore void T1 and stamp "cancelled" onto T2 - a
+        # live, paid label - which then unblocks a third booking. Bind them:
+        # the number must be the order's CURRENT shipment. The whole exchange
+        # runs under the dispatch lock, the same one the booking path holds,
+        # so a cancel cannot interleave with a book.
+        async with _dispatch_lock(oid or tn):
+            if oid:
+                cur = (_load_dispatch().get(str(oid)) or {})
+                have = str(cur.get("tracking_number") or "").strip()
+                if have and have != tn:
+                    return _json({"error": "That tracking number is not this order's current "
+                                           "shipment - it was re-booked since this page was "
+                                           "opened. Refresh and try again."}, 409)
+            try:
+                res = await worldoptions.cancel(tn)
+            except worldoptions.WorldOptionsError as e:
+                return _json({"error": str(e)}, 400)
+            except Exception:
+                logger.exception("dispatch cancel failed")
+                return _json({"error": "Couldn't cancel the shipment."}, 500)
+            return await _finish_cancel(oid, tn, res, _who)
+
+    async def _finish_cancel(oid, tn, res, _who):
         note = ""
         if oid:
             entry = (_load_dispatch().get(str(oid)) or {})
@@ -15229,6 +15335,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _update_dispatch(oid, _mark_cancelled)
             except DispatchStoreUnwritable:
                 logger.exception("could not record the cancellation of %s", oid)
+                return _json({"error": "The shipment was cancelled at World Options, but that "
+                                       "could not be recorded here. Do NOT re-book yet: check "
+                                       "the data volume, then refresh."}, 500)
             _track(_who, "dispatch", "cancelled a shipment",
                    (entry.get("order_name") or str(oid))[:30])
             # A pasted-address shipment has no order behind it: the void at World
@@ -15362,11 +15471,32 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         pre = _pre_checks(request)
         if pre:
             return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            logger.warning("print-labels sign: 401 (auth header present=%s, origin=%s)",
-                           bool(request.headers.get("authorization")), request.headers.get("origin"))
+        # The print action runs INSIDE Shopify's order page, where App Bridge
+        # gives the extension an id token and nothing else - it cannot carry
+        # the app's own session (different origin, no shared storage). So the
+        # embed token is the perimeter here: it proves the caller is signed
+        # into THIS store's Shopify admin. _authorize additionally demands an
+        # app session, which no extension can ever satisfy, so requiring it
+        # made every print action 401 - the feature was dead, and a test that
+        # only checked for the word "Unauthorized" kept quiet about it.
+        # When a session IS present (the app's own UI) it is honoured below,
+        # so in-app callers still meet the Production Manager tab check.
+        if not SHOPIFY_API_SECRET:
             return JSONResponse({"error": "Unauthorized"}, status_code=401, headers={**_API_HEADERS, **cors})
+        tok = ""
+        auth_hdr = request.headers.get("authorization", "")
+        if auth_hdr.startswith("Bearer "):
+            tok = auth_hdr[7:]
+        try:
+            _verify_session_token(tok)
+        except Exception:
+            logger.warning("print-labels sign: 401 (auth header present=%s, origin=%s)",
+                           bool(auth_hdr), request.headers.get("origin"))
+            return JSONResponse({"error": "Unauthorized"}, status_code=401, headers={**_API_HEADERS, **cors})
+        signer = _live_uid(request)
+        if signer and not _uid_has_tab(signer, "labels"):
+            return JSONResponse({"error": "Production Manager is switched off for your account."},
+                                status_code=403, headers={**_API_HEADERS, **cors})
         body = await _read_json_capped(request)
         if body is None:
             return JSONResponse({"error": "Request too large."}, status_code=413, headers={**_API_HEADERS, **cors})
@@ -15446,12 +15576,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # could hand-drive this URL to read orders and release them to
             # production. Earlier this check only ran "if doc_who" - so
             # omitting the header skipped it entirely.
-            doc_who = _session_uid(request.headers.get("x-app-session")) or ""
-            if not doc_who:
-                return deny("Open this from the Store Copilot app, or use the "
-                            "print button on the order.")
-            tabs = _user_tabs(doc_who)
-            if tabs is not None and "labels" not in tabs:
+            # A LIVE account only: _session_uid alone would accept a session
+            # belonging to a switched-off, deleted, or still-on-its-starter-
+            # password account, which every other route refuses.
+            doc_who = _live_uid(request)
+            if doc_who and not _uid_has_tab(doc_who, "labels"):
                 return deny("Production Manager is switched off for your account.")
 
         ids = []

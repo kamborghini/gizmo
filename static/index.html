@@ -160,6 +160,14 @@
         .ov-hero h2 { font-size: 20px; margin: 0 0 4px; font-weight: 600; letter-spacing: -.03em; }
         .ov-hero p { margin: 0; color: var(--ink-2); font-size: 14px; line-height: 1.55; max-width: 72ch; }
         .ov-updated { font-size: 11px; color: var(--ink-3); margin-left: auto; white-space: nowrap; padding-top: 6px; }
+        /* On a phone the badge, the gaps and this stamp left the heading and
+           its sentence 138px of a 300px row - a four-line ribbon. The stamp
+           takes its own line instead, and the text gets the width. */
+        @media (max-width: 640px) {
+            .ov-hero { flex-wrap: wrap; gap: 12px; }
+            .ov-hero > div:not(.badge) { flex: 1 1 200px; min-width: 0; }
+            .ov-updated { margin-left: 56px; padding-top: 0; flex-basis: 100%; }
+        }
         /* KPI cards: uppercase micro-label + large figure + colored delta */
         .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-bottom: 24px; }
         .stat { position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm);
@@ -510,7 +518,13 @@
             text-decoration: none; font-weight: 600; }
         .proof-ext:hover { text-decoration: underline; }
         /* ---- production lifecycle segments + dispatch ---- */
-        .lbl-seg { display: inline-flex; gap: 4px; background: var(--bg-2); border: 1px solid var(--border-2);
+        /* flex-wrap, not nowrap: at 375px a five-item bar measured 422px wide,
+           so its LAST segment sat past the viewport with nothing scrolling -
+           the CRM's Insights and the Production Manager's Custom Shipments
+           were unreachable on a phone. Wrapping keeps every segment tappable
+           inside the same track. */
+        .lbl-seg { display: inline-flex; flex-wrap: wrap; gap: 4px; background: var(--bg-2);
+            border: 1px solid var(--border-2); max-width: 100%;
             border-radius: var(--r-sm); padding: 4px; margin-bottom: 12px; }
         .lbl-segbtn { background: transparent; border: 0; color: var(--ink-3); font: inherit; font-size: 12px;
             font-weight: 600; padding: 4px 12px; border-radius: 6px; cursor: pointer; }
@@ -861,6 +875,17 @@
             .crm-chev-s { flex: 1 1 30%; clip-path: none !important; border-radius: 6px; }
             .crm-bar-lab { width: 92px; font-size: 11px; }
             .crm-bar-val { width: 66px; font-size: 11px; }
+            /* Order and email rows are built from hard min-widths plus a row
+               of buttons whose min-content exceeds a 390px phone, so they
+               spilled past the card and pushed the page sideways. On a phone
+               they wrap onto a second line instead, and the floors relax. */
+            .lbl-row { flex-wrap: wrap; padding: 12px; }
+            .lbl-num { min-width: 0; }
+            .lbl-who { min-width: 0; flex: 1 1 100%; }
+            .lbl-actions { flex: 1 1 100%; justify-content: flex-start; }
+            .mrow { flex-wrap: wrap; }
+            .msubj { flex: 1 1 100%; order: 5; }
+            .mfrom { min-width: 0; flex: 1 1 auto; }
         }
         @media (max-width: 640px) { .disp-addr-grid { grid-template-columns: 1fr; } }
         .disp-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
@@ -988,19 +1013,24 @@
             border: 1px solid var(--border-2); margin-bottom: 8px; }
         .lia-seg.within { background: var(--win-bg); }
         .lia-seg.soon { background: var(--warn-bg); }
+        /* The four overdue buckets were the SAME pink, so the aged-debt bar -
+           whose entire job is showing how deep the debt is aged - read as one
+           undifferentiated block. A ramp from the danger tint to full danger. */
         .lia-seg.o1 { background: var(--danger-bg); }
-        .lia-seg.o2 { background: var(--danger-bg); }
-        .lia-seg.o3 { background: var(--danger-bg); }
-        .lia-seg.o4 { background: var(--danger-bg); }
+        .lia-seg.o2 { background: #f6bdb0; }
+        .lia-seg.o3 { background: #e07a5f; }
+        .lia-seg.o4 { background: var(--danger); }
         .lia-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 11px; color: var(--ink-2); margin-bottom: 16px; }
         .lia-leg-item { display: inline-flex; align-items: center; gap: 4px; }
         .lia-dot { width: 9px; height: 9px; border-radius: 6px; display: inline-block; }
-        .lia-dot.within { background: var(--win-bg); }
-        .lia-dot.soon { background: var(--warn-bg); }
-        .lia-dot.o1 { background: var(--danger-bg); }
-        .lia-dot.o2 { background: var(--danger-bg); }
-        .lia-dot.o3 { background: var(--danger-bg); }
-        .lia-dot.o4 { background: var(--danger-bg); }
+        /* Legend swatches use the FOREGROUND tokens: the -bg tints were almost
+           the page colour, so the key read as blank space. */
+        .lia-dot.within { background: var(--win); }
+        .lia-dot.soon { background: var(--warn); }
+        .lia-dot.o1 { background: #f3a693; }
+        .lia-dot.o2 { background: #f6bdb0; }
+        .lia-dot.o3 { background: #e07a5f; }
+        .lia-dot.o4 { background: var(--danger); }
         .lia-name { font-size: 14px; font-weight: 600; min-width: 150px; }
         .lbl-chip.deep { background: var(--danger-bg); color: var(--danger); border-color: rgba(239,68,68,.6); }
         .cov-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -3925,7 +3955,10 @@
                     row.append(el('div', 'lia-name', c.name));
                     const mid = el('div', 'lbl-who');
                     const line = el('span', 'lbl-nameline');
-                    line.append(el('b', null, liaMoney(c.total, cur, 0)));
+                    /* .lbl-name, not a bare <b>: the nameline's shrink rule is
+                       scoped to that class, so without it the money figure
+                       refused to give way and the chips were cut in half. */
+                    line.append(el('b', 'lbl-name', liaMoney(c.total, cur, 0)));
                     if (c.overdue > 0) line.append(el('span', 'lbl-chip bad', 'OVERDUE ' + liaMoney(c.overdue, cur, 0)));
                     else line.append(el('span', 'lbl-chip made', 'WITHIN TERMS'));
                     if (c.last_chased && c.last_chased.at) {
@@ -5040,7 +5073,7 @@
                     m.textContent = 'Kept ' + money(tt.margin) + (tt.margin_pct != null ? '  (' + tt.margin_pct + '%)' : '');
                     head2.append(m);
                     out.append(head2);
-                    const wrap = el('div', 'tablewrap');
+                    const wrap = el('div', 'ktable-wrap');
                     const tb = el('table', 'ktable');
                     tb.innerHTML = '<thead><tr><th>Order</th><th>Customer</th><th>Sent</th>'
                         + '<th class="num">Revenue</th><th class="num">Goods</th><th class="num">Courier</th>'
@@ -5119,7 +5152,7 @@
                     if (rq !== maniReq) return;
                     out.innerHTML = ''; current = d;
                     if (!d.rows.length) { out.append(el('div', 'cov-line', 'Nothing was booked on this day.')); return; }
-                    const wrap = el('div', 'tablewrap');
+                    const wrap = el('div', 'ktable-wrap');
                     const tb = el('table', 'ktable');
                     tb.innerHTML = '<thead><tr><th>Time</th><th>Order</th><th>Customer</th><th>Courier</th>'
                         + '<th>Tracking</th><th class="num">Courier ex VAT</th><th class="num">Customer paid</th></tr></thead>';
@@ -11002,7 +11035,8 @@
             x.onclick = close;   // Backdrop clicks never close a window here; the X is the way out.
             head.append(x);
             const body = el('div', 'modal-body fprev-body');
-            body.append(loader());
+            (function(){ const t = el('div', 'thinking');
+                t.append(loader(), el('span', null, 'Opening\u2026')); body.append(t); })();
             const foot = el('div', 'modal-foot');
             foot.append(el('span', 'fprev-meta',
                 fmtBytes(f.size) + ' · ' + fmtDate(f.uploaded_at || f.created_at)
@@ -11914,7 +11948,9 @@
         function renderTeamWork(host) {
             const wrap = el('div');
             host.append(wrap);
-            wrap.append(loader());
+            (function(){ const t = el('div', 'thinking');
+                t.append(loader(), el('span', null, 'Reading the clock\u2026'));
+                wrap.append(t); })();
             api('/api/work/board', {}).then(d => {
                 wrap.innerHTML = '';
                 const nm = (uid) => (d.names || {})[uid] || uid;
