@@ -836,6 +836,27 @@ def t_the_deal_board_can_be_worked_without_a_mouse():
     ok("e.key === 'Enter' || e.key === ' '" in fn, "Enter and Space open it")
 
 
+@test
+def t_a_failed_load_is_not_reported_as_an_empty_list():
+    """Both tabs cached into a module-level array and swallowed the read error
+    into an empty catch, so a 500 rendered the empty state - whose copy actively
+    lies, telling the merchant nothing has been saved yet. Reproduced against a
+    forced 500 in the browser: Skills said 'No skills yet'."""
+    ok("function loadFailure" in SCRIPT, "one shared notice, so the two tabs cannot drift")
+    for name, var in (("loadMemory", "memoryLoadErr"), ("loadSkills", "skillsLoadErr")):
+        fn = re.search(r"async function " + name + r"\(\).*?\n        \}", SCRIPT, re.S).group(0)
+        ok(var + " = ''" in fn, "%s clears the previous failure before it reads" % name)
+        ok("catch (e) { " + var in fn or var + " = e.message" in fn,
+           "%s records the failure instead of swallowing it" % name)
+    for render, var in (("renderMemory", "memoryLoadErr"), ("renderSkills", "skillsLoadErr")):
+        fn = re.search(r"function " + render + r"\(\).*?\n        \}", SCRIPT, re.S).group(0)
+        ok("if (" + var + ")" in fn,
+           "%s shows the failure instead of the empty state" % render)
+        ok("loadFailure(" in fn, "%s offers the retry" % render)
+    ok("it is unknown" in SCRIPT,
+       "and the copy says the list is unknown rather than empty")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

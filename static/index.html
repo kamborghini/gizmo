@@ -1266,6 +1266,8 @@
         .msg.error:not(:has(.bubble)) { background: var(--danger-bg); border: 1px solid var(--border);
             color: var(--danger); padding: 12px 16px; border-radius: var(--r); font-size: 13px; }
 
+        .load-failed { display: flex; align-items: center; justify-content: space-between;
+            gap: 12px; flex-wrap: wrap; margin: 4px 0 0; }
         .thinking { display: flex; align-items: center; gap: 12px; color: var(--ink-2); font-size: 13px; }
         .thinking .three-body { --uib-size: 24px; --uib-speed: .8s; --uib-color: var(--accent);
             position: relative; display: inline-block; flex: none; height: var(--uib-size); width: var(--uib-size);
@@ -3509,11 +3511,25 @@
 
         /* ---------- memory ---------- */
         let memories = [];
+        let memoryLoadErr = '';   // a failed read is not an empty list
         let knowledge = {};
         let learning = false;
         let impact = [];
+        /* An empty list and a failed load look identical once the error is
+           swallowed, and the empty state's copy actively lies about it: it says
+           nothing has been saved yet when the server never answered. Every tab
+           that caches into a module-level array needs this. */
+        function loadFailure(msg, retry) {
+            const box = el('div', 'msg error load-failed');
+            box.append(el('div', null, msg));
+            const b = el('button', 'btn'); b.textContent = 'Try again';
+            b.onclick = retry; box.append(b);
+            return box;
+        }
         async function loadMemory() {
-            try { const d = await api('/api/memory', {}); if (d && Array.isArray(d.memories)) memories = d.memories; } catch (e) {}
+            memoryLoadErr = '';
+            try { const d = await api('/api/memory', {}); if (d && Array.isArray(d.memories)) memories = d.memories; }
+            catch (e) { memoryLoadErr = e.message || 'Could not read your notes.'; }
             try { const k = await api('/api/learn', {}); knowledge = (k && k.knowledge) || {}; } catch (e) {}
             try { const im = await api('/api/impact', {}); if (im && Array.isArray(im.impact)) impact = im.impact; } catch (e) {}
             if ($('view-memory').classList.contains('active')) renderMemory();
@@ -3691,6 +3707,10 @@
             const closed = memories.filter(m => m.type === 'followup' && m.status !== 'open');
             if (!openFu.length && !facts.length && !learned.length && !closed.length) {
                 box.append(el('div', 'section-title', 'Notes'));
+                if (memoryLoadErr) {
+                    box.append(loadFailure('Your notes could not be read, so this list is not empty, it is unknown. ' + memoryLoadErr, loadMemory));
+                    return;
+                }
                 const e = el('div', 'empty'); e.style.margin = '4px 0 0';
                 e.append(el('div', null, "No notes yet. As you chat, the copilot captures key facts, decisions, your preferences, and proven learnings here."));
                 box.append(e); return;
@@ -3703,10 +3723,13 @@
 
         /* ---------- skills ---------- */
         let skills = [];
+        let skillsLoadErr = '';    // a failed read is not an empty list
         let skillEditId = null;
         const SKILL_BODY_MAX = 6000, SKILL_TITLE_MAX = 120;
         async function loadSkills() {
-            try { const d = await api('/api/skills', {}); if (d && Array.isArray(d.skills)) skills = d.skills; } catch (e) {}
+            skillsLoadErr = '';
+            try { const d = await api('/api/skills', {}); if (d && Array.isArray(d.skills)) skills = d.skills; }
+            catch (e) { skillsLoadErr = e.message || 'Could not read your skills.'; }
             if ($('view-skills').classList.contains('active')) renderSkills();
         }
         async function skillOp(payload) {
@@ -3722,6 +3745,11 @@
             box.append(skillForm());
             box.append(el('div', 'section-title', 'Saved skills' + (skills.length ? ' (' + skills.length + ')' : '')));
             if (!skills.length) {
+                if (skillsLoadErr) {
+                    box.append(loadFailure('Your skills could not be read, so this list is not empty, it is unknown. '
+                        + skillsLoadErr + ' Do not add one until it loads, or you may end up with a duplicate.', loadSkills));
+                    return;
+                }
                 const e = el('div', 'empty'); e.style.margin = '4px 0 0';
                 e.textContent = 'No skills yet. Add your first above. Ideas: a brand voice guide, a discounting policy, an SEO checklist, or a product launch playbook.';
                 box.append(e); return;
