@@ -227,6 +227,10 @@
         .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3);
             margin: 26px 0 13px; display: flex; align-items: center; gap: 8px; }
         .section-title::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+        /* ::after is always the last flex item, so a control inside the heading has
+           to be ordered past it to leave the hairline in between. The heading
+           tracking would otherwise inherit and stretch the button labels. */
+        .section-title > .seg { order: 1; letter-spacing: normal; }
         .seo-score { display: flex; align-items: center; gap: 16px; background: var(--surface); border: 1px solid var(--border);
             border-radius: var(--r); padding: 20px 24px; margin-bottom: 20px; box-shadow: var(--sh-1); position: relative; overflow: hidden; }
         .seo-score .num { font-size: 32px; font-weight: 600; letter-spacing: -.04em; line-height: 1; }
@@ -244,8 +248,8 @@
         .mem-left { display: flex; align-items: flex-start; gap: 12px; flex: 1; min-width: 0; }
         .mem-text { font-size: 13px; line-height: 1.5; }
         .mem-card.done .mem-text { text-decoration: line-through; color: var(--ink-3); }
-        .mem-tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; padding: 4px 8px;
-            border-radius: 12px; flex-shrink: 0; margin-top: 0px; }
+        .mem-tag { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; padding: 0 var(--sp-2);
+            border-radius: var(--r-xs); flex-shrink: 0; margin-top: 0px; }
         .mem-tag.fact { background: var(--info-bg); color: var(--info); }
         .mem-tag.decision { background: var(--opp-bg); color: var(--opp); }
         .mem-tag.followup { background: var(--warn-bg); color: var(--warn); }
@@ -302,8 +306,11 @@
         .pfield { display: flex; flex-direction: column; gap: 4px; }
         .pfield label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); }
         .fchips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-        .fchip { display: inline-flex; align-items: center; gap: 4px; background: var(--accent-soft); border: 1px solid var(--accent-line); color: var(--accent-ink); border-radius: 12px; padding: 4px 8px 4px 12px; font-size: 12px; font-weight: 500; }
-        .fchip button { border: 0; background: transparent; color: inherit; display: grid; place-items: center; padding: 0px; border-radius: 50%; cursor: pointer; }
+        .fchip { display: inline-flex; align-items: center; gap: 4px; background: var(--accent-soft); border: 1px solid var(--accent-line); color: var(--accent-ink); border-radius: var(--r-xs); padding: 4px 8px 4px 12px; font-size: 12px; font-weight: 500; }
+        /* The 12px glyph was the whole target; the box grows around it and the
+           negative margin keeps the chip the height it was. */
+        .fchip button { border: 0; background: transparent; color: inherit; display: grid; place-items: center; padding: 0px; border-radius: 50%; cursor: pointer;
+            min-width: 24px; min-height: 24px; margin: -3px -4px; }
         .fchip button:hover { background: var(--surface-3); } .fchip button svg { width: 12px; height: 12px; display: block; }
         .psummary { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; color: var(--ink-2); font-size: 13px; margin-bottom: 12px; }
         .psummary b { color: var(--ink); font-weight: 600; }
@@ -370,7 +377,7 @@
         .action.done .check svg { opacity: 1; }
         .action.done .text { color: var(--ink-3); text-decoration: line-through; }
         .action .text { flex: 1; font-size: 13px; line-height: 1.5; }
-        .pill { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; padding: 4px 8px; border-radius: 12px; flex-shrink: 0; }
+        .pill { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; padding: 0 var(--sp-2); border-radius: var(--r-xs); flex-shrink: 0; }
         .pill.high { background: var(--danger-bg); color: var(--danger); } .pill.medium { background: var(--warn-bg); color: var(--warn); }
         .pill.low { background: var(--surface-3); color: var(--ink-2); }
 
@@ -529,7 +536,7 @@
         /* The customer name gives way first; status chips must never be cut in half. */
         .lbl-nameline > .lbl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
         .lbl-chip { font-size: 11px; font-weight: 600; letter-spacing: .06em; padding: 0px 8px;
-            border-radius: 6px; flex: none; }
+            border-radius: var(--r-xs); flex: none; }
         .lbl-chip.bad { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--border); }
         .lbl-chip.warn { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--border); }
         .lbl-chip.note { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--border-2); }
@@ -655,8 +662,6 @@
            Inbox: the shared-mailbox ownership board. Columns and cards wear
            the CRM board's clothes; only the ownership chrome is its own.
            ------------------------------------------------------------------ */
-        .mail-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
-        .mail-top .seg { margin: 0; }
         .mail-sync { font-size: 12px; color: var(--ink-3); }
         .mail-sync.err { color: var(--danger); }
         .mail-search { flex: 1 1 160px; max-width: 260px; }
@@ -677,9 +682,9 @@
         .mail-card.overdue-soft { background: var(--warn-bg); border-color: var(--border); }
         .mail-card.overdue-hard { background: var(--danger-bg); border-color: var(--border); }
         .mail-owner { display: inline-flex; align-items: center; gap: 5px; font-size: 11px;
-            background: var(--surface-3); border-radius: 12px; padding: 2px 9px; color: var(--ink-2); }
+            background: var(--surface-3); border-radius: var(--r-xs); padding: 2px 9px; color: var(--ink-2); }
         .mail-claim { border: 1px solid var(--border-2); background: var(--surface); color: var(--accent);
-            font: inherit; font-size: 11px; font-weight: 600; border-radius: 12px; padding: 2px 10px; cursor: pointer; }
+            font: inherit; font-size: 11px; font-weight: 600; border-radius: var(--r-xs); padding: 2px 10px; cursor: pointer; }
         .mail-claim:hover { border-color: var(--accent); }
         .mail-claim:disabled { background: var(--surface-2); color: var(--ink-3); border-color: var(--border); cursor: not-allowed; }
         .mail-age { margin-left: auto; font-size: 11px; color: var(--ink-3); }
@@ -699,8 +704,8 @@
         .mail-note-meta { color: var(--ink-3); font-size: 11px; margin-bottom: 2px; }
         .mail-act { font-size: 11px; color: var(--ink-3); padding: 2px 0; }
         .mail-crmchip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px;
-            background: #eef4ff; border: 1px solid #c7d7fe; color: #3538cd;
-            border-radius: 12px; padding: 2px 9px; }
+            background: var(--accent-soft); border: 1px solid var(--accent-line); color: var(--accent-ink);
+            border-radius: var(--r-xs); padding: 2px 9px; }
         .mail-statebar { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
         .mail-labelerr { font-size: 11px; color: var(--warn); }
         /* ---- the list: an inbox reads as rows, not columns ---- */
@@ -742,7 +747,7 @@
         .munread { flex: none; font-size: 11px; font-weight: 600; letter-spacing: .03em;
             color: var(--accent-ink); }
         .mcount { flex: none; font-size: 11px; color: var(--ink-3); background: var(--surface-3);
-            border-radius: 12px; padding: 0 6px; }
+            border-radius: var(--r-xs); padding: 0 6px; }
         .mnote { flex: none; display: inline-flex; color: var(--ink-3); }
         .mnote svg { width: 13px; height: 13px; }
         .mage { flex: 0 0 46px; text-align: right; font-size: 12px; color: var(--ink-3); }
@@ -771,7 +776,7 @@
         .mail-order-name { font-size: 13px; font-weight: 600; color: var(--accent-ink);
             text-decoration: none; }
         .mail-order-name:hover { text-decoration: underline; }
-        .mail-order-stage { font-size: 11px; font-weight: 600; border-radius: 12px; padding: 0 8px; }
+        .mail-order-stage { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; border-radius: var(--r-xs); padding: 0 var(--sp-2); }
         .mail-order-stage.shipped { background: var(--win-bg); color: var(--win); }
         .mail-order-stage.made { background: var(--accent-soft); color: var(--accent-ink); }
         .mail-order-stage.in-production { background: var(--warn-bg); color: var(--warn); }
@@ -797,7 +802,7 @@
         .mrule-pool { margin: 6px 0; }
         .mrule-broken { font-size: 12px; color: var(--warn); margin-top: 4px; }
         .mrule-tag { flex: none; font-size: 11px; color: var(--ink-3); background: var(--surface-3);
-            border-radius: 12px; padding: 0 6px; }
+            border-radius: var(--r-xs); padding: 0 6px; }
         .mail-draft { border: 1px solid var(--accent-line); background: var(--accent-soft);
             border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
         .mail-draft-text { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px;
@@ -1267,7 +1272,7 @@
         .resp-head .av { width: 24px; height: 24px; border-radius: 6px; background: linear-gradient(140deg, var(--accent), var(--accent-2)); display: grid; place-items: center; }
         .resp-head .av svg { width: 13px; height: 13px; color: #fff; }
         .resp-head .who { font-size: 12px; font-weight: 600; color: var(--ink); }
-        .resp-head .tag { font-size: 11px; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 12px; padding: 0px 8px; text-transform: uppercase; letter-spacing: .04em; }
+        .resp-head .tag { font-size: 11px; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: var(--r-xs); padding: 0px 8px; text-transform: uppercase; letter-spacing: .06em; }
         .summary { font-size: 16px; font-weight: 500; line-height: 1.55; letter-spacing: -.012em; margin-bottom: 16px; color: var(--ink); }
         .block { margin-bottom: 16px; }
         .msg.error .bubble { background: var(--danger-bg); border: 1px solid var(--border); color: var(--danger); padding: 12px 16px; border-radius: 12px; font-size: 13px; }
@@ -1489,7 +1494,7 @@
         .setting-title { font-size: 13px; font-weight: 600; }
         .setting-sub { font-size: 12px; color: var(--ink-2); margin-top: 4px; line-height: 1.5; }
         .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 20px; border-top: 1px solid var(--border); }
-        .g-badge { font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 12px; white-space: nowrap; }
+        .g-badge { font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: var(--r-xs); white-space: nowrap; }
         .g-badge.on { background: var(--win-bg); color: var(--win); }
         .g-badge.off { background: var(--surface-3); color: var(--ink-3); }
         .g-badge.mid { background: var(--warn-bg); color: var(--warn); }
@@ -2344,9 +2349,8 @@
         const tail = (arr, k) => (arr || []).slice(Math.max(0, (arr || []).length - k));
         const sumv = (arr) => (arr || []).reduce((a, b) => a + (+(b && b.value) || 0), 0);
         function trendsHeader(title, range, onRange) {
-            const row = el('div'); row.style.cssText = 'display:flex;align-items:center;gap:12px;margin:26px 0 13px;';
-            const t = el('div', null, title); t.style.cssText = 'font-size:11px;font-weight:var(--w-bold);text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);';
-            const sp = el('div'); sp.style.flex = '1'; row.append(t, sp);
+            const row = el('div', 'section-title');
+            row.append(el('span', null, title));
             if (onRange) row.append(segControl(RANGE_OPTS, range, onRange));
             return row;
         }
@@ -4134,7 +4138,7 @@
                             tr.append(el('td', null, r.due ? fmtDate(r.due) : 'unknown'));
                             tr.append(el('td', 'num', liaMoney(r.value, cur)));
                             tr.append(el('td', 'num', liaMoney(r.paid, cur)));
-                            const out = el('td', 'num', liaMoney(r.outstanding, cur)); out.style.fontWeight = '700';
+                            const out = el('td', 'num', liaMoney(r.outstanding, cur)); out.style.fontWeight = 'var(--w-bold)';
                             tr.append(out);
                             tr.append(el('td', null, r.terms + (r.terms_source === 'assumed' ? ' (assumed)'
                                 : r.terms_source === 'customer' ? ' (tag)' : '')));
@@ -7367,7 +7371,8 @@
             box.append(hero);
             GUIDE.forEach(sec => {
                 const card = el('div', 'card'); card.style.marginTop = '14px';
-                card.append(el('div', 'disp-subhead', sec.h));
+                const h = el('div', 'section-title', sec.h); h.style.margin = '0 0 8px';
+                card.append(h);
                 sec.body.forEach(([t, d]) => {
                     const row = el('div'); row.style.cssText = 'padding:9px 0;border-top:1px solid var(--line)';
                     row.append(el('div', 'setting-title', t), el('div', 'setting-sub', d));
@@ -9897,7 +9902,7 @@
             });
             box.append(who);
             /* ---- toolbar ---- */
-            const top = el('div', 'mail-top');
+            const top = el('div', 'lbl-toolbar');
             const counts = { open: 0, mine: 0, unassigned: 0, unread: 0, done: 0 };
             (d.threads || []).forEach(t => {
                 if (t.unread) counts.unread++;       // whatever state it is in

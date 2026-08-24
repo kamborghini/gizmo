@@ -1007,6 +1007,62 @@ def t_a_tick_box_that_is_a_div_still_answers_the_keyboard():
     ok(SCRIPT.count("ck.tabIndex = 0") == 2, "both are reachable")
 
 
+@test
+def t_every_status_chip_has_the_same_geometry():
+    """Chips split 6px against 12px roughly along tab lines, so the same kind of
+    label was a rounded rectangle in one tab and a capsule in the next. The
+    radius scale's own comment names the three steps card, control, chip, which
+    settles which of the two is the chip: --r-xs."""
+    chips = ["pill", "mem-tag", "mail-order-stage", "lbl-chip", "fchip", "mail-owner",
+             "mcount", "mrule-tag", "g-badge", "mail-claim", "mail-crmchip"]
+    for c in chips:
+        rule = re.search(r"\." + c + r" \{[^}]*\}", HTML, re.S)
+        ok(rule, "the .%s rule is still there" % c)
+        ok("border-radius: var(--r-xs)" in rule.group(0),
+           ".%s takes the chip radius from the token, not a literal" % c)
+    ok("border-radius: 12px" not in re.search(r"\.fchip \{[^}]*\}", HTML).group(0),
+       "and no chip keeps the control radius")
+
+
+@test
+def t_the_inbox_crm_chip_is_the_accent_not_a_lookalike():
+    """It ran its own #eef4ff / #c7d7fe / #3538cd, three near-misses of the
+    accent trio, so the CRM link chip was a slightly different blue from every
+    other accent-tinted chip in the app."""
+    rule = re.search(r"\.mail-crmchip \{[^}]*\}", HTML, re.S).group(0)
+    for tok in ("var(--accent-soft)", "var(--accent-line)", "var(--accent-ink)"):
+        ok(tok in rule, ".mail-crmchip reads %s" % tok)
+    for h in ("#eef4ff", "#c7d7fe", "#3538cd"):
+        ok(h not in HTML, "the near-miss %s is gone" % h)
+
+
+@test
+def t_a_heading_with_a_control_in_it_is_still_the_heading_component():
+    """trendsHeader hand-rolled .section-title from an inline style string at an
+    off-scale weight and with no hairline, so Overview's own trends heading did
+    not match the headings above and below it."""
+    fn = re.search(r"function trendsHeader.*?\n        \}", SCRIPT, re.S).group(0)
+    ok("el('div', 'section-title')" in fn, "it uses the real component")
+    ok("font-size:11px" not in fn and "font-weight" not in fn,
+       "and sets no type of its own")
+    ok(re.search(r"\.section-title > \.seg \{[^}]*order: 1", HTML),
+       "the range control is ordered past the ::after hairline, which is "
+       "always the last flex item")
+    ok(re.search(r"\.section-title > \.seg \{[^}]*letter-spacing: normal", HTML),
+       "and the heading's tracking does not leak into the button labels")
+    ok("el('div', 'disp-subhead', sec.h)" not in SCRIPT,
+       "the Guide's on-screen headings are headings, not dispatch field labels")
+
+
+@test
+def t_no_off_scale_type_is_set_from_javascript():
+    """Weights and sizes set in JS style strings never reach the stylesheet, so
+    the type scale looks closed while 700, 800 and 17px live in the renderers."""
+    for bad in ("font-weight:700", "font-weight:800", "font-weight = '700'",
+                "font-weight = '800'", "font-size:17px"):
+        ok(bad not in SCRIPT, "%r is set from JavaScript" % bad)
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
