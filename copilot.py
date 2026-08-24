@@ -8168,9 +8168,13 @@ def _files_head(key: str):
 # ---------------------------------------------------------------------------
 MAILBOX_PATH = os.environ.get("MAILBOX_PATH", "/data/mailbox.json")
 MAIL_SYNC_SECONDS = 120        # board re-syncs when its picture is older than this
-MAIL_TRACK_DAYS = 60           # how far back the working set reaches
-MAIL_DONE_KEEP_DAYS = 180      # done threads stay searchable this long
-MAIL_THREADS_CAP = 1000        # hard cap; oldest done threads fall off first
+# Two years, not sixty days: the inbox stopped being only a triage board the
+# day deals started carrying their correspondence - it is the shop's email
+# HISTORY now, and a deal's thread from last spring has to be findable.
+MAIL_TRACK_DAYS = int(os.environ.get("MAIL_TRACK_DAYS", "730"))
+MAIL_DONE_KEEP_DAYS = int(os.environ.get("MAIL_DONE_KEEP_DAYS", "730"))
+MAIL_THREADS_CAP = int(os.environ.get("MAIL_THREADS_CAP", "6000"))
+MAIL_LIST_MAX = 5000           # most threads one sync will walk from Gmail
 MAIL_MSGS_PER_THREAD = 50      # newest messages kept per thread record
 MAIL_STATES = ("unassigned", "assigned", "progress", "waiting", "done")
 MAIL_PRESENCE = ("office", "home", "out")
@@ -8693,7 +8697,7 @@ async def _mail_sync_now(force: bool = False) -> None:
                 pass
         try:
             listing = await google_mail.list_threads(
-                f"in:inbox newer_than:{MAIL_TRACK_DAYS}d", 500)
+                f"in:inbox newer_than:{MAIL_TRACK_DAYS}d", MAIL_LIST_MAX)
             listed = listing.get("threads") or []
             listing_complete = bool(listing.get("complete"))
             addr = google_mail.address().lower()

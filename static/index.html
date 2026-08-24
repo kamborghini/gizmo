@@ -9328,6 +9328,7 @@
            One owner per thread, always. Unclaimed threads age visibly.
            ================================================================== */
         let mailCache = null, mailFilter = 'open', mailQ = '', mailTimer = null;
+        let mailListCap = 400;   /* render page size; the cache holds everything */
         /* List is the default: a real inbox arrives with weeks of history in
            it, and five columns of that is a wall, not a view. The board stays
            one click away for seeing how work is spread across people. */
@@ -9575,7 +9576,7 @@
                                    { value: 'mine', label: lab('Mine', counts.mine) },
                                    { value: 'unassigned', label: lab('Unassigned', counts.unassigned) },
                                    { value: 'done', label: 'Done' }],
-                mailFilter, v => { mailFilter = v; mailSel.clear(); renderMail(); }));
+                mailFilter, v => { mailFilter = v; mailSel.clear(); mailListCap = 400; renderMail(); }));
             const search = document.createElement('input');
             search.type = 'search'; search.className = 'disp-text mail-search';
             search.placeholder = 'Search sender or subject'; search.value = mailQ;
@@ -9792,8 +9793,18 @@
                 return;
             }
             const list = el('div', 'mlist');
-            rows.forEach(t => list.append(mailRow(t)));
+            /* Two years of history is thousands of rows; the DOM gets them a
+               page at a time. Search still reaches everything - the rows are
+               all in the cache, only the RENDER is paged. */
+            rows.slice(0, mailListCap).forEach(t => list.append(mailRow(t)));
             host.append(list);
+            if (rows.length > mailListCap) {
+                const more = el('button', 'btn');
+                more.style.marginTop = '8px';
+                more.textContent = 'Show more (' + (rows.length - mailListCap) + ' older)';
+                more.onclick = () => { mailListCap += 400; renderMail(); };
+                host.append(more);
+            }
         }
         function mailOfferUndo(token, n, what) {
             /* One mis-click can move 150 emails. The offer is short-lived and

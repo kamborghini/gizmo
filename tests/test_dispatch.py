@@ -7989,6 +7989,32 @@ def t_mail_connect_ticket_expires():
     with_mail(go)
 
 @test
+def t_the_inbox_window_reaches_two_years_and_the_walk_can_get_there():
+    """60 days was a triage window; with deals carrying their correspondence
+    the inbox is the shop's email HISTORY. The window, the done-keep and the
+    cap must all agree, and the Gmail walk must actually be able to fetch a
+    two-year listing - the old fixed six-page walk silently clipped at 3000."""
+    ok(copilot.MAIL_TRACK_DAYS >= 730, f"window is {copilot.MAIL_TRACK_DAYS} days")
+    ok(copilot.MAIL_DONE_KEEP_DAYS >= copilot.MAIL_TRACK_DAYS,
+       "done threads survive as long as the window reaches")
+    ok(copilot.MAIL_THREADS_CAP > copilot.MAIL_LIST_MAX * 0.8,
+       "the store cap does not quietly undo the listing size")
+    pages = []
+    async def fake_call(method, path, params=None, **kw):
+        pages.append(dict(params or {}))
+        start = len(pages[:-1]) * 500
+        return {"threads": [{"id": f"t{start + i}", "historyId": "h"} for i in range(500)],
+                "nextPageToken": "more"}
+    saved = _gm._call
+    _gm._call = fake_call
+    try:
+        got = run_async(_gm.list_threads("in:inbox newer_than:730d", 4000))
+    finally:
+        _gm._call = saved
+    eq(len(got["threads"]), 4000, "the walk reaches what it was asked for")
+    ok(not got["complete"], "and says honestly that the mailbox holds more")
+
+@test
 def t_a_deal_carries_its_email_history_behind_the_inbox_gate():
     """The deal modal shows every shared-inbox thread with the deal's contact
     - matched on ANY of their addresses, plus the thread a website enquiry was

@@ -228,9 +228,12 @@ async def list_threads(query: str = "in:inbox", max_results: int = 100) -> dict:
     Gmail", and on a truncated page that would mean silently closing live
     customer email that merely fell off the end."""
     out, token, pages, complete = [], None, 0, True
-    per = max(1, min(int(max_results), 500))
+    want = max(1, int(max_results))
+    # Enough pages to actually reach max_results (plus one for ragged pages):
+    # the old fixed six-page walk silently clipped a two-year window at 3000.
+    max_pages = max(6, -(-want // 500) + 1)
     while True:
-        params = {"q": query, "maxResults": min(per, 500)}
+        params = {"q": query, "maxResults": min(want - len(out), 500)}
         if token:
             params["pageToken"] = token
         data = await _call("GET", "threads", params=params)
@@ -242,7 +245,7 @@ async def list_threads(query: str = "in:inbox", max_results: int = 100) -> dict:
         pages += 1
         if not token:
             break
-        if pages >= 6 or len(out) >= 3000:
+        if pages >= max_pages or len(out) >= want:
             complete = False       # a mailbox bigger than we will walk
             break
     return {"threads": out, "complete": complete}
