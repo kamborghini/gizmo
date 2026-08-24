@@ -7171,6 +7171,7 @@
         let crmQ = '', crmStatus = 'open', crmLeadsMode = 'active', crmContactsMode = 'people';
         let crmActPeriod = 'upcoming', crmActTypesOff = {}, crmActMine = false;
         let crmLabelF = '', crmOwnerF = '', crmContactsQ = '', crmContactsCap = 60;
+        const crmContactSel = new Set();   /* bulk-delete ticks, master only */
         let crmLoadedAt = 0, crmPdOpen = false;
         const CRM_TYPES = [['call', 'Call'], ['meeting', 'Meeting'], ['task', 'Task'],
                            ['deadline', 'Deadline'], ['email', 'Email'], ['lunch', 'Lunch']];
@@ -8610,9 +8611,50 @@
                     list.append(el('div', 'empty', ql ? 'Nobody matches that.' : 'Nobody here yet.'));
                     return;
                 }
+                /* A tick may only ever mean a row you can SEE - same rule as
+                   the mail bulk bar. */
+                const visible = new Set(items.map(c => c.id));
+                [...crmContactSel].forEach(id => { if (!visible.has(id)) crmContactSel.delete(id); });
+                const master = !teamMe || teamMe.role === 'master';
+                if (master && crmContactSel.size) {
+                    const bar2 = el('div', 'lbl-toolbar');
+                    const del = el('button', 'btn');
+                    del.append(ico(I.trash), document.createTextNode(
+                        'Delete ' + crmContactSel.size + ' selected'));
+                    del.onclick = async () => {
+                        if (!await uiConfirm('Delete ' + crmContactSel.size + ' selected '
+                            + (people ? 'people' : 'organisations') + '? Anyone on an open deal '
+                            + 'is skipped. This cannot be undone.',
+                            { title: 'Delete contacts', okText: 'Delete' })) return;
+                        del.disabled = true;
+                        try {
+                            const r = await crmOp('/api/crm/contact', { op: 'bulk_delete',
+                                kind: people ? 'person' : 'org', ids: [...crmContactSel] });
+                            crmContactSel.clear();
+                            if ((r.skipped || []).length)
+                                toastError('Deleted ' + r.deleted + '. Skipped (on open deals): '
+                                    + r.skipped.slice(0, 5).join(', ')
+                                    + (r.skipped.length > 5 ? '…' : ''));
+                            else toastOk('Deleted ' + r.deleted + '.');
+                            renderCRM();
+                        } catch (e) { del.disabled = false; toastError(e.message); }
+                    };
+                    const clr = el('button', 'btn', 'Clear selection');
+                    clr.onclick = () => { crmContactSel.clear(); paint(); };
+                    bar2.append(del, clr);
+                    list.append(bar2);
+                }
                 items.slice(0, crmContactsCap).forEach(c => {
                     const row = el('div', 'lbl-row');
                     row.setAttribute('role', 'button'); row.tabIndex = 0;
+                    if (master) {
+                        const cb = document.createElement('input');
+                        cb.type = 'checkbox'; cb.checked = crmContactSel.has(c.id);
+                        cb.style.cssText = 'width:17px;height:17px;accent-color:var(--accent);flex:none';
+                        cb.onclick = (e) => { e.stopPropagation();
+                            cb.checked ? crmContactSel.add(c.id) : crmContactSel.delete(c.id); paint(); };
+                        row.append(cb);
+                    }
                     const left = el('div', 'lia-name', c.name);
                     row.append(left);
                     const mid = el('div', 'lbl-who');

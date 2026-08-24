@@ -12831,6 +12831,35 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 rec["updated_at"], rec["edited_here"] = _crm_now(), True
                 return _crm_ok(d, action=("contact " + op).replace("_", " "), who=actor)
 
+            if op == "bulk_delete":
+                # Clearing test/sample contacts in one pass. Master-only and
+                # guarded per record: anyone on an OPEN deal is skipped and
+                # NAMED, never silently removed from under live pipeline.
+                if _team_role(actor) != "master":
+                    return _json({"error": "Only the master account can bulk-delete contacts."}, 403)
+                kind = "orgs" if str(body.get("kind") or "") == "org" else "persons"
+                ref = "org_id" if kind == "orgs" else "person_id"
+                ids = [str(i) for i in (body.get("ids") or []) if str(i).strip()][:500]
+                if not ids:
+                    return _json({"error": "Nothing selected."}, 400)
+                deleted, skipped = [], []
+                for cid in ids:
+                    rec = d[kind].get(cid)
+                    if not rec:
+                        continue
+                    if any(v.get(ref) == cid and v.get("status") == "open"
+                           and not v.get("deleted") for v in d["deals"].values()):
+                        skipped.append(rec.get("name") or cid)
+                        continue
+                    d[kind].pop(cid, None)
+                    deleted.append(cid)
+                if not deleted and skipped:
+                    return _json({"error": "None deleted: all "
+                                           + str(len(skipped)) + " are on open deals."}, 400)
+                return _crm_ok(d, {"deleted": len(deleted), "skipped": skipped},
+                               action="bulk-deleted contacts",
+                               detail=str(len(deleted)) + " removed", who=actor)
+
             if op == "shopify_link_sweep":
                 # Bulk fill of every unlinked contact. Master-only, like the
                 # import: it writes 2,800 records in one press.

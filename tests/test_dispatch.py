@@ -8098,6 +8098,29 @@ def t_the_inbox_window_reaches_two_years_and_the_walk_can_get_there():
     ok(not got["complete"], "and says honestly that the mailbox holds more")
 
 @test
+def t_bulk_delete_clears_sample_contacts_but_never_live_pipeline():
+    """One pass to clear hand-typed test contacts. Master-only, and anyone on
+    an OPEN deal is skipped and NAMED - live pipeline cannot be shredded by a
+    cleanup."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        junk1 = post("/api/crm/contact", {"op": "person_add", "name": "Test Person"}).json()["id"]
+        junk2 = post("/api/crm/contact", {"op": "person_add", "name": "Sample Sam"}).json()["id"]
+        live = post("/api/crm/contact", {"op": "person_add", "name": "Real Customer"}).json()["id"]
+        post("/api/crm/deal", {"op": "add", "title": "Real deal", "person_id": live, "value": 100})
+        r = post("/api/crm/contact", {"op": "bulk_delete", "kind": "person",
+                                      "ids": [junk1, junk2, live]}).json()
+        eq(r["deleted"], 2, r)
+        eq(r["skipped"], ["Real Customer"], "the live contact is skipped BY NAME")
+        d = copilot._load_crm()
+        ok(junk1 not in d["persons"] and junk2 not in d["persons"] and live in d["persons"])
+        _uid, sess, _pw = ready_user("Norma", "norma2")
+        eq(post_s(sess, "/api/crm/contact", {"op": "bulk_delete", "kind": "person",
+                                             "ids": [live]}).status_code, 403, "master only")
+    with_accounts(go)
+
+@test
 def t_the_link_sweep_matches_contacts_to_shopify_customers_without_guessing():
     """2,800 migrated contacts, linked in one crawl instead of one search at a
     time. An existing link is never touched, a person whose addresses match
