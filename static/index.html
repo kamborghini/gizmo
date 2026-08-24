@@ -711,6 +711,10 @@
         .mrow:hover { background: var(--bg-2); }
         .mrow.selected { background: var(--accent-soft); }
         .mrow.cursor { box-shadow: inset 0 0 0 2px var(--accent); }
+        /* .mlist clips its overflow and the rows fill it edge to edge, so the
+           house ring has to be drawn inside the row or its left and right
+           sides are cut away. */
+        .mrow:focus-visible { outline-offset: -2px; }
         .mail-check { width: 15px; height: 15px; flex: none; margin: 0; accent-color: var(--accent); cursor: pointer; }
         /* A 15px tick is a miss under a finger, and this one selects the email
            a bulk action is about to run on. */
@@ -1015,8 +1019,6 @@
         .disp-boxedit { display: flex; gap: 4px; align-items: center; margin-bottom: 4px; }
         .disp-boxname { flex: 1 1 auto; }
         .disp-boxdim { width: 62px; flex: none; }
-        .disp-savebar { display: flex; justify-content: flex-end; margin-top: 16px;
-            border-top: 1px solid var(--border-2); padding-top: 14px; }
         .disp-customs { border: 1px solid var(--border-2); background: var(--bg-2);
             border-radius: var(--r-sm); padding: 12px 12px; margin: 10px 0; }
         .disp-breakdown { font-size: 12px; margin-top: 4px; }
@@ -2113,7 +2115,13 @@
             actions.forEach(a => {
                 const row = el('div', 'action');
                 const ck = el('div', 'check'); ck.innerHTML = I.check;
-                row.onclick = () => row.classList.toggle('done');
+                // The role goes on the box, not the row: the row also holds the
+                // Track button, and a role=button row would swallow "Track" into
+                // its own name and prune the button out of the tree.
+                ck.setAttribute('role', 'button'); ck.setAttribute('aria-pressed', 'false');
+                ck.setAttribute('aria-label', 'Mark done'); ck.tabIndex = 0;
+                ck.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ck.click(); } });
+                row.onclick = () => ck.setAttribute('aria-pressed', String(row.classList.toggle('done')));
                 row.append(ck, el('div', 'text', a.text || ''));
                 if (a.priority) { const p = el('span', 'pill ' + a.priority, a.priority); row.append(p); }
                 const track = el('button', 'track-btn'); track.append(ico(I.tag), document.createTextNode('Track'));
@@ -2816,6 +2824,8 @@
                 ofu.slice(0, 6).forEach(m => {
                     const row = el('div', 'action');
                     const ck = el('div', 'check'); ck.innerHTML = I.check; ck.title = 'Mark done';
+                    ck.setAttribute('role', 'button'); ck.setAttribute('aria-label', 'Mark done'); ck.tabIndex = 0;
+                    ck.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ck.click(); } });
                     ck.onclick = (e) => { e.stopPropagation(); memOp({ op: 'set_status', id: m.id, status: 'done' }); };
                     row.append(ck, el('div', 'text', m.text));
                     card.append(row);
@@ -7156,7 +7166,7 @@
             }
             renderBoxes();
 
-            const foot = el('div', 'disp-savebar');
+            const foot = el('div', 'modal-foot');
             const saveB = el('button', 'btn btn-primary'); saveB.textContent = 'Save shipping settings';
             saveB.onclick = async () => {
                 const origin = {}; Object.keys(of).forEach(k => origin[k] = of[k].value.trim());
@@ -7183,7 +7193,7 @@
                 } catch (e) { saveB.disabled = false; addToast(e.message || 'Could not save'); }
             };
             foot.append(saveB);
-            body.append(foot);
+            modal.append(foot);
         }
 
         let printSeq = 0;
@@ -10256,6 +10266,16 @@
             const age = el('span', 'mage' + (stale ? ' hot' : ''), mailAgo(t.last_at));
             age.title = mailAgoLong(t.last_at);
             row.append(age);
+            row.setAttribute('role', 'button'); row.tabIndex = 0;
+            /* Guarded on target, and the event stops here: the row's own
+               checkbox and Claim button have to keep their Space and Enter,
+               and the inbox-wide Enter shortcut would otherwise also open
+               whatever row the j/k cursor last sat on. */
+            row.addEventListener('keydown', (e) => {
+                if (e.target !== row) return;
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault(); e.stopPropagation(); row.click();
+            });
             row.onclick = () => t.archive ? openMailArchive(t) : openMailThread(t.id);
             return row;
         }
@@ -10344,6 +10364,13 @@
             if (stale) age.title = 'Quiet for over a day';
             bot.append(age);
             card.append(bot);
+            card.setAttribute('role', 'button'); card.tabIndex = 0;
+            /* Guarded on target so the Claim button keeps its own Space and Enter. */
+            card.addEventListener('keydown', (e) => {
+                if (e.target !== card) return;
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault(); e.stopPropagation(); card.click();
+            });
             card.onclick = () => openMailThread(t.id);
             return card;
         }
@@ -12483,10 +12510,11 @@
                 sh.ok ? ('Connected. Dispatch couriers from the Production Manager.' + (sh.fulfillment ? '' : ' Fulfillment writer is not wired.'))
                     : sh.available ? 'Add your World Options API key to dispatch couriers.' : 'Not available on this server.');
             if (sh.available) {
-                const mng = el('button', 'g-badge mid'); mng.style.cursor = 'pointer'; mng.style.border = '0';
-                mng.textContent = sh.ok ? 'Manage' : 'Set up';
+                // A real button appended beside the badge, not instead of it:
+                // replacing it took away the row's only state readout.
+                const mng = el('button', 'btn', sh.ok ? 'Manage' : 'Set up');
                 mng.onclick = () => { $('settings-modal').classList.remove('show'); openShippingSettings(); };
-                shRow.replaceChild(mng, shRow.lastChild);
+                shRow.append(mng);
             }
             host.append(shRow);
             // Size list health

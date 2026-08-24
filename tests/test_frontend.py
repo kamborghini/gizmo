@@ -956,6 +956,57 @@ def t_deleting_a_conversation_is_reachable_and_visible():
     ok("min-width: 24px" in rule, "it also clears the minimum target size")
 
 
+@test
+def t_a_status_badge_is_never_the_control():
+    """The Shipping row built its action as a .g-badge and swapped it in over
+    the badge that was the row's state readout. So one row in a list of
+    thirteen was clickable while looking identical to twelve inert pills, and
+    it was also the only row that showed no connection state at all."""
+    ok("el('button', 'g-badge mid')" not in SCRIPT,
+       "no badge is a button")
+    ok("shRow.replaceChild(mng" not in SCRIPT,
+       "and the action no longer replaces the state readout")
+    ok("shRow.append(mng)" in SCRIPT, "it sits beside it")
+
+
+@test
+def t_save_is_pinned_where_every_other_modal_puts_it():
+    """Shipping settings put Save inside the scrolling body, so on a short
+    window it sat below the fold of a long form and looked absent."""
+    ok(".disp-savebar" not in HTML, "the one-off footer component is retired")
+    fn = re.search(r"function openShippingSettings.*?\n        \}", SCRIPT, re.S).group(0)
+    ok("el('div', 'modal-foot')" in fn, "it uses the house footer")
+    ok("modal.append(foot)" in fn, "pinned to the modal, not appended into the scroller")
+
+
+@test
+def t_the_inbox_list_can_be_worked_without_a_mouse():
+    """Every other list row in the app is a real button; the Inbox's rows and
+    cards were click-only divs."""
+    for name in ("row", "card"):
+        ok(name + ".setAttribute('role', 'button'); " + name + ".tabIndex = 0;" in SCRIPT,
+           "the mail %s announces itself and can be tabbed to" % name)
+    ok(SCRIPT.count("if (e.target !== row) return;") == 1
+       and SCRIPT.count("if (e.target !== card) return;") == 1,
+       "the key handler is guarded on target so the row's own checkbox and "
+       "Claim keep their Space and Enter")
+    ok("e.stopPropagation(); row.click();" in SCRIPT,
+       "and it stops there, or the inbox-wide Enter shortcut fires too")
+    ok(re.search(r"\.mrow:focus-visible \{[^}]*outline-offset: -2px", HTML),
+       "the ring is drawn inside the row, which .mlist would otherwise clip")
+
+
+@test
+def t_a_tick_box_that_is_a_div_still_answers_the_keyboard():
+    """The action lists build their tick as a bare div with a click handler on
+    the row, so the only way to mark something done was a mouse."""
+    ok(SCRIPT.count("ck.setAttribute('role', 'button')") == 2,
+       "both action lists give the box a role")
+    ok("ck.setAttribute('aria-pressed', String(row.classList.toggle('done')))" in SCRIPT,
+       "and the pressed state follows the row, rather than going stale")
+    ok(SCRIPT.count("ck.tabIndex = 0") == 2, "both are reachable")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
