@@ -8098,6 +8098,62 @@ def t_the_inbox_window_reaches_two_years_and_the_walk_can_get_there():
     ok(not got["complete"], "and says honestly that the mailbox holds more")
 
 @test
+def t_the_link_sweep_matches_contacts_to_shopify_customers_without_guessing():
+    """2,800 migrated contacts, linked in one crawl instead of one search at a
+    time. An existing link is never touched, a person whose addresses match
+    two DIFFERENT customers is skipped rather than guessed, and neither
+    updated_at nor edited_here is stamped - stamping 2,800 records would
+    freeze them all against a final Pipedrive import."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        p1 = post("/api/crm/contact", {"op": "person_add", "name": "Match Me",
+                                       "emails": ["JO@customer.com"]}).json()["id"]
+        p2 = post("/api/crm/contact", {"op": "person_add", "name": "Already Linked",
+                                       "emails": ["ann@x.com"],
+                                       "shopify_customer_id": 999}).json()["id"]
+        p3 = post("/api/crm/contact", {"op": "person_add", "name": "Two Hats",
+                                       "emails": ["a@one.com", "b@two.com"]}).json()["id"]
+        p4 = post("/api/crm/contact", {"op": "person_add", "name": "No Shop",
+                                       "emails": ["nobody@nowhere.com"]}).json()["id"]
+        before = {k: (v.get("updated_at"), v.get("edited_here"))
+                  for k, v in copilot._load_crm()["persons"].items()}
+        async def tools(registry, name, args):
+            if name == "shopify_list_customers":
+                return {"customers": [
+                    {"id": 71, "email": "jo@customer.com"},
+                    {"id": 72, "email": "ann@x.com"},
+                    {"id": 73, "email": "a@one.com"},
+                    {"id": 74, "email": "b@two.com"}]}
+            return {}
+        saved = copilot._tool_json
+        copilot._tool_json = tools
+        try:
+            rep = run_async(copilot._crm_shopify_link_sweep({}))
+        finally:
+            copilot._tool_json = saved
+        eq(rep["linked"], 1, rep)
+        eq(rep["already"], 1, rep)
+        eq(rep["ambiguous"], 1, rep)
+        eq(rep["unmatched"], 1, rep)
+        d = copilot._load_crm()
+        eq(d["persons"][p1]["shopify_customer_id"], 71, "matched case-insensitively")
+        eq(d["persons"][p2]["shopify_customer_id"], 999, "a hand-made link outranks the sweep")
+        ok(not d["persons"][p3].get("shopify_customer_id"), "two customers = no guess")
+        for k, v in d["persons"].items():
+            eq((v.get("updated_at"), v.get("edited_here")), before[k],
+               "linking stamps nothing that would fight a final import")
+        # The bulk op is master-only, like the import.
+        _uid, sess, _pw = ready_user("Norm", "norm")
+        eq(post_s(sess, "/api/crm/contact", {"op": "shopify_link_sweep"}).status_code, 403)
+        # And an arriving order links its own customer on the spot.
+        copilot._crm_link_order_customer({"email": "nobody@nowhere.com",
+                                          "customer": {"id": 88}})
+        eq(copilot._load_crm()["persons"][p4]["shopify_customer_id"], 88,
+           "a converting enquirer is linked the day they order")
+    with_accounts(go)
+
+@test
 def t_a_deal_carries_its_email_history_behind_the_inbox_gate():
     """The deal modal shows every shared-inbox thread with the deal's contact
     - matched on ANY of their addresses, plus the thread a website enquiry was

@@ -8557,6 +8557,27 @@
             add.append(ico(I.plus), document.createTextNode(crmContactsMode === 'people' ? 'Person' : 'Organisation'));
             add.onclick = () => crmContactForm(crmContactsMode === 'people' ? 'person' : 'org');
             bar.append(add);
+            if ((!teamMe || teamMe.role === 'master') && crmContactsMode === 'people') {
+                /* Bulk email-matching of contacts to Shopify customers. Runs
+                   nightly by itself; the button is for not waiting overnight. */
+                const link = el('button', 'btn');
+                link.append(ico(I.refresh), document.createTextNode('Link Shopify'));
+                link.title = 'Match every unlinked contact to a Shopify customer by email';
+                link.onclick = async () => {
+                    link.disabled = true;
+                    try {
+                        const r = await crmOp('/api/crm/contact', { op: 'shopify_link_sweep' });
+                        const rep = r.report || {};
+                        toastOk('Linked ' + (rep.linked || 0) + ' contacts to Shopify customers'
+                            + (rep.already ? ' · ' + rep.already + ' already linked' : '')
+                            + (rep.ambiguous ? ' · ' + rep.ambiguous + ' skipped as ambiguous' : '')
+                            + '.');
+                        renderCRM();
+                    } catch (e) { toastError(e.message); }
+                    link.disabled = false;
+                };
+                bar.append(link);
+            }
             const seg = el('div', 'lbl-seg');
             [['people', 'People'], ['orgs', 'Organisations']].forEach(([k, lab]) => {
                 const b = el('button', 'lbl-segbtn' + (crmContactsMode === k ? ' on' : ''), lab);

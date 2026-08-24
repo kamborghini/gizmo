@@ -7482,6 +7482,8 @@ async def _scheduler_loop(registry: dict) -> None:
         try:
             shopify_up = await _watchdog_tick(registry)
             await asyncio.to_thread(_weekly_snapshot)   # no-op until a week is up
+            if shopify_up:
+                await _crm_shopify_link_nightly(registry)   # once a day, self-stamped
             cfg = _load_schedule()
             if not shopify_up:
                 logger.warning("scheduler: Shopify unreachable; skipping paid audits this tick")
@@ -9057,6 +9059,113 @@ def _crm_deal_threads(d: dict, deal: dict) -> list:
     return rows[:20]
 
 
+async def _crm_shopify_link_sweep(registry: dict, max_pages: int = 40) -> dict:
+    """Fill in person.shopify_customer_id by email, in bulk. One paginated
+    customer crawl indexed in memory, then a single pass over the people -
+    2,800 per-contact searches would take twenty minutes of rate limit; this
+    takes a dozen requests.
+
+    Rules that keep it safe to run nightly forever: an EXISTING link is never
+    touched (a hand-made link outranks a guess); a person whose addresses
+    match two DIFFERENT customers is skipped and counted, never guessed; and
+    neither updated_at nor edited_here is stamped - a link is an enrichment,
+    and stamping 2,800 contacts would freeze them all against a final
+    Pipedrive import."""
+    report = {"customers": 0, "linked": 0, "already": 0, "ambiguous": 0, "unmatched": 0}
+    by_email: dict = {}
+    since = 0
+    for _ in range(max_pages):
+        res = await _tool_json(registry, "shopify_list_customers",
+                               {"limit": 250, "since_id": since, "fields": "id,email"})
+        rows = (res or {}).get("customers") or []
+        if not rows:
+            break
+        for c in rows:
+            e = str(c.get("email") or "").strip().lower()
+            if e and c.get("id"):
+                by_email[e] = c["id"]
+            try:
+                since = max(since, int(c.get("id") or 0))
+            except (TypeError, ValueError):
+                pass
+        if len(rows) < 250:
+            break
+    report["customers"] = len(by_email)
+    if not by_email:
+        return report
+    d = _load_crm()
+    changed = False
+    for p in d.get("persons", {}).values():
+        if p.get("shopify_customer_id"):
+            report["already"] += 1
+            continue
+        hits = {by_email[e] for e in (str(x).strip().lower() for x in (p.get("emails") or []))
+                if e in by_email}
+        if not hits:
+            report["unmatched"] += 1
+        elif len(hits) > 1:
+            report["ambiguous"] += 1
+        else:
+            p["shopify_customer_id"] = next(iter(hits))
+            report["linked"] += 1
+            changed = True
+    if changed:
+        _write_crm(d)
+    return report
+
+
+async def _crm_shopify_link_nightly(registry: dict) -> None:
+    """The scheduler's once-a-day pass, stamped in the CRM store so a redeploy
+    or restart never doubles it up. Quiet on failure: linking is enrichment,
+    and the next day gets another chance."""
+    try:
+        d = _load_crm()
+        if not d.get("persons"):
+            return
+        last = str(d.get("shopify_link_at") or "")
+        if last:
+            try:
+                if (datetime.now(timezone.utc)
+                        - datetime.fromisoformat(last)).total_seconds() < 20 * 3600:
+                    return
+            except ValueError:
+                pass
+        rep = await _crm_shopify_link_sweep(registry)
+        d = _load_crm()
+        d["shopify_link_at"] = _crm_now()
+        _write_crm(d)
+        if rep["linked"]:
+            _track("", "crm", "linked contacts to Shopify",
+                   str(rep["linked"]) + " matched by email")
+        logger.info("crm: shopify link sweep %s", rep)
+    except Exception:
+        logger.exception("crm: shopify link sweep failed")
+
+
+def _crm_link_order_customer(order: dict) -> None:
+    """A single arriving order links its customer on the spot, so a brand-new
+    enquirer who converts is linked the day they order, not tomorrow night.
+    Same rules as the sweep: never overwrite, never guess."""
+    try:
+        cust = order.get("customer") or {}
+        cid = cust.get("id")
+        email = str(order.get("email") or cust.get("email") or "").strip().lower()
+        if not cid or not email:
+            return
+        d = _load_crm()
+        changed = False
+        for p in d.get("persons", {}).values():
+            if p.get("shopify_customer_id"):
+                continue
+            if any(str(x).strip().lower() == email for x in (p.get("emails") or [])):
+                p["shopify_customer_id"] = cid
+                changed = True
+        if changed:
+            _write_crm(d)
+    except Exception:
+        logger.exception("crm: order-customer link failed")
+
+
 def _mail_crm_match(email: str) -> Optional[dict]:
     """The reason this lives here and not in a helpdesk: the sender might
     already be in the CRM. A match puts the relationship beside the email."""
@@ -9832,6 +9941,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _webhook_state["last_at"] = time.time()
         _webhook_state["last_topic"] = str(request.headers.get("x-shopify-topic") or "")
         _webhook_state["count"] += 1
+        try:
+            _crm_link_order_customer(json.loads(raw.decode("utf-8", "replace")))
+        except Exception:
+            pass   # the webhook's ack must never hinge on enrichment
         return PlainTextResponse("ok", status_code=200)
 
     @mcp.custom_route("/healthz", methods=["GET"])
@@ -12717,6 +12830,20 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     rec["notes"] = [n for n in rec.get("notes", []) if n["id"] != nid]
                 rec["updated_at"], rec["edited_here"] = _crm_now(), True
                 return _crm_ok(d, action=("contact " + op).replace("_", " "), who=actor)
+
+            if op == "shopify_link_sweep":
+                # Bulk fill of every unlinked contact. Master-only, like the
+                # import: it writes 2,800 records in one press.
+                if _team_role(actor) != "master":
+                    return _json({"error": "Only the master account can run the link sweep."}, 403)
+                rep = await _crm_shopify_link_sweep(registry)
+                d = _load_crm()
+                d["shopify_link_at"] = _crm_now()
+                _write_crm(d)
+                if rep["linked"]:
+                    _track(actor, "crm", "linked contacts to Shopify",
+                           str(rep["linked"]) + " matched by email")
+                return _json({"ok": True, "report": rep, "crm": _crm_shape(_load_crm())})
 
             if op in ("person_merge", "org_merge"):
                 # 1,951 imported people guarantee duplicates, and deleting the
