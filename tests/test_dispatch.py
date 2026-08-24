@@ -2174,6 +2174,20 @@ def t_projectors_default_to_china_when_shopify_has_no_origin():
         copilot._tool_json = saved
 
 @test
+def t_a_source_four_junior_is_a_66mm_gobo_however_it_is_spelled():
+    """Order 104275 nearly shipped 53.3 mm glass for a Source 4 Jr. The sheet
+    held the same fixture twice: 'Source Four Jr' at 66 and 'Source Four
+    Junior - M size' undercut to 53.3 off a 65.5 mm holder measurement - and
+    the order's wording matched the wrong twin. The merchant's ruling is 66
+    (the M-size glass the GH64 holder takes); the override carries it over
+    ANY size sheet, and the aliases catch the spellings the sheet lacks."""
+    for model in ("Source Four Jr", "Source Four Junior", "Source Four Junior - M size",
+                  "Source 4 Jr", "Source 4 Junior", "S4 Jr", "S4 Junior", "Source Four Jnr"):
+        hit, review = copilot._gobo_lookup("ETC", model)
+        ok(hit is not None and review is None, model + " -> " + repr(review))
+        eq(hit["production_size"], "66", model + " must cut at 66 mm, got " + hit["production_size"])
+
+@test
 def t_gobo_projectors_are_projectors_not_gobos():
     # The regression the merchant caught live: projector products are NAMED
     # "Projected Image ... Gobo Projector", so a naive "contains gobo" rule
