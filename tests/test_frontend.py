@@ -1064,6 +1064,84 @@ def t_no_off_scale_type_is_set_from_javascript():
         ok(bad not in SCRIPT, "%r is set from JavaScript" % bad)
 
 
+def _body_of(signature):
+    """Slice one function out of the SPA by counting braces. A non-greedy regex
+    to a closing brace at a guessed indent silently runs to the end of the file,
+    which makes an assertion about a single function quietly meaningless."""
+    i = SCRIPT.index(signature)
+    depth, j, started = 0, i, False
+    while j < len(SCRIPT):
+        c = SCRIPT[j]
+        if c == "{":
+            depth += 1
+            started = True
+        elif c == "}":
+            depth -= 1
+            if started and depth == 0:
+                return SCRIPT[i:j + 1]
+        j += 1
+    raise AssertionError("unbalanced braces after " + signature)
+
+
+@test
+def t_the_custom_shipment_queue_speaks_its_own_tab_s_language():
+    """It sat on the Production Manager behind the same segmented control as the
+    order queues, but was built from three other tabs' vocabularies: the Files
+    browser's rows, a dispatch modal's search field plus an inline one-off, and
+    the Inbox's empty state."""
+    fn = _body_of("function renderCustomQueue")
+    for borrowed in ("files-list", "files-row", "files-name", "files-meta",
+                     "disp-text", "mail-empty"):
+        ok(borrowed not in fn, "the queue no longer borrows .%s" % borrowed)
+    for own in ("lbl-row", "lbl-who", "lbl-meta", "lbl-actions", "lbl-find", "lbl-chip bad"):
+        ok(own in fn, "it uses the tab's own .%s" % own)
+    ok("margin-left:auto" not in fn, "and the inline one-off layout is gone")
+
+
+@test
+def t_the_customers_switcher_is_the_house_control():
+    """Customers was the only tab whose sub-view switcher was loose pills, and
+    the only one that put the switcher above its own page title."""
+    ok(".secbar" not in HTML and ".secbtn" not in HTML,
+       "the one-off pill component is retired")
+    fn = re.search(r"function sectorBar.*?\n        \}", SCRIPT, re.S).group(0)
+    ok("el('div', 'lbl-seg')" in fn and "lbl-segbtn" in fn,
+       "it is built on the same segmented control as every other tab")
+    ok("box.append(hero, sectorBar())" in SCRIPT,
+       "and the hero comes first, like every other tab")
+
+
+@test
+def t_reordering_kpis_works_without_a_drag():
+    """HTML5 drag events never fire from touch, so the Overview KPI reorder was
+    unreachable on a phone and the hint told you to do the one thing you could
+    not do."""
+    ok(re.search(r"\.stat-move \{", HTML), "there is a button path")
+    ok("el('button', 'stat-move back')" in SCRIPT and "el('button', 'stat-move fwd')" in SCRIPT,
+       "one each way")
+    ok("bL.disabled = !order[i - 1]" in SCRIPT and "bR.disabled = !order[i + 1]" in SCRIPT,
+       "and the ends are disabled rather than silently doing nothing")
+    ok("Use the arrows to reorder" in SCRIPT,
+       "the hint describes what actually works")
+    ok("card.draggable = true" in SCRIPT, "drag still works for a mouse")
+
+
+@test
+def t_one_tracking_value_for_the_micro_label():
+    """The 11px uppercase micro-label is the app's most repeated typographic
+    unit and it was set at .04, .05, .06 and .08em in different places."""
+    ok("--track-caps" in HTML, "there is one token for it")
+    style = HTML[HTML.index("<style>"):HTML.index("</style>")]
+    stray = []
+    for m in re.finditer(r"\n\s*([^\n{}]+)\{([^}]*)\}", style):
+        body = m.group(2)
+        if "font-size: 11px" in body and "text-transform: uppercase" in body:
+            ls = re.search(r"letter-spacing:\s*([^;]+)", body)
+            if ls and "var(" not in ls.group(1):
+                stray.append(m.group(1).strip()[:46] + " -> " + ls.group(1).strip())
+    ok(not stray, "every 11px uppercase label reads the token: " + "; ".join(stray[:3]))
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
