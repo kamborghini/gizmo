@@ -6423,8 +6423,18 @@
                 const rt = el('label', 'disp-fld'); rt.style.marginTop = '8px';
                 rt.append(el('span', 'disp-fld-lab', "Receiver's tax / VAT id (optional, helps clearance)"));
                 recvTaxIn = document.createElement('input'); recvTaxIn.type = 'text'; recvTaxIn.className = 'disp-num';
-                recvTaxIn.value = recvTaxSaved || '';
+                /* What the customer already gave Shopify, so an export does not
+                   wait on somebody hunting for it. Anything typed on this card
+                   wins - the prefill is a starting point, not a decision. */
+                recvTaxIn.value = (recvTaxSaved !== null && recvTaxSaved !== undefined && recvTaxSaved !== '')
+                    ? recvTaxSaved : (quote.receiver_tax_id || '');
                 rt.append(recvTaxIn); card.append(rt);
+                if (!recvTaxSaved && quote.receiver_tax_id && quote.receiver_tax_source) {
+                    /* Named, because an autofilled number nobody can trace is
+                       one nobody checks. */
+                    card.append(el('div', 'sub', 'Tax id filled in from '
+                        + quote.receiver_tax_source + '. Change it here if it is wrong.'));
+                }
                 return card;
             }
             function collectCustoms() {

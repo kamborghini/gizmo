@@ -3540,6 +3540,7 @@ _PROPOSAL_RE = re.compile(r"https://" + re.escape(PROPOSAL_HOST) + r"/proof/[A-Z
 _order_tag_writer = None
 _payment_terms_writer = None
 _scope_reader = None
+_tax_id_reader = None
 _order_writer = None
 # The tag that marks an order sold on account: releasing one to production is
 # the moment its 30-day clock should start ticking in Shopify.
@@ -4879,6 +4880,22 @@ def _customs_title(title: str) -> str:
     return CUSTOMS_GOBO_DESCRIPTION if _is_gobo_title(title) else str(title or "").strip()
 
 
+async def _order_tax_id(o: dict) -> dict:
+    """{"receiver_tax_id", "receiver_tax_source"} for an order, or empties.
+
+    Never fatal and never guessed: no id simply means the operator types one
+    as they always have."""
+    if _tax_id_reader is None or not o.get("id"):
+        return {"receiver_tax_id": "", "receiver_tax_source": ""}
+    try:
+        got = await _tax_id_reader(int(o["id"]))
+    except Exception:
+        logger.exception("tax id lookup failed for order %s", o.get("id"))
+        return {"receiver_tax_id": "", "receiver_tax_source": ""}
+    return {"receiver_tax_id": str(got.get("tax_id") or "")[:40],
+            "receiver_tax_source": str(got.get("source") or "")[:80]}
+
+
 async def _customs_items(registry: dict, o: dict) -> list:
     """Per-line customs facts from Shopify: the HS code and the UNIT COST both live
     on the variant's inventory item (not the product). Customs declares what the
@@ -5134,6 +5151,11 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         "international": (str(dest.get("country") or "").upper() not in ("GB", "")),
         "customs_items": (await _customs_items(registry, o)
                           if str(dest.get("country") or "").upper() not in ("GB", "") else []),
+        # The receiver's own tax / VAT id, when the customer gave one. Filled
+        # in for the operator rather than looked up by hand on every export,
+        # and it SAYS where it came from so a wrong one is spottable.
+        **(await _order_tax_id(o) if str(dest.get("country") or "").upper() not in ("GB", "")
+           else {"receiver_tax_id": "", "receiver_tax_source": ""}),
         "currency_note": ("" if str(o.get("currency") or "").upper() in (currency, "")
                           else f"Quoted in {currency}; the order was paid in {o.get('currency')}."),
     }
@@ -10527,13 +10549,14 @@ def _files_tick() -> None:
 def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=None,
                fulfillment_canceler=None, webhook_ensurer=None,
                payment_terms_writer=None, order_writer=None,
-               scope_reader=None) -> None:
+               scope_reader=None, tax_id_reader=None) -> None:
     # The write capabilities the server hands over. None of them ever joins any
     # tool registry: the AI can read the store; only the app's own print / Mark
     # made / Dispatch actions can touch tags or fulfillments.
     global _order_tag_writer, _fulfillment_writer, _fulfillment_canceler, _webhook_ensurer
-    global _payment_terms_writer, _order_writer, _scope_reader
+    global _payment_terms_writer, _order_writer, _scope_reader, _tax_id_reader
     _scope_reader = scope_reader
+    _tax_id_reader = tax_id_reader
     _order_tag_writer = order_tag_writer
     _fulfillment_writer = fulfillment_writer
     _fulfillment_canceler = fulfillment_canceler

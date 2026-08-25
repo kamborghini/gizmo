@@ -1095,6 +1095,67 @@ async def shopify_granted_scopes(max_age: float = 900.0) -> dict:
             "missing": {k: v for k, v in REQUIRED_WRITE_SCOPES.items() if k not in got}}
 
 
+async def shopify_order_tax_id(order_id: int) -> dict:
+    """{"tax_id": str, "source": str} - the RECEIVER's tax / VAT id for a
+    customs declaration, or empty when the customer has not given one.
+
+    Shopify keeps this in more than one place and the Customer object itself
+    has no tax-id field at all, so all three are asked in ONE query and the
+    most authoritative answer wins:
+
+      1. the order's own localization extensions with purpose TAX - the
+         country-specific credential a checkout collects (ES, IT, PT, TR, MX,
+         BR and the rest);
+      2. a B2B order's company location tax registration id (purchasingEntity
+         -> PurchasingCompany -> location.taxSettings.taxRegistrationId);
+      3. a customer metafield that names itself tax or vat - where a shop
+         records it by hand when neither of the above applies.
+
+    Read-only, and never fatal: a failure here means the operator types the
+    number as they always have."""
+    q = """query($id: ID!) {
+      order(id: $id) {
+        localizationExtensions(first: 10, purposes: [TAX]) {
+          edges { node { key value title countryCode } } }
+        purchasingEntity {
+          ... on PurchasingCompany {
+            company { name }
+            location { name taxSettings { taxRegistrationId } } } }
+        customer { id metafields(first: 30) { edges { node { namespace key value } } } }
+      }
+    }"""
+    try:
+        data = await _request("POST", "graphql.json", body={
+            "query": q, "variables": {"id": f"gid://shopify/Order/{int(order_id)}"}})
+        order = ((data.get("data") or {}).get("order")) or {}
+        if not order:
+            return {"tax_id": "", "source": ""}
+        for e in (((order.get("localizationExtensions") or {}).get("edges")) or []):
+            n = e.get("node") or {}
+            val = str(n.get("value") or "").strip()
+            if val:
+                what = str(n.get("title") or n.get("key") or "tax id")
+                return {"tax_id": val[:40], "source": "the order's " + what}
+        pe = order.get("purchasingEntity") or {}
+        loc = pe.get("location") or {}
+        reg = str(((loc.get("taxSettings") or {}).get("taxRegistrationId")) or "").strip()
+        if reg:
+            co = (pe.get("company") or {}).get("name") or loc.get("name") or "the company"
+            return {"tax_id": reg[:40], "source": str(co)[:60] + "'s tax registration"}
+        for e in ((((order.get("customer") or {}).get("metafields") or {}).get("edges")) or []):
+            n = e.get("node") or {}
+            name = (str(n.get("namespace") or "") + "." + str(n.get("key") or "")).lower()
+            val = str(n.get("value") or "").strip()
+            # Only a field that SAYS it is one, and only a plausible id: a
+            # wrong number on a declaration is worse than an empty box.
+            if val and 4 <= len(val) <= 40 and ("tax" in name or "vat" in name or "eori" in name):
+                return {"tax_id": val[:40], "source": "the customer's " + name + " field"}
+        return {"tax_id": "", "source": ""}
+    except Exception as e:
+        logger.warning("tax id lookup failed for order %s: %s", order_id, str(e)[:200])
+        return {"tax_id": "", "source": "", "error": str(e)[:200]}
+
+
 _net30_template = {"id": ""}    # found once, remembered for the process's life
 
 async def set_order_payment_terms_net30(order_id: int) -> dict:
@@ -1461,6 +1522,7 @@ try:
                        webhook_ensurer=ensure_order_webhooks,
                        payment_terms_writer=set_order_payment_terms_net30,
                        scope_reader=shopify_granted_scopes,
+                       tax_id_reader=shopify_order_tax_id,
                        order_writer=update_order_fields)
 except Exception as e:
     logger.error(f"Store Copilot disabled (chat UI unavailable): {e}")

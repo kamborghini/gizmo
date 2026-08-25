@@ -489,6 +489,40 @@ def t_env_creds_win():
         copilot._wo_boot()
 
 @test
+def t_an_international_quote_carries_the_customers_own_tax_id():
+    """Shopify keeps a customer's tax id in more than one place and the
+    Customer object has no such field at all, so the lookup asks all of them.
+    It must fill the box for the operator, SAY where the number came from, and
+    never invent one."""
+    seen = []
+    async def reader(order_id):
+        seen.append(int(order_id))
+        return {"tax_id": "ESB12345678", "source": "the order's Spanish tax credential"}
+    saved = copilot._tax_id_reader
+    copilot._tax_id_reader = reader
+    try:
+        got = run_async(copilot._order_tax_id({"id": 12345}))
+        eq(got["receiver_tax_id"], "ESB12345678")
+        ok("Spanish" in got["receiver_tax_source"], got)
+        eq(seen, [12345])
+        # No id on file is an empty box, not a failure.
+        async def none(order_id):
+            return {"tax_id": "", "source": ""}
+        copilot._tax_id_reader = none
+        eq(run_async(copilot._order_tax_id({"id": 1}))["receiver_tax_id"], "")
+        # A lookup that BLOWS UP must never stop a dispatch.
+        async def boom(order_id):
+            raise RuntimeError("Shopify said no")
+        copilot._tax_id_reader = boom
+        eq(run_async(copilot._order_tax_id({"id": 1})),
+           {"receiver_tax_id": "", "receiver_tax_source": ""})
+        # And with no reader wired at all.
+        copilot._tax_id_reader = None
+        eq(run_async(copilot._order_tax_id({"id": 1}))["receiver_tax_id"], "")
+    finally:
+        copilot._tax_id_reader = saved
+
+@test
 def t_gobos_cross_a_border_as_glass_optical_filters():
     """A customs officer needs the goods, not the shop's product name: "Create
     your own gobo" means nothing at a border. The declaration and the waybill

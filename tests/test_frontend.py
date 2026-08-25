@@ -1272,6 +1272,17 @@ def t_the_customs_card_prefills_the_declaration_name():
        "the declaration name wins, with the product title as the fallback")
 
 
+@test
+def t_the_receivers_tax_id_prefills_but_never_overrides_typing():
+    """An export waited on somebody hunting for a number the customer had
+    already given Shopify - but a prefill that overwrites what the operator
+    typed is worse than no prefill."""
+    ok("quote.receiver_tax_id" in SCRIPT, "the card prefills from the order")
+    ok("recvTaxSaved !== ''" in SCRIPT, "and anything already typed wins")
+    ok("quote.receiver_tax_source" in SCRIPT,
+       "with the source named, so an autofilled number can be checked")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

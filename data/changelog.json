@@ -5,6 +5,10 @@
    "title": "What's new, feature requests, and a security audit",
    "items": [
     {
+     "kind": "added",
+     "text": "International orders fill in the customer's tax id. If the customer gave Shopify a tax or VAT id - at checkout, on their B2B company, or recorded on their account - the dispatch card fills the receiver's tax box for you and says where the number came from. Not every customer has one; those still get an empty box, and anything you type always wins."
+    },
+    {
      "kind": "improved",
      "text": "Gobos cross borders as \"Glass Optical Filter\". Customs lines and the waybill contents line both use the declaration name now rather than the shop product name - \"Create your own gobo\" means nothing to a border officer, and it matches the commodity code the app already declares (9002.20.000). Projectors keep their own name, and every line is still editable on the dispatch card before booking."
     },
