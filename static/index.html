@@ -4421,7 +4421,21 @@
                        clock starts here too. The note was computed and thrown
                        away, so a purchase order could enter production with no
                        due date and nobody was told. */
-                    if (r && r.terms_note) {
+                    /* Per order. One boolean over a whole batch meant a red
+                       toast could carry three success sentences while the
+                       order that actually failed was never named. */
+                    const terms = (r && r.terms) || [];
+                    const bad = terms.filter(t => !t.ok);
+                    const good = terms.filter(t => t.ok);
+                    if (bad.length) {
+                        bad.slice(0, 4).forEach(t => toastError('#' + t.order + ': ' + t.note));
+                        if (bad.length > 4) toastError((bad.length - 4) + ' more orders did not get their 30-day terms. Release them again from the queue.');
+                    }
+                    if (good.length) {
+                        addToast(good.length === 1 ? ('#' + good[0].order + ': ' + good[0].note)
+                                 : (good.length + ' account orders were put on 30-day terms.'), 'good');
+                    }
+                    if (!terms.length && r && r.terms_note) {
                         if (r.terms_ok === false) toastError(r.terms_note);
                         else addToast(r.terms_note, 'good');
                     }
@@ -4484,9 +4498,12 @@
                 /* An account order's payment clock starts here: the outcome is
                    said either way, because a purchase order quietly missing
                    its terms is an invoice nobody chases. */
+                /* The release HAPPENED - the tag moved before the terms were
+                   attempted - so say so either way. Showing only the red terms
+                   error left the merchant unsure whether to press it again. */
+                addToast(orderNo(o) + ' moved to To make.'
+                    + (r.po_unpaid && r.terms_ok && r.terms_note ? ' ' + r.terms_note : ''));
                 if (r.po_unpaid && !r.terms_ok) toastError(orderNo(o) + ': ' + r.terms_note);
-                else addToast(orderNo(o) + ' moved to To make.'
-                    + (r.terms_note ? ' ' + r.terms_note : ''));
                 loadLabels(true);
             } catch (e) {
                 btn.disabled = false;
@@ -5095,6 +5112,14 @@
                         + ' · ' + dsp.tracking_number + (dsp.dispatched_at ? ' · ' + fmtDate(dsp.dispatched_at) : '')
                         + (booked ? '. Mark this order made to fulfil it in Shopify and email the customer.' : '');
                     nameLine.append(dc);
+                }
+                /* A toast is gone the moment the page moves on, and the
+                   background half of a big print run has no toast at all. The
+                   order itself carries the problem until the terms are on it. */
+                if (st.terms_error) {
+                    const tc = el('span', 'lbl-chip bad', 'NO TERMS');
+                    tc.title = st.terms_error + ' Release this order again to retry.';
+                    nameLine.append(tc);
                 }
                 if (st.made_at && !dsp.tracking_number) nameLine.append(el('span', 'lbl-chip made', 'MADE'));
                 else if (st.printed_at && !dsp.tracking_number) {

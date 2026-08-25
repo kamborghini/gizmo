@@ -1196,9 +1196,50 @@ async def set_order_payment_terms_net30(order_id: int) -> dict:
     copilot.add_routes. Returns {ok, ...} and never raises for the expected
     cases, so the release flow can report instead of break.
     """
-    async def gql(query: str, variables: dict) -> dict:
-        return await _request("POST", "graphql.json",
+    async def gql(query: str, variables: dict, read: bool = False) -> dict:
+        # GraphQL travels by POST, so the transport treats every call here as a
+        # write and will not retry it after an ambiguous failure. That is right
+        # for the mutations and wrong for the two queries: a read costs nothing
+        # to repeat, and losing one to a blip fails a release for no reason.
+        return await _request("POST", "graphql.json", idempotent=read,
                               body={"query": query, "variables": variables})
+
+    def _throttled(payload: dict) -> bool:
+        """Shopify answers a throttled GraphQL call with HTTP 200 and an errors
+        array, so it never reaches the HTTP retry path. Every call here has to
+        recognise it, or the merchant is told something that reads like a real
+        refusal when the answer is simply to try again."""
+        for e in (payload.get("errors") or []):
+            code = str(((e.get("extensions") or {}).get("code")) or "").upper()
+            if code == "THROTTLED" or "throttl" in str(e.get("message", "")).lower():
+                return True
+        return False
+
+    _THROTTLE = {"ok": False, "reason": "throttled",
+                 "detail": "Shopify is rate-limiting right now; the terms were not "
+                           "attached. Try this order again in a moment."}
+
+    async def _terms_now() -> Optional[dict]:
+        """What payment terms the order carries RIGHT NOW.
+
+        For deciding whether a write we lost the answer to actually happened.
+        A create that succeeds and then loses its response - a timeout, a
+        gateway 502 - leaves the order correctly on Net 30 while the release
+        reports a red failure, which is the one thing this function exists to
+        stop. None means we could not find out."""
+        try:
+            again = await gql("query($id: ID!) { order(id: $id) { paymentTerms {"
+                              " id paymentTermsName paymentTermsType dueInDays } } }",
+                              {"id": gid}, read=True)
+        except Exception:
+            return None
+        if _throttled(again):
+            return None
+        return ((again.get("data") or {}).get("order") or {}).get("paymentTerms") or None
+
+    def _is_net30(terms: Optional[dict]) -> bool:
+        return bool(terms and terms.get("paymentTermsType") == "NET"
+                    and terms.get("dueInDays") == 30)
 
     def _perm(scope: str) -> dict:
         return {"ok": False, "reason": "permission",
@@ -1211,32 +1252,39 @@ async def set_order_payment_terms_net30(order_id: int) -> dict:
     gid = f"gid://shopify/Order/{int(order_id)}"
     try:
         if not _net30_template["id"]:
-            t = await gql("query { paymentTermsTemplates { id name paymentTermsType dueInDays } }", {})
+            t = await gql("query { paymentTermsTemplates { id name paymentTermsType dueInDays } }",
+                          {}, read=True)
             rows = ((t.get("data") or {}).get("paymentTermsTemplates")) or []
             hit = next((x for x in rows
                         if x.get("paymentTermsType") == "NET" and x.get("dueInDays") == 30), None)
             if not hit:
-                # A throttled GraphQL call answers 200 with an errors array, so
-                # it never reaches the HTTP retry path - and told the merchant
-                # their store has no Net 30 template, sending them to fix a
-                # configuration that was never wrong.
-                for e in (t.get("errors") or []):
-                    code = str(((e.get("extensions") or {}).get("code")) or "").upper()
-                    if code == "THROTTLED" or "throttl" in str(e.get("message", "")).lower():
-                        return {"ok": False, "reason": "throttled",
-                                "detail": "Shopify is rate-limiting right now; the terms were "
-                                          "not attached. Try this order again in a moment."}
+                # A throttled answer is not "your store has no Net 30 template",
+                # which sent the merchant off to fix a configuration that was
+                # never wrong.
+                if _throttled(t):
+                    return dict(_THROTTLE)
                 for e in (t.get("errors") or []):
                     if "access" in str(e.get("message", "")).lower():
                         return _perm("the payment terms scopes "
                                      "(read_payment_terms / write_payment_terms)")
+                # ANY other error means we did not get to see the templates, so
+                # we do not know that there is no Net 30 one. Saying there is
+                # none sends the merchant to build a template they already have.
+                first = str(((t.get("errors") or [{}])[0]).get("message") or "").strip()
+                if first:
+                    return {"ok": False, "reason": "graphql",
+                            "detail": "Shopify could not list the payment terms templates: "
+                                      + first[:160]}
                 return {"ok": False, "reason": "no_template",
                         "detail": "No Net 30 payment terms template exists on this store."}
             _net30_template["id"] = str(hit["id"])
 
         # What is on the order right now.
         q = await gql("query($id: ID!) { order(id: $id) { createdAt paymentTerms {"
-                      " id paymentTermsName paymentTermsType dueInDays } } }", {"id": gid})
+                      " id paymentTermsName paymentTermsType dueInDays } } }",
+                      {"id": gid}, read=True)
+        if _throttled(q):
+            return dict(_THROTTLE)
         for e in (q.get("errors") or []):
             msg = str(e.get("message") or "")
             if "access" in msg.lower():
@@ -1267,6 +1315,8 @@ async def set_order_payment_terms_net30(order_id: int) -> dict:
                            "paymentTermsAttributes": {
                                "paymentTermsTemplateId": _net30_template["id"],
                                "paymentSchedules": schedules}}})
+            if _throttled(m):
+                return dict(_THROTTLE)
             for e in (m.get("errors") or []):
                 msg = str(e.get("message") or "")
                 if "access" in msg.lower():
@@ -1288,6 +1338,8 @@ async def set_order_payment_terms_net30(order_id: int) -> dict:
             {"referenceId": gid,
              "paymentTermsAttributes": {"paymentTermsTemplateId": _net30_template["id"],
                                         "paymentSchedules": schedules}})
+        if _throttled(m):
+            return dict(_THROTTLE)
         for e in (m.get("errors") or []):
             msg = str(e.get("message") or "")
             if "access" in msg.lower():
@@ -1307,9 +1359,34 @@ async def set_order_payment_terms_net30(order_id: int) -> dict:
         return {"ok": True, "created": True}
     except httpx.HTTPStatusError as e:
         code = e.response.status_code if e.response is not None else 0
-        if code in (401, 403):
+        if code == 403:
             return _perm("write_payment_terms")
+        if code == 401:
+            # NOT a missing scope: the token itself was refused (expired, or
+            # revoked by a re-install). Sending the merchant to add a scope
+            # they already have is the wrong errand.
+            return {"ok": False, "reason": "auth",
+                    "detail": "Shopify refused the app's access token. Open the app from "
+                              "your Shopify admin to refresh it, then try again."}
+        landed = await _terms_now()
+        if _is_net30(landed):
+            logger.warning("payment terms: Shopify answered %s but order %s is on Net 30",
+                           code, order_id)
+            return {"ok": True, "verified": True,
+                    "name": str((landed or {}).get("paymentTermsName") or "Net 30")}
         return {"ok": False, "reason": "http", "detail": f"Shopify answered {code}."}
+    except (httpx.TimeoutException, httpx.TransportError):
+        # The write may well have landed; asking beats guessing, and guessing
+        # wrong here means a red failure toast over an order that is correctly
+        # on 30-day terms.
+        landed = await _terms_now()
+        if _is_net30(landed):
+            logger.warning("payment terms: the answer was lost but order %s is on Net 30", order_id)
+            return {"ok": True, "verified": True,
+                    "name": str((landed or {}).get("paymentTermsName") or "Net 30")}
+        return {"ok": False, "reason": "timeout",
+                "detail": "Shopify did not answer in time, and the order is not on 30-day "
+                          "terms. Try this order again."}
     except Exception as e:
         logger.exception("payment terms: net-30 attach failed for order %s", order_id)
         return {"ok": False, "reason": "error", "detail": str(e)[:200]}

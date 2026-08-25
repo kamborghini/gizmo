@@ -1319,6 +1319,37 @@ def t_a_bulk_label_run_inherits_the_rules_the_single_print_has():
     ok("SHIP_RUN_MAX" in SCRIPT, "and a run has a ceiling rather than firing 1,800 requests")
 
 
+@test
+def t_a_batch_never_paints_its_successes_red():
+    """One boolean over a whole print run meant a red toast could carry three
+    success sentences while the order that actually failed was never named."""
+    f = re.search(r"const terms = \(r && r\.terms\) \|\| \[\][\s\S]{0,1200}", SCRIPT).group(0)
+    ok("bad.filter" in f or "filter(t => !t.ok)" in f, "failures are separated from successes")
+    ok("'#' + t.order" in f, "and each failure names its order")
+    ok("toastError" in f and "addToast" in f, "red for the failures, green for the rest")
+
+
+@test
+def t_a_release_always_says_the_order_moved():
+    """The tag moves before the terms are attempted, so the release happened
+    even when the terms did not. Showing only the red terms error left the
+    merchant unsure whether to press it again."""
+    f = re.search(r"async function readyToMake[\s\S]{0,1200}", SCRIPT).group(0)
+    moved = f.index("moved to To make")
+    err = f.index("toastError(orderNo(o)")
+    ok(moved < err, "the confirmation comes first, then the problem")
+
+
+@test
+def t_an_order_missing_its_terms_is_flagged_on_the_queue_row():
+    """A toast is gone when the page moves on, and the background half of a
+    big print run has no toast at all."""
+    ok("st.terms_error" in SCRIPT, "the queue row reads the flag the server left")
+    f = re.search(r"if \(st\.terms_error\)[\s\S]{0,400}", SCRIPT).group(0)
+    ok("NO TERMS" in f, "and shows it")
+    ok("lbl-chip bad" in f, "in red, like the other things that need attention")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

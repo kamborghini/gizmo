@@ -3894,53 +3894,38 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
     return True, "", changed, name, warn
 
 
-async def _sync_tags_bg(registry: dict, order_ids: list, add=(), remove=()) -> None:
-    """Background tag sync for the admin print extensions: the print document
-    must render immediately, the tag writes follow. Paced to respect Shopify's
-    write bucket, failures logged and retried once. Never raises."""
-    failed = []
-    for oid in order_ids:
-        try:
-            okd, note = await _sync_order_tags(registry, oid, add=add, remove=remove)
-            if not okd:
-                logger.warning("background tag sync refused for order %s: %s", oid, note)
-                failed.append(oid)
-        except Exception:
-            logger.exception("background tag sync failed for order %s", oid)
-            failed.append(oid)
-        await asyncio.sleep(0.6)
-    if failed:
-        await asyncio.sleep(10)   # let a throttling burst clear, then one retry round
-        for oid in failed:
-            try:
-                okd, note = await _sync_order_tags(registry, oid, add=add, remove=remove)
-                if not okd:
-                    logger.error("tag sync still failing for order %s after retry: %s", oid, note)
-            except Exception:
-                logger.exception("tag sync retry failed for order %s", oid)
-            await asyncio.sleep(0.6)
-
-
 async def _release_bg(registry: dict, order_ids: list) -> None:
     """The tail of a big print run: the same tag move and Net-30 attach the
     interactive path does, paced, off the request. A 60-order batch is ~5
     Shopify round-trips each; done inline the browser gives up long before the
     server does, rolls back its printed stamps, and the team's view and Shopify
     then disagree about which orders were released. Never raises."""
-    for oid in order_ids:
+    async def once(oid) -> bool:
         try:
             okd, note = await _sync_order_tags(registry, oid,
                                                add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG])
             if not okd:
                 logger.warning("background release: tag refused for order %s: %s", oid, note)
-                continue
-            tn = await _net30_on_release(registry, oid)
-            if tn["account"] and not tn["ok"]:
-                logger.error("background release: Net 30 not attached to order %s: %s",
-                             oid, tn["note"])
+                return False
+            # _net30_on_release records its own outcome on the order, so a
+            # failure out here is not lost to the log: the queue row shows it.
+            await _net30_on_release(registry, oid)
+            return True
         except Exception:
             logger.exception("background release failed for order %s", oid)
+            return False
+
+    failed = []
+    for oid in order_ids:
+        if not await once(oid):
+            failed.append(oid)
         await asyncio.sleep(0.6)
+    if failed:
+        await asyncio.sleep(10)      # let a throttling burst clear, then one retry round
+        for oid in failed:
+            if not await once(oid):
+                logger.error("release still failing for order %s after a retry", oid)
+            await asyncio.sleep(0.6)
 
 
 async def _dispatch_move_tags(registry: dict, order_id) -> tuple:
@@ -10154,6 +10139,37 @@ def _session_uid(raw: Optional[str]) -> Optional[str]:
     return str(row.get("uid") or "") or None
 
 
+def _terms_flag(order_id, ok: bool, note: str = "") -> None:
+    """Remember, on the order itself, that its payment terms did not attach.
+
+    A toast is gone the moment the page moves on, and the tail of a big print
+    run has no toast at all - its failures only ever reached the server log,
+    where a dispatch desk never looks. The queue row reads this and shows the
+    order in red until the terms are actually on it. Best-effort by design: a
+    flag that cannot be saved must never break a release."""
+    try:
+        state = _load_prod_state()
+        entry = state.get(str(order_id)) or {}
+        if ok:
+            if not entry.get("terms_error"):
+                return                      # nothing to clear, nothing to write
+            entry.pop("terms_error", None)
+            entry.pop("terms_error_at", None)
+        else:
+            if entry.get("terms_error") == note[:200]:
+                return                      # same problem as last time
+            entry["terms_error"] = note[:200] or "The 30-day payment terms could not be added."
+            entry["terms_error_at"] = datetime.now(timezone.utc).isoformat()
+        if not entry:
+            state.pop(str(order_id), None)
+        else:
+            state[str(order_id)] = entry
+        if _store_writable(PRODUCTION_STATE_PATH):
+            _write_prod_state(state)
+    except Exception:
+        logger.exception("could not record the payment-terms outcome for order %s", order_id)
+
+
 async def _net30_on_release(registry: dict, order_id) -> dict:
     """Start an account order's 30-day clock when it is released to production.
 
@@ -10178,6 +10194,14 @@ async def _net30_on_release(registry: dict, order_id) -> dict:
                     "note": "Could not check whether this order needs 30-day payment terms."}
         if not any(_norm_key(t) == _norm_key(PO_UNPAID_TAG) for t in _order_tags(o)):
             return quiet
+        # _sync_order_tags leaves DEAD orders alone (cancelled, refunded, already
+        # fulfilled) and still answers ok, so the release carried on and put
+        # 30-day terms on an order that will never be invoiced - and told the
+        # merchant it had been released. Nothing was moved, so nothing is due.
+        dead = _order_status(o)
+        if dead:
+            return {"account": True, "ok": True,
+                    "note": "No payment terms added: this order is " + str(dead) + "."}
     except Exception:
         logger.exception("net30: pre-release order read failed for %s", order_id)
         return {"account": True, "ok": False,
@@ -10188,6 +10212,7 @@ async def _net30_on_release(registry: dict, order_id) -> dict:
         logger.exception("net30: attach failed for %s", order_id)
         return {"account": True, "ok": False,
                 "note": "Released, but the 30-day payment terms could not be added."}
+    _terms_flag(order_id, ok=bool(r.get("ok")), note=str(r.get("detail") or ""))
     if r.get("ok"):
         # Say what actually happened to the order, not what was hoped for. The
         # old wording claimed "already on the order" whenever Shopify refused
@@ -13047,7 +13072,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # That IS a release, so an account order's 30-day clock starts
                 # here too - this is the ordinary way an order reaches the
                 # workbench, and it used to be the path that forgot.
-                notes, terms_notes, terms_bad = [], [], False
+                notes, terms, terms_notes, terms_bad = [], [], [], False
                 # Inline for a normal run; the tail is paced in the background.
                 # Each order is a tag GET+PUT plus up to three GraphQL calls,
                 # so a 60-order batch done inline outlives the browser's patience.
@@ -13059,6 +13084,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         notes.append(note)
                         continue
                     tn = await _net30_on_release(registry, oid)
+                    if tn["account"]:
+                        # Per ORDER. Flattened to one boolean and the first
+                        # three notes, a batch could show a red toast whose
+                        # text was three success sentences while the order that
+                        # actually failed was never named.
+                        terms.append({"order": oid, "ok": tn["ok"], "note": tn["note"]})
                     if tn["note"]:
                         terms_notes.append(tn["note"])
                     if tn["account"] and not tn["ok"]:
@@ -13068,8 +13099,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     # No loop to defer to (never true in a route, but say so
                     # rather than promise a pass that never started).
                     logger.error("release tail of %d orders could not be scheduled", len(tail))
+                # The summary keeps the FAILURES, never a truncation that
+                # happens to be all successes.
+                bad_notes = [t["note"] for t in terms if not t["ok"]]
                 return _json({"ok": True, "state": {str(i): _load_prod_state().get(str(i), {}) for i in ids},
-                              "terms_note": ("  ".join(terms_notes[:3]) if terms_notes else ""),
+                              "terms": terms,
+                              "terms_note": ("  ".join((bad_notes or terms_notes)[:3])
+                                             if (bad_notes or terms_notes) else ""),
                               "terms_ok": not terms_bad,
                               "tag_note": (notes[0] if notes else ""),
                               "queued": queued,
@@ -16815,8 +16851,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                    str(len(printed_ids)) + (" order" if len(printed_ids) == 1 else " orders")
                    + " from the admin print action")
         if printed_ids:
-            asyncio.get_running_loop().create_task(
-                _sync_tags_bg(registry, printed_ids, add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG]))
+            # A FULL release, not just the tag move: an account order that
+            # reaches production still needs its 30-day terms, and half a
+            # release is the state nobody notices until the invoice is due.
+            # In practice this is unreachable from the print-action extensions,
+            # which cannot carry an app session and so always get a read-only
+            # URL; it fires only for a caller that came with its own token.
+            _spawn_bg(_release_bg(registry, printed_ids))
         esc = html.escape
         sheets = []
         for o in orders:

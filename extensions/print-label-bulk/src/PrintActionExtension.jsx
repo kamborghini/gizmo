@@ -56,6 +56,15 @@ function Extension() {
             ? "Production label ready. Choose the label size, then Print."
             : "Production label status: " + status}
         </s-text>
+        {/* Printing here renders the labels and changes nothing else: this
+            frame carries no gizmo session, so the document is read-only by
+            design. Saying so beats letting the order sit in Unprocessed. */}
+        {status === "ready" ? (
+          <s-text tone="subdued">
+            These orders still need Ready to make in gizmo to move into production
+            and, on an account order, to start the 30-day payment terms.
+          </s-text>
+        ) : null}
         <s-select
           label="Label size"
           value={size}

@@ -2,6 +2,52 @@
  "releases": [
   {
    "date": "2026-08-25",
+   "title": "30-day terms, switched on and told the truth",
+   "items": [
+    {
+     "kind": "added",
+     "text": "30-day payment terms now actually reach Shopify. The app's access token was missing the write permission until today, so every attempt stopped at the door. With it granted, the whole path past that door ran for the first time, and it was audited hard before being trusted with a live order."
+    },
+    {
+     "kind": "fixed",
+     "text": "A cancelled or refunded order can no longer be put on 30-day terms. The tag move skips dead orders and still reports success, so the release carried on and attached terms to an order that will never be invoiced, then said it had been released."
+    },
+    {
+     "kind": "fixed",
+     "text": "A print run of several account orders now names the orders whose terms failed. It used to collapse the whole batch into one red or green light plus the first three sentences, so a red toast could be three success messages while the order that actually failed was never mentioned."
+    },
+    {
+     "kind": "fixed",
+     "text": "An order whose 30-day terms did not attach is now flagged on its queue row until they do, with the reason on hover. Previously the only trace was a toast that vanished, and for the background half of a big print run there was no toast at all - only a line in the server log."
+    },
+    {
+     "kind": "fixed",
+     "text": "Releasing a single order always confirms that it moved to To make, even when the payment terms fail. It used to show the terms error alone, which left you unsure whether the release had happened."
+    },
+    {
+     "kind": "fixed",
+     "text": "If Shopify takes the payment terms and then loses the answer - a timeout, a gateway error - the app asks Shopify what actually happened instead of assuming the worst. It used to report a red failure over an order that was correctly on 30-day terms."
+    },
+    {
+     "kind": "fixed",
+     "text": "Shopify rate-limiting is recognised everywhere in the payment terms path, not just on the first lookup. It used to surface as the bare word \"Throttled\", or as \"no Net 30 template exists on this store\" - an errand to fix a setting that was never wrong, and one you could not fix if you tried, because Shopify owns that list."
+    },
+    {
+     "kind": "fixed",
+     "text": "A refused access token is no longer reported as a missing permission. A 401 means the token itself was rejected, which is fixed by opening the app from your Shopify admin, not by granting a scope you already have."
+    },
+    {
+     "kind": "fixed",
+     "text": "The two read-only lookups in the payment terms path retry again after a blip. They travel by POST, which the app had just started treating as unsafe to repeat; that is right for the write and wrong for a read, and a single transient error was failing the whole attach."
+    },
+    {
+     "kind": "improved",
+     "text": "Printing from the Shopify admin print action now says, in the print panel, that the order still needs Ready to make in gizmo. That print view carries no gizmo session, so it renders labels and deliberately changes nothing - which was true but unsaid, and an order could sit in Unprocessed without anyone noticing."
+    }
+   ]
+  },
+  {
+   "date": "2026-08-25",
    "title": "Locking the side doors, and writes that cannot happen twice",
    "items": [
     {
