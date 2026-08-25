@@ -2217,6 +2217,13 @@ def t_releasing_an_unpaid_purchase_order_starts_its_30_day_clock():
         copilot._payment_terms_writer = already
         r2 = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"}).json()
         ok(r2["terms_ok"] and "already" in r2["terms_note"], r2)
+        # An order that WAS on other terms says so, rather than claiming the
+        # order already had 30-day terms it never had.
+        async def moved(order_id):
+            return {"ok": True, "updated": True, "was": "Due on receipt"}
+        copilot._payment_terms_writer = moved
+        r2b = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"}).json()
+        eq(r2b["terms_note"], "Payment terms changed from Due on receipt to Net 30.")
         # An ordinary order: no terms call at all.
         ORDER["tags"] = "Unprocessed"
         calls.clear()
@@ -8164,30 +8171,123 @@ def t_every_release_path_starts_the_30_day_clock():
     finally:
         copilot._payment_terms_writer, ORDER["tags"] = saved_terms, saved_tags
 
+# ---- payment terms -------------------------------------------------------
+def _terms_stub(current_terms, mutation_errors=None, capture=None):
+    """A Shopify that answers the three calls the net-30 writer makes: find the
+    template, read what is on the order, then create or update."""
+    import server as _srv
+
+    async def fake_req(method, path, params=None, body=None, **kw):
+        q = str((body or {}).get("query") or "")
+        if capture is not None:
+            capture.append(body)
+        if "paymentTermsTemplates" in q:
+            return {"data": {"paymentTermsTemplates": [
+                {"id": "gid://shopify/PaymentTermsTemplate/4", "name": "Net 30",
+                 "paymentTermsType": "NET", "dueInDays": 30}]}}
+        if q.strip().startswith("query($id"):
+            return {"data": {"order": {"createdAt": "2026-08-01T10:00:00Z",
+                                       "paymentTerms": current_terms}}}
+        key = "paymentTermsUpdate" if "paymentTermsUpdate" in q else "paymentTermsCreate"
+        return {"data": {key: {"paymentTerms": {"id": "gid://shopify/PaymentTerms/1"},
+                               "userErrors": mutation_errors or []}}}
+    return fake_req
+
+
+def _with_terms_stub(fake_req, fn):
+    import server as _srv
+    saved = _srv._request
+    _srv._request = fake_req
+    _srv._net30_template["id"] = ""
+    try:
+        return fn(_srv)
+    finally:
+        _srv._request = saved
+        _srv._net30_template["id"] = ""
+
+
+@test
+def t_an_order_that_already_has_terms_is_updated_not_refused():
+    """THE BUG. Shopify gives almost every order payment terms of some kind, and
+    paymentTermsCreate refuses outright when any exist. Creating blindly and
+    reading "already" as success meant nothing was ever attached AND the
+    merchant was told 30-day terms were on an order that was on due-on-receipt."""
+    sent = []
+    fake = _terms_stub({"id": "gid://shopify/PaymentTerms/77",
+                        "paymentTermsName": "Due on receipt",
+                        "paymentTermsType": "RECEIPT", "dueInDays": None}, capture=sent)
+
+    def go(_srv):
+        return run_async(_srv.set_order_payment_terms_net30(12345))
+    r = _with_terms_stub(fake, go)
+    ok(r["ok"] and r.get("updated"), "the existing terms are UPDATED: " + str(r))
+    ok(not r.get("already"), "and it is not reported as already done")
+    eq(r.get("was"), "Due on receipt", "it says what the order was on before")
+    upd = [b for b in sent if "paymentTermsUpdate" in str(b.get("query") or "")]
+    ok(upd, "an update mutation was actually sent")
+    v = upd[0]["variables"]["input"]
+    eq(v["paymentTermsId"], "gid://shopify/PaymentTerms/77", "against the order's own terms")
+    eq(v["paymentTermsAttributes"]["paymentTermsTemplateId"],
+       "gid://shopify/PaymentTermsTemplate/4", "using the Net 30 template")
+    eq(v["paymentTermsAttributes"]["paymentSchedules"], [{"issuedAt": "2026-08-01T10:00:00Z"}],
+       "issued from the ORDER date, so Shopify's due date matches the one the "
+       "Liability tab computes as created + days")
+
+
+@test
+def t_an_order_already_on_net_30_is_left_alone():
+    sent = []
+    fake = _terms_stub({"id": "gid://shopify/PaymentTerms/77", "paymentTermsName": "Net 30",
+                        "paymentTermsType": "NET", "dueInDays": 30}, capture=sent)
+    r = _with_terms_stub(fake, lambda _s: run_async(_s.set_order_payment_terms_net30(12345)))
+    ok(r["ok"] and r.get("already"), "a true no-op: " + str(r))
+    ok(not any("paymentTerms" + "Update" in str(b.get("query") or "")
+               or "paymentTermsCreate" in str(b.get("query") or "") for b in sent),
+       "and nothing was written at all")
+
+
+@test
+def t_an_order_with_no_terms_gets_them_created():
+    sent = []
+    fake = _terms_stub(None, capture=sent)
+    r = _with_terms_stub(fake, lambda _s: run_async(_s.set_order_payment_terms_net30(12345)))
+    ok(r["ok"] and r.get("created"), "created: " + str(r))
+    cre = [b for b in sent if "paymentTermsCreate" in str(b.get("query") or "")]
+    ok(cre, "a create mutation was sent")
+    a = cre[0]["variables"]["paymentTermsAttributes"]
+    eq(a["paymentSchedules"], [{"issuedAt": "2026-08-01T10:00:00Z"}],
+       "with the issue date, so the order shows a real due date in Shopify")
+
+
 @test
 def t_a_missing_payment_terms_template_is_reported_not_swallowed():
     """"does not exist" contains "exist", so the idempotency shortcut used to
     report a deleted template as "already on the order" - an invoice with no
     due date, reported as done."""
-    import server as _srv
-    async def fake_req(method, path, params=None, body=None, **kw):
-        if "paymentTermsTemplates" in str((body or {}).get("query") or ""):
-            return {"data": {"paymentTermsTemplates": [
-                {"id": "gid://shopify/PaymentTermsTemplate/4", "name": "Net 30",
-                 "paymentTermsType": "NET", "dueInDays": 30}]}}
-        return {"data": {"paymentTermsCreate": {"paymentTerms": None, "userErrors": [
-            {"field": ["paymentTermsAttributes"], "message": "Payment terms template does not exist"}]}}}
-    saved = _srv._request
-    _srv._request = fake_req
-    _srv._net30_template["id"] = ""
-    try:
+    fake = _terms_stub(None, mutation_errors=[
+        {"field": ["paymentTermsAttributes"], "message": "Payment terms template does not exist"}])
+
+    def go(_srv):
         r = run_async(_srv.set_order_payment_terms_net30(12345))
         ok(not r["ok"], "a missing template is a FAILURE, not a quiet success: " + str(r))
         ok("does not exist" in (r.get("detail") or ""), r)
-        eq(_srv._net30_template["id"], "", "and the stale id is dropped so the next try re-discovers")
-    finally:
-        _srv._request = saved
-        _srv._net30_template["id"] = ""
+        eq(_srv._net30_template["id"], "",
+           "and the stale id is dropped so the next try re-discovers")
+        return r
+    _with_terms_stub(fake, go)
+
+
+@test
+def t_terms_appearing_mid_release_ask_for_a_retry_not_a_false_success():
+    """If terms land between the read and the create, the honest answer is
+    "press it again", not a claim that the order is on 30-day terms."""
+    fake = _terms_stub(None, mutation_errors=[
+        {"field": [], "message": "Payment terms already exist for this order"}])
+    r = _with_terms_stub(fake, lambda _s: run_async(_s.set_order_payment_terms_net30(12345)))
+    ok(not r["ok"], "not reported as success: " + str(r))
+    eq(r.get("reason"), "raced", str(r))
+    ok("once more" in (r.get("detail") or ""), "and it says what to do: " + str(r))
+
 
 @test
 def t_cancelling_a_shipment_is_bound_to_the_order_current_tracking():

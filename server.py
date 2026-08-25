@@ -1044,21 +1044,53 @@ async def update_order_tags(order_id: int, tags: str) -> dict:
                           body={"order": {"id": int(order_id), "tags": tags}})
 
 
+def _template_gone(msg: str) -> bool:
+    """Shopify no longer accepts the cached template id - deleted and recreated
+    with a new gid, most often. Order matters here: "does not exist" contains
+    "exist", so testing a success phrase first turned every missing-template
+    failure into a cheerful "already on the order"."""
+    low = (msg or "").lower()
+    return ("template" in low or "not found" in low or "invalid" in low
+            or "does not exist" in low)
+
+
 _net30_template = {"id": ""}    # found once, remembered for the process's life
 
 async def set_order_payment_terms_net30(order_id: int) -> dict:
-    """Attach NET-30 payment terms to an order. GraphQL, because payment terms
-    have no REST surface: paymentTermsTemplates to find the store's Net 30
-    template, then paymentTermsCreate against the order (verified against the
-    Admin API references; needs the write_payment_terms scope).
+    """Put NET-30 payment terms on an order.
+
+    GraphQL, because payment terms have no REST surface. Needs write_payment_terms.
+
+    An order usually ALREADY carries payment terms - Shopify gives one to
+    anything that came through a checkout - and `paymentTermsCreate` refuses
+    outright when any exist, with a message saying so. Creating blindly and
+    reading "already" as success is therefore wrong twice over: it never
+    attaches anything, and it reports the goal state to a merchant who is about
+    to invoice on terms the order does not have. So this reads what is on the
+    order first and then does the matching thing:
+
+      nothing there            -> create
+      already Net 30           -> nothing to do, and say so truthfully
+      some other terms         -> update those terms to the Net 30 template
 
     Deliberately NOT in COPILOT_TOOLS - the AI chat stays read-only; only the
-    app's own Ready-to-make path calls this, via the writer handed to
+    app's own release paths reach this, via the writer handed to
     copilot.add_routes. Returns {ok, ...} and never raises for the expected
-    cases, so the release flow can report instead of break."""
+    cases, so the release flow can report instead of break.
+    """
     async def gql(query: str, variables: dict) -> dict:
         return await _request("POST", "graphql.json",
                               body={"query": query, "variables": variables})
+
+    def _perm(scope: str) -> dict:
+        return {"ok": False, "reason": "permission",
+                "detail": "The access token lacks " + scope + "."}
+
+    def _user_errors(payload: dict, key: str) -> str:
+        errs = (((payload.get("data") or {}).get(key) or {}).get("userErrors")) or []
+        return "; ".join(str(e.get("message") or "") for e in errs)[:200]
+
+    gid = f"gid://shopify/Order/{int(order_id)}"
     try:
         if not _net30_template["id"]:
             t = await gql("query { paymentTermsTemplates { id name paymentTermsType dueInDays } }", {})
@@ -1068,49 +1100,87 @@ async def set_order_payment_terms_net30(order_id: int) -> dict:
             if not hit:
                 for e in (t.get("errors") or []):
                     if "access" in str(e.get("message", "")).lower():
-                        return {"ok": False, "reason": "permission",
-                                "detail": "The access token lacks the payment terms scopes "
-                                          "(read_payment_terms / write_payment_terms)."}
+                        return _perm("the payment terms scopes "
+                                     "(read_payment_terms / write_payment_terms)")
                 return {"ok": False, "reason": "no_template",
                         "detail": "No Net 30 payment terms template exists on this store."}
             _net30_template["id"] = str(hit["id"])
+
+        # What is on the order right now.
+        q = await gql("query($id: ID!) { order(id: $id) { createdAt paymentTerms {"
+                      " id paymentTermsName paymentTermsType dueInDays } } }", {"id": gid})
+        for e in (q.get("errors") or []):
+            msg = str(e.get("message") or "")
+            if "access" in msg.lower():
+                return _perm("read_payment_terms")
+            return {"ok": False, "reason": "graphql", "detail": msg[:200]}
+        order = ((q.get("data") or {}).get("order")) or {}
+        if not order:
+            return {"ok": False, "reason": "not_found",
+                    "detail": "Shopify did not return that order."}
+        current = order.get("paymentTerms") or None
+        # Shopify emits createdAt in exactly the form it wants back as issuedAt.
+        # The Liability tab computes a missing due date as created + days, so
+        # issuing from the order date keeps Shopify's due date and the app's
+        # identical instead of a day or two apart.
+        issued = str(order.get("createdAt") or "") or None
+        schedules = [{"issuedAt": issued}] if issued else []
+
+        if current:
+            was = str(current.get("paymentTermsName") or "").strip() or "existing terms"
+            if current.get("paymentTermsType") == "NET" and current.get("dueInDays") == 30:
+                return {"ok": True, "already": True, "name": was}
+            m = await gql(
+                "mutation($input: PaymentTermsUpdateInput!) {"
+                " paymentTermsUpdate(input: $input) {"
+                "   paymentTerms { id }"
+                "   userErrors { field message } } }",
+                {"input": {"paymentTermsId": str(current.get("id") or ""),
+                           "paymentTermsAttributes": {
+                               "paymentTermsTemplateId": _net30_template["id"],
+                               "paymentSchedules": schedules}}})
+            for e in (m.get("errors") or []):
+                msg = str(e.get("message") or "")
+                if "access" in msg.lower():
+                    return _perm("write_payment_terms")
+                return {"ok": False, "reason": "graphql", "detail": msg[:200]}
+            msg = _user_errors(m, "paymentTermsUpdate")
+            if msg:
+                if _template_gone(msg):
+                    _net30_template["id"] = ""
+                return {"ok": False, "reason": "user_error", "detail": msg, "was": was}
+            return {"ok": True, "updated": True, "was": was}
+
         m = await gql(
             "mutation($referenceId: ID!, $paymentTermsAttributes: PaymentTermsCreateInput!) {"
             " paymentTermsCreate(referenceId: $referenceId,"
             "                    paymentTermsAttributes: $paymentTermsAttributes) {"
             "   paymentTerms { id }"
             "   userErrors { field message } } }",
-            {"referenceId": f"gid://shopify/Order/{int(order_id)}",
-             "paymentTermsAttributes": {"paymentTermsTemplateId": _net30_template["id"]}})
+            {"referenceId": gid,
+             "paymentTermsAttributes": {"paymentTermsTemplateId": _net30_template["id"],
+                                        "paymentSchedules": schedules}})
         for e in (m.get("errors") or []):
             msg = str(e.get("message") or "")
             if "access" in msg.lower():
-                return {"ok": False, "reason": "permission",
-                        "detail": "The access token lacks write_payment_terms."}
+                return _perm("write_payment_terms")
             return {"ok": False, "reason": "graphql", "detail": msg[:200]}
-        errs = (((m.get("data") or {}).get("paymentTermsCreate") or {}).get("userErrors")) or []
-        if errs:
-            msg = "; ".join(str(e.get("message") or "") for e in errs)[:200]
-            low = msg.lower()
-            # Order matters. A cached template id Shopify no longer accepts
-            # (deleted and recreated with a new gid) must be dropped and
-            # REPORTED - not swallowed. "does not exist" contains "exist", so
-            # testing the success case first turned every missing-template
-            # failure into a cheerful "already on the order".
-            if "template" in low or "not found" in low or "invalid" in low or "does not exist" in low:
+        msg = _user_errors(m, "paymentTermsCreate")
+        if msg:
+            if _template_gone(msg):
                 _net30_template["id"] = ""
-                return {"ok": False, "reason": "user_error", "detail": msg}
-            # An order that already carries terms IS the goal state: re-releasing
-            # must stay idempotent.
-            if "already" in low:
-                return {"ok": True, "already": True}
+            # Terms appeared between the read and the write. Rare, but the answer
+            # is a re-run, not a false claim of success.
+            if "already" in msg.lower():
+                return {"ok": False, "reason": "raced",
+                        "detail": "Payment terms were added to this order while it was "
+                                  "being released. Press it once more."}
             return {"ok": False, "reason": "user_error", "detail": msg}
-        return {"ok": True}
+        return {"ok": True, "created": True}
     except httpx.HTTPStatusError as e:
         code = e.response.status_code if e.response is not None else 0
         if code in (401, 403):
-            return {"ok": False, "reason": "permission",
-                    "detail": "The access token lacks write_payment_terms."}
+            return _perm("write_payment_terms")
         return {"ok": False, "reason": "http", "detail": f"Shopify answered {code}."}
     except Exception as e:
         logger.exception("payment terms: net-30 attach failed for order %s", order_id)

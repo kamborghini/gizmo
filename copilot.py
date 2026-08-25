@@ -9781,8 +9781,16 @@ async def _net30_on_release(registry: dict, order_id) -> str:
         logger.exception("net30: attach failed for %s", order_id)
         return "Released, but the 30-day payment terms could not be added."
     if r.get("ok"):
-        return ("30-day payment terms were already on the order."
-                if r.get("already") else "30-day payment terms added.")
+        # Say what actually happened to the order, not what was hoped for. The
+        # old wording claimed "already on the order" whenever Shopify refused
+        # the create - which it does for ANY order that already carries terms,
+        # so an order on due-on-receipt reported as being on 30-day terms.
+        if r.get("already"):
+            return "30-day payment terms were already on the order."
+        if r.get("updated"):
+            was = str(r.get("was") or "the previous terms")
+            return "Payment terms changed from " + was + " to Net 30."
+        return "30-day payment terms added."
     return ("Released, but the 30-day payment terms could not be added: "
             + str(r.get("detail") or "unknown error"))
 
