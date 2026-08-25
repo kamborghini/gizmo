@@ -10988,8 +10988,8 @@
                    Say where the rest went instead of looking like it lost them. */
                 if (state === 'done' && d.older_hidden) {
                     col.append(el('div', 'crm-col-note',
-                        d.older_hidden + ' older closed ' + (d.older_hidden === 1 ? 'thread is' : 'threads are')
-                        + ' out of the board window. Use search to find them.'));
+                        d.older_hidden + ' older ' + (d.older_hidden === 1 ? 'conversation is' : 'conversations are')
+                        + ' outside the board window. Search finds them.'));
                 }
                 board.append(col);
             });

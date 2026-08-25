@@ -495,7 +495,8 @@ def _memory_grounded(text: str, said: str, saw: str) -> bool:
     return not borrowed or not (borrowed - _mem_grams(said))
 
 
-def _add_memories(items: list[dict], said: str = "", saw: str = "") -> list[dict]:
+def _add_memories(items: list[dict], said: str = "", saw: str = "",
+                  source: str = "merchant") -> list[dict]:
     memories = _load_memory()
     asked = bool(_MEM_ASKED.search(said or ""))   # the merchant asked for this in so many words
     seen = {m.get("text", "").strip().lower() for m in memories}
@@ -519,7 +520,7 @@ def _add_memories(items: list[dict], said: str = "", saw: str = "") -> list[dict
             "fact", "decision", "followup", "preference", "insight") else "fact"
         memories.append({"id": secrets.token_hex(5), "type": mtype, "text": text,
                          "status": "open", "created": now, "updated": now,
-                         "source": "chat" if saw else "merchant"})
+                         "source": source})
         seen.add(text.lower())
     if len(memories) > MEMORY_MAX:  # keep open follow-ups + the most recent of everything else
         keep = [m for m in memories if m.get("type") == "followup" and m.get("status") == "open"][:MEMORY_MAX]
@@ -10817,10 +10818,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # Shopify tools + live SEO tools + Google data tools (the last only if configured)
     chat_registry = {**registry, **_build_seo_tools(registry), **_build_google_tools()}
     tools = _build_tools(chat_registry)
-    # Who is asking, for the duration of one chat turn. Set on the way in by
-    # the chat routes; read by the tool gate above.
-    _chat_actor = {"uid": ""}
-    dispatch = _build_dispatch(chat_registry, lambda: _chat_actor["uid"])
+    def dispatch_for(uid: str) -> Callable:
+        """The tool dispatcher for ONE chat turn, carrying who is asking so the
+        tool gate can refuse what their tabs do not cover. Bound per run, never
+        module-wide: a shared "current asker" is only safe while nothing awaits
+        between writing and reading it, and a chat turn is minutes of awaits -
+        a second person starting a chat would have re-pointed it long before
+        the first turn's tool calls ran."""
+        return _build_dispatch(chat_registry, lambda: str(uid or ""))
 
     logger.info(f"Copilot enabled — embedded-only; models: fast={MODEL_FAST}, deep={MODEL_DEEP}; "
                 f"effort={ANTHROPIC_EFFORT}; max_tokens={MAX_TOKENS}; tools: {len(tools)}")
@@ -10950,11 +10955,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if _is_seo(history):
             extra += "\n\n" + SEO_KNOWLEDGE
         extra += _page_context_to_system(body.get("context"))
-        # Whose permissions this turn runs under. Set on the very next line
-        # after the last await, and read synchronously by the tool gate.
-        _chat_actor["uid"] = str(_who or "")
         try:
-            result = await run_chat(history, dispatch, tools, model, extra)
+            result = await run_chat(history, dispatch_for(_who), tools, model, extra)
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
         except anthropic.APIError:
@@ -10965,7 +10967,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         saw = result.pop("_saw", "")
         if isinstance(mems, list) and mems:
             try:
-                _add_memories(mems, _chat_said(history), saw)
+                _add_memories(mems, _chat_said(history), saw, source="chat")
             except Exception:
                 logger.exception("Memory capture failed")
         return _json(result)
@@ -10999,18 +11001,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if _is_seo(history):
             extra += "\n\n" + SEO_KNOWLEDGE
         extra += _page_context_to_system(body.get("context"))
-        _chat_actor["uid"] = str(_who or "")     # same gate as /api/chat
 
         q: asyncio.Queue = asyncio.Queue()
 
         async def runner():
             try:
-                result = await run_chat(history, dispatch, tools, model, extra, emit=q.put)
+                result = await run_chat(history, dispatch_for(_who), tools, model, extra,
+                                        emit=q.put)
                 mems = result.get("structured", {}).pop("remember", None)
                 saw = result.pop("_saw", "")
                 if isinstance(mems, list) and mems:
                     try:
-                        _add_memories(mems, _chat_said(history), saw)
+                        _add_memories(mems, _chat_said(history), saw, source="chat")
                     except Exception:
                         logger.exception("Memory capture failed")
                 await q.put({"type": "done", "result": result})
@@ -13061,13 +13063,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         terms_notes.append(tn["note"])
                     if tn["account"] and not tn["ok"]:
                         terms_bad = True
-                if tail:
-                    _spawn_bg(_release_bg(registry, tail))
+                queued = len(tail) if tail and _spawn_bg(_release_bg(registry, tail)) else 0
+                if tail and not queued:
+                    # No loop to defer to (never true in a route, but say so
+                    # rather than promise a pass that never started).
+                    logger.error("release tail of %d orders could not be scheduled", len(tail))
                 return _json({"ok": True, "state": {str(i): _load_prod_state().get(str(i), {}) for i in ids},
                               "terms_note": ("  ".join(terms_notes[:3]) if terms_notes else ""),
                               "terms_ok": not terms_bad,
                               "tag_note": (notes[0] if notes else ""),
-                              "queued": len(tail),
+                              "queued": queued,
                               "state_note": ("" if stamped else "Printed stamps couldn't be saved; "
                                              "the list may show these as unprinted after a reload.")})
             if op == "unprinted":
