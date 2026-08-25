@@ -2,6 +2,40 @@
  "releases": [
   {
    "date": "2026-08-25",
+   "title": "An auditor that never sleeps: Shopify, Xero and the inbox, cross-checked",
+   "items": [
+    {
+     "kind": "added",
+     "text": "A Reconciliation tab: an independent financial controller that cross-checks Shopify, Xero and the inbox. It looks for sales missing from the books, refunds with no credit note, payouts that never reached the bank, duplicate supplier bills, over-allocated invoices, remittances that do not add up, and bank lines sitting unreconciled - and turns each into a discrepancy card with the evidence and the arithmetic on it."
+    },
+    {
+     "kind": "added",
+     "text": "Connect Xero from the new tab (a one-time, five-minute walk shown to the master account). The connection is read-only by construction: the client has no ability to create, change, allocate or delete anything in the accounts, so the tool that checks the books cannot bend them."
+    },
+    {
+     "kind": "added",
+     "text": "Every discrepancy has an investigation screen: why it was flagged, the deterministic arithmetic, the evidence records from each system verbatim, and - separately and clearly labelled - the AI's interpretation with its confidence and the evidence it cites. The AI must cite what it was shown; an answer that cites nothing valid is recorded as \"insufficient evidence, requires human review\", never as a finding."
+    },
+    {
+     "kind": "added",
+     "text": "Discrepancies carry a status (investigating, explained, confirmed error, corrected, ignored) with a full history of who changed what and when. Ignoring one requires a written reason. When the books catch up and a discrepancy is no longer detected, it is marked as such and kept - never silently deleted."
+    },
+    {
+     "kind": "added",
+     "text": "The chat can now answer questions like \"what doesn't match this month?\" and \"show me everything over £1,000 that needs attention\" - it reads the same discrepancy list, evidence and all, and the tools are gated on the Reconciliation tab like every other permission."
+    },
+    {
+     "kind": "added",
+     "text": "Remittance advices and invoices arriving in the inbox are read automatically (the text layer first; the AI only for scans, and anything it extracts is cross-checked against the document text - an amount the document does not contain is refused). Each document is then matched against the books: unknown invoice numbers, short payments and missing receipts each become discrepancies."
+    },
+    {
+     "kind": "improved",
+     "text": "The sweep runs nightly once Xero is connected, and says plainly when part of it could not run - a check that did not happen is reported as exactly that, never as a clean result."
+    }
+   ]
+  },
+  {
+   "date": "2026-08-25",
    "title": "30-day terms, switched on and told the truth",
    "items": [
     {

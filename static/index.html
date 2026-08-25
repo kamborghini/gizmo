@@ -1719,6 +1719,7 @@
                 <button class="nav-item" data-view="products" id="nav-products"></button>
                 <button class="nav-item" data-view="customers" id="nav-customers"></button>
                 <button class="nav-item" data-view="liability" id="nav-liability"></button>
+                <button class="nav-item" data-view="recon" id="nav-recon"></button>
                 <button class="nav-item" data-view="crm" id="nav-crm"></button>
                 <button class="nav-item" data-view="mail" id="nav-mail"></button>
                 <button class="nav-item" data-view="files" id="nav-files"></button>
@@ -1779,6 +1780,9 @@
             <!-- Liability / accounts receivable -->
             <section class="view" id="view-liability">
                 <div class="scroll"><div class="ov-wrap wrap-data" id="liability-content"></div></div>
+            </section>
+            <section class="view" id="view-recon">
+                <div class="scroll"><div class="ov-wrap wrap-data" id="recon-content"></div></div>
             </section>
 
             <!-- Production labels -->
@@ -1999,6 +2003,7 @@
         $('nav-products').append(ico(I.box), document.createTextNode('Products'));
         $('nav-customers').append(ico(I.users), document.createTextNode('Customers'));
         $('nav-liability').append(ico(I.card), document.createTextNode('Liability'));
+        $('nav-recon').append(ico(I.check), document.createTextNode('Reconciliation'));
         $('nav-crm').append(ico(I.briefcase), document.createTextNode('CRM'));
         $('nav-mail').append(ico(I.mail), document.createTextNode('Inbox'));
         $('nav-files').append(ico(I.folder), document.createTextNode('Files'));
@@ -4543,6 +4548,230 @@
             return { pct: Math.round(size / base * 100), clipped: over() };
         }
         let skipLabelsAutoLoad = false;   // set by the admin deep link, which fetches its own order
+        /* ==================================================================
+           Reconciliation: an independent auditor over Shopify + Xero + Gmail.
+           Everything on this tab is READ from the three systems and never
+           written back; the only thing that changes is the exception list's
+           statuses. Facts, arithmetic and AI interpretation are visually
+           separate, because a guess dressed as a fact is how a wrong number
+           survives an audit.
+           ================================================================== */
+        let reconCache = null, reconFilter = { severity: '', status: '', q: '' }, reconOpen = null;
+        async function showReconView() { renderRecon(); refreshRecon(); }
+        async function refreshRecon() {
+            try {
+                const st = await api('/api/recon/status', {});
+                const ex = await api('/api/recon/exceptions', reconFilter);
+                reconCache = { st, ex };
+            } catch (e) { reconCache = { error: e.message }; }
+            if (document.querySelector('#view-recon.active')) renderRecon();
+        }
+        const RECON_SEV = { critical: ['CRITICAL', 'bad'], high: ['HIGH', 'bad'],
+                            medium: ['MEDIUM', 'warn'], low: ['LOW', 'note'] };
+        function renderRecon() {
+            const box = $('recon-content'); box.innerHTML = '';
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.check;
+            const ht = el('div');
+            ht.append(el('h2', null, 'Reconciliation'),
+                el('p', null, 'An independent check that Shopify, Xero and the inbox agree: '
+                    + 'every sale in the books, every payout in the bank, every document accounted for. '
+                    + 'It reads all three systems and writes to none of them.'));
+            hero.append(badge, ht); box.append(hero);
+            if (!reconCache) { box.append(el('div', 'empty', 'Loading\u2026')); return; }
+            if (reconCache.error) { box.append(loadFailure('The reconciliation state could not be read. ' + reconCache.error, refreshRecon)); return; }
+            const st = reconCache.st || {};
+            /* Connection + sweep card */
+            const card = el('div', 'card'); card.style.marginBottom = '16px';
+            const row = el('div'); row.style.cssText = 'display:flex;gap:16px;align-items:center;flex-wrap:wrap';
+            const xs = st.xero || {};
+            row.append(el('span', 'lbl-chip ' + (xs.connected ? 'made' : 'bad'),
+                xs.connected ? ('XERO \u00b7 ' + (xs.tenant || 'CONNECTED')) : 'XERO NOT CONNECTED'));
+            row.append(el('span', 'lbl-chip ' + (st.gmail ? 'made' : 'warn'), st.gmail ? 'GMAIL' : 'GMAIL OFF'));
+            row.append(el('span', 'sub', st.last_sync ? ('Last sweep ' + fmtDate(st.last_sync)) : 'Never swept'));
+            if (st.docs) row.append(el('span', 'sub', st.docs + ' documents read'));
+            const sw = el('button', 'btn btn-primary'); sw.append(ico(I.refresh),
+                document.createTextNode(st.sweeping ? 'Sweeping\u2026' : 'Sweep now'));
+            sw.disabled = !!st.sweeping || !xs.connected;
+            sw.onclick = async () => { sw.disabled = true; sw.textContent = 'Sweeping\u2026';
+                try { await api('/api/recon/sweep', {}); toastOk('Sweep finished.'); }
+                catch (e) { toastError(e.message); }
+                refreshRecon(); };
+            row.style.rowGap = '8px'; row.append(sw); card.append(row);
+            (st.sweep_notes || []).forEach(n => card.append(el('div', 'field-help', n)));
+            box.append(card);
+            /* Setup, master only, until Xero is connected */
+            if (!xs.connected && st.setup && st.setup.env_needed) {
+                const su = el('div', 'card'); su.style.marginBottom = '16px';
+                su.append(el('div', 'know-title', 'Connect Xero (one-time, about five minutes)'));
+                /* Built as nodes, not innerHTML: the redirect URI is server
+                   data and goes in as TEXT, whatever it contains. */
+                const step = (n, before, strong, after) => {
+                    const p2 = el('div', 'field-help');
+                    p2.append(document.createTextNode(n + '. ' + before));
+                    if (strong) { const b2 = el('b', null, strong); p2.append(b2); }
+                    if (after) p2.append(document.createTextNode(after));
+                    return p2;
+                };
+                su.append(step('1', 'Create a free app at ', 'developer.xero.com',
+                    ' (My Apps, New app, Web app).'));
+                su.append(step('2', 'Set its redirect URI to exactly: ',
+                    st.setup.redirect_uri || '', ''));
+                su.append(step('3', 'Put the Client ID and Client Secret into the Railway variables ',
+                    'XERO_CLIENT_ID and XERO_CLIENT_SECRET',
+                    ' (never anywhere else), then redeploy.'));
+                su.append(step('4', 'Open ',
+                    location.origin + (st.setup.connect_path || '/oauth/xero/start?key=...'),
+                    ' and sign in as the organisation. The connection is read-only by construction.'));
+                if (!st.setup.configured) su.append(el('div', 'field-help',
+                    'The server does not have the two variables yet: the connect link will say "Not configured" until they are set.'));
+                box.append(su);
+            }
+            /* Severity summary */
+            const counts = st.open_counts || {};
+            const mets = el('div', 'metrics');
+            [['critical', 'Critical'], ['high', 'High'], ['medium', 'Medium'], ['low', 'Low']].forEach(([k, lab]) => {
+                const stat = el('div', 'stat' + (counts[k] && (k === 'critical' || k === 'high') ? ' stat-bad' : ''));
+                stat.style.cursor = 'pointer';
+                stat.append(el('div', 'stat-l', lab), el('div', 'stat-v', String(counts[k] || 0)));
+                stat.onclick = () => { reconFilter.severity = reconFilter.severity === k ? '' : k; refreshRecon(); };
+                if (reconFilter.severity === k) stat.classList.add('on');
+                mets.append(stat);
+            });
+            box.append(mets);
+            /* Filters */
+            const bar = el('div', 'lbl-toolbar'); bar.style.flexWrap = 'wrap';
+            bar.append(segControl([{ value: '', label: 'Open' }, { value: 'investigating', label: 'Investigating' },
+                { value: 'explained', label: 'Explained' }, { value: 'confirmed_error', label: 'Errors' },
+                { value: 'ignored', label: 'Ignored' }], reconFilter.status,
+                v => { reconFilter.status = v; refreshRecon(); }));
+            const search = el('input', 'mail-search'); search.placeholder = 'Search discrepancies';
+            search.value = reconFilter.q;
+            search.onchange = () => { reconFilter.q = search.value; refreshRecon(); };
+            bar.append(search);
+            const exp = el('button', 'btn'); exp.append(ico(I.download), document.createTextNode('Export CSV'));
+            exp.onclick = reconCSV; bar.append(exp);
+            box.append(bar);
+            /* Exception list */
+            const ex = (reconCache.ex || {}).exceptions || [];
+            if (!ex.length) {
+                box.append(el('div', 'empty', xs.connected
+                    ? 'Nothing needs attention with these filters. That is the goal state.'
+                    : 'Connect Xero above, then run the first sweep.'));
+                return;
+            }
+            const list = el('div', 'card'); list.style.padding = '4px 0';
+            ex.forEach(e => {
+                const r = el('div', 'lbl-row');
+                r.setAttribute('role', 'button'); r.tabIndex = 0;
+                const [lab, cls] = RECON_SEV[e.severity] || ['?', 'note'];
+                r.append(el('span', 'lbl-chip ' + cls, lab));
+                const mid = el('div', 'lbl-who');
+                const line = el('span', 'lbl-nameline');
+                line.append(el('span', 'lbl-name', e.title));
+                if (e.has_ai) line.append(el('span', 'lbl-chip note', 'AI VERDICT'));
+                if (e.stale) line.append(el('span', 'lbl-chip', 'NO LONGER DETECTED'));
+                mid.append(line);
+                mid.append(el('span', 'sub', (e.systems || []).join(' + ') + '  \u00b7  ' + (e.date || '')
+                    + (e.status !== 'new' ? '  \u00b7  ' + e.status.replace('_', ' ') : '')));
+                r.append(mid);
+                r.append(el('div', 'lbl-meta', e.amount_disp || ''));
+                r.onclick = () => openReconExc(e.id);
+                list.append(r);
+            });
+            box.append(list);
+            if (reconOpen) paintReconDetail(box);
+        }
+        function reconCSV() {
+            const ex = ((reconCache || {}).ex || {}).exceptions || [];
+            const esc2 = (v) => { v = (v == null ? '' : String(v)); if (/^[=+\-@\t\r]/.test(v)) v = "'" + v; return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+            const rows = [['Severity', 'Title', 'Amount', 'Date', 'Systems', 'Status', 'Id'].join(',')];
+            ex.forEach(e => rows.push([e.severity, e.title, e.amount_disp, e.date,
+                (e.systems || []).join(' + '), e.status, e.id].map(esc2).join(',')));
+            const blob = new Blob([rows.join('\r\n')], { type: 'text/csv' });
+            const aEl = document.createElement('a'); aEl.href = URL.createObjectURL(blob);
+            aEl.download = 'reconciliation.csv'; aEl.click(); URL.revokeObjectURL(aEl.href);
+        }
+        async function openReconExc(id) {
+            try {
+                const d = await api('/api/recon/exception', { id });
+                reconOpen = d.exception; renderRecon();
+                const dt = document.getElementById('recon-detail');
+                if (dt) dt.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } catch (e) { toastError(e.message); }
+        }
+        function paintReconDetail(box) {
+            const e = reconOpen; if (!e) return;
+            const d = el('div', 'card'); d.id = 'recon-detail'; d.style.marginTop = '16px';
+            const head = el('div'); head.style.cssText = 'display:flex;gap:10px;align-items:flex-start';
+            const [lab, cls] = RECON_SEV[e.severity] || ['?', 'note'];
+            head.append(el('span', 'lbl-chip ' + cls, lab));
+            const hd = el('div'); hd.append(el('div', 'know-title', e.title));
+            hd.append(el('div', 'sub', (e.systems || []).join(' + ') + '  \u00b7  ' + (e.date || '')
+                + '  \u00b7  ' + (e.amount_disp || '')));
+            head.append(hd);
+            const x = el('button', 'btn'); x.style.marginLeft = 'auto'; x.textContent = 'Close';
+            x.onclick = () => { reconOpen = null; renderRecon(); };
+            head.append(x); d.append(head);
+            d.append(el('div', 'section-title', 'Why this was flagged'));
+            d.append(el('div', 'field-help', e.why || ''));
+            if ((e.computed || []).length) {
+                d.append(el('div', 'section-title', 'The arithmetic (deterministic, not AI)'));
+                (e.computed || []).forEach(c => { const m = el('div', 'field-help'); m.style.fontVariantNumeric = 'tabular-nums'; m.textContent = c; d.append(m); });
+            }
+            d.append(el('div', 'section-title', 'Evidence'));
+            (e.evidence || []).forEach(v => {
+                const evc = el('details', 'know-body');
+                const sm = el('summary', null, '[' + v.eid + '] ' + v.system.toUpperCase() + ' \u00b7 ' + v.label);
+                const pre = el('pre', 'know-text'); pre.style.whiteSpace = 'pre-wrap';
+                pre.textContent = JSON.stringify(v.record, null, 1);
+                evc.append(sm, pre); d.append(evc);
+            });
+            d.append(el('div', 'section-title', 'AI interpretation'));
+            if (e.ai) {
+                const conf = e.ai.confidence || 0;
+                const aiBox = el('div', 'insight ' + (e.ai.classification === 'genuine_error' ? 'warning' : 'insight'));
+                const body = el('div');
+                body.append(el('div', 't', (e.ai.classification || '').replace(/_/g, ' ')
+                    + '  \u00b7  confidence ' + conf + '%'));
+                body.append(el('div', 'd', e.ai.explanation || ''));
+                if ((e.ai.cites || []).length) body.append(el('div', 'd', 'Evidence cited: ' + e.ai.cites.join(', ')));
+                if (e.ai.recommended_action) body.append(el('div', 'd', 'Recommended: ' + e.ai.recommended_action));
+                body.append(el('div', 'd', 'This is the model\u2019s interpretation of the evidence above, not an accounting fact. Model: ' + (e.ai.model || 'unknown')));
+                aiBox.append(body); d.append(aiBox);
+            } else {
+                const inv = el('button', 'btn'); inv.append(ico(I.zap || I.check), document.createTextNode('Investigate with AI'));
+                inv.onclick = async () => { inv.disabled = true; inv.textContent = 'Investigating\u2026';
+                    try { const r = await api('/api/recon/exception', { id: e.id, op: 'investigate' }); reconOpen = r.exception; renderRecon(); }
+                    catch (er) { toastError(er.message); inv.disabled = false; } };
+                d.append(inv);
+                d.append(el('div', 'field-help', 'The AI reads only the evidence shown above, must cite what it relies on, and its answer is recorded as interpretation, never as fact.'));
+            }
+            d.append(el('div', 'section-title', 'Status'));
+            const stbar = el('div', 'lbl-toolbar'); stbar.style.flexWrap = 'wrap';
+            [['investigating', 'Investigating'], ['explained', 'Explained'],
+             ['confirmed_error', 'Confirmed error'], ['corrected', 'Corrected'],
+             ['ignored', 'Ignore\u2026']].forEach(([k, labl]) => {
+                const b = el('button', 'btn' + (e.status === k ? ' on' : ''));
+                b.textContent = labl;
+                b.onclick = async () => {
+                    let note = '';
+                    if (k === 'ignored') { note = prompt('Why is this being ignored? (required)') || ''; if (!note.trim()) return; }
+                    try { const r = await api('/api/recon/exception', { id: e.id, op: 'status', status: k, note });
+                        reconOpen = r.exception; refreshRecon(); }
+                    catch (er) { toastError(er.message); }
+                };
+                stbar.append(b);
+            });
+            d.append(stbar);
+            if ((e.history || []).length) {
+                d.append(el('div', 'section-title', 'History'));
+                (e.history || []).forEach(h => d.append(el('div', 'field-help',
+                    fmtDate(h.at) + '  \u00b7  ' + h.by + '  \u00b7  ' + h.from + ' \u2192 ' + h.to
+                    + (h.note ? '  \u00b7  ' + h.note : ''))));
+            }
+            box.append(d);
+        }
+
         function showLabelsView() {
             // A plain Shopify read with no AI cost: load straight away, no gate.
             if (skipLabelsAutoLoad) { skipLabelsAutoLoad = false; return; }
@@ -12742,7 +12971,7 @@
             return data;
         }
         const TAB_KEYS = ['overview', 'seo', 'keywords', 'products', 'customers', 'liability',
-                          'crm', 'mail', 'files', 'labels', 'memory', 'skills', 'chat'];
+                          'crm', 'mail', 'files', 'labels', 'memory', 'skills', 'chat', 'recon'];
         function tabAllowed(v) {
             if (!teamMe || !Array.isArray(teamMe.tabs)) return true;
             if (TAB_KEYS.indexOf(v) < 0) return true;   // guide and team are governed elsewhere
@@ -13276,10 +13505,10 @@
         }
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
-            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'crm', 'mail', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', crm: 'CRM', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
+            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'crm', 'mail', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', crm: 'CRM', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
-            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide' || v === 'crm' || v === 'mail' || v === 'files' || v === 'team') ? 'none' : '';
+            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide' || v === 'crm' || v === 'mail' || v === 'files' || v === 'team' || v === 'recon') ? 'none' : '';
             if (v === 'guide') renderGuide();
             // Only offer the PDF when there is actually a report to print: the print
             // stylesheet hides the Run gate, so printing an un-run tab yields a blank page.
@@ -13307,6 +13536,7 @@
             if (v === 'labels') showLabelsView();
             if (v === 'memory') loadMemory();
             if (v === 'skills') loadSkills();
+            if (v === 'recon') showReconView();
         }
 
         /* ---------- responsive sidebar ---------- */

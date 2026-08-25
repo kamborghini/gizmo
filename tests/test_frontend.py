@@ -1469,6 +1469,44 @@ def t_independent_cards_use_the_width():
        "squeezed into a 380px column is not a typing surface")
 
 
+@test
+def t_the_reconciliation_tab_exists_and_is_gated():
+    ok('id="view-recon"' in HTML, "the view exists")
+    ok('data-view="recon"' in HTML, "and its sidebar entry")
+    ok("'recon'" in re.search(r"const TAB_KEYS = \[[^\]]+\]", SCRIPT).group(0),
+       "the tab is in the permission list, so an admin can switch it off per account")
+    ok("wrap-data" in re.search(r'id="recon-content"[^>]*|[^>]*id="recon-content"', HTML).group(0)
+       or 'class="ov-wrap wrap-data" id="recon-content"' in HTML,
+       "a data tab rides the wide tier")
+
+
+@test
+def t_ai_output_is_labelled_interpretation_never_fact():
+    """Section 9 of the brief, and the whole point: a model's conclusion is
+    displayed as interpretation with its confidence and citations, visually
+    apart from the arithmetic."""
+    fn = SCRIPT.split("function paintReconDetail")[1].split("\n        function ")[0]
+    ok("interpretation of the evidence above, not an accounting fact" in fn,
+       "the label is on the card")
+    ok("deterministic, not AI" in fn, "and the arithmetic says what it is")
+    ok("confidence" in fn and "cites" in fn, "confidence and citations are shown")
+
+
+@test
+def t_ignoring_a_discrepancy_demands_a_reason():
+    fn = SCRIPT.split("function paintReconDetail")[1].split("\n        function ")[0]
+    ok("if (!note.trim()) return" in fn,
+       "the client refuses an empty reason before the server even sees it")
+
+
+@test
+def t_recon_csv_export_carries_the_armour():
+    fn = SCRIPT.split("function reconCSV")[1].split("\n        function ")[0]
+    ok("replace(/\"/g" in fn.replace("'", '"') or 'replace(/"/g' in fn, "quotes are doubled")
+    ok('[",\\n\\r]' in fn, "commas, newlines AND carriage returns quote the field")
+    ok("^[=+\\-@" in fn, "formula injection is armoured")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

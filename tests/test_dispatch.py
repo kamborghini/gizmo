@@ -40,6 +40,10 @@ os.environ.update({
     "MAILBOX_PATH": SCRATCH + "/mailbox.json",
     "GMAIL_TOKEN_PATH": SCRATCH + "/gmail_oauth.json",
     "FEEDBACK_PATH": SCRATCH + "/feedback.json",
+    "RECON_PATH": SCRATCH + "/recon.json",
+    "RECON_CACHE_PATH": SCRATCH + "/recon_cache.json",
+    "RECON_DOCS_PATH": SCRATCH + "/recon_docs.json",
+    "XERO_TOKEN_PATH": SCRATCH + "/xero_oauth.json",
 })
 for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
     os.environ.pop(v, None)
@@ -10234,6 +10238,441 @@ def t_the_admin_print_document_never_half_releases():
                    encoding="utf-8").read()
         ok("Ready to make" in jsx,
            f + " tells the merchant the order still needs releasing in gizmo")
+
+
+# ---------------------------------------------------------------------------
+# Reconciliation engine: the auditor must itself be auditable
+# ---------------------------------------------------------------------------
+import recon as _rc
+
+
+def _inv(num, total, contact="Northern Stage Ltd", typ="ACCREC", date="2026-08-10",
+         tax=None, due_p=None, paid_p=None, ref="", status="AUTHORISED", iid=None):
+    return {"id": iid or ("XI-" + num), "number": num, "type": typ, "status": status,
+            "contact": contact, "date": date, "due": "2026-09-10",
+            "total": total, "tax": tax, "due_pence": due_p, "paid_pence": paid_p,
+            "credited_pence": 0, "currency": "GBP", "reference": ref, "updated": ""}
+
+
+def _ord(oid, name, total, date="2026-08-10", fin="paid", company="Northern Stage Ltd",
+         tax=None, refunds=None, cancelled=False, test=False):
+    return {"id": oid, "name": name, "created_at": date, "total": total, "tax": tax,
+            "currency": "GBP", "financial_status": fin, "cancelled": cancelled,
+            "test": test, "customer": "Sarah Fielding", "company": company,
+            "gateways": ["manual"], "refunds": refunds or []}
+
+
+def _bt(tid, pence_, typ="RECEIVE", date="2026-08-11", rec=True, ref="", account="Current"):
+    return {"id": tid, "type": typ, "status": "AUTHORISED", "date": date,
+            "pence": pence_, "currency": "GBP", "contact": "", "reference": ref,
+            "account": account, "is_reconciled": rec}
+
+
+@test
+def t_money_is_pence_and_never_a_float():
+    eq(_rc.pence("12.30"), 1230)
+    eq(_rc.pence("1,234.56"), 123456)
+    eq(_rc.pence("£8,420.00"), 842000)
+    eq(_rc.pence(0.1) + _rc.pence(0.2), 30, "0.1 + 0.2 is 30 pence, not 30.000000004")
+    eq(_rc.pence(""), None, "unparseable is UNKNOWN, not zero")
+    eq(_rc.pence(None), None)
+    eq(_rc.money(842000), "£8420.00")
+    eq(_rc.norm_ref("INV-00142"), _rc.norm_ref("inv 142"),
+       "leading zeros and punctuation are presentation, not identity")
+    ok(_rc.norm_ref("INV-142") != _rc.norm_ref("INV-1420"))
+    eq(_rc.norm_name("Selecon Lighting GmbH"), _rc.norm_name("SELECON LIGHTING"))
+    eq(_rc._day("/Date(1787097600000+0000)/"), "2026-08-19",
+       "Xero's /Date()/ form parses to a day")
+
+
+@test
+def t_a_shopify_sale_missing_from_xero_is_flagged_with_its_arithmetic():
+    cache = {"shopify": {"orders": {"1": _ord(104275, "#104275", 84200)}},
+             "xero": {"invoices": {}}}
+    out = _rc.check_orders_vs_invoices(cache)
+    eq(len(out), 1, out)
+    e = out[0]
+    eq(e["kind"], "shopify_sale_missing")
+    eq(e["severity"], "critical", "£842 is above the £250 materiality line")
+    ok("#104275" in e["title"] and e["amount"] == 84200)
+    ok(e["computed"] and "no match" in e["computed"][0], e["computed"])
+    ok(e["evidence"][0]["system"] == "shopify")
+
+
+@test
+def t_a_sale_found_by_number_or_by_amount_is_not_flagged():
+    cache = {"shopify": {"orders": {
+                "1": _ord(104275, "#104275", 84200),
+                "2": _ord(104276, "#104276", 12000, company="Roundhouse Trust")}},
+             "xero": {"invoices": {
+                "a": _inv("INV-104275", 84200),
+                "b": _inv("SI-0099", 12000, contact="Roundhouse Trust", ref="")}}}
+    out = _rc.check_orders_vs_invoices(cache)
+    eq([e for e in out if e["kind"] == "shopify_sale_missing"], [],
+       "one matched by number, the other by amount+date+name")
+    # And a cancelled or test order never asks for an invoice at all.
+    cache["shopify"]["orders"]["3"] = _ord(9, "#9", 5000, cancelled=True)
+    cache["shopify"]["orders"]["4"] = _ord(10, "#10", 5000, test=True)
+    out2 = _rc.check_orders_vs_invoices(cache)
+    eq([e for e in out2 if e["kind"] == "shopify_sale_missing"], [])
+
+
+@test
+def t_amount_and_vat_mismatches_show_both_sides_of_the_subtraction():
+    cache = {"shopify": {"orders": {"1": _ord(104275, "#104275", 84200, tax=14033)}},
+             "xero": {"invoices": {"a": _inv("INV-104275", 80000, tax=13333)}}}
+    out = _rc.check_orders_vs_invoices(cache)
+    kinds = sorted(e["kind"] for e in out)
+    eq(kinds, ["order_invoice_amount_mismatch", "order_invoice_tax_mismatch"])
+    amt = next(e for e in out if e["kind"] == "order_invoice_amount_mismatch")
+    eq(amt["amount"], 4200, "the diff is Shopify minus Xero, in pence")
+    ok("£842.00" in amt["computed"][0] and "£800.00" in amt["computed"][0], amt["computed"])
+
+
+@test
+def t_a_shopify_refund_needs_a_credit_note_or_a_bank_spend():
+    refund = {"id": 77, "created_at": "2026-08-12", "pence": 15000}
+    cache = {"shopify": {"orders": {"1": _ord(104275, "#104275", 84200, refunds=[refund])}},
+             "xero": {"invoices": {}, "credit_notes": {}, "bank_transactions": {}}}
+    out = _rc.check_refunds(cache)
+    eq(len(out), 1)
+    eq(out[0]["kind"], "shopify_refund_missing")
+    # A matching ACCREC credit note within the window settles it.
+    cache["xero"]["credit_notes"]["c"] = {
+        "id": "c", "number": "CN-1", "type": "ACCRECCREDIT", "status": "AUTHORISED",
+        "contact": "Northern Stage Ltd", "date": "2026-08-13", "total": 15000,
+        "remaining": 0, "currency": "GBP", "reference": ""}
+    eq(_rc.check_refunds(cache), [])
+
+
+@test
+def t_payouts_match_the_bank_once_and_only_once():
+    cache = {"shopify": {"payouts": {
+                "p1": {"id": "p1", "date": "2026-08-14", "pence": 2348172,
+                       "currency": "GBP", "status": "paid"},
+                "p2": {"id": "p2", "date": "2026-08-15", "pence": 2348172,
+                       "currency": "GBP", "status": "paid"}}},
+             "xero": {"bank_transactions": {
+                "b1": _bt("b1", 2348172, date="2026-08-15")}}}
+    out = _rc.check_payouts_vs_bank(cache)
+    eq(len(out), 1, "two identical payouts cannot both claim the one bank line")
+    eq(out[0]["kind"], "payout_missing_from_bank")
+    # An unreconciled match is its own, lesser, finding.
+    cache["shopify"]["payouts"].pop("p2")
+    cache["xero"]["bank_transactions"]["b1"]["is_reconciled"] = False
+    out2 = _rc.check_payouts_vs_bank(cache)
+    eq(out2[0]["kind"], "payout_bank_unreconciled")
+
+
+@test
+def t_duplicate_bills_are_caught_by_number_and_by_shape():
+    cache = {"xero": {"invoices": {
+        "a": _inv("INV-0042", 50000, typ="ACCPAY", contact="Glass Supplies Ltd", iid="a"),
+        "b": _inv("INV 42", 50000, typ="ACCPAY", contact="Glass Supplies Ltd",
+                  date="2026-08-12", iid="b"),
+        "c": _inv("GS-771", 32000, typ="ACCPAY", contact="Glass Supplies Ltd",
+                  date="2026-08-01", iid="c"),
+        "d": _inv("GS-778", 32000, typ="ACCPAY", contact="Glass Supplies Limited",
+                  date="2026-08-04", iid="d")}}}
+    out = _rc.check_duplicates(cache)
+    kinds = sorted(e["kind"] for e in out)
+    eq(kinds, ["duplicate_bill_number", "possible_duplicate_bill"], out)
+    dup = next(e for e in out if e["kind"] == "duplicate_bill_number")
+    ok("INV-0042" in dup["title"] and len(dup["evidence"]) == 2)
+
+
+@test
+def t_an_overpaid_invoice_shows_the_sum_that_proves_it():
+    cache = {"xero": {
+        "invoices": {"a": _inv("INV-9", 50000, iid="a")},
+        "payments": {
+            "p1": {"id": "p1", "date": "2026-08-11", "pence": 50000, "reference": "",
+                   "status": "AUTHORISED", "invoice_id": "a", "invoice_number": "INV-9",
+                   "contact": "N", "account": "090", "is_reconciled": True},
+            "p2": {"id": "p2", "date": "2026-08-18", "pence": 50000, "reference": "",
+                   "status": "AUTHORISED", "invoice_id": "a", "invoice_number": "INV-9",
+                   "contact": "N", "account": "090", "is_reconciled": True}}}}
+    out = _rc.check_overpayments(cache)
+    eq(len(out), 1)
+    eq(out[0]["amount"], 50000, "over by exactly one duplicated payment")
+    ok("£500.00" in out[0]["computed"][0] and "over" in out[0]["computed"][0])
+
+
+@test
+def t_a_remittance_is_taken_apart_line_by_line():
+    doc = {"source_key": "m1:a1", "doc_type": "remittance", "from": "ap@customer.com",
+           "counterparty": "Customer A", "date": "2026-08-19", "currency": "GBP",
+           "total_pence": 842000, "filename": "remit.pdf", "subject": "Remittance",
+           "extracted_by": "text",
+           "invoice_numbers": ["INV-201", "INV-202", "INV-999"],
+           "invoice_lines": [{"number": "INV-201", "pence": 500000},
+                             {"number": "INV-202", "pence": 342000},
+                             {"number": "INV-999", "pence": 100}]}
+    cache = {"xero": {"invoices": {
+        "a": _inv("INV-201", 500000, iid="a", due_p=0, paid_p=500000),
+        "b": _inv("INV-202", 400000, iid="b", due_p=400000, paid_p=0)},
+        "payments": {}}}
+    out = _rc.check_gmail_docs(cache, {"m1:a1": doc})
+    kinds = sorted(e["kind"] for e in out)
+    eq(kinds, ["remittance_amount_mismatch", "remittance_payment_missing",
+               "remittance_unknown_invoice"], kinds)
+    mm = next(e for e in out if e["kind"] == "remittance_amount_mismatch")
+    ok("INV-202" in mm["title"], "the short-paid line is named")
+    # When every line is individually settled, a split payment is NOT flagged.
+    cache["xero"]["payments"] = {
+        "p1": {"id": "p1", "date": "2026-08-20", "pence": 500000, "reference": "",
+               "status": "AUTHORISED", "invoice_id": "a", "invoice_number": "INV-201",
+               "contact": "", "account": "090", "is_reconciled": True},
+        "p2": {"id": "p2", "date": "2026-08-20", "pence": 342000, "reference": "",
+               "status": "AUTHORISED", "invoice_id": "b", "invoice_number": "INV-202",
+               "contact": "", "account": "090", "is_reconciled": True}}
+    doc2 = dict(doc, invoice_numbers=["INV-201", "INV-202"],
+                invoice_lines=[{"number": "INV-201", "pence": 500000},
+                               {"number": "INV-202", "pence": 342000}])
+    out2 = _rc.check_gmail_docs(cache, {"m1:a1": doc2})
+    ok(not any(e["kind"] == "remittance_payment_missing" for e in out2),
+       "split settlement is the normal case, not a finding: %s" % [e["kind"] for e in out2])
+
+
+@test
+def t_document_text_parses_deterministically():
+    text = ("REMITTANCE ADVICE\nFrom: Customer A Ltd\n"
+            "Invoice INV-201  500,000.00\nInvoice INV-202  3,420.00\n"
+            "Total paid: £503,420.00\nRef: BACS-88121")
+    d = _rc.parse_doc_text(text, "Remittance advice", "ap@customer.com")
+    eq(d["doc_type"], "remittance")
+    ok("INV-201" in d["invoice_numbers"] and "INV-202" in d["invoice_numbers"])
+    eq(d["total_pence"], 50342000, "the largest amount is the document total")
+    eq(d["extracted_by"], "text")
+
+
+@test
+def t_ai_extraction_cannot_invent_what_the_text_layer_disproves():
+    """THE safety property for documents: an amount or invoice number the AI
+    reports that does not appear in the text is dropped, recorded, and never
+    reaches the books comparison."""
+    text = "Invoice INV-201 for £500.00 from Glass Supplies"
+    parsed = _rc.parse_doc_text(text)
+    ai = {"doc_type": "supplier_invoice", "counterparty": "Glass Supplies",
+          "total": "9999.99", "invoice_numbers": ["INV-201", "INV-777"],
+          "invoice_lines": [{"number": "INV-201", "amount": "500.00"},
+                            {"number": "INV-777", "amount": "9999.99"}]}
+    out = _rc._merge_extractions(parsed, ai, text)
+    eq([l["number"] for l in out["invoice_lines"]], ["INV-201"],
+       "the invented INV-777 line is dropped")
+    eq(out["invoice_numbers"], ["INV-201"], "and the invented number too")
+    eq(out["total_pence"], 50000, "the invented total is refused; the text's stands")
+    ok("INV-777" in " ".join(out.get("ai_dropped", [])), "the drop is recorded")
+
+
+class _FakeAIResp:
+    def __init__(self, verdict):
+        class B:  # a tool_use block
+            type = "tool_use"
+        b = B(); b.input = verdict
+        self.content = [b]
+        self.model = "claude-test"
+
+
+@test
+def t_an_uncited_ai_verdict_is_downgraded_not_believed():
+    exc = _rc.make_exc("shopify_sale_missing", "high", "t", ["1"], amount=1000,
+                       evidence=[_rc.ev("shopify", "order", "Order #1", {"id": 1}, 1)])
+    async def confident_but_baseless(system, messages, tools, tool_choice):
+        return _FakeAIResp({"classification": "explained", "confidence": 95,
+                            "explanation": "It is fine.", "cites": ["E99"]})
+    _rc.configure(ai_call=confident_but_baseless)
+    try:
+        v = run_async(_rc.investigate(exc, {}))
+    finally:
+        _rc.configure(ai_call=None)
+    eq(v["classification"], "insufficient_evidence",
+       "confidence without valid citations is worth nothing")
+    eq(v["confidence"], 0)
+    ok("human review" in v["explanation"].lower())
+
+
+@test
+def t_a_cited_ai_verdict_is_stored_as_interpretation_with_its_evidence():
+    exc = _rc.make_exc("payout_missing_from_bank", "high", "t", ["p1"], amount=51376,
+                       date="2026-08-14",
+                       evidence=[_rc.ev("shopify", "payout", "Payout p1",
+                                        {"id": "p1", "pence": 2348172}, 1)])
+    async def cites_properly(system, messages, tools, tool_choice):
+        ok("record_verdict" in json.dumps(tools), "the verdict rides a forced tool")
+        ok("Never invent" in system, "the system prompt carries the safety rules")
+        return _FakeAIResp({"classification": "timing_difference", "confidence": 80,
+                            "explanation": "The payout landed a day later.",
+                            "cites": ["E1"], "recommended_action": "Confirm tomorrow."})
+    _rc.configure(ai_call=cites_properly)
+    try:
+        v = run_async(_rc.investigate(exc, {}))
+    finally:
+        _rc.configure(ai_call=None)
+    eq(v["classification"], "timing_difference")
+    eq(v["cites"], ["E1"])
+    eq(v["model"], "claude-test")
+    ok(v.get("evidence_shown"), "the audit trail records what the model was shown")
+
+
+class _FakeXero:
+    """The accounts, as a module-shaped object the engine cannot tell apart."""
+    def __init__(self, invoices=None, payments=None, bank=None, notes_=None):
+        self.invoices, self.payments = invoices or [], payments or []
+        self.bank, self.notes = bank or [], notes_ or []
+    def connected(self): return True
+    async def list_invoices(self, since=None, modified_since=None): return list(self.invoices)
+    async def list_payments(self, modified_since=None): return list(self.payments)
+    async def list_bank_transactions(self, modified_since=None): return list(self.bank)
+    async def list_credit_notes(self, modified_since=None): return list(self.notes)
+
+
+def _recon_world(fx, orders):
+    """Wire the engine to fakes end to end; returns the in-memory stores."""
+    stores = {"store": {"exceptions": {}, "watermarks": {}}, "cache": {}, "docs": {}}
+    async def fake_tool_json(reg, name, args):
+        if name == "shopify_list_orders":
+            if args.get("since_id"):
+                return {"orders": []}
+            return {"orders": list(orders)}
+        if name == "shopify_list_payouts":
+            return {"available": False, "reason": "not on Shopify Payments"}
+        return {"_failed": True}
+    _rc.configure(
+        xero=fx, registry={}, tool_json=fake_tool_json,
+        mail_store=lambda: {"threads": {}}, gmail_bytes=None, ai_call=None,
+        load_store=lambda: stores["store"],
+        write_store=lambda d: stores.update(store=d),
+        load_cache=lambda: stores["cache"],
+        write_cache=lambda d: stores.update(cache=d),
+        load_docs=lambda: stores["docs"],
+        write_docs=lambda d: stores.update(docs=d))
+    return stores
+
+
+def _raw_xinv(num, total, typ="ACCREC", contact="Northern Stage Ltd"):
+    return {"InvoiceID": "XR-" + num, "InvoiceNumber": num, "Type": typ,
+            "Status": "AUTHORISED", "Contact": {"Name": contact},
+            "DateString": "2026-08-10T00:00:00", "DueDateString": "2026-09-10T00:00:00",
+            "Total": total, "TotalTax": 0, "AmountDue": total, "AmountPaid": 0,
+            "AmountCredited": 0, "CurrencyCode": "GBP", "Reference": "",
+            "UpdatedDateUTC": "/Date(1755561600000+0000)/"}
+
+
+def _raw_order(oid, name, total):
+    return {"id": oid, "name": name, "created_at": "2026-08-10T09:00:00Z",
+            "total_price": total, "total_tax": "0.00", "currency": "GBP",
+            "financial_status": "paid", "cancelled_at": None, "test": False,
+            "customer": {"first_name": "Sarah", "last_name": "Fielding",
+                         "default_address": {"company": "Northern Stage Ltd"}},
+            "payment_gateway_names": ["manual"], "refunds": []}
+
+
+@test
+def t_a_full_sweep_finds_the_missing_sale_and_statuses_survive_resweeps():
+    """End to end through sweep(): sync, check, merge. The same facts keep the
+    same exception id, a status set by a person survives the next sweep, and a
+    discrepancy the data no longer shows is marked, never deleted."""
+    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+    orders = [_raw_order(104275, "#104275", "842.00"),
+              _raw_order(104276, "#104276", "120.00")]
+    stores = _recon_world(fx, orders)
+    try:
+        r = run_async(_rc.sweep())
+        ok(r["ok"], r)
+        exs = stores["store"]["exceptions"]
+        missing = [e for e in exs.values() if e["kind"] == "shopify_sale_missing"]
+        eq(len(missing), 1, "only #104276 is missing")
+        ok("#104276" in missing[0]["title"])
+        ok(any("payout checks did not run" in n for n in r["notes"]),
+           "a check that could not run says so instead of reading as clean: %s" % r["notes"])
+        xid = missing[0]["id"]
+        # A person marks it explained; the next sweep must not undo that.
+        exs[xid]["status"] = "explained"
+        exs[xid]["status_note"] = "Invoiced under the January consolidation."
+        r2 = run_async(_rc.sweep())
+        ok(r2["ok"])
+        eq(stores["store"]["exceptions"][xid]["status"], "explained",
+           "a human's status outlives the sweep")
+        # The books catch up: the invoice appears. The exception goes stale,
+        # with the disappearance on its history - never silently deleted.
+        fx.invoices.append(_raw_xinv("INV-104276", "120.00"))
+        r3 = run_async(_rc.sweep())
+        ok(r3["ok"])
+        e = stores["store"]["exceptions"][xid]
+        ok(e["stale"], "no longer detected, and it says so")
+        ok(any("No longer detected" in h.get("note", "") for h in e["history"]))
+    finally:
+        _rc.configure(xero=None, registry=None, tool_json=None, mail_store=None,
+                      load_store=None, write_store=None, load_cache=None,
+                      write_cache=None, load_docs=None, write_docs=None)
+
+
+@test
+def t_the_xero_client_is_read_only_by_construction():
+    """No POST, PUT or DELETE ever reaches the accounting API. The one POST in
+    the module is the OAuth token endpoint, which mints credentials, not
+    records."""
+    src = open(os.path.join(HERE, "xero.py"), encoding="utf-8").read()
+    ok("client.post" in src and src.count("client.post") == 1
+       and "/connect/token" in src.split("client.post")[1][:200],
+       "the only POST is the token endpoint")
+    for verb in ("client.put", "client.delete", "client.patch", '"POST", f"{API_BASE}/api'):
+        ok(verb not in src, verb + " must not appear in a read-only client")
+
+
+@test
+def t_recon_routes_enforce_their_rules():
+    def go():
+        ensure_auth()
+        r = post("/api/recon/status", {})
+        eq(r.status_code, 200, r.text[:120])
+        j = r.json()
+        ok("xero" in j and "open_counts" in j, j)
+        # Ignoring without a reason is refused: an unexplained ignore is how a
+        # real discrepancy disappears.
+        import copilot as _cp
+        d = _cp._load_recon()
+        e = _rc.make_exc("shopify_sale_missing", "high", "A test discrepancy", ["t1"],
+                         amount=1000)
+        d.setdefault("exceptions", {})[e["id"]] = e
+        _cp._write_recon(d)
+        r2 = post("/api/recon/exception", {"id": e["id"], "op": "status",
+                                           "status": "ignored"})
+        eq(r2.status_code, 400, "ignore needs a reason: " + r2.text[:100])
+        r3 = post("/api/recon/exception", {"id": e["id"], "op": "status",
+                                           "status": "ignored", "note": "Test data."})
+        eq(r3.status_code, 200, r3.text[:120])
+        hist = r3.json()["exception"]["history"]
+        ok(hist and hist[-1]["note"] == "Test data.", "the reason is on the record")
+        # A member without the recon tab cannot see the routes at all.
+        rr = post("/api/team/user", {"op": "create", "name": "Norec", "username": "norec",
+                                     "role": "member"})
+        uid, pw = rr.json()["id"], rr.json()["starter_password"]
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["labels"]})
+        lg = client.post("/api/auth/login", json={"username": "norec", "password": pw},
+                         headers={"Authorization": "Bearer " + tok()}).json()
+        sess = lg.get("session")
+        ch = post_s(sess, "/api/auth/password", {"current": pw, "new": "norec-pw-8812"})
+        sess = ch.json().get("session") or sess
+        r4 = post_s(sess, "/api/recon/status", {})
+        eq(r4.status_code, 403, "no recon tab, no recon routes: %s" % r4.status_code)
+        r5 = post_s(sess, "/api/recon/sweep", {})
+        ok(r5.status_code in (403,), "and certainly no sweep")
+    with_accounts(go)
+
+
+@test
+def t_recon_chat_tools_are_tab_gated_and_read_only():
+    import copilot as _cp
+    for name in ("recon_summary", "recon_exceptions", "recon_exception"):
+        eq(_cp._TOOL_TABS.get(name), "recon", name + " is gated on the recon tab")
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    seg = src.split("async def recon_summary")[1].split("_oauth_states")[0] \
+        if "_oauth_states" in src.split("async def recon_summary")[1][:9000] \
+        else src.split("async def recon_summary")[1][:9000]
+    ok("_write_recon" not in seg.split("async def recon_exception")[1][:1200],
+       "the chat tools only ever read the store")
 
 
 # =========================== run ===========================================

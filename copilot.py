@@ -46,6 +46,8 @@ import httpx
 import jwt
 import google_data
 import google_mail
+import recon as recon_engine
+import xero as xero_api
 import pipedrive
 try:
     import worldoptions
@@ -138,6 +140,10 @@ CHAT_CONTEXT_CAP   = int(os.environ.get("CHAT_CONTEXT_CAP", "12000"))  # max cha
 SCHEDULE_PATH      = os.environ.get("SCHEDULE_PATH", "/data/schedule.json")  # auto-refresh config (off by default)
 ALERTS_PATH        = os.environ.get("ALERTS_PATH", "/data/alerts.json")      # change alerts from scheduled runs
 FEEDBACK_PATH      = os.environ.get("FEEDBACK_PATH", "/data/feedback.json")  # feature requests from the desk
+# Reconciliation engine: exceptions + audit trail, system snapshots, extracted documents.
+RECON_PATH         = os.environ.get("RECON_PATH", "/data/recon.json")
+RECON_CACHE_PATH   = os.environ.get("RECON_CACHE_PATH", "/data/recon_cache.json")
+RECON_DOCS_PATH    = os.environ.get("RECON_DOCS_PATH", "/data/recon_docs.json")
 CHANGELOG_PATH     = os.environ.get("CHANGELOG_PATH",
                                     os.path.join(os.path.dirname(__file__), "data", "changelog.json"))
 ALERTS_MAX         = int(os.environ.get("ALERTS_MAX", "60"))
@@ -1226,6 +1232,7 @@ def _build_backup_zip():
     secrets_excluded = {
         os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
         os.path.basename(getattr(google_mail, "TOKEN_PATH", "gmail_oauth.json")),
+        os.path.basename(getattr(xero_api, "TOKEN_PATH", "xero_oauth.json")),
         os.path.basename(WO_SECRET_PATH),
         # Sessions are transient bearer state: never in a backup. The accounts
         # register IS included: it holds only scrypt hashes, and restoring it
@@ -1727,6 +1734,7 @@ def _build_tools(registry: dict) -> list[dict]:
 _TOOL_TABS = {
     "shopify_list_customers": "customers", "shopify_search_customers": "customers",
     "shopify_get_customer": "customers", "shopify_get_customer_orders": "customers",
+    "recon_summary": "recon", "recon_exceptions": "recon", "recon_exception": "recon",
 }
 
 
@@ -7541,6 +7549,151 @@ _rl_global: list[float] = []
 _oauth_states: dict[str, float] = {}   # state nonce -> expiry (Google OAuth connect flow)
 
 
+# ---------------------------------------------------------------------------
+# Reconciliation stores + the read-only tools the chat is given
+# ---------------------------------------------------------------------------
+
+def _load_recon() -> dict:
+    d = _load_json_store(RECON_PATH, "recon", None)
+    return d if isinstance(d, dict) else {"exceptions": {}, "watermarks": {}}
+
+
+def _write_recon(d: dict) -> None:
+    if not _store_writable(RECON_PATH):
+        return
+    os.makedirs(os.path.dirname(RECON_PATH) or ".", exist_ok=True)
+    tmp = RECON_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"recon": d}, fh, allow_nan=False)
+    os.replace(tmp, RECON_PATH)
+
+
+def _load_recon_cache() -> dict:
+    d = _load_json_store(RECON_CACHE_PATH, "cache", None)
+    return d if isinstance(d, dict) else {}
+
+
+def _write_recon_cache(d: dict) -> None:
+    if not _store_writable(RECON_CACHE_PATH):
+        return
+    os.makedirs(os.path.dirname(RECON_CACHE_PATH) or ".", exist_ok=True)
+    tmp = RECON_CACHE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"cache": d}, fh, allow_nan=False)
+    os.replace(tmp, RECON_CACHE_PATH)
+
+
+def _load_recon_docs() -> dict:
+    d = _load_json_store(RECON_DOCS_PATH, "docs", None)
+    return d if isinstance(d, dict) else {}
+
+
+def _write_recon_docs(d: dict) -> None:
+    if not _store_writable(RECON_DOCS_PATH):
+        return
+    os.makedirs(os.path.dirname(RECON_DOCS_PATH) or ".", exist_ok=True)
+    tmp = RECON_DOCS_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"docs": d}, fh, allow_nan=False)
+    os.replace(tmp, RECON_DOCS_PATH)
+
+
+# The auditor's model: env-pinnable, otherwise the deep model, so upgrading is
+# one variable and never a code change.
+MODEL_RECON = os.environ.get("ANTHROPIC_MODEL_RECON") or MODEL_DEEP
+
+
+async def _recon_ai_call(system: str, messages: list, tools: list, tool_choice: dict):
+    """The one AI entry point the engine gets: read, reason, answer through a
+    forced tool. No registry, no writes, no memory - an auditor with a
+    document in one hand and nothing in the other."""
+    client = _anthropic()
+    return await _xcreate(client, model=MODEL_RECON, max_tokens=MAX_TOKENS,
+                          system=system, messages=messages, tools=tools,
+                          tool_choice=tool_choice,
+                          output_config={"effort": _effort_for(MODEL_RECON)})
+
+
+def _recon_exc_public(e: dict, full: bool = False) -> dict:
+    out = {k: e.get(k) for k in ("id", "kind", "severity", "title", "amount", "currency",
+                                 "date", "systems", "status", "status_note", "stale",
+                                 "created", "updated")}
+    out["amount_disp"] = recon_engine.money(e.get("amount"), e.get("currency") or "GBP")
+    out["has_ai"] = bool(e.get("ai"))
+    if full:
+        out.update({k: e.get(k) for k in ("why", "suggestion", "computed", "evidence",
+                                          "ai", "history", "refs")})
+    return out
+
+
+def _recon_filter(exceptions: dict, severity: str = "", status: str = "", q: str = "",
+                  min_pence: int = 0, include_stale: bool = False) -> list:
+    rows = []
+    ql = q.strip().lower()
+    for e in exceptions.values():
+        if e.get("stale") and not include_stale:
+            continue
+        if severity and e["severity"] != severity:
+            continue
+        if status and e["status"] != status:
+            continue
+        if min_pence and abs(e.get("amount") or 0) < min_pence:
+            continue
+        if ql and ql not in (e["title"] + " " + e["kind"] + " " + e.get("why", "")).lower():
+            continue
+        rows.append(e)
+    sev_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    rows.sort(key=lambda e: (sev_rank.get(e["severity"], 9), -(abs(e.get("amount") or 0))))
+    return rows
+
+
+class ReconEmptyInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReconExceptionsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    severity: Optional[str] = Field(default=None, description="critical | high | medium | low")
+    status: Optional[str] = Field(default=None, description="new | investigating | explained | confirmed_error | corrected | ignored")
+    q: Optional[str] = Field(default=None, description="Free-text filter over titles and reasons")
+    min_amount: Optional[float] = Field(default=None, description="Only discrepancies of at least this many pounds")
+
+
+class ReconExceptionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(..., description="The exception id, e.g. x3fa29bc10d44")
+
+
+async def recon_summary(params: ReconEmptyInput) -> str:
+    """Reconciliation health: open discrepancy counts by severity, the biggest open items, when the books were last swept, and any parts of the last sweep that could not run."""
+    d = _load_recon()
+    top = [_recon_exc_public(e) for e in _recon_filter(d.get("exceptions", {}))[:10]]
+    return json.dumps({"last_sync": d.get("last_sync") or "never",
+                       "open_counts": d.get("open_counts") or {},
+                       "sweep_notes": d.get("last_notes") or [],
+                       "largest_open": top}, default=str)
+
+
+async def recon_exceptions(params: ReconExceptionsInput) -> str:
+    """List reconciliation discrepancies (Shopify vs Xero vs Gmail), filterable by severity, status, text and minimum amount. Amounts are in pence in `amount` and displayed in `amount_disp`."""
+    d = _load_recon()
+    rows = _recon_filter(d.get("exceptions", {}),
+                         severity=str(params.severity or ""),
+                         status=str(params.status or ""), q=str(params.q or ""),
+                         min_pence=int((params.min_amount or 0) * 100))
+    return json.dumps({"count": len(rows),
+                       "exceptions": [_recon_exc_public(e) for e in rows[:60]]}, default=str)
+
+
+async def recon_exception(params: ReconExceptionInput) -> str:
+    """One discrepancy in full: the evidence records from each system, the deterministic arithmetic, any AI verdict (clearly labelled interpretation, never fact), and the status history."""
+    d = _load_recon()
+    e = d.get("exceptions", {}).get(str(params.id))
+    if not e:
+        return json.dumps({"error": "No exception with that id."})
+    return json.dumps(_recon_exc_public(e, full=True), default=str)
+
+
 def _client_key(request: Request) -> str:
     # Use the RIGHTMOST X-Forwarded-For entry: proxies append, so the last hop is the
     # one our own edge observed. The leftmost value is client-supplied and trivially
@@ -7918,6 +8071,25 @@ async def _watchdog_tick(registry: dict) -> bool:
         return True
 
 
+_recon_nightly_stamp = {"day": ""}
+
+
+async def _recon_nightly() -> None:
+    """One sweep a day, self-stamped like the CRM's. Never raises: a failed
+    sweep is a note in the store, not a dead scheduler."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if _recon_nightly_stamp["day"] == today:
+        return
+    if not xero_api.connected():
+        return                       # nothing to reconcile against yet
+    _recon_nightly_stamp["day"] = today
+    try:
+        r = await recon_engine.sweep()
+        logger.info("recon nightly: %s", json.dumps(r.get("open_counts") or {}))
+    except Exception:
+        logger.exception("recon nightly sweep failed")
+
+
 async def _scheduler_loop(registry: dict) -> None:
     await asyncio.sleep(60)  # let the app settle after boot
     while True:
@@ -7926,6 +8098,10 @@ async def _scheduler_loop(registry: dict) -> None:
             await asyncio.to_thread(_weekly_snapshot)   # no-op until a week is up
             if shopify_up:
                 await _crm_shopify_link_nightly(registry)   # once a day, self-stamped
+            # Xero refresh tokens die after 60 unused days, and the books
+            # drift silently between sweeps: both are the scheduler's problem.
+            await xero_api.keepalive()
+            await _recon_nightly()
             cfg = _load_schedule()
             if not shopify_up:
                 logger.warning("scheduler: Shopify unreachable; skipping paid audits this tick")
@@ -10350,9 +10526,10 @@ def _master_reset_check(d: dict) -> None:
 # The master is never restricted. Enforcement is central (in _pre_checks) via
 # this path map, so hiding a tab in the page is never the only lock.
 TAB_KEYS = ("overview", "seo", "keywords", "products", "customers", "liability",
-            "crm", "mail", "files", "labels", "memory", "skills", "chat")
+            "crm", "mail", "files", "labels", "memory", "skills", "chat", "recon")
 _TAB_ROUTES = (
     ("/api/overview", "overview"), ("/api/seo", "seo"), ("/api/keyword", "keywords"),
+    ("/api/recon", "recon"),
     ("/api/products", "products"), ("/api/product", "products"),
     # customer-history also serves the CRM's deal modal (the Shopify card on a
     # linked person), so either tab opens it.
@@ -10841,7 +11018,20 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     _order_writer = order_writer
     _wo_boot()
     # Shopify tools + live SEO tools + Google data tools (the last only if configured)
-    chat_registry = {**registry, **_build_seo_tools(registry), **_build_google_tools()}
+    chat_registry = {**registry, **_build_seo_tools(registry), **_build_google_tools(),
+                     "recon_summary": (recon_summary, ReconEmptyInput),
+                     "recon_exceptions": (recon_exceptions, ReconExceptionsInput),
+                     "recon_exception": (recon_exception, ReconExceptionInput)}
+    # The reconciliation engine gets its IO here and only here: the Shopify
+    # registry (reads), Gmail attachment bytes, the mail store, the stores,
+    # and one AI entry point. It has no other way to reach the world.
+    recon_engine.configure(
+        registry=registry, tool_json=_tool_json,
+        gmail_bytes=google_mail.attachment_bytes,
+        mail_store=_load_mail, ai_call=_recon_ai_call, xero=xero_api,
+        load_store=_load_recon, write_store=_write_recon,
+        load_cache=_load_recon_cache, write_cache=_write_recon_cache,
+        load_docs=_load_recon_docs, write_docs=_write_recon_docs)
     tools = _build_tools(chat_registry)
     def dispatch_for(uid: str) -> Callable:
         """The tool dispatcher for ONE chat turn, carrying who is asking so the
@@ -12844,7 +13034,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # sessions: the same exclusions the backup applies, applied again.
         blocked = {os.path.basename(WO_SECRET_PATH), os.path.basename(SESSIONS_PATH),
                    os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
-                   os.path.basename(getattr(google_mail, "TOKEN_PATH", "gmail_oauth.json"))}
+                   os.path.basename(getattr(google_mail, "TOKEN_PATH", "gmail_oauth.json")),
+                   os.path.basename(getattr(xero_api, "TOKEN_PATH", "xero_oauth.json"))}
         # (name, target_dir) for every restorable entry; everything else named
         # in the manifest as skipped, so nothing ever vanishes silently.
         todo, skipped = [], []
@@ -17106,6 +17297,175 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         headers = {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
                    "base-uri 'none'; form-action 'none'", **_API_HEADERS}
         return HTMLResponse(body, headers=headers)
+
+    # ----- Xero connect: the accounts side of the reconciliation engine -----
+    def _xero_redirect_uri(request: Request) -> str:
+        if APP_BASE_URL:
+            return APP_BASE_URL.rstrip("/") + "/oauth/xero/callback"
+        host = request.headers.get("host", "")
+        return f"https://{host}/oauth/xero/callback"
+
+    @mcp.custom_route("/oauth/xero/start", methods=["GET"])
+    async def xero_start(request: Request):
+        if not _window_ok(_rl_hits.setdefault("oauth:" + _client_key(request), []), RATE_MAX_CLIENT, time.monotonic()):
+            return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
+        if not xero_api.client_configured():
+            return _oauth_page("Not configured", "Set XERO_CLIENT_ID / XERO_CLIENT_SECRET on the server first.")
+        key = request.query_params.get("key", "")
+        if not (google_data.CONNECT_SECRET and key and
+                secrets.compare_digest(key, google_data.CONNECT_SECRET)):
+            return PlainTextResponse("Forbidden", status_code=403, headers=_API_HEADERS)
+        now = time.time()
+        for st, exp in list(_oauth_states.items()):
+            if exp < now:
+                _oauth_states.pop(st, None)
+        state = secrets.token_urlsafe(24)
+        _oauth_states[state] = now + 900
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(xero_api.consent_url(_xero_redirect_uri(request), state),
+                                status_code=302)
+
+    @mcp.custom_route("/oauth/xero/callback", methods=["GET"])
+    async def xero_callback(request: Request):
+        qp = request.query_params
+        if qp.get("error"):
+            return _oauth_page("Connection cancelled", f"Xero returned: {qp.get('error')}")
+        state = qp.get("state", "")
+        exp = _oauth_states.pop(state, None)
+        if not state or exp is None or exp < time.time():
+            return _oauth_page("Link expired", "That connect link expired or was already used. Start again.")
+        code = qp.get("code", "")
+        if not code:
+            return _oauth_page("Connection failed", "No authorization code returned.")
+        try:
+            ok = await xero_api.exchange_code(code, _xero_redirect_uri(request))
+        except Exception:
+            logger.exception("Xero OAuth exchange error")
+            ok = False
+        if not ok:
+            return _oauth_page("Connection failed", "Couldn't complete the Xero connection. Please try again.")
+        return _oauth_page("Connected to Xero",
+                           "The reconciliation engine can now read your accounts (read-only). "
+                           "Close this tab and return to Store Copilot.")
+
+    @mcp.custom_route("/api/recon/status", methods=["POST"])
+    async def recon_status_route(request: Request):
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        d = _load_recon()
+        docs = _load_recon_docs()
+        xs = xero_api.status()
+        setup = {}
+        if _team_role(who) == "master" and not xs["connected"]:
+            # The setup aids, like Gmail's: the EXACT redirect URI and the env
+            # var names, so the developer-app walk cannot go wrong by a
+            # character. The secret itself never appears anywhere.
+            setup = {"redirect_uri": _xero_redirect_uri(request),
+                     "connect_path": "/oauth/xero/start?key=YOUR_CONNECT_SECRET"
+                     if google_data.CONNECT_SECRET else "",
+                     "env_needed": ["XERO_CLIENT_ID", "XERO_CLIENT_SECRET"],
+                     "configured": xs["configured"]}
+        return _json({"xero": xs, "setup": setup,
+                      "gmail": google_mail.connected(),
+                      "model": MODEL_RECON,
+                      "last_sync": d.get("last_sync") or "",
+                      "sweep_notes": d.get("last_notes") or [],
+                      "open_counts": d.get("open_counts") or {},
+                      "docs": len(docs),
+                      "sweeping": recon_engine._sweeping["on"]})
+
+    @mcp.custom_route("/api/recon/sweep", methods=["POST"])
+    async def recon_sweep_route(request: Request):
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        if _team_level(who) < ROLE_LEVELS["admin"]:
+            return _json({"error": "Only an admin can run a sweep."}, 403)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        try:
+            r = await recon_engine.sweep()
+        except Exception:
+            logger.exception("recon sweep failed")
+            return _json({"error": "The sweep failed part-way. Check the server logs."}, 502)
+        _track(who, "recon", "ran a reconciliation sweep",
+               str(r.get("exceptions", 0)) + " open items")
+        return _json(r)
+
+    @mcp.custom_route("/api/recon/exceptions", methods=["POST"])
+    async def recon_exceptions_route(request: Request):
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        d = _load_recon()
+        rows = _recon_filter(d.get("exceptions", {}),
+                             severity=str(body.get("severity") or ""),
+                             status=str(body.get("status") or ""),
+                             q=str(body.get("q") or "")[:120],
+                             min_pence=int(body.get("min_pence") or 0),
+                             include_stale=bool(body.get("include_stale")))
+        return _json({"count": len(rows),
+                      "exceptions": [_recon_exc_public(e) for e in rows[:400]]})
+
+    @mcp.custom_route("/api/recon/exception", methods=["POST"])
+    async def recon_exception_route(request: Request):
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        d = _load_recon()
+        e = d.get("exceptions", {}).get(str(body.get("id") or ""))
+        if not e:
+            return _json({"error": "That discrepancy no longer exists."}, 404)
+        op = str(body.get("op") or "")
+        if not op:
+            return _json({"exception": _recon_exc_public(e, full=True)})
+        if op == "status":
+            new = str(body.get("status") or "")
+            if new not in recon_engine.STATUSES:
+                return _json({"error": "Unknown status."}, 400)
+            note = str(body.get("note") or "").strip()[:400]
+            if new == "ignored" and not note:
+                # An unexplained ignore is how a real discrepancy disappears.
+                return _json({"error": "Ignoring a discrepancy needs a reason."}, 400)
+            e["history"] = (e.get("history") or []) + [{
+                "at": datetime.now(timezone.utc).isoformat(),
+                "by": _team_name(who) or who, "from": e["status"], "to": new, "note": note}]
+            e["status"], e["status_note"] = new, note
+            e["updated"] = datetime.now(timezone.utc).isoformat()
+            _write_recon(d)
+            _track(who, "recon", "set a discrepancy to " + new, e["title"][:60])
+            return _json({"ok": True, "exception": _recon_exc_public(e, full=True)})
+        if op == "investigate":
+            verdict = await recon_engine.investigate(e, _load_recon_cache())
+            e["ai"] = verdict
+            e["updated"] = datetime.now(timezone.utc).isoformat()
+            _write_recon(d)
+            _track(who, "recon", "asked the AI to investigate", e["title"][:60])
+            return _json({"ok": True, "exception": _recon_exc_public(e, full=True)})
+        return _json({"error": "Unknown op."}, 400)
 
     @mcp.custom_route("/oauth/google/start", methods=["GET"])
     async def google_start(request: Request):

@@ -1,0 +1,1205 @@
+"""The reconciliation and investigation engine: Shopify + Xero + Gmail.
+
+One question, asked continuously: what should have happened, what actually
+happened, and can the accounting records be PROVEN to reflect it?
+
+Division of labour, and it is strict:
+  * Deterministic code does everything arithmetic: totals, differences, date
+    windows, matching, duplicate clustering. A sum is never an opinion.
+  * The AI (Claude, the deep model, env-upgradable) is only for what genuinely
+    needs judgement: reading documents, classifying an already-computed
+    discrepancy, proposing an explanation. Every AI conclusion must cite the
+    evidence ids it was shown, the citations are validated against the pack,
+    and an answer that fails validation is recorded as
+    "Insufficient evidence - requires human review", never as a finding.
+  * Nothing here writes to Shopify, Xero or Gmail. The engine reads three
+    systems and writes ONE local store of exceptions and evidence.
+
+Money is handled in integer pence from the moment it enters. Floats are how
+reconciliation tools invent penny discrepancies of their own.
+
+The module is deliberately free of app imports: copilot.py injects the IO it
+needs (Shopify registry, Gmail bytes, the AI caller, the mail store) via
+configure(), so every check in here runs under test against plain dicts.
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import logging
+import os
+import re
+import time
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
+from typing import Any, Callable, Optional
+
+logger = logging.getLogger(__name__)
+
+# Tunables. Env-overridable so materiality is the merchant's call, not code's.
+WINDOW_DAYS = int(os.environ.get("RECON_WINDOW_DAYS", "120"))
+MATERIAL_PENCE = int(os.environ.get("RECON_MATERIAL_PENCE", "25000"))     # 250.00
+TOLERANCE_PENCE = int(os.environ.get("RECON_TOLERANCE_PENCE", "100"))     # 1.00
+STALE_UNRECONCILED_DAYS = int(os.environ.get("RECON_STALE_DAYS", "21"))
+DOCS_PER_SWEEP = int(os.environ.get("RECON_DOCS_PER_SWEEP", "8"))
+DOC_BYTES_MAX = int(os.environ.get("RECON_DOC_BYTES_MAX", str(8 * 1024 * 1024)))
+
+# Injected by copilot.configure(): the engine owns logic, never transport.
+_registry: Optional[dict] = None          # Shopify tool registry
+_tool_json: Optional[Callable] = None     # async (registry, name, args) -> dict
+_gmail_bytes: Optional[Callable] = None   # async (message_id, attachment_id) -> bytes
+_mail_store: Optional[Callable] = None    # () -> the mailbox dict
+_ai_call: Optional[Callable] = None       # async (system, messages, tools) -> response
+_xero = None                              # the xero module (injected to allow fakes)
+
+_load_store: Optional[Callable] = None    # () -> dict   (RECON_PATH, house store rules)
+_write_store: Optional[Callable] = None
+_load_cache: Optional[Callable] = None    # () -> dict   (RECON_CACHE_PATH)
+_write_cache: Optional[Callable] = None
+_load_docs: Optional[Callable] = None     # () -> dict   (RECON_DOCS_PATH)
+_write_docs: Optional[Callable] = None
+
+_sweeping = {"on": False, "at": 0.0}      # one sweep at a time, on the event loop
+
+
+def configure(**kw) -> None:
+    g = globals()
+    for name, val in kw.items():
+        key = "_" + name
+        if key not in g:
+            raise KeyError("recon.configure: unknown hook " + name)
+        g[key] = val
+
+
+# ---------------------------------------------------------------------------
+# Money and matching primitives
+# ---------------------------------------------------------------------------
+
+def pence(v: Any) -> Optional[int]:
+    """Integer pence or None - never a float, never a guess. Accepts '12.30',
+    12.3, '£1,234.56', -5. A value that will not parse is None, and every
+    caller treats None as 'unknown', not zero: a sale of unknown value must
+    not reconcile as a sale of nothing."""
+    if v is None:
+        return None
+    s = str(v).strip().replace(",", "").replace("£", "").replace("$", "").replace("€", "")
+    if not s:
+        return None
+    try:
+        return int((Decimal(s) * 100).quantize(Decimal("1")))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def money(p: Optional[int], cur: str = "GBP") -> str:
+    if p is None:
+        return "unknown"
+    sym = {"GBP": "£", "USD": "$", "EUR": "€"}.get(cur, cur + " ")
+    neg = "-" if p < 0 else ""
+    p = abs(p)
+    return f"{neg}{sym}{p // 100}.{p % 100:02d}"
+
+
+def norm_ref(s: Any) -> str:
+    """Invoice/reference normalization for matching: case, punctuation and
+    leading zeros are presentation, not identity. 'INV-00142' == 'inv 142'."""
+    t = re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+    return re.sub(r"^([a-z]*)0+(\d)", r"\1\2", t)
+
+
+def norm_name(s: Any) -> str:
+    t = re.sub(r"[^a-z0-9 ]", "", str(s or "").lower())
+    for suffix in (" limited", " ltd", " gmbh", " inc", " llc", " plc", " co", " company"):
+        if t.endswith(suffix):
+            t = t[: -len(suffix)]
+    return " ".join(t.split())
+
+
+def _day(s: Any) -> str:
+    """YYYY-MM-DD out of ISO strings or Xero's /Date(1699999999000+0000)/ form."""
+    t = str(s or "")
+    m = re.match(r"/Date\((\d+)", t)
+    if m:
+        return datetime.fromtimestamp(int(m.group(1)) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+    return t[:10]
+
+
+def _days_between(a: str, b: str) -> Optional[int]:
+    try:
+        da = datetime.strptime(_day(a), "%Y-%m-%d")
+        db = datetime.strptime(_day(b), "%Y-%m-%d")
+        return abs((da - db).days)
+    except ValueError:
+        return None
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _cutoff_day(days: int = WINDOW_DAYS) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+# ---------------------------------------------------------------------------
+# Slimmers: what each system contributes to the cache. Verbatim identifiers,
+# amounts as pence, and nothing the checks do not need - the cache rides in
+# backups and is reloaded on every sweep.
+# ---------------------------------------------------------------------------
+
+def slim_order(o: dict) -> dict:
+    refunds = []
+    for r in (o.get("refunds") or []):
+        amt = 0
+        for t in (r.get("transactions") or []):
+            if t.get("kind") in ("refund", "void") and t.get("status") == "success":
+                amt += pence(t.get("amount")) or 0
+        refunds.append({"id": r.get("id"), "created_at": _day(r.get("created_at")),
+                        "pence": amt})
+    return {
+        "id": o.get("id"), "name": str(o.get("name") or ""),
+        "created_at": _day(o.get("created_at")),
+        "total": pence(o.get("total_price")),
+        "tax": pence(o.get("total_tax")),
+        "currency": str(o.get("currency") or "GBP"),
+        "financial_status": str(o.get("financial_status") or ""),
+        "cancelled": bool(o.get("cancelled_at")),
+        "test": bool(o.get("test")),
+        "customer": str(((o.get("customer") or {}).get("first_name") or "") + " "
+                        + ((o.get("customer") or {}).get("last_name") or "")).strip(),
+        "company": str((((o.get("customer") or {}).get("default_address") or {})
+                        .get("company")) or ""),
+        "gateways": sorted({str(g) for g in (o.get("payment_gateway_names") or []) if g}),
+        "refunds": refunds,
+    }
+
+
+def slim_invoice(v: dict) -> dict:
+    return {
+        "id": str(v.get("InvoiceID") or ""),
+        "number": str(v.get("InvoiceNumber") or ""),
+        "type": str(v.get("Type") or ""),                       # ACCREC | ACCPAY
+        "status": str(v.get("Status") or ""),
+        "contact": str(((v.get("Contact") or {}).get("Name")) or ""),
+        "date": _day(v.get("DateString") or v.get("Date")),
+        "due": _day(v.get("DueDateString") or v.get("DueDate")),
+        "total": pence(v.get("Total")),
+        "tax": pence(v.get("TotalTax")),
+        "due_pence": pence(v.get("AmountDue")),
+        "paid_pence": pence(v.get("AmountPaid")),
+        "credited_pence": pence(v.get("AmountCredited")),
+        "currency": str(v.get("CurrencyCode") or "GBP"),
+        "reference": str(v.get("Reference") or ""),
+        "updated": str(v.get("UpdatedDateUTC") or ""),
+    }
+
+
+def slim_payment(p: dict) -> dict:
+    inv = p.get("Invoice") or {}
+    return {
+        "id": str(p.get("PaymentID") or ""),
+        "date": _day(p.get("Date")),
+        "pence": pence(p.get("Amount")),
+        "reference": str(p.get("Reference") or ""),
+        "status": str(p.get("Status") or ""),
+        "invoice_id": str(inv.get("InvoiceID") or ""),
+        "invoice_number": str(inv.get("InvoiceNumber") or ""),
+        "contact": str(((inv.get("Contact") or {}).get("Name")) or ""),
+        "account": str(((p.get("Account") or {}).get("Code")) or ""),
+        "is_reconciled": bool(p.get("IsReconciled")),
+    }
+
+
+def slim_bank_txn(t: dict) -> dict:
+    return {
+        "id": str(t.get("BankTransactionID") or ""),
+        "type": str(t.get("Type") or ""),                       # RECEIVE | SPEND | ...
+        "status": str(t.get("Status") or ""),
+        "date": _day(t.get("DateString") or t.get("Date")),
+        "pence": pence(t.get("Total")),
+        "currency": str(t.get("CurrencyCode") or "GBP"),
+        "contact": str(((t.get("Contact") or {}).get("Name")) or ""),
+        "reference": str(t.get("Reference") or ""),
+        "account": str(((t.get("BankAccount") or {}).get("Name")) or ""),
+        "is_reconciled": bool(t.get("IsReconciled")),
+    }
+
+
+def slim_credit_note(c: dict) -> dict:
+    return {
+        "id": str(c.get("CreditNoteID") or ""),
+        "number": str(c.get("CreditNoteNumber") or ""),
+        "type": str(c.get("Type") or ""),               # ACCRECCREDIT | ACCPAYCREDIT
+        "status": str(c.get("Status") or ""),
+        "contact": str(((c.get("Contact") or {}).get("Name")) or ""),
+        "date": _day(c.get("DateString") or c.get("Date")),
+        "total": pence(c.get("Total")),
+        "remaining": pence(c.get("RemainingCredit")),
+        "currency": str(c.get("CurrencyCode") or "GBP"),
+        "reference": str(c.get("Reference") or ""),
+    }
+
+
+def slim_payout(p: dict) -> dict:
+    return {
+        "id": str(p.get("id") or ""),
+        "date": _day(p.get("date")),
+        "pence": pence(p.get("amount")),
+        "currency": str(p.get("currency") or "GBP"),
+        "status": str(p.get("status") or ""),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Exceptions: creation, identity, evidence
+# ---------------------------------------------------------------------------
+
+SEVERITIES = ("critical", "high", "medium", "low")
+STATUSES = ("new", "investigating", "explained", "confirmed_error", "corrected", "ignored")
+
+
+def _exc_id(kind: str, refs: list) -> str:
+    """Stable across sweeps: the same underlying facts keep the same id, so a
+    status set on Monday survives Tuesday's sweep."""
+    return "x" + hashlib.sha1((kind + "|" + "|".join(sorted(str(r) for r in refs)))
+                              .encode()).hexdigest()[:12]
+
+
+def make_exc(kind: str, severity: str, title: str, refs: list, *,
+             amount: Optional[int] = None, currency: str = "GBP",
+             date: str = "", systems: Optional[list] = None,
+             why: str = "", suggestion: str = "",
+             evidence: Optional[list] = None,
+             computed: Optional[list] = None) -> dict:
+    assert severity in SEVERITIES, severity
+    return {
+        "id": _exc_id(kind, refs), "kind": kind, "severity": severity,
+        "title": title, "amount": amount, "currency": currency, "date": date,
+        "systems": systems or [], "refs": [str(r) for r in refs],
+        "why": why, "suggestion": suggestion,
+        "evidence": evidence or [],           # [{eid, system, kind, label, record}]
+        "computed": computed or [],           # ["£23,481.72 - £513.76 fees = £22,967.96"]
+        "ai": None, "status": "new", "status_note": "",
+        "history": [], "created": _now(), "updated": _now(), "stale": False,
+    }
+
+
+def ev(system: str, kind: str, label: str, record: dict, n: int) -> dict:
+    """One evidence entry, verbatim. The eid is what the AI must cite."""
+    return {"eid": f"E{n}", "system": system, "kind": kind,
+            "label": label, "record": record}
+
+
+def _sev_for_amount(p: Optional[int], base: str) -> str:
+    """Materiality raises severity one notch; it never lowers it."""
+    if p is not None and abs(p) >= MATERIAL_PENCE:
+        return {"high": "critical", "medium": "high", "low": "medium"}.get(base, base)
+    return base
+
+
+# ---------------------------------------------------------------------------
+# Deterministic checks. Each takes the cache and returns exceptions. No IO.
+# ---------------------------------------------------------------------------
+
+def _order_invoice_index(xinv: dict) -> dict:
+    """ACCREC invoices indexed by every normalized token that could name a
+    Shopify order: the invoice number, the reference, and any #12345-shaped
+    fragments inside either."""
+    idx: dict = {}
+    for v in xinv.values():
+        if v["type"] != "ACCREC":
+            continue
+        keys = {norm_ref(v["number"]), norm_ref(v["reference"])}
+        for m in re.findall(r"#?\d{4,}", v["number"] + " " + v["reference"]):
+            keys.add(norm_ref(m))
+        for k in keys:
+            if k:
+                idx.setdefault(k, []).append(v)
+    return idx
+
+
+def check_orders_vs_invoices(cache: dict) -> list:
+    """Every real Shopify sale should be visible in Xero, and at the same
+    amount. Matching: order number in the invoice number/reference first, then
+    amount + date window + name similarity."""
+    out = []
+    xinv = cache.get("xero", {}).get("invoices", {})
+    orders = cache.get("shopify", {}).get("orders", {})
+    idx = _order_invoice_index(xinv)
+    by_amount: dict = {}
+    for v in xinv.values():
+        if v["type"] == "ACCREC" and v["total"] is not None:
+            by_amount.setdefault((v["total"], v["currency"]), []).append(v)
+
+    for o in orders.values():
+        if o["cancelled"] or o["test"]:
+            continue
+        if o["financial_status"] not in ("paid", "partially_refunded", "partially_paid", "pending"):
+            continue
+        if o["total"] in (None, 0):
+            continue
+        hit = None
+        for k in (norm_ref(o["name"]), norm_ref(str(o["id"]))):
+            if k and idx.get(k):
+                hit = idx[k][0]
+                break
+        if hit is None:
+            # Amount + date + name: the invoice may carry its own numbering.
+            for v in by_amount.get((o["total"], o["currency"]), []):
+                gap = _days_between(o["created_at"], v["date"])
+                if gap is not None and gap <= 7:
+                    nm = norm_name(o["company"] or o["customer"])
+                    if not nm or nm in norm_name(v["contact"]) or norm_name(v["contact"]) in nm:
+                        hit = v
+                        break
+        if hit is None:
+            sev = _sev_for_amount(o["total"], "high")
+            out.append(make_exc(
+                "shopify_sale_missing", sev,
+                f"Shopify sale {o['name']} ({money(o['total'], o['currency'])}) has no matching Xero invoice",
+                [o["id"]], amount=o["total"], currency=o["currency"], date=o["created_at"],
+                systems=["shopify", "xero"],
+                why=(f"Order {o['name']} is {o['financial_status']} in Shopify, but no ACCREC "
+                     "invoice carries its number, and none matches on amount, date and customer."),
+                suggestion="Check whether this sale reached Xero at all, or reached it under an unrecognisable reference.",
+                evidence=[ev("shopify", "order", f"Order {o['name']}", o, 1)],
+                computed=[f"Searched {len(xinv)} Xero invoices for '{o['name']}' and for "
+                          f"{money(o['total'], o['currency'])} within 7 days of {o['created_at']}: no match."]))
+            continue
+        if hit["total"] is not None and o["total"] is not None and hit["total"] != o["total"]:
+            diff = o["total"] - hit["total"]
+            if abs(diff) > TOLERANCE_PENCE:
+                out.append(make_exc(
+                    "order_invoice_amount_mismatch", _sev_for_amount(diff, "medium"),
+                    f"{o['name']}: Shopify total {money(o['total'], o['currency'])} vs "
+                    f"Xero invoice {hit['number'] or hit['id']} {money(hit['total'], hit['currency'])}",
+                    [o["id"], hit["id"]], amount=diff, currency=o["currency"],
+                    date=o["created_at"], systems=["shopify", "xero"],
+                    why="The matched invoice's total differs from the order's total.",
+                    suggestion="Compare line items, shipping, discounts and VAT between the two records.",
+                    evidence=[ev("shopify", "order", f"Order {o['name']}", o, 1),
+                              ev("xero", "invoice", f"Invoice {hit['number'] or hit['id']}", hit, 2)],
+                    computed=[f"{money(o['total'], o['currency'])} (Shopify) - "
+                              f"{money(hit['total'], hit['currency'])} (Xero) = {money(diff, o['currency'])}"]))
+        if (hit.get("tax") is not None and o.get("tax") is not None
+                and abs(hit["tax"] - o["tax"]) > TOLERANCE_PENCE):
+            tdiff = o["tax"] - hit["tax"]
+            out.append(make_exc(
+                "order_invoice_tax_mismatch", "medium",
+                f"{o['name']}: VAT differs - Shopify {money(o['tax'], o['currency'])} vs "
+                f"Xero {money(hit['tax'], hit['currency'])}",
+                [o["id"], hit["id"], "tax"], amount=tdiff, currency=o["currency"],
+                date=o["created_at"], systems=["shopify", "xero"],
+                why="The tax recorded in Xero does not equal the tax Shopify charged.",
+                suggestion="Check the tax rate applied on the Xero invoice lines.",
+                evidence=[ev("shopify", "order", f"Order {o['name']}", o, 1),
+                          ev("xero", "invoice", f"Invoice {hit['number'] or hit['id']}", hit, 2)],
+                computed=[f"VAT: {money(o['tax'], o['currency'])} (Shopify) - "
+                          f"{money(hit['tax'], hit['currency'])} (Xero) = {money(tdiff, o['currency'])}"]))
+    return out
+
+
+def check_refunds(cache: dict) -> list:
+    """A Shopify refund is money leaving; Xero must show it as an ACCREC credit
+    note or a refund-shaped bank line."""
+    out = []
+    orders = cache.get("shopify", {}).get("orders", {})
+    notes = cache.get("xero", {}).get("credit_notes", {})
+    bank = cache.get("xero", {}).get("bank_transactions", {})
+    for o in orders.values():
+        for r in o.get("refunds", []):
+            if not r["pence"]:
+                continue
+            hit = None
+            for c in notes.values():
+                if c["type"] != "ACCRECCREDIT" or c["total"] != r["pence"]:
+                    continue
+                gap = _days_between(r["created_at"], c["date"])
+                if gap is not None and gap <= 10:
+                    hit = ("credit note " + (c["number"] or c["id"]), c)
+                    break
+            if hit is None:
+                for t in bank.values():
+                    if t["type"] != "SPEND" or t["pence"] != r["pence"]:
+                        continue
+                    gap = _days_between(r["created_at"], t["date"])
+                    if gap is not None and gap <= 10:
+                        hit = ("bank payment " + t["id"], t)
+                        break
+            if hit is None:
+                out.append(make_exc(
+                    "shopify_refund_missing", _sev_for_amount(r["pence"], "high"),
+                    f"Refund of {money(r['pence'], o['currency'])} on {o['name']} has no Xero record",
+                    [o["id"], r["id"]], amount=r["pence"], currency=o["currency"],
+                    date=r["created_at"], systems=["shopify", "xero"],
+                    why=("Shopify refunded this amount, but no ACCREC credit note and no SPEND "
+                         "bank transaction matches it within 10 days."),
+                    suggestion="Record the refund in Xero, or find where it was recorded under a different amount.",
+                    evidence=[ev("shopify", "order", f"Order {o['name']}", o, 1),
+                              ev("shopify", "refund", f"Refund on {r['created_at']}",
+                                 {**r, "order": o["name"]}, 2)],
+                    computed=[f"Searched {len(notes)} credit notes and {len(bank)} bank "
+                              f"transactions for {money(r['pence'], o['currency'])} within 10 days "
+                              f"of {r['created_at']}: no match."]))
+    return out
+
+
+def check_payouts_vs_bank(cache: dict) -> list:
+    """Every Shopify payout must land in the bank, once, at its exact amount.
+    (Only runs when the payouts scope is granted and the store uses Shopify
+    Payments; otherwise the sweep records that this check could not run.)"""
+    out = []
+    payouts = cache.get("shopify", {}).get("payouts", {})
+    bank = cache.get("xero", {}).get("bank_transactions", {})
+    receives: dict = {}
+    for t in bank.values():
+        if t["type"] == "RECEIVE" and t["pence"] is not None:
+            receives.setdefault(t["pence"], []).append(t)
+    claimed: set = set()
+    for p in payouts.values():
+        if p["status"] in ("canceled", "failed") or p["pence"] in (None, 0):
+            continue
+        hit = None
+        for t in receives.get(p["pence"], []):
+            gap = _days_between(p["date"], t["date"])
+            if gap is not None and gap <= 4 and t["id"] not in claimed:
+                hit = t
+                claimed.add(t["id"])
+                break
+        if hit is None:
+            out.append(make_exc(
+                "payout_missing_from_bank", _sev_for_amount(p["pence"], "high"),
+                f"Shopify payout of {money(p['pence'], p['currency'])} on {p['date']} "
+                "has no matching bank transaction in Xero",
+                [p["id"]], amount=p["pence"], currency=p["currency"], date=p["date"],
+                systems=["shopify", "xero"],
+                why="No RECEIVE bank transaction matches this payout's amount within 4 days.",
+                suggestion=("Check the bank feed for the deposit; if it arrived at a different "
+                            "amount, fees or a currency conversion may explain the gap."),
+                evidence=[ev("shopify", "payout", f"Payout {p['id']}", p, 1)],
+                computed=[f"Searched {len(bank)} Xero bank transactions for "
+                          f"{money(p['pence'], p['currency'])} within 4 days of {p['date']}: no match."]))
+        elif not hit["is_reconciled"]:
+            out.append(make_exc(
+                "payout_bank_unreconciled", "medium",
+                f"Bank deposit for payout {p['id']} ({money(p['pence'], p['currency'])}) is not reconciled",
+                [p["id"], hit["id"]], amount=p["pence"], currency=p["currency"], date=hit["date"],
+                systems=["shopify", "xero"],
+                why="The deposit exists but its Xero bank transaction is unreconciled.",
+                suggestion="Reconcile the bank line in Xero.",
+                evidence=[ev("shopify", "payout", f"Payout {p['id']}", p, 1),
+                          ev("xero", "bank_transaction", f"Bank txn {hit['id']}", hit, 2)]))
+    return out
+
+
+def check_stale_unreconciled(cache: dict) -> list:
+    """A bank line sitting unreconciled for weeks is where errors hide."""
+    out = []
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    for t in cache.get("xero", {}).get("bank_transactions", {}).values():
+        if t["is_reconciled"] or t["status"] == "DELETED" or t["pence"] in (None, 0):
+            continue
+        age = _days_between(t["date"], today)
+        if age is None or age < STALE_UNRECONCILED_DAYS:
+            continue
+        out.append(make_exc(
+            "stale_unreconciled", _sev_for_amount(t["pence"], "low"),
+            f"Bank transaction of {money(t['pence'], t['currency'])} from {t['date']} "
+            f"is still unreconciled after {age} days",
+            [t["id"]], amount=t["pence"], currency=t["currency"], date=t["date"],
+            systems=["xero"],
+            why=f"Unreconciled for {age} days (threshold {STALE_UNRECONCILED_DAYS}).",
+            suggestion="Reconcile it, or investigate why it cannot be matched.",
+            evidence=[ev("xero", "bank_transaction", f"Bank txn {t['id']}", t, 1)]))
+    return out
+
+
+def check_duplicates(cache: dict) -> list:
+    """Same bill twice is the classic way a supplier gets paid twice. Cluster
+    on the normalized invoice number, then on (supplier, amount, close dates)
+    for bills whose numbers differ only by typo."""
+    out = []
+    bills = [v for v in cache.get("xero", {}).get("invoices", {}).values()
+             if v["type"] == "ACCPAY" and v["status"] not in ("VOIDED", "DELETED")]
+    by_num: dict = {}
+    for v in bills:
+        k = norm_ref(v["number"])
+        if k:
+            by_num.setdefault(k, []).append(v)
+    for k, group in by_num.items():
+        if len(group) < 2:
+            continue
+        total = sum(v["total"] or 0 for v in group)
+        out.append(make_exc(
+            "duplicate_bill_number", _sev_for_amount(max(v["total"] or 0 for v in group), "high"),
+            f"Bill number '{group[0]['number']}' appears {len(group)} times "
+            f"({', '.join(sorted({g['contact'] for g in group}))})",
+            [v["id"] for v in group], amount=total, currency=group[0]["currency"],
+            date=group[0]["date"], systems=["xero"],
+            why="Two or more ACCPAY bills share the same normalized invoice number.",
+            suggestion="Void the duplicate, or confirm these are genuinely distinct documents.",
+            evidence=[ev("xero", "bill", f"Bill {v['number']} ({v['contact']})", v, i + 1)
+                      for i, v in enumerate(group)],
+            computed=[f"Normalized number '{k}' matches {len(group)} bills."]))
+    seen_pairs: set = set()
+    by_contact: dict = {}
+    for v in bills:
+        by_contact.setdefault((norm_name(v["contact"]), v["total"]), []).append(v)
+    for (cname, amt), group in by_contact.items():
+        if len(group) < 2 or amt in (None, 0):
+            continue
+        for i, a in enumerate(group):
+            for b in group[i + 1:]:
+                if norm_ref(a["number"]) == norm_ref(b["number"]) and norm_ref(a["number"]):
+                    continue                    # already reported above
+                gap = _days_between(a["date"], b["date"])
+                if gap is None or gap > 14:
+                    continue
+                key = tuple(sorted((a["id"], b["id"])))
+                if key in seen_pairs:
+                    continue
+                seen_pairs.add(key)
+                out.append(make_exc(
+                    "possible_duplicate_bill", _sev_for_amount(amt, "medium"),
+                    f"Two bills from {a['contact'] or 'the same supplier'} for "
+                    f"{money(amt, a['currency'])} within {gap} days "
+                    f"({a['number'] or 'no number'} / {b['number'] or 'no number'})",
+                    [a["id"], b["id"]], amount=amt, currency=a["currency"], date=a["date"],
+                    systems=["xero"],
+                    why="Same supplier, same amount, days apart, different numbers.",
+                    suggestion="Open both bills and compare their line items and source documents.",
+                    evidence=[ev("xero", "bill", f"Bill {a['number'] or a['id']}", a, 1),
+                              ev("xero", "bill", f"Bill {b['number'] or b['id']}", b, 2)]))
+    return out
+
+
+def check_overpayments(cache: dict) -> list:
+    """Payments against one invoice summing past its total: a duplicate
+    payment, or a misallocation."""
+    out = []
+    xinv = cache.get("xero", {}).get("invoices", {})
+    by_invoice: dict = {}
+    for p in cache.get("xero", {}).get("payments", {}).values():
+        if p["status"] == "DELETED" or not p["invoice_id"]:
+            continue
+        by_invoice.setdefault(p["invoice_id"], []).append(p)
+    for inv_id, pays in by_invoice.items():
+        v = xinv.get(inv_id)
+        if not v or v["total"] in (None, 0):
+            continue
+        paid = sum(p["pence"] or 0 for p in pays)
+        credited = v.get("credited_pence") or 0
+        if paid + credited > v["total"] + TOLERANCE_PENCE:
+            over = paid + credited - v["total"]
+            out.append(make_exc(
+                "overpaid_invoice", _sev_for_amount(over, "high"),
+                f"Invoice {v['number'] or inv_id} ({v['contact']}) is over-allocated by "
+                f"{money(over, v['currency'])}",
+                [inv_id], amount=over, currency=v["currency"], date=v["date"],
+                systems=["xero"],
+                why=f"{len(pays)} payments plus credits exceed the invoice total.",
+                suggestion="Look for a duplicated payment or a payment allocated to the wrong invoice.",
+                evidence=([ev("xero", "invoice", f"Invoice {v['number'] or inv_id}", v, 1)]
+                          + [ev("xero", "payment", f"Payment {p['id']}", p, i + 2)
+                             for i, p in enumerate(pays[:8])]),
+                computed=[f"Payments {money(paid, v['currency'])} + credits "
+                          f"{money(credited, v['currency'])} - invoice total "
+                          f"{money(v['total'], v['currency'])} = {money(over, v['currency'])} over."]))
+    return out
+
+
+def check_gmail_docs(cache: dict, docs: dict) -> list:
+    """Documents found in Gmail versus the books. Extraction happened earlier
+    (deterministic text first, AI on scans); by the time this check runs a doc
+    is already plain fields, and matching is arithmetic."""
+    out = []
+    xinv = cache.get("xero", {}).get("invoices", {})
+    payments = cache.get("xero", {}).get("payments", {})
+    num_idx: dict = {}
+    for v in xinv.values():
+        for k in (norm_ref(v["number"]), norm_ref(v["reference"])):
+            if k:
+                num_idx.setdefault(k, []).append(v)
+    for d in docs.values():
+        if d.get("ignored") or d.get("doc_type") in (None, "", "other"):
+            continue
+        ident = [d.get("source_key") or ""]
+        base_ev = [ev("gmail", "document",
+                      f"{d.get('doc_type')} '{d.get('filename') or d.get('subject')}' "
+                      f"from {d.get('from') or 'unknown sender'} on {_day(d.get('date'))}",
+                      {k: d.get(k) for k in ("doc_type", "filename", "subject", "from", "date",
+                                             "counterparty", "invoice_numbers", "total_pence",
+                                             "currency", "extracted_by")}, 1)]
+        if d.get("doc_type") in ("supplier_invoice", "customer_invoice", "credit_note"):
+            nums = [n for n in (d.get("invoice_numbers") or []) if norm_ref(n)]
+            missing = [n for n in nums if norm_ref(n) not in num_idx]
+            if nums and len(missing) == len(nums):
+                amt = d.get("total_pence")
+                out.append(make_exc(
+                    "gmail_doc_missing_from_xero", _sev_for_amount(amt, "high"),
+                    f"{d.get('doc_type', 'document').replace('_', ' ').title()} "
+                    f"{nums[0]}{' and others' if len(nums) > 1 else ''} found in Gmail "
+                    "but not in Xero",
+                    ident + nums, amount=amt, currency=d.get("currency") or "GBP",
+                    date=_day(d.get("date")), systems=["gmail", "xero"],
+                    why=(f"The document names invoice number(s) {', '.join(nums)}; none of them "
+                         f"match any of {len(xinv)} Xero invoice numbers or references."),
+                    suggestion="Enter the document in Xero, or confirm it was superseded or is not for this business.",
+                    evidence=base_ev,
+                    computed=[f"Normalized lookups tried: {', '.join(norm_ref(n) for n in nums)}."]))
+        if d.get("doc_type") == "remittance":
+            out.extend(_check_remittance(d, base_ev, num_idx, payments))
+    return out
+
+
+def _check_remittance(d: dict, base_ev: list, num_idx: dict, payments: dict) -> list:
+    """One remittance advice, taken apart: does each referenced invoice exist,
+    do the allocation amounts fit, and did a matching payment reach Xero?
+    Partial payments and multi-invoice remittances are the normal case."""
+    out = []
+    ident = [d.get("source_key") or ""]
+    cur = d.get("currency") or "GBP"
+    total = d.get("total_pence")
+    lines = d.get("invoice_lines") or []      # [{number, pence}]
+    n = len(base_ev)
+    line_sum = sum(l.get("pence") or 0 for l in lines) if lines else None
+    computed = []
+    if total is not None and line_sum is not None and lines:
+        gap = total - line_sum
+        computed.append(f"Remittance total {money(total, cur)} - listed invoice lines "
+                        f"{money(line_sum, cur)} = {money(gap, cur)}"
+                        + ("" if abs(gap) > TOLERANCE_PENCE else " (consistent)"))
+    for l in lines:
+        v = (num_idx.get(norm_ref(l.get("number"))) or [None])[0]
+        if v is None:
+            out.append(make_exc(
+                "remittance_unknown_invoice", "high",
+                f"Remittance from {d.get('counterparty') or d.get('from') or 'unknown'} "
+                f"references invoice {l.get('number')} which is not in Xero",
+                ident + [l.get("number")], amount=l.get("pence"), currency=cur,
+                date=_day(d.get("date")), systems=["gmail", "xero"],
+                why="The payer says they paid this invoice; Xero has no invoice with that number.",
+                suggestion="Find the invoice (was it raised outside Xero?) or query the payer.",
+                evidence=base_ev, computed=computed))
+        elif (l.get("pence") is not None and v["due_pence"] is not None
+              and v["paid_pence"] is not None
+              and l["pence"] not in (v["total"], v["due_pence"], v["paid_pence"])
+              and abs(l["pence"] - (v["total"] or 0)) > TOLERANCE_PENCE):
+            out.append(make_exc(
+                "remittance_amount_mismatch", "medium",
+                f"Remittance pays {money(l['pence'], cur)} against invoice "
+                f"{l.get('number')} whose total is {money(v['total'], v['currency'])}",
+                ident + [l.get("number"), "amt"], amount=l["pence"] - (v["total"] or 0),
+                currency=cur, date=_day(d.get("date")), systems=["gmail", "xero"],
+                why="The paid amount matches neither the invoice total, the amount due, nor the amount already paid - possibly a partial payment, a deduction, or an error.",
+                suggestion="Check for credit notes, early-settlement discounts or short payment.",
+                evidence=base_ev + [ev("xero", "invoice", f"Invoice {v['number']}", v, len(base_ev) + 1)],
+                computed=computed + [
+                    f"Line {money(l['pence'], cur)} vs invoice total {money(v['total'], v['currency'])}, "
+                    f"due {money(v['due_pence'], v['currency'])}, paid {money(v['paid_pence'], v['currency'])}."]))
+    if total:
+        pay_hit = None
+        for p in payments.values():
+            if p["pence"] == total:
+                gap = _days_between(_day(d.get("date")), p["date"])
+                if gap is not None and gap <= 14:
+                    pay_hit = p
+                    break
+        if pay_hit is None and lines:
+            hits = sum(1 for l in lines
+                       if any(p["pence"] == l.get("pence")
+                              and norm_ref(p["invoice_number"]) == norm_ref(l.get("number"))
+                              for p in payments.values()))
+            if hits == len(lines):
+                pay_hit = {"split": True}
+        if pay_hit is None:
+            out.append(make_exc(
+                "remittance_payment_missing", _sev_for_amount(total, "high"),
+                f"Remittance for {money(total, cur)} from "
+                f"{d.get('counterparty') or d.get('from') or 'unknown'} has no matching Xero payment",
+                ident + ["pay"], amount=total, currency=cur,
+                date=_day(d.get("date")), systems=["gmail", "xero"],
+                why=("No single Xero payment equals the remitted total within 14 days, and the "
+                     "listed invoices are not each individually settled at their stated amounts."),
+                suggestion="Check the bank feed for the receipt and record/allocate the payment.",
+                evidence=base_ev, computed=computed))
+    return out
+
+
+ALL_CHECKS = [check_orders_vs_invoices, check_refunds, check_payouts_vs_bank,
+              check_stale_unreconciled, check_duplicates, check_overpayments]
+
+
+# ---------------------------------------------------------------------------
+# Gmail document discovery + extraction
+# ---------------------------------------------------------------------------
+
+_FIN_WORDS = re.compile(
+    r"(?i)\b(remittance|invoice|statement|credit note|payment advice|"
+    r"payment confirmation|purchase order|receipt|refund)\b")
+_AMOUNT_RE = re.compile(r"(?<![\d.])(\d{1,3}(?:,\d{3})*\.\d{2})(?!\d)")
+_INVNUM_RE = re.compile(r"(?i)\b((?:inv|in|si|pi|cn)[-# ]?\d{3,10}|\d{4,8})\b")
+
+
+def find_doc_candidates(mail_store: dict, known: set, cap: int = 200) -> list:
+    """Threads whose subject or files look financial, newest first. Reading
+    the STORE only - no Gmail calls here."""
+    out = []
+    for t in (mail_store.get("threads") or {}).values():
+        subject = str(t.get("subject") or "")
+        files = t.get("files") or []
+        looks = bool(_FIN_WORDS.search(subject)) or any(
+            str(f.get("name", "")).lower().endswith(".pdf") for f in files)
+        if not looks:
+            continue
+        for m in (t.get("messages") or []):
+            for f in (m.get("files") or []):
+                name = str(f.get("name") or "")
+                if not name.lower().endswith(".pdf"):
+                    continue
+                key = f"{m.get('id')}:{f.get('id')}"
+                if key in known:
+                    continue
+                out.append({"source_key": key, "thread_id": t.get("id"),
+                            "message_id": m.get("id"), "attachment_id": f.get("id"),
+                            "filename": name, "size": f.get("size") or 0,
+                            "subject": subject,
+                            "from": str(m.get("from_email") or t.get("from_email") or ""),
+                            "date": str(m.get("at") or t.get("last_at") or "")})
+    out.sort(key=lambda c: c["date"], reverse=True)
+    return out[:cap]
+
+
+def _pdf_text(data: bytes) -> str:
+    try:
+        import pypdfium2 as pdfium
+        doc = pdfium.PdfDocument(data)
+        parts = []
+        for i in range(min(len(doc), 12)):
+            parts.append(doc[i].get_textpage().get_text_range())
+        return "\n".join(parts)
+    except Exception:
+        logger.exception("recon: pdf text extraction failed")
+        return ""
+
+
+def parse_doc_text(text: str, subject: str = "", sender: str = "") -> dict:
+    """Deterministic extraction: regex over the text layer. Good enough for
+    born-digital PDFs; scans get the AI pass instead."""
+    low = (subject + "\n" + text).lower()
+    if "remittance" in low or "payment advice" in low:
+        dtype = "remittance"
+    elif "credit note" in low:
+        dtype = "credit_note"
+    elif "statement" in low:
+        dtype = "statement"
+    elif "invoice" in low:
+        dtype = "supplier_invoice"
+    else:
+        dtype = "other"
+    amounts = [pence(a) for a in _AMOUNT_RE.findall(text)]
+    amounts = [a for a in amounts if a]
+    nums = []
+    for m in _INVNUM_RE.findall(text[:6000]):
+        if m.lower() not in ("2024", "2025", "2026") and m not in nums:
+            nums.append(m)
+    return {"doc_type": dtype, "invoice_numbers": nums[:12],
+            "total_pence": max(amounts) if amounts else None,
+            "amounts": sorted(set(amounts), reverse=True)[:12],
+            "currency": "GBP" if "£" in text or "gbp" in low else
+                        ("USD" if "$" in text else "EUR" if "€" in text else "GBP"),
+            "invoice_lines": [], "counterparty": "", "extracted_by": "text",
+            "verified": True}
+
+
+_DOC_TOOL = {
+    "name": "record_document",
+    "description": "Record what this financial document actually says. Use null for anything the document does not state. NEVER guess or infer a number that is not printed in the document.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "doc_type": {"type": "string", "enum": [
+                "remittance", "supplier_invoice", "customer_invoice", "credit_note",
+                "statement", "payment_confirmation", "purchase_order", "other"]},
+            "counterparty": {"type": "string", "description": "The other business named on the document"},
+            "currency": {"type": "string"},
+            "total": {"type": ["string", "null"], "description": "The document's principal total, digits exactly as printed"},
+            "invoice_numbers": {"type": "array", "items": {"type": "string"}},
+            "invoice_lines": {"type": "array", "items": {"type": "object", "properties": {
+                "number": {"type": "string"}, "amount": {"type": ["string", "null"]}},
+                "required": ["number"]}},
+            "payment_date": {"type": ["string", "null"]},
+            "payment_reference": {"type": ["string", "null"]},
+            "notes": {"type": "string"},
+        },
+        "required": ["doc_type", "currency", "invoice_numbers"],
+    },
+}
+
+_DOC_SYSTEM = (
+    "You read one financial document for a reconciliation audit. Report ONLY what is "
+    "printed in the document. Copy numbers digit for digit. If a field is not stated, "
+    "return null for it. You are recording evidence, not interpreting it: no guesses, "
+    "no derived values, no filling in of blanks.")
+
+
+async def extract_doc(candidate: dict) -> Optional[dict]:
+    """Fetch one attachment and turn it into fields. Text layer first (free,
+    exact); the AI reads it only when the PDF is a scan - and anything the AI
+    returns that the text layer COULD have shown is cross-checked against it."""
+    if _gmail_bytes is None:
+        return None
+    if candidate.get("size") and candidate["size"] > DOC_BYTES_MAX:
+        return {**candidate, "doc_type": "other", "ignored": True,
+                "note": "attachment larger than the size cap"}
+    try:
+        data = await _gmail_bytes(candidate["message_id"], candidate["attachment_id"])
+    except Exception:
+        logger.exception("recon: attachment fetch failed for %s", candidate.get("source_key"))
+        return None
+    text = _pdf_text(data)
+    if len(text.strip()) >= 120:
+        parsed = parse_doc_text(text, candidate.get("subject", ""), candidate.get("from", ""))
+        # The text layer told us the type; a remittance's allocation table is
+        # worth an AI read even when text exists, because its rows are the one
+        # structure regex cannot be trusted to pair up correctly.
+        if parsed["doc_type"] == "remittance" and _ai_call is not None:
+            ai = await _ai_extract(data, text)
+            if ai:
+                parsed = _merge_extractions(parsed, ai, text)
+        return {**candidate, **parsed, "text_chars": len(text)}
+    if _ai_call is None:
+        return {**candidate, "doc_type": "other", "ignored": True,
+                "note": "scanned document and no AI configured"}
+    ai = await _ai_extract(data, "")
+    if not ai:
+        return {**candidate, "doc_type": "other", "ignored": True,
+                "note": "extraction failed"}
+    return {**candidate, **ai, "extracted_by": "ai", "verified": False, "text_chars": 0}
+
+
+def _merge_extractions(parsed: dict, ai: dict, text: str) -> dict:
+    """AI output is only trusted where the text layer can confirm it: an
+    amount or invoice number the AI reports that does not appear in the text
+    is dropped, and the drop is recorded."""
+    dropped = []
+    flat = re.sub(r"[\s,£$€]", "", text)
+    lines = []
+    for l in (ai.get("invoice_lines") or []):
+        num_ok = norm_ref(l.get("number")) and norm_ref(l.get("number")) in norm_ref(text)
+        amt = pence(l.get("amount"))
+        amt_ok = amt is None or (f"{abs(amt) // 100}.{abs(amt) % 100:02d}" in flat)
+        if num_ok and amt_ok:
+            lines.append({"number": str(l.get("number")), "pence": amt})
+        else:
+            dropped.append(str(l.get("number") or l.get("amount")))
+    out = dict(parsed)
+    out["doc_type"] = ai.get("doc_type") or parsed["doc_type"]
+    out["counterparty"] = str(ai.get("counterparty") or "")
+    out["invoice_lines"] = lines
+    ai_total = pence(ai.get("total"))
+    if ai_total is not None and f"{abs(ai_total) // 100}.{abs(ai_total) % 100:02d}" in flat:
+        out["total_pence"] = ai_total
+    if ai.get("invoice_numbers"):
+        confirmed = [n for n in ai["invoice_numbers"] if norm_ref(n) in norm_ref(text)]
+        if confirmed:
+            out["invoice_numbers"] = confirmed[:12]
+    out["extracted_by"] = "text+ai"
+    if dropped:
+        out["ai_dropped"] = dropped[:8]
+    return out
+
+
+async def _ai_extract(pdf_bytes: bytes, text: str) -> Optional[dict]:
+    import base64
+    content: list = []
+    if text:
+        content.append({"type": "text", "text": "Document text layer:\n" + text[:30000]})
+    else:
+        content.append({"type": "document", "source": {
+            "type": "base64", "media_type": "application/pdf",
+            "data": base64.b64encode(pdf_bytes).decode()}})
+    content.append({"type": "text", "text": "Record this document with the record_document tool."})
+    try:
+        resp = await _ai_call(_DOC_SYSTEM, [{"role": "user", "content": content}],
+                              [_DOC_TOOL], {"type": "tool", "name": "record_document"})
+        for block in resp.content:
+            if getattr(block, "type", "") == "tool_use":
+                d = dict(block.input)
+                d["total"] = d.get("total")
+                return d
+    except Exception:
+        logger.exception("recon: AI document extraction failed")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# AI investigation of one exception
+# ---------------------------------------------------------------------------
+
+_VERDICT_TOOL = {
+    "name": "record_verdict",
+    "description": "Record your conclusion about this discrepancy, citing only the evidence ids you were given.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "classification": {"type": "string", "enum": [
+                "genuine_error", "timing_difference", "accounting_adjustment",
+                "explained", "insufficient_evidence"]},
+            "explanation": {"type": "string"},
+            "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+            "cites": {"type": "array", "items": {"type": "string"},
+                      "description": "Evidence ids (E1, E2...) your explanation rests on"},
+            "recommended_action": {"type": "string"},
+        },
+        "required": ["classification", "explanation", "confidence", "cites"],
+    },
+}
+
+_INVESTIGATE_SYSTEM = (
+    "You are an independent financial auditor investigating ONE discrepancy between "
+    "Shopify, Xero and Gmail records. You are given the discrepancy, the deterministic "
+    "arithmetic already computed, and a set of evidence records, each with an id.\n"
+    "Rules, absolute:\n"
+    "- Reason ONLY from the evidence provided. If it does not support a conclusion, "
+    "classify as insufficient_evidence.\n"
+    "- Cite the evidence ids your explanation depends on. An uncited claim is worthless.\n"
+    "- Never invent transactions, amounts, references or explanations.\n"
+    "- A timing difference needs the dates in evidence to actually support it.\n"
+    "- Confidence above 85 requires the arithmetic to close exactly.\n"
+    "- You are read-only: recommend actions for a human, never claim to have acted.")
+
+
+async def investigate(exc: dict, cache: dict) -> dict:
+    """Run the AI over one exception. Facts and arithmetic ride along; the
+    model's job is the interpretation layer, clearly labelled as such."""
+    if _ai_call is None:
+        return {"classification": "insufficient_evidence", "confidence": 0,
+                "explanation": "AI is not configured on this server.", "cites": [],
+                "at": _now(), "model": ""}
+    pack = list(exc.get("evidence") or [])
+    n = len(pack)
+    for extra in _related_evidence(exc, cache, start=n + 1):
+        pack.append(extra)
+    lines = [f"DISCREPANCY: {exc['title']}",
+             f"Why flagged: {exc['why']}",
+             "Deterministic arithmetic (already computed, trust it):"]
+    lines += ["  " + c for c in (exc.get("computed") or ["(none)"])]
+    lines.append("\nEVIDENCE:")
+    for e in pack:
+        lines.append(f"[{e['eid']}] ({e['system']} {e['kind']}) {e['label']}:\n"
+                     + json.dumps(e["record"], default=str)[:2000])
+    try:
+        resp = await _ai_call(_INVESTIGATE_SYSTEM,
+                              [{"role": "user", "content": "\n".join(lines)[:180000]}],
+                              [_VERDICT_TOOL], {"type": "tool", "name": "record_verdict"})
+    except Exception:
+        logger.exception("recon: investigation failed for %s", exc.get("id"))
+        return {"classification": "insufficient_evidence", "confidence": 0,
+                "explanation": "The AI call failed; requires human review.", "cites": [],
+                "at": _now(), "model": ""}
+    verdict = None
+    for block in resp.content:
+        if getattr(block, "type", "") == "tool_use":
+            verdict = dict(block.input)
+    if not verdict:
+        verdict = {"classification": "insufficient_evidence", "confidence": 0,
+                   "explanation": "The model returned no structured verdict.", "cites": []}
+    # Validation IS the safety layer: citations must exist, and a confident
+    # answer with no valid citations is downgraded, not believed.
+    valid_ids = {e["eid"] for e in pack}
+    verdict["cites"] = [c for c in (verdict.get("cites") or []) if c in valid_ids]
+    if not verdict["cites"] and verdict.get("classification") != "insufficient_evidence":
+        verdict["classification"] = "insufficient_evidence"
+        verdict["confidence"] = 0
+        verdict["explanation"] = ("Insufficient evidence - requires human review. "
+                                  "(The model cited no valid evidence.)")
+    verdict["confidence"] = max(0, min(100, int(verdict.get("confidence") or 0)))
+    verdict["at"] = _now()
+    verdict["model"] = str(getattr(resp, "model", "") or "")
+    verdict["evidence_shown"] = sorted(valid_ids)
+    return verdict
+
+
+def _related_evidence(exc: dict, cache: dict, start: int) -> list:
+    """Nearby records the checks did not attach but an investigator would pull:
+    bank lines and payments within 10% of the amount and 10 days of the date."""
+    out = []
+    amt, date = exc.get("amount"), exc.get("date")
+    if not amt or not date:
+        return out
+    n = start
+    for t in cache.get("xero", {}).get("bank_transactions", {}).values():
+        if t["pence"] and abs(abs(t["pence"]) - abs(amt)) <= max(abs(amt) // 10, 500):
+            gap = _days_between(date, t["date"])
+            if gap is not None and gap <= 10:
+                out.append(ev("xero", "bank_transaction",
+                              f"Nearby bank txn {t['id']} ({money(t['pence'], t['currency'])} on {t['date']})",
+                              t, n))
+                n += 1
+        if n - start >= 6:
+            break
+    return out
+
+
+# ---------------------------------------------------------------------------
+# The sweep: sync all three systems, run every check, merge into the store
+# ---------------------------------------------------------------------------
+
+async def sweep(deep_docs: bool = True) -> dict:
+    """One full pass. Serialized: the stores follow the house single-writer
+    rule, and two sweeps interleaving would double-report everything."""
+    if _sweeping["on"]:
+        return {"ok": False, "note": "A sweep is already running."}
+    _sweeping["on"] = True
+    _sweeping["at"] = time.time()
+    try:
+        return await _sweep_inner(deep_docs)
+    finally:
+        _sweeping["on"] = False
+
+
+async def _sweep_inner(deep_docs: bool) -> dict:
+    cache = _load_cache()
+    store = _load_store()
+    docs = _load_docs()
+    notes: list = []
+
+    # --- Xero, incrementally ------------------------------------------------
+    if _xero is not None and _xero.connected():
+        marks = store.setdefault("watermarks", {})
+        stamp = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+        x = cache.setdefault("xero", {})
+        for name, fetch, slimmer, key in (
+                ("invoices", _xero.list_invoices, slim_invoice, "id"),
+                ("payments", _xero.list_payments, slim_payment, "id"),
+                ("bank_transactions", _xero.list_bank_transactions, slim_bank_txn, "id"),
+                ("credit_notes", _xero.list_credit_notes, slim_credit_note, "id")):
+            try:
+                if name == "invoices":
+                    rows = await fetch(since=_cutoff_day(), modified_since=marks.get(name))
+                else:
+                    rows = await fetch(modified_since=marks.get(name))
+                bucket = x.setdefault(name, {})
+                truncated = False
+                for r in rows:
+                    if r.get("_truncated"):
+                        truncated = True
+                        continue
+                    s = slimmer(r)
+                    if s[key]:
+                        bucket[s[key]] = s
+                if truncated:
+                    notes.append(f"Xero {name}: the crawl hit its page cap; results are partial.")
+                else:
+                    marks[name] = stamp
+            except Exception as e:
+                notes.append(f"Xero {name} could not be read: {str(e)[:120]}")
+                logger.exception("recon sweep: xero %s failed", name)
+    else:
+        notes.append("Xero is not connected; the accounts side of every check is missing.")
+
+    # --- Shopify orders, whole window (the registry pages by since_id) ------
+    if _registry is not None and _tool_json is not None:
+        try:
+            fetched, since_id = 0, 0
+            bucket = cache.setdefault("shopify", {}).setdefault("orders", {})
+            while fetched < 1500:
+                d = await _tool_json(_registry, "shopify_list_orders", {
+                    "limit": 250, "status": "any", "since_id": since_id or None,
+                    "created_at_min": _cutoff_day() + "T00:00:00Z"})
+                if d.get("_failed"):
+                    notes.append("Shopify orders could not be read; sale checks ran on the cached copy.")
+                    break
+                rows = d.get("orders") or []
+                for o in rows:
+                    s = slim_order(o)
+                    if s["id"]:
+                        bucket[str(s["id"])] = s
+                        since_id = max(since_id, int(s["id"]))
+                fetched += len(rows)
+                if len(rows) < 250:
+                    break
+        except Exception as e:
+            notes.append(f"Shopify orders sync failed: {str(e)[:120]}")
+            logger.exception("recon sweep: shopify orders failed")
+        # Payouts: present only when the scope is granted and the store uses
+        # Shopify Payments. Absence is recorded, never silently skipped.
+        try:
+            d = await _tool_json(_registry, "shopify_list_payouts", {})
+            if d.get("_failed") or d.get("available") is False:
+                cache.setdefault("shopify", {}).setdefault("payouts", {})
+                notes.append("Shopify payouts are not readable (scope not granted, or the store "
+                             "does not use Shopify Payments); payout checks did not run.")
+            else:
+                bucket = cache.setdefault("shopify", {}).setdefault("payouts", {})
+                for p in d.get("payouts") or []:
+                    s = slim_payout(p)
+                    if s["id"]:
+                        bucket[s["id"]] = s
+        except KeyError:
+            notes.append("Payout tools are not on this server build.")
+
+    # --- Gmail documents, a bounded batch per sweep -------------------------
+    if _mail_store is not None and deep_docs:
+        try:
+            known = set(docs.keys())
+            cands = find_doc_candidates(_mail_store(), known)
+            for c in cands[:DOCS_PER_SWEEP]:
+                d = await extract_doc(c)
+                if d:
+                    docs[c["source_key"]] = d
+            if len(cands) > DOCS_PER_SWEEP:
+                notes.append(f"{len(cands) - DOCS_PER_SWEEP} more Gmail documents are queued "
+                             "for later sweeps.")
+        except Exception:
+            logger.exception("recon sweep: gmail scan failed")
+            notes.append("The Gmail document scan failed part-way; documents may be missing.")
+
+    # --- Checks (pure functions over the cache) -----------------------------
+    fresh: dict = {}
+    for check in ALL_CHECKS:
+        try:
+            for e in check(cache):
+                fresh[e["id"]] = e
+        except Exception:
+            logger.exception("recon check %s crashed", check.__name__)
+            notes.append(f"The {check.__name__} check crashed; its findings are missing "
+                         "from this sweep.")
+    try:
+        for e in check_gmail_docs(cache, docs):
+            fresh[e["id"]] = e
+    except Exception:
+        logger.exception("recon check_gmail_docs crashed")
+
+    # --- Merge: statuses and AI verdicts survive; disappearance is recorded -
+    existing = store.setdefault("exceptions", {})
+    for xid, e in fresh.items():
+        old = existing.get(xid)
+        if old:
+            e["status"], e["status_note"] = old["status"], old["status_note"]
+            e["history"], e["ai"] = old["history"], old["ai"]
+            e["created"] = old["created"]
+        existing[xid] = e
+    for xid, old in list(existing.items()):
+        if xid not in fresh and not old.get("stale"):
+            old["stale"] = True
+            old["updated"] = _now()
+            old["history"] = (old.get("history") or []) + [{
+                "at": _now(), "by": "sweep", "from": old["status"], "to": old["status"],
+                "note": "No longer detected by the latest sweep; kept for the audit trail."}]
+
+    store["last_sync"] = _now()
+    store["last_notes"] = notes[:12]
+    counts = {s: 0 for s in SEVERITIES}
+    for e in existing.values():
+        if not e.get("stale") and e["status"] in ("new", "investigating"):
+            counts[e["severity"]] += 1
+    store["open_counts"] = counts
+    _write_cache(cache)
+    _write_docs(docs)
+    _write_store(store)
+    return {"ok": True, "notes": notes, "open_counts": counts,
+            "exceptions": len([e for e in existing.values() if not e.get("stale")]),
+            "docs": len(docs)}

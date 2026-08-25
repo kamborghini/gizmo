@@ -964,6 +964,80 @@ class EmptyInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class PayoutTxnInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    payout_id: Optional[int] = Field(default=None, description="Limit to one payout's transactions")
+
+
+async def _payments_get(path: str, params: Optional[dict] = None) -> dict:
+    """Shopify Payments endpoints answer 403 when the scope is missing and 404
+    when the store simply is not on Shopify Payments. Both are ordinary states
+    for this store, not errors: the reconciliation engine records that the
+    check COULD NOT run, which is a different fact from "no payouts exist"."""
+    try:
+        return await _request("GET", path, params=params)
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code if e.response is not None else 0
+        if code in (401, 403):
+            return {"available": False,
+                    "reason": "The access token lacks the Shopify Payments read scopes "
+                              "(read_shopify_payments_payouts / read_shopify_payments_disputes)."}
+        if code == 404:
+            return {"available": False,
+                    "reason": "This store does not appear to use Shopify Payments."}
+        raise
+
+
+@mcp.tool(
+    name="shopify_list_payouts",
+    annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
+)
+async def shopify_list_payouts(params: EmptyInput) -> str:
+    """List Shopify Payments payouts (id, amount, date, status). Answers with
+    available:false when the scope is missing or the store is not on Shopify Payments."""
+    try:
+        d = await _payments_get("shopify_payments/payouts.json", params={"limit": 250})
+        if d.get("available") is False:
+            return _fmt(d)
+        return _fmt({"payouts": d.get("payouts", [])})
+    except Exception as e:
+        return _error(e)
+
+
+@mcp.tool(
+    name="shopify_payout_transactions",
+    annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
+)
+async def shopify_payout_transactions(params: PayoutTxnInput) -> str:
+    """Balance transactions (charges, refunds, FEES, adjustments), optionally for one payout.
+    This is where the fee that explains a payout-vs-bank gap lives."""
+    try:
+        q: Dict[str, Any] = {"limit": 250}
+        if params.payout_id:
+            q["payout_id"] = params.payout_id
+        d = await _payments_get("shopify_payments/balance/transactions.json", params=q)
+        if d.get("available") is False:
+            return _fmt(d)
+        return _fmt({"transactions": d.get("transactions", [])})
+    except Exception as e:
+        return _error(e)
+
+
+@mcp.tool(
+    name="shopify_list_disputes",
+    annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
+)
+async def shopify_list_disputes(params: EmptyInput) -> str:
+    """Chargebacks and inquiries against the store, with amounts, reasons and status."""
+    try:
+        d = await _payments_get("shopify_payments/disputes.json", params={"limit": 250})
+        if d.get("available") is False:
+            return _fmt(d)
+        return _fmt({"disputes": d.get("disputes", [])})
+    except Exception as e:
+        return _error(e)
+
+
 @mcp.tool(
     name="shopify_get_shop",
     annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
@@ -1050,6 +1124,9 @@ COPILOT_TOOLS = {
     "shopify_get_variant":           (shopify_get_variant,           GetVariantInput),
     "shopify_get_inventory_items":   (shopify_get_inventory_items,   GetInventoryItemsInput),
     "shopify_list_webhooks":         (shopify_list_webhooks,         ListWebhooksInput),
+    "shopify_list_payouts":          (shopify_list_payouts,          EmptyInput),
+    "shopify_payout_transactions":   (shopify_payout_transactions,   PayoutTxnInput),
+    "shopify_list_disputes":         (shopify_list_disputes,         EmptyInput),
 }
 
 async def update_order_tags(order_id: int, tags: str) -> dict:
