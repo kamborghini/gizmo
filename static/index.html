@@ -4754,15 +4754,37 @@
                 const b = el('button', 'btn' + (e.status === k ? ' on' : ''));
                 b.textContent = labl;
                 b.onclick = async () => {
-                    let note = '';
-                    if (k === 'ignored') { note = prompt('Why is this being ignored? (required)') || ''; if (!note.trim()) return; }
-                    try { const r = await api('/api/recon/exception', { id: e.id, op: 'status', status: k, note });
+                    if (k === 'ignored') {
+                        /* Native dialogs no longer exist inside a
+                           cross-origin iframe, which is exactly where this
+                           app lives. An inline field, reason still required. */
+                        reasonRow.style.display = '';
+                        reasonIn.focus();
+                        return;
+                    }
+                    try { const r = await api('/api/recon/exception', { id: e.id, op: 'status', status: k, note: '' });
                         reconOpen = r.exception; refreshRecon(); }
                     catch (er) { toastError(er.message); }
                 };
                 stbar.append(b);
             });
             d.append(stbar);
+            const reasonRow = el('div'); reasonRow.style.cssText = 'display:none;margin-top:8px;gap:8px';
+            reasonRow.style.display = 'none';
+            const reasonIn = el('input', 'mail-search');
+            reasonIn.placeholder = 'Why is this being ignored? (required)';
+            reasonIn.style.maxWidth = '420px';
+            const reasonGo = el('button', 'btn', 'Ignore with this reason');
+            reasonGo.onclick = async () => {
+                if (!reasonIn.value.trim()) { reasonIn.focus(); return; }
+                try { const r = await api('/api/recon/exception',
+                        { id: e.id, op: 'status', status: 'ignored', note: reasonIn.value.trim() });
+                    reasonRow.style.display = 'none'; reconOpen = r.exception; refreshRecon(); }
+                catch (er) { toastError(er.message); }
+            };
+            const rr = el('div'); rr.style.cssText = 'display:flex;gap:8px;margin-top:8px';
+            rr.append(reasonIn, reasonGo); reasonRow.append(rr);
+            d.append(reasonRow);
             if ((e.history || []).length) {
                 d.append(el('div', 'section-title', 'History'));
                 (e.history || []).forEach(h => d.append(el('div', 'field-help',

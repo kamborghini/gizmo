@@ -17460,6 +17460,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"ok": True, "exception": _recon_exc_public(e, full=True)})
         if op == "investigate":
             verdict = await recon_engine.investigate(e, _load_recon_cache())
+            # RELOAD before writing: the AI call awaited for seconds, and a
+            # sweep may have rewritten the store underneath. Writing the copy
+            # from before the await would clobber the sweep - the lost-update
+            # this codebase's single-writer rule exists to prevent.
+            d = _load_recon()
+            e = d.get("exceptions", {}).get(str(body.get("id") or ""))
+            if not e:
+                return _json({"error": "That discrepancy disappeared while the AI was reading it."}, 409)
             e["ai"] = verdict
             e["updated"] = datetime.now(timezone.utc).isoformat()
             _write_recon(d)

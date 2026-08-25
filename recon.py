@@ -331,6 +331,7 @@ def check_orders_vs_invoices(cache: dict) -> list:
     for v in xinv.values():
         if v["type"] == "ACCREC" and v["total"] is not None:
             by_amount.setdefault((v["total"], v["currency"]), []).append(v)
+    claimed: set = set()      # an invoice explains ONE order, not every same-priced one
 
     for o in orders.values():
         if o["cancelled"] or o["test"]:
@@ -347,11 +348,14 @@ def check_orders_vs_invoices(cache: dict) -> list:
         if hit is None:
             # Amount + date + name: the invoice may carry its own numbering.
             for v in by_amount.get((o["total"], o["currency"]), []):
+                if v["id"] in claimed:
+                    continue
                 gap = _days_between(o["created_at"], v["date"])
                 if gap is not None and gap <= 7:
                     nm = norm_name(o["company"] or o["customer"])
                     if not nm or nm in norm_name(v["contact"]) or norm_name(v["contact"]) in nm:
                         hit = v
+                        claimed.add(v["id"])
                         break
         if hit is None:
             sev = _sev_for_amount(o["total"], "high")
@@ -858,7 +862,9 @@ async def extract_doc(candidate: dict) -> Optional[dict]:
     except Exception:
         logger.exception("recon: attachment fetch failed for %s", candidate.get("source_key"))
         return None
-    text = _pdf_text(data)
+    # OFF the event loop: pypdfium2 chewing an 8MB scan is pure CPU, and this
+    # process also answers Shopify's order webhook inside a 5-second window.
+    text = await asyncio.to_thread(_pdf_text, data)
     if len(text.strip()) >= 120:
         parsed = parse_doc_text(text, candidate.get("subject", ""), candidate.get("from", ""))
         # The text layer told us the type; a remittance's allocation table is

@@ -288,7 +288,13 @@ async def list_invoices(since: Optional[str] = None, modified_since: Optional[st
     document date; `modified_since` is the incremental-sync watermark."""
     params: dict = {"order": "UpdatedDateUTC ASC"}
     if since:
-        params["where"] = f"Date >= DateTime({since.replace('-', ',')})"
+        try:
+            y, m, d = (int(x) for x in since.split("-"))
+            # Built from parsed ints: "DateTime(2026,8,27)" - never a literal
+            # with leading zeros, whose acceptance the docs do not promise.
+            params["where"] = f"Date >= DateTime({y},{m},{d})"
+        except ValueError:
+            pass                          # a bad date filters nothing, never crashes
     return await _paged("Invoices", "Invoices", params, modified_since)
 
 

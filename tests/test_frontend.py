@@ -1495,8 +1495,11 @@ def t_ai_output_is_labelled_interpretation_never_fact():
 @test
 def t_ignoring_a_discrepancy_demands_a_reason():
     fn = SCRIPT.split("function paintReconDetail")[1].split("\n        function ")[0]
-    ok("if (!note.trim()) return" in fn,
-       "the client refuses an empty reason before the server even sees it")
+    ok("prompt(" not in fn,
+       "no native prompt(): it does not exist inside a cross-origin iframe, "
+       "which is exactly where this app runs")
+    ok("if (!reasonIn.value.trim())" in fn,
+       "the inline field refuses an empty reason before the server even sees it")
 
 
 @test
