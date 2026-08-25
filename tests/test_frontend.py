@@ -1283,6 +1283,42 @@ def t_the_receivers_tax_id_prefills_but_never_overrides_typing():
        "with the source named, so an autofilled number can be checked")
 
 
+@test
+def t_courier_labels_print_in_separate_runs_per_courier():
+    """Three DHL and eight UPS is two runs at two printers: the courier is
+    chosen BEFORE anything prints, not discovered halfway through a stack."""
+    ok("function printShippingLabelsFor" in SCRIPT and "function courierOf" in SCRIPT,
+       "labels are grouped by the courier that carries them")
+    ok("d.tracking_number && !d.canceled" in SCRIPT,
+       "only orders actually dispatched, and never a cancelled one")
+    ok("every courier, one run" in SCRIPT,
+       "with one deliberate option to print the lot together")
+    m = re.search(r"function fetchLabelsFor[\s\S]{0,3000}", SCRIPT).group(0)
+    ok("failed.push" in m, "an unreadable label is collected, never swallowed")
+    ok("[0, 1, 2, 3].map(worker)" in m,
+       "fetched a few at a time - a megabyte a label makes one big request a timeout")
+    ok("could not be read" in SCRIPT, "and the orders that failed are NAMED")
+    # The ways a stack goes out short, each of which must be reported.
+    ok("parcels could print" in m,
+       "a multi-parcel order that only partly printed is named, not counted a success")
+    ok("no label stored" in m and "cannot print in place" in m,
+       "and so are a missing label and one that cannot print in place")
+    ok("slots[idx] = got" in m,
+       "results land in queue order, not whoever answered first")
+    ok("run.cancelled" in m, "and closing the window mid-run stops it")
+
+
+@test
+def t_a_bulk_label_run_inherits_the_rules_the_single_print_has():
+    """The gobo bulk print has refused cancelled, refunded and fulfilled
+    orders for a long time; a new bulk path must not quietly skip that."""
+    f = re.search(r"function shipLabelEligible[\s\S]{0,900}", SCRIPT).group(0)
+    ok("if (o.status) return false" in f,
+       "cancelled, refunded and fulfilled orders never join a courier run")
+    ok("d.canceled" in f, "nor a shipment voided at the courier")
+    ok("SHIP_RUN_MAX" in SCRIPT, "and a run has a ceiling rather than firing 1,800 requests")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

@@ -489,6 +489,33 @@ def t_env_creds_win():
         copilot._wo_boot()
 
 @test
+def t_the_queue_only_promises_labels_it_still_has():
+    """has_label is stamped once at booking and never cleared, but the label
+    FILES are pruned oldest-first - so a months-old order advertises a label
+    the volume no longer holds, and a Reprint button counts a stack it cannot
+    print. One directory listing tells the truth for every order at once."""
+    os.makedirs(copilot.DISPATCH_LABELS_DIR, exist_ok=True)
+    kept = os.path.join(copilot.DISPATCH_LABELS_DIR, "555001.json")
+    with open(kept, "w", encoding="utf-8") as fh:
+        json.dump({"labels": [{"type": "base64pdf", "value": "x"}]}, fh)
+    try:
+        out = copilot._dispatch_with_live_labels({
+            "555001": {"tracking_number": "A", "has_label": True},   # file present
+            "555002": {"tracking_number": "B", "has_label": True},   # file pruned away
+            "555003": {"tracking_number": "C", "has_label": False},  # never had one
+        })
+        ok(out["555001"]["has_label"], "a label still on disk is still offered")
+        ok(not out["555002"]["has_label"],
+           "a pruned label stops being counted, rather than failing at the printer")
+        ok(not out["555003"]["has_label"])
+        eq(out["555001"]["tracking_number"], "A", "nothing else about the entry is disturbed")
+    finally:
+        try:
+            os.remove(kept)
+        except OSError:
+            pass
+
+@test
 def t_an_international_quote_carries_the_customers_own_tax_id():
     """Shopify keeps a customer's tax id in more than one place and the
     Customer object has no such field at all, so the lookup asks all of them.

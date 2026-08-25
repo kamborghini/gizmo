@@ -4926,6 +4926,19 @@
                 all.onclick = () => printLabels(printable);
                 bar.append(all);
             }
+            /* Courier labels for everything in view that has actually been
+               dispatched. Separate from the gobo-label buttons above: that
+               stock is 4x2 on the bench printer, this is the courier's own
+               4x6 sheet, and they are never the same run. */
+            const shipLabels = shown.filter(shipLabelEligible);
+            if (shipLabels.length) {
+                const sl = el('button', 'btn');
+                sl.append(ico(I.truck), document.createTextNode(
+                    'Print shipping labels (' + shipLabels.length + ')'));
+                sl.title = 'Reprint the courier labels for dispatched orders in this list';
+                sl.onclick = () => printShippingLabelsFor(shipLabels);
+                bar.append(sl);
+            }
             if (!dispatched) {
                 const filt = el('div', 'lbl-seg tight');
                 [['all', 'All'], ['unprinted', 'Unprinted (' + unprinted.length + ')'], ['unmade', 'Not made (' + unmade.length + ')']].forEach(([k, lab]) => {
@@ -5182,6 +5195,17 @@
             if (!labelsLoading && labelsCache) renderLabels();
         }
         window.__demoCoverage = d => { labelsCoverage = { data: d, at: Date.now() }; if (labelsCache) renderLabels(); };
+        /* Courier-split label printing, driven without a Shopify order behind
+           it: the grouping and the picker are the parts worth proving. */
+        window.__demoShipLabels = (dispatch, orders) => {
+            /* Calls the REAL predicate. A hook with its own copy of the filter
+               tests the copy, and lets a regression through the one that
+               actually decides what gets printed. */
+            labelsCache = { data: { dispatch: dispatch || {} } };
+            const eligible = (orders || []).filter(shipLabelEligible);
+            printShippingLabelsFor(eligible);
+            return eligible.length;
+        };
         function coverageCard() {
             const card = el('div', 'card'); card.style.marginBottom = '16px';
             if (labelsCoverage === 'busy') {
@@ -5900,6 +5924,159 @@
                 setTimeout(() => URL.revokeObjectURL(url), 60000);
             } catch (e) { toastError('Could not save the label. Use Download, or your World Options portal.'); }
         }
+        /* ==================================================================
+           Bulk courier-label reprint, split BY COURIER.
+           Couriers do not share a sheet: three DHL and eight UPS is two runs
+           at two different printers, so the choice is made before anything
+           prints rather than discovered halfway through a stack.
+           ================================================================== */
+        function courierOf(o) {
+            const d = dispatchStateOf(o) || {};
+            return String(d.carrier_label || d.carrier_known || d.carrier_name || '').trim()
+                || 'Courier not named';
+        }
+        /* One printer run. Past this the fan-out trips the app's own rate
+           limit and returns a stack that is mostly missing, which is worse
+           than being told to narrow the list. */
+        const SHIP_RUN_MAX = 60;
+        function shipLabelEligible(o) {
+            /* o.status is cancelled / refunded / already-fulfilled - the same
+               rule the gobo bulk print uses two buttons along. d.canceled is a
+               different thing: the COURIER shipment was voided. A cancelled
+               order that still has a live courier booking must not walk into
+               a bulk run and get a label printed for a parcel nobody is
+               sending. */
+            if (o.status) return false;
+            const d = dispatchStateOf(o) || {};
+            return !!d.tracking_number && !d.canceled && d.has_label !== false;
+        }
+        async function fetchLabelsFor(orders, onProgress, run) {
+            /* Bounded fan-out over the EXISTING single-label route: labels are
+               about a megabyte each, and one bulk response carrying eleven of
+               them is a request that times out on a bad morning.
+
+               Results land in INDEXED slots, not by whoever answers first: the
+               stack has to come out in the order the picker listed, or the
+               operator matches eleven labels to eleven parcels by reading
+               every address. Every shortfall is named - including a
+               multi-parcel order where only some parcels could print, which is
+               precisely how box 2 of 2 goes out bare. */
+            const slots = new Array(orders.length);
+            const failed = [];
+            let i = 0, done = 0;
+            async function worker() {
+                while (i < orders.length) {
+                    const idx = i++;
+                    if (run && run.cancelled) return;
+                    const o = orders[idx];
+                    try {
+                        const r = await api('/api/dispatch/label',
+                            o.__custom ? { id: o.id } : { order_id: o.id });
+                        const all = (r.labels || []).filter(Boolean);
+                        const got = all.filter(l => l.print_images && l.print_images.length);
+                        slots[idx] = got;
+                        if (!all.length) failed.push(orderNo(o) + ': no label stored');
+                        else if (!got.length) failed.push(orderNo(o)
+                            + ': the label cannot print in place - open the order and download it');
+                        else if (got.length < all.length) failed.push(orderNo(o)
+                            + ': only ' + got.length + ' of ' + all.length
+                            + ' parcels could print - the rest need downloading from the order');
+                    } catch (e) {
+                        failed.push(orderNo(o) + ': ' + (e.message || 'could not be read'));
+                    }
+                    if (onProgress) onProgress(++done, orders.length);
+                }
+            }
+            await Promise.all([0, 1, 2, 3].map(worker));
+            return { labels: slots.filter(Boolean).flat(), failed,
+                     cancelled: !!(run && run.cancelled) };
+        }
+        function printShippingLabelsFor(orders) {
+            const byCourier = new Map();
+            orders.forEach(o => {
+                const c = courierOf(o);
+                if (!byCourier.has(c)) byCourier.set(c, []);
+                byCourier.get(c).push(o);
+            });
+            const groups = [...byCourier.entries()].sort((a, b) => b[1].length - a[1].length);
+            const m = crmModal('Print shipping labels');
+            const run = { cancelled: false, busy: false };
+            const closeBtn = m.head.querySelector('.icon-btn');
+            if (closeBtn) closeBtn.addEventListener('click', () => { run.cancelled = true; });
+            m.body.append(el('p', 'field-help', 'These are the courier labels for orders already '
+                + 'dispatched in this list. Each courier prints on its own stock, so pick one run '
+                + 'at a time.'));
+            const status = el('div', 'sub'); status.style.marginTop = '8px';
+            const problems = el('div'); problems.style.marginTop = '8px';
+            async function go(list, what) {
+                if (run.busy) return;             /* one run at a time, per picker */
+                if (list.length > SHIP_RUN_MAX) {
+                    problems.innerHTML = '';
+                    problems.append(el('div', 'msg error', list.length + ' labels is more than one '
+                        + 'printer run. Narrow the list first - search, or switch queue - then '
+                        + 'print up to ' + SHIP_RUN_MAX + ' at a time.'));
+                    return;
+                }
+                run.busy = true;
+                problems.innerHTML = '';
+                const btns = [...m.body.querySelectorAll('button')];
+                btns.forEach(b => b.disabled = true);
+                status.textContent = 'Fetching ' + list.length + ' label'
+                    + (list.length === 1 ? '' : 's') + '\u2026';
+                const { labels, failed, cancelled } = await fetchLabelsFor(list,
+                    (n, total) => { status.textContent = 'Fetching label ' + n + ' of ' + total + '\u2026'; },
+                    run);
+                run.busy = false;
+                status.textContent = '';
+                if (cancelled) return;            /* the window was closed: print nothing */
+                btns.forEach(b => b.disabled = false);
+                if (!labels.length) {
+                    problems.append(el('div', 'msg error', 'Nothing printable for ' + what + '.'));
+                    failed.forEach(f => problems.append(el('div', 'sub', f)));
+                    return;
+                }
+                printLabelImages(labels);
+                if (!failed.length) {
+                    m.close();
+                    addToast('Printing ' + labels.length + ' label'
+                        + (labels.length === 1 ? '' : 's') + ' for ' + what + '.', 'good');
+                    return;
+                }
+                /* A short stack is how a parcel goes out with no label on it,
+                   so the window STAYS OPEN listing every order that fell out -
+                   all of them, not the first few, and not in a toast that
+                   vanishes while the print dialog is still up. */
+                problems.append(el('div', 'msg error', 'Printing ' + labels.length + ' label'
+                    + (labels.length === 1 ? '' : 's') + ', but ' + failed.length
+                    + ' did not make the stack. Deal with these before the parcels go out:'));
+                failed.forEach(f => problems.append(el('div', 'sub', f)));
+            }
+            const list = el('div');
+            groups.forEach(([courier, os]) => {
+                const row = el('div', 'lbl-row');
+                row.append(el('div', 'lia-name', courier));
+                const mid = el('div', 'lbl-who');
+                mid.append(el('span', 'sub', os.length + (os.length === 1 ? ' order' : ' orders')
+                    + ' \u00b7 ' + os.slice(0, 3).map(orderNo).join(', ')
+                    + (os.length > 3 ? ' and ' + (os.length - 3) + ' more' : '')));
+                row.append(mid);
+                const b = el('button', 'btn btn-primary', 'Print ' + os.length);
+                b.onclick = () => go(os, courier);
+                row.append(b);
+                list.append(row);
+            });
+            m.body.append(list);
+            if (groups.length > 1) {
+                const bar2 = el('div', 'disp-actions');
+                const every = el('button', 'btn', 'Print all ' + orders.length
+                    + ' (every courier, one run)');
+                every.title = 'Only sensible if the same printer takes every courier\u2019s stock';
+                every.onclick = () => go(orders, 'every courier');
+                bar2.append(every); m.body.append(bar2);
+            }
+            m.body.append(status, problems);
+        }
+
         function printLabelImages(labels) {
             const pages = [];
             const B64 = /^[A-Za-z0-9+/=\s]+$/;   // no quote or angle can reach the attribute

@@ -6,6 +6,10 @@
    "items": [
     {
      "kind": "added",
+     "text": "Print all the shipping labels, one courier at a time. The production queue has a Print shipping labels button for orders already dispatched: it asks which courier first, because three DHL and eight UPS is two runs on two different stocks. Cancelled, refunded and voided shipments never join a run, the stack comes out in queue order, and any order whose label could not be printed is listed on screen rather than quietly missing from the pile."
+    },
+    {
+     "kind": "added",
      "text": "International orders fill in the customer's tax id. If the customer gave Shopify a tax or VAT id - at checkout, on their B2B company, or recorded on their account - the dispatch card fills the receiver's tax box for you and says where the number came from. Not every customer has one; those still get an empty box, and anything you type always wins."
     },
     {

@@ -1049,6 +1049,32 @@ def _save_dispatch_labels(order_id, labels: list) -> None:
         logger.exception("saving dispatch labels failed for order %s", order_id)
 
 
+def _dispatch_with_live_labels(entries: dict) -> dict:
+    """The queue's dispatch map, with has_label telling the truth. A Reprint
+    button that counts labels the volume no longer holds promises a stack it
+    cannot print."""
+    have = _stored_label_ids()
+    out = {}
+    for k, v in (entries or {}).items():
+        if v.get("has_label") and k not in have:
+            v = {**v, "has_label": False}
+        out[k] = v
+    return out
+
+
+def _stored_label_ids() -> set:
+    """Which shipments still HAVE a label file, from one directory listing.
+
+    has_label is stamped once at booking and never cleared, but the label
+    files are pruned oldest-first - so a months-old order can advertise a
+    label that is no longer on disk. Reading the directory once is cheap;
+    reading every order's file is not."""
+    try:
+        return {n[:-5] for n in os.listdir(DISPATCH_LABELS_DIR) if n.endswith(".json")}
+    except OSError:
+        return set()
+
+
 def _load_dispatch_labels(order_id) -> list:
     try:
         with open(_label_path(order_id), "r", encoding="utf-8") as fh:
@@ -4215,7 +4241,8 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
     return {"tag": tag, "days": days, "count": len(tagged), "orders": shaped,
             "partial_note": partial,
             "state": {str(s["id"]): state[str(s["id"])] for s in shaped if str(s["id"]) in state},
-            "dispatch": {str(s["id"]): disp[str(s["id"])] for s in shaped if str(s["id"]) in disp}}
+            "dispatch": _dispatch_with_live_labels(
+                {str(s["id"]): disp[str(s["id"])] for s in shaped if str(s["id"]) in disp})}
 
 
 # ---------------------------------------------------------------------------
