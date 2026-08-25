@@ -244,11 +244,20 @@ async def _request(
     params: Optional[dict] = None,
     body:   Optional[dict] = None,
     _retried: bool = False,
+    idempotent: Optional[bool] = None,
 ) -> dict:
     """Central HTTP helper — every API call flows through here.
     Retries once on 401 (OAuth refresh), and up to 3 times with backoff on
     429/5xx/timeout so throttling and transient errors don't surface as data loss.
+
+    `idempotent` decides whether an AMBIGUOUS failure (a timeout, or a 5xx that
+    may have been raised after the write landed) is retried. It defaults to
+    "everything except POST", because re-posting a create is how one shipment
+    becomes two, and how a customer gets two tracking emails. A 429 is retried
+    for every method: Shopify rejected it before doing anything.
     """
+    if idempotent is None:
+        idempotent = method.upper() != "POST"
     if not SHOPIFY_STORE:
         raise RuntimeError(
             "Missing SHOPIFY_STORE environment variable. "
@@ -270,7 +279,7 @@ async def _request(
                         timeout=30.0,
                     )
             except (httpx.TimeoutException, httpx.TransportError) as e:
-                if attempt >= 3:
+                if attempt >= 3 or not idempotent:
                     raise
                 await asyncio.sleep(min(2 ** attempt, 8))
                 logger.warning("Shopify %s %s: %s — retry %d", method, path, type(e).__name__, attempt + 1)
@@ -282,7 +291,8 @@ async def _request(
                 await token_manager.force_refresh()
                 continue
 
-            if resp.status_code in _RETRY_STATUS and attempt < 3:
+            if (resp.status_code in _RETRY_STATUS and attempt < 3
+                    and (idempotent or resp.status_code == 429)):
                 # Respect Retry-After on 429; otherwise exponential backoff.
                 try:
                     # CLAMPED. This sleep happens while holding a permit on the
@@ -918,7 +928,8 @@ async def shopify_set_inventory_level(params: SetInventoryLevelInput) -> str:
             "location_id":       params.location_id,
             "available":         params.available,
         }
-        data = await _request("POST", "inventory_levels/set.json", body=body)
+        # An absolute set, not an increment: safe to repeat.
+        data = await _request("POST", "inventory_levels/set.json", body=body, idempotent=True)
         return _fmt(data.get("inventory_level", data))
     except Exception as e:
         return _error(e)
@@ -1083,7 +1094,7 @@ async def shopify_granted_scopes(max_age: float = 900.0) -> dict:
         got = _granted_scopes["scopes"]
     else:
         try:
-            data = await _request("POST", "graphql.json", body={
+            data = await _request("POST", "graphql.json", idempotent=True, body={
                 "query": "{ currentAppInstallation { accessScopes { handle } } }"})
             rows = (((data.get("data") or {}).get("currentAppInstallation") or {})
                     .get("accessScopes")) or []
@@ -1130,7 +1141,7 @@ async def shopify_order_tax_id(order_id: int) -> dict:
       }
     }"""
     try:
-        data = await _request("POST", "graphql.json", body={
+        data = await _request("POST", "graphql.json", idempotent=True, body={
             "query": q, "variables": {"id": f"gid://shopify/Order/{int(order_id)}"}})
         order = ((data.get("data") or {}).get("order")) or {}
         if not order:
@@ -1351,6 +1362,34 @@ async def create_order_fulfillment(
     }}
     if tracking_info:
         body["fulfillment"]["tracking_info"] = tracking_info
+    async def _already_landed() -> Optional[dict]:
+        """Did the write we just lost the answer to actually happen? A create
+        that succeeds and then loses its response - a 30s timeout, a gateway
+        502 - has already emailed the customer their tracking. Reporting that
+        as a failure (which reverts the tag and leaves the order sitting in the
+        queue) is the worse half of the two wrong answers, so ask Shopify."""
+        try:
+            again = await _request("GET", f"orders/{order_id}/fulfillment_orders.json")
+        except Exception:
+            return None
+        rows = again.get("fulfillment_orders", []) or []
+        tried = {g["fulfillment_order_id"] for g in groups}
+        still_open = [r for r in rows if r.get("id") in tried
+                      and r.get("status") in ("open", "in_progress", "scheduled")]
+        if still_open:
+            return None                      # nothing landed; the caller's error stands
+        fid, status = None, ""
+        try:
+            done = await _request("GET", f"orders/{order_id}/fulfillments.json")
+            live = [f for f in (done.get("fulfillments") or [])
+                    if f.get("status") != "cancelled"]
+            if live:
+                fid, status = live[-1].get("id"), live[-1].get("status") or ""
+        except Exception:
+            pass
+        return {"ok": True, "fulfillment_id": fid, "status": status,
+                "note": "Shopify did not answer, but the fulfillment is there."}
+
     try:
         data = await _request("POST", "fulfillments.json", body=body)
     except httpx.HTTPStatusError as e:
@@ -1359,6 +1398,18 @@ async def create_order_fulfillment(
             return {"ok": False, "reason": "permission",
                     "detail": "The access token can read fulfillment orders but cannot create "
                               "fulfillments (needs write_fulfillments)."}
+        landed = await _already_landed()
+        if landed:
+            logger.warning("fulfillment POST answered %s but the fulfillment exists; "
+                           "treating order %s as fulfilled", code, order_id)
+            return landed
+        raise
+    except (httpx.TimeoutException, httpx.TransportError):
+        landed = await _already_landed()
+        if landed:
+            logger.warning("fulfillment POST timed out but the fulfillment exists; "
+                           "treating order %s as fulfilled", order_id)
+            return landed
         raise
     f = data.get("fulfillment", data)
     return {"ok": True, "fulfillment_id": f.get("id"), "status": f.get("status")}

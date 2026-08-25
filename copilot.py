@@ -3920,6 +3920,28 @@ async def _sync_tags_bg(registry: dict, order_ids: list, add=(), remove=()) -> N
             await asyncio.sleep(0.6)
 
 
+async def _release_bg(registry: dict, order_ids: list) -> None:
+    """The tail of a big print run: the same tag move and Net-30 attach the
+    interactive path does, paced, off the request. A 60-order batch is ~5
+    Shopify round-trips each; done inline the browser gives up long before the
+    server does, rolls back its printed stamps, and the team's view and Shopify
+    then disagree about which orders were released. Never raises."""
+    for oid in order_ids:
+        try:
+            okd, note = await _sync_order_tags(registry, oid,
+                                               add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG])
+            if not okd:
+                logger.warning("background release: tag refused for order %s: %s", oid, note)
+                continue
+            tn = await _net30_on_release(registry, oid)
+            if tn["account"] and not tn["ok"]:
+                logger.error("background release: Net 30 not attached to order %s: %s",
+                             oid, tn["note"])
+        except Exception:
+            logger.exception("background release failed for order %s", oid)
+        await asyncio.sleep(0.6)
+
+
 async def _dispatch_move_tags(registry: dict, order_id) -> tuple:
     """Move an order onto the finished tag (Complete): add it, drop the workflow
     tags (Unprocessed / IP / PC). Called while the order is still unfulfilled so
@@ -8690,6 +8712,9 @@ MAIL_SYNC_SECONDS = 120        # board re-syncs when its picture is older than t
 MAIL_TRACK_DAYS = int(os.environ.get("MAIL_TRACK_DAYS", "730"))
 MAIL_DONE_KEEP_DAYS = int(os.environ.get("MAIL_DONE_KEEP_DAYS", "730"))
 MAIL_THREADS_CAP = int(os.environ.get("MAIL_THREADS_CAP", "6000"))
+# How many orders a print run releases inline before the rest goes to a paced
+# background pass. Each release is a tag GET+PUT plus up to three GraphQL calls.
+RELEASE_INLINE_MAX = int(os.environ.get("RELEASE_INLINE_MAX", "12"))
 MAIL_LIST_MAX = 5000           # most threads one sync will walk from Gmail
 MAIL_MSGS_PER_THREAD = 50      # newest messages kept per thread record
 MAIL_STATES = ("unassigned", "assigned", "progress", "waiting", "done")
@@ -9581,9 +9606,28 @@ async def _mail_sync_labels(t: dict, owner_name: str = "") -> None:
         labels.pop(have, None)
 
 
-def _mail_board_shape(store: dict) -> list:
+# What the board is FOR: live work, plus recently closed conversations for
+# context. Two years of finished mail belongs behind search, not in a payload
+# rebuilt and shipped to every open client every 60 seconds.
+MAIL_BOARD_DONE_DAYS = int(os.environ.get("MAIL_BOARD_DONE_DAYS", "90"))
+MAIL_BOARD_MAX = int(os.environ.get("MAIL_BOARD_MAX", "1500"))
+
+
+def _mail_board_shape(store: dict, window: bool = False) -> list:
+    """Compact rows for the board. With window=True, finished threads older
+    than MAIL_BOARD_DONE_DAYS are left out and the result is capped: at the
+    6,000-thread store cap the unwindowed list is megabytes per poll, per
+    client. Search passes window=False, because a hit must be showable
+    whatever its age."""
+    cutoff = ""
+    if window:
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(days=MAIL_BOARD_DONE_DAYS)).isoformat()
     out = []
     for t in store.get("threads", {}).values():
+        if cutoff and t.get("state") == "done" \
+                and str(t.get("done_at") or t.get("last_at") or "") < cutoff:
+            continue
         out.append({"id": t.get("id"), "subject": t.get("subject") or "(no subject)",
                     "from_name": t.get("from_name") or "", "from_email": t.get("from_email") or "",
                     "state": t.get("state"), "owner": t.get("owner") or "",
@@ -9598,7 +9642,7 @@ def _mail_board_shape(store: dict) -> list:
                     "files": len(t.get("files") or []),
                     "label_error": bool(t.get("label_error"))})
     out.sort(key=lambda r: r.get("last_at") or "", reverse=True)
-    return out
+    return out[:MAIL_BOARD_MAX] if window else out
 
 
 def _mail_team_shape() -> list:
@@ -9640,10 +9684,13 @@ def _crm_deal_threads(d: dict, deal: dict) -> list:
         return []
     rows = []
     for t in store.get("threads", {}).values():
-        hit = (t.get("id") == born
-               or str(t.get("from_email") or "").lower() in addrs
-               or any(str(m.get("from_email") or "").lower() in addrs
-                      for m in (t.get("messages") or [])))
+        # The thread's COUNTERPARTY, not "somebody in this thread once". Gmail
+        # groups a forward or a cc into whatever thread it lands in, so
+        # matching any message sender put another customer's whole
+        # conversation - their subject, their snippet, their owner - into this
+        # deal's history, where a rep reads it as this customer's. from_email
+        # is already the first sender who is not us, which is exactly the test.
+        hit = (t.get("id") == born or str(t.get("from_email") or "").lower() in addrs)
         if not hit:
             continue
         rows.append({"id": t.get("id"), "subject": t.get("subject") or "(no subject)",
@@ -9835,15 +9882,22 @@ async def _crm_link_order_later(body_txt: str) -> None:
         logger.exception("crm: order-customer link failed")
 
 
-def _crm_link_order_soon(body_txt: str) -> None:
-    """Schedule the link and HOLD A REFERENCE: a bare create_task can be
-    garbage-collected before it runs."""
+def _spawn_bg(coro) -> bool:
+    """Run a coroutine after this request, and HOLD A REFERENCE: a bare
+    create_task can be garbage-collected before it ever runs. False when
+    there is no loop to defer to, so the caller can do the work inline."""
     try:
-        t = asyncio.get_running_loop().create_task(_crm_link_order_later(body_txt))
-        _crm_bg_tasks.add(t)
-        t.add_done_callback(_crm_bg_tasks.discard)
+        t = asyncio.get_running_loop().create_task(coro)
     except RuntimeError:
-        pass          # no running loop: nothing to defer to
+        coro.close()
+        return False
+    _crm_bg_tasks.add(t)
+    t.add_done_callback(_crm_bg_tasks.discard)
+    return True
+
+
+def _crm_link_order_soon(body_txt: str) -> None:
+    _spawn_bg(_crm_link_order_later(body_txt))
 
 
 def _mail_crm_match(email: str) -> Optional[dict]:
@@ -11630,11 +11684,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if _team_role(who) == "master" and not google_mail.connected():
                 setup = {"project": google_mail.project_number(),
                          "redirect_uri": _gmail_redirect_uri(request)}
+            rows = _mail_board_shape(store, window=True)
             return _json({"connected": google_mail.connected(),
                           "client": google_mail.client_configured(),
                           "address": google_mail.address() or None,
                           "setup": setup,
-                          "threads": _mail_board_shape(store),
+                          "threads": rows,
+                          "older_hidden": max(0, len(store.get("threads") or {}) - len(rows)),
                           "rules": len(store.get("rules") or []),
                           "team": _mail_team_shape(),
                           "me": who, "lead": _mail_lead(who),
@@ -12990,7 +13046,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # here too - this is the ordinary way an order reaches the
                 # workbench, and it used to be the path that forgot.
                 notes, terms_notes, terms_bad = [], [], False
-                for oid in ids:
+                # Inline for a normal run; the tail is paced in the background.
+                # Each order is a tag GET+PUT plus up to three GraphQL calls,
+                # so a 60-order batch done inline outlives the browser's patience.
+                head, tail = ids[:RELEASE_INLINE_MAX], ids[RELEASE_INLINE_MAX:]
+                for oid in head:
                     okd, note = await _sync_order_tags(registry, oid,
                                                        add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG])
                     if not okd and note:
@@ -13001,10 +13061,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         terms_notes.append(tn["note"])
                     if tn["account"] and not tn["ok"]:
                         terms_bad = True
+                if tail:
+                    _spawn_bg(_release_bg(registry, tail))
                 return _json({"ok": True, "state": {str(i): _load_prod_state().get(str(i), {}) for i in ids},
                               "terms_note": ("  ".join(terms_notes[:3]) if terms_notes else ""),
                               "terms_ok": not terms_bad,
                               "tag_note": (notes[0] if notes else ""),
+                              "queued": len(tail),
                               "state_note": ("" if stamped else "Printed stamps couldn't be saved; "
                                              "the list may show these as unprinted after a reload.")})
             if op == "unprinted":
@@ -13512,7 +13575,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if go:
             # The one irreversible moment gets a snapshot immediately before it.
             try:
-                _weekly_snapshot(force=True)
+                # OFF the event loop: this deflates the whole data volume, and
+                # doing it inline stopped the process serving for as long as
+                # it took - including POST /webhooks/orders, which Shopify
+                # gives 5 seconds before it starts counting failures.
+                await asyncio.to_thread(_weekly_snapshot, True)
             except Exception:
                 logger.exception("pre-import snapshot failed")
         d = _load_crm()

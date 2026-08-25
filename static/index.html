@@ -674,6 +674,8 @@
         .crm-col.dragover { border-color: var(--accent); background: var(--surface-3); }
         .crm-col-name { font-size: 12px; font-weight: 600; color: var(--ink); padding: 2px 4px 0; }
         .crm-col-sum { font-size: 11px; color: var(--ink-3); padding: 0 4px 8px; }
+        .crm-col-note { font-size: 11px; color: var(--ink-3); padding: var(--sp-2) 4px 0;
+            line-height: 1.4; }
         .crm-col-add { width: 100%; border: 1px dashed var(--border-2); background: none;
             border-radius: var(--r-sm); color: var(--ink-3); font: inherit; font-size: 12px;
             padding: var(--sp-1) 0; cursor: pointer; }
@@ -4422,6 +4424,13 @@
                     if (r && r.terms_note) {
                         if (r.terms_ok === false) toastError(r.terms_note);
                         else addToast(r.terms_note, 'good');
+                    }
+                    /* A big run releases the first orders while you wait and
+                       paces the rest behind the scenes, so say so rather than
+                       leaving the queue looking half-moved. */
+                    if (r && r.queued) {
+                        addToast(r.queued + ' more ' + (r.queued === 1 ? 'order is' : 'orders are')
+                                 + ' being released in the background; the queue will catch up.');
                     }
                     if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
                     // The browser cannot tell us whether they actually printed, so
@@ -10975,6 +10984,13 @@
                 col.append(el('div', 'crm-col-sum',
                     state === 'done' && total > 30 ? 'newest 30 of ' + total : String(total)));
                 rows.forEach(t => col.append(mailCard(t)));
+                /* The board carries live work plus recently closed threads.
+                   Say where the rest went instead of looking like it lost them. */
+                if (state === 'done' && d.older_hidden) {
+                    col.append(el('div', 'crm-col-note',
+                        d.older_hidden + ' older closed ' + (d.older_hidden === 1 ? 'thread is' : 'threads are')
+                        + ' out of the board window. Use search to find them.'));
+                }
                 board.append(col);
             });
             host.append(board);
