@@ -1264,6 +1264,14 @@ def t_a_box_preset_can_be_picked_as_the_dispatch_default():
        "and deleting the default box clears it")
 
 
+@test
+def t_the_customs_card_prefills_the_declaration_name():
+    """The card used to prefill the shop's product title as the customs
+    description."""
+    ok("it.customs_description || it.title" in SCRIPT,
+       "the declaration name wins, with the product title as the fallback")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

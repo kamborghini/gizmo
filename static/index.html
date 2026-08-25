@@ -6375,7 +6375,10 @@
                         // stocked product missing its cost is worth flagging.
                         if (it.needs_cost) fellBack.push(it.title);
                         addLine({
-                            description: it.title || 'Custom glass gobo',
+                            /* What the DECLARATION calls it, not the shop's
+                               product name: a gobo crosses a border as a glass
+                               optical filter. Still editable on the card. */
+                            description: it.customs_description || it.title || 'Custom glass gobo',
                             quantity: it.quantity || 1,
                             unit_price: parseFloat(it.unit_value || it.cost || it.price) || '',
                             hs: it.hs_code || quote.default_hs_code || '',

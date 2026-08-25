@@ -489,6 +489,31 @@ def t_env_creds_win():
         copilot._wo_boot()
 
 @test
+def t_gobos_cross_a_border_as_glass_optical_filters():
+    """A customs officer needs the goods, not the shop's product name: "Create
+    your own gobo" means nothing at a border. The declaration and the waybill
+    must agree, and PROJECTORS - whose names also contain "gobo" - must keep
+    their own description."""
+    eq(copilot._customs_title("Create your own gobo"), "Glass Optical Filter")
+    eq(copilot._customs_title("CREATE YOUR OWN GOBO"), "Glass Optical Filter",
+       "however it is capitalised")
+    eq(copilot._customs_title("Custom Gobo"), "Glass Optical Filter")
+    eq(copilot._customs_title("Steel gobo - B size"), "Glass Optical Filter")
+    # The trap the classification exists for.
+    eq(copilot._customs_title("Projected Image 200 Watt Gobo Projector"),
+       "Projected Image 200 Watt Gobo Projector", "a projector is not a filter")
+    eq(copilot._customs_title("Gobo Projector"), "Gobo Projector")
+    eq(copilot._customs_title("Glass cleaning cloth"), "Glass cleaning cloth",
+       "anything else keeps its own name")
+    # The waybill's contents line speaks the same language, and de-duplicates.
+    summary = copilot._goods_summary({"line_items": [
+        {"title": "Create your own gobo"}, {"title": "Custom Gobo"},
+        {"title": "Projected Image 200 Watt Gobo Projector"},
+        {"title": "Additional shipping charge"}]})
+    eq(summary, "Glass Optical Filter; Projected Image 200 Watt Gobo Projector",
+       "two gobo lines collapse to one description, the charge is dropped")
+
+@test
 def t_a_box_preset_can_be_made_the_dispatch_default():
     """The dispatch panel already opened on cfg.default_box_id; nothing in the
     settings could SET it. And a default must never outlive the box it names,

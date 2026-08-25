@@ -4562,10 +4562,16 @@ def _spread_value(boxes: list, total: float) -> list:
 
 
 def _goods_summary(o: dict) -> str:
+    """The parcel's contents line on the waybill. Declaration names, not shop
+    product names: a waybill reading "Create your own gobo" beside customs
+    lines reading "Glass Optical Filter" is one parcel described two ways."""
     titles = []
     for li in (o.get("line_items") or []):
         t = str(li.get("title") or li.get("name") or "").strip()
-        if t and not _label_skip_item(t) and t not in titles:
+        if not t or _label_skip_item(t):
+            continue
+        t = _customs_title(t)
+        if t and t not in titles:
             titles.append(t)
     return ("; ".join(titles))[:100] or "Custom glass gobos"
 
@@ -4850,6 +4856,29 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
             "truncated": bool(meta.get("truncated"))}
 
 
+# What gobos are called on a customs declaration. The shop's own product names
+# ("Create your own gobo") mean nothing to a border officer, and this agrees
+# with the HS code the same rule applies, 9002.20.000.
+CUSTOMS_GOBO_DESCRIPTION = os.environ.get("CUSTOMS_GOBO_DESCRIPTION", "Glass Optical Filter")
+
+
+def _is_gobo_title(title: str) -> bool:
+    """One definition, used by the customs lines AND the waybill's contents
+    summary, so a parcel cannot declare itself two different ways.
+
+    The catalog's naming makes the obvious test wrong: projector products read
+    "Projected Image ... Gobo Projector", so the word "gobo" appears in
+    PROJECTOR names too. Projector wins."""
+    low = str(title or "").lower()
+    stocked = ("projector" in low) or ("projected image" in low)
+    return ("gobo" in low) and not stocked
+
+
+def _customs_title(title: str) -> str:
+    """The shipping paperwork's name for a line: goods, not product names."""
+    return CUSTOMS_GOBO_DESCRIPTION if _is_gobo_title(title) else str(title or "").strip()
+
+
 async def _customs_items(registry: dict, o: dict) -> list:
     """Per-line customs facts from Shopify: the HS code and the UNIT COST both live
     on the variant's inventory item (not the product). Customs declares what the
@@ -4889,7 +4918,7 @@ async def _customs_items(registry: dict, o: dict) -> list:
         # wins the classification, or every projector would be declared at sale
         # value under the gobo rule.
         is_stocked = ("projector" in low) or ("projected image" in low)
-        is_gobo = ("gobo" in low) and not is_stocked
+        is_gobo = _is_gobo_title(title)
         origin = str((item or {}).get("country_code_of_origin") or "").strip().upper()
         if not origin:
             # The merchant's blanket rule when Shopify does not say: projectors are
@@ -4899,6 +4928,12 @@ async def _customs_items(registry: dict, o: dict) -> list:
         if not hs and is_gobo:
             # House rule: every gobo is 9002.20.000 (mounted optical filter glass).
             hs = "9002.20.000"
+        # What the DECLARATION calls it. A customs officer needs the goods, not
+        # the shop's product name: "Create your own gobo" means nothing at a
+        # border, and the same classification already declares these under
+        # 9002.20.000, mounted optical filter glass. The shop title is kept
+        # alongside so the app can still name the product to the operator.
+        customs_desc = _customs_title(title)
         price = str(li.get("price") or "")
         # The declared value. Gobos are custom work, declared at their SALE value;
         # stocked goods (projectors and the rest) at COST, falling back to sale
@@ -4922,6 +4957,7 @@ async def _customs_items(registry: dict, o: dict) -> list:
         out.append({
             "key": key,
             "title": title,
+            "customs_description": customs_desc,
             "quantity": int(li.get("quantity") or 1),
             "price": price,
             "cost": cost,
