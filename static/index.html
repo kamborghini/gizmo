@@ -3448,7 +3448,7 @@
         }
         function exportCSV(rows) {
             const head = ['Title', 'Status', 'Vendor', 'Type', 'Price', 'Inventory', 'Units (' + pPeriodLabel() + ')', 'Revenue (' + pPeriodLabel() + ')', 'Created', 'Updated'];
-            const esc = (v) => { v = (v == null ? '' : String(v)); if (/^[=+\-@\t\r]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+            const esc = (v) => { v = (v == null ? '' : String(v)); if (/^[=+\-@\t\r]/.test(v)) v = "'" + v; return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
             const lines = [head.join(',')];
             rows.forEach(r => { const p = r.p; lines.push([p.title, p.status, p.vendor, p.product_type, p.price, p.inventory, r.units, r.revenue, (p.created_at || '').slice(0, 10), (p.updated_at || '').slice(0, 10)].map(esc).join(',')); });
             const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -8074,8 +8074,12 @@
                                 pink: '#c9317e', brown: '#8b6242', gray: '#8a94a6',
                                 'dark-gray': '#5b6472' };
         function crmLabelColor(name) {
+            /* Only the known names map to a colour. The raw string used to fall
+               through into style.background, and a Pipedrive label coloured
+               url(//evil.co/a) then beaconed every render of the board. */
             const c = ((crmCache && crmCache.label_colors) || {})[name] || '';
-            return CRM_COLOR_CSS[c] || c || 'var(--ink-3)';
+            if (CRM_COLOR_CSS[c]) return CRM_COLOR_CSS[c];
+            return /^#[0-9a-f]{3,8}$/i.test(c) ? c : 'var(--ink-3)';
         }
         function crmChip(name) {
             /* Tinted ground, full-strength text: white-on-amber was 2.4:1. */
@@ -8159,7 +8163,10 @@
                    trigger gets the apostrophe armour, same as the product
                    exporter. A +44 phone number counts - Excel sees a formula. */
                 if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;
-                return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+                /* \r too: rows are joined with CRLF, and a bare CR inside an
+                   unquoted field starts a NEW record in Excel, where the
+                   leading-character armour above was never applied. */
+                return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
             };
             const txt = [header].concat(rows).map(r => r.map(esc).join(',')).join('\r\n');
             const a = document.createElement('a');
@@ -9235,7 +9242,8 @@
             if (crmMulti() && a.assignee && crmUname(a.assignee)) bits.push(crmUname(a.assignee));
             const sub = el('span', 'crm-sub', bits.join(' · '));
             mid.append(sub);
-            if (a.note && !a.done) mid.append(el('div', 'crm-act-note', a.note.slice(0, 160)));
+            const preview = a.note_preview || a.note || '';
+            if (preview && !a.done) mid.append(el('div', 'crm-act-note', preview));
             mid.onclick = () => crmActivityForm({ id: a.id }, refresh);
             r.append(mid);
             if (a.priority) r.append(el('span', 'crm-prio ' + a.priority, a.priority.toUpperCase()));
@@ -9298,7 +9306,18 @@
             const perIn = crmText(editing && crmPerson(editing.person_id)
                 ? crmPerson(editing.person_id).name : '', 'Type to link a person');
             crmField(grid, 'Person (optional)', crmTypeahead(perIn, crmPersonRows));
-            const noteIn = crmText(editing ? editing.note : '', 'Optional note');
+            /* The board payload carries only a preview, so the form asks for
+               the real note before it can save one back - prefilling from the
+               preview would truncate it on the first save. */
+            const noteIn = crmText('', 'Optional note');
+            if (editing) {
+                noteIn.disabled = true;
+                noteIn.placeholder = 'Reading the note\u2026';
+                api('/api/crm/activity', { op: 'detail', id: editing.id })
+                    .then(r => { noteIn.value = r.note || ''; noteIn.disabled = false;
+                                 noteIn.placeholder = 'Optional note'; })
+                    .catch(() => { noteIn.disabled = false; noteIn.placeholder = 'Optional note'; });
+            }
             crmField(grid, 'Note', noteIn);
             let assSel = null;
             if (crmMulti()) {

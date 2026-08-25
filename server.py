@@ -285,7 +285,12 @@ async def _request(
             if resp.status_code in _RETRY_STATUS and attempt < 3:
                 # Respect Retry-After on 429; otherwise exponential backoff.
                 try:
-                    wait = float(resp.headers.get("Retry-After", ""))
+                    # CLAMPED. This sleep happens while holding a permit on the
+                    # process-wide Shopify gate, so an edge 503 carrying a
+                    # legal "Retry-After: 3600" would park a quarter of the
+                    # app's Shopify capacity for an hour, and four of them
+                    # would stall every queue, dispatch and tag write behind it.
+                    wait = min(float(resp.headers.get("Retry-After", "")), 10.0)
                 except ValueError:
                     wait = min(2 ** attempt, 8)
                 logger.warning("Shopify %s %s: %d — backing off %.1fs (retry %d)",
