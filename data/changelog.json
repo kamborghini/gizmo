@@ -6,6 +6,10 @@
    "items": [
     {
      "kind": "added",
+     "text": "Settings, Connections now checks what the app is actually ALLOWED to do in Shopify, not just what it asks for. A permission the app needs but was never granted is named there, with what stops working because of it - the gap that made Net 30 fail silently for days."
+    },
+    {
+     "kind": "added",
      "text": "What's new lives in the app. Guide now has three tabs: the desk guide, What's new (every release, newest first, in plain terms) and Requests. A quiet dot appears on Guide when there are notes you have not read."
     },
     {

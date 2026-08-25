@@ -1054,6 +1054,47 @@ def _template_gone(msg: str) -> bool:
             or "does not exist" in low)
 
 
+# The writes this app actually performs, and the scope each one needs. A
+# missing scope is invisible until the moment it matters - the payment-terms
+# writer failed on every account order for days because the app requested
+# read_payment_terms and never write_payment_terms, and nothing said so.
+REQUIRED_WRITE_SCOPES = {
+    "write_orders": "editing an order, moving its tags",
+    "write_fulfillments": "marking an order shipped",
+    "write_merchant_managed_fulfillment_orders": "fulfilling and holding orders",
+    "write_payment_terms": "putting an unpaid purchase order on 30-day terms",
+}
+_granted_scopes: dict = {"at": 0.0, "scopes": None, "error": ""}
+
+
+async def shopify_granted_scopes(max_age: float = 900.0) -> dict:
+    """{"scopes": [...], "missing": {scope: why}, "error": str}.
+
+    What the INSTALLED app may actually do, read from Shopify rather than
+    from the config file that merely asks. Cached: this answers a settings
+    panel, not a hot path."""
+    now = time.monotonic()
+    if _granted_scopes["scopes"] is not None and now - _granted_scopes["at"] < max_age:
+        got = _granted_scopes["scopes"]
+    else:
+        try:
+            data = await _request("POST", "graphql.json", body={
+                "query": "{ currentAppInstallation { accessScopes { handle } } }"})
+            rows = (((data.get("data") or {}).get("currentAppInstallation") or {})
+                    .get("accessScopes")) or []
+            got = sorted({str(r.get("handle") or "") for r in rows if r.get("handle")})
+            if not got:
+                raise RuntimeError("no scopes returned")
+            _granted_scopes.update({"at": now, "scopes": got, "error": ""})
+        except Exception as e:
+            _granted_scopes["error"] = str(e)[:200]
+            # Unknown is not the same as missing: never claim a scope is
+            # absent because the lookup itself failed.
+            return {"scopes": [], "missing": {}, "error": str(e)[:200]}
+    return {"scopes": got, "error": "",
+            "missing": {k: v for k, v in REQUIRED_WRITE_SCOPES.items() if k not in got}}
+
+
 _net30_template = {"id": ""}    # found once, remembered for the process's life
 
 async def set_order_payment_terms_net30(order_id: int) -> dict:
@@ -1419,6 +1460,7 @@ try:
                        fulfillment_canceler=cancel_order_fulfillment,
                        webhook_ensurer=ensure_order_webhooks,
                        payment_terms_writer=set_order_payment_terms_net30,
+                       scope_reader=shopify_granted_scopes,
                        order_writer=update_order_fields)
 except Exception as e:
     logger.error(f"Store Copilot disabled (chat UI unavailable): {e}")

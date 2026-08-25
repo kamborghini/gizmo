@@ -12830,6 +12830,25 @@
                     ? ((s.shopify.name || 'Connected') + (s.shopify.currency ? ' (' + s.shopify.currency + ')' : '')
                        + (s.shopify.api_version ? ' \u00b7 API ' + s.shopify.api_version : ''))
                     : 'Reads are not working. Check your access token.'));
+            /* Permissions: what the INSTALLED app may actually do. A write the
+               app performs but the install cannot is silent until the moment
+               it matters - Net 30 failed on every account order for days
+               because nothing here said the permission was never granted. */
+            const sc = (s.shopify && s.shopify.scopes) || {};
+            const miss = Object.keys(sc.missing || {});
+            if (sc.error) {
+                host.append(connRow('Shopify permissions', 'mid',
+                    'Could not be checked. ' + sc.error));
+            } else if (miss.length) {
+                host.append(connRow('Shopify permissions', 'off',
+                    miss.length + (miss.length === 1 ? ' permission is' : ' permissions are')
+                    + ' missing, so ' + Object.values(sc.missing).join('; ')
+                    + ' cannot work. Add ' + miss.join(', ')
+                    + ' in your Shopify app, then release and reinstall it.'));
+            } else if (sc.checked) {
+                host.append(connRow('Shopify permissions', 'on',
+                    'Everything the app writes is permitted.'));
+            }
             // Live updates: Shopify pushing order events to the app. Without them
             // everything still works off the short cache and the Refresh button.
             const wh = s.webhooks || {};

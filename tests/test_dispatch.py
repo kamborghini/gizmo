@@ -6149,6 +6149,41 @@ def t_the_bare_token_print_route_demands_a_live_account():
     ok("if not _uid_has_tab(doc_who" in seg, "and the tab is checked on its own line")
 
 @test
+def t_status_reports_a_write_the_install_cannot_actually_do():
+    """Net 30 failed on every account order for days because the app asked
+    Shopify for read_payment_terms and never write_payment_terms, and nothing
+    anywhere said so. The Connections panel now reads what the INSTALL may do
+    and names any write it cannot - and never claims a scope is missing just
+    because the lookup itself failed."""
+    def go():
+        ensure_auth()
+        saved = copilot._scope_reader
+        try:
+            async def missing():
+                return {"scopes": ["read_orders", "write_orders"], "error": "",
+                        "missing": {"write_payment_terms": "putting an unpaid purchase "
+                                                           "order on 30-day terms"}}
+            copilot._scope_reader = missing
+            sc = post("/api/status", {}).json()["shopify"]["scopes"]
+            ok(sc["checked"], sc)
+            ok("write_payment_terms" in sc["missing"], sc)
+            async def granted():
+                return {"scopes": ["write_payment_terms"], "error": "", "missing": {}}
+            copilot._scope_reader = granted
+            sc2 = post("/api/status", {}).json()["shopify"]["scopes"]
+            eq(sc2["missing"], {}, "a granted install reports nothing missing")
+            ok(sc2["checked"])
+            async def broken():
+                return {"scopes": [], "error": "Shopify answered 503", "missing": {}}
+            copilot._scope_reader = broken
+            sc3 = post("/api/status", {}).json()["shopify"]["scopes"]
+            eq(sc3["missing"], {}, "a failed lookup is UNKNOWN, never 'missing'")
+            ok(not sc3["checked"] and sc3["error"], sc3)
+        finally:
+            copilot._scope_reader = saved
+    with_accounts(go)
+
+@test
 def t_updates_show_the_running_release_and_take_requests():
     """Release notes ship WITH the release (a repo file), so the panel always
     describes the code that is running. Requests are open to everyone signed

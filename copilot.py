@@ -3539,6 +3539,7 @@ PROPOSAL_HOST = os.environ.get("PROPOSAL_HOST", "quote.projectedimage.com")
 _PROPOSAL_RE = re.compile(r"https://" + re.escape(PROPOSAL_HOST) + r"/proof/[A-Za-z0-9]+")
 _order_tag_writer = None
 _payment_terms_writer = None
+_scope_reader = None
 _order_writer = None
 # The tag that marks an order sold on account: releasing one to production is
 # the moment its 30-day clock should start ticking in Shopify.
@@ -10489,12 +10490,14 @@ def _files_tick() -> None:
 
 def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=None,
                fulfillment_canceler=None, webhook_ensurer=None,
-               payment_terms_writer=None, order_writer=None) -> None:
+               payment_terms_writer=None, order_writer=None,
+               scope_reader=None) -> None:
     # The write capabilities the server hands over. None of them ever joins any
     # tool registry: the AI can read the store; only the app's own print / Mark
     # made / Dispatch actions can touch tags or fulfillments.
     global _order_tag_writer, _fulfillment_writer, _fulfillment_canceler, _webhook_ensurer
-    global _payment_terms_writer, _order_writer
+    global _payment_terms_writer, _order_writer, _scope_reader
+    _scope_reader = scope_reader
     _order_tag_writer = order_tag_writer
     _fulfillment_writer = fulfillment_writer
     _fulfillment_canceler = fulfillment_canceler
@@ -16824,10 +16827,24 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             vol_ok, vol_detail = False, str(e)[:200]
         watch = _load_watch()
         health = _gobo_sizes().get("health") or {}
+        scope_state = {"checked": False, "missing": {}, "error": ""}
+        if _scope_reader is not None and shop_ok:
+            try:
+                got = await _scope_reader()
+                scope_state = {"checked": not got.get("error"),
+                               "missing": got.get("missing") or {},
+                               "error": got.get("error") or ""}
+            except Exception as e:
+                scope_state["error"] = str(e)[:200]
         return _json({
             "shopify": {"ok": shop_ok, "name": shop_name, "currency": currency,
                         "api_version": api_version,
-                        "down_since": watch.get("shopify_down")},
+                        "down_since": watch.get("shopify_down"),
+                        # What the INSTALL may actually do, read from Shopify -
+                        # not what the config file asks for. A write the app
+                        # performs but the install cannot is invisible until
+                        # the moment it matters, which is the wrong moment.
+                        "scopes": scope_state},
             "ai": {"ok": bool(ANTHROPIC_API_KEY)},
             "google": google_data.status(),
             "gmail": google_mail.status(),
