@@ -489,6 +489,25 @@ def t_env_creds_win():
         copilot._wo_boot()
 
 @test
+def t_a_box_preset_can_be_made_the_dispatch_default():
+    """The dispatch panel already opened on cfg.default_box_id; nothing in the
+    settings could SET it. And a default must never outlive the box it names,
+    or dispatch opens looking for a parcel that is not there."""
+    boxes = [{"id": "small", "name": "Small", "width": 20, "length": 15, "depth": 10, "weight": 0.5},
+             {"id": "big", "name": "Big", "width": 40, "length": 30, "depth": 20, "weight": 2}]
+    r = post("/api/shipping/config", {"op": "set", "boxes": boxes, "default_box_id": "big"})
+    eq(r.status_code, 200, r.text)
+    eq(r.json()["config"]["default_box_id"], "big", "the chosen preset sticks")
+    # A pointer at a box that is not in the config is refused, not stored.
+    r2 = post("/api/shipping/config", {"op": "set", "default_box_id": "no-such-box"})
+    eq(r2.json()["config"]["default_box_id"], "", "a dangling default is cleared, not kept")
+    # Choosing again works, and clearing means "the first one".
+    post("/api/shipping/config", {"op": "set", "default_box_id": "small"})
+    eq(post("/api/shipping/config", {"op": "get"}).json()["config"]["default_box_id"], "small")
+    r3 = post("/api/shipping/config", {"op": "set", "default_box_id": ""})
+    eq(r3.json()["config"]["default_box_id"], "", "and it can be turned off again")
+
+@test
 def t_collection_window_config():
     r = post("/api/shipping/config", {"op": "set", "ready_time": "14:00", "close_time": "17:30"})
     eq(r.status_code, 200, r.text)

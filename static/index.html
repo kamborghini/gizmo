@@ -582,6 +582,8 @@
         .disp-boxedit > select, .disp-boxedit > input { height: 36px; box-sizing: border-box; }
         .disp-boxedit > select.psel { min-width: 168px; padding: 8px 8px; font-size: 13px; }
         .disp-boxedit .icon-btn { width: 30px; height: 30px; flex: none; }
+        .disp-boxedit > input.disp-boxdef { width: 17px; height: 17px; flex: none;
+            accent-color: var(--accent); cursor: pointer; margin: 0; }
         .disp-addbox { margin-top: 8px; }
         .disp-insure { display: flex; align-items: center; gap: 8px; margin: 18px 0 0;
             font-size: 12px; color: var(--ink-2); cursor: pointer; }
@@ -7375,13 +7377,29 @@
 
             // Box presets
             body.append(el('div', 'section-title', 'Box presets'));
-            body.append(el('p', 'field-help', 'The parcel sizes you offer when dispatching. Dimensions in cm, weight in kg.'));
+            body.append(el('p', 'field-help', 'The parcel sizes you offer when dispatching. Dimensions in cm, '
+                + 'weight in kg. Tick one to have the dispatch panel open on it; leave them all '
+                + 'unticked and it opens on the first.'));
             const boxHost = el('div'); body.append(boxHost);
             let boxes = (cfg.boxes || []).map(b => Object.assign({}, b));
+            /* A box with no id cannot be pointed at: older configs predate them,
+               and the default is stored BY id. */
+            boxes.forEach((b, i) => { if (!b.id) b.id = 'box' + (i + 1) + '_' + Date.now(); });
+            let defaultBoxId = cfg.default_box_id || '';
             function renderBoxes() {
                 boxHost.innerHTML = '';
                 boxes.forEach((b, i) => {
                     const rowb = el('div', 'disp-boxedit');
+                    /* Which box the dispatch panel opens on. A radio because it
+                       is one of many, and it reads as the row's own state. */
+                    const def = document.createElement('input');
+                    def.type = 'radio'; def.name = 'ship-default-box';
+                    def.className = 'disp-boxdef';
+                    def.checked = (defaultBoxId === b.id);
+                    def.title = 'Start dispatch with this box';
+                    def.setAttribute('aria-label', 'Use ' + (b.name || 'this box') + ' by default');
+                    def.onchange = () => { if (def.checked) defaultBoxId = b.id; };
+                    rowb.append(def);
                     const nm = document.createElement('input'); nm.type = 'text'; nm.className = 'disp-num disp-boxname'; nm.value = b.name || ''; nm.placeholder = 'Name';
                     nm.oninput = () => b.name = nm.value;
                     rowb.append(nm);
@@ -7391,7 +7409,10 @@
                         rowb.append(inp);
                     });
                     const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove';
-                    rm.onclick = () => { boxes.splice(i, 1); renderBoxes(); };
+                    rm.onclick = () => {
+                        if (boxes[i].id === defaultBoxId) defaultBoxId = '';
+                        boxes.splice(i, 1); renderBoxes();
+                    };
                     rowb.append(rm);
                     boxHost.append(rowb);
                 });
@@ -7416,6 +7437,10 @@
                         default_hs_code: intlIn.default_hs_code.value.trim(), trade_term: intlIn.trade_term.value.trim(),
                         export_reason: erSel.value, duties_payor: dpSel.value };
                     if (clean.length) payload.boxes = clean;
+                    /* Only ever a box that is actually being saved: a default
+                       pointing at a deleted or half-filled row would send the
+                       dispatch panel looking for a parcel that is not there. */
+                    payload.default_box_id = clean.some(b => b.id === defaultBoxId) ? defaultBoxId : '';
                     if (!fromEnv) {
                         if (credIn.meter_number.value.trim()) payload.meter_number = credIn.meter_number.value.trim();
                         if (credIn.key.value.trim()) payload.key = credIn.key.value.trim();

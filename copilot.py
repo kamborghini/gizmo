@@ -15556,7 +15556,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if cleaned:
                 cfg["boxes"] = cleaned
         if "default_box_id" in body:
-            cfg["default_box_id"] = str(body.get("default_box_id") or "")[:40]
+            # Only a box that actually exists once this save has landed. A
+            # pointer at a deleted preset would send the dispatch panel looking
+            # for a parcel that is not there; empty means "the first one".
+            want = str(body.get("default_box_id") or "")[:40]
+            have = {str(b.get("id") or "") for b in (cfg.get("boxes") or [])}
+            cfg["default_box_id"] = want if want in have else ""
         if "notify_customer" in body:
             cfg["notify_customer"] = bool(body.get("notify_customer"))
         if "show_parcelshop" in body:

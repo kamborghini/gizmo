@@ -6,6 +6,10 @@
    "items": [
     {
      "kind": "added",
+     "text": "Pick your default parcel. Shipping settings now has a tick beside each box preset - the dispatch panel opens on the one you tick, instead of always the first in the list. Leave them all unticked and it behaves as before. Deleting the box you had chosen simply clears the choice."
+    },
+    {
+     "kind": "added",
      "text": "Settings, Connections now checks what the app is actually ALLOWED to do in Shopify, not just what it asks for. A permission the app needs but was never granted is named there, with what stops working because of it - the gap that made Net 30 fail silently for days."
     },
     {

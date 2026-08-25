@@ -1251,6 +1251,19 @@ def t_the_app_can_show_its_own_release_notes_and_take_a_request():
     ok("markReleasesSeen" in SCRIPT, "and reading them clears it")
 
 
+@test
+def t_a_box_preset_can_be_picked_as_the_dispatch_default():
+    """Dispatch already honoured cfg.default_box_id; the settings had no way
+    to choose one."""
+    ok("disp-boxdef" in SCRIPT and "ship-default-box" in SCRIPT,
+       "each box row carries a radio for the default")
+    ok("payload.default_box_id" in SCRIPT, "and the choice is saved")
+    ok("clean.some(b => b.id === defaultBoxId)" in SCRIPT,
+       "never pointing at a box that did not survive the save")
+    ok("if (boxes[i].id === defaultBoxId) defaultBoxId = ''" in SCRIPT,
+       "and deleting the default box clears it")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
