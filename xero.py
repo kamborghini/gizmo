@@ -45,8 +45,10 @@ logger = logging.getLogger(__name__)
 
 CLIENT_ID = os.environ.get("XERO_CLIENT_ID", "")
 CLIENT_SECRET = os.environ.get("XERO_CLIENT_SECRET", "")
-TOKEN_PATH = os.environ.get("XERO_TOKEN_PATH", os.path.join(
-    os.environ.get("DATA_DIR", "data"), "xero_oauth.json"))
+# /data is the Railway volume, same default as every other store in the app.
+# The container filesystem would be wiped on every deploy, and a wiped
+# ROTATING refresh token is a dead connection needing a human re-consent.
+TOKEN_PATH = os.environ.get("XERO_TOKEN_PATH", "/data/xero_oauth.json")
 API_BASE = os.environ.get("XERO_API_BASE", "https://api.xero.com")
 IDENTITY_BASE = os.environ.get("XERO_IDENTITY_BASE", "https://identity.xero.com")
 LOGIN_BASE = os.environ.get("XERO_LOGIN_BASE", "https://login.xero.com")
@@ -137,15 +139,37 @@ async def exchange_code(code: str, redirect_uri: str) -> bool:
         return False
     access = str(tok.get("access_token") or "")
     # Which organisation consented: /connections, with the fresh access token.
+    # rows[0] is NOT "the one that just consented" when this Xero user has
+    # authorized the app for more than one organisation: match this consent's
+    # authEventId (readable from the id_token without verification - it names
+    # the event, it does not authenticate anything), else take the newest.
     tenant_id, tname = "", ""
     try:
         async with httpx.AsyncClient() as client:
             r = await client.get(f"{API_BASE}/connections", timeout=30.0,
                                  headers={"Authorization": "Bearer " + access})
         rows = r.json() if r.status_code == 200 else []
-        if rows:
-            tenant_id = str(rows[0].get("tenantId") or "")
-            tname = str(rows[0].get("tenantName") or "")
+        rows = [x for x in rows if isinstance(x, dict)]
+        auth_event = ""
+        try:
+            import base64
+            payload = str(tok.get("id_token") or "").split(".")[1]
+            payload += "=" * (-len(payload) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(payload))
+            auth_event = str(claims.get("authentication_event_id") or "")
+        except Exception:
+            pass
+        hit = next((x for x in rows if auth_event
+                    and str(x.get("authEventId") or "") == auth_event), None)
+        if hit is None and rows:
+            hit = sorted(rows, key=lambda x: str(x.get("createdDateUtc") or ""))[-1]
+            if len(rows) > 1:
+                logger.warning("xero: %d organisations authorized; connected to the newest "
+                               "(%s) - the status panel shows which", len(rows),
+                               hit.get("tenantName"))
+        if hit:
+            tenant_id = str(hit.get("tenantId") or "")
+            tname = str(hit.get("tenantName") or "")
     except Exception:
         logger.exception("xero: connections lookup failed")
     if not tenant_id:

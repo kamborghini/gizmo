@@ -4668,6 +4668,7 @@
                 const mid = el('div', 'lbl-who');
                 const line = el('span', 'lbl-nameline');
                 line.append(el('span', 'lbl-name', e.title));
+                if (e.basis === 'ai_extraction') line.append(el('span', 'lbl-chip warn', 'AI-READ SCAN'));
                 if (e.has_ai) line.append(el('span', 'lbl-chip note', 'AI VERDICT'));
                 if (e.stale) line.append(el('span', 'lbl-chip', 'NO LONGER DETECTED'));
                 mid.append(line);
@@ -4681,8 +4682,12 @@
             box.append(list);
             if (reconOpen) paintReconDetail(box);
         }
-        function reconCSV() {
-            const ex = ((reconCache || {}).ex || {}).exceptions || [];
+        async function reconCSV() {
+            /* The export is a report: it fetches everything matching the
+               filters, not just the rows the list happens to show. */
+            let ex = ((reconCache || {}).ex || {}).exceptions || [];
+            try { ex = (await api('/api/recon/exceptions',
+                Object.assign({}, reconFilter, { limit: 5000 }))).exceptions || ex; } catch (e) {}
             const esc2 = (v) => { v = (v == null ? '' : String(v)); if (/^[=+\-@\t\r]/.test(v)) v = "'" + v; return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
             const rows = [['Severity', 'Title', 'Amount', 'Date', 'Systems', 'Status', 'Id'].join(',')];
             ex.forEach(e => rows.push([e.severity, e.title, e.amount_disp, e.date,
@@ -4706,6 +4711,8 @@
             const [lab, cls] = RECON_SEV[e.severity] || ['?', 'note'];
             head.append(el('span', 'lbl-chip ' + cls, lab));
             const hd = el('div'); hd.append(el('div', 'know-title', e.title));
+            if (e.basis === 'ai_extraction') hd.append(el('span', 'lbl-chip warn',
+                'READ BY AI FROM A SCAN - UNVERIFIED'));
             hd.append(el('div', 'sub', (e.systems || []).join(' + ') + '  \u00b7  ' + (e.date || '')
                 + '  \u00b7  ' + (e.amount_disp || '')));
             head.append(hd);
@@ -4714,6 +4721,10 @@
             head.append(x); d.append(head);
             d.append(el('div', 'section-title', 'Why this was flagged'));
             d.append(el('div', 'field-help', e.why || ''));
+            if (e.suggestion) {
+                d.append(el('div', 'section-title', 'Recommended action'));
+                d.append(el('div', 'field-help', e.suggestion));
+            }
             if ((e.computed || []).length) {
                 d.append(el('div', 'section-title', 'The arithmetic (deterministic, not AI)'));
                 (e.computed || []).forEach(c => { const m = el('div', 'field-help'); m.style.fontVariantNumeric = 'tabular-nums'; m.textContent = c; d.append(m); });
@@ -13343,7 +13354,8 @@
                     const NAMES = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords',
                         products: 'Products', customers: 'Customers', liability: 'Liability',
                         crm: 'CRM', mail: 'Inbox', files: 'Files', labels: 'Production Manager',
-                        memory: 'Memory', skills: 'Skills', chat: 'Chat' };
+                        memory: 'Memory', skills: 'Skills', chat: 'Chat',
+                        recon: 'Reconciliation' };
                     const chosen = new Set(Array.isArray(u.tabs) ? u.tabs : TAB_KEYS);
                     const boxes = [];
                     const group = el('div');

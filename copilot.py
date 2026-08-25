@@ -7617,7 +7617,7 @@ async def _recon_ai_call(system: str, messages: list, tools: list, tool_choice: 
 def _recon_exc_public(e: dict, full: bool = False) -> dict:
     out = {k: e.get(k) for k in ("id", "kind", "severity", "title", "amount", "currency",
                                  "date", "systems", "status", "status_note", "stale",
-                                 "created", "updated")}
+                                 "created", "updated", "basis")}
     out["amount_disp"] = recon_engine.money(e.get("amount"), e.get("currency") or "GBP")
     out["has_ai"] = bool(e.get("ai"))
     if full:
@@ -17305,6 +17305,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         host = request.headers.get("host", "")
         return f"https://{host}/oauth/xero/callback"
 
+    _xero_oauth_states: dict = {}
+
     @mcp.custom_route("/oauth/xero/start", methods=["GET"])
     async def xero_start(request: Request):
         if not _window_ok(_rl_hits.setdefault("oauth:" + _client_key(request), []), RATE_MAX_CLIENT, time.monotonic()):
@@ -17316,11 +17318,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 secrets.compare_digest(key, google_data.CONNECT_SECRET)):
             return PlainTextResponse("Forbidden", status_code=403, headers=_API_HEADERS)
         now = time.time()
-        for st, exp in list(_oauth_states.items()):
+        for st, exp in list(_xero_oauth_states.items()):
             if exp < now:
-                _oauth_states.pop(st, None)
+                _xero_oauth_states.pop(st, None)
         state = secrets.token_urlsafe(24)
-        _oauth_states[state] = now + 900
+        _xero_oauth_states[state] = now + 900
         from starlette.responses import RedirectResponse
         return RedirectResponse(xero_api.consent_url(_xero_redirect_uri(request), state),
                                 status_code=302)
@@ -17331,7 +17333,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if qp.get("error"):
             return _oauth_page("Connection cancelled", f"Xero returned: {qp.get('error')}")
         state = qp.get("state", "")
-        exp = _oauth_states.pop(state, None)
+        exp = _xero_oauth_states.pop(state, None)
         if not state or exp is None or exp < time.time():
             return _oauth_page("Link expired", "That connect link expired or was already used. Start again.")
         code = qp.get("code", "")
@@ -17383,7 +17385,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/recon/sweep", methods=["POST"])
     async def recon_sweep_route(request: Request):
-        pre = _pre_checks(request)
+        pre = _pre_checks(request, ai=True)   # a sweep can read documents with the model
         if pre:
             return pre
         ok, who = _authorize(request)
@@ -17394,6 +17396,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
+        if not xero_api.connected():
+            return _json({"error": "Connect Xero first: without the accounts there is "
+                                   "nothing to reconcile against."}, 400)
         try:
             r = await recon_engine.sweep()
         except Exception:
@@ -17421,8 +17426,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                              q=str(body.get("q") or "")[:120],
                              min_pence=int(body.get("min_pence") or 0),
                              include_stale=bool(body.get("include_stale")))
+        # The CSV export asks for everything; the browser list stays modest.
+        cap = min(int(body.get("limit") or 400), 5000)
         return _json({"count": len(rows),
-                      "exceptions": [_recon_exc_public(e) for e in rows[:400]]})
+                      "exceptions": [_recon_exc_public(e) for e in rows[:cap]]})
 
     @mcp.custom_route("/api/recon/exception", methods=["POST"])
     async def recon_exception_route(request: Request):
@@ -17459,6 +17466,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             _track(who, "recon", "set a discrepancy to " + new, e["title"][:60])
             return _json({"ok": True, "exception": _recon_exc_public(e, full=True)})
         if op == "investigate":
+            # The same global AI budget as chat: an investigation is a model
+            # call, and the limiter exists so one tab cannot starve the rest.
+            if not _window_ok(_rl_global, RATE_MAX_GLOBAL, time.monotonic()):
+                return _json({"error": "The assistant is busy right now. Try again shortly."}, 429)
             verdict = await recon_engine.investigate(e, _load_recon_cache())
             # RELOAD before writing: the AI call awaited for seconds, and a
             # sweep may have rewritten the store underneath. Writing the copy
