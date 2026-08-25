@@ -9453,10 +9453,15 @@
                     try {
                         const r = await crmOp('/api/crm/contact', { op: 'shopify_link_sweep' });
                         const rep = r.report || {};
-                        toastOk('Linked ' + (rep.linked || 0) + ' contacts to Shopify customers'
-                            + (rep.already ? ' · ' + rep.already + ' already linked' : '')
-                            + (rep.ambiguous ? ' · ' + rep.ambiguous + ' skipped as ambiguous' : '')
-                            + '.');
+                        const line = 'Linked ' + (rep.linked || 0) + ' contacts to Shopify customers'
+                            + (rep.already ? ' \u00b7 ' + rep.already + ' already linked' : '')
+                            + (rep.ambiguous ? ' \u00b7 ' + rep.ambiguous + ' skipped as ambiguous' : '')
+                            + '.';
+                        /* A partial crawl must not read as a finished one: the
+                           contacts it never reached look identical to contacts
+                           with no Shopify customer at all. */
+                        if (rep.complete === false) toastError(line + ' ' + (rep.problem || ''));
+                        else toastOk(line);
                         renderCRM();
                     } catch (e) { toastError(e.message); }
                     link.disabled = false;

@@ -8905,7 +8905,7 @@ def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str) -> None:
         # sync files it into the CRM once it can read the body. The flag is
         # set here (sync store logic, unit-testable), the filing happens
         # where the network lives.
-        if _mail_looks_like_enquiry(t.get("subject")):
+        if _mail_looks_like_enquiry(t.get("subject"), t.get("from_email"), mailbox_addr):
             t["enquiry"] = "new"
         # Rules run on ARRIVAL only. A later message must never re-triage a
         # conversation out from under whoever is already holding it.
@@ -8925,8 +8925,31 @@ _MAIL_ENQUIRY_SUBJECT = re.compile(
     r"|contact form(?: submission)?)")
 
 
-def _mail_looks_like_enquiry(subject) -> bool:
-    return bool(_MAIL_ENQUIRY_SUBJECT.search(str(subject or "")))
+# Domains a genuine storefront notification comes FROM. Shopify sends these as
+# the store itself, so the shared mailbox's own address counts too.
+ENQUIRY_SENDERS = tuple(x.strip().lower() for x in os.environ.get(
+    "ENQUIRY_SENDERS",
+    "shopifyemail.com,shopify.com,projectedimage.com").split(",") if x.strip())
+
+
+def _mail_looks_like_enquiry(subject, from_email: str = "", mailbox: str = "") -> bool:
+    """A storefront enquiry, by SUBJECT and SENDER.
+
+    The subject alone is a public string: the shared inbox is on the website,
+    so anyone could send "New customer message" with a body naming a real
+    customer, and it would file itself into that customer's CRM record as a
+    deal marked "Website form". The body stays untrusted - it is a stranger's
+    text either way - but the message now has to come from somewhere a real
+    notification comes from before it is allowed to write into the CRM."""
+    if not _MAIL_ENQUIRY_SUBJECT.search(str(subject or "")):
+        return False
+    addr = str(from_email or "").strip().lower()
+    if not addr:
+        return False
+    if mailbox and addr == str(mailbox).strip().lower():
+        return True
+    dom = addr.rsplit("@", 1)[-1]
+    return any(dom == d or dom.endswith("." + d) for d in ENQUIRY_SENDERS)
 
 
 _MAIL_EMAIL_RX = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
@@ -8948,7 +8971,10 @@ def _mail_parse_enquiry(text: str) -> dict:
                 key, val = m.group(1).lower(), m.group(2).strip()
                 if key.startswith(("e", "e-")):
                     hit = _MAIL_EMAIL_RX.search(val)
-                    out["email"] = out["email"] or (hit.group(0) if hit else val[:200])
+                    # Only an actual address: keeping the raw text made every
+                    # unparsable enquiry collapse onto one bogus contact, and
+                    # suppressed the Reply-To rescue meant for exactly this.
+                    out["email"] = out["email"] or (hit.group(0) if hit else "")
                 elif key.startswith("phone"):
                     out["phone"] = out["phone"] or val[:40]
                 elif key.startswith(("company", "org")):
@@ -9578,15 +9604,27 @@ async def _crm_shopify_link_sweep(registry: dict, max_pages: int = 40) -> dict:
     neither updated_at nor edited_here is stamped - a link is an enrichment,
     and stamping 2,800 contacts would freeze them all against a final
     Pipedrive import."""
-    report = {"customers": 0, "linked": 0, "already": 0, "ambiguous": 0, "unmatched": 0}
+    report = {"customers": 0, "linked": 0, "already": 0, "ambiguous": 0, "unmatched": 0,
+              "complete": True, "problem": ""}
     by_email: dict = {}
     since = 0
+    pages = 0
     for _ in range(max_pages):
         res = await _tool_json(registry, "shopify_list_customers",
                                {"limit": 250, "since_id": since, "fields": "id,email"})
+        # A swallowed failure must never read as "no more customers". _tool_json
+        # returns {"_failed": True} for a throttle, a 5xx or a timeout, and
+        # without this a 429 on page three ended the crawl, reported success,
+        # and counted every remaining contact as having no Shopify customer.
+        if not _ok(res):
+            report["complete"] = False
+            report["problem"] = ("Shopify stopped answering partway through, so this is "
+                                 "only part of your customers. Run it again in a moment.")
+            break
         rows = (res or {}).get("customers") or []
         if not rows:
             break
+        pages += 1
         for c in rows:
             e = str(c.get("email") or "").strip().lower()
             if e and c.get("id"):
@@ -9600,6 +9638,12 @@ async def _crm_shopify_link_sweep(registry: dict, max_pages: int = 40) -> dict:
                 pass
         if len(rows) < 250:
             break
+    else:
+        # Ran out of pages rather than customers: the one exit that used to
+        # carry no signal at all, so the rest were silently "unmatched".
+        report["complete"] = False
+        report["problem"] = ("More customers than this sweep reads in one go ("
+                             + str(max_pages * 250) + "). The rest are not linked yet.")
     report["customers"] = len(by_email)
     if not by_email:
         return report

@@ -6,6 +6,18 @@
    "items": [
     {
      "kind": "fixed",
+     "text": "A stranger could write into a customer's CRM record by emailing the shop. Website enquiries were recognised by their SUBJECT LINE alone - and the inbox address is on the website - so anyone could send \"New customer message\", name a real customer in the body, and have it file itself as a deal marked Website form. The message now has to come from Shopify (or the shop itself) before it can write anything."
+    },
+    {
+     "kind": "fixed",
+     "text": "An enquiry whose email line is not an address no longer collapses onto one bogus contact - and the fallback that reads the real customer's address from the reply-to header works again."
+    },
+    {
+     "kind": "fixed",
+     "text": "The Shopify contact-linking sweep now says when it did not finish. A rate-limited page looked exactly like \"no more customers\": it stopped early, reported success, and counted everyone it never reached as having no Shopify customer."
+    },
+    {
+     "kind": "fixed",
      "text": "Only admins can change the pipeline now. Stages, deal labels and lost reasons are shared settings - one member renaming a stage changed the board for everyone - but the screen was open to anyone with the CRM tab."
     },
     {

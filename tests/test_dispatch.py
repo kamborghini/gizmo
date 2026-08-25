@@ -489,6 +489,84 @@ def t_env_creds_win():
         copilot._wo_boot()
 
 @test
+def t_a_stranger_cannot_write_into_the_crm_by_emailing_the_shop():
+    """The enquiry bridge promoted a thread to a CRM deal on its SUBJECT LINE
+    alone. The shared inbox is on the website, so anyone could send "New
+    customer message" with a body naming a real customer and have it file
+    itself into that customer's record, marked "Website form"."""
+    def go():
+        ensure_auth()
+        store = copilot._load_mail()
+        # The real thing: Shopify's own notification address.
+        _seed_thread("real1", "New customer message on 25 Aug",
+                     frm=("Projected Image", "no-reply@shopifyemail.com"))
+        eq(store["threads"]["real1"].get("enquiry"), "new", "a genuine notification files")
+        # The same subject from anyone at all does not.
+        _seed_thread("spoof1", "New customer message on 25 Aug",
+                     frm=("Someone", "attacker@evil.example"))
+        ok(not store["threads"]["spoof1"].get("enquiry"),
+           "a stranger's lookalike is just an email, not a CRM write")
+        _seed_thread("spoof2", "Contact form submission", frm=("X", "x@shopifyemail.com.evil.co"))
+        ok(not store["threads"]["spoof2"].get("enquiry"),
+           "and a domain that merely ENDS with the real one is not the real one")
+        # The mailbox's own address counts (a forward from the shop itself).
+        _seed_thread("own1", "New customer message", frm=("Sales", MBOX))
+        eq(store["threads"]["own1"].get("enquiry"), "new")
+    with_mail(go)
+
+@test
+def t_an_enquiry_email_line_that_is_not_an_address_is_not_used():
+    """Keeping the raw text made every unparsable enquiry collapse onto one
+    bogus contact, and suppressed the Reply-To rescue meant for exactly it."""
+    p1 = copilot._mail_parse_enquiry("Name: Dana\nEmail: (not given)\nBody:\nhello")
+    eq(p1["email"], "", "a non-address is not stored as one")
+    p2 = copilot._mail_parse_enquiry("Name: Dana\nEmail: dana@venue.co.uk\nBody:\nhello")
+    eq(p2["email"], "dana@venue.co.uk", "a real one still is")
+
+@test
+def t_a_partial_customer_crawl_is_never_reported_as_a_clean_sweep():
+    """A throttled page read exactly like "no more customers": the crawl
+    stopped, reported success, burned the nightly cooldown, and counted every
+    contact it never reached as having no Shopify customer."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        post("/api/crm/contact", {"op": "person_add", "name": "A", "emails": ["a@x.com"]})
+        calls = []
+        async def flaky(registry, name, args):
+            if name != "shopify_list_customers":
+                return {}
+            calls.append(args.get("since_id"))
+            if len(calls) == 1:
+                return {"customers": [{"id": 1000 + i, "email": f"p{i}@x.com"} for i in range(250)]}
+            return {"_failed": True}          # Shopify stops answering
+        saved = copilot._tool_json
+        copilot._tool_json = flaky
+        try:
+            rep = run_async(copilot._crm_shopify_link_sweep({}))
+        finally:
+            copilot._tool_json = saved
+        ok(not rep["complete"], "a failed page is not the end of the customers")
+        ok("again" in rep["problem"].lower(), rep["problem"])
+        # A crawl that runs out of PAGES says so too.
+        async def endless(registry, name, args):
+            if name != "shopify_list_customers":
+                return {}
+            n = len(calls2)
+            calls2.append(1)
+            return {"customers": [{"id": 9000 + n * 250 + i, "email": f"q{n}_{i}@x.com"}
+                                  for i in range(250)]}
+        calls2 = []
+        copilot._tool_json = endless
+        try:
+            rep2 = run_async(copilot._crm_shopify_link_sweep({}, max_pages=2))
+        finally:
+            copilot._tool_json = saved
+        ok(not rep2["complete"], "hitting the page ceiling is a partial crawl")
+        ok("not linked yet" in rep2["problem"], rep2["problem"])
+    with_accounts(go)
+
+@test
 def t_only_an_admin_rewrites_the_shared_pipeline():
     """Stages, labels and lost reasons are the desk's settings: one member
     renaming a stage changes the board under everyone. Every sibling that
