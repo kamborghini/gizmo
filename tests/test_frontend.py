@@ -1426,6 +1426,49 @@ def t_the_label_preview_sits_beside_the_queue_on_a_wide_screen():
        "and it still falls back to inline where there is no room for a pane")
 
 
+@test
+def t_contacts_is_a_table_not_a_run_together_line():
+    """Company, email, deal count and the Shopify link were joined with dots
+    into one nowrap line, so a long company name truncated the rest away."""
+    ok("crm-contact-table" in SCRIPT, "contacts renders the house table")
+    fn = SCRIPT.split("crm-contact-table")[1][:1800]
+    for col in ("Organisation", "Email", "Phone", "Deals", "Label"):
+        ok(col in fn, "there is a " + col + " column")
+    ok("e.stopPropagation()" in fn,
+       "and ticking the box still does not open the contact")
+
+
+@test
+def t_each_crm_segment_declares_its_own_width():
+    """crm-narrow capped four segments at 1120 with no auto margins, so they
+    hugged the left edge with an empty band down the right."""
+    ok("crm-seg-" in SCRIPT, "the segment carries its own class")
+    ok(".crm-seg-leads" in CSS and ".crm-seg-insights" in CSS,
+       "and the short ones are capped by name rather than by a blanket rule")
+
+
+@test
+def t_insight_charts_sit_side_by_side():
+    """A bar track 860px wide encodes exactly one number."""
+    ok(".crm-charts" in CSS, "there is a chart grid")
+    ok("auto-fit" in re.search(r"\.crm-charts \{[^}]*\}", CSS).group(0),
+       "which collapses on its own rather than needing a breakpoint")
+    ok("host.lastChild" not in SCRIPT,
+       "and the forecast note attaches to the chart it belongs to, not to "
+       "whatever happened to be appended last")
+
+
+@test
+def t_independent_cards_use_the_width():
+    ok(".card-grid" in CSS, "notes and skills sit in a card grid")
+    rule = re.search(r"\.card-grid \{[^}]*\}", CSS).group(0)
+    ok("auto-fill" in rule and "min(100%" in rule,
+       "self-collapsing, so a phone and a printed page get one column")
+    ok(".span-all" in CSS and "span-all" in SCRIPT,
+       "and the skill being edited takes a full row, because a text area "
+       "squeezed into a 380px column is not a typing surface")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

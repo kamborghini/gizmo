@@ -780,10 +780,27 @@
         .crm-wrap { --wrap: var(--wrap-data); }
         /* The board earns the width; lists and charts read best at the house
            measure, so every other segment caps itself back to it. */
+        .crm-seg { margin-top: var(--sp-3); }
+        /* Independent cards of similar size: let them sit side by side when
+           there is room. auto-fill with a real floor means this needs no
+           breakpoint and collapses to one column on a phone and on paper. */
+        .card-grid { display: grid; gap: var(--sp-3); align-items: start;
+            grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); }
+        .card-grid > .span-all { grid-column: 1 / -1; }
+        .crm-charts { display: grid; gap: var(--sp-4); align-items: start;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
+        .crm-contact-table td.tick, .crm-contact-table th.tick { width: 34px; padding-right: 0; }
+        .crm-contact-table td .lbl-chip { margin-left: var(--sp-2); }
+        /* A lead is a short form and an insight is a chart set: both read
+           better measured than stretched. Deals, contacts and activities are
+           data and take the whole wrap. */
+        .crm-seg-leads { max-width: 760px; }
+        .crm-seg-insights { max-width: 1120px; }
+        /* Kept: older markup and the tests still name it. */
         .crm-narrow { max-width: 1120px; margin-left: auto; margin-right: auto; }
         .crm-board { display: flex; gap: var(--sp-2); overflow-x: auto; align-items: flex-start;
             padding-bottom: var(--sp-3); min-height: 300px; }
-        .crm-col { min-width: 228px; flex: 1 0 228px; background: var(--surface-2);
+        .crm-col { min-width: 228px; flex: 1 0 228px; max-width: 300px; background: var(--surface-2);
             border: 1px solid var(--line); border-radius: var(--r); padding: var(--sp-2);
             min-height: 380px; display: flex; flex-direction: column; }
         .crm-col .crm-col-add { margin-top: auto; }
@@ -3929,10 +3946,21 @@
                 e.append(el('div', null, "No notes yet. As you chat, the copilot captures key facts, decisions, your preferences, and proven learnings here."));
                 box.append(e); return;
             }
-            if (openFu.length) { box.append(el('div', 'section-title', 'Open follow-ups')); openFu.forEach(m => box.append(memCard(m, true))); }
-            if (learned.length) { box.append(el('div', 'section-title', 'Preferences & learnings')); learned.forEach(m => box.append(memCard(m, false))); }
-            if (facts.length) { box.append(el('div', 'section-title', 'Facts & decisions')); facts.forEach(m => box.append(memCard(m, false))); }
-            if (closed.length) { box.append(el('div', 'section-title', 'Closed follow-ups')); closed.forEach(m => box.append(memCard(m, false))); }
+            /* Notes are short and independent, so they read as a wall of cards
+               rather than a single column a screen and a half long. The grid
+               self-collapses: one column wherever there is not room for two,
+               which includes a printed page. */
+            const group = (title, rows, fu) => {
+                if (!rows.length) return;
+                box.append(el('div', 'section-title', title));
+                const g = el('div', 'card-grid');
+                rows.forEach(m => g.append(memCard(m, fu)));
+                box.append(g);
+            };
+            group('Open follow-ups', openFu, true);
+            group('Preferences & learnings', learned, false);
+            group('Facts & decisions', facts, false);
+            group('Closed follow-ups', closed, false);
         }
 
         /* ---------- skills ---------- */
@@ -3968,7 +3996,17 @@
                 e.textContent = 'No skills yet. Add your first above. Ideas: a brand voice guide, a discounting policy, an SEO checklist, or a product launch playbook.';
                 box.append(e); return;
             }
-            skills.forEach(s => box.append(skillEditId === s.id ? skillEditor(s) : skillCard(s)));
+            /* Same as the notes: independent cards, side by side where there is
+               room. The one being EDITED takes a full row of its own, because
+               a text area squeezed into a 380px column is not a typing
+               surface. */
+            const g = el('div', 'card-grid');
+            skills.forEach(s => {
+                const card = skillEditId === s.id ? skillEditor(s) : skillCard(s);
+                if (skillEditId === s.id) card.classList.add('span-all');
+                g.append(card);
+            });
+            box.append(g);
         }
         function skillForm() {
             const card = el('div', 'card skill-form');
@@ -8427,8 +8465,11 @@
             }
             /* Only the board earns 1600px; everything else keeps the house
                measure, or five stat cards stretch into near-empty bands. */
-            const host = el('div', crmSeg === 'deals' ? '' : 'crm-narrow');
-            host.style.marginTop = '12px'; box.append(host);
+            /* Each segment declares its own width. Deals is a board, contacts
+               and activities are lists that earn the room, leads is a short
+               form and insights is a set of charts that reads best measured. */
+            const host = el('div', 'crm-seg crm-seg-' + crmSeg);
+            box.append(host);
             if (crmSeg === 'deals') renderCRMDeals(host);
             else if (crmSeg === 'activities') renderCRMActivities(host);
             else if (crmSeg === 'contacts') renderCRMContacts(host);
@@ -9738,35 +9779,56 @@
                     bar2.append(del, clr);
                     list.append(bar2);
                 }
+                /* A TABLE, because this is a table: the company, the email, the
+                   deal count and the Shopify link used to be joined with dots
+                   into one nowrap line, so a long company name truncated the
+                   other three away entirely. Same shape as the deals list, so
+                   both read alike and the width goes to real columns. */
+                const wrapT = el('div', 'ktable-wrap');
+                const tb = el('table', 'ktable crm-contact-table');
+                const cols = master ? ['<th class="tick"></th>'] : [];
+                cols.push('<th>Name</th>');
+                if (people) cols.push('<th>Organisation</th>', '<th>Email</th>', '<th>Phone</th>');
+                else cols.push('<th>Website</th>', '<th>Address</th>');
+                cols.push('<th class="num">Deals</th>', '<th>Label</th>');
+                tb.innerHTML = '<thead><tr>' + cols.join('') + '</tr></thead>';
+                const tbody = el('tbody');
                 items.slice(0, crmContactsCap).forEach(c => {
-                    const row = el('div', 'lbl-row');
-                    row.setAttribute('role', 'button'); row.tabIndex = 0;
+                    const tr = el('tr', 'crm-list-row');
+                    tr.setAttribute('role', 'button'); tr.tabIndex = 0;
                     if (master) {
+                        const cell = el('td', 'tick');
                         const cb = document.createElement('input');
                         cb.type = 'checkbox'; cb.checked = crmContactSel.has(c.id);
-                        cb.style.cssText = 'width:17px;height:17px;accent-color:var(--accent);flex:none';
+                        cb.style.cssText = 'width:17px;height:17px;accent-color:var(--accent)';
                         cb.onclick = (e) => { e.stopPropagation();
                             cb.checked ? crmContactSel.add(c.id) : crmContactSel.delete(c.id); paint(); };
-                        row.append(cb);
+                        cell.append(cb); tr.append(cell);
                     }
-                    const left = el('div', 'lia-name', c.name);
-                    row.append(left);
-                    const mid = el('div', 'lbl-who');
+                    tr.append(el('td', 'kw', c.name));
                     const deals = Object.values(crmCache.deals).filter(x =>
                         (people ? x.person_id : x.org_id) === c.id);
                     const openD = deals.filter(x => x.status === 'open' && !x.archived).length;
-                    const bits = [];
-                    if (people && c.org_id && crmOrg(c.org_id)) bits.push(crmOrg(c.org_id).name);
-                    if (people && (c.emails || [])[0]) bits.push(c.emails[0]);
-                    if (deals.length) bits.push(deals.length + (deals.length === 1 ? ' deal' : ' deals')
-                        + (openD ? ' (' + openD + ' open)' : ''));
-                    if (c.shopify_customer_id) bits.push('Shopify linked');
-                    mid.append(el('span', 'sub', bits.join(' · ')));
-                    if (c.label) mid.append(crmChip(c.label));
-                    row.append(mid);
-                    row.onclick = () => crmContactModal(people ? 'person' : 'org', c.id);
-                    list.append(row);
+                    if (people) {
+                        tr.append(el('td', null, (crmOrg(c.org_id) || {}).name || ''));
+                        const em = el('td');
+                        if ((c.emails || [])[0]) em.append(el('span', null, c.emails[0]));
+                        if (c.shopify_customer_id) em.append(el('span', 'lbl-chip note', 'SHOPIFY'));
+                        tr.append(em);
+                        tr.append(el('td', null, (c.phones || [])[0] || ''));
+                    } else {
+                        tr.append(el('td', null, c.website || ''));
+                        tr.append(el('td', null, c.address || ''));
+                    }
+                    tr.append(el('td', 'num', deals.length
+                        ? String(deals.length) + (openD ? ' (' + openD + ' open)' : '') : ''));
+                    const lab = el('td');
+                    if (c.label) lab.append(crmChip(c.label));
+                    tr.append(lab);
+                    tr.onclick = () => crmContactModal(people ? 'person' : 'org', c.id);
+                    tbody.append(tr);
                 });
+                tb.append(tbody); wrapT.append(tb); list.append(wrapT);
                 const foot = el('div', 'crm-listfoot');
                 if (items.length > crmContactsCap) {
                     const more = el('button', 'btn');
@@ -10425,6 +10487,10 @@
                 grid.append(c);
             });
             host.append(grid);
+            /* Charts side by side. A bar track 860px wide encodes exactly one
+               number, so extra width was going into decoration while the funnel
+               and the loss reasons sat a screen apart. */
+            const charts = el('div', 'crm-charts'); host.append(charts);
             function bars(title, rows, fmt) {
                 const box2 = el('div', 'crm-focus');
                 box2.append(el('div', 'disp-subhead', title));
@@ -10440,7 +10506,8 @@
                     box2.append(r);
                 });
                 if (!rows.length) box2.append(el('div', 'crm-sub', 'Nothing to chart yet.'));
-                host.append(box2);
+                charts.append(box2);
+                return box2;
             }
             const niceMonth = k => new Date(k + '-01T12:00:00')
                 .toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
@@ -10459,9 +10526,9 @@
                 }
             });
             const noDate = open.filter(x => !x.expected_close).length;
-            bars('Expected to close', Object.keys(fc).sort().slice(0, 8)
+            const fcBox = bars('Expected to close', Object.keys(fc).sort().slice(0, 8)
                 .map(k => [niceMonth(k), Math.round(fc[k][0])]), crmMoney);
-            if (noDate) host.lastChild.append(el('div', 'crm-sub',
+            if (noDate) fcBox.append(el('div', 'crm-sub',
                 noDate + ' open ' + (noDate === 1 ? 'deal has' : 'deals have')
                 + ' no expected close date, so ' + (noDate === 1 ? 'it' : 'they') + ' cannot be forecast.'));
             /* Funnel: a won deal counts as having completed every stage. */
