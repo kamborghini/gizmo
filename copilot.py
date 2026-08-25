@@ -3662,7 +3662,7 @@ def _clean_edit_fields(body: dict, current: dict) -> tuple:
                             + " address line is longer than the "
                             + str(COURIER_LINE_CHARS) + " characters a courier label prints.")
         out["ship_to"] = merged
-    for k, cap in (("email", 200), ("phone", 60)):
+    for k, cap in (("email", 200), ("phone", 60), ("note", 5000)):
         if k in body:
             v = str(body.get(k) or "").strip()[:cap]
             if v != str(current.get(k) or ""):
@@ -3699,6 +3699,12 @@ async def _order_editable(registry: dict, order_id) -> tuple:
         "order_id": o.get("id"),
         "name": o.get("name") or "",
         "ship_to": _ship_to(o),
+        # The RAW note. The queue's copy has had the proposal URL cut out of it
+        # and the remainder truncated to 500 characters, so prefilling a form
+        # from that one and saving would delete the artwork proof link from
+        # Shopify for good. Prefilled from here, an untouched note round-trips
+        # byte for byte and the link survives because it never left.
+        "note": str(o.get("note") or ""),
         "status": _order_status(o),
         "booked": ({"carrier": booked.get("carrier") or "",
                     "service": booked.get("service") or "",
@@ -3731,6 +3737,7 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
                 return False, ("That order is " + dead + ", so it is a closed record - "
                                "Shopify will not take changes to it."), [], name, []
             current = dict(_ship_to(o))
+            current["note"] = str(o.get("note") or "")
             fields, why, changed, warn = _clean_edit_fields(body, current)
             if fields is None:
                 return False, why, [], name, []

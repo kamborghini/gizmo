@@ -8776,17 +8776,49 @@ def t_a_long_address_line_saves_but_says_it_will_not_print():
 
 
 @test
-def t_tags_and_the_note_never_reach_shopify_from_here():
+def t_tags_never_reach_shopify_from_here():
     """orderUpdate REPLACES the tag list, and this app's production queues AND
-    its accounts-receivable chase list are both tag-driven. The note arrives
-    with its proposal URL stripped and cut to 500 characters."""
-    r = _edit({"tags": "whatever", "note": "clobber", "ship_to": {"postcode": "M1 9ZZ"}})
+    its accounts-receivable chase list are both tag-driven. An order that is
+    unpaid and untagged has no bucket anywhere, so nobody would chase it."""
+    r = _edit({"tags": "whatever", "ship_to": {"postcode": "M1 9ZZ"}})
     ok(r.status_code == 200, "the request is accepted")
     sent = ORDER_WRITES[0][1]
-    ok("tags" not in sent and "note" not in sent,
-       "but neither tags nor the note are sent: %s" % sorted(sent))
-    ok("tags" not in r.json()["changed"] and "note" not in r.json()["changed"],
-       "and neither is reported as changed")
+    ok("tags" not in sent, "but the tags are not sent: %s" % sorted(sent))
+    ok("tags" not in r.json()["changed"], "and they are not reported as changed")
+
+
+@test
+def t_the_proposal_proof_link_survives_an_untouched_note():
+    """The killer: the queue's copy of the note has the proposal URL surgically
+    removed and the rest cut to 500 characters. Prefilling a form from THAT and
+    saving would delete the artwork proof link from Shopify for good. The panel
+    reads the raw note instead, so an untouched note round-trips byte for byte."""
+    saved = copilot._tool_json
+    raw = ("Rush job for the Friday get-in.\n\nProposal link: "
+           "https://quote.projectedimage.co.uk/p/abc123\n\n" + ("x" * 700))
+
+    async def noted(registry, name, args):
+        if name == "shopify_get_order":
+            o = dict(ORDER); o["note"] = raw; return o
+        return await saved(registry, name, args)
+    copilot._tool_json = noted
+    try:
+        r = _edit({"op": "read"})
+        ok(r.json()["note"] == raw, "the read hands back the note exactly as Shopify holds it")
+        ok(len(r.json()["note"]) > 500, "including past the 500 chars the queue copy stops at")
+        ok("quote.projectedimage.co.uk" in r.json()["note"], "proposal link and all")
+        # Saving that value back unchanged must not be treated as an edit at all.
+        r = _edit({"note": raw, "ship_to": {"postcode": "M1 2AB"}})
+        ok(r.status_code == 200, "saving it back is fine")
+        ok(r.json()["changed"] == [], "and counts as no change: %s" % r.json()["changed"])
+        ok(not ORDER_WRITES, "so nothing is written and the link cannot be lost")
+        # A genuine note edit does go, with the link still in it.
+        r = _edit({"note": raw + "\nCollect at 8am."})
+        ok(r.status_code == 200, "a real note edit is accepted")
+        ok("quote.projectedimage.co.uk" in ORDER_WRITES[0][1]["note"],
+           "and the proposal link is still in what goes to Shopify")
+    finally:
+        copilot._tool_json = saved
 
 
 @test

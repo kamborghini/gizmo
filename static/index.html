@@ -6041,9 +6041,19 @@
             einp.type = 'email'; einp.className = 'disp-num'; einp.value = cur.email || '';
             ew.append(einp); f.email = einp; cgrid.append(ew);
             body.append(cgrid);
-            body.append(el('div', 'cov-note', 'The order tags and the order note are managed by the '
-                + 'app itself and are not editable here: the queues and the chase list are both '
-                + 'driven by tags, and the note carries the artwork proof link.'));
+            body.append(el('div', 'section-title', 'Order note'));
+            const note = document.createElement('textarea');
+            note.className = 'disp-paste'; note.rows = 4;
+            /* Prefilled from the LIVE note, not the queue's copy: that one has the
+               proposal link stripped out and is cut to 500 characters, so saving
+               it back would delete the proof link. Left untouched, this
+               round-trips byte for byte. */
+            note.value = live.note || '';
+            body.append(note);
+            body.append(el('div', 'cov-note', 'This is the order note exactly as Shopify holds it, '
+                + 'including the proposal link if there is one. The order TAGS are not editable '
+                + 'here: the production queues and the chase list are both driven by them, so they '
+                + 'are changed by the queue buttons instead.'));
 
             const err = el('div'); body.append(err);
             const foot = el('div', 'modal-foot');
@@ -6057,6 +6067,7 @@
                 ORDER_EDIT_FIELDS.forEach(([k]) => { ship[k] = f[k].value.trim(); });
                 const payload = {
                     order_id: o.id, ship_to: ship, email: f.email.value.trim(),
+                    note: note.value,
                 };
                 const addrMoved = ORDER_EDIT_FIELDS.some(([k]) => ship[k] !== (cur[k] || ''));
                 if (live.booked && addrMoved) {

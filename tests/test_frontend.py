@@ -1219,8 +1219,9 @@ def t_the_edit_panel_offers_only_what_shopify_will_change():
     ok("phone_c" not in SCRIPT,
        "there is ONE phone field: Shopify keeps one on the address and one on the "
        "order, and showing both put the same number on screen twice")
-    ok("not editable here" in fn,
-       "and the panel says why tags and the note are not on it")
+    ok("live.note || ''" in fn,
+       "the note box is prefilled from the LIVE note, not the queue's stripped copy")
+    ok("not editable" in fn, "and the panel says why the tags are not on it")
 
 
 @test
