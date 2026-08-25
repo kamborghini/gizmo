@@ -546,19 +546,29 @@
            distance from the text they act on, instead of drifting to the far
            edge of a 2,000px row. Below 1200px nothing changes: it stays the
            flex row the tablet breakpoints were written against. */
+        /* .lbl-qrow, NOT .lbl-row. The row shell is shared by seven lists -
+           the two production queues, Liability, the dispatch manifest, the CRM
+           bin, contacts and leads - and they carry two, three or four children
+           in different orders. A fixed track list applied to all of them puts
+           a Print button in a column meant for an item count, and (because
+           the contacts checkbox only exists for a master) gives two accounts
+           two different layouts. Only the queues opt in. */
         @media (min-width: 1200px) {
-            .lbl-row { display: grid; align-items: center;
+            .lbl-qrow { display: grid; align-items: center;
                 grid-template-columns: 100px minmax(0, 1fr) auto auto; }
-            .lbl-who { overflow: visible; white-space: normal; }
-            .lbl-nameline { flex-wrap: wrap; row-gap: 4px; }
-            .lbl-meta { justify-self: end; padding-right: var(--sp-3); }
-            .lbl-actions { justify-self: end; }
+            .lbl-qrow .lbl-who { overflow: visible; white-space: normal; }
+            .lbl-qrow .lbl-nameline { flex-wrap: wrap; row-gap: 4px; }
+            .lbl-qrow .lbl-meta { justify-self: end; padding-right: var(--sp-3); }
+            .lbl-qrow .lbl-actions { justify-self: end; }
         }
         /* The queue and the label preview, side by side. The pane sticks so the
            label stays in view while you work down a long queue, and the list
            column keeps a sane row length instead of stretching to the screen. */
-        .lbl-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 460px);
-            gap: var(--sp-4); align-items: start; }
+        .lbl-split { display: block; }
+        @media (min-width: 1500px) {
+            .lbl-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 460px);
+                gap: var(--sp-4); align-items: start; }
+        }
         .lbl-pane { position: sticky; top: var(--sp-3); }
         /* No order selected: the pane collapses and the list takes the row back,
            rather than leaving a 460px hole down the side of the queue. */
@@ -569,9 +579,9 @@
            rather than two stacked lines with a growing void beside them. The
            width buys information, which is the only thing it is worth buying. */
         @media (min-width: 1500px) {
-            .lbl-row { grid-template-columns: 100px minmax(220px, 1fr) minmax(0, 210px) auto auto; }
-            .lbl-who { display: contents; }
-            .lbl-who .sub { align-self: center; font-size: 12px; overflow: hidden;
+            .lbl-qrow { grid-template-columns: 100px minmax(220px, 1fr) minmax(0, 210px) auto auto; }
+            .lbl-qrow .lbl-who { display: contents; }
+            .lbl-qrow .lbl-who .sub { align-self: center; font-size: 12px; overflow: hidden;
                 text-overflow: ellipsis; white-space: nowrap; }
         }
         /* Six labelled buttons measure 593px. Below 1200 that does not fit
@@ -1311,6 +1321,9 @@
                 { break-inside: avoid; page-break-inside: avoid; }
             /* Affordances that only mean something under a finger. */
             .prod-go, .files-go, .crm-go { display: none !important; }
+            /* A printed queue is one column, never a queue beside a pane. */
+            .lbl-split { display: block !important; }
+            .lbl-pane { position: static !important; }
         }
         /* run-task gate (tabs stay idle until the user starts the task) */
         .run-gate { max-width: 480px; margin: 7vh auto 0; text-align: center; display: flex; flex-direction: column; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 40px 32px; box-shadow: var(--sh-1); animation: fadeUp .4s ease backwards; }
@@ -4949,7 +4962,7 @@
                 /* The tab's own queue row, not the Files browser's. */
                 const list = el('div');
                 shown.forEach(sh => {
-                    const row = el('div', 'lbl-row');
+                    const row = el('div', 'lbl-row lbl-qrow');
                     row.append(el('div', 'lbl-num', sh.reference || 'Shipment'));
                     const who = el('div', 'lbl-who');
                     const nameLine = el('span', 'lbl-nameline');
@@ -5221,7 +5234,7 @@
                 const st = prodStateOf(o);
                 // In the Complete queue "fulfilled" is the expected state, not staleness.
                 const staleStatus = dispatched && o.status === 'fulfilled' ? '' : o.status;
-                const row = el('div', 'lbl-row' + (labelSel === o.id ? ' on' : '') + (staleStatus || (st.made_at && !dispatched) ? ' stale' : ''));
+                const row = el('div', 'lbl-row lbl-qrow' + (labelSel === o.id ? ' on' : '') + (staleStatus || (st.made_at && !dispatched) ? ' stale' : ''));
                 row.setAttribute('role', 'button'); row.tabIndex = 0;
                 row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
                 row.append(orderA(orderNo(o), o.admin_url, 'lbl-num lbl-num-link'));

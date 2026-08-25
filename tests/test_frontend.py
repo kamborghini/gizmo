@@ -1398,10 +1398,13 @@ def t_prose_is_capped_to_a_reading_measure():
 
 @test
 def t_the_queue_row_spends_width_on_columns_not_on_a_void():
-    f = re.search(r"@media \(min-width: 1500px\) \{\s*\.lbl-row[\s\S]{0,600}?\n        \}", CSS)
+    f = re.search(r"@media \(min-width: 1500px\) \{\s*\.lbl-qrow[\s\S]{0,600}?\n        \}", CSS)
     ok(f, "there is a wide-screen rule for the queue row")
     ok("display: contents" in f.group(0),
        "the .lbl-who box dissolves so its two lines become two real columns")
+    ok(".lbl-row {" not in f.group(0),
+       "and it is scoped to .lbl-qrow: the row shell is shared by seven lists "
+       "with different children, and a fixed track list breaks the other six")
 
 
 @test
