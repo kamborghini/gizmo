@@ -559,7 +559,7 @@ def t_gobos_cross_a_border_as_glass_optical_filters():
     eq(copilot._customs_title("CREATE YOUR OWN GOBO"), "Glass Optical Filter",
        "however it is capitalised")
     eq(copilot._customs_title("Custom Gobo"), "Glass Optical Filter")
-    eq(copilot._customs_title("Steel gobo - B size"), "Glass Optical Filter")
+    eq(copilot._customs_title("B-size monochrome gobo"), "Glass Optical Filter")
     # The trap the classification exists for.
     eq(copilot._customs_title("Projected Image 200 Watt Gobo Projector"),
        "Projected Image 200 Watt Gobo Projector", "a projector is not a filter")
