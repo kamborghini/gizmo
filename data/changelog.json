@@ -5,6 +5,10 @@
    "title": "What's new, feature requests, and a security audit",
    "items": [
     {
+     "kind": "improved",
+     "text": "Gobos cross borders as \"Glass Optical Filter\". Customs lines and the waybill contents line both use the declaration name now rather than the shop product name - \"Create your own gobo\" means nothing to a border officer, and it matches the commodity code the app already declares (9002.20.000). Projectors keep their own name, and every line is still editable on the dispatch card before booking."
+    },
+    {
      "kind": "added",
      "text": "Pick your default parcel. Shipping settings now has a tick beside each box preset - the dispatch panel opens on the one you tick, instead of always the first in the list. Leave them all unticked and it behaves as before. Deleting the box you had chosen simply clears the choice."
     },
