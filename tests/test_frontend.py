@@ -1389,8 +1389,8 @@ def t_widening_never_reaches_a_narrow_screen_or_a_printed_page():
 def t_prose_is_capped_to_a_reading_measure():
     """The whole point of the width work is that DATA gets the width and TEXT
     does not. A 1,640px line of 12px help text is worse than the crowding."""
-    rule = re.search(r"\.setting-sub, \.field-help[\s\S]{0,400}?\}", CSS).group(0)
-    ok("78ch" in rule, "prose is capped in ch, not pixels")
+    rule = re.search(r"\.setting-sub, \.field-help[\s\S]{0,900}?\}", CSS).group(0)
+    ok("52ch" in rule, "prose is capped in ch, not pixels")
     ok("var(--" not in rule.split("max-width:")[1].split(";")[0],
        "and the cap is written on the rule, not held in a root custom property "
        "where ch would resolve against the root font size instead of the text's own")

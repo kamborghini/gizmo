@@ -201,7 +201,7 @@
            because ch resolves against the font size of whatever element uses
            it: on :root that is 16px, so a 12px help line would inherit a flat
            686px cap - 114 characters, the very thing being fixed. */
-        .measure { max-width: 78ch; }
+        .measure { max-width: 52ch; }
         /* THE OTHER HALF OF THE WIDTH WORK. Widening the page without this
            makes the app worse, not better: a help line or an AI finding set as
            one 1,640px line is harder to read than the same text at 1,120, and
@@ -212,7 +212,13 @@
         .setting-sub, .field-help, .know-sub, .know-text, .mem-text,
         .sk-body, .rel-item, .insight .d, .insight .t, .action .text, .empty,
         .crm-act-note, .lbl-preview-note, .req-detail, .summary {
-            max-width: 78ch;
+            /* 52ch, not the 78ch a measure is usually quoted at, because ch is
+               the width of a ZERO and this typeface's zero is a wide 0.73em.
+               78 of them is about 114 average characters, which is the fault
+               this cap exists to prevent; 52 lands near 75, which is the
+               measure that was wanted. Verified in a browser rather than
+               assumed, at 12px and at 16px. */
+            max-width: 52ch;
         }
         /* An insight or action is a flex row with an icon, so cap the text
            block rather than the row, which owns the card's background. */
@@ -355,6 +361,24 @@
         .prod-go { color: var(--ink-3); display: grid; flex-shrink: 0; } .prod-go svg { width: 18px; height: 18px; transform: rotate(180deg); }
         .back-btn { margin-bottom: 16px; }
         @media (max-width: 640px) { .prod-chips { gap: 12px; } .prod-chip.rev { display: none; } }
+        /* A product row was a thumbnail, one very wide cell holding a title,
+           and a cluster of numbers pushed to the far edge. On a wide screen
+           the title cell reached 830px for a line of text that needs a third
+           of that, and the eye had to cross the gap to reach the figures.
+           Above 1500 the sub line becomes its own column and the numbers stop
+           drifting: same facts, read in steps rather than in one long jump. */
+        @media (min-width: 1500px) {
+            .prod-row { display: grid; align-items: center;
+                grid-template-columns: auto minmax(240px, 560px) minmax(0, max-content) 1fr auto; }
+            .prod-main { display: contents; }
+            /* The title is capped rather than given every spare pixel: 1fr on
+               the title made a 1,015px cell for a line that needs a third of
+               it. The slack goes to the empty track before the figures, so
+               units and revenue align down the list the way a table's numbers
+               do, which is what makes a list scannable. */
+            .prod-sub { align-self: center; margin-top: 0; }
+            .prod-chips { grid-column: 5; justify-self: end; }
+        }
         /* Products toolbar + filters */
         .ptools { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
         .ptools .row1 { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
