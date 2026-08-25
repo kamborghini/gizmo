@@ -8099,6 +8099,15 @@ def _crm_purge(d: dict) -> None:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=CRM_DELETED_KEEP_DAYS)).isoformat()
     dead = [k for k, v in d["deals"].items() if v.get("deleted") and str(v.get("deleted_at") or "") < cutoff]
     for k in dead:
+        # The bin emptying is the moment the record stops existing, so it is
+        # the moment the tombstone has to exist instead: without one the next
+        # Pipedrive import brings the deal straight back, and a deal deleted
+        # five weeks ago reappears on the board with no explanation. Notes,
+        # activities and contacts have had this; deals were the gap.
+        pid = str((d["deals"].get(k) or {}).get("pd_id") or "")
+        if pid:
+            d.setdefault("pd_deleted_deals", []).append(pid)
+            d["pd_deleted_deals"] = d["pd_deleted_deals"][-5000:]
         d["deals"].pop(k, None)
         for ak in [ak for ak, a in d["activities"].items() if a.get("deal_id") == k]:
             d["activities"].pop(ak, None)
@@ -9534,8 +9543,11 @@ def _crm_contact_open_ref(d: dict, kind: str, cid: str) -> int:
     first-class reference (a lead must belong to someone), so a contact held
     only by a live enquiry must not be deletable out from under it."""
     ref = "person_id" if kind == "persons" else "org_id"
+    # A BINNED deal counts too. It is not gone, it is restorable for 30 days -
+    # and a deal restored to find its person and organisation deleted from
+    # under it is a deal nobody can ring back.
     deals = sum(1 for v in d["deals"].values()
-                if v.get(ref) == cid and v.get("status") == "open" and not v.get("deleted"))
+                if v.get(ref) == cid and v.get("status") == "open")
     leads = sum(1 for l in d["leads"].values()
                 if l.get(ref) == cid and not l.get("archived"))
     return deals + leads
@@ -13044,7 +13056,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                   "activities": {"new": 0, "updated": 0}, "notes": {"added": 0},
                   "custom_values": 0,
                   "kept": {"deals": 0, "persons": 0, "orgs": 0},
-                  "kept_edited": {"deals": 0, "persons": 0, "orgs": 0, "activities": 0},
+                  "kept_edited": {"deals": 0, "persons": 0, "orgs": 0, "activities": 0,
+                                  "stages": 0},
                   "problems": []}
 
         def index(coll):
@@ -13088,6 +13101,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             prev = by_pd.get(st["pd_id"])
             sid = prev["id"] if prev else ("s_pd" + st["pd_id"])
             seen_stage[st["pd_id"]] = sid
+            if prev and prev.get("edited_here"):
+                # The import's whole promise is that gizmo-side work survives.
+                # Stages were the one exception: a renamed stage, a retuned
+                # probability or a rot timer set at the desk was rebuilt from
+                # Pipedrive on every run, silently.
+                new_stages.append(dict(prev))
+                report["kept_edited"]["stages"] = report["kept_edited"].get("stages", 0) + 1
+                continue
             new_stages.append({"id": sid, "name": st["name"] or ("Stage " + str(i + 1)),
                                "probability": st.get("probability") if st.get("probability") is not None else 100,
                                "rot_on": bool(st.get("rot_on")),
@@ -13179,7 +13200,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 d["persons"][gid] = rec
 
         lost_reasons = set(d.get("lost_reasons") or [])
+        dead_deals = set(d.get("pd_deleted_deals") or [])
         for dl in data.get("deals") or []:
+            if dl["pd_id"] in dead_deals:
+                continue          # deleted here means deleted, not "until next import"
             gid = deal_ix.get(dl["pd_id"])
             rec = d["deals"].get(gid) if gid else None
             if rec is not None and edited_here(rec):
@@ -14016,6 +14040,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, body = await _crm_guard(request)
         if err:
             return err
+        # The shared pipeline, the label vocabulary and the lost reasons are
+        # the desk's SETTINGS: one member renaming a stage or dropping a label
+        # changes the board under everyone. Every sibling that rewrites this
+        # store the same way (import, survey, bulk delete, link sweep) is
+        # already role-gated; this one was reachable by anyone with the tab.
+        if _team_level(_crm_actor["sub"]) < ROLE_LEVELS["admin"]:
+            return _json({"error": "Only an admin can change the pipeline, its labels "
+                                   "or the lost reasons."}, 403)
         try:
             d = _load_crm()
             # The route is the CRM's settings desk: stages, labels, lost
@@ -14086,6 +14118,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                        "rot_days_stored": rot if rot > 0 else int(prev.get("rot_days_stored") or 0)}
                 if prev.get("pd_id"):
                     row["pd_id"] = prev["pd_id"]
+                # An imported stage CHANGED at the desk is gizmo's now, and the
+                # import must leave it alone - the same promise deals, people
+                # and activities already get.
+                changed = any(prev.get(k) != row[k] for k in
+                              ("name", "probability", "rot_days", "rot_on"))
+                if prev.get("edited_here") or (prev and changed):
+                    row["edited_here"] = True
                 new.append(row)
             # Pipedrive deletes a stage's deals after a warning. Refusing and
             # asking to move them first loses nothing and cannot surprise:
@@ -16386,6 +16425,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             logger.warning("print-labels sign: 401 (auth header present=%s, origin=%s)",
                            bool(auth_hdr), request.headers.get("origin"))
             return JSONResponse({"error": "Unauthorized"}, status_code=401, headers={**_API_HEADERS, **cors})
+        # The admin print-action extension runs in Shopify's own frame and
+        # cannot carry an app session, so a session here cannot be REQUIRED.
+        # What a session-less URL may DO is limited instead: see below, it
+        # renders the document and stamps nothing.
         signer = _live_uid(request)
         if signer and not _uid_has_tab(signer, "labels"):
             return JSONResponse({"error": "Production Manager is switched off for your account."},
@@ -16400,12 +16443,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not raw_ids.strip():
             return JSONResponse({"error": "No order ids given."}, status_code=400, headers={**_API_HEADERS, **cors})
         exp = int(time.time()) + 300
+        # A URL minted WITHOUT a gizmo account behind it is read-only. It can
+        # still render the label document (whoever holds an embed token can
+        # already read these orders in Shopify itself), but it cannot stamp
+        # them printed or release them into production - which is a real
+        # workflow change, and was reachable by anyone denied the tab.
+        mode = "rw" if signer else "ro"
         sig = hmac.new(SHOPIFY_API_SECRET.encode(),
-                       f"{raw_ids}|{exp}".encode(), hashlib.sha256).hexdigest()
+                       f"{raw_ids}|{exp}|{mode}".encode(), hashlib.sha256).hexdigest()
         base = (APP_BASE_URL.rstrip("/") if APP_BASE_URL
                 else f"https://{request.headers.get('host', '')}")
         path = (f"/print/production-labels?ids={quote(raw_ids, safe='')}"
-                f"&exp={exp}&sig={sig}")
+                f"&exp={exp}&mode={mode}&sig={sig}")
         logger.info("print-labels sign: ok ids=%s size=%s", raw_ids[:120], raw_size)
         return JSONResponse({"url": base + path, "path": path, "expires_in": 300},
                             headers={**_API_HEADERS, **cors})
@@ -16440,13 +16489,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         qp = request.query_params
         raw_ids = str(qp.get("ids") or "")
         exp_s, sig = str(qp.get("exp") or ""), str(qp.get("sig") or "")
+        mode = "rw" if str(qp.get("mode") or "") == "rw" else "ro"
         if exp_s and sig and SHOPIFY_API_SECRET:
             try:
+                # The mode is INSIDE the signature, so it cannot be upgraded by
+                # editing the query string.
                 expect = hmac.new(SHOPIFY_API_SECRET.encode(),
-                                  f"{raw_ids}|{exp_s}".encode(), hashlib.sha256).hexdigest()
+                                  f"{raw_ids}|{exp_s}|{mode}".encode(), hashlib.sha256).hexdigest()
                 authed = int(exp_s) > time.time() and hmac.compare_digest(sig, expect)
             except (TypeError, ValueError):
                 authed = False
+        may_write = (not authed) or mode == "rw"
         doc_who = ""
         if not authed:
             token = qp.get("id_token") or ""
@@ -16517,7 +16570,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # extensions; stamp these orders as printed (best-effort, never raises)
         # and move their tags along in the background so the document itself
         # renders without waiting on Shopify writes.
-        printed_ids = [o["id"] for o in orders if o.get("id")]
+        printed_ids = [o["id"] for o in orders if o.get("id")] if may_write else []
         stamped_ok = _mark_printed(printed_ids)
         if printed_ids and stamped_ok:
             _track(doc_who, "production", "printed labels",

@@ -6,6 +6,26 @@
    "items": [
     {
      "kind": "fixed",
+     "text": "Only admins can change the pipeline now. Stages, deal labels and lost reasons are shared settings - one member renaming a stage changed the board for everyone - but the screen was open to anyone with the CRM tab."
+    },
+    {
+     "kind": "fixed",
+     "text": "Your pipeline edits survive a Pipedrive import. Renaming a stage, retuning its probability or setting a rot timer used to be rebuilt from Pipedrive on the next import, silently. Stages now get the same protection deals, people and activities already had."
+    },
+    {
+     "kind": "fixed",
+     "text": "A deal you delete stays deleted. Once its 30-day bin window passed, the next import brought it back onto the board with no explanation - notes, activities and contacts already left a marker, deals were the gap."
+    },
+    {
+     "kind": "fixed",
+     "text": "A contact attached to a binned deal can no longer be deleted. Restoring that deal 3 weeks later would have given you a deal whose customer no longer existed."
+    },
+    {
+     "kind": "fixed",
+     "text": "The Shopify print-action link can no longer push orders into production. Anyone with Shopify admin access could use it to stamp orders printed and release them, even with Production Manager switched off for their account. It still prints; it just cannot change your workflow."
+    },
+    {
+     "kind": "fixed",
      "text": "Net 30 working was being reported as Net 30 failing. The commonest outcome of all - the order's terms changed from due-on-receipt to Net 30 - came back as a red error, because success was judged by how the sentence started rather than by what actually happened."
     },
     {

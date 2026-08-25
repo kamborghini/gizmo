@@ -489,6 +489,96 @@ def t_env_creds_win():
         copilot._wo_boot()
 
 @test
+def t_only_an_admin_rewrites_the_shared_pipeline():
+    """Stages, labels and lost reasons are the desk's settings: one member
+    renaming a stage changes the board under everyone. Every sibling that
+    rewrites this store is role-gated; this one was open to anyone with the
+    CRM tab."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        stages = post("/api/crm/board", {}).json()["crm"]["stages"]
+        _uid, sess, _pw = ready_user("Sam", "sam9", role="member")
+        r = post_s(sess, "/api/crm/stages", {"stages": stages})
+        eq(r.status_code, 403, "a member cannot rewrite the pipeline")
+        eq(post_s(sess, "/api/crm/stages", {"labels": [{"name": "X", "color": "red"}]}).status_code,
+           403, "nor the label vocabulary")
+        eq(post_s(sess, "/api/crm/stages", {"lost_reasons": ["Nope"]}).status_code, 403,
+           "nor the lost reasons")
+        eq(post("/api/crm/stages", {"stages": stages}).status_code, 200,
+           "the master still can")
+    with_accounts(go)
+
+@test
+def t_a_binned_deal_still_holds_its_contact():
+    """A binned deal is restorable for 30 days. Deleting its person meanwhile
+    restores a deal nobody can ring back."""
+    _org, per, deal = crm_seed()
+    post("/api/crm/deal", {"op": "delete", "id": deal})
+    r = post("/api/crm/contact", {"op": "person_delete", "id": per})
+    eq(r.status_code, 400, "the contact is still spoken for by the binned deal")
+    r2 = post("/api/crm/contact", {"op": "bulk_delete", "kind": "person", "ids": [per]})
+    eq(r2.status_code, 400, "and bulk delete refuses rather than skipping quietly")
+    ok("open deal" in r2.json()["error"], r2.text)
+    # Once the deal is really gone, the contact frees up.
+    post("/api/crm/deal", {"op": "restore", "id": deal})
+    post("/api/crm/deal", {"op": "won", "id": deal})
+    post("/api/crm/deal", {"op": "delete", "id": deal})
+    d = copilot._load_crm()
+    d["deals"][deal]["deleted_at"] = "2000-01-01T00:00:00+00:00"
+    copilot._write_crm(d)
+    copilot._crm_purge(d); copilot._write_crm(d)
+    eq(post("/api/crm/contact", {"op": "person_delete", "id": per}).status_code, 200)
+
+@test
+def t_a_deleted_deal_is_not_resurrected_by_the_next_import():
+    """Notes, activities and contacts all leave tombstones; deals did not, so
+    a deal deleted five weeks ago reappeared on the board with no
+    explanation."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        async def fake_export(progress=None):
+            return dict(PD_EXPORT)
+        saved = (pipedrive.export, pipedrive.API_TOKEN)
+        pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
+        try:
+            post("/api/crm/import", {"go": True})
+            d = copilot._load_crm()
+            doomed = [x for x in d["deals"].values() if x["pd_id"] == "31"][0]["id"]
+            post("/api/crm/deal", {"op": "delete", "id": doomed})
+            # The bin empties: that is the moment the tombstone must exist.
+            d = copilot._load_crm()
+            d["deals"][doomed]["deleted_at"] = "2000-01-01T00:00:00+00:00"
+            copilot._write_crm(d)
+            d = copilot._load_crm()
+            copilot._crm_purge(d)
+            copilot._write_crm(d)
+            ok("31" in (copilot._load_crm().get("pd_deleted_deals") or []),
+               "the deal leaves a tombstone as it goes")
+            post("/api/crm/import", {"go": True})
+            back = [x for x in copilot._load_crm()["deals"].values() if x.get("pd_id") == "31"]
+            eq(back, [], "and the import does not bring it back")
+        finally:
+            pipedrive.export, pipedrive.API_TOKEN = saved
+    with_accounts(go)
+
+@test
+def t_a_session_less_label_url_can_read_but_not_release():
+    """Shopify's print-action extension cannot carry an app session, so one
+    cannot be required - but a URL minted without a gizmo account behind it
+    must not stamp orders printed or release them into production, which is a
+    real workflow change that was reachable by anyone denied the tab."""
+    src = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "copilot.py"), encoding="utf-8").read()
+    i = src.index('mode = "rw" if signer else "ro"')
+    ok('f"{raw_ids}|{exp}|{mode}"' in src[i:i + 400],
+       "the mode is inside the signature, so it cannot be edited into the URL")
+    j = src.index("may_write = (not authed) or mode ==")
+    ok('printed_ids = [o["id"] for o in orders if o.get("id")] if may_write else []' in src[j:j + 6000],
+       "a read-only URL stamps nothing and releases nothing")
+
+@test
 def t_a_successful_net30_update_is_not_reported_as_a_failure():
     """Success was decided by reading the note's first words. The commonest
     outcome of all - terms UPDATED from due-on-receipt to Net 30 - starts
@@ -4086,8 +4176,10 @@ def t_editing_a_contact_keeps_the_addresses_the_form_cannot_show():
 PD_EXPORT = {
     "account": {"name": "Projected Image", "admin": True, "company": "Projected Image UK Ltd",
                 "currency": "GBP"},
-    "stages": [{"pd_id": "1", "name": "Enquiry", "order": 1, "probability": 20, "rot_days": 14},
-               {"pd_id": "2", "name": "Quoted", "order": 2, "probability": 60, "rot_days": 7}],
+    "stages": [{"pd_id": "1", "name": "Enquiry", "order": 1, "probability": 20,
+                "rot_on": True, "rot_days": 14, "rot_days_stored": 14},
+               {"pd_id": "2", "name": "Quoted", "order": 2, "probability": 60,
+                "rot_on": True, "rot_days": 7, "rot_days_stored": 7}],
     "orgs": [{"pd_id": "10", "name": "Lumen Events", "address": "Newcastle",
               "created_at": "2024-02-01T09:00:00Z", "updated_at": "2025-01-01T09:00:00Z"}],
     "persons": [{"pd_id": "20", "name": "Sarah Whitfield", "org_pd_id": "10",
@@ -4667,6 +4759,18 @@ def t_reimport_spares_stages_made_here_and_the_editor_keeps_their_identity():
             eq(names, ["Enquiry", "Quoted", "Install booked"], names)
             mine = [x for x in d2["deals"].values() if x["pd_id"] == "31"][0]
             eq(mine["stage_id"], install, "and the deal is still in it")
+            # Last: a stage CHANGED at the desk is gizmo's, like every other
+            # record. Stages were the one thing the import still rebuilt.
+            stages2 = post("/api/crm/board", {}).json()["crm"]["stages"]
+            stages2[0]["name"] = "First contact"
+            stages2[0]["probability"] = 35
+            post("/api/crm/stages", {"stages": stages2})
+            r3 = post("/api/crm/import", {"go": True}).json()
+            eq(r3["report"]["kept_edited"]["stages"], 1, r3["report"])
+            final = post("/api/crm/board", {}).json()["crm"]["stages"]
+            eq(final[0]["name"], "First contact",
+               "a renamed stage is not rebuilt from Pipedrive on the next import")
+            eq(final[0]["probability"], 35, "nor is a retuned probability")
         finally:
             pipedrive.export, pipedrive.API_TOKEN = saved
     with_accounts(go)
