@@ -239,7 +239,12 @@ def t_order_numbers_are_doors_not_labels():
     ok(_re.search(r"orderA\(r\.order_name, r\.admin_url\)", HTML), "manifest and margin rows link")
     ok(_re.search(r"orderA\(prev\.name, prev\.admin_url\)", HTML), "the repeat-customer line links")
     ok(_re.search(r"orderA\(latest\.name, latest\.admin_url\)", HTML), "the CRM Shopify card links")
-    ok(_re.search(r"a\.target = '_top'", HTML), "links escape the embedded iframe to the admin")
+    # Was _top, to escape the embedded iframe. _blank escapes it too and does not
+    # take the production queue with it, which is what the desk actually needs -
+    # and it is what the Inbox's order links already did.
+    ok(_re.search(r"a\.target = '_blank'", HTML),
+       "links escape the embedded iframe by opening a new tab")
+    ok("'_top'" not in HTML, "and nothing navigates the admin frame away any more")
 
 
 @test
@@ -1140,6 +1145,95 @@ def t_one_tracking_value_for_the_micro_label():
             if ls and "var(" not in ls.group(1):
                 stray.append(m.group(1).strip()[:46] + " -> " + ls.group(1).strip())
     ok(not stray, "every 11px uppercase label reads the token: " + "; ".join(stray[:3]))
+
+
+@test
+def t_an_order_number_is_a_door_and_opens_beside_the_queue():
+    """orderA opened with target=_top, which navigates the whole embedded Shopify
+    admin away and takes the production queue with it. The Inbox already used
+    _blank; this was drift, and a production desk that loses its place to a
+    stray click has been made worse."""
+    fn = _body_of("function orderA(")
+    ok("'_blank'" in fn and "a.rel = 'noopener'" in fn, "it opens in a new tab")
+    ok("'_top'" not in fn, "and never navigates the admin frame away")
+    ok("e.stopPropagation()" in fn,
+       "the click stops there: half these numbers sit inside a row that is "
+       "itself a button")
+    ok("if (!url) return el('span'" in fn,
+       "and it degrades to plain text when there is no id, so no caller has to decide")
+
+
+@test
+def t_the_production_queue_links_its_order_numbers():
+    ok("row.append(orderA(orderNo(o), o.admin_url, 'lbl-num lbl-num-link'))" in SCRIPT,
+       "the queue row's order number is the link")
+    ok('"admin_url": _admin_order_url(o.get("id")),' in
+       open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read(),
+       "and the label order payload carries the url, like every other order payload")
+    ok(re.search(r"\.lbl-num-link[^{]*\{[^}]*var\(--accent-ink\)", HTML),
+       "it reads as a link, while .lbl-num keeps the tabular column geometry")
+
+
+@test
+def t_the_printed_label_is_not_turned_into_a_hyperlink():
+    """labelSheet() is reused verbatim by printLabels(), so an anchor there
+    would print onto the physical label."""
+    fn = _body_of("function labelSheet(")
+    ok("orderA(" not in fn, "the label sheet's order line stays plain text")
+
+
+@test
+def t_only_an_admin_is_offered_the_edit_button():
+    """The server is the real gate. This just stops offering a button that
+    would come back 403."""
+    ok("function canEditOrders" in SCRIPT, "there is a role check")
+    ok("if (canEditOrders() && o.status !== 'cancelled')" in SCRIPT,
+       "and the row only builds Edit for someone who may use it, and not for a "
+       "cancelled order")
+
+
+@test
+def t_the_edit_panel_reads_the_order_live_before_it_edits():
+    """The queue's copy of an order can be a sweep old, and its note has had the
+    proposal URL cut out and the remainder truncated - so prefilling from it and
+    saving would delete the artwork proof link from Shopify."""
+    fn = _body_of("async function openOrderEdit(")
+    ok("op: 'read'" in fn, "it fetches the current values first")
+    ok("live.ship_to" in fn, "and prefills from those, not from the queue object")
+    ok("live.booked" in fn, "it knows about a booked label before anyone types")
+    ok("uiConfirm(" in fn and "danger: true" in fn,
+       "and changing a booked parcel's address takes a destructive confirmation")
+    ok("confirm_booked" in fn, "which is what the server is told")
+    ok("quoteCache.delete(String(o.id))" in fn,
+       "a saved address invalidates the courier quote priced for the old one")
+    ok("loadLabels(true)" in fn, "and the queue is refetched rather than left stale")
+
+
+@test
+def t_the_edit_panel_offers_only_what_shopify_will_change():
+    fn = _body_of("async function openOrderEdit(")
+    ok("'name'" not in _body_of("const ORDER_EDIT_FIELDS")
+       or "['firstname'" in SCRIPT,
+       "the recipient is first + last, because Shopify derives the address name")
+    ok(SCRIPT.count("['firstname', 'First name']") == 1, "first name is a field")
+    ok("phone_c" not in SCRIPT,
+       "there is ONE phone field: Shopify keeps one on the address and one on the "
+       "order, and showing both put the same number on screen twice")
+    ok("not editable here" in fn,
+       "and the panel says why tags and the note are not on it")
+
+
+@test
+def t_a_parcel_whose_address_moved_is_not_quietly_fulfilled():
+    """Mark made is what emails the customer their tracking. If the address was
+    edited after the label was booked, the parcel is going somewhere else."""
+    py = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    ok('"reason": "address_changed"' in py, "the fulfilment gate stops for it")
+    ok('"needs_ack": (ship_reason == "address_changed")' in py,
+       "and tells the workbench, because only a human knows where the parcel went")
+    fn = _body_of("async function toggleMade(")
+    ok("r.needs_ack" in fn and "ack_address: true" in fn,
+       "which asks once and then proceeds on the answer")
 
 
 if __name__ == "__main__":

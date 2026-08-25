@@ -1048,8 +1048,13 @@
         .miss-row b { color: var(--ink); font-variant-numeric: tabular-nums; }
         .miss-co { color: var(--ink); font-weight: 600; }
         .miss-queue { margin-left: auto; padding: 4px 8px; font-size: 12px; }
-        .miss-open { color: var(--accent); text-decoration: none; font-weight: 600; }
+        .miss-open { color: var(--accent-ink); text-decoration: none; font-weight: 600; }
         .miss-open:hover { text-decoration: underline; }
+        /* An order number that is a door still has to sit in the same column as
+           one that is not, so the link takes only the colour: .lbl-num keeps the
+           14px tabular geometry and the 92px column. */
+        .lbl-num-link, .modal-order-link { color: var(--accent-ink); text-decoration: none; }
+        .lbl-num-link:hover, .modal-order-link:hover { text-decoration: underline; }
         .label-sheet .ls-dead { border: 3px solid #000; font-size: 1.68em; font-weight: 800; letter-spacing: .04em;
             text-align: center; padding: .35em .4em; margin-bottom: .7em; }
         .label-sheet .ls-due { font-size: .85em; font-weight: 600; color: #333; margin-left: .7em; }
@@ -4011,8 +4016,7 @@
                 s.append(head);
                 d.stale_tagged.forEach(m => {
                     const row = el('div', 'miss-row');
-                    row.append(el('b', null, m.name));
-                    if (m.admin_url) { const a = el('a', 'miss-open', 'Open order'); a.href = m.admin_url; a.target = '_top'; row.append(a); }
+                    row.append(orderA(m.name, m.admin_url, 'miss-open'));
                     s.append(row);
                 });
                 box.append(s);
@@ -4135,11 +4139,12 @@
                         const wrap = el('div', 'ktable-wrap'); wrap.style.margin = '4px 0 16px';
                         const tb = el('table', 'ktable');
                         tb.innerHTML = '<thead><tr><th>Order</th><th>Order date</th><th>Due</th><th class="num">Value</th>'
-                            + '<th class="num">Paid</th><th class="num">Outstanding</th><th>Terms</th><th>Channel</th><th>Status</th><th></th></tr></thead>';
+                            + '<th class="num">Paid</th><th class="num">Outstanding</th><th>Terms</th><th>Channel</th><th>Status</th></tr></thead>';
                         const tbody = el('tbody');
                         rows.forEach(r => {
                             const tr = el('tr');
-                            tr.append(el('td', 'kw', r.name));
+                            const onc = el('td', 'kw'); onc.append(orderA(r.name, r.admin_url));
+                            tr.append(onc);
                             tr.append(el('td', null, fmtDate(r.created_at)));
                             tr.append(el('td', null, r.due ? fmtDate(r.due) : 'unknown'));
                             tr.append(el('td', 'num', liaMoney(r.value, cur)));
@@ -4150,9 +4155,6 @@
                                 : r.terms_source === 'customer' ? ' (tag)' : '')));
                             tr.append(el('td', null, (r.channels || [r.channel]).join(', ')));
                             const tds = el('td'); tds.append(liaChip(r)); tr.append(tds);
-                            const tda = el('td');
-                            if (r.admin_url) { const a = el('a', 'miss-open', 'Open'); a.href = r.admin_url; a.target = '_top'; tda.append(a); }
-                            tr.append(tda);
                             tbody.append(tr);
                         });
                         tb.append(tbody); wrap.append(tb); host.append(wrap);
@@ -4466,7 +4468,27 @@
                     labelsCache.data.dispatch = Object.assign({}, labelsCache.data.dispatch || {}, r.dispatch);
                 }
                 renderLabels();
-                if (r && r.ship_note) addToast(r.ship_note, r.fulfilled ? 'good' : '');
+                if (r && r.needs_ack) {
+                    // The address moved after the label was booked. Only a human
+                    // knows where the parcel actually went, so ask once and let
+                    // the answer stand.
+                    const go = await uiConfirm(r.ship_note + '\n\nIf the parcel did reach the '
+                        + 'customer, confirm and this order will be fulfilled with the booked '
+                        + 'tracking as normal.',
+                        { title: 'The address changed after this label was booked',
+                          okText: 'The parcel is fine, fulfil it', cancelText: 'Leave it for now' });
+                    if (go) {
+                        try {
+                            const r2 = await api('/api/production-state',
+                                { op: 'made', id: o.id, on: true, name: orderNo(o), ack_address: true });
+                            if (r2 && r2.dispatch && labelsCache && labelsCache.data) {
+                                labelsCache.data.dispatch = Object.assign({}, labelsCache.data.dispatch || {}, r2.dispatch);
+                            }
+                            renderLabels();
+                            if (r2 && r2.ship_note) addToast(r2.ship_note, r2.fulfilled ? 'good' : '');
+                        } catch (e2) { toastError(e2.message || 'Could not fulfil it.'); }
+                    } else addToast(r.ship_note);
+                } else if (r && r.ship_note) addToast(r.ship_note, r.fulfilled ? 'good' : '');
                 if (r && r.stock_note) addToast(r.stock_note);
                 if (r && r.tag_note) toastError(r.tag_note);
             } catch (e) {
@@ -4534,11 +4556,8 @@
                     }
                 };
                 row.append(q);
-                if (m.admin_url) {
-                    const a = el('a', 'miss-open', 'Open order');
-                    a.href = m.admin_url; a.target = '_top';
-                    row.append(a);
-                }
+                /* No separate "Open order" link: the order number itself is
+                   now the door, and two links to the same place is clutter. */
                 wrap.append(row);
             });
             return wrap;
@@ -4579,10 +4598,16 @@
         /* An order number on screen is a door, never a label: it opens the
            order in the Shopify admin. Falls back to plain text when the link
            cannot be built (custom shipments, store handle unknown). */
-        function orderA(name, url) {
-            if (!url) return el('span', null, name || '');
-            const a = el('a', 'miss-open', name || 'Order');
-            a.href = url; a.target = '_top';
+        /* An order number on screen is a door. It opens in a NEW TAB, never in
+           place: half these numbers sit inside a row that is itself a button,
+           and a production desk that loses its queue to a stray click has been
+           made worse, not better. Falls back to plain text when there is no id
+           to link to, so a caller never has to decide. */
+        function orderA(name, url, cls) {
+            if (!url) return el('span', cls || null, name || '');
+            const a = el('a', cls || 'miss-open', name || 'Order');
+            a.href = url; a.target = '_blank'; a.rel = 'noopener';
+            a.title = 'Open ' + (name || 'this order') + ' in Shopify (new tab)';
             a.onclick = (e) => e.stopPropagation();
             return a;
         }
@@ -4982,7 +5007,7 @@
                 const row = el('div', 'lbl-row' + (labelSel === o.id ? ' on' : '') + (staleStatus || (st.made_at && !dispatched) ? ' stale' : ''));
                 row.setAttribute('role', 'button'); row.tabIndex = 0;
                 row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
-                row.append(el('div', 'lbl-num', orderNo(o)));
+                row.append(orderA(orderNo(o), o.admin_url, 'lbl-num lbl-num-link'));
                 const who = el('div', 'lbl-who');
                 const nameLine = el('span', 'lbl-nameline');
                 nameLine.append(el('span', 'lbl-name', o.display_name));
@@ -5026,6 +5051,12 @@
                 const pv = el('button', 'btn'); pv.title = labelSel === o.id ? 'Hide label preview' : 'Preview label'; pv.append(ico(I.eye), el('span', 'lbl-btn-txt', labelSel === o.id ? 'Hide' : 'Preview'));
                 pv.onclick = (e) => { e.stopPropagation(); labelSel = (labelSel === o.id ? null : o.id); renderLabels(); };
                 acts.append(pv);
+                if (canEditOrders() && o.status !== 'cancelled') {
+                    const ed = el('button', 'btn'); ed.title = 'Change the delivery address or contact details';
+                    ed.append(ico(I.edit), el('span', 'lbl-btn-txt', 'Edit'));
+                    ed.onclick = (e) => { e.stopPropagation(); openOrderEdit(o); };
+                    acts.append(ed);
+                }
                 if (o.proposal_url) {
                     const pf = el('button', 'btn'); pf.title = 'Preview the proposal proof';
                     pf.append(ico(I.globe), el('span', 'lbl-btn-txt', 'Proof'));
@@ -5904,11 +5935,171 @@
             host.append(row);
         }
 
+        /* Only an admin may rewrite where a paid order ships. The server is the
+           real gate; this just stops offering a button that would be refused. */
+        function canEditOrders() {
+            return !teamMe || ({ master: 3, admin: 2 }[teamMe.role] || 0) >= 2;
+        }
+
+        /* The fields Shopify still lets you change on a placed order, in the
+           app's own address shape. There is no "name": Shopify builds an
+           address's name from first + last, so offering one would report a save
+           and change nothing. */
+        const ORDER_EDIT_FIELDS = [
+            ['firstname', 'First name'], ['lastname', 'Last name'],
+            ['company', 'Company'], ['phone', 'Phone for the courier'],
+            ['street', 'Address line 1'], ['street2', 'Address line 2'],
+            ['city', 'Town or city'], ['state', 'County or state'],
+            ['postcode', 'Postcode'], ['country', 'Country (2-letter, e.g. GB)'],
+        ];
+        const COURIER_LINE_CHARS = 35;
+
+        async function openOrderEdit(o) {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal disp-modal');
+            const head = el('div', 'modal-head');
+            const h = el('h3', null, 'Edit ');
+            h.append(orderA(orderNo(o), o.admin_url, 'modal-order-link'));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
+            head.append(h, x);
+            const body = el('div', 'modal-body');
+            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+            const prev = document.activeElement;
+            let saving = false;
+            const close = () => {
+                if (saving) { addToast('The change is still saving. Please wait.'); return; }
+                overlay.remove(); if (prev && prev.focus) prev.focus();
+            };
+            x.onclick = close;   // the X is the only way out: a misclick must not wipe a filled form
+            x.focus();
+
+            const load = el('div', 'thinking');
+            load.append(loader(), el('span', null, 'Reading this order from Shopify…'));
+            body.append(load);
+
+            let live;
+            try {
+                live = await api('/api/order/edit', { order_id: o.id, op: 'read' });
+            } catch (e) {
+                body.innerHTML = '';
+                body.append(el('div', 'msg error', e.message || 'Could not read that order.'));
+                return;
+            }
+            body.innerHTML = '';
+
+            /* Read live, not from the queue: the queue's copy can be a sweep old,
+               and the person is about to retype an address from it. */
+            if (live.status) {
+                body.append(el('div', 'disp-warn', 'Shopify shows this order as ' + live.status
+                    + '. Changing it here does not undo that.'));
+            }
+            if (live.booked) {
+                const w = el('div', 'msg error');
+                w.append(el('div', null, 'A courier label is already booked for this order ('
+                    + [live.booked.carrier, live.booked.service, live.booked.tracking]
+                        .filter(Boolean).join(' ')
+                    + '). The label is printed and the parcel travels to the address it was '
+                    + 'cut from. Changing the address here changes Shopify only - it does not '
+                    + 'change the label or the courier booking.'));
+                body.append(w);
+            }
+
+            body.append(el('div', 'section-title', 'Delivery address'));
+            const cur = live.ship_to || {};
+            const f = {};
+            const grid = el('div', 'disp-origin');
+            ORDER_EDIT_FIELDS.forEach(([k, lab]) => {
+                const w = el('label', 'disp-fld');
+                w.append(el('span', 'disp-fld-lab', lab));
+                const inp = document.createElement('input');
+                inp.type = 'text'; inp.className = 'disp-num'; inp.value = cur[k] || '';
+                w.append(inp); f[k] = inp; grid.append(w);
+            });
+            body.append(grid);
+            const lineNote = el('div', 'cov-note');
+            const checkLines = () => {
+                const over = ['street', 'street2'].filter(k => (f[k].value || '').length > COURIER_LINE_CHARS);
+                lineNote.textContent = over.length
+                    ? 'A courier label prints about ' + COURIER_LINE_CHARS + ' characters per address line. '
+                      + (over.length === 1 ? 'One line is' : 'Both lines are') + ' longer than that.'
+                    : '';
+            };
+            ['street', 'street2'].forEach(k => f[k].addEventListener('input', checkLines));
+            checkLines();
+            body.append(lineNote);
+
+            /* One phone only. Shopify keeps a phone on the address AND one on the
+               order, and _ship_to falls back from one to the other - so showing
+               both put the same number on screen twice with no way to tell which
+               one a courier would ring. The address phone is the one that gets
+               printed on the label. */
+            body.append(el('div', 'section-title', 'Contact'));
+            const cgrid = el('div', 'disp-origin');
+            const ew = el('label', 'disp-fld');
+            ew.append(el('span', 'disp-fld-lab', 'Email'));
+            const einp = document.createElement('input');
+            einp.type = 'email'; einp.className = 'disp-num'; einp.value = cur.email || '';
+            ew.append(einp); f.email = einp; cgrid.append(ew);
+            body.append(cgrid);
+            body.append(el('div', 'cov-note', 'The order tags and the order note are managed by the '
+                + 'app itself and are not editable here: the queues and the chase list are both '
+                + 'driven by tags, and the note carries the artwork proof link.'));
+
+            const err = el('div'); body.append(err);
+            const foot = el('div', 'modal-foot');
+            const cancel = el('button', 'btn', 'Cancel'); cancel.onclick = close;
+            const save = el('button', 'btn btn-primary', 'Save changes');
+            foot.append(cancel, save); modal.append(foot);
+
+            save.onclick = async () => {
+                if (saving) return;
+                const ship = {};
+                ORDER_EDIT_FIELDS.forEach(([k]) => { ship[k] = f[k].value.trim(); });
+                const payload = {
+                    order_id: o.id, ship_to: ship, email: f.email.value.trim(),
+                };
+                const addrMoved = ORDER_EDIT_FIELDS.some(([k]) => ship[k] !== (cur[k] || ''));
+                if (live.booked && addrMoved) {
+                    if (!await uiConfirm('The parcel for this order is already booked with '
+                        + (live.booked.carrier || 'a courier') + ' on tracking '
+                        + (live.booked.tracking || '') + ', and the printed label carries the OLD '
+                        + 'address. Saving changes Shopify only. Cancel the shipment and book '
+                        + 'again if the parcel has not gone yet.',
+                        { title: 'The label is already printed', okText: 'Change it anyway',
+                          cancelText: 'Leave it', danger: true })) return;
+                    payload.confirm_booked = true;
+                }
+                saving = true; save.disabled = true; cancel.disabled = true;
+                save.textContent = 'Saving…'; err.innerHTML = '';
+                try {
+                    const r = await api('/api/order/edit', payload);
+                    (r.warnings || []).forEach(w => addToast(w));
+                    if (!(r.changed || []).length) addToast('Nothing had changed.');
+                    else {
+                        addToast(orderNo(o) + ' updated in Shopify.', 'good');
+                        // The cached quote was priced for the old destination, and
+                        // the queue's copy of this order still holds the old address.
+                        quoteCache.delete(String(o.id));
+                        loadLabels(true);
+                    }
+                    saving = false;
+                    overlay.remove(); if (prev && prev.focus) prev.focus();
+                } catch (e) {
+                    saving = false; save.disabled = false; cancel.disabled = false;
+                    save.textContent = 'Save changes';
+                    err.innerHTML = '';
+                    err.append(el('div', 'msg error', e.message || 'The order could not be changed.'));
+                }
+            };
+        }
+
         async function openDispatch(o) {
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal disp-modal');
             const head = el('div', 'modal-head');
-            head.append(el('h3', null, 'Dispatch · ' + orderNo(o)));
+            const dh = el('h3', null, 'Dispatch · ');
+            dh.append(orderA(orderNo(o), o.admin_url, 'modal-order-link'));
+            head.append(dh);
             const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
             const body = el('div', 'modal-body');
             modal.append(head, body); overlay.append(modal); document.body.append(overlay);

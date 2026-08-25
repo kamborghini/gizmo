@@ -3536,6 +3536,7 @@ PROPOSAL_HOST = os.environ.get("PROPOSAL_HOST", "quote.projectedimage.com")
 _PROPOSAL_RE = re.compile(r"https://" + re.escape(PROPOSAL_HOST) + r"/proof/[A-Za-z0-9]+")
 _order_tag_writer = None
 _payment_terms_writer = None
+_order_writer = None
 # The tag that marks an order sold on account: releasing one to production is
 # the moment its 30-day clock should start ticking in Shopify.
 PO_UNPAID_TAG = os.environ.get("PO_UNPAID_TAG", "purchase order unpaid")
@@ -3617,6 +3618,162 @@ async def _sync_order_tags(registry: dict, order_id, add=(), remove=()) -> tuple
         return False, "Tags couldn't update. Check the server logs."
 
 
+# What the panel may change. `name` is deliberately absent: Shopify derives an
+# address's name from first + last, so a form offering "name" would report a
+# save and change nothing.
+_EDIT_ADDR_KEYS = ("firstname", "lastname", "company", "street", "street2",
+                   "city", "state", "postcode", "country", "phone")
+_EDIT_EMAIL = re.compile(r"^[^@\s]+@[^@\s.]+\.[^@\s]+$")
+# A courier prints each address line in a fixed width. Longer still saves - this
+# is Shopify's record, not the label - but the person typing should be told.
+COURIER_LINE_CHARS = 35
+
+
+def _clean_edit_fields(body: dict, current: dict) -> tuple:
+    """Validate an edit and merge it over what the order already has.
+
+    Shopify REPLACES the whole shipping address, so a form that posted only the
+    fields it happened to show would silently blank the rest. Everything is
+    therefore merged over the order's current address before it goes, and a key
+    the caller did not send keeps its existing value rather than becoming "".
+
+    The address is then put through the SAME validators the courier booking uses.
+    An address that passes here has to pass there minutes later, and the two
+    standards drifting apart is how a merchant fixes an address in the app and is
+    still refused at the dispatch window.
+    """
+    out, changed, warn = {}, [], []
+    if isinstance(body.get("ship_to"), dict):
+        sent = body["ship_to"]
+        merged = {k: str(current.get(k) or "") for k in _EDIT_ADDR_KEYS}
+        for k in _EDIT_ADDR_KEYS:
+            if k in sent:
+                merged[k] = str(sent.get(k) or "")
+        merged = {k: v for k, v in _clean_address(merged).items() if k in _EDIT_ADDR_KEYS}
+        why = _addr_ready(merged) or _country_ready(merged)
+        if why:
+            return None, why, [], []
+        for k in _EDIT_ADDR_KEYS:
+            if merged.get(k, "") != str(current.get(k) or ""):
+                changed.append(k)
+        for k in ("street", "street2"):
+            if len(merged.get(k, "")) > COURIER_LINE_CHARS:
+                warn.append("The " + ("first" if k == "street" else "second")
+                            + " address line is longer than the "
+                            + str(COURIER_LINE_CHARS) + " characters a courier label prints.")
+        out["ship_to"] = merged
+    for k, cap in (("email", 200), ("phone", 60)):
+        if k in body:
+            v = str(body.get(k) or "").strip()[:cap]
+            if v != str(current.get(k) or ""):
+                changed.append(k)
+            out[k] = v
+    email = out.get("email", "")
+    if email and not _EDIT_EMAIL.match(email):
+        return None, "That email address does not look right.", [], []
+    return out, "", changed, warn
+
+
+def _live_booking(order_id) -> dict:
+    """The order's courier booking, if one is live. A cancelled shipment is not
+    one: the parcel is not moving and the address is free to change."""
+    e = _load_dispatch().get(str(order_id)) or {}
+    return e if (e.get("tracking_number") and not e.get("canceled")) else {}
+
+
+async def _order_editable(registry: dict, order_id) -> tuple:
+    """What the panel prefills from, read LIVE rather than off the queue sweep.
+
+    Three reasons it cannot reuse the order object the Production Manager
+    already holds: that object's note has had the proposal URL surgically
+    removed and is cut to 500 characters, so round-tripping it would delete the
+    artwork proof link from Shopify for good; the sweep is cached for up to 45s
+    and the panel then sits open while somebody types; and the guards below have
+    to be decided on the order as it is now, not as it was when the queue loaded.
+    """
+    o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+    if not _ok(o) or not o.get("id"):
+        return None, "Couldn't read that order from Shopify."
+    booked = _live_booking(order_id)
+    return {
+        "order_id": o.get("id"),
+        "name": o.get("name") or "",
+        "ship_to": _ship_to(o),
+        "status": _order_status(o),
+        "booked": ({"carrier": booked.get("carrier") or "",
+                    "service": booked.get("service") or "",
+                    "tracking": booked.get("tracking_number") or "",
+                    "at": booked.get("dispatched_at") or ""} if booked else None),
+    }, ""
+
+
+async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
+    """Apply a merchant's edit to a placed order.
+
+    Returns (ok, message, changed, name, warnings).
+
+    Serialized on the same per-order lock the tag writer uses: an edit and a
+    Ready-to-make pressed together would otherwise read the same order and race.
+    """
+    if _order_writer is None:
+        return False, "Order edits are not enabled on this server.", [], "", []
+    name = ""
+    try:
+        async with _tag_lock(order_id):
+            o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+            if not _ok(o) or not o.get("id"):
+                return False, "Couldn't read the order to edit it.", [], "", []
+            name = str(o.get("name") or "")
+            # A cancelled order is a closed record. Its sibling, the tag writer,
+            # makes the same call and leaves finished orders alone.
+            dead = _order_status(o)
+            if dead in ("cancelled", "refunded"):
+                return False, ("That order is " + dead + ", so it is a closed record - "
+                               "Shopify will not take changes to it."), [], name, []
+            current = dict(_ship_to(o))
+            fields, why, changed, warn = _clean_edit_fields(body, current)
+            if fields is None:
+                return False, why, [], name, []
+            if not changed:
+                # Provably wrote nothing, so nothing is stale. Busting here would
+                # cost a full store sweep for a save that did not save anything.
+                return True, "", [], name, []
+            # The parcel may already be moving under the old address. Changing
+            # Shopify does NOT change a label that is printed and booked, so the
+            # merchant has to say out loud that they know that.
+            booked = _live_booking(order_id)
+            if booked and "ship_to" in fields and not body.get("confirm_booked"):
+                return False, ("A courier label is already booked for this order ("
+                               + (booked.get("carrier") or "courier")
+                               + " " + (booked.get("tracking_number") or "")
+                               + "). Changing the address here does not change that "
+                               "label or the courier's booking."), [], name, []
+            r = await _order_writer(int(order_id), fields)
+            if not r.get("ok"):
+                reason = str(r.get("reason") or "")
+                detail = str(r.get("detail") or "")
+                if reason == "permission":
+                    return False, ("The order couldn't be changed: the app's access token "
+                                   "doesn't have the write_orders permission yet."), [], name, []
+                return False, ("Shopify refused the change"
+                               + (": " + detail if detail else ".")), [], name, []
+            if booked and "ship_to" in fields:
+                # Mark the divergence so the fulfilment path can refuse rather
+                # than email the customer tracking for a parcel addressed
+                # somewhere else.
+                _update_dispatch(order_id, lambda e: e.update(
+                    {"address_changed_at": datetime.now(timezone.utc).isoformat()}))
+    except Exception:
+        # A write may have landed before this raised, so the snapshot is suspect.
+        _bust_orders()
+        logger.exception("order edit failed for order %s", order_id)
+        return False, "The order couldn't be changed. Check the server logs.", [], name, []
+    # The queues read the address straight off the cached sweep, so leaving the
+    # snapshot in place would show the old address until the next refresh.
+    _bust_orders()
+    return True, "", changed, name, warn
+
+
 async def _sync_tags_bg(registry: dict, order_ids: list, add=(), remove=()) -> None:
     """Background tag sync for the admin print extensions: the print document
     must render immediately, the tag writes follow. Paced to respect Shopify's
@@ -3654,7 +3811,8 @@ async def _dispatch_move_tags(registry: dict, order_id) -> tuple:
         remove=(UNPROCESSED_TAG, PRODUCTION_TAG, MADE_TAG))
 
 
-async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = None) -> dict:
+async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = None,
+                            ack_address: bool = False) -> dict:
     """The single gate for telling Shopify (and the customer) an order shipped.
 
     Booking a courier label is preparation, not shipping: the gobo may not be
@@ -3678,6 +3836,24 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
         return {"fulfilled": False, "reason": "not_made", "notified": False,
                 "detail": "Label booked. Shopify is fulfilled and the customer emailed "
                           "when you mark this order made.", "tag_note": ""}
+    # The delivery address was edited AFTER this label was booked. Fulfilling now
+    # would email the customer tracking for a parcel that is on its way to the
+    # address the label was cut from, while the order page shows the new one -
+    # the one moment where saying nothing is worse than stopping.
+    if entry.get("address_changed_at") and not ack_address:
+        return {"fulfilled": False, "reason": "address_changed", "notified": False,
+                "detail": ("The delivery address was changed after this label was booked, "
+                           "so the parcel is on its way to the address the label was cut "
+                           "from, not the one on the order now. Cancel the shipment and "
+                           "book again, or confirm that the parcel went to the right place."),
+                "tag_note": ""}
+    if entry.get("address_changed_at") and ack_address:
+        # Asked and answered. Clear it so the order is not stopped twice, and so
+        # a later genuine edit can raise it again.
+        try:
+            _update_dispatch(oid, lambda e: (e.pop("address_changed_at", None), e)[1])
+        except Exception:
+            logger.exception("could not clear the address-change flag on %s", oid)
 
     do_notify = entry.get("notify", True) if notify is None else bool(notify)
     # Tag BEFORE fulfilling: _sync_order_tags deliberately skips orders Shopify
@@ -3949,6 +4125,7 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None) -> di
         "id": o.get("id"),
         "order_number": o.get("order_number") or str(o.get("name") or "").lstrip("#"),
         "name": o.get("name"),
+        "admin_url": _admin_order_url(o.get("id")),
         "created_at": o.get("created_at"),
         "company": company,
         "customer": person,
@@ -9722,6 +9899,7 @@ _TAB_ROUTES = (
     ("/api/liability", "liability"),
     ("/api/crm/", "crm"), ("/api/mail/", "mail"), ("/api/files/", "files"),
     ("/api/production-labels", "labels"), ("/api/production-state", "labels"),
+    ("/api/order/", "labels"),
     ("/api/dispatch/", "labels"), ("/api/custom/", "labels"),
     ("/api/stock-usage", "labels"), ("/api/margin", "labels"), ("/api/gobo-sizes", "labels"),
     ("/api/memory", "memory"), ("/api/learn", "memory"), ("/api/impact", "memory"),
@@ -10184,17 +10362,18 @@ def _files_tick() -> None:
 
 def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=None,
                fulfillment_canceler=None, webhook_ensurer=None,
-               payment_terms_writer=None) -> None:
+               payment_terms_writer=None, order_writer=None) -> None:
     # The write capabilities the server hands over. None of them ever joins any
     # tool registry: the AI can read the store; only the app's own print / Mark
     # made / Dispatch actions can touch tags or fulfillments.
     global _order_tag_writer, _fulfillment_writer, _fulfillment_canceler, _webhook_ensurer
-    global _payment_terms_writer
+    global _payment_terms_writer, _order_writer
     _order_tag_writer = order_tag_writer
     _fulfillment_writer = fulfillment_writer
     _fulfillment_canceler = fulfillment_canceler
     _webhook_ensurer = webhook_ensurer
     _payment_terms_writer = payment_terms_writer
+    _order_writer = order_writer
     _wo_boot()
     # Shopify tools + live SEO tools + Google data tools (the last only if configured)
     chat_registry = {**registry, **_build_seo_tools(registry), **_build_google_tools()}
@@ -12252,6 +12431,62 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         headers={**_API_HEADERS,
                                  "Content-Disposition": f"attachment; filename=store-copilot-backup-{stamp}.zip"})
 
+    @mcp.custom_route("/api/order/edit", methods=["POST"])
+    async def order_edit_route(request: Request):
+        """Read or change the delivery address and contact details on a placed
+        order.
+
+        Two things are deliberately NOT editable here.
+
+        Tags: the queues are tag-driven and Shopify's order update REPLACES the
+        whole tag list rather than merging it, so one save from a panel holding a
+        stale list would silently strip IP, Complete or "Purchase order unpaid" -
+        the last of which drops the order out of the chase list entirely, with no
+        bucket anywhere to catch it. Tag changes keep going through the
+        read-merge-write path under the same per-order lock.
+
+        The note: the order object this panel comes from has had the proposal URL
+        stripped out of its note and the remainder cut to 500 characters, so
+        writing it back would delete the artwork proof link from Shopify for good.
+
+        Admin and up. The labels tab is the tab part-time workshop staff are given
+        so they can print and dispatch, and a new account gets every tab until
+        somebody sets its permissions - so the tab alone is not a gate for
+        rewriting where a paid order ships. This matches the other writes on this
+        tab that change a shared record of truth (the size list, shipping setup).
+        """
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        uid = _live_uid(request)
+        if _team_level(uid) < ROLE_LEVELS["admin"]:
+            return _json({"error": "Only an admin can change an order."}, 403)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        oid = str(body.get("order_id") or "").strip()
+        if not oid.isdigit():
+            return _json({"error": "Which order?"}, 400)
+        if str(body.get("op") or "") == "read":
+            data, why = await _order_editable(registry, int(oid))
+            if data is None:
+                return _json({"error": why}, 400)
+            return _json(data)
+        done, why, changed, name, warn = await _edit_order(registry, int(oid), body)
+        if not done:
+            return _json({"error": why or "The order couldn't be changed."}, 400)
+        if changed:
+            # The field NAMES, not the values: the ledger is a board the whole
+            # team reads and a customer's address does not belong on it. The
+            # order name comes from the order the route actually read, never
+            # from the request body, so a ledger line cannot name one order for
+            # a write that landed on another.
+            _track(_who, "orders", "edited order " + (name or oid), ", ".join(changed))
+        return _json({"ok": True, "changed": changed, "warnings": warn})
+
     @mcp.custom_route("/api/production-state", methods=["POST"])
     async def production_state_route(request: Request):
         # Printed and made stamps per order. Local JSON on the volume, no AI.
@@ -12339,7 +12574,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _track(_who, "production", "marked made" if on else "un-marked made", nm)
                 # Made is the moment an order actually ships: if a courier label is
                 # already booked, THIS is what fulfils Shopify and emails tracking.
-                ship_note, fulfilled, notified = "", False, False
+                ship_note, fulfilled, notified, ship_reason = "", False, False, ""
                 if on:
                     # Under the dispatch lock, the same one the booking path
                     # holds: _fulfill_if_ready reads the record, then awaits
@@ -12350,7 +12585,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     # booking path already holds it and asyncio locks are not
                     # reentrant.)
                     async with _dispatch_lock(oid):
-                        ready = await _fulfill_if_ready(registry, oid)
+                        ready = await _fulfill_if_ready(
+                            registry, oid, ack_address=bool(body.get("ack_address")))
+                    ship_reason = str(ready.get("reason") or "")
                     fulfilled, notified = ready["fulfilled"], ready["notified"]
                     if fulfilled:
                         # _fulfill_if_ready already moved the tags to Dispatched - unless
@@ -12378,6 +12615,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                               "dispatch": {str(oid): _load_dispatch().get(str(oid), {})},
                               "fulfilled": fulfilled, "notified": notified,
                               "ship_note": ship_note, "stock_note": stock_note,
+                              # The one reason the workbench can answer: the
+                              # address moved after the label was booked, and
+                              # only a human knows where the parcel really went.
+                              "needs_ack": (ship_reason == "address_changed"),
                               "tag_note": ("" if okd else note)})
             return _json({"error": "Unknown op."}, 400)
         except Exception:

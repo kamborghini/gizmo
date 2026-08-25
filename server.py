@@ -1244,6 +1244,103 @@ async def ensure_order_webhooks() -> dict:
         return {"ok": False, "detail": f"{type(e).__name__}: {e}"[:200]}
 
 
+# The subset of an order Shopify actually lets you change after the fact, in the
+# app's own internal address shape (the one _ship_to produces and ADDR_FIELDS
+# edits). Anything not named here is not sent, so a partial form cannot blank a
+# field it never showed.
+_ORDER_ADDR_MAP = {
+    "firstname": "firstName", "lastname": "lastName", "company": "company",
+    "street": "address1", "street2": "address2", "city": "city",
+    "postcode": "zip", "phone": "phone",
+}
+
+
+def _addr_input(a: dict) -> dict:
+    """Our address shape -> Shopify's address input.
+
+    Country and province each have a code form and a free-text form, and sending
+    both invites a conflict, so exactly one of each goes: the code when it looks
+    like a code, the text otherwise. A merchant who types "United Kingdom" gets
+    `country`; one who types "GB" gets `countryCode`, which is the enum Shopify
+    actually validates against.
+    """
+    out = {}
+    for ours, theirs in _ORDER_ADDR_MAP.items():
+        if ours in a:
+            out[theirs] = str(a.get(ours) or "")
+    country = str(a.get("country") or "").strip()
+    if country:
+        out["countryCode" if len(country) == 2 else "country"] = (
+            country.upper() if len(country) == 2 else country)
+    state = str(a.get("state") or "").strip()
+    if state:
+        out["provinceCode" if len(state) in (2, 3) else "province"] = (
+            state.upper() if len(state) in (2, 3) else state)
+    return out
+
+
+async def update_order_fields(order_id: int, fields: dict) -> dict:
+    """Change what Shopify still allows on a placed order: the delivery address,
+    the contact details and the note.
+
+    GraphQL, not REST. The REST order update cannot touch shipping_address at
+    all - verified against the Admin API reference, which says only "a few"
+    attributes are changeable and names addresses among those that are not - and
+    REST has been legacy since October 2024. Needs write_orders.
+
+    Tags are deliberately NOT accepted here even though orderUpdate would take
+    them: orderUpdate REPLACES the whole tag list, and this app's production
+    queues are tag-driven. Tag changes go through update_order_tags, which reads,
+    merges and writes under a per-order lock.
+
+    Deliberately NOT in COPILOT_TOOLS - the AI chat stays read-only; only the
+    app's own Edit panel reaches this, via the writer handed to
+    copilot.add_routes. Returns {ok, ...} and never raises for the expected cases
+    so the route can report instead of break.
+    """
+    inp = {"id": f"gid://shopify/Order/{int(order_id)}"}
+    if isinstance(fields.get("ship_to"), dict):
+        addr = _addr_input(fields["ship_to"])
+        if addr:
+            inp["shippingAddress"] = addr
+    for ours, theirs in (("email", "email"), ("phone", "phone"), ("note", "note")):
+        if ours in fields:
+            inp[theirs] = str(fields.get(ours) or "")
+    if len(inp) == 1:
+        return {"ok": False, "reason": "nothing", "detail": "Nothing to change."}
+    try:
+        m = await _request("POST", "graphql.json", body={
+            "query": "mutation($input: OrderInput!) { orderUpdate(input: $input) {"
+                     "   order { id }"
+                     "   userErrors { field message } } }",
+            "variables": {"input": inp}})
+        for e in (m.get("errors") or []):
+            msg = str(e.get("message") or "")
+            if "access" in msg.lower():
+                return {"ok": False, "reason": "permission",
+                        "detail": "The access token lacks write_orders."}
+            return {"ok": False, "reason": "graphql", "detail": msg[:200]}
+        errs = (((m.get("data") or {}).get("orderUpdate") or {}).get("userErrors")) or []
+        if errs:
+            # Shopify names the offending field, and "shippingAddress.countryCode"
+            # is a far more useful thing to put on screen than "invalid".
+            detail = "; ".join(
+                (".".join(str(x) for x in (e.get("field") or []) if x != "input") + ": "
+                 if e.get("field") else "") + str(e.get("message") or "")
+                for e in errs)[:300]
+            return {"ok": False, "reason": "user_error", "detail": detail}
+        return {"ok": True}
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code if e.response is not None else 0
+        if code in (401, 403):
+            return {"ok": False, "reason": "permission",
+                    "detail": "The access token lacks write_orders."}
+        return {"ok": False, "reason": "http", "detail": f"Shopify answered {code}."}
+    except Exception as e:
+        logger.exception("order update failed for order %s", order_id)
+        return {"ok": False, "reason": "error", "detail": str(e)[:200]}
+
+
 try:
     import copilot
     copilot.add_routes(mcp, COPILOT_TOOLS,
@@ -1251,7 +1348,8 @@ try:
                        fulfillment_writer=create_order_fulfillment,
                        fulfillment_canceler=cancel_order_fulfillment,
                        webhook_ensurer=ensure_order_webhooks,
-                       payment_terms_writer=set_order_payment_terms_net30)
+                       payment_terms_writer=set_order_payment_terms_net30,
+                       order_writer=update_order_fields)
 except Exception as e:
     logger.error(f"Store Copilot disabled (chat UI unavailable): {e}")
 
