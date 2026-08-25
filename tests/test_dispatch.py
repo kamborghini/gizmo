@@ -39,6 +39,7 @@ os.environ.update({
     "ZETA_SYNC_PATH": SCRATCH + "/zeta_sync.json",
     "MAILBOX_PATH": SCRATCH + "/mailbox.json",
     "GMAIL_TOKEN_PATH": SCRATCH + "/gmail_oauth.json",
+    "FEEDBACK_PATH": SCRATCH + "/feedback.json",
 })
 for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
     os.environ.pop(v, None)
@@ -6087,6 +6088,135 @@ def t_dav_refusals_explain_themselves_and_caches_die_with_the_password():
             except FileNotFoundError:
                 pass
     with_accounts(go)
+
+@test
+def t_restore_never_silently_drops_the_store_it_exists_to_protect():
+    """The backup packs files up to BACKUP_FILE_MAX; the restore used its own
+    hardcoded 10MB and skipped anything bigger PER FILE, non-fatally - so a CRM
+    holding an imported sales history was carried into the zip and thrown away
+    on the way out, under a green success toast. The two ceilings are now one,
+    and a file over it fails the WHOLE restore rather than part of it."""
+    import zipfile as zz, io as iio, base64 as b64
+    def zip_of(payload):
+        buf = iio.BytesIO()
+        with zz.ZipFile(buf, "w", zz.ZIP_DEFLATED) as z:
+            z.writestr("volume/crm.json", payload)
+        return b64.b64encode(buf.getvalue()).decode()
+    def go():
+        ensure_auth()
+        # Over the OLD ceiling, inside what the backup carries: must restore.
+        big = '{"crm": {"deals": {}, "pad": "' + "x" * (11 * 1024 * 1024) + '"}}'
+        ok(len(big) > 10 * 1024 * 1024 and len(big) < copilot.BACKUP_FILE_MAX)
+        r = post("/api/restore", {"zip": zip_of(big)})
+        eq(r.status_code, 200, r.text)
+        eq(r.json()["restored"], 1, "the store the backup exists for comes BACK")
+        eq(r.json().get("skipped") or [], [], "and nothing was quietly dropped")
+        # Over the shared ceiling: the whole restore refuses, nothing written.
+        saved = copilot.BACKUP_FILE_MAX
+        copilot.BACKUP_FILE_MAX = 1024
+        try:
+            r2 = post("/api/restore", {"zip": zip_of('{"crm": {"pad": "' + "y" * 5000 + '"}}')})
+            eq(r2.status_code, 400, r2.text)
+            ok("Nothing has been changed" in r2.json()["error"], r2.text)
+        finally:
+            copilot.BACKUP_FILE_MAX = saved
+
+@test
+def t_the_order_webhook_never_writes_the_crm_from_a_thread():
+    """The CRM store's whole safety story is one writer at a time: every route
+    loads, mutates and writes with no await in between. A worker thread runs
+    in genuine parallel and can install a stale snapshot over a won deal, or
+    truncate the store through the shared .tmp path."""
+    src = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "copilot.py"), encoding="utf-8").read()
+    hook = src[src.index("async def order_webhook"):]
+    hook = hook[:hook.index("@mcp.custom_route", 10)]
+    ok("run_in_executor" not in hook,
+       "the order webhook does not push CRM work onto a thread")
+    ok("_crm_link_order_soon" in hook, "it defers onto the event loop instead")
+    ok("_crm_bg_tasks" in src, "and holds a reference so the task cannot be collected")
+
+@test
+def t_the_bare_token_print_route_demands_a_live_account():
+    """With no x-app-session the tab check short-circuited, so a Shopify admin
+    denied Production Manager (or switched off entirely) could hand-drive the
+    URL, read every order on it and release them to production."""
+    src = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "copilot.py"), encoding="utf-8").read()
+    i = src.index("doc_who = _live_uid(request)")
+    seg = src[i:i + 400]
+    ok("if not doc_who:" in seg, "no session is a refusal, not a skipped check")
+    ok("if not _uid_has_tab(doc_who" in seg, "and the tab is checked on its own line")
+
+@test
+def t_updates_show_the_running_release_and_take_requests():
+    """Release notes ship WITH the release (a repo file), so the panel always
+    describes the code that is running. Requests are open to everyone signed
+    in - a part-timer notices gaps the master never sees - but triage is
+    admin-only."""
+    def go():
+        ensure_auth()
+        import json as _j
+        # A changelog exactly as the repo ships one.
+        cl = SCRATCH + "/changelog.json"
+        with open(cl, "w", encoding="utf-8") as fh:
+            _j.dump({"releases": [
+                {"date": "2026-08-24", "title": "CRM week", "items": [
+                    {"kind": "added", "text": "Deals carry their email history."},
+                    {"kind": "fixed", "text": "Apostrophes read as apostrophes."}]},
+                {"date": "2026-08-01", "items": [{"kind": "improved", "text": "Faster board."}]},
+                {"date": "bad", "items": []}]}, fh)
+        saved = copilot.CHANGELOG_PATH
+        copilot.CHANGELOG_PATH = cl
+        copilot._changelog_cache["mtime"] = None
+        try:
+            r = post("/api/updates", {}).json()
+            eq([x["date"] for x in r["releases"]], ["2026-08-24", "2026-08-01"],
+               "newest first, and a malformed entry is skipped rather than fatal")
+            eq(r["version"]["latest"], "2026-08-24", "the version line names the running release")
+            eq(len(r["releases"][0]["items"]), 2)
+            # Anyone signed in may ask; the ask lands and is attributed.
+            uid, sess, _pw = ready_user("Poppy", "poppy9", role="parttime")
+            a = post_s(sess, "/api/updates", {"op": "request", "title": "Bigger print button",
+                                              "detail": "hard to hit on the tablet"})
+            eq(a.status_code, 200, a.text)
+            listed = post("/api/updates", {}).json()["requests"]
+            eq(listed[0]["title"], "Bigger print button")
+            eq(listed[0]["by"], uid, "attributed to whoever asked")
+            eq(listed[0]["state"], "open")
+            eq(post_s(sess, "/api/updates", {"op": "request", "title": ""}).status_code, 400,
+               "a request needs a one-line title")
+            # Triage is admin+; a part-timer cannot move it.
+            rid = listed[0]["id"]
+            eq(post_s(sess, "/api/updates", {"op": "state", "id": rid, "state": "shipped"}).status_code,
+               403, "triage is not everyone's")
+            eq(post("/api/updates", {"op": "state", "id": rid, "state": "nonsense"}).status_code, 400)
+            post("/api/updates", {"op": "state", "id": rid, "state": "planned", "note": "next week"})
+            after = post("/api/updates", {}).json()["requests"][0]
+            eq(after["state"], "planned")
+            eq(after["note"], "next week")
+        finally:
+            copilot.CHANGELOG_PATH = saved
+            copilot._changelog_cache["mtime"] = None
+    with_accounts(go)
+
+@test
+def t_updates_survive_a_missing_or_broken_changelog():
+    """Notes are notes: a missing or corrupt file costs the panel, never the app."""
+    saved = copilot.CHANGELOG_PATH
+    copilot._changelog_cache["mtime"] = None
+    try:
+        copilot.CHANGELOG_PATH = SCRATCH + "/no-such-changelog.json"
+        eq(copilot._load_changelog(), [])
+        bad = SCRATCH + "/broken-changelog.json"
+        with open(bad, "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        copilot.CHANGELOG_PATH = bad
+        copilot._changelog_cache["mtime"] = None
+        eq(copilot._load_changelog(), [], "a corrupt file is empty notes, not a 500")
+    finally:
+        copilot.CHANGELOG_PATH = saved
+        copilot._changelog_cache["mtime"] = None
 
 @test
 def t_backup_is_exhaustive_by_construction():

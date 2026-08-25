@@ -1,0 +1,1014 @@
+{
+ "releases": [
+  {
+   "date": "2026-08-25",
+   "title": "What's new, feature requests, and a security audit",
+   "items": [
+    {
+     "kind": "added",
+     "text": "What's new lives in the app. Guide now has three tabs: the desk guide, What's new (every release, newest first, in plain terms) and Requests. A quiet dot appears on Guide when there are notes you have not read."
+    },
+    {
+     "kind": "added",
+     "text": "Ask for a feature, from anywhere. A button in the sidebar opens a box on any screen - the moment you notice a gap is the moment worth capturing. It lands in Guide, Requests and emails Cameron. Anyone signed in can ask; an admin marks each one planned, shipped or declined."
+    },
+    {
+     "kind": "fixed",
+     "text": "A backup could not restore your CRM or your inbox. The backup deliberately carries files up to 60MB so an imported sales history is never dropped - but the restore refused anything over 10MB, skipped it, carried on, and reported success. On a lost volume the CRM and two years of email would have been silently gone. Both sides now use one ceiling, and a file too big fails the whole restore instead of part of it."
+    },
+    {
+     "kind": "fixed",
+     "text": "The restore now says what it skipped. It reported only what it restored, so a dropped store looked like a clean success."
+    },
+    {
+     "kind": "fixed",
+     "text": "An arriving order could overwrite CRM work. Linking an order's customer ran in parallel with the rest of the app, so an order landing while you moved a deal could put the CRM back as it was seconds earlier - or corrupt the file outright. It now waits its turn."
+    },
+    {
+     "kind": "fixed",
+     "text": "A print link could be driven by an account that should not have it. Someone with Shopify admin access whose gizmo account was switched off, or who was denied Production Manager, could use the print URL directly to read orders and release them into production. It now requires a live account with that tab."
+    },
+    {
+     "kind": "fixed",
+     "text": "Net 30 could never have worked: the app was never asking Shopify for permission to write payment terms, only to read them. The permission is now requested - the app has to be released and reinstalled once for it to take effect."
+    },
+    {
+     "kind": "added",
+     "text": "Edit panel on production orders. You can now change a customer's delivery address and the order email without leaving gizmo. The address goes through the same checks the courier booking uses, so an address the panel accepts can't be rejected at the dispatch window minutes later. It reads the order live before filling the form, so you're never retyping over a stale copy."
+    },
+    {
+     "kind": "added",
+     "text": "The order note is editable from the same panel, and it now shows the note exactly as Shopify holds it, artwork proposal link and all. (The queue's own copy of the note has the link stripped out and is cut to 500 characters, so editing from that copy would have deleted the proof link permanently.)"
+    },
+    {
+     "kind": "added",
+     "text": "A guard for orders whose label is already booked. Changing an address after a label has been cut warns you before you type, needs a destructive confirmation, and then stops Mark made from emailing the customer tracking for a parcel that went to the old address. Acknowledge it once and the order fulfils normally."
+    },
+    {
+     "kind": "fixed",
+     "text": "30-day payment terms were never actually attached. Pressing \"Ready to make\" on a purchase-order order reported the order was on Net 30 while Shopify still had it on due-on-receipt, because Shopify refuses to add terms to an order that already carries any, and the app read that refusal as success. The app now reads what's on the order first and creates, updates or genuinely leaves it alone —…"
+    },
+    {
+     "kind": "improved",
+     "text": "Order numbers are doors. The Production Manager queue's order number is now a link, and every order link in the app opens Shopify in a NEW tab rather than navigating the whole embedded admin away and losing your place in the queue. The redundant \"Open order\" links beside plain-text order numbers (unprocessed strip, Liability table) are gone."
+    },
+    {
+     "kind": "improved",
+     "text": "Editing an address now requires Admin or above. The Production Manager tab is the one given to part-time workshop staff for printing, so the tab alone couldn't be the gate on rewriting where a paid order ships."
+    },
+    {
+     "kind": "improved",
+     "text": "Tags stay off the edit panel deliberately: saving a stale tag list would strip IP, Complete or \"Purchase order unpaid\", and an unpaid order with no tag never appears on the chase list."
+    }
+   ]
+  },
+  {
+   "date": "2026-08-24",
+   "title": "CRM lockdown, website enquiries, and a full design + safety audit",
+   "items": [
+    {
+     "kind": "added",
+     "text": "Website enquiries file themselves. A contact-form submission arriving in the shared inbox now becomes a deal in Contact Made automatically: the sender is matched to an existing person or created as a new one, the message becomes the deal's first note, and the email and the deal are one click from each other."
+    },
+    {
+     "kind": "added",
+     "text": "Every deal carries its email history. The deal panel lists every shared-inbox thread with that contact (matched on any of their addresses), newest first, with subject, message count, owner and unread in bold. Each row opens the conversation in the Inbox. Only shown to people who can open the Inbox."
+    },
+    {
+     "kind": "added",
+     "text": "The 2,800 imported contacts link themselves to Shopify customers. Runs nightly, or on demand from a Link Shopify button, or immediately when an enquirer places their first order. An existing link is never overwritten, and a person whose details match two different customers is skipped rather than guessed at."
+    },
+    {
+     "kind": "added",
+     "text": "Bulk delete on the Contacts list, for clearing out the hand-typed sample records. Anyone attached to an open deal is skipped and named rather than silently removed."
+    },
+    {
+     "kind": "fixed",
+     "text": "Edits made in gizmo used to be silently undone by the next Pipedrive import. Archiving a deal, deleting a note, deleting an activity, merging two contacts — all of them now stick permanently."
+    },
+    {
+     "kind": "improved",
+     "text": "The CRM was audited across 97 findings and rebuilt to match the rest of the app: one chip shape everywhere, labels on tinted chips (white-on-amber was unreadable), three labels that had been rendering as invisible text."
+    },
+    {
+     "kind": "added",
+     "text": "Releasing an unpaid purchase order starts its 30-day clock. Pressing \"Ready to make\" on an order tagged \"Purchase order unpaid\" now attaches Net 30 payment terms to the Shopify order."
+    },
+    {
+     "kind": "fixed",
+     "text": "A Source Four Junior cuts at 66 mm whatever spelling the order uses, and the Source Four Revolution is 66 mm too."
+    },
+    {
+     "kind": "improved",
+     "text": "The Inbox window now reaches back two years instead of 60 days, because deals live that long."
+    },
+    {
+     "kind": "fixed",
+     "text": "Apostrophes in email subjects and snippets show as apostrophes, not `&#39;`."
+    },
+    {
+     "kind": "fixed",
+     "text": "The Shopify order-page \"Print production label\" action was completely dead — every press was refused. The whole round trip now works and is tested end to end."
+    },
+    {
+     "kind": "fixed",
+     "text": "Courier labels were printing at the gobo label stock size. With 4x2 loaded, a 4x6 shipping label was shrunk to a third scale and its barcode wouldn't scan. Carrier labels now always print at 4x6."
+    },
+    {
+     "kind": "fixed",
+     "text": "Production labels only checked whether content fitted vertically. On narrow 2x4 stock a gobo size or glass chip could walk off the right edge of the printed label with no sign anything was wrong."
+    },
+    {
+     "kind": "fixed",
+     "text": "Mark made now refuses outright when it can't save, instead of stamping in memory, fulfilling the order in Shopify, booking the glass at the stock app, and reporting success on work that was never recorded."
+    },
+    {
+     "kind": "fixed",
+     "text": "A booking and a Mark made happening at the same time could both fulfil the order, sending the customer two tracking emails."
+    },
+    {
+     "kind": "fixed",
+     "text": "Failed loads were reported as empty lists. The Skills and Memory tabs told you \"No skills yet, add your first above\" when the server had actually failed to answer, inviting you to retype something you already had. They now say the list is unknown, quote the server's reason and offer Try again."
+    },
+    {
+     "kind": "fixed",
+     "text": "A failure in the Ask panel was rendered as though the copilot had answered it: the model appeared to have thought about your question and replied \"Failed to fetch\". Failures are now their own kind of message, with an Ask again button."
+    },
+    {
+     "kind": "fixed",
+     "text": "Files: copying a file on the mounted Finder drive was the one write path with no storage-quota check. Rename, move and restore could leave two files with the same name in one folder, making the newer one permanently unreachable from Finder. The trash cleaner could stall on a big backlog."
+    },
+    {
+     "kind": "fixed",
+     "text": "Print output: the desk guide clipped off the right-hand edge of A4, and the dispatch manifest used only 68% of a landscape sheet."
+    },
+    {
+     "kind": "improved",
+     "text": "Logging in now takes the same time whether the username is wrong or the password is, so response timing can't answer the question the error message deliberately refuses to."
+    },
+    {
+     "kind": "fixed",
+     "text": "Muted text — every timestamp, meta line, sub-line and small label in the app — failed readable-contrast on every background except pure white. A new grey clears the standard on all nine backgrounds."
+    },
+    {
+     "kind": "fixed",
+     "text": "Touch targets a finger actually misses, measured on a phone-sized screen: the only way into a folder was the 20px line of its name inside a 74px row; file and email selection ticks were 15-16px. Both now reach 24px under a finger, while a mouse keeps the small ones."
+    },
+    {
+     "kind": "fixed",
+     "text": "Keyboard reach. The CRM deal board was mouse-only — Enter and Space now open a card. Inbox rows and cards, and the tick boxes on action lists, are now real controls a keyboard can reach. The delete control on a conversation row was hover-only, which on a tablet meant an invisible but fully live target next to the row you meant to open."
+    },
+    {
+     "kind": "fixed",
+     "text": "Controls that didn't look like controls: the Shipping row in Settings was the only clickable row among thirteen inert-looking pills, and the only one showing no connection state. Shipping settings had its Save button inside the scrolling area, so on a short window it read as missing."
+    },
+    {
+     "kind": "fixed",
+     "text": "Buttons that couldn't be pressed looked identical to ones that could — disabled states were missing entirely on icon buttons and the Claim button."
+    },
+    {
+     "kind": "fixed",
+     "text": "The KPI card asking for your attention had a paler border than an ordinary card, so the one that mattered receded."
+    },
+    {
+     "kind": "improved",
+     "text": "Overview's KPI reordering can be done with arrow buttons. It was drag-only, and drag never works on a phone, so the feature was unreachable and the hint told you to do the one thing you couldn't."
+    },
+    {
+     "kind": "improved",
+     "text": "One visual language throughout: one chip shape, one heading style, one type scale, one segmented control, one spacing scale. The Inbox had been shipping its own set of near-miss reds, greens and ambers, so the same production status looked different depending which tab you were on. The Customers tab's sub-view switcher and the Production Manager's custom-shipment queue now match every other tab."
+    }
+   ]
+  },
+  {
+   "date": "2026-08-21",
+   "title": "Moving off Pipedrive, and a home for custom shipments",
+   "items": [
+    {
+     "kind": "added",
+     "text": "Pipedrive import. Reads your Pipedrive account and writes it into gizmo: stages, organisations, people, deals, activities and notes, with their real dates — created, moved-into-stage, won and lost. It previews by default and shows exactly what would change before anything is written, and it's safe to run twice: a second run updates rather than duplicating, and anything you typed in gizmo by…"
+    },
+    {
+     "kind": "added",
+     "text": "A \"Moving from Pipedrive\" survey panel in the CRM, read-only, that reports what's in the account before you commit: record counts, pipelines and deals per stage, which custom fields actually carry data, activity types, owners, currencies. Warnings first, in red. One button copies the summary to hand to someone else — it copies the shape of the account and never its contents (no deal titles, no…"
+    },
+    {
+     "kind": "added",
+     "text": "A Custom Shipments queue in the Production Manager. A parcel booked to a pasted address has no Shopify order behind it, so it never appeared in any queue and its label was effectively unfindable — the only route back was reopening the New shipment window, which reads like \"book another one and spend money again\". Every pasted-address shipment now has a row: reference, customer, carrier,…"
+    },
+    {
+     "kind": "fixed",
+     "text": "The Pipedrive import was quietly bringing the wrong data. Ten faults, two of them serious enough that the CRM on screen wasn't really the account: all 257 archived deals (the entire won/lost back catalogue) were never arriving and the run still reported success, and the real pipeline stages were never read, so every deal landed in \"Qualified\". Also fixed: won and lost dates were carried across…"
+    },
+    {
+     "kind": "fixed",
+     "text": "The CRM was deleting history to stay under a size cap. Past 2,000 deals it removed the oldest CLOSED deals and their activities — silently, no warning — which is precisely the won/lost record a CRM exists to keep. It now refuses and reports rather than destroys, and the limits are raised."
+    },
+    {
+     "kind": "fixed",
+     "text": "The backup silently dropped any store over 10MB, which a real CRM history passes, so the backup meant to protect it would have stopped including it."
+    },
+    {
+     "kind": "fixed",
+     "text": "Editing a contact deleted the addresses the form can't show. An imported contact can have four email addresses; the form shows one, and saving replaced the list."
+    },
+    {
+     "kind": "fixed",
+     "text": "The Pipedrive survey was hitting Pipedrive's web app instead of their API, so the error was a mouthful of raw HTML. The connector now finds your company's own Pipedrive domain by itself, and a non-JSON reply is explained in plain words."
+    },
+    {
+     "kind": "improved",
+     "text": "The queue is named \"Custom Shipments\" rather than \"Shipments\", which beside four order queues read as though it might hold all of them."
+    }
+   ]
+  },
+  {
+   "date": "2026-08-20",
+   "title": "The order behind the email, artwork onto the drive, real search",
+   "items": [
+    {
+     "kind": "added",
+     "text": "The order behind the email. Beside every message: that sender's recent orders, each with what this shop knows on top of Shopify — whether it's been made, whether it shipped and on what tracking — with a copy button and one click to drop the line into the reply. The same facts go to the AI drafter. Matched on the exact sender address only, because a fuzzy name match would show one customer…"
+    },
+    {
+     "kind": "added",
+     "text": "Artwork onto the drive. Attachments now show a paperclip on the row and the filenames in the thread, and one button lifts a file out of Gmail into the file store under a path like Artwork/#1201, creating the folders on the way. Because the store is mounted in Finder, artwork lands on the production machine one click after it arrives."
+    },
+    {
+     "kind": "added",
+     "text": "Real search. Typing filters the board as before; pressing Enter hands the query to Google and searches every message body and attachment name in the mailbox, with from:, has:attachment and filename: for free. Older hits are marked archive and open read-only, so a search never quietly drags old mail into your filters."
+    },
+    {
+     "kind": "added",
+     "text": "Read and unread travel both ways with Gmail. Opening an email here marks it read in Gmail, exactly as opening it there would. There's a Mark unread button in the thread and a read/unread action in the bulk bar."
+    },
+    {
+     "kind": "added",
+     "text": "The mailbox syncs on its own now, whether or not anyone has the tab open. Until now \"close newsletters on arrival\" only fired when somebody clicked Inbox, so Monday morning dropped three days of mail into the round-robin at once."
+    },
+    {
+     "kind": "added",
+     "text": "Bulk actions can be undone for ten minutes, and j/k/o/c/x// keyboard shortcuts for anyone living in the list."
+    },
+    {
+     "kind": "fixed",
+     "text": "Order facts followed the wrong person. Orders were looked up for the address the thread came from, while the draft was addressed to the last message's Reply-To — both chosen by whoever sent the email, so one crafted message could pull a real customer's orders and address the reply somewhere else."
+    },
+    {
+     "kind": "fixed",
+     "text": "\"Shipped\" meant \"a label was booked\". The order card announced a tracking number as shipped, sending customers to chase a courier holding nothing. Shipped now means fulfilled; a booked label reads \"label booked, not handed over yet\"; cancelled and part-shipped orders say so."
+    },
+    {
+     "kind": "fixed",
+     "text": "The sync was closing live customer email. A thread that fell off the first page of Gmail results was treated as archived and marked done, so on a busy mailbox real email was silently closed while customers waited."
+    },
+    {
+     "kind": "fixed",
+     "text": "Unread email was being hidden by Done. Clearing the backlog marks everything done, and every view hides done mail — including the Unread filter and the unread count. An email marked unread in Gmail after a backlog clear was invisible everywhere except Done, and the chip read \"Unread\" with no number. A view that's hiding unread mail now says so, above the list, with a button to it."
+    },
+    {
+     "kind": "fixed",
+     "text": "Unread could sit stale indefinitely, because it was inferred from a cached copy rather than asked of Gmail. It's now asked outright on every sync."
+    },
+    {
+     "kind": "fixed",
+     "text": "\"Open in Gmail\" now names the mailbox, so it stops resolving against whatever Google account that browser happens to default to and showing \"conversation not found\" on the most-used button."
+    },
+    {
+     "kind": "fixed",
+     "text": "A thread archived in Gmail (including by gizmo's own file-it-away filters) now leaves the board instead of sitting there ageing amber."
+    },
+    {
+     "kind": "fixed",
+     "text": "Re-saving a draft no longer deletes a version somebody rewrote in Gmail."
+    },
+    {
+     "kind": "fixed",
+     "text": "Saving an attachment whose name already existed left two live files in one folder, making the newer one unreachable on the Finder drive — the exact case (proof-v2.pdf arriving three times) this feature is for. It now supersedes, with the old version in the 30-day trash."
+    },
+    {
+     "kind": "fixed",
+     "text": "Inline signature logos no longer count as attachments and put a paperclip on half the inbox."
+    }
+   ]
+  },
+  {
+   "date": "2026-08-19",
+   "title": "Standing filters, AI-drafted replies, a real file manager, and a safe move",
+   "items": [
+    {
+     "kind": "added",
+     "text": "The shared mailbox as an ownership board. Every thread has exactly one owner, states age visibly (unassigned goes amber at 4 hours, red at 8), and the ownership syncs back into Gmail as a label so it's visible there too. Connecting is a button on the Inbox tab, and Google always asks which account — connecting your own inbox instead of the shared one used to look like success."
+    },
+    {
+     "kind": "added",
+     "text": "The list view. Sixty days of history arriving as a five-column board was the wrong shape; an inbox reads as rows. Sender, subject with snippet, age, unread in bold, a state dot, and either the owner or a Claim button on each row. The board is still one click away."
+    },
+    {
+     "kind": "added",
+     "text": "Standing filters, in the shape people already know from Gmail: conditions on sender, domain, subject or the whole email, joined all-or-any, then gizmo's own actions — hand the email to a person, share it round a group in turn, close it on arrival, or file it into a Gmail folder (with an optional \"and take it out of the Gmail inbox\")."
+    },
+    {
+     "kind": "added",
+     "text": "Claude-drafted replies, with the thread's history as context."
+    },
+    {
+     "kind": "added",
+     "text": "Unread as a real thing: a filter with a live count beside Open, Mine and Unassigned, so \"what has nobody even looked at\" is one click."
+    },
+    {
+     "kind": "added",
+     "text": "Bulk triage, so a backlog can be cleared at once."
+    },
+    {
+     "kind": "improved",
+     "text": "Unread email is now unmissable. Read rows sit back (lighter, muted); unread comes forward with full-strength text, its own tint, a blue edge and the word New, and rises to the top of the list. Previously the difference between read and unread was a font weight nobody can see across a list."
+    },
+    {
+     "kind": "fixed",
+     "text": "\"Subject is exactly invoice\" was firing on \"copy of invoice 2291\" and closing it on arrival, because \"is exactly\" also matched any single word in the field. Also: a stranger could put your customer's address in their own display name and choose which of your filters fired."
+    },
+    {
+     "kind": "fixed",
+     "text": "A filter that couldn't do its job fell through to the next one. If the person a rule named lost the Inbox tab, the rule matched, did nothing, and the mail dropped into the catch-all underneath, which closed it."
+    },
+    {
+     "kind": "fixed",
+     "text": "Our own unsent drafts were being read back as conversation. Saving a draft adds a message to the Gmail thread, so the next sync counted it as a reply from us, moved the thread on, and fed Claude our own unsent words as though the customer had received them."
+    },
+    {
+     "kind": "fixed",
+     "text": "Anyone with the Inbox tab could write a reply into a colleague's live customer conversation."
+    },
+    {
+     "kind": "fixed",
+     "text": "Pound signs and other characters came through as replacement characters on quotes from certain senders."
+    },
+    {
+     "kind": "fixed",
+     "text": "The merchant's private store profile was being pasted into customer-facing drafts."
+    },
+    {
+     "kind": "fixed",
+     "text": "An email body can no longer forge an earlier turn in the conversation to steer the AI's reply."
+    },
+    {
+     "kind": "fixed",
+     "text": "An edited draft survives clicking anything else in the modal instead of being wiped, and \"Try again\" shows Claude the draft it's meant to be correcting."
+    },
+    {
+     "kind": "added",
+     "text": "Previews: clicking a picture or PDF opens it in a window inside the app. Type icons, a sort control (name, newest, largest), tick-to-multi-select with a bulk bar, and an explicit Move with a folder picker — which also makes moving possible on a phone, where dragging doesn't exist."
+    },
+    {
+     "kind": "improved",
+     "text": "Uploading a name that already exists in a folder now REPLACES it, with the old version kept in the 30-day trash, rather than creating a confusing duplicate."
+    },
+    {
+     "kind": "fixed",
+     "text": "A folder holding only subfolders read \"0 files\" and looked broken. Rows now read \"2 folders, 2 files\" and say \"Empty\" when there's genuinely nothing inside."
+    },
+    {
+     "kind": "added",
+     "text": "The estimated stock usage day view becomes a reviewed, editable sheet. Each line shows the estimate alongside an editable FINAL column; lines can be amended, removed or added for something used that the estimate never saw. \"Send to stock sheet\" pushes the final figures, applying only the difference against what the day's automatic bookings already recorded, so it can never double-count. A day…"
+    },
+    {
+     "kind": "added",
+     "text": "Restore from backup (master only), so a downloaded backup zip can be put back on the server. Credentials and sessions are never restored."
+    },
+    {
+     "kind": "added",
+     "text": "Backups now carry a manifest: build time, every file included with its size, and everything left behind with the reason. The restore dry-run shows the backup's age before a byte is written."
+    },
+    {
+     "kind": "fixed",
+     "text": "The backup was missing every stored dispatch label, so a restored app couldn't have reprinted anything already dispatched."
+    },
+    {
+     "kind": "improved",
+     "text": "The app is measurably snappier: a write-behind activity log and an hour-long drive cache remove gizmo's own share of the delay. (The bulk of the slowness was traced to the server sitting in a far region — a ~220ms round trip on every request — and this release makes moving it a safe ten-minute job.)"
+    }
+   ]
+  },
+  {
+   "date": "2026-08-18",
+   "title": "The office file server, accounts and roles, and the release gate",
+   "items": [
+    {
+     "kind": "added",
+     "text": "A Files tab: the app becomes the office file server. Folders, drag-and-drop multi-upload with progress, search everywhere, rename, drag to move, and a 30-day trash with restore and Delete now. Dropping a whole folder from your desktop recreates it, structure and all."
+    },
+    {
+     "kind": "added",
+     "text": "Files in Finder. The whole file store mounts on a Mac as a native network drive with Connect to Server and no software to install: the same folders as the Files tab, saves attributed to the person's own account, Finder deletes going to the same 30-day trash. Folder listings answer in about a millisecond and Finder shows honest capacity."
+    },
+    {
+     "kind": "added",
+     "text": "The app owns its own accounts. Username and password per person, a sign-in screen, and a first-run setup that creates the master admin. Roles are ranked: master (can never be demoted, switched off or deleted), admin (manages members), member (the work tools). New accounts and password resets issue a generated starter password shown exactly once, with a forced change on first sign-in. Sessions…"
+    },
+    {
+     "kind": "added",
+     "text": "Per-account tab access. Each account can be limited to chosen tabs, enforced by the server rather than just hidden in the menu. Blocked nav items disappear, and somebody standing on a tab that just closed is moved to their first allowed one."
+    },
+    {
+     "kind": "added",
+     "text": "A Part-time role with a clock. Part-timers get a Clock in/out button in the sidebar with a ticking duration; the server owns every timestamp, allows one open session per person, and refuses double clock-ins. Team gains a Work dashboard showing who's on the clock now, with a correction for forgotten clock-outs."
+    },
+    {
+     "kind": "added",
+     "text": "A Team tab: people, roles, 30-day work tallies per person, and an activity feed with person and area filters. Actions across the app — printing, made, releases, dispatch, files, the sales desk, chasing, settings — each write one line."
+    },
+    {
+     "kind": "added",
+     "text": "An Unprocessed queue in the Production Manager, ahead of To make, with a \"Ready to make\" button per order that releases it to the workbench. Deliberately sparse: Preview and Print stay, Dispatch and Mark made don't, because neither makes sense for an order that hasn't been released yet."
+    },
+    {
+     "kind": "added",
+     "text": "Order numbers are doors, not labels, across the size-list coverage card, the dispatch manifest, both margin reports, the repeat-customer line and the CRM deal page. Print surfaces deliberately stay plain — paper has no cursor."
+    },
+    {
+     "kind": "added",
+     "text": "The glass catalogue publishes to the stock app hourly, so the stock sheet's mapping view knows every size that can exist, not just the ones that have already been used."
+    },
+    {
+     "kind": "fixed",
+     "text": "Bezelled gobos were drifting the stock sheet by one ring and one wrong-sized blank on every large order. An 86mm or 100mm gobo isn't cut from 86 or 100 glass — it's a 64.9mm blank bezelled up with a ring, and that's now what the day sheet and the stock push both say."
+    },
+    {
+     "kind": "fixed",
+     "text": "The CRM tab sat flush against the sidebar and the window edges with no page header, reading as unfinished. It now opens like every other tab, with lanes that share the width on a wide screen and an empty pipeline that says what to do next rather than showing five hollow columns."
+    },
+    {
+     "kind": "fixed",
+     "text": "Three cards (the size-list coverage card, the Trade radar and the Guide) had content sitting flush against their edges."
+    },
+    {
+     "kind": "fixed",
+     "text": "Uploads were failing with \"the transfer failed\" because the page was blocking the browser from reaching the storage bucket."
+    },
+    {
+     "kind": "fixed",
+     "text": "Sign-in could strand a brand-new install at a password prompt with no account to sign into."
+    },
+    {
+     "kind": "improved",
+     "text": "Security sweep over everything added that day (30 lenses): revoking someone's access or resetting their password now takes effect immediately rather than after a 10-minute cache; a starter password unlocks nothing but the choose-your-own screen; a stale Finder mount can never lock a person out of the app."
+    }
+   ]
+  },
+  {
+   "date": "2026-08-17",
+   "title": "A sales desk, a chase desk, and stock that books itself",
+   "items": [
+    {
+     "kind": "added",
+     "text": "A CRM tab modelled on Pipedrive: Leads, Deals, Activities, Contacts and Insights. Built around activity-based selling — you can't control whether a deal closes, only whether it always has a next action scheduled — so every open deal's card wears one of four states: overdue red, due-today green, an amber warning when NOTHING is scheduled (deliberately louder than being late), and future grey.…"
+    },
+    {
+     "kind": "added",
+     "text": "The chase desk. The Liability tab ranked who owed money and then left you writing every chasing email from scratch, 30 to 60 minutes a week. Each account now gets its email composed from the ledger beside it: every unpaid order listed with amounts and days overdue, tone stepped by the oldest debt (statement, gentle, firm, final — never legal threats, these are trade customers worth keeping).…"
+    },
+    {
+     "kind": "added",
+     "text": "Live order webhooks, so new orders appear without waiting for a refresh."
+    },
+    {
+     "kind": "added",
+     "text": "Mark made books the glass at the stock app. The order's items resolve into glass lines through exactly the same rules the day sheet uses, and the stock app decrements as if it had been counted down. Un-marking made pushes a reversal restoring precisely what was booked. If the stock app is down, made state saves locally anyway and the push is retried hourly."
+    },
+    {
+     "kind": "fixed",
+     "text": "A mixed account (one late invoice beside a large order still inside terms) was previously told in the subject line that its entire balance was overdue. \"Outstanding\" is now the whole account; \"overdue\" is only the part past its due date."
+    }
+   ]
+  },
+  {
+   "date": "2026-08-14",
+   "title": "A light app, a desk guide, custom-address parcels, and real speed",
+   "items": [
+    {
+     "kind": "added",
+     "text": "Custom address dispatch. A New shipment button in the Production Manager opens a shipment with no order behind it — a replacement, a sample, something for a supplier. Paste the address, add a parcel and a value, get quotes, book. The address is read locally first (instant, free, offline, the same answer every time) and Claude is only asked when the local pass can't place something. Every field…"
+    },
+    {
+     "kind": "added",
+     "text": "A desk guide inside the app. Six sections, thirty-three entries: the daily run from tagged order to customer email, what to do when something goes wrong, dispatch in detail, what the other tools are for, and housekeeping. Written for the person at the bench. Deliberately static — no network call, no AI — because it's read exactly when something else is broken. It prints on A4 so it can live…"
+    },
+    {
+     "kind": "improved",
+     "text": "A complete visual overhaul. The app was a dark panel embedded in a light Shopify admin, which reads as a foreign object, and it had drifted into 30 font sizes, 10 font weights, 82 padding values, 15 corner radii and 53 shadows. Rebuilt on light surfaces, hairline borders, restrained shadow and one focus ring, with seven text sizes, three weights, three radii and one spacing scale. The indigo…"
+    },
+    {
+     "kind": "improved",
+     "text": "The app is much faster. Every open of the Production Manager, every flip between To make / To ship / Complete, and every load after Mark made was re-downloading every order from the last 180 days — up to 30 pages that couldn't run in parallel, then up to 40 product lookups. All three queues now share one sweep, held for 45 seconds, and the page loads in pieces instead of all at once."
+    },
+    {
+     "kind": "improved",
+     "text": "Fulfilled orders are tagged \"Complete\" rather than \"Dispatched\". Orders finished before the rename still show up."
+    },
+    {
+     "kind": "fixed",
+     "text": "The app's stored configuration didn't list the permissions Shopify has actually granted, which meant the app was one deploy away from proposing a permission set that omitted the one dispatch depends on."
+    }
+   ]
+  },
+  {
+   "date": "2026-08-13",
+   "title": "What each order made, quotes that are ready before you ask, and infrastructure",
+   "items": [
+    {
+     "kind": "added",
+     "text": "Margins: what each dispatched order actually made. Revenue net of VAT and discounts, plus what the customer paid for delivery net of VAT, less the cost price of the goods and what the courier charged. VAT is the part that matters — UK prices are tax-inclusive, so the gross figure isn't revenue, and mixing it with a net cost price overstates every margin."
+    },
+    {
+     "kind": "added",
+     "text": "Courier quotes pre-fetch in the background while the ready-to-ship queue is open, so by the time you press Dispatch the couriers are usually already listed. A cached price is only ever used when the parcels and insurance match exactly what was priced, and it expires after eight minutes."
+    },
+    {
+     "kind": "added",
+     "text": "Customs values are remembered. The store prices custom gobos through dropdowns, so their base price is zero and every international order needed the real value typing in by hand. The app now remembers what you typed, per variant or product, and prefills it next time, saying which values came from last time. Values are saved before the booking is attempted — a failed booking is exactly when…"
+    },
+    {
+     "kind": "fixed",
+     "text": "A booking-erasing race. A dispatch record could be silently deleted along with the label you'd already paid for: tracking gone, missing from the manifest and margin report, and the double-book guard disarmed so the next click paid for a second label."
+    },
+    {
+     "kind": "fixed",
+     "text": "Cancelling a shipment left the record still claiming the order was fulfilled."
+    },
+    {
+     "kind": "improved",
+     "text": "Automatic snapshots (backups), a supported Shopify API version (the app was running on one roughly two years past its support window), errors that are actually visible, and an automated test suite that runs on every change plus a weekly security audit of every dependency."
+    },
+    {
+     "kind": "fixed",
+     "text": "Security: five live advisories in underlying libraries, two of them in the path of every single request; a session-hijacking flaw in the component that serves every route in the app; a redirect in a courier reply could have pointed the server at internal addresses."
+    }
+   ]
+  },
+  {
+   "date": "2026-08-12",
+   "title": "The dispatch desk made actually usable",
+   "items": [
+    {
+     "kind": "fixed",
+     "text": "Cheaper courier services were being hidden. The quote was going out declaring a FedEx box on an export shipment regardless, so UPS Standard and every other domestic road service was filtered out before anyone saw it. Prices now show both ex-VAT and inc-VAT."
+    },
+    {
+     "kind": "added",
+     "text": "Cheaper Access Point (pickup-point) services are now quoted alongside door delivery, in parallel, merged cheapest-first. Parcel-shop services are hidden by default because you've never used them, behind a Shipping settings switch in case that changes."
+    },
+    {
+     "kind": "added",
+     "text": "Customs done properly. Every gobo declares at its SALE value (it's custom work) with the right commodity code; stocked goods declare at cost. Country of origin is a visible, editable field on every customs line, taking Shopify's value when the product has one and your blanket rule otherwise (projectors China, gobos and everything else UK). Cost prices and each product's own commodity code are…"
+    },
+    {
+     "kind": "fixed",
+     "text": "Gobo Projectors were being declared at sale value because their product names contain the word \"gobo\". Anything named as a projector is a stocked product first."
+    },
+    {
+     "kind": "fixed",
+     "text": "Label printing, end to end. Labels are now downloaded and stored by the server the moment a booking returns (an opened World Options link resolved against gizmo and showed a 404). PDFs are rendered to images at booking, because a PDF in a hidden frame prints blank inside the Shopify admin. The label prints on the selected stock with no trailing blank page. One Print label button prints every…"
+    },
+    {
+     "kind": "fixed",
+     "text": "\"Invalid Date, Parcel Ready From\" and a run of booking failures caused by empty and missing date/time fields. Ready-from now rolls forward to a future quarter-hour today, or to the next working day when booked after close or at a weekend."
+    },
+    {
+     "kind": "fixed",
+     "text": "Bookings were failing with \"Value cannot be null\" because a UK consumer address has no county and no company, and those blanks were being dropped from the request entirely rather than sent as blanks."
+    },
+    {
+     "kind": "fixed",
+     "text": "Shopify's two address lines were being glued into one, manufacturing over-long lines out of clean data while the second line went out empty. They now travel separately, wrapping at a word boundary only when a line exceeds the courier's 35-character cap."
+    },
+    {
+     "kind": "fixed",
+     "text": "Courier options said \"11 Standard\", which told the operator nothing. Every option now leads with the carrier name (\"UPS Standard\"), resolved from the service code, package type and service text, and the carrier is named even for UKMail, which the booking request can't name at all."
+    },
+    {
+     "kind": "fixed",
+     "text": "Sending FedEx signature codes on UPS bookings."
+    },
+    {
+     "kind": "added",
+     "text": "A \"Technical details\" panel on a rejected booking: World Options' exact words, the request that was sent with credentials and customer details removed, and a Copy button. The last ten failures are kept, so closing the window no longer destroys the only copy."
+    },
+    {
+     "kind": "added",
+     "text": "One safe retry. A booking that provably created nothing is retried once, 15 seconds later. A post-send silence is never retried, because the first attempt may have booked."
+    },
+    {
+     "kind": "added",
+     "text": "A dispatch manifest: everything booked on a chosen day, with courier cost ex-VAT and what the customer paid side by side, plus totals and margin."
+    },
+    {
+     "kind": "added",
+     "text": "Dispatch straight from the order page."
+    },
+    {
+     "kind": "fixed",
+     "text": "Modals no longer close on a stray backdrop click. A misclick was wiping filled forms — the customs declaration most painfully. The X is the only way out, and a confirm dialog only answers to its own buttons."
+    },
+    {
+     "kind": "improved",
+     "text": "The per-minute request ceiling was low enough that a fast run of six or seven orders hit it. Raised, and the message now says how long to wait and that nothing was booked or charged."
+    }
+   ]
+  },
+  {
+   "date": "2026-08-11",
+   "title": "One-click courier dispatch",
+   "items": [
+    {
+     "kind": "added",
+     "text": "Dispatch. Press Dispatch on an order in the Production Manager, pick a box and a courier, book, and the order is fulfilled in Shopify with tracking. Backed by your own World Options account."
+    },
+    {
+     "kind": "added",
+     "text": "Customs and international: EORI, VAT number, export reason, duties election and trade term from a new International section in Shipping settings, plus goods lines (description, quantity, unit value, commodity code, origin) collected in the dispatch window and prefilled from the order. The commercial invoice is generated for you."
+    },
+    {
+     "kind": "added",
+     "text": "Multi-parcel bookings, insurance, drop-off, signature options and cost breakdowns."
+    },
+    {
+     "kind": "added",
+     "text": "A collection window in Shipping settings (ready time and close time)."
+    },
+    {
+     "kind": "fixed",
+     "text": "Courier quote cards were showing raw markup (\"Wed, 12 Aug 2026<br/>End of business day\") because World Options puts display HTML inside data fields."
+    },
+    {
+     "kind": "fixed",
+     "text": "World Options authentication errors are translated into plain guidance instead of a raw code."
+    },
+    {
+     "kind": "fixed",
+     "text": "A poisoned data file used to load as empty and the next write would persist the wipe. Damaged files are now preserved for repair, writes refuse, and Settings shows what's paused."
+    }
+   ]
+  },
+  {
+   "date": "2026-08-10",
+   "title": "The Production Manager, money owed, and stock consumed",
+   "items": [
+    {
+     "kind": "added",
+     "text": "A Liability tab: accounts receivable from unpaid purchase orders over the last two years. Payment terms are never invented — the precedence is explicit and shown per order: Shopify's own terms on the order first, then a Net-N tag, then the house default. Bank transfer unpaid and Procurement unpaid count alongside Purchase order unpaid, so the tag becomes a payment-channel dimension with…"
+    },
+    {
+     "kind": "added",
+     "text": "Estimated stock usage. A date picker on the Production Manager; every order marked made that day has its items resolved through the same size lookup the labels use, and the glass consumed is summed by size and type (\"26.5mm Mono x 6\"). Items that don't resolve are listed by order, never silently dropped. Prints as an A4 day sheet."
+    },
+    {
+     "kind": "added",
+     "text": "Order tags now follow the work. Printing a label moves Unprocessed to IP; Mark made moves IP to PC, and unticking reverses it. This is the app's first and only write to Shopify, handed to the routes directly — the AI chat stays strictly read-only."
+    },
+    {
+     "kind": "added",
+     "text": "Printed and made state on every order, with the maker recorded."
+    },
+    {
+     "kind": "added",
+     "text": "A \"Possibly missing from production\" strip: paid gobo orders that never got the production tag, now with the company name beside the order number, a Proof link, and an \"Add to queue\" button that tags the order into production in one click."
+    },
+    {
+     "kind": "added",
+     "text": "Embedded proof preview: the artwork proposal opens inside the app rather than in a separate tab."
+    },
+    {
+     "kind": "added",
+     "text": "Trade radar on the Customers tab: overdue repeat accounts (customers with a reorder rhythm whose next order hasn't come, with what they bought last and a mailto), plus untagged likely-trade customers so sector analytics see the whole trade side."
+    },
+    {
+     "kind": "added",
+     "text": "A repeat-customer line above the label preview (\"Repeat customer: 7 orders, previous #104102\")."
+    },
+    {
+     "kind": "added",
+     "text": "A self-serve size sheet, so the gobo size list can be replaced without a developer."
+    },
+    {
+     "kind": "added",
+     "text": "Failure alerts. An hourly watchdog probes the Shopify connection; three consecutive failures raise an alert, pause scheduled audits and email you, with a recovery email when it comes back."
+    },
+    {
+     "kind": "improved",
+     "text": "The Labels tab is renamed Production Manager, because it now manages the whole production lifecycle."
+    },
+    {
+     "kind": "improved",
+     "text": "Urgency on labels comes from the customer's own dates. The old guess based on shipping charges and express service names is gone; it now reads each item's \"Date Required\" property, or the Wedding Date when that's all there is, taking the earliest across the order. Dates parse day-first only — this is a UK store and a month-first misread would set a wrong deadline. The label never says \"Priority\"."
+    },
+    {
+     "kind": "improved",
+     "text": "Cancelled and refunded orders print a heavy DO NOT MAKE bar on the label, show a red chip in the list, and are excluded from every bulk print. Fulfilled ones grey out and stay out too."
+    },
+    {
+     "kind": "improved",
+     "text": "Stock usage groups by glass family rather than order variant: one \"26.5mm Mono\" total instead of a row per variant, since Original and Copy consume the same physical blank. The labels still show original vs copy, because the maker needs it."
+    },
+    {
+     "kind": "fixed",
+     "text": "A phantom blank-glass row in the stock report, caused by wedding gobos and older products carrying no Glass Type property. The glass is now derived from the SKU or variant, and items with no glass information at all read \"(type not recorded)\" instead of an empty cell."
+    },
+    {
+     "kind": "fixed",
+     "text": "An order of one line with quantity 12 read \"1 item\", hiding the real workload. Rows now read \"1 item · 12 pcs\"."
+    },
+    {
+     "kind": "fixed",
+     "text": "Shopify throttling was unhandled, so busy moments could silently corrupt money figures, drop orders from print runs, or lose tags."
+    },
+    {
+     "kind": "fixed",
+     "text": "\"Additional Shipping Charges\" line items were printing on labels as things to build."
+    },
+    {
+     "kind": "fixed",
+     "text": "Flagged CHECK rows print the reason only, no product title — long generic titles like \"Create Your Own Gobo\" were pushing content off the sheet."
+    },
+    {
+     "kind": "fixed",
+     "text": "The proof preview rendered blank, and had a stray scrollbar gutter beside it."
+    }
+   ]
+  },
+  {
+   "date": "2026-08-07",
+   "title": "Production Labels",
+   "items": [
+    {
+     "kind": "added",
+     "text": "A Labels tab that lists every Shopify order carrying the production tag and prints a production label for each: order number, company (or customer name), and each item with its options."
+    },
+    {
+     "kind": "added",
+     "text": "Print production label from the Shopify order page itself. It appears in the order's print actions and previews in Shopify's own print modal, so you never navigate away from the order mid-workflow. Single and bulk."
+    },
+    {
+     "kind": "added",
+     "text": "Labels sized to real label stock, with a true-size on-screen preview and shrink-to-fit, so the preview is what the printer produces. 4x6 default with 4x3, 4x2, 2x4 and A4 presets, a portrait rotation toggle, and the choice remembered per browser."
+    },
+    {
+     "kind": "added",
+     "text": "Production size looked up per item from the gobo size sheet, with a \"Size check\" button that runs the last 200 orders through the exact lookup the labels print with and reports every gap, so the sheet can be corrected before it costs a mis-cut."
+    },
+    {
+     "kind": "added",
+     "text": "An overrides file that survives sheet replacements, holding your rulings on sizes the sheet gets wrong or doesn't have (Pointe family 15.9, Equinox XP80W 44, Source Four Zoom A 100 and B 86, Maverick Force X Spot 23.7, Intimidator Spot 200/300 23.7, and others)."
+    },
+    {
+     "kind": "added",
+     "text": "A \"5 Star Service\" strip on the bottom edge of every label, since the label rides on the parcel: five stars and \"Leave us a review on Trustpilot\"."
+    },
+    {
+     "kind": "added",
+     "text": "A Preview button on every label row, and the row buttons collapse to icons on a phone."
+    },
+    {
+     "kind": "improved",
+     "text": "The label is rebuilt to your own design, ported from your hand-built label tool: the logo lockup over a big company name, a quiet \"Order:\" line closed by a heavy rule, then one-line item rows of bold quantity and size (\"2x 26.5mm\"), an outlined glass-type chip, and the artwork title in quotes. Manufacturer and model no longer print — the size is the operative fact."
+    },
+    {
+     "kind": "improved",
+     "text": "Glass types shorten on the chip: \"Monochrome Glass - Original\" becomes \"Mono - Original\"."
+    },
+    {
+     "kind": "fixed",
+     "text": "Only half the gobo items on recent orders were resolving to a size. Model names in the store are written several ways the sheet isn't — comma-bundled dropdowns (\"ESPRITE, iESPRITE\"), slash bundles (\"Ikon LED / Ikon IR\"), different punctuation (\"Source Four (B Size)\" vs \"Source Four B-Size\"), and per-manufacturer dropdowns named \"American DJ Models\" rather than \"Model\". All of these now match."
+    },
+    {
+     "kind": "fixed",
+     "text": "Prices were reaching labels, because the store's dropdowns price the add-ons: \"Monochrome Glass - Original £85\". Trailing price tokens are stripped from the glass type, options, manufacturer and model — which also stops a priced model string breaking the size lookup. Wattages (40W/80W) and model codes (E100Z, AECO 10) are untouched."
+    },
+    {
+     "kind": "fixed",
+     "text": "Prices never print on production labels at all."
+    },
+    {
+     "kind": "fixed",
+     "text": "The label showed a bare \"104231\" instead of the full order number as the admin shows it, \"#104231\", including any store prefix."
+    },
+    {
+     "kind": "fixed",
+     "text": "\"Preview unable to load\" in the Shopify print modal, chased through several rounds to a working fix."
+    },
+    {
+     "kind": "fixed",
+     "text": "A production outage. The app was returning 502 with no healthy container, because an unpinned dependency had resolved to a new major version that removed a module the app imports, so the container crash-looped on boot. All dependencies are now pinned exactly."
+    },
+    {
+     "kind": "fixed",
+     "text": "A PDF export that was unreadable, false alerts, unbounded AI spend, and a rate-limit bypass."
+    },
+    {
+     "kind": "fixed",
+     "text": "Insight card colours were dead app-wide — win, warning and opportunity all rendered the same."
+    },
+    {
+     "kind": "fixed",
+     "text": "The review QR printed illegibly on the shop's printer, so the strip is back to text only."
+    }
+   ]
+  },
+  {
+   "date": "2026-06-04",
+   "title": "",
+   "items": [
+    {
+     "kind": "added",
+     "text": "AI token usage and cost tracking, per call and per audit type, with a rolling summary of the last N days. Measure-first, so pricing decisions are based on real figures."
+    }
+   ]
+  },
+  {
+   "date": "2026-06-03",
+   "title": "",
+   "items": [
+    {
+     "kind": "added",
+     "text": "Sales by sector on the Overview: revenue, orders and average order value for the last 28 days split by customer tag (B2B / B2C / Procure), with each sector name linking into that sector's own audit."
+    },
+    {
+     "kind": "added",
+     "text": "PDF export. A Download button on Overview, SEO, Keywords, Products and Customers saves the tab as a clean report, with the sidebar, chat box and controls stripped out and cards kept whole across pages."
+    },
+    {
+     "kind": "added",
+     "text": "A \"what changed since your last run\" strip on every audit tab, showing the run-over-run movement of each headline figure."
+    },
+    {
+     "kind": "added",
+     "text": "Scheduled refresh and change alerts. The audits can re-run on their own on a schedule and flag notable moves as in-app alerts. Off by default, since it spends AI credits automatically."
+    },
+    {
+     "kind": "fixed",
+     "text": "Bar charts overlapped the axis: the first bar's left half crossed into the tick labels and the last bar spilled past the right edge."
+    }
+   ]
+  },
+  {
+   "date": "2026-06-02",
+   "title": "",
+   "items": [
+    {
+     "kind": "added",
+     "text": "Skills: a permanent, merchant-authored knowledge library. Save titled instructions and playbooks (brand voice, discounting policy, SEO checklist, launch playbook) and the copilot follows them in chat and in every analysis."
+    },
+    {
+     "kind": "added",
+     "text": "Per-sector customer audits by customer tag, plus a Comprehensive audit that analyses everyone and compares the sectors side by side."
+    },
+    {
+     "kind": "added",
+     "text": "\"Refresh all\": one sidebar button re-runs Overview, SEO, Keywords and Customers in sequence, with progress. Behind a confirm, since it spends AI credits."
+    },
+    {
+     "kind": "added",
+     "text": "\"Ask about this report\": a chat box on every audit tab, scoped to that report."
+    },
+    {
+     "kind": "added",
+     "text": "Live-streaming chat. The copilot now shows real progress as it works (\"Reading Orders, Google Analytics 4\") instead of canned loading messages."
+    },
+    {
+     "kind": "fixed",
+     "text": "AI tab results are saved on the server. Previously they lived only in the browser, and the Shopify admin's storage gets cleared, so closing and reopening the app lost every result and every tab had to be re-run, burning tokens each time."
+    },
+    {
+     "kind": "improved",
+     "text": "Audits are noticeably faster: each one now fetches all its data at once instead of one source after another."
+    },
+    {
+     "kind": "fixed",
+     "text": "Chart labels clipping into the chart title when a value reached the top of the scale."
+    },
+    {
+     "kind": "fixed",
+     "text": "The \"Refresh all\" button spanned the sidebar edge to edge while every nav item is inset."
+    }
+   ]
+  },
+  {
+   "date": "2026-06-01",
+   "title": "",
+   "items": [
+    {
+     "kind": "added",
+     "text": "A Keywords tab: top queries from Search Console with clicks, impressions, CTR and position, page-2 and top-3 opportunity badges, a money-ranked plan, plus paid-search CPC optimisation from Google Ads (spend, CPC, conversions, ROAS, per-campaign table with losing-ROAS rows flagged) and a URL keyword scraper."
+    },
+    {
+     "kind": "added",
+     "text": "A Customers & retention tab: total customers, repeat-purchase rate, average lifetime value, new in 30 days, at-risk count, a new-customers-over-time chart, and RFM-style segments (Champions, Loyal, New, At risk, One and done, Prospects) with counts and lifetime revenue."
+    },
+    {
+     "kind": "added",
+     "text": "Impact tracking. Every recommendation gets a Track button that snapshots your 28-day headline figures at the moment you start acting on it, then shows how they've moved since, with a Conclude action that writes the result back as a durable learning."
+    },
+    {
+     "kind": "added",
+     "text": "Dashboard customisation: drag to reorder Overview KPI cards, hide the ones you don't want, with Reset."
+    },
+    {
+     "kind": "added",
+     "text": "A Connections panel in Settings showing Shopify, Claude, GA4, Search Console and Google Ads each as Connected / Needs setup / Not connected, with a one-line guided fix."
+    },
+    {
+     "kind": "added",
+     "text": "Sparklines on the KPI cards and click-to-expand on every chart."
+    },
+    {
+     "kind": "added",
+     "text": "\"Show the data behind this\": each chat answer can expand to list every source it pulled from with a snippet of the actual data."
+    },
+    {
+     "kind": "added",
+     "text": "Plain-English definitions on hover for every KPI label (repeat rate, ROAS, average position, CTR, lifetime value)."
+    },
+    {
+     "kind": "improved",
+     "text": "Deeper reasoning in the copilot, and richer memory."
+    }
+   ]
+  },
+  {
+   "date": "2026-05-29",
+   "title": "",
+   "items": [
+    {
+     "kind": "added",
+     "text": "Google Search Console and Google Analytics 4 connected, read-only, via a Connect button."
+    },
+    {
+     "kind": "added",
+     "text": "A Products tab: best-sellers-first product list with 28-day units and revenue and instant search, and a per-product optimisation plan fusing that product's search queries, traffic, sales and live on-page SEO."
+    },
+    {
+     "kind": "added",
+     "text": "Memory and follow-through. The copilot captures durable facts, decisions and your own commitments, carries them into future conversations and audits, and checks in on open follow-ups. A Memory tab to review, mark done, dismiss or delete."
+    },
+    {
+     "kind": "added",
+     "text": "\"Learn my store\": crawls your homepage, pages and blog and builds a durable store profile that's injected into every answer."
+    },
+    {
+     "kind": "added",
+     "text": "24-month trends and a much richer chart set: every chart now shows where its data came from, axis titles, an average reference line, a peak marker and an emphasised end point."
+    },
+    {
+     "kind": "improved",
+     "text": "A premium dark redesign of the whole interface."
+    },
+    {
+     "kind": "improved",
+     "text": "The SEO tab becomes a money-focused hub: opportunities ranked by revenue with supporting numbers and expected impact, leading with Top opportunities rather than raw findings."
+    },
+    {
+     "kind": "fixed",
+     "text": "Tabs no longer auto-run and spend AI credits the moment you click them (including on app load). Overview, SEO and Products now open to a Run card that says whether it uses credits. Cached results skip the gate."
+    },
+    {
+     "kind": "fixed",
+     "text": "Google API errors now show Google's actual message (\"this API has not been used in project N before, or it is disabled\") instead of a misleading generic \"denied access\"."
+    },
+    {
+     "kind": "fixed",
+     "text": "A cross-site scripting hole on the Google connect callback page, and a memory limit that wasn't enforced at its own ceiling."
+    },
+    {
+     "kind": "improved",
+     "text": "Security hardening: rate limiting on every endpoint plus a global AI-call ceiling, request-size caps, a full content security policy, an SSRF guard, and the removal of the shared-password login path entirely (access is now exclusively a verified Shopify session)."
+    }
+   ]
+  },
+  {
+   "date": "2026-05-28",
+   "title": "Store Copilot",
+   "items": [
+    {
+     "kind": "added",
+     "text": "Store Copilot: an embedded Claude chat inside the Shopify admin, with a premium app shell, structured responses and an Overview dashboard."
+    },
+    {
+     "kind": "added",
+     "text": "Store Profile: persistent custom instructions that steer the copilot — business model, priorities, brand voice, things to avoid — with structured fields and toggles (track inventory, be concise, be proactive, flag anomalies). Stored on the server, because browser storage isn't reliable inside the Shopify admin frame."
+    },
+    {
+     "kind": "added",
+     "text": "An SEO tab: a live audit of the storefront (titles, meta, canonical, robots, structured data, alt text, H1s), robots.txt and sitemap, plus product-level signals (alt coverage, thin content, duplicate titles), producing a scorecard and prioritised findings."
+    },
+    {
+     "kind": "improved",
+     "text": "Icons swapped to a consistent set throughout."
+    },
+    {
+     "kind": "improved",
+     "text": "Security hardening on the embedded connection, and the chat page hidden from direct browser visits."
+    }
+   ]
+  }
+ ]
+}

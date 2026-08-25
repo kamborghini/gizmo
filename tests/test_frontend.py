@@ -1237,6 +1237,20 @@ def t_a_parcel_whose_address_moved_is_not_quietly_fulfilled():
        "which asks once and then proceeds on the answer")
 
 
+@test
+def t_the_app_can_show_its_own_release_notes_and_take_a_request():
+    """The app has to be able to say what it IS and what just changed, and
+    catch a request at the moment somebody notices the gap."""
+    ok("'/api/updates'" in SCRIPT, "the updates endpoint is reached from the SPA")
+    ok("function paintReleases" in SCRIPT and "function paintRequests" in SCRIPT,
+       "What's new and Requests both render")
+    ok("function askFeature" in SCRIPT, "and a request can be made")
+    ok("ask-feature" in HTML, "with a button that lives outside any one tab")
+    ok("nav-new-dot" in HTML and "LS_SEEN_REL" in SCRIPT,
+       "unread releases show a quiet dot, remembered per browser")
+    ok("markReleasesSeen" in SCRIPT, "and reading them clears it")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

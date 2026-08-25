@@ -632,6 +632,33 @@
            carrying the four-colour activity state, a drop bar that exists
            only mid-drag, rotten deals tinted red as a whole card.
            ------------------------------------------------------------------ */
+        /* Updates: release notes and the request box. */
+        .nav-ask { display: flex; align-items: center; gap: 8px; width: 100%; margin: 4px 0 0;
+            padding: 8px 10px; border: 1px solid var(--border-2); border-radius: var(--r-sm);
+            background: var(--surface); color: var(--ink-2); font: inherit; font-size: 12px;
+            font-weight: 500; cursor: pointer; text-align: left; }
+        .nav-ask:hover { border-color: var(--accent); color: var(--accent); }
+        .nav-ask svg { width: 15px; height: 15px; }
+        .nav-new-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+            flex: none; margin-left: auto; }
+        .rel { border-top: 1px solid var(--line); padding: 12px 0; }
+        .rel:first-of-type { border-top: 0; }
+        .rel-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+        .rel-date { font-size: 12px; font-weight: 600; color: var(--ink); }
+        .rel-title { font-size: 12px; color: var(--ink-3); }
+        .rel-item { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0; font-size: 13px;
+            color: var(--ink-2); }
+        .rel-kind { font-size: 11px; font-weight: 600; letter-spacing: .06em; border-radius: var(--r-xs);
+            padding: 0 var(--sp-2); flex: none; margin-top: 1px; }
+        .rel-kind.added { background: var(--win-bg); color: var(--win); }
+        .rel-kind.fixed { background: var(--danger-bg); color: var(--danger); }
+        .rel-kind.improved { background: var(--surface-3); color: var(--ink-2); }
+        .req-row { border-top: 1px solid var(--line); padding: 10px 0; }
+        .req-row:first-of-type { border-top: 0; }
+        .req-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .req-title { font-size: 13px; font-weight: 600; color: var(--ink); }
+        .req-detail { font-size: 12px; color: var(--ink-2); margin-top: 3px; white-space: pre-wrap; }
+        .req-meta { font-size: 11px; color: var(--ink-3); margin-top: 3px; }
         .crm-wrap { max-width: 1600px; }
         /* The board earns the width; lists and charts read best at the house
            measure, so every other segment caps itself back to it. */
@@ -1532,6 +1559,7 @@
             <div class="convo-head"><span>Conversations</span>
                 <button class="icon-btn" id="new-convo" title="New chat"></button></div>
             <div class="convos" id="convos"></div>
+            <button class="nav-ask" id="ask-feature" title="Ask for something the app cannot do yet"></button>
             <div class="side-foot"><span class="dot"></span><span class="auth-account" id="auth-account"></span>
                 <button class="btn" id="clock-btn" style="display:none;margin-left:auto"></button>
                 <button class="icon-btn" id="logout-btn" title="Log out"></button>
@@ -1806,6 +1834,8 @@
         $('nav-skills').append(ico(I.book), document.createTextNode('Skills'));
         $('nav-chat').append(ico(I.chat), document.createTextNode('Chat'));
         $('nav-guide').append(ico(I.helpCircle), document.createTextNode('Guide'));
+        $('ask-feature').append(ico(I.spark), document.createTextNode('Ask for a feature'));
+        $('ask-feature').onclick = () => askFeature(currentView());
         $('refresh-all').append(ico(I.rotate), el('span', 'nr-label', 'Refresh all'));
         $('refresh-all').onclick = refreshAll;
         $('new-convo').innerHTML = I.plus;
@@ -7555,9 +7585,43 @@
                 ['Shipping settings', 'Origin address, box presets, collection window, insurance defaults, EORI and the World Options credentials. Credentials are write-only: the app never shows them again and never puts them in a backup.'],
             ]},
         ];
+        /* ==================================================================
+           Guide, What's new and Requests share the one tab: they are the
+           app talking ABOUT itself. Release notes ship with the release, so
+           the panel always describes the code actually running.
+           ================================================================== */
+        let guideSeg = 'guide', updCache = null;
+        const LS_SEEN_REL = 'sc_seen_release';
+        async function loadUpdates(force) {
+            if (updCache && !force) return updCache;
+            updCache = await api('/api/updates', {});
+            return updCache;
+        }
+        function markReleasesSeen() {
+            try {
+                const latest = ((updCache || {}).version || {}).latest || '';
+                if (latest) localStorage.setItem(LS_SEEN_REL, latest);
+            } catch (e) {}
+            const d = $('nav-guide') && $('nav-guide').querySelector('.nav-new-dot');
+            if (d) d.remove();
+        }
+        async function updatesBadge() {
+            /* A quiet dot on Guide when the running build has notes the person
+               has not read. Never a number, never a toast: it is news, not work. */
+            try {
+                const u = await loadUpdates();
+                const latest = (u.version || {}).latest || '';
+                let seen = '';
+                try { seen = localStorage.getItem(LS_SEEN_REL) || ''; } catch (e) {}
+                const nav = $('nav-guide');
+                if (!nav) return;
+                const had = nav.querySelector('.nav-new-dot');
+                if (latest && latest !== seen) { if (!had) nav.append(el('span', 'nav-new-dot')); }
+                else if (had) had.remove();
+            } catch (e) { /* the dot is never worth an error */ }
+        }
         function renderGuide() {
             const box = $('guide-content');
-            if (box.dataset.built) return;          // static content, build once
             box.dataset.built = '1';
             box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.book;
@@ -7565,22 +7629,152 @@
             ht.append(el('h2', null, 'Guide'),
                       el('p', null, 'How the desk runs, and what to do when something goes wrong.'));
             hero.append(badge, ht);
-            const pr = el('button', 'btn'); pr.append(ico(I.printer), document.createTextNode('Print this'));
-            pr.style.marginLeft = 'auto';
-            pr.onclick = printGuide;
-            hero.append(pr);
+            if (guideSeg === 'guide') {
+                const pr = el('button', 'btn'); pr.append(ico(I.printer), document.createTextNode('Print this'));
+                pr.style.marginLeft = 'auto';
+                pr.onclick = printGuide;
+                hero.append(pr);
+            }
             box.append(hero);
-            GUIDE.forEach(sec => {
-                const card = el('div', 'card'); card.style.marginTop = '14px';
-                const h = el('div', 'section-title', sec.h); h.style.margin = '0 0 8px';
-                card.append(h);
-                sec.body.forEach(([t, d]) => {
-                    const row = el('div'); row.style.cssText = 'padding:9px 0;border-top:1px solid var(--line)';
-                    row.append(el('div', 'setting-title', t), el('div', 'setting-sub', d));
-                    card.append(row);
-                });
-                box.append(card);
+            const seg = el('div', 'lbl-seg');
+            [['guide', 'Guide'], ['new', "What's new"], ['requests', 'Requests']].forEach(([k, lab]) => {
+                const b = el('button', 'lbl-segbtn' + (guideSeg === k ? ' on' : ''), lab);
+                b.onclick = () => { guideSeg = k; renderGuide(); };
+                seg.append(b);
             });
+            box.append(seg);
+            const host = el('div'); host.style.marginTop = '12px'; box.append(host);
+            if (guideSeg === 'guide') {
+                GUIDE.forEach(sec => {
+                    const card = el('div', 'card'); card.style.marginTop = '14px';
+                    const h = el('div', 'section-title', sec.h); h.style.margin = '0 0 8px';
+                    card.append(h);
+                    sec.body.forEach(([t, d]) => {
+                        const row = el('div'); row.style.cssText = 'padding:9px 0;border-top:1px solid var(--line)';
+                        row.append(el('div', 'setting-title', t), el('div', 'setting-sub', d));
+                        card.append(row);
+                    });
+                    host.append(card);
+                });
+                return;
+            }
+            const wait = el('div', 'thinking');
+            wait.append(loader(), el('span', null, 'Reading…'));
+            host.append(wait);
+            loadUpdates(true).then(u => {
+                host.innerHTML = '';
+                if (guideSeg === 'new') paintReleases(host, u);
+                else paintRequests(host, u);
+            }).catch(e => {
+                host.innerHTML = '';
+                host.append(el('div', 'msg error', e.message || 'Could not read the updates.'));
+            });
+        }
+        function paintReleases(host, u) {
+            const v = u.version || {};
+            const card = el('div', 'card');
+            card.append(el('div', 'section-title', 'What\u2019s new'));
+            const rels = u.releases || [];
+            if (!rels.length) {
+                card.append(el('div', 'empty', 'No release notes yet.'));
+            } else {
+                rels.forEach(r => {
+                    const box2 = el('div', 'rel');
+                    const h = el('div', 'rel-head');
+                    h.append(el('span', 'rel-date', fmtDate(r.date)));
+                    if (r.title) h.append(el('span', 'rel-title', r.title));
+                    box2.append(h);
+                    (r.items || []).forEach(it => {
+                        const row = el('div', 'rel-item');
+                        row.append(el('span', 'rel-kind ' + (it.kind || 'improved'),
+                            (it.kind || 'improved').toUpperCase()));
+                        row.append(el('span', null, it.text));
+                        box2.append(row);
+                    });
+                    card.append(box2);
+                });
+            }
+            host.append(card);
+            /* The version line: what this app IS right now, in plain terms. */
+            const foot = el('div', 'setting-sub');
+            foot.style.marginTop = '10px';
+            foot.textContent = 'Running the ' + (v.latest ? fmtDate(v.latest) + ' release' : 'current build')
+                + (v.releases ? ' \u00b7 ' + v.releases + ' releases on record' : '')
+                + (v.sha ? ' \u00b7 build ' + v.sha : '')
+                + (v.started_at ? ' \u00b7 running since ' + fmtDate(v.started_at) : '');
+            host.append(foot);
+            markReleasesSeen();
+        }
+        function paintRequests(host, u) {
+            const card = el('div', 'card');
+            const head = el('div', 'lbl-toolbar');
+            head.append(el('div', 'section-title', 'Feature requests'));
+            const add = el('button', 'btn btn-primary');
+            add.append(ico(I.plus), document.createTextNode('Ask for something'));
+            add.onclick = () => askFeature();
+            head.append(add);
+            card.append(head);
+            card.append(el('p', 'field-help', 'Anything the app cannot do yet, or does awkwardly. '
+                + 'Short and specific beats polished.'));
+            const rows = u.requests || [];
+            if (!rows.length) card.append(el('div', 'empty', 'Nothing asked for yet.'));
+            rows.forEach(r => {
+                const row = el('div', 'req-row');
+                const h = el('div', 'req-head');
+                h.append(el('span', 'req-title', r.title));
+                const tone = r.state === 'shipped' ? ' made' : r.state === 'declined' ? ' bad'
+                    : r.state === 'planned' ? ' warn' : ' note';
+                h.append(el('span', 'lbl-chip' + tone, (r.state || 'open').toUpperCase()));
+                if (u.can_triage) {
+                    const sel = el('select', 'lbl-size');
+                    ['open', 'planned', 'shipped', 'declined'].forEach(st => {
+                        const o = el('option', null, st); o.value = st;
+                        if (r.state === st) o.selected = true; sel.append(o);
+                    });
+                    sel.style.marginLeft = 'auto';
+                    sel.onchange = async () => {
+                        try {
+                            await api('/api/updates', { op: 'state', id: r.id, state: sel.value });
+                            updCache = null; renderGuide();
+                        } catch (e) { toastError(e.message); }
+                    };
+                    h.append(sel);
+                }
+                row.append(h);
+                if (r.detail) row.append(el('div', 'req-detail', r.detail));
+                const who = (u.names || {})[r.by] || '';
+                row.append(el('div', 'req-meta', [who, fmtDate(r.at), r.note].filter(Boolean).join(' \u00b7 ')));
+                card.append(row);
+            });
+            host.append(card);
+        }
+        function askFeature(where) {
+            /* Reachable from every screen: the moment you notice a gap is the
+               moment worth capturing, not later from a different tab. */
+            const m = crmModal('Ask for a feature');
+            m.body.append(el('p', 'field-help', 'What should the app do that it does not do yet? '
+                + 'It lands in Guide \u2192 Requests, and Cameron gets an email.'));
+            const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
+            const t = crmText('', 'One line: what you want');
+            crmField(grid, 'The ask', t);
+            const d = document.createElement('textarea');
+            d.className = 'lia-chase-body'; d.rows = 4;
+            d.placeholder = 'Optional: when it would help, what you do instead today\u2026';
+            m.body.append(d);
+            const bar = m.foot();
+            const go = el('button', 'btn btn-primary', 'Send it');
+            go.onclick = async () => {
+                if (!t.value.trim()) { toastError('Give it a one-line title.'); return; }
+                go.disabled = true;
+                try {
+                    await api('/api/updates', { op: 'request', title: t.value.trim(),
+                        detail: d.value.trim(), where: where || '' });
+                    updCache = null;
+                    m.close();
+                    toastOk('Sent. Thank you \u2014 it is on the list.');
+                } catch (e) { go.disabled = false; toastError(e.message); }
+            };
+            bar.append(go);
         }
         function printGuide() {
             const host = $('label-print'); host.innerHTML = '';
@@ -12072,6 +12266,7 @@
                 if (p.me && p.me.must_change) { authShow('change'); return; }
                 ov.style.display = 'none'; ov.dataset.mode = '';
                 applyRoleChrome();
+                updatesBadge();
                 // A deep link that hit the login screen carries on now.
                 const pend = window.__pendingAdminLink; window.__pendingAdminLink = null;
                 if (pend) (pend.dispatch ? dispatchFromAdminLink : printFromAdminLink)(pend.id);
@@ -12149,6 +12344,7 @@
                 if (st.me.must_change) { authShow('change'); return; }
                 const ov = $('auth-overlay'); if (ov) { ov.style.display = 'none'; ov.dataset.mode = ''; }
                 applyRoleChrome();
+                updatesBadge();
                 window.__pendingAdminLink = null;   // the boot-time call ran with a live session
             } catch (e) {
                 attempt = attempt || 0;
@@ -12543,6 +12739,10 @@
             host.append(list, el('div', 'files-hint',
                 'The newest actions are at the top. The feed shows the last 600; the full ledger keeps 8,000 and is in every backup.'));
         }
+        function currentView() {
+            const n = document.querySelector('.nav-item.active');
+            return (n && n.dataset.view) || '';
+        }
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
             ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'crm', 'mail', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
@@ -12778,7 +12978,14 @@
                             r.readAsDataURL(f);
                         });
                         const out = await api('/api/restore', { zip: b64 });
-                        addToast('Restored ' + out.restored + ' files. Sign in again to carry on.', 'good');
+                        /* Anything the restore would not take is said out loud:
+                           a green toast over a silently skipped store is how a
+                           lost CRM looks like a successful restore. */
+                        const miss = out.skipped || [];
+                        if (miss.length) toastError('Restored ' + out.restored + ' files, but SKIPPED: '
+                            + miss.slice(0, 6).join(', ') + (miss.length > 6 ? '…' : '')
+                            + '. Sign in again to carry on.');
+                        else addToast('Restored ' + out.restored + ' files. Sign in again to carry on.', 'good');
                         setAppSession('');
                         setTimeout(() => authShow('login'), 800);
                     } catch (e) { toastError(e.message || 'The restore failed.'); }

@@ -137,6 +137,9 @@ ANALYSIS_CACHE_MAX_BYTES = int(os.environ.get("ANALYSIS_CACHE_MAX_BYTES", "80000
 CHAT_CONTEXT_CAP   = int(os.environ.get("CHAT_CONTEXT_CAP", "12000"))  # max chars of page-report context injected into chat
 SCHEDULE_PATH      = os.environ.get("SCHEDULE_PATH", "/data/schedule.json")  # auto-refresh config (off by default)
 ALERTS_PATH        = os.environ.get("ALERTS_PATH", "/data/alerts.json")      # change alerts from scheduled runs
+FEEDBACK_PATH      = os.environ.get("FEEDBACK_PATH", "/data/feedback.json")  # feature requests from the desk
+CHANGELOG_PATH     = os.environ.get("CHANGELOG_PATH",
+                                    os.path.join(os.path.dirname(__file__), "data", "changelog.json"))
 ALERTS_MAX         = int(os.environ.get("ALERTS_MAX", "60"))
 SCHEDULE_CHECK_SECS = int(os.environ.get("SCHEDULE_CHECK_SECS", "900"))       # how often the scheduler wakes to check
 USAGE_PATH         = os.environ.get("USAGE_PATH", "/data/usage.json")          # AI token-usage + cost log (measurement)
@@ -9578,6 +9581,38 @@ def _crm_link_order_customer(order: dict) -> None:
         logger.exception("crm: order-customer link failed")
 
 
+_crm_bg_tasks: set = set()
+
+
+async def _crm_link_order_later(body_txt: str) -> None:
+    """Link an arriving order's customer AFTER the webhook has been answered,
+    but on the EVENT LOOP - never in a thread.
+
+    The CRM store's entire safety story is that one writer runs at a time:
+    every route loads, mutates and writes without awaiting in between, so two
+    writes cannot interleave. A worker thread runs in genuine parallel with
+    the loop, so it can read the store, have a route write a won deal
+    underneath it, and then install its own stale snapshot - or truncate the
+    store outright, because _write_crm's temp path is shared. Deferring to the
+    loop keeps the receiver fast (the ack is already sent) and keeps the
+    single-writer rule intact."""
+    try:
+        _crm_link_order_customer(json.loads(body_txt))
+    except Exception:
+        logger.exception("crm: order-customer link failed")
+
+
+def _crm_link_order_soon(body_txt: str) -> None:
+    """Schedule the link and HOLD A REFERENCE: a bare create_task can be
+    garbage-collected before it runs."""
+    try:
+        t = asyncio.get_running_loop().create_task(_crm_link_order_later(body_txt))
+        _crm_bg_tasks.add(t)
+        t.add_done_callback(_crm_bg_tasks.discard)
+    except RuntimeError:
+        pass          # no running loop: nothing to defer to
+
+
 def _mail_crm_match(email: str) -> Optional[dict]:
     """The reason this lives here and not in a helpdesk: the sender might
     already be in the CRM. A match puts the relationship beside the email."""
@@ -9616,6 +9651,83 @@ def _mail_crm_match(email: str) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 USERS_PATH = os.environ.get("USERS_PATH", "/data/users.json")
 SESSIONS_PATH = os.environ.get("SESSIONS_PATH", "/data/sessions.json")
+# ---------------------------------------------------------------------------
+# What's new: the release notes that ship WITH the release, and the desk's own
+# feature requests. The changelog is a repo file, so the running build always
+# carries exactly the notes for the code that is running - a changelog kept on
+# the volume would drift from the deploy the moment either changed alone.
+# ---------------------------------------------------------------------------
+# Keyed on (path, mtime), not mtime alone: keyed on time only, a cache built
+# from one file can be served for another that happens to share a timestamp.
+_changelog_cache: dict = {"mtime": None, "releases": []}
+
+
+def _load_changelog() -> list:
+    """Releases newest first. A malformed or missing file costs the What's new
+    panel, never the app: it is notes, not data."""
+    try:
+        key = (CHANGELOG_PATH, os.path.getmtime(CHANGELOG_PATH))
+    except OSError:
+        return []
+    if _changelog_cache["mtime"] == key:
+        return _changelog_cache["releases"]
+    rows = []
+    try:
+        with open(CHANGELOG_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        for r in (data.get("releases") if isinstance(data, dict) else data) or []:
+            if not isinstance(r, dict) or not r.get("date"):
+                continue
+            items = [{"kind": str(i.get("kind") or "improved")[:12],
+                      "text": str(i.get("text") or "")[:400],
+                      "tab": str(i.get("tab") or "")[:20]}
+                     for i in (r.get("items") or []) if isinstance(i, dict) and i.get("text")]
+            if items:
+                rows.append({"date": str(r["date"])[:10],
+                             "title": str(r.get("title") or "")[:120], "items": items})
+        rows.sort(key=lambda r: r["date"], reverse=True)
+    except Exception:
+        logger.exception("changelog: could not read %s", CHANGELOG_PATH)
+        # Last good notes for THIS file, or nothing - never another file's.
+        return (_changelog_cache["releases"]
+                if (_changelog_cache["mtime"] or ("", 0))[0] == CHANGELOG_PATH else [])
+    _changelog_cache["mtime"], _changelog_cache["releases"] = key, rows
+    return rows
+
+
+_boot_at = datetime.now(timezone.utc).isoformat()
+
+
+def _app_version() -> dict:
+    """What the running build IS: the deployed commit, when this instance
+    started, and the newest release the notes describe."""
+    rel = _load_changelog()
+    return {"sha": (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12],
+            "started_at": _boot_at,
+            "latest": (rel[0]["date"] if rel else ""),
+            "releases": len(rel)}
+
+
+def _load_feedback() -> dict:
+    d = _load_json_store(FEEDBACK_PATH, "feedback", None)
+    if not isinstance(d, dict) or "items" not in d:
+        d = {"seq": 0, "items": []}
+    return d
+
+
+def _write_feedback(d: dict) -> None:
+    if not _store_writable(FEEDBACK_PATH):
+        raise RuntimeError("feedback store is not writable")
+    os.makedirs(os.path.dirname(FEEDBACK_PATH) or ".", exist_ok=True)
+    tmp = FEEDBACK_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"feedback": d}, fh, allow_nan=False)
+    os.replace(tmp, FEEDBACK_PATH)
+
+
+FEEDBACK_STATES = ("open", "planned", "shipped", "declined")
+
+
 ACTIVITY_PATH = os.environ.get("ACTIVITY_PATH", "/data/activity.json")
 ACTIVITY_MAX = int(os.environ.get("ACTIVITY_MAX", "8000"))
 SESSION_HOURS = float(os.environ.get("SESSION_HOURS", "24"))
@@ -10477,13 +10589,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _webhook_state["last_topic"] = str(request.headers.get("x-shopify-topic") or "")
         _webhook_state["count"] += 1
         try:
-            # Off the event loop: this reads and re-scans the whole CRM store,
-            # which at the imported Pipedrive scale is a blocking parse plus an
-            # O(records) sweep - on a busy morning that stalls the receiver and
-            # Shopify starts retrying (and eventually deletes the subscription).
-            body_txt = raw.decode("utf-8", "replace")
-            asyncio.get_running_loop().run_in_executor(
-                None, lambda: _crm_link_order_customer(json.loads(body_txt)))
+            # Deferred, so the whole-store scan never stalls the receiver (a
+            # slow ack makes Shopify retry and eventually delete the
+            # subscription) - but deferred onto the LOOP, not a thread, so it
+            # cannot interleave with a CRM route mid-write.
+            _crm_link_order_soon(raw.decode("utf-8", "replace"))
         except Exception:
             pass   # the webhook's ack must never hinge on enrichment
         return PlainTextResponse("ok", status_code=200)
@@ -10815,6 +10925,86 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if ok_tab("customers") and isinstance(cache.get("customers_segments"), dict):
             out["customers_segments"] = cache["customers_segments"]
         return _json(out)
+
+    @mcp.custom_route("/api/updates", methods=["POST"])
+    async def updates_route(request: Request):
+        """What's new + the desk's feature requests. Deliberately open to every
+        signed-in account and NOT tab-gated: release notes are how a part-time
+        member learns what changed under them, and the request box is worth
+        most from the people who never get asked."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        op = str(body.get("op") or "")
+        try:
+            d = _load_feedback()
+            if op == "request":
+                title = str(body.get("title") or "").strip()[:140]
+                detail = str(body.get("detail") or "").strip()[:4000]
+                if not title:
+                    return _json({"error": "Give the request a one-line title."}, 400)
+                d["seq"] = int(d.get("seq") or 0) + 1
+                item = {"id": "r" + str(d["seq"]), "title": title, "detail": detail,
+                        "by": who, "state": "open", "note": "",
+                        "where": str(body.get("where") or "")[:20],
+                        "at": datetime.now(timezone.utc).isoformat()}
+                d.setdefault("items", []).insert(0, item)
+                d["items"] = d["items"][:500]
+                _write_feedback(d)
+                _track(who, "updates", "asked for a feature", title[:60])
+                # Best-effort: a request nobody reads is a suggestion box with
+                # no lid. Never blocks the save.
+                try:
+                    await _send_alert_email(
+                        "gizmo: " + (_team_name(who) or "someone") + " asked for a feature",
+                        [title, detail or "(no detail given)"])
+                except Exception:
+                    pass
+                return _json({"ok": True, "item": item})
+            if op == "state":
+                # Triage. Admin+, because it speaks for the whole desk.
+                if _team_level(who) < ROLE_LEVELS["admin"]:
+                    return _json({"error": "Only an admin can triage requests."}, 403)
+                rid = str(body.get("id") or "")
+                state = str(body.get("state") or "")
+                if state not in FEEDBACK_STATES:
+                    return _json({"error": "Unknown state."}, 400)
+                hit = next((x for x in d.get("items", []) if x.get("id") == rid), None)
+                if not hit:
+                    return _json({"error": "That request no longer exists."}, 404)
+                hit["state"] = state
+                if "note" in body:
+                    hit["note"] = str(body.get("note") or "").strip()[:400]
+                hit["state_at"] = datetime.now(timezone.utc).isoformat()
+                _write_feedback(d)
+                _track(who, "updates", "marked a request " + state, (hit.get("title") or "")[:60])
+                return _json({"ok": True, "item": hit})
+            if op == "delete":
+                if _team_level(who) < ROLE_LEVELS["admin"]:
+                    return _json({"error": "Only an admin can remove requests."}, 403)
+                rid = str(body.get("id") or "")
+                d["items"] = [x for x in d.get("items", []) if x.get("id") != rid]
+                _write_feedback(d)
+                return _json({"ok": True})
+            return _json({"ok": True, "releases": _load_changelog(),
+                          "version": _app_version(),
+                          "requests": d.get("items", [])[:200],
+                          "names": _team_names(), "me": who,
+                          "can_triage": _team_level(who) >= ROLE_LEVELS["admin"]})
+        except (RuntimeError, OSError):
+            # A read-only or full volume is a SAVE failure with a cause the
+            # merchant can act on, not a "check the logs".
+            return _json({"error": "That could not be saved. The data volume may be "
+                                   "unwritable; check Settings, Connections."}, 500)
+        except Exception:
+            logger.exception("updates route failed")
+            return _json({"error": "That could not be done. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/schedule", methods=["POST"])
     async def schedule_route(request: Request):
@@ -12332,9 +12522,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if not base or base in blocked or not base.lower().endswith((".json", ".jsonl", ".csv", ".bak")):
                 skipped.append(base + " (never restored)")
                 continue
-            if info.file_size > 10 * 1024 * 1024:
-                skipped.append(base + " (too large)")
-                continue
+            # The SAME ceiling the backup packs to. A smaller one here meant the
+            # backup dutifully carried the CRM and the mailbox and the restore
+            # dropped them - the two stores the backup exists for - and called
+            # the result a success. A store too big to restore fails the WHOLE
+            # restore: a partial restore of the desk is not a restore.
+            if info.file_size > BACKUP_FILE_MAX:
+                return _json({"error": base + " is larger than this app will restore ("
+                                       + str(info.file_size // (1024 * 1024)) + "MB). Nothing "
+                                       "has been changed. Raise BACKUP_FILE_MAX and try again."}, 400)
             todo.append((info, base, target))
         if not todo:
             return _json({"error": "Nothing in that zip looked like this app's backup."}, 400)
@@ -16142,8 +16338,22 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # A LIVE account only: _session_uid alone would accept a session
             # belonging to a switched-off, deleted, or still-on-its-starter-
             # password account, which every other route refuses.
+            # REQUIRE the session, do not merely tolerate one. The previous
+            # form ("if doc_who and not ...") described this rule in its
+            # comment but never enforced it: with no x-app-session header
+            # _live_uid returns "", the `and` short-circuits, and the check
+            # was skipped entirely - so a Shopify admin whose gizmo account
+            # was switched off, or explicitly denied this tab, could hand-drive
+            # this URL with the id_token Shopify puts in the app frame, read
+            # every order on it, and release them all to production.
+            # The genuinely session-less caller is the admin print-action
+            # extension, which does NOT come through here: it mints a signed
+            # URL from /sign and arrives on the authed branch above.
             doc_who = _live_uid(request)
-            if doc_who and not _uid_has_tab(doc_who, "labels"):
+            if not doc_who:
+                return deny("Open this from inside the app, or use the print button "
+                            "on the order in Shopify.")
+            if not _uid_has_tab(doc_who, "labels"):
                 return deny("Production Manager is switched off for your account.")
 
         ids = []
