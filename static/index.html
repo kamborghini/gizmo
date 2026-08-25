@@ -173,7 +173,50 @@
         .scroll { flex: 1; overflow-y: auto; }
 
         /* ---------- Overview ---------- */
-        .ov-wrap { max-width: 1120px; margin: 0 auto; padding: 32px 32px 72px; width: 100%; }
+        /* ONE width system, three measures.
+           --wrap is the page's own width and grows with the screen: this app is
+           used on a 1920 monitor and a 2560 iMac, where a fixed 1120 left a
+           third to a half of the screen as empty margin while the queue rows
+           and tables inside it were the crowded part.
+           The ladder is min-width only, deliberately: a print page is never
+           1500px, so paper keeps the 1120 measure it was designed against.
+           What must NOT follow the screen is prose. --measure is the reading
+           width for body copy and stays put however wide the monitor is; a
+           paragraph at 2,200px is not generous, it is unreadable. Widening is
+           for lists, boards, tables and second panes. */
+        :root { --wrap-read: 1120px; --wrap-data: 1600px; --wrap-pad: 32px; }
+        /* Two tiers, four stops. A tab of stacked report cards has no shape
+           that improves past 1680, so the reading tier stops there; a board or
+           a queue keeps going. Every stop is min-width, so a printed page
+           (never 1500px wide) keeps the measure it was designed against. */
+        @media (min-width: 1500px) { :root { --wrap-read: 1400px; --wrap-data: 1800px; } }
+        @media (min-width: 1900px) { :root { --wrap-read: 1680px; --wrap-data: 2040px; --wrap-pad: 40px; } }
+        @media (min-width: 2400px) { :root { --wrap-data: 2160px; } }
+        .ov-wrap { max-width: var(--wrap, var(--wrap-read)); margin: 0 auto; width: 100%;
+            padding: 32px var(--wrap-pad) 72px; }
+        /* The queues and boards opt into the wider tier. */
+        .wrap-data { --wrap: var(--wrap-data); }
+        /* Body copy inside any tab: measured, never the full wrap.
+           The cap is written in ch HERE rather than held in a custom property,
+           because ch resolves against the font size of whatever element uses
+           it: on :root that is 16px, so a 12px help line would inherit a flat
+           686px cap - 114 characters, the very thing being fixed. */
+        .measure { max-width: 78ch; }
+        /* THE OTHER HALF OF THE WIDTH WORK. Widening the page without this
+           makes the app worse, not better: a help line or an AI finding set as
+           one 1,640px line is harder to read than the same text at 1,120, and
+           far harder than at a proper measure. Everything listed here is prose
+           that a person reads a sentence at a time, so it stops where the eye
+           wants it to. Data - tables, rows, boards, metric tiles - is
+           deliberately absent from this list and takes the width instead. */
+        .setting-sub, .field-help, .know-sub, .know-text, .mem-text,
+        .sk-body, .rel-item, .insight .d, .insight .t, .action .text, .empty,
+        .crm-act-note, .lbl-preview-note, .req-detail, .summary {
+            max-width: 78ch;
+        }
+        /* An insight or action is a flex row with an icon, so cap the text
+           block rather than the row, which owns the card's background. */
+        .insight > div:not(.ico), .action > div:not(.ico) { min-width: 0; }
         .ov-hero { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 24px; }
         .ov-hero .badge { width: 40px; height: 40px; border-radius: 12px; background: var(--accent-soft); color: var(--accent-ink);
             display: grid; place-items: center; flex-shrink: 0; box-shadow: inset 0 0 0 1px var(--accent-line); }
@@ -192,7 +235,18 @@
             .ov-updated { margin-left: 56px; padding-top: 0; flex-basis: 100%; }
         }
         /* KPI cards: uppercase micro-label + large figure + colored delta */
-        .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-bottom: 24px; }
+        /* A floor AND a ceiling. auto-fill with only a floor turned a 2,560px
+           screen into eleven 170px strips with the labels wrapping; a metric
+           card wants to be read at a glance, so the tiles grow to a comfortable
+           size and then stop, and the row simply holds fewer of them. */
+        .metrics { display: grid; gap: 12px; margin-bottom: 24px;
+            grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+        @media (min-width: 1500px) {
+            .metrics { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+        }
+        @media (min-width: 1800px) {
+            .metrics { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+        }
         .stat { position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm);
             padding: 16px 16px; box-shadow: var(--sh-1); animation: fadeUp .4s ease backwards; }
         /* No corner glow: on a light card it reads as a stain behind the number. */
@@ -485,8 +539,59 @@
         .lbl-meta { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
         /* Narrow: the date and the button words go before the customer name does. */
         @media (max-width: 900px) { .lbl-meta { display: none; } }
-        @media (max-width: 820px) { .lbl-actions .lbl-btn-txt { display: none; } .lbl-actions .btn { padding: 8px; } }
+        /* On a wide screen the row was a name on the left, buttons on the right
+           and a growing void between them, while the name itself was the part
+           being truncated. As a grid the extra width goes to the name and its
+           chips (which is what gets cut off today) and the buttons stay a fixed
+           distance from the text they act on, instead of drifting to the far
+           edge of a 2,000px row. Below 1200px nothing changes: it stays the
+           flex row the tablet breakpoints were written against. */
+        @media (min-width: 1200px) {
+            .lbl-row { display: grid; align-items: center;
+                grid-template-columns: 100px minmax(0, 1fr) auto auto; }
+            .lbl-who { overflow: visible; white-space: normal; }
+            .lbl-nameline { flex-wrap: wrap; row-gap: 4px; }
+            .lbl-meta { justify-self: end; padding-right: var(--sp-3); }
+            .lbl-actions { justify-self: end; }
+        }
+        /* The queue and the label preview, side by side. The pane sticks so the
+           label stays in view while you work down a long queue, and the list
+           column keeps a sane row length instead of stretching to the screen. */
+        .lbl-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 460px);
+            gap: var(--sp-4); align-items: start; }
+        .lbl-pane { position: sticky; top: var(--sp-3); }
+        /* No order selected: the pane collapses and the list takes the row back,
+           rather than leaving a 460px hole down the side of the queue. */
+        .lbl-split:has(.lbl-pane:empty) { grid-template-columns: minmax(0, 1fr); }
+        .lbl-pane:empty { display: none; }
+        /* Wider still: display:contents dissolves the .lbl-who box so the name
+           and the "Company - 3 items - 6 pcs" line become two real columns
+           rather than two stacked lines with a growing void beside them. The
+           width buys information, which is the only thing it is worth buying. */
+        @media (min-width: 1500px) {
+            .lbl-row { grid-template-columns: 100px minmax(220px, 1fr) minmax(0, 210px) auto auto; }
+            .lbl-who { display: contents; }
+            .lbl-who .sub { align-self: center; font-size: 12px; overflow: hidden;
+                text-overflow: ellipsis; white-space: nowrap; }
+        }
+        /* Six labelled buttons measure 593px. Below 1200 that does not fit
+           beside an order number, a name and a date, so the rail was quietly
+           squeezed and the buttons painted over whatever was to their left.
+           Dropping to icons is the honest answer: every one keeps its title,
+           the row stays one line, and nothing overlaps. 820 was too low a
+           threshold - it left a 380px band where the row was already broken. */
+        @media (max-width: 1199px) { .lbl-actions .lbl-btn-txt { display: none; } .lbl-actions .btn { padding: 8px; } }
         .lbl-actions { display: flex; gap: 8px; align-items: center; flex: 0 1 auto; min-width: 0; justify-content: flex-end; }
+        /* A real overlap, not a nicety. Between 900 and 1200 the rail is a flex
+           item with min-width 0, so it is squeezed below its content (526px of
+           room for 593px of buttons) while .btn carries white-space: nowrap and
+           refuses to shrink - so the first button paints ON TOP of the date.
+           The rail reserves what it needs and the name ellipsises instead,
+           which is the part that can afford to give. Above 1200 the grid
+           already sizes the rail to its content. */
+        @media (min-width: 901px) and (max-width: 1199px) {
+            .lbl-actions { min-width: max-content; }
+        }
         /* The label is sized to the real label stock and shares the print document's
            line-height and font stack exactly, so the preview is what prints.
            All internal sizes are in em, so shrink-to-fit only has to change one
@@ -661,10 +766,11 @@
         .req-title { font-size: 13px; font-weight: 600; color: var(--ink); }
         .req-detail { font-size: 12px; color: var(--ink-2); margin-top: 3px; white-space: pre-wrap; }
         .req-meta { font-size: 11px; color: var(--ink-3); margin-top: 3px; }
-        .crm-wrap { max-width: 1600px; }
+        /* Kept as an alias so existing markup and tests still resolve. */
+        .crm-wrap { --wrap: var(--wrap-data); }
         /* The board earns the width; lists and charts read best at the house
            measure, so every other segment caps itself back to it. */
-        .crm-narrow { max-width: 1120px; }
+        .crm-narrow { max-width: 1120px; margin-left: auto; margin-right: auto; }
         .crm-board { display: flex; gap: var(--sp-2); overflow-x: auto; align-items: flex-start;
             padding-bottom: var(--sp-3); min-height: 300px; }
         .crm-col { min-width: 228px; flex: 1 0 228px; background: var(--surface-2);
@@ -1094,7 +1200,15 @@
         .label-sheet .ls-onote { font-size: .9em; font-weight: 500; color: #111; margin-top: .55em; overflow-wrap: break-word; }
         .label-sheet .ls-onote b { font-weight: 800; }
         /* liability / accounts receivable */
-        .lia-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--sp-3); margin-bottom: 12px; }
+        /* auto-FIT stretches its tracks to fill, so six summary tiles became six
+           very wide ones on a big screen. A ceiling stops them and the row
+           stays left-aligned instead. */
+        .lia-grid { display: grid; gap: var(--sp-3); margin-bottom: 12px;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+        @media (min-width: 1500px) {
+            .lia-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 280px));
+                justify-content: start; }
+        }
         .lia-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm);
             padding: 12px 16px; box-shadow: var(--sh-1); }
         .lia-k { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: var(--track-caps); color: var(--ink-3); }
@@ -1243,6 +1357,7 @@
         .idelta.up .iv { color: var(--win); } .idelta.down .iv { color: var(--danger); } .idelta.flat .iv { color: var(--ink-2); }
         /* ---------- Customer segments ---------- */
         .segs { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+        @media (min-width: 1800px) { .segs { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); } }
         .seg-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 12px 16px; box-shadow: var(--sh-1); }
         .seg-card .seg-n { font-size: 20px; font-weight: 600; letter-spacing: -.025em; }
         .seg-card .seg-name { font-size: 13px; font-weight: 600; margin-top: 0px; }
@@ -1287,6 +1402,7 @@
         .cmodal { max-width: 980px; }
         .chart-modal .modal-body { padding: 16px 20px 24px; }
         .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+        @media (min-width: 2100px) { .charts-grid { grid-template-columns: repeat(3, 1fr); } }
         .charts-grid > .chart-card:only-child { grid-column: 1 / -1; }  /* no orphan half-width charts */
         @media (max-width: 760px) { .charts-grid { grid-template-columns: 1fr; } }
         .chart-anim { animation: chartIn .5s ease backwards; }
@@ -1608,7 +1724,7 @@
 
             <!-- Liability / accounts receivable -->
             <section class="view" id="view-liability">
-                <div class="scroll"><div class="ov-wrap" id="liability-content"></div></div>
+                <div class="scroll"><div class="ov-wrap wrap-data" id="liability-content"></div></div>
             </section>
 
             <!-- Production labels -->
@@ -1631,7 +1747,7 @@
                 <div class="scroll"><div class="ov-wrap" id="team-content"></div></div>
             </section>
             <section class="view" id="view-labels">
-                <div class="scroll"><div class="ov-wrap" id="labels-content"></div></div>
+                <div class="scroll"><div class="ov-wrap wrap-data" id="labels-content"></div></div>
             </section>
 
             <!-- Memory -->
@@ -4891,6 +5007,15 @@
             }
             paint();
         }
+        // The split is decided in JS, so crossing it must repaint. Without this a
+        // window dragged from one screen to another shows a preview in the wrong
+        // place until the next click.
+        try {
+            window.matchMedia('(min-width: 1500px)').addEventListener('change', () => {
+                if (document.querySelector('#view-labels.active') && labelsCache) renderLabels();
+            });
+        } catch (e) { /* older browsers: the layout is simply fixed at load */ }
+
         function renderLabels() {
             if (!labelsCache) return;   // e.g. a coverage callback after the cache was cleared for a reload
             const box = $('labels-content'); box.innerHTML = '';
@@ -5079,6 +5204,19 @@
                     : (labelsFilter === 'unprinted' ? 'Every live order has been printed.' : 'Every live order is marked made.')));
                 return;
             }
+            /* On a wide screen the label preview belongs BESIDE the queue, not
+               inside it. Opened inline it shoves every order below it down the
+               page, so the row you just clicked jumps under your cursor and the
+               rest of the queue moves. Below 1500px it stays inline, which is
+               right on a tablet where there is no room for a second column. */
+            const wideSplit = window.matchMedia('(min-width: 1500px)').matches;
+            const list = wideSplit ? el('div', 'lbl-list') : box;
+            const pane = wideSplit ? el('aside', 'lbl-pane') : null;
+            if (wideSplit) {
+                const split = el('div', 'lbl-split');
+                split.append(list, pane);
+                box.append(split);
+            }
             shown.forEach(o => {
                 const st = prodStateOf(o);
                 // In the Complete queue "fulfilled" is the expected state, not staleness.
@@ -5182,9 +5320,10 @@
                 }
                 row.append(acts);
                 row.onclick = () => { labelSel = (labelSel === o.id ? null : o.id); renderLabels(); };
-                box.append(row);
+                list.append(row);
                 if (labelSel === o.id) {
-                    const wrap = el('div', 'lbl-preview'); wrap.style.margin = '4px 0 16px';
+                    const wrap = el('div', 'lbl-preview');
+                    if (!pane) wrap.style.margin = '4px 0 16px';
                     if (o.customer_id) wrap.append(histLine(o));
                     const sheet = labelSheet(o);
                     wrap.append(sheet);
@@ -5193,7 +5332,7 @@
                     const p2 = el('button', 'btn btn-primary'); p2.append(ico(I.printer), document.createTextNode('Print this label'));
                     p2.onclick = () => printLabels([o]);
                     act.append(p2); wrap.append(act);
-                    box.append(wrap);
+                    (pane || box).append(wrap);
                     // Must run after it is in the document, or there is nothing to measure.
                     // Re-measured once the label typeface arrives: until then the metrics
                     // are the fallback font's and the shrink figure would be wrong.

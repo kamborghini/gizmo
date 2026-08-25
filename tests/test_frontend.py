@@ -10,6 +10,9 @@ import os, re, subprocess, sys, tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
 SCRIPT = max(re.findall(r"<script>(.*?)</script>", HTML, re.S), key=len)
+# The stylesheet is a separate block; layout rules are asserted against this,
+# not against SCRIPT, which is the JS.
+CSS = max(re.findall(r"<style>(.*?)</style>", HTML, re.S), key=len)
 
 _passed, _failed = 0, []
 
@@ -1348,6 +1351,76 @@ def t_an_order_missing_its_terms_is_flagged_on_the_queue_row():
     f = re.search(r"if \(st\.terms_error\)[\s\S]{0,400}", SCRIPT).group(0)
     ok("NO TERMS" in f, "and shows it")
     ok("lbl-chip bad" in f, "in red, like the other things that need attention")
+
+
+@test
+def t_the_page_width_grows_with_the_screen():
+    """A fixed 1120px wrap left a third of a 1920 monitor and half of a 2560
+    iMac as empty margin, while the rows inside it were the crowded part."""
+    ok("--wrap-read" in CSS and "--wrap-data" in CSS, "there are two width tiers")
+    ok(".wrap-data" in CSS, "and a class a tab opts in with")
+    for stop in ("1500px", "1900px", "2400px"):
+        ok("min-width: " + stop in CSS, "the ladder has a " + stop + " stop")
+    ok("max-width: 1120px" not in re.search(r"\.ov-wrap \{[^}]*\}", CSS).group(0),
+       "the wrap no longer hard-codes 1120")
+
+
+def _wrap_widening_is_min_width_only():
+    """Every rule that GROWS something must be min-width gated, so a printed
+    page and a phone are untouched by the desktop work."""
+    for m in re.finditer(r"@media\s*\(max-width:\s*(\d+)px\)\s*\{", CSS):
+        block_start = m.end()
+        depth, i = 1, block_start
+        while i < len(CSS) and depth:
+            if CSS[i] == "{": depth += 1
+            elif CSS[i] == "}": depth -= 1
+            i += 1
+        block = CSS[block_start:i]
+        ok("--wrap-read:" not in block and "--wrap-data:" not in block,
+           "no max-width block moves a wrap token (found in the " + m.group(1) + "px block)")
+
+
+@test
+def t_widening_never_reaches_a_narrow_screen_or_a_printed_page():
+    _wrap_widening_is_min_width_only()
+
+
+@test
+def t_prose_is_capped_to_a_reading_measure():
+    """The whole point of the width work is that DATA gets the width and TEXT
+    does not. A 1,640px line of 12px help text is worse than the crowding."""
+    rule = re.search(r"\.setting-sub, \.field-help[\s\S]{0,400}?\}", CSS).group(0)
+    ok("78ch" in rule, "prose is capped in ch, not pixels")
+    ok("var(--" not in rule.split("max-width:")[1].split(";")[0],
+       "and the cap is written on the rule, not held in a root custom property "
+       "where ch would resolve against the root font size instead of the text's own")
+
+
+@test
+def t_the_queue_row_spends_width_on_columns_not_on_a_void():
+    f = re.search(r"@media \(min-width: 1500px\) \{\s*\.lbl-row[\s\S]{0,600}?\n        \}", CSS)
+    ok(f, "there is a wide-screen rule for the queue row")
+    ok("display: contents" in f.group(0),
+       "the .lbl-who box dissolves so its two lines become two real columns")
+
+
+@test
+def t_six_buttons_never_paint_over_the_date():
+    """The rail is a flex item with min-width 0, so it was squeezed to 526px
+    while its buttons measured 593px and refused to shrink."""
+    ok("min-width: max-content" in CSS, "the rail reserves what it needs")
+    ok("@media (max-width: 1199px) { .lbl-actions .lbl-btn-txt { display: none; }" in CSS,
+       "and below 1200 the buttons drop to icons rather than overlapping")
+
+
+@test
+def t_the_label_preview_sits_beside_the_queue_on_a_wide_screen():
+    """Opened inline it shoved every order below it down the page."""
+    ok(".lbl-split" in CSS and ".lbl-pane" in CSS, "the split layout is styled")
+    ok("lbl-split" in SCRIPT and "lbl-pane" in SCRIPT, "and built by the renderer")
+    ok("matchMedia('(min-width: 1500px)')" in SCRIPT, "decided once, above 1500")
+    ok("(pane || box).append(wrap)" in SCRIPT,
+       "and it still falls back to inline where there is no room for a pane")
 
 
 if __name__ == "__main__":
