@@ -9952,45 +9952,56 @@ def _session_uid(raw: Optional[str]) -> Optional[str]:
     return str(row.get("uid") or "") or None
 
 
-async def _net30_on_release(registry: dict, order_id) -> str:
+async def _net30_on_release(registry: dict, order_id) -> dict:
     """Start an account order's 30-day clock when it is released to production.
 
     Every path that moves Unprocessed -> IP is a release: the Ready-to-make
     button, the missed-orders strip, AND printing the labels (which is the
     ordinary way an order enters the workbench). Attaching terms on only one
     of them meant the normal lifecycle produced an invoice with no due date.
-    Returns a note for the caller to surface; '' when the order is not an
-    account order. Never raises: the release itself must not fail with this."""
+    Returns {"account": was this an account order, "ok": did the terms end up
+    right, "note": what to tell the merchant}. A VERDICT, not prose: the
+    caller used to decide success by reading the note's first words, so the
+    commonest outcome of all - terms UPDATED from due-on-receipt to Net 30 -
+    came out as a red failure toast because its sentence starts differently.
+    Never raises: the release itself must not fail with this."""
+    quiet = {"account": False, "ok": True, "note": ""}
     if _payment_terms_writer is None:
-        return ""
+        return quiet
     try:
         o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
         if not _ok(o):
             # A read that FAILED is not proof the order is not on account.
-            return "Could not check whether this order needs 30-day payment terms."
+            return {"account": True, "ok": False,
+                    "note": "Could not check whether this order needs 30-day payment terms."}
         if not any(_norm_key(t) == _norm_key(PO_UNPAID_TAG) for t in _order_tags(o)):
-            return ""
+            return quiet
     except Exception:
         logger.exception("net30: pre-release order read failed for %s", order_id)
-        return "Could not check whether this order needs 30-day payment terms."
+        return {"account": True, "ok": False,
+                "note": "Could not check whether this order needs 30-day payment terms."}
     try:
         r = await _payment_terms_writer(int(order_id))
     except Exception:
         logger.exception("net30: attach failed for %s", order_id)
-        return "Released, but the 30-day payment terms could not be added."
+        return {"account": True, "ok": False,
+                "note": "Released, but the 30-day payment terms could not be added."}
     if r.get("ok"):
         # Say what actually happened to the order, not what was hoped for. The
         # old wording claimed "already on the order" whenever Shopify refused
         # the create - which it does for ANY order that already carries terms,
         # so an order on due-on-receipt reported as being on 30-day terms.
         if r.get("already"):
-            return "30-day payment terms were already on the order."
-        if r.get("updated"):
-            was = str(r.get("was") or "the previous terms")
-            return "Payment terms changed from " + was + " to Net 30."
-        return "30-day payment terms added."
-    return ("Released, but the 30-day payment terms could not be added: "
-            + str(r.get("detail") or "unknown error"))
+            note = "30-day payment terms were already on the order."
+        elif r.get("updated"):
+            note = ("Payment terms changed from " + str(r.get("was") or "the previous terms")
+                    + " to Net 30.")
+        else:
+            note = "30-day payment terms added."
+        return {"account": True, "ok": True, "note": note}
+    return {"account": True, "ok": False,
+            "note": ("Released, but the 30-day payment terms could not be added: "
+                     + str(r.get("detail") or "unknown error"))}
 
 
 def _live_uid(request) -> str:
@@ -10068,6 +10079,10 @@ def _team_names() -> dict:
     return {uid: (u.get("name") or "") for uid, u in _load_users()["users"].items()}
 
 
+# How long a break-glass password stays usable. Long enough to redeploy, read
+# the log and sign in; short enough that the copy left in the deploy log is
+# useless to anyone who reads it later.
+MASTER_RESET_MINUTES = int(os.environ.get("MASTER_RESET_MINUTES", "30"))
 _master_reset_done = False
 
 
@@ -10084,6 +10099,12 @@ def _master_reset_check(d: dict) -> None:
             starter = secrets.token_urlsafe(9)
             u["pw"] = _hash_pw(starter)
             u["must_change"] = True
+            # The password goes into a deploy log that is retained and readable
+            # by anyone with project access, so it must not stay usable. It is
+            # for the next few minutes and the sign-in that follows; after that
+            # the log holds a dead string.
+            u["pw_expires_at"] = (datetime.now(timezone.utc)
+                                  + timedelta(minutes=MASTER_RESET_MINUTES)).isoformat()
             u["fails"], u["lock_until"] = 0, ""
             try:
                 _write_users(d)
@@ -10091,8 +10112,9 @@ def _master_reset_check(d: dict) -> None:
                 logger.exception("master reset could not be saved")
                 return
             logger.error("MASTER RESET: temporary password for %s is: %s  "
-                         "Sign in with it now, choose a new password, and REMOVE "
-                         "the MASTER_RESET variable.", u.get("username"), starter)
+                         "It stops working in %d minutes. Sign in with it now, choose a "
+                         "new password, and REMOVE the MASTER_RESET variable.",
+                         u.get("username"), starter, MASTER_RESET_MINUTES)
             _track(uid, "auth", "master password reset", "via the MASTER_RESET variable")
             return
 
@@ -12811,7 +12833,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # That IS a release, so an account order's 30-day clock starts
                 # here too - this is the ordinary way an order reaches the
                 # workbench, and it used to be the path that forgot.
-                notes, terms_notes = [], []
+                notes, terms_notes, terms_bad = [], [], False
                 for oid in ids:
                     okd, note = await _sync_order_tags(registry, oid,
                                                        add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG])
@@ -12819,10 +12841,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         notes.append(note)
                         continue
                     tn = await _net30_on_release(registry, oid)
-                    if tn:
-                        terms_notes.append(tn)
+                    if tn["note"]:
+                        terms_notes.append(tn["note"])
+                    if tn["account"] and not tn["ok"]:
+                        terms_bad = True
                 return _json({"ok": True, "state": {str(i): _load_prod_state().get(str(i), {}) for i in ids},
                               "terms_note": ("  ".join(terms_notes[:3]) if terms_notes else ""),
+                              "terms_ok": not terms_bad,
                               "tag_note": (notes[0] if notes else ""),
                               "state_note": ("" if stamped else "Printed stamps couldn't be saved; "
                                              "the list may show these as unprinted after a reload.")})
@@ -14533,6 +14558,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not u.get("active", True):
             _track(uid, "auth", "failed login", "account is switched off")
             return vague
+        exp = str(u.get("pw_expires_at") or "")
+        if exp and exp < now.isoformat():
+            # A break-glass password that was never used in time. Refused
+            # exactly like a wrong one, so the reply says nothing about which
+            # accounts exist or which are mid-reset.
+            _track(uid, "auth", "failed login", "the temporary password had expired")
+            return vague
         if not _check_pw(pw, u.get("pw") or ""):
             u["fails"] = int(u.get("fails") or 0) + 1
             if u["fails"] >= LOGIN_FAIL_LIMIT:
@@ -14612,6 +14644,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             d["users"][uid]["must_change"] = False
             d["users"][uid]["fails"] = 0
             d["users"][uid]["lock_until"] = ""
+            # The expiry belonged to the break-glass password, not to this one:
+            # left behind, the master's chosen password would stop working half
+            # an hour later and lock them out of their own app.
+            d["users"][uid].pop("pw_expires_at", None)
             _write_users(d)
         except RuntimeError:
             return _json({"error": "The change could not be saved. The data volume may be "
@@ -14822,6 +14858,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 u["pw"] = _hash_pw(starter)
                 u["must_change"] = True
                 u["fails"], u["lock_until"] = 0, ""
+                # This one is handed over in person, not written to a log, so
+                # it does not expire - and it must not inherit an expiry left
+                # behind by an earlier break-glass reset.
+                u.pop("pw_expires_at", None)
                 _write_users(d)
                 _drop_sessions(uid=target)       # the old password's sessions die
                 _dav_drop_cache(target)
@@ -15545,11 +15585,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # primary action and must not fail with it, but a purchase order
             # silently missing its payment terms is an unpaid invoice nobody
             # chases. Shared with the print path so every release behaves alike.
-            terms_note = await _net30_on_release(registry, oid)
-            if terms_note.startswith("30-day"):
-                _track(_who, "production", "added 30-day payment terms", nm)
-            return _json({"ok": True, "po_unpaid": bool(terms_note), "terms_note": terms_note,
-                          "terms_ok": (not terms_note) or terms_note.startswith("30-day")})
+            terms = await _net30_on_release(registry, oid)
+            if terms["account"] and terms["ok"]:
+                _track(_who, "production", "put an account order on 30-day terms", nm)
+            return _json({"ok": True, "po_unpaid": terms["account"],
+                          "terms_note": terms["note"], "terms_ok": terms["ok"]})
         except Exception:
             logger.exception("Queue tagging failed")
             return _json({"error": "Couldn't tag the order."}, 500)

@@ -5,6 +5,26 @@
    "title": "What's new, feature requests, and a security audit",
    "items": [
     {
+     "kind": "fixed",
+     "text": "Net 30 working was being reported as Net 30 failing. The commonest outcome of all - the order's terms changed from due-on-receipt to Net 30 - came back as a red error, because success was judged by how the sentence started rather than by what actually happened."
+    },
+    {
+     "kind": "fixed",
+     "text": "Printing an account order's labels now tells you about its payment terms. Printing is a release, so it starts the 30-day clock too - but the result was worked out and thrown away, so a purchase order could enter production with no due date and nobody knew."
+    },
+    {
+     "kind": "fixed",
+     "text": "Shopify rate-limiting is no longer reported as \"your store has no Net 30 template\", which sent you to fix a setting that was never wrong."
+    },
+    {
+     "kind": "fixed",
+     "text": "The emergency password written to the deploy log now stops working after 30 minutes. It was a live, working credential sitting in a log that anyone with project access can read, for as long as the log was kept."
+    },
+    {
+     "kind": "fixed",
+     "text": "Shipping settings could show four characters of your World Options API key. It promised the last four of the meter number, but with no meter set it fell back to the key - which is a secret, unlike the meter."
+    },
+    {
      "kind": "added",
      "text": "Print all the shipping labels, one courier at a time. The production queue has a Print shipping labels button for orders already dispatched: it asks which courier first, because three DHL and eight UPS is two runs on two different stocks. Cancelled, refunded and voided shipments never join a run, the stack comes out in queue order, and any order whose label could not be printed is listed on screen rather than quietly missing from the pile."
     },

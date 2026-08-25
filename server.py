@@ -1200,6 +1200,16 @@ async def set_order_payment_terms_net30(order_id: int) -> dict:
             hit = next((x for x in rows
                         if x.get("paymentTermsType") == "NET" and x.get("dueInDays") == 30), None)
             if not hit:
+                # A throttled GraphQL call answers 200 with an errors array, so
+                # it never reaches the HTTP retry path - and told the merchant
+                # their store has no Net 30 template, sending them to fix a
+                # configuration that was never wrong.
+                for e in (t.get("errors") or []):
+                    code = str(((e.get("extensions") or {}).get("code")) or "").upper()
+                    if code == "THROTTLED" or "throttl" in str(e.get("message", "")).lower():
+                        return {"ok": False, "reason": "throttled",
+                                "detail": "Shopify is rate-limiting right now; the terms were "
+                                          "not attached. Try this order again in a moment."}
                 for e in (t.get("errors") or []):
                     if "access" in str(e.get("message", "")).lower():
                         return _perm("the payment terms scopes "

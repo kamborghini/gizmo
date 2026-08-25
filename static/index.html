@@ -4415,6 +4415,14 @@
                 .then(r => {
                     if (r && r.tag_note) toastError(r.tag_note);
                     if (r && r.state_note) toastError(r.state_note);
+                    /* Printing IS a release, so an account order's 30-day
+                       clock starts here too. The note was computed and thrown
+                       away, so a purchase order could enter production with no
+                       due date and nobody was told. */
+                    if (r && r.terms_note) {
+                        if (r.terms_ok === false) toastError(r.terms_note);
+                        else addToast(r.terms_note, 'good');
+                    }
                     if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
                     // The browser cannot tell us whether they actually printed, so
                     // offer a way back: wrong label stock is a normal mistake.

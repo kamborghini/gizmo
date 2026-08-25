@@ -463,7 +463,14 @@ def set_base_url(url) -> None:
 
 
 def meter_last4() -> str:
-    v = _state["meter"] or _state["key"]
+    """The METER number's last four, and only ever that.
+
+    It used to fall back to the API KEY when no meter was set - a supported
+    state, since configured() accepts either - so a screen that promises
+    "connected + last4" quietly showed four characters of a live secret to
+    anyone who can open the shipping settings. A meter is not secret; a key
+    is. With no meter there is nothing to show, so it says so."""
+    v = _state["meter"]
     return v[-4:] if len(v) >= 4 else ("set" if v else "")
 
 

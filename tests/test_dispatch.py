@@ -489,6 +489,127 @@ def t_env_creds_win():
         copilot._wo_boot()
 
 @test
+def t_a_successful_net30_update_is_not_reported_as_a_failure():
+    """Success was decided by reading the note's first words. The commonest
+    outcome of all - terms UPDATED from due-on-receipt to Net 30 - starts
+    differently, so the normal path showed the merchant a red failure toast
+    for a job that worked."""
+    def go():
+        ensure_auth()
+        saved_w, saved_tags = copilot._payment_terms_writer, ORDER["tags"]
+        ORDER["tags"] = "Unprocessed, purchase order unpaid"
+        try:
+            async def updated(order_id):
+                return {"ok": True, "updated": True, "was": "Due on receipt"}
+            copilot._payment_terms_writer = updated
+            r = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"}).json()
+            ok(r["po_unpaid"], r)
+            ok(r["terms_ok"], "an UPDATE is a success, whatever its sentence looks like")
+            ok("Net 30" in r["terms_note"], r["terms_note"])
+            async def created(order_id):
+                return {"ok": True}
+            copilot._payment_terms_writer = created
+            ok(post("/api/production-labels/queue", {"order_id": 12345}).json()["terms_ok"])
+            async def already(order_id):
+                return {"ok": True, "already": True}
+            copilot._payment_terms_writer = already
+            ok(post("/api/production-labels/queue", {"order_id": 12345}).json()["terms_ok"])
+            async def refused(order_id):
+                return {"ok": False, "detail": "The access token lacks write_payment_terms."}
+            copilot._payment_terms_writer = refused
+            bad = post("/api/production-labels/queue", {"order_id": 12345}).json()
+            ok(not bad["terms_ok"] and "write_payment_terms" in bad["terms_note"], bad)
+            # An ordinary order is not an account order at all.
+            ORDER["tags"] = "Unprocessed"
+            plain = post("/api/production-labels/queue", {"order_id": 12345}).json()
+            ok(not plain["po_unpaid"] and plain["terms_ok"] and not plain["terms_note"], plain)
+        finally:
+            copilot._payment_terms_writer, ORDER["tags"] = saved_w, saved_tags
+    with_accounts(go)
+
+@test
+def t_printing_an_account_order_reports_its_payment_terms_too():
+    """Printing IS a release, so it starts the 30-day clock - but the note was
+    computed and thrown away, so a purchase order could enter production with
+    no due date and nobody was told."""
+    def go():
+        ensure_auth()
+        reset_prod()
+        saved_w, saved_tags = copilot._payment_terms_writer, ORDER["tags"]
+        ORDER["tags"] = "Unprocessed, purchase order unpaid"
+        try:
+            async def refused(order_id):
+                return {"ok": False, "detail": "no Net 30 template on this store"}
+            copilot._payment_terms_writer = refused
+            r = post("/api/production-state", {"op": "printed", "ids": [12345]}).json()
+            ok("terms_ok" in r, "the print path reports the outcome at all")
+            ok(not r["terms_ok"], r)
+            ok("could not be added" in r["terms_note"], r["terms_note"])
+            async def okw(order_id):
+                return {"ok": True, "updated": True, "was": "Due on receipt"}
+            copilot._payment_terms_writer = okw
+            r2 = post("/api/production-state", {"op": "printed", "ids": [12345]}).json()
+            ok(r2["terms_ok"], r2)
+        finally:
+            copilot._payment_terms_writer, ORDER["tags"] = saved_w, saved_tags
+    with_accounts(go)
+
+@test
+def t_a_break_glass_password_stops_working():
+    """MASTER_RESET writes a live password into a deploy log that is retained
+    and readable by anyone with project access. It has to die quickly, and the
+    password chosen afterwards must NOT inherit the expiry."""
+    def go():
+        import copy as _copy
+        ensure_auth()                      # with_accounts starts with no users at all
+        d = copilot._load_users()
+        uid = next(k for k, u in d["users"].items() if u.get("role") == "master")
+        before = _copy.deepcopy(d["users"][uid])
+        try:
+            os.environ["MASTER_RESET"] = "yes"
+            copilot._master_reset_done = False
+            copilot._master_reset_check(d)
+            u = copilot._load_users()["users"][uid]
+            ok(u.get("pw_expires_at"), "the logged password carries an expiry")
+            ok(u.get("must_change"), "and still forces a new one at sign-in")
+            # Aged past its window, it is refused exactly like a wrong password.
+            d2 = copilot._load_users()
+            d2["users"][uid]["pw_expires_at"] = "2000-01-01T00:00:00+00:00"
+            copilot._write_users(d2)
+            r = bare("/api/auth/login", {"username": before.get("username"), "password": "anything"})
+            eq(r.status_code, 401, "an expired break-glass password is dead")
+            # Choosing a real password clears the expiry, or the master would
+            # be locked out of their own app half an hour later.
+            d3 = copilot._load_users()
+            d3["users"][uid]["pw_expires_at"] = ""
+            copilot._write_users(d3)
+            ok(not copilot._load_users()["users"][uid].get("pw_expires_at"))
+        finally:
+            os.environ.pop("MASTER_RESET", None)
+            copilot._master_reset_done = False
+            dd = copilot._load_users()
+            dd["users"][uid] = before
+            copilot._write_users(dd)
+    with_accounts(go)
+
+@test
+def t_the_meter_last4_never_shows_the_api_key():
+    """The shipping settings promise "connected + last4" of a METER number,
+    which is not secret. With no meter set it showed the tail of the API KEY,
+    which is."""
+    saved = dict(worldoptions._state)
+    try:
+        worldoptions._state["meter"], worldoptions._state["key"] = "", "SECRETKEY9999"
+        eq(worldoptions.meter_last4(), "",
+           "no meter means nothing to show, not four characters of the key")
+        worldoptions._state["meter"] = "METER-1234"
+        eq(worldoptions.meter_last4(), "1234")
+        worldoptions._state["meter"], worldoptions._state["key"] = "", ""
+        eq(worldoptions.meter_last4(), "")
+    finally:
+        worldoptions._state.clear(); worldoptions._state.update(saved)
+
+@test
 def t_the_queue_only_promises_labels_it_still_has():
     """has_label is stamped once at booking and never cleared, but the label
     FILES are pruned oldest-first - so a months-old order advertises a label
