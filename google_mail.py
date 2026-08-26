@@ -124,10 +124,17 @@ def save_connection(refresh_token: str, addr: str, acct: Account = SALES) -> Non
                          "Set GMAIL_FINANCE_TOKEN_PATH to its own path before connecting.")
     os.makedirs(os.path.dirname(acct.token_path) or ".", exist_ok=True)
     tmp = acct.token_path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
+    # 0600, like the Xero token beside it: a refresh token in a world-readable
+    # file is a mailbox anyone on the box can read.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump({"refresh_token": refresh_token, "address": addr,
                    "connected_at": datetime.now(timezone.utc).isoformat()}, fh)
     os.replace(tmp, acct.token_path)
+    try:
+        os.chmod(acct.token_path, 0o600)
+    except OSError:
+        pass
     acct.access["token"], acct.access["exp"] = "", 0.0
 
 

@@ -17506,6 +17506,57 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         return _json({"url": f"/oauth/gmail-finance/start?t={ticket}",
                       "expires_in": MAIL_TICKET_SECONDS})
 
+    @mcp.custom_route("/api/recon/disconnect", methods=["POST"])
+    async def recon_disconnect_route(request: Request):
+        """Disconnect Xero or the accounts mailbox, and mean it.
+
+        Revoking at the provider is the point: a refresh token we merely
+        forget stays valid at Xero for up to 60 days and at Google until
+        someone notices. The Xero-derived cache goes with it, because keeping
+        a copy of the books after the merchant said stop is not defensible."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        if _team_role(who) != "master":
+            return _json({"error": "Only the master account can disconnect."}, 403)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        what = str(body.get("what") or "")
+        notes = []
+        if what == "xero":
+            r = await xero_api.revoke()
+            if r.get("note"):
+                notes.append(r["note"])
+            # The books go too. The exception list stays: it is the audit
+            # trail of what was found, and it is the merchant's own record.
+            cache = _load_recon_cache()
+            if cache.pop("xero", None) is not None:
+                _write_recon_cache(cache)
+                notes.append("The cached copy of the Xero records was deleted.")
+            d = _load_recon()
+            d.pop("watermarks", None)
+            _write_recon(d)
+            _track(who, "recon", "disconnected Xero", " ".join(notes)[:120])
+        elif what == "mailbox":
+            google_mail.disconnect(google_mail.FINANCE)
+            docs = _load_recon_docs()
+            if docs:
+                _write_recon_docs({})
+                notes.append(f"{len(docs)} extracted documents were deleted.")
+            d = _load_recon()
+            d.pop("seen_threads", None)
+            _write_recon(d)
+            _track(who, "recon", "disconnected the accounts mailbox", " ".join(notes)[:120])
+            notes.append("Google keeps its own record of the grant: remove gizmo at "
+                         "myaccount.google.com/permissions to be certain it is gone.")
+        else:
+            return _json({"error": "Say what to disconnect: xero or mailbox."}, 400)
+        return _json({"ok": True, "notes": notes})
+
     @mcp.custom_route("/api/recon/sweep", methods=["POST"])
     async def recon_sweep_route(request: Request):
         pre = _pre_checks(request, ai=True)   # a sweep can read documents with the model

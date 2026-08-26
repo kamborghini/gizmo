@@ -10620,12 +10620,28 @@ def t_the_xero_client_is_read_only_by_construction():
     the module is the OAuth token endpoint, which mints credentials, not
     records."""
     src = open(os.path.join(HERE, "xero.py"), encoding="utf-8").read()
-    ok("client.post" in src and src.count("client.post") == 1
-       and "/connect/token" in src.split("client.post")[1][:200],
-       "the only POST is the token endpoint")
-    for verb in ("client.put", "client.delete", "client.patch", '"POST", f"{API_BASE}/api'):
+    lines = src.split("\n")
+    # POSTs are allowed ONLY to Xero's identity host: minting a token and
+    # revoking one are identity operations, not writes to the books. Anything
+    # that reaches the accounting API must be a GET.
+    # The call and its URL can sit on different lines, so take each POST with
+    # the two lines after it.
+    posts = [" ".join(x.strip() for x in lines[i:i + 3])
+             for i, l in enumerate(lines) if "client.post(" in l]
+    ok(posts, "found the POST call sites")
+    for l in posts:
+        ok("IDENTITY_BASE" in l, "a POST goes somewhere other than the identity host: " + l)
+    joined = " ".join(posts)
+    ok("/connect/revocation" in joined,
+       "revocation exists: a token merely forgotten stays live at Xero for 60 days")
+    ok("/connect/token" in joined, "and the token endpoint is the only other POST")
+    for l in lines:
+        if "client.get(" in l or "client.request(" in l:
+            ok("client.post" not in l, "no disguised write: " + l.strip())
+    for verb in ("client.put", "client.delete", "client.patch"):
         ok(verb not in src, verb + " must not appear in a read-only client")
-
+    # The accounting API is reached through _get only, which is a GET.
+    ok('resp = await client.get(url' in src, "the accounting fetcher is a GET")
 
 @test
 def t_recon_routes_enforce_their_rules():
@@ -11454,6 +11470,86 @@ def t_the_xero_consent_asks_only_for_what_it_reads():
                scope + " is asked for and used")
     extra = scopes - set(reads) - {"openid", "offline_access", "profile", "email"}
     eq(extra, set(), "nothing is asked for that no fetcher uses: %s" % extra)
+
+
+@test
+def t_disconnecting_xero_revokes_rather_than_forgets():
+    """A refresh token we merely delete stays valid at Xero for up to 60 days.
+    Disconnect has to end the grant at the provider, or it is housekeeping
+    dressed as a security control."""
+    def go():
+        ensure_auth()
+        saved = (xero_api.CLIENT_ID, xero_api.CLIENT_SECRET, xero_api.httpx.AsyncClient)
+        xero_api.CLIENT_ID = xero_api.CLIENT_SECRET = "demo"
+        called = {}
+
+        class _R:
+            status_code = 200
+            text = ""
+
+        class _C:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def post(self, url, **kw):
+                called["url"] = url
+                called["token"] = (kw.get("data") or {}).get("token")
+                called["auth"] = kw.get("auth")
+                return _R()
+        xero_api.httpx.AsyncClient = lambda *a, **k: _C()
+        try:
+            xero_api._write_token({"refresh_token": "rt-live", "tenant_id": "t1",
+                                   "tenant_name": "Projected Image"})
+            # The cache holds a copy of the books; it must not outlive the consent.
+            import copilot as _cp
+            _cp._write_recon_cache({"xero": {"invoices": {"a": {"id": "a"}}},
+                                    "shopify": {"orders": {}}})
+            r = post("/api/recon/disconnect", {"what": "xero"})
+            eq(r.status_code, 200, r.text[:160])
+            ok(called.get("url", "").endswith("/connect/revocation"),
+               "Xero's revocation endpoint was called: %s" % called.get("url"))
+            eq(called.get("token"), "rt-live", "with the live refresh token")
+            ok(called.get("auth"), "authenticated with the client credentials")
+            ok(not xero_api.connected(), "and the local copy is gone")
+            eq(_cp._load_recon_cache().get("xero"), None,
+               "the cached accounting records went with it")
+            ok("shopify" in _cp._load_recon_cache(),
+               "while the rest of the cache is untouched")
+        finally:
+            xero_api.CLIENT_ID, xero_api.CLIENT_SECRET, xero_api.httpx.AsyncClient = saved
+            xero_api.disconnect()
+    with_accounts(go)
+
+
+@test
+def t_only_the_master_can_disconnect():
+    def go():
+        r = post("/api/team/user", {"op": "create", "name": "Adam", "username": "adamx",
+                                    "role": "admin"})
+        uid, pw = r.json()["id"], r.json()["starter_password"]
+        lg = client.post("/api/auth/login", json={"username": "adamx", "password": pw},
+                         headers={"Authorization": "Bearer " + tok()}).json()
+        sess = lg.get("session")
+        ch = post_s(sess, "/api/auth/password", {"current": pw, "new": "adam-pw-77120"})
+        sess = ch.json().get("session") or sess
+        for what in ("xero", "mailbox"):
+            rr = post_s(sess, "/api/recon/disconnect", {"what": what})
+            eq(rr.status_code, 403, "an admin cannot disconnect " + what)
+    with_accounts(go)
+
+
+@test
+def t_token_files_are_not_world_readable():
+    """Xero: a leaked refresh token 'would allow anyone to generate new
+    access_tokens for that user with the same permissions'."""
+    import stat
+    xero_api._write_token({"refresh_token": "rt", "tenant_id": "t"})
+    mode = stat.S_IMODE(os.stat(xero_api.TOKEN_PATH).st_mode)
+    eq(mode & 0o077, 0, "the Xero token file is owner-only: %o" % mode)
+    xero_api.disconnect()
+    _gm.save_connection("rt", "accounts@example.com", _gm.FINANCE)
+    mode2 = stat.S_IMODE(os.stat(_gm.FINANCE.token_path).st_mode)
+    eq(mode2 & 0o077, 0, "and so is the mailbox token: %o" % mode2)
+    _gm.disconnect(_gm.FINANCE)
 
 
 # =========================== run ===========================================

@@ -4614,6 +4614,30 @@
                              : 'ACCOUNTS MAILBOX NOT CONNECTED'));
             row.append(el('span', 'sub', st.last_sync ? ('Last sweep ' + fmtDate(st.last_sync)) : 'Never swept'));
             if (st.docs) row.append(el('span', 'sub', st.docs + ' documents read'));
+            /* Disconnecting has to be possible, and has to mean it: the token
+               is revoked at the provider, not merely forgotten here. */
+            const discon = (what, label, live) => {
+                if (!live) return;
+                const b2 = el('button', 'btn');
+                b2.append(ico(I.x || I.trash), document.createTextNode(label));
+                b2.onclick = async () => {
+                    const msg = what === 'xero'
+                        ? 'Disconnect Xero? The connection is revoked at Xero, and the cached '
+                          + 'copy of your accounting records is deleted. Discrepancies already '
+                          + 'found are kept as your audit trail.'
+                        : 'Disconnect the accounts mailbox? The documents read from it are '
+                          + 'deleted. Nothing in the mailbox itself is touched.';
+                    if (!await uiConfirm(msg, { title: 'Disconnect', okText: 'Disconnect' })) return;
+                    b2.disabled = true;
+                    try {
+                        const r = await api('/api/recon/disconnect', { what });
+                        (r.notes || []).forEach(n => addToast(n));
+                        toastOk('Disconnected.');
+                        refreshRecon();
+                    } catch (e) { toastError(e.message); b2.disabled = false; }
+                };
+                row.append(b2);
+            };
             const sw = el('button', 'btn btn-primary'); sw.append(ico(I.refresh),
                 document.createTextNode(st.sweeping ? 'Sweeping\u2026' : 'Sweep now'));
             sw.disabled = !!st.sweeping || !xs.connected;
@@ -4621,7 +4645,10 @@
                 try { await api('/api/recon/sweep', {}); toastOk('Sweep finished.'); }
                 catch (e) { toastError(e.message); }
                 refreshRecon(); };
-            row.style.rowGap = '8px'; row.append(sw); card.append(row);
+            row.style.rowGap = '8px'; row.append(sw);
+            discon('xero', 'Disconnect Xero', xs.connected);
+            discon('mailbox', 'Disconnect mailbox', mb.connected);
+            card.append(row);
             (st.sweep_notes || []).forEach(n => card.append(el('div', 'field-help', n)));
             box.append(card);
             /* The accounts mailbox: a SEPARATE Google account from the Inbox

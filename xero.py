@@ -114,9 +114,18 @@ def _load_token() -> dict:
 def _write_token(d: dict) -> None:
     os.makedirs(os.path.dirname(TOKEN_PATH) or ".", exist_ok=True)
     tmp = TOKEN_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
+    # 0600 before anything is written into it. Xero's own guidance is that a
+    # leaked refresh token "would allow anyone to generate new access_tokens
+    # for that user with the same permissions", and the default 0644 is a
+    # world-readable file holding exactly that.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump(d, fh)
     os.replace(tmp, TOKEN_PATH)
+    try:
+        os.chmod(TOKEN_PATH, 0o600)
+    except OSError:
+        pass
 
 
 def connected() -> bool:
@@ -129,12 +138,44 @@ def tenant_name() -> str:
 
 
 def disconnect() -> None:
-    """Forget the tokens. The Xero-side grant is revoked from Xero's own UI."""
+    """Forget the tokens locally. Prefer revoke(), which also ends the grant at
+    Xero: a refresh token we merely forget stays valid there for up to 60 days,
+    so deleting our copy is housekeeping, not revocation."""
     try:
         os.remove(TOKEN_PATH)
     except FileNotFoundError:
         pass
     _state.update({"access": "", "access_exp": 0.0, "tenant": "", "tenant_name": ""})
+
+
+async def revoke() -> dict:
+    """End the connection at XERO, then forget it here.
+
+    Xero's revocation endpoint kills the refresh token and removes every
+    connection this app holds for that user. Without it, disconnecting in
+    gizmo leaves a live credential in Xero's hands for up to 60 days, which is
+    not what anyone means by disconnect. Returns {ok, note}: the local forget
+    happens either way, because leaving a token we intend to abandon is worse
+    than a failed revoke we can report."""
+    d = _load_token()
+    rt = d.get("refresh_token")
+    note = ""
+    if rt and CLIENT_ID and CLIENT_SECRET:
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.post(f"{IDENTITY_BASE}/connect/revocation",
+                                      data={"token": rt, "token_type_hint": "refresh_token"},
+                                      auth=(CLIENT_ID, CLIENT_SECRET), timeout=20.0)
+            if r.status_code not in (200, 204):
+                note = f"Xero answered {r.status_code} to the revocation."
+                logger.warning("xero revoke: %s %s", r.status_code, r.text[:200])
+        except Exception as e:
+            note = "The revocation call did not reach Xero: " + str(e)[:120]
+            logger.exception("xero revoke failed")
+    elif rt:
+        note = "No client credentials on this server, so the token could only be forgotten locally."
+    disconnect()
+    return {"ok": not note, "note": note}
 
 
 def consent_url(redirect_uri: str, state: str) -> str:
@@ -241,7 +282,16 @@ async def _access_token() -> str:
         if tok.get("refresh_token"):
             d["refresh_token"] = str(tok["refresh_token"])
             d["last_refresh"] = time.time()
-            _write_token(d)
+            try:
+                _write_token(d)
+            except Exception:
+                # The disk refused it. Xero keeps the OLD token usable for 30
+                # minutes precisely for this, so the connection is not lost
+                # yet - but it will be if nobody notices, and a silent
+                # continue would burn that window quietly.
+                logger.exception("xero: the rotated refresh token could NOT be saved. Xero "
+                                 "honours the previous one for about 30 minutes; fix the data "
+                                 "volume before that runs out or Xero must be reconnected.")
         _state["access"] = str(tok["access_token"])
         _state["access_exp"] = time.monotonic() + float(tok.get("expires_in") or 1800) - 60
         _state["tenant"] = str(d.get("tenant_id") or "")
