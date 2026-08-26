@@ -8907,6 +8907,7 @@ MAIL_VIEW_SECONDS = 25          # a heartbeat older than this no longer counts
 # strictly smaller thing to leak than the standing connect secret.
 _mail_connect_tickets: dict = {}     # ticket -> expiry (wall clock)
 _fin_connect_tickets: dict = {}      # the same, for the ACCOUNTS mailbox
+_fin_expect: dict = {}               # state nonce -> the address that was asked for
 MAIL_TICKET_SECONDS = 300
 _mail_undo: dict = {}                # token -> what a bulk action changed, for putting back
 MAIL_UNDO_SECONDS = 600
@@ -17435,6 +17436,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Unauthorized"}, 401)
         if _team_role(who) != "master":
             return _json({"error": "Only the master account can connect the accounts mailbox."}, 403)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
         if not google_mail.client_configured():
             return _json({"error": "The server has no Google client configured yet. "
                                    "Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET."}, 400)
@@ -17445,9 +17449,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         for t, exp in list(_fin_connect_tickets.items()):
             if exp < now:
                 _fin_connect_tickets.pop(t, None)
+        # The address they mean, so Google opens THAT account rather than
+        # whichever one this browser is already signed into.
+        want = str((body or {}).get("address") or "").strip()[:200]
+        if want and not _EDIT_EMAIL.match(want):
+            return _json({"error": "That does not look like an email address."}, 400)
         ticket = secrets.token_urlsafe(24)
-        _fin_connect_tickets[ticket] = now + MAIL_TICKET_SECONDS
-        _track(who, "recon", "started connecting the accounts mailbox")
+        _fin_connect_tickets[ticket] = {"exp": now + MAIL_TICKET_SECONDS, "want": want}
+        _track(who, "recon", "started connecting the accounts mailbox", want)
         return _json({"url": f"/oauth/gmail-finance/start?t={ticket}",
                       "expires_in": MAIL_TICKET_SECONDS})
 
@@ -17706,7 +17715,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         ticket = request.query_params.get("t", "")
         tx = _fin_connect_tickets.pop(ticket, None) if ticket else None
         by_secret = _secret_ok(request.query_params.get("key", ""), google_data.CONNECT_SECRET)
-        if not ((tx is not None and tx > time.time()) or by_secret):
+        live = isinstance(tx, dict) and tx.get("exp", 0) > time.time()
+        if not (live or by_secret):
             return PlainTextResponse("Forbidden", status_code=403, headers=_API_HEADERS)
         now = time.time()
         for st, exp in list(_oauth_states.items()):
@@ -17714,9 +17724,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _oauth_states.pop(st, None)
         state = secrets.token_urlsafe(24)
         _oauth_states["gmfin:" + state] = now + 900
+        want = (tx or {}).get("want", "") if live else ""
+        if want:
+            _fin_expect[state] = want
+        for st in [k for k, v in list(_fin_expect.items()) if ("gmfin:" + k) not in _oauth_states]:
+            _fin_expect.pop(st, None)          # never outlive their own state
         from starlette.responses import RedirectResponse
         return RedirectResponse(
-            google_mail.consent_url(_gmail_fin_redirect_uri(request), state), status_code=302)
+            google_mail.consent_url(_gmail_fin_redirect_uri(request), state, want),
+            status_code=302)
 
     @mcp.custom_route("/oauth/gmail-finance/callback", methods=["GET"])
     async def gmail_finance_callback(request: Request):
@@ -17747,6 +17763,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 "client's authorised redirect URIs, or the sign-in was cancelled part-way. "
                 "Add that exact URL in the Google console, then press Connect again.")
         addr = google_mail.address(google_mail.FINANCE) or "the mailbox"
+        want = _fin_expect.pop(state, "")
+        if want and addr.strip().lower() != want.strip().lower():
+            # They named the mailbox; Google connected a different one, which is
+            # what happens when the browser is already signed in elsewhere.
+            google_mail.disconnect(google_mail.FINANCE)
+            return _oauth_page("Wrong mailbox",
+                               f"You asked for {want} but the sign-in connected {addr}. "
+                               "Nothing was saved. Sign out of Google, or use a private "
+                               "window, and try again.")
         sales = google_mail.address()
         if sales and addr.strip().lower() == sales.strip().lower():
             # Consenting as the sales mailbox again would leave reconciliation

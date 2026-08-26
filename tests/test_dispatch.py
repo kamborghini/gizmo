@@ -39,6 +39,7 @@ os.environ.update({
     "ZETA_SYNC_PATH": SCRATCH + "/zeta_sync.json",
     "MAILBOX_PATH": SCRATCH + "/mailbox.json",
     "GMAIL_TOKEN_PATH": SCRATCH + "/gmail_oauth.json",
+    "GMAIL_FINANCE_TOKEN_PATH": SCRATCH + "/gmail_finance_oauth.json",
     "FEEDBACK_PATH": SCRATCH + "/feedback.json",
     "RECON_PATH": SCRATCH + "/recon.json",
     "RECON_CACHE_PATH": SCRATCH + "/recon_cache.json",
@@ -11296,6 +11297,54 @@ def t_only_the_master_can_connect_the_accounts_mailbox():
         sess = ch.json().get("session") or sess
         rr = post_s(sess, "/api/recon/connect-link", {})
         eq(rr.status_code, 403, "an admin cannot connect a mailbox: " + rr.text[:120])
+    with_accounts(go)
+
+
+@test
+def t_the_consent_walk_names_the_mailbox_it_wants():
+    """select_account shows Google's chooser, but a browser with one live
+    session lands on THAT account anyway, so the merchant kept being offered
+    the sales mailbox. Naming the address preselects the right one."""
+    url = _gm.consent_url("https://x/cb", "st8", "accounts@example.com")
+    ok("login_hint=accounts%40example.com" in url, url)
+    ok("prompt=consent+select_account" in url, "the chooser is still offered")
+    plain = _gm.consent_url("https://x/cb", "st8")
+    ok("login_hint" not in plain, "and nothing is hinted when nothing was asked for")
+
+
+@test
+def t_a_mailbox_other_than_the_one_asked_for_is_not_saved():
+    """Google can hand back a different account than the one hinted, which is
+    exactly what happens when the browser is signed in elsewhere. Accepting it
+    would leave reconciliation reading whatever mailbox turned up."""
+    def go():
+        ensure_auth()
+        saved = (_gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET, _gm.exchange_code)
+        _gm.OAUTH_CLIENT_ID = _gm.OAUTH_CLIENT_SECRET = "demo"
+        try:
+            r = post("/api/recon/connect-link", {"address": "accounts@example.com"})
+            eq(r.status_code, 200, r.text[:140])
+            url = r.json()["url"]
+            h = {"Authorization": "Bearer " + tok()}
+            red = client.get(url, headers=h, follow_redirects=False)
+            eq(red.status_code, 302, "the walk starts")
+            loc = red.headers["location"]
+            ok("login_hint=accounts%40example.com" in loc, "Google is told which account: " + loc[:120])
+            state = loc.split("state=")[1].split("&")[0]
+
+            # Google comes back having connected the WRONG mailbox.
+            async def wrong(code, redirect_uri, acct=_gm.SALES):
+                _gm.save_connection("rt", "gobo@projectedimage.com", acct)
+                return True
+            _gm.exchange_code = wrong
+            cb = client.get(f"/oauth/gmail-finance/callback?state={state}&code=abc", headers=h)
+            ok("Wrong mailbox" in cb.text, "it is refused: " + cb.text[:200])
+            ok("accounts@example.com" in cb.text and "gobo@projectedimage.com" in cb.text,
+               "and both addresses are named so the mistake is obvious")
+            ok(not _gm.connected(_gm.FINANCE), "nothing was saved")
+        finally:
+            _gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET, _gm.exchange_code = saved
+            _gm.disconnect(_gm.FINANCE)
     with_accounts(go)
 
 

@@ -162,7 +162,7 @@ def status(acct: Account = SALES) -> dict:
 # OAuth flow
 # ---------------------------------------------------------------------------
 
-def consent_url(redirect_uri: str, state: str) -> str:
+def consent_url(redirect_uri: str, state: str, login_hint: str = "") -> str:
     params = {
         "client_id": OAUTH_CLIENT_ID,
         "redirect_uri": redirect_uri,
@@ -176,6 +176,12 @@ def consent_url(redirect_uri: str, state: str) -> str:
         "prompt": "consent select_account",
         "state": state,
     }
+    if login_hint:
+        # Naming the mailbox we want. select_account shows the chooser, but a
+        # browser with one live Google session lands on THAT account anyway,
+        # and the person ends up connecting the mailbox they were already in
+        # rather than the one they meant. A hint preselects the right one.
+        params["login_hint"] = login_hint
     return f"{AUTH_ENDPOINT}?{urlencode(params)}"
 
 
