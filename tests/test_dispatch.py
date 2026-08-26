@@ -11972,6 +11972,27 @@ def t_a_payout_older_than_the_bank_lines_is_not_a_missing_deposit():
 
 
 @test
+def t_a_record_with_no_readable_date_is_kept_not_destroyed():
+    """An empty string sorts before every cutoff, so the obvious comparison
+    deletes precisely the records whose age is unknown. Reachable through the
+    Shopify payout and dispute buckets, which carry no API-side date filter the
+    way the four Xero reads do."""
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    old = (_dt.now(_tz.utc) - _td(days=400)).strftime("%Y-%m-%d")
+    cache = {"shopify": {"payouts": {
+        "p-none": {"id": "p-none", "date": ""},
+        "p-junk": {"id": "p-junk", "date": "not a date"},
+        "p-old": {"id": "p-old", "date": old}}}}
+    store = {"exceptions": {}}
+    notes = _rc.prune(cache, {}, store)
+    eq(sorted(cache["shopify"]["payouts"]), ["p-junk", "p-none"],
+       "the datable old one goes; the undatable ones stay")
+    ok(any("no readable date" in n for n in notes),
+       "and the sweep says it kept them rather than silently doing so: %s" % notes)
+    ok("p-none" not in store["retention_dropped"], "nothing undated is recorded as dropped")
+
+
+@test
 def t_payouts_and_disputes_are_pruned_like_everything_else():
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
     old = (_dt.now(_tz.utc) - _td(days=400)).strftime("%Y-%m-%d")

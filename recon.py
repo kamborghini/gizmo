@@ -965,11 +965,26 @@ def prune(cache: dict, docs: dict, store: dict) -> list:
             keep.add(str(r))
     gone: list = []
 
+    undated = []
+
     def _sweep_bucket(rows, datekey):
         if not rows:
             return
-        old = [k for k, v in rows.items()
-               if str(v.get(datekey) or "") < cutoff and str(k) not in keep]
+        old = []
+        for k, v in rows.items():
+            if str(k) in keep:
+                continue
+            day = str(v.get(datekey) or "")[:10]
+            if len(day) != 10:
+                # No readable date. "" sorts before every cutoff, so the
+                # obvious comparison would DESTROY exactly the records we
+                # understand least. Keep them and say so: the Shopify payout
+                # and dispute buckets carry no API-side date filter, so this
+                # is reachable in a way the Xero buckets are not.
+                undated.append(str(k))
+                continue
+            if day < cutoff:
+                old.append(k)
         for k in old:
             rows.pop(k, None)
         gone.extend(str(k) for k in old)
@@ -988,6 +1003,9 @@ def prune(cache: dict, docs: dict, store: dict) -> list:
     if gone:
         notes.append(f"{len(gone)} records older than {CACHE_KEEP_DAYS} days were dropped from "
                      "the local copy; they are still in Xero and Shopify.")
+    if undated:
+        notes.append(f"{len(undated)} cached records carry no readable date, so their age "
+                     "could not be judged and they were kept.")
     # Remembered so the NEXT sweep can tell "we deleted our copy" from "the
     # discrepancy went away", which are not the same fact and must not share a
     # sentence. Capped: this is a hint for wording, not a second ledger.
@@ -1706,8 +1724,12 @@ async def _sweep_inner(deep_docs: bool) -> dict:
     try:
         notes.extend(prune(cache, docs, store))
     except Exception:
+        # It mutates as it goes, so "nothing was deleted" is a guess, and the
+        # wrong one: whatever it had already dropped stays dropped.
         logger.exception("recon: pruning failed")
-        notes.append("The retention pass failed this sweep; nothing was deleted.")
+        notes.append("The retention pass failed part way through this sweep. Anything it had "
+                     "already removed from the local copy is gone from it; nothing was "
+                     "touched in Xero, Shopify or the mailbox.")
     store["last_sync"] = _now()
     store["last_notes"] = notes[:12]
     counts = {s: 0 for s in SEVERITIES}
