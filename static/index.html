@@ -4639,12 +4639,31 @@
                    secret into a browser bar is how the first attempt at this
                    ended up as Forbidden, and the sales mailbox already had the
                    better answer: mint a single-use ticket in the app. */
+                /* The step everyone trips on: Google answers an unregistered
+                   callback with "Access blocked: This app's request is
+                   invalid", which names nothing. So the URL is here, exact and
+                   copyable, rather than described. */
                 const step = el('div', 'field-help');
                 step.append(document.createTextNode(
-                    'One thing to do first: add this callback URL to the Google OAuth '
-                    + 'client, beside the one the Inbox tab already uses. '));
-                step.append(el('b', null, mb.redirect_uri || ''));
-                mc.append(step);
+                    'First, add this callback URL to your Google OAuth client, beside the one '
+                    + 'the Inbox tab already uses (APIs and Services, Credentials, your OAuth '
+                    + 'client, Authorised redirect URIs). Until it is there Google refuses the '
+                    + 'sign-in with "Access blocked: this app\u2019s request is invalid".'));
+                const uriRow = el('div', 'field-help');
+                uriRow.style.marginTop = '6px';
+                const uri = el('b', null, mb.redirect_uri || '');
+                uri.style.cssText = 'word-break:break-all;user-select:all;cursor:text';
+                uriRow.append(uri);
+                const cp = el('button', 'btn');
+                cp.style.cssText = 'display:block;margin-top:6px';
+                cp.append(ico(I.copy), document.createTextNode('Copy callback URL'));
+                cp.onclick = async () => {
+                    try { await navigator.clipboard.writeText(mb.redirect_uri || '');
+                          toastOk('Callback URL copied.'); }
+                    catch (e) { toastError('Select the URL above and copy it.'); }
+                };
+                uriRow.append(cp);
+                mc.append(step); mc.append(uriRow);
                 if (mb.can_connect) {
                     /* Naming the mailbox does two jobs: Google opens THAT
                        account instead of whichever one this browser is signed
