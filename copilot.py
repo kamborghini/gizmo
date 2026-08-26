@@ -1233,6 +1233,7 @@ def _build_backup_zip():
         os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
         os.path.basename(getattr(google_mail, "TOKEN_PATH", "gmail_oauth.json")),
         os.path.basename(getattr(xero_api, "TOKEN_PATH", "xero_oauth.json")),
+        os.path.basename(getattr(google_mail, "FINANCE_TOKEN_PATH", "gmail_finance_oauth.json")),
         os.path.basename(WO_SECRET_PATH),
         # Sessions are transient bearer state: never in a backup. The accounts
         # register IS included: it holds only scrypt hashes, and restoring it
@@ -7553,6 +7554,18 @@ _oauth_states: dict[str, float] = {}   # state nonce -> expiry (Google OAuth con
 # Reconciliation stores + the read-only tools the chat is given
 # ---------------------------------------------------------------------------
 
+def _secret_ok(given: str, expected: str) -> bool:
+    """Constant-time compare that cannot raise. compare_digest throws
+    TypeError on a non-ASCII str, so a mistyped key returned a 500 where a
+    plain 403 belongs - and a stack trace is a worse answer than "no"."""
+    if not expected or not given:
+        return False
+    try:
+        return secrets.compare_digest(given.encode("utf-8"), expected.encode("utf-8"))
+    except (AttributeError, TypeError):
+        return False
+
+
 def _load_recon() -> dict:
     d = _load_json_store(RECON_PATH, "recon", None)
     return d if isinstance(d, dict) else {"exceptions": {}, "watermarks": {}}
@@ -11025,10 +11038,26 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # The reconciliation engine gets its IO here and only here: the Shopify
     # registry (reads), Gmail attachment bytes, the mail store, the stores,
     # and one AI entry point. It has no other way to reach the world.
+    # Every Gmail hook here is bound to the FINANCE account. The Inbox tab's
+    # mailbox is a different Google account and the reconciliation engine has
+    # no way to reach it: the binding is the isolation.
+    _fin = google_mail.FINANCE
+
+    async def _fin_bytes(message_id, attachment_id):
+        return await google_mail.attachment_bytes(message_id, attachment_id, acct=_fin)
+
+    async def _fin_search(query, max_results=200, out_complete=None):
+        return await google_mail.list_thread_ids(query, max_results=max_results, acct=_fin,
+                                                 out_complete=out_complete)
+
+    async def _fin_thread(thread_id):
+        return await google_mail.get_thread(thread_id, acct=_fin)
+
     recon_engine.configure(
         registry=registry, tool_json=_tool_json,
-        gmail_bytes=google_mail.attachment_bytes,
-        mail_store=_load_mail, ai_call=_recon_ai_call, xero=xero_api,
+        mail_connected=lambda: google_mail.connected(_fin),
+        gmail_bytes=_fin_bytes, mail_search=_fin_search, mail_thread=_fin_thread,
+        ai_call=_recon_ai_call, xero=xero_api,
         load_store=_load_recon, write_store=_write_recon,
         load_cache=_load_recon_cache, write_cache=_write_recon_cache,
         load_docs=_load_recon_docs, write_docs=_write_recon_docs)
@@ -13035,7 +13064,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         blocked = {os.path.basename(WO_SECRET_PATH), os.path.basename(SESSIONS_PATH),
                    os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
                    os.path.basename(getattr(google_mail, "TOKEN_PATH", "gmail_oauth.json")),
-                   os.path.basename(getattr(xero_api, "TOKEN_PATH", "xero_oauth.json"))}
+                   os.path.basename(getattr(xero_api, "TOKEN_PATH", "xero_oauth.json")),
+                   os.path.basename(getattr(google_mail, "FINANCE_TOKEN_PATH",
+                                            "gmail_finance_oauth.json"))}
         # (name, target_dir) for every restorable entry; everything else named
         # in the manifest as skipped, so nothing ever vanishes silently.
         todo, skipped = [], []
@@ -17374,8 +17405,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                      if google_data.CONNECT_SECRET else "",
                      "env_needed": ["XERO_CLIENT_ID", "XERO_CLIENT_SECRET"],
                      "configured": xs["configured"]}
+        fin = google_mail.status(google_mail.FINANCE)
         return _json({"xero": xs, "setup": setup,
-                      "gmail": google_mail.connected(),
+                      "gmail": fin["connected"],
+                      "mailbox": {"connected": fin["connected"],
+                                  "address": fin["address"],
+                                  "client": fin["client"],
+                                  "connect_path": ("/oauth/gmail-finance/start?key=YOUR_CONNECT_SECRET"
+                                                   if google_data.CONNECT_SECRET else ""),
+                                  "redirect_uri": _gmail_fin_redirect_uri(request),
+                                  # Named so a wrong-account consent is obvious.
+                                  "sales_address": google_mail.address()},
                       "model": MODEL_RECON,
                       "last_sync": d.get("last_sync") or "",
                       "sweep_notes": d.get("last_notes") or [],
@@ -17597,8 +17637,86 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not ok:
             return _oauth_page("Connection failed", "Couldn't complete the connection. Please try again.")
         addr = google_mail.address() or "the mailbox"
+        fin_addr = google_mail.address(google_mail.FINANCE)
+        if fin_addr and addr.strip().lower() == fin_addr.strip().lower():
+            # The mirror of the guard on the accounts walk. Whichever order the
+            # two are connected in, one address cannot be both mailboxes: that
+            # would put finance mail on the shared board and leave
+            # reconciliation reading the inbox the team triages.
+            google_mail.disconnect()
+            return _oauth_page("That is the accounts mailbox",
+                               f"{addr} is already connected to Reconciliation. Sign in as "
+                               "the shared sales mailbox for the Inbox tab instead.")
         return _oauth_page("✅ Mailbox connected", f"{addr} is now linked. The Inbox tab will "
                            "fill on its next refresh. You can close this tab.")
+
+    # ----- the ACCOUNTS mailbox: a second Google account, for reconciliation -
+    # Same OAuth client and scope as the sales inbox, its own refresh token,
+    # its own consent walk, its own state namespace. The two can never
+    # complete each other's flow, and neither can reach the other's mail.
+    def _gmail_fin_redirect_uri(request: Request) -> str:
+        if APP_BASE_URL:
+            return APP_BASE_URL.rstrip("/") + "/oauth/gmail-finance/callback"
+        host = request.headers.get("host", "")
+        return f"https://{host}/oauth/gmail-finance/callback"
+
+    @mcp.custom_route("/oauth/gmail-finance/start", methods=["GET"])
+    async def gmail_finance_start(request: Request):
+        if not _window_ok(_rl_hits.setdefault("oauth:" + _client_key(request), []),
+                          RATE_MAX_CLIENT, time.monotonic()):
+            return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
+        if not google_mail.client_configured():
+            return _oauth_page("Not configured", "Set GOOGLE_OAUTH_CLIENT_ID / SECRET on the server first.")
+        if not google_mail.FINANCE.usable():
+            return _oauth_page("Not configured",
+                               "The accounts mailbox is set to the same token file as the "
+                               "sales inbox. Give GMAIL_FINANCE_TOKEN_PATH its own path, "
+                               "then try again.")
+        if not _secret_ok(request.query_params.get("key", ""), google_data.CONNECT_SECRET):
+            return PlainTextResponse("Forbidden", status_code=403, headers=_API_HEADERS)
+        now = time.time()
+        for st, exp in list(_oauth_states.items()):
+            if exp < now:
+                _oauth_states.pop(st, None)
+        state = secrets.token_urlsafe(24)
+        _oauth_states["gmfin:" + state] = now + 900
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(
+            google_mail.consent_url(_gmail_fin_redirect_uri(request), state), status_code=302)
+
+    @mcp.custom_route("/oauth/gmail-finance/callback", methods=["GET"])
+    async def gmail_finance_callback(request: Request):
+        qp = request.query_params
+        if qp.get("error"):
+            return _oauth_page("Connection cancelled", f"Google returned: {qp.get('error')}")
+        state = qp.get("state", "")
+        exp = _oauth_states.pop("gmfin:" + state, None)
+        if not state or exp is None or exp < time.time():
+            return _oauth_page("Link expired", "That connect link expired or was already used. Start again.")
+        code = qp.get("code", "")
+        if not code:
+            return _oauth_page("Connection failed", "No authorization code returned.")
+        try:
+            ok = await google_mail.exchange_code(code, _gmail_fin_redirect_uri(request),
+                                                 google_mail.FINANCE)
+        except Exception:
+            logger.exception("Gmail (accounts) OAuth exchange error")
+            ok = False
+        if not ok:
+            return _oauth_page("Connection failed", "Couldn't complete the connection. Please try again.")
+        addr = google_mail.address(google_mail.FINANCE) or "the mailbox"
+        sales = google_mail.address()
+        if sales and addr.strip().lower() == sales.strip().lower():
+            # Consenting as the sales mailbox again would leave reconciliation
+            # reading the wrong post. Refuse it rather than quietly agreeing.
+            google_mail.disconnect(google_mail.FINANCE)
+            return _oauth_page("That is the sales mailbox",
+                               f"{addr} is already connected as the Inbox tab's mailbox. "
+                               "Sign in as the ACCOUNTS mailbox instead, then try again.")
+        return _oauth_page("Accounts mailbox connected",
+                           f"{addr} is now linked to Reconciliation only. It does not appear in "
+                           "the Inbox tab, and the Inbox tab's mailbox is not read by "
+                           "reconciliation. You can close this tab.")
 
     @mcp.custom_route("/api/mail/connect-link", methods=["POST"])
     async def mail_connect_link_route(request: Request):

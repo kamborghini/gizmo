@@ -2,6 +2,32 @@
  "releases": [
   {
    "date": "2026-08-26",
+   "title": "Reconciliation reads the accounts mailbox, not the sales inbox",
+   "items": [
+    {
+     "kind": "added",
+     "text": "Reconciliation now reads the accounts mailbox, which is a different Google account from the one behind the Inbox tab. It was reading the sales inbox, which is the wrong post: remittances and supplier invoices arrive in accounts. Connect it from the Reconciliation tab; the two mailboxes keep separate sign-ins, and neither can see the other's mail."
+    },
+    {
+     "kind": "added",
+     "text": "If you sign in as the wrong mailbox during that connection, it is refused and says so, rather than quietly reconciling against the wrong post. That works in both directions, whichever mailbox you connect first."
+    },
+    {
+     "kind": "improved",
+     "text": "A sweep that could not read the accounts mailbox now says so on the report. Silence there would have read as \"no missing invoices\", which is the one thing this tool must never imply."
+    },
+    {
+     "kind": "fixed",
+     "text": "A document that could not be read is retried on the next sweep instead of being quietly written off. Its thread is only marked as read once the document is actually in the store."
+    },
+    {
+     "kind": "improved",
+     "text": "The newest mail is read first. Each sweep works through a batch, and the remaining backlog is stated rather than left for you to guess at."
+    }
+   ]
+  },
+  {
+   "date": "2026-08-26",
    "title": "One page width everywhere, and two tabs marked Beta",
    "items": [
     {

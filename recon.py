@@ -44,12 +44,29 @@ TOLERANCE_PENCE = int(os.environ.get("RECON_TOLERANCE_PENCE", "100"))     # 1.00
 STALE_UNRECONCILED_DAYS = int(os.environ.get("RECON_STALE_DAYS", "21"))
 DOCS_PER_SWEEP = int(os.environ.get("RECON_DOCS_PER_SWEEP", "8"))
 DOC_BYTES_MAX = int(os.environ.get("RECON_DOC_BYTES_MAX", str(8 * 1024 * 1024)))
+# What to ask the accounts mailbox for. Attachments are where remittances,
+# invoices and statements actually live; the words catch the ones sent in the
+# body. Gmail's own search does the work, so the app never walks the mailbox.
+MAIL_QUERY = os.environ.get(
+    "RECON_GMAIL_QUERY",
+    "(has:attachment OR remittance OR invoice OR statement OR \"credit note\") "
+    "newer_than:{days}d")
+THREADS_PER_SWEEP = int(os.environ.get("RECON_THREADS_PER_SWEEP", "40"))
+# How many walked threads to remember. Past this the OLDEST are forgotten and
+# may be walked again: wasted budget, never a lost document, because a thread
+# is only ever skipped when its documents were already read into the store.
+SEEN_CAP = int(os.environ.get("RECON_SEEN_CAP", "4000"))
 
 # Injected by copilot.configure(): the engine owns logic, never transport.
 _registry: Optional[dict] = None          # Shopify tool registry
 _tool_json: Optional[Callable] = None     # async (registry, name, args) -> dict
 _gmail_bytes: Optional[Callable] = None   # async (message_id, attachment_id) -> bytes
-_mail_store: Optional[Callable] = None    # () -> the mailbox dict
+# The FINANCE mailbox, not the sales inbox the Inbox tab shows. It is a
+# separate Google account with no thread board behind it, so discovery is a
+# live Gmail search rather than a walk over a local store.
+_mail_connected: Optional[Callable] = None  # () -> bool, is the accounts mailbox linked
+_mail_search: Optional[Callable] = None   # async (query, max_results) -> set of thread ids
+_mail_thread: Optional[Callable] = None   # async (thread_id) -> parsed thread dict
 _ai_call: Optional[Callable] = None       # async (system, messages, tools) -> response
 _xero = None                              # the xero module (injected to allow fakes)
 
@@ -936,33 +953,72 @@ _AMOUNT_RE = re.compile(r"(?<![\d.])(\d{1,3}(?:,\d{3})*\.\d{2})(?!\d)")
 _INVNUM_RE = re.compile(r"(?i)\b((?:inv|in|si|pi|cn)[-# ]?\d{3,10}|\d{4,8})\b")
 
 
-def find_doc_candidates(mail_store: dict, known: set, cap: int = 200) -> list:
-    """Threads whose subject or files look financial, newest first. Reading
-    the STORE only - no Gmail calls here."""
+def candidates_in_thread(t: dict, known: set) -> list:
+    """The PDF attachments in one fetched thread that we have not read yet.
+    Pure: the fetching is the caller's problem, so this is testable against a
+    plain dict."""
     out = []
-    for t in (mail_store.get("threads") or {}).values():
-        subject = str(t.get("subject") or "")
-        files = t.get("files") or []
-        looks = bool(_FIN_WORDS.search(subject)) or any(
-            str(f.get("name", "")).lower().endswith(".pdf") for f in files)
-        if not looks:
+    subject = str(t.get("subject") or "")
+    for m in (t.get("messages") or []):
+        for f in (m.get("files") or []):
+            name = str(f.get("name") or "")
+            if not name.lower().endswith(".pdf"):
+                continue
+            key = f"{m.get('id')}:{f.get('id')}"
+            if key in known:
+                continue
+            out.append({"source_key": key, "thread_id": t.get("id"),
+                        "message_id": m.get("id"), "attachment_id": f.get("id"),
+                        "filename": name, "size": f.get("size") or 0,
+                        "subject": subject,
+                        "from": str(m.get("from_email") or t.get("from_email") or ""),
+                        "date": str(m.get("at") or t.get("last_at") or "")})
+    return out
+
+
+async def find_doc_candidates(known: set, seen_threads: set,
+                              cap: Optional[int] = None) -> tuple:
+    """Ask the ACCOUNTS mailbox what has arrived.
+
+    Returns (candidates, threads_read, search_ok, listing_complete).
+      * threads_read holds ONLY threads actually fetched: one that raised must
+        come back next sweep rather than being written off as looked at.
+      * search_ok is False when the mailbox could not be read at all, so the
+        caller can say so instead of reporting a clean sweep.
+      * listing_complete is False when Gmail had more matches than one listing
+        returns, which the merchant is told rather than left to assume.
+
+    Candidates come back NEWEST FIRST. Gmail hands back an unordered set, and
+    with a per-sweep budget an arbitrary 40 threads means the newest invoice
+    can sit unread behind a year of old post."""
+    if _mail_search is None or _mail_thread is None:
+        return [], set(), False, True
+    # Read at CALL time, not bound as a default: a default argument captures
+    # the value at import, so the env setting could never actually be changed.
+    cap = THREADS_PER_SWEEP if cap is None else cap
+    query = MAIL_QUERY.format(days=WINDOW_DAYS)
+    complete_flag: list = []
+    try:
+        ids = await _mail_search(query, 200, complete_flag)
+    except Exception:
+        logger.exception("recon: the accounts mailbox search failed")
+        return [], set(), False, True
+    complete = complete_flag[0] if complete_flag else True
+    fresh = [i for i in ids if i not in seen_threads]
+    # Gmail thread ids sort by age (they are ordered hex), so the newest are
+    # the largest. Sorting by length first keeps that true across id widths.
+    fresh.sort(key=lambda i: (len(str(i)), str(i)), reverse=True)
+    out, read = [], set()
+    for tid in fresh[:cap]:
+        try:
+            t = await _mail_thread(tid)
+        except Exception:
+            logger.exception("recon: could not read thread %s", tid)
             continue
-        for m in (t.get("messages") or []):
-            for f in (m.get("files") or []):
-                name = str(f.get("name") or "")
-                if not name.lower().endswith(".pdf"):
-                    continue
-                key = f"{m.get('id')}:{f.get('id')}"
-                if key in known:
-                    continue
-                out.append({"source_key": key, "thread_id": t.get("id"),
-                            "message_id": m.get("id"), "attachment_id": f.get("id"),
-                            "filename": name, "size": f.get("size") or 0,
-                            "subject": subject,
-                            "from": str(m.get("from_email") or t.get("from_email") or ""),
-                            "date": str(m.get("at") or t.get("last_at") or "")})
-    out.sort(key=lambda c: c["date"], reverse=True)
-    return out[:cap]
+        read.add(tid)
+        out.extend(candidates_in_thread(t, known))
+    out.sort(key=lambda c: str(c.get("date") or ""), reverse=True)
+    return out, read, True, complete
 
 
 def _pdf_text(data: bytes) -> str:
@@ -1418,21 +1474,48 @@ async def _sweep_inner(deep_docs: bool) -> dict:
         except KeyError:
             notes.append("Payout tools are not on this server build.")
 
-    # --- Gmail documents, a bounded batch per sweep -------------------------
-    if _mail_store is not None and deep_docs:
+    # --- The accounts mailbox, a bounded batch per sweep --------------------
+    mailbox_linked = bool(_mail_connected()) if _mail_connected else (_mail_search is not None)
+    if _mail_search is not None and mailbox_linked and deep_docs:
         try:
             known = set(docs.keys())
-            cands = find_doc_candidates(_mail_store(), known)
-            for c in cands[:DOCS_PER_SWEEP]:
+            seen = set(store.get("seen_threads") or [])
+            found = await find_doc_candidates(known, seen)
+            cands, walked, search_ok, complete = found
+            if not search_ok:
+                # A mailbox that cannot be read has checked NO documents. Saying
+                # nothing here reads as "no missing invoices", which is the one
+                # thing this tool must never imply.
+                notes.append("The accounts mailbox could not be read this sweep, so no "
+                             "remittances, supplier invoices or statements were checked.")
+            batch = cands[:DOCS_PER_SWEEP]
+            queued = {c["thread_id"] for c in cands[DOCS_PER_SWEEP:] if c.get("thread_id")}
+            failed: set = set()
+            for c in batch:
                 d = await extract_doc(c)
                 if d:
                     docs[c["source_key"]] = d
+                else:
+                    # Extraction failed: the document is NOT read, so its thread
+                    # must come back. Marking it seen would drop an invoice
+                    # permanently and silently.
+                    failed.add(c.get("thread_id"))
+            if failed:
+                notes.append(f"{len(failed)} document(s) could not be read this sweep and "
+                             "will be retried.")
+            store["seen_threads"] = sorted((seen | walked) - queued - failed)[-SEEN_CAP:]
             if len(cands) > DOCS_PER_SWEEP:
-                notes.append(f"{len(cands) - DOCS_PER_SWEEP} more Gmail documents are queued "
-                             "for later sweeps.")
+                notes.append(f"{len(cands) - DOCS_PER_SWEEP} more documents from the accounts "
+                             "mailbox are queued for later sweeps.")
+            if not complete:
+                notes.append("The accounts mailbox has more matching mail than one sweep "
+                             "lists; the backlog is worked through a batch at a time.")
         except Exception:
-            logger.exception("recon sweep: gmail scan failed")
-            notes.append("The Gmail document scan failed part-way; documents may be missing.")
+            logger.exception("recon sweep: accounts mailbox scan failed")
+            notes.append("The accounts mailbox scan failed part-way; documents may be missing.")
+    elif deep_docs:
+        notes.append("The accounts mailbox is not connected, so no remittances, supplier "
+                     "invoices or statements were checked this sweep.")
 
     # --- Checks (pure functions over the cache) -----------------------------
     # THE RULE THAT KEEPS THE TOOL TRUSTED: a failed read is not an empty
@@ -1472,8 +1555,14 @@ async def _sweep_inner(deep_docs: bool) -> dict:
     # time. Merging into the snapshot from the top of the sweep would clobber
     # them - the same lost-update the investigate op already guards against.
     marks = store.get("watermarks", {})
+    seen_now = store.get("seen_threads")
     store = _load_store()
     store["watermarks"] = {**store.get("watermarks", {}), **marks}
+    # Everything this sweep learned has to cross the reload, not just the
+    # watermarks: seen_threads decides which mail is walked next time, and
+    # dropping it here left the crawl rereading its first 40 threads forever.
+    if seen_now is not None:
+        store["seen_threads"] = seen_now
     existing = store.setdefault("exceptions", {})
     for xid, e in fresh.items():
         old = existing.get(xid)

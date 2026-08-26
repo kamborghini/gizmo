@@ -35,13 +35,59 @@ logger = logging.getLogger("shopify_mcp.gmail")
 OAUTH_CLIENT_ID     = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
 OAUTH_CLIENT_SECRET = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
 TOKEN_PATH          = os.environ.get("GMAIL_TOKEN_PATH", "/data/gmail_oauth.json")
+# The accounts mailbox is a DIFFERENT Google account from the sales inbox, so
+# it gets its own refresh token and its own access cache. Same OAuth client,
+# same scope; nothing else is shared, because the whole point of the split is
+# that reconciliation reads the finance mail and the Inbox tab does not.
+FINANCE_TOKEN_PATH  = os.environ.get("GMAIL_FINANCE_TOKEN_PATH", "/data/gmail_finance_oauth.json")
 API_BASE            = os.environ.get("GMAIL_API_BASE", "https://gmail.googleapis.com").rstrip("/")
 TOKEN_ENDPOINT      = os.environ.get("GMAIL_TOKEN_URL", "https://oauth2.googleapis.com/token")
 AUTH_ENDPOINT       = "https://accounts.google.com/o/oauth2/v2/auth"
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 
-_access: dict = {"token": "", "exp": 0.0}   # cached access token
+_access: dict = {"token": "", "exp": 0.0}   # cached access token (sales)
+
+
+class Account:
+    """One connected mailbox: its own token file and its own access cache.
+
+    The path is read through a callable rather than captured, so a test (or a
+    future settings screen) that reassigns the module's TOKEN_PATH is still
+    talking about the same account rather than a stale copy of its filename."""
+
+    __slots__ = ("_path_fn", "label", "access")
+
+    def __init__(self, path_fn, label: str, access: dict = None):
+        self._path_fn = path_fn
+        self.label = label
+        self.access = access if access is not None else {"token": "", "exp": 0.0}
+
+    @property
+    def token_path(self) -> str:
+        return self._path_fn()
+
+    def usable(self) -> bool:
+        """False when this account's token file would collide with another's.
+
+        Two accounts sharing one token file is not a small misconfiguration:
+        it silently points reconciliation at the sales inbox while the screen
+        says it is reading the accounts mailbox, which is the exact failure
+        this whole split exists to prevent. Refuse rather than guess."""
+        if self is SALES:
+            return True
+        if os.path.abspath(self.token_path) == os.path.abspath(SALES.token_path):
+            logger.error("gmail: the %s mailbox is configured with the same token file as "
+                         "the sales inbox (%s). Set GMAIL_FINANCE_TOKEN_PATH to its own "
+                         "path; refusing to use it until then.", self.label, self.token_path)
+            return False
+        return True
+
+
+# SALES keeps the original module-level access dict, so anything that reached
+# in and cleared `_access` directly still clears the right cache.
+SALES = Account(lambda: TOKEN_PATH, "sales", _access)
+FINANCE = Account(lambda: FINANCE_TOKEN_PATH, "finance")
 
 
 class GmailError(Exception):
@@ -52,40 +98,50 @@ def client_configured() -> bool:
     return bool(OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET)
 
 
-def _load_token_file() -> dict:
+def _load_token_file(acct: Account = SALES) -> dict:
     try:
-        with open(TOKEN_PATH, "r", encoding="utf-8") as fh:
+        with open(acct.token_path, "r", encoding="utf-8") as fh:
             d = json.load(fh)
         return d if isinstance(d, dict) else {}
     except Exception:
         return {}
 
 
-def connected() -> bool:
-    return bool(_load_token_file().get("refresh_token"))
+def connected(acct: Account = SALES) -> bool:
+    return bool(acct.usable() and _load_token_file(acct).get("refresh_token"))
 
 
-def address() -> str:
+def address(acct: Account = SALES) -> str:
     """The connected mailbox address, captured at connect time."""
-    return str(_load_token_file().get("address") or "")
+    return str(_load_token_file(acct).get("address") or "")
 
 
-def save_connection(refresh_token: str, addr: str) -> None:
-    os.makedirs(os.path.dirname(TOKEN_PATH) or ".", exist_ok=True)
-    tmp = TOKEN_PATH + ".tmp"
+def save_connection(refresh_token: str, addr: str, acct: Account = SALES) -> None:
+    if not acct.usable():
+        # Writing here would land ON TOP of the sales inbox's token and take
+        # that connection down with it. Refuse loudly.
+        raise GmailError("The accounts mailbox shares a token file with the sales inbox. "
+                         "Set GMAIL_FINANCE_TOKEN_PATH to its own path before connecting.")
+    os.makedirs(os.path.dirname(acct.token_path) or ".", exist_ok=True)
+    tmp = acct.token_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump({"refresh_token": refresh_token, "address": addr,
                    "connected_at": datetime.now(timezone.utc).isoformat()}, fh)
-    os.replace(tmp, TOKEN_PATH)
-    _access["token"], _access["exp"] = "", 0.0
+    os.replace(tmp, acct.token_path)
+    acct.access["token"], acct.access["exp"] = "", 0.0
 
 
-def disconnect() -> None:
+def disconnect(acct: Account = SALES) -> None:
+    if not acct.usable():
+        # With colliding paths this would delete the SALES token and take the
+        # Inbox tab down with it. Clearing the cache is safe; the file is not.
+        acct.access["token"], acct.access["exp"] = "", 0.0
+        return
     try:
-        os.remove(TOKEN_PATH)
+        os.remove(acct.token_path)
     except OSError:
         pass
-    _access["token"], _access["exp"] = "", 0.0
+    acct.access["token"], acct.access["exp"] = "", 0.0
 
 
 def project_number() -> str:
@@ -97,9 +153,9 @@ def project_number() -> str:
     return head if head.isdigit() else ""
 
 
-def status() -> dict:
-    return {"client": client_configured(), "connected": connected(),
-            "address": address() or None}
+def status(acct: Account = SALES) -> dict:
+    return {"client": client_configured(), "connected": connected(acct),
+            "address": address(acct) or None}
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +179,7 @@ def consent_url(redirect_uri: str, state: str) -> str:
     return f"{AUTH_ENDPOINT}?{urlencode(params)}"
 
 
-async def exchange_code(code: str, redirect_uri: str) -> bool:
+async def exchange_code(code: str, redirect_uri: str, acct: Account = SALES) -> bool:
     """Swap the auth code for tokens, look up whose mailbox this is, persist."""
     async with httpx.AsyncClient(timeout=20.0) as c:
         r = await c.post(TOKEN_ENDPOINT, data={
@@ -155,16 +211,21 @@ async def exchange_code(code: str, redirect_uri: str) -> bool:
         logger.warning("Gmail connect: token exchange succeeded but the profile "
                        "lookup failed; refusing the half-connection.")
         return False
-    save_connection(rt, addr)
+    save_connection(rt, addr, acct)
     return True
 
 
-async def _token() -> str:
-    rt = _load_token_file().get("refresh_token", "")
+async def _token(acct: Account = SALES) -> str:
+    if not acct.usable():
+        raise GmailError("The accounts mailbox shares a token file with the sales inbox. "
+                         "Set GMAIL_FINANCE_TOKEN_PATH to its own path.")
+    rt = _load_token_file(acct).get("refresh_token", "")
     if not rt:
-        raise GmailError("Gmail is not connected.")
-    if _access["token"] and time.monotonic() < _access["exp"]:
-        return _access["token"]
+        raise GmailError("Gmail is not connected."
+                         if acct is SALES else
+                         "The accounts mailbox is not connected.")
+    if acct.access["token"] and time.monotonic() < acct.access["exp"]:
+        return acct.access["token"]
     async with httpx.AsyncClient(timeout=20.0) as c:
         r = await c.post(TOKEN_ENDPOINT, data={
             "client_id": OAUTH_CLIENT_ID, "client_secret": OAUTH_CLIENT_SECRET,
@@ -188,13 +249,14 @@ async def _token() -> str:
     data = r.json()
     if not data.get("access_token"):
         raise GmailError("Gmail token refresh returned no access token.")
-    _access["token"] = data["access_token"]
-    _access["exp"] = time.monotonic() + int(data.get("expires_in", 3600)) - 60
-    return _access["token"]
+    acct.access["token"] = data["access_token"]
+    acct.access["exp"] = time.monotonic() + int(data.get("expires_in", 3600)) - 60
+    return acct.access["token"]
 
 
-async def _call(method: str, path: str, *, params: dict = None, body: dict = None) -> dict:
-    token = await _token()
+async def _call(method: str, path: str, *, params: dict = None, body: dict = None,
+                acct: Account = SALES) -> dict:
+    token = await _token(acct)
     url = f"{API_BASE}/gmail/v1/users/me/{path}"
     async with httpx.AsyncClient(timeout=25.0) as c:
         r = await c.request(method, url, params=params, json=body,
@@ -203,8 +265,8 @@ async def _call(method: str, path: str, *, params: dict = None, body: dict = Non
             # Google can kill an access token before its stated expiry (the
             # mailbox password changed, a security event). Standard recovery:
             # drop the cache, mint a fresh token, retry exactly once.
-            _access["token"], _access["exp"] = "", 0.0
-            token = await _token()
+            acct.access["token"], acct.access["exp"] = "", 0.0
+            token = await _token(acct)
             r = await c.request(method, url, params=params, json=body,
                                 headers={"Authorization": f"Bearer {token}"})
     if r.status_code >= 400:
@@ -212,7 +274,7 @@ async def _call(method: str, path: str, *, params: dict = None, body: dict = Non
             detail = r.json().get("error", {}).get("message", "") or r.text[:300]
         except Exception:
             detail = r.text[:300]
-        logger.warning(f"Gmail API {r.status_code} on {path}: {detail}")
+        logger.warning(f"Gmail API {r.status_code} on {path} ({acct.label}): {detail}")
         raise GmailError(str(detail).strip()[:400] or f"HTTP {r.status_code}")
     return r.json() if r.content else {}
 
@@ -252,7 +314,7 @@ async def list_threads(query: str = "in:inbox", max_results: int = 100) -> dict:
     return {"threads": out, "complete": complete}
 
 
-async def list_thread_ids(query: str, max_results: int = 500, pages: int = 8,
+async def list_thread_ids(query: str, max_results: int = 500, pages: int = 8, acct: Account = SALES,
                           out_complete=None) -> set:
     """Just the ids matching a query.
 
@@ -265,7 +327,7 @@ async def list_thread_ids(query: str, max_results: int = 500, pages: int = 8,
         params = {"q": query, "maxResults": max(1, min(int(max_results), 500))}
         if token:
             params["pageToken"] = token
-        data = await _call("GET", "threads", params=params)
+        data = await _call("GET", "threads", params=params, acct=acct)
         for t in (data.get("threads") or []):
             if t.get("id"):
                 out.add(str(t["id"]))
@@ -302,7 +364,7 @@ def _msg_time(msg: dict) -> str:
         return ""
 
 
-async def get_thread(thread_id: str) -> dict:
+async def get_thread(thread_id: str, acct: Account = SALES) -> dict:
     """Normalized thread: subject + per-message sender/time/snippet. Gmail
     HTML-escapes snippets (&#39; for an apostrophe), so they are unescaped
     HERE, once, at the boundary - the app renders text, never HTML. Metadata
@@ -311,7 +373,7 @@ async def get_thread(thread_id: str) -> dict:
     # app could not tell an email with artwork attached from one without.
     # Bodies are ignored here; only names and sizes are read, and attachment
     # bytes stay behind their attachmentId either way.
-    data = await _call("GET", f"threads/{thread_id}", params={"format": "full"})
+    data = await _call("GET", f"threads/{thread_id}", params={"format": "full"}, acct=acct)
     msgs = []
     subject = ""
     for m in (data.get("messages") or []):
@@ -537,10 +599,11 @@ async def create_draft(thread_id: str, to_addr: str, subject: str, body_text: st
     return {"id": str(out.get("id") or ""), "thread_id": landed or str(thread_id)}
 
 
-async def attachment_bytes(message_id: str, attachment_id: str, cap: int = 25 * 1024 * 1024) -> bytes:
+async def attachment_bytes(message_id: str, attachment_id: str, cap: int = 25 * 1024 * 1024,
+                           acct: Account = SALES) -> bytes:
     """One attachment's bytes, fetched deliberately and capped."""
     import base64
-    data = await _call("GET", f"messages/{message_id}/attachments/{attachment_id}")
+    data = await _call("GET", f"messages/{message_id}/attachments/{attachment_id}", acct=acct)
     size = int(data.get("size") or 0)
     if size > cap:
         raise GmailError("That file is " + str(round(size / 1048576, 1))

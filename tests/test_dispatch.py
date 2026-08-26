@@ -7636,7 +7636,7 @@ def t_mail_own_unsent_drafts_are_not_part_of_the_conversation():
              "snippet": "our unsent words", "payload": {"headers": [
                  {"name": "From", "value": "Sales <" + MBOX + ">"},
                  {"name": "Subject", "value": "Re: Order"}]}}]}
-        async def fake_call(method, path, params=None, body=None):
+        async def fake_call(method, path, params=None, body=None, **kw):
             return thread
         saved = _gm._call
         _gm._call = fake_call
@@ -10538,14 +10538,18 @@ def _recon_world(fx, orders):
         if name == "shopify_list_payouts":
             return {"available": False, "reason": "not on Shopify Payments"}
         return {"_failed": True}
+    import copy as _copy
+    # deepcopy on load, like a real store parsing from disk: a fake that hands
+    # back the same object makes every lost-update bug invisible, which is
+    # exactly how the seen_threads write survived a reload that discarded it.
     _rc.configure(
         xero=fx, registry={}, tool_json=fake_tool_json,
-        mail_store=lambda: {"threads": {}}, gmail_bytes=None, ai_call=None,
-        load_store=lambda: stores["store"],
+        mail_search=None, mail_thread=None, gmail_bytes=None, ai_call=None,
+        load_store=lambda: _copy.deepcopy(stores["store"]),
         write_store=lambda d: stores.update(store=d),
-        load_cache=lambda: stores["cache"],
+        load_cache=lambda: _copy.deepcopy(stores["cache"]),
         write_cache=lambda d: stores.update(cache=d),
-        load_docs=lambda: stores["docs"],
+        load_docs=lambda: _copy.deepcopy(stores["docs"]),
         write_docs=lambda d: stores.update(docs=d))
     return stores
 
@@ -10603,9 +10607,9 @@ def t_a_full_sweep_finds_the_missing_sale_and_statuses_survive_resweeps():
         ok(e["stale"], "no longer detected, and it says so")
         ok(any("No longer detected" in h.get("note", "") for h in e["history"]))
     finally:
-        _rc.configure(xero=None, registry=None, tool_json=None, mail_store=None,
-                      load_store=None, write_store=None, load_cache=None,
-                      write_cache=None, load_docs=None, write_docs=None)
+        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
+                      mail_thread=None, load_store=None, write_store=None,
+                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
 
 
 @test
@@ -10734,9 +10738,9 @@ def t_a_crashed_check_does_not_resolve_its_own_findings():
            "and it is still there when the check runs again")
     finally:
         _rc.ALL_CHECKS[:] = saved
-        _rc.configure(xero=None, registry=None, tool_json=None, mail_store=None,
-                      load_store=None, write_store=None, load_cache=None,
-                      write_cache=None, load_docs=None, write_docs=None)
+        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
+                      mail_thread=None, load_store=None, write_store=None,
+                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
 
 
 @test
@@ -10808,9 +10812,9 @@ def t_a_truncated_xero_crawl_advances_its_watermark():
         ok("19 Aug 2026" in mark,
            "the watermark advanced to the last row actually received: " + mark)
     finally:
-        _rc.configure(xero=None, registry=None, tool_json=None, mail_store=None,
-                      load_store=None, write_store=None, load_cache=None,
-                      write_cache=None, load_docs=None, write_docs=None)
+        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
+                      mail_thread=None, load_store=None, write_store=None,
+                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
 
 
 @test
@@ -10883,6 +10887,363 @@ def t_the_other_direction_a_xero_sale_no_shopify_order_explains():
         cache["xero"]["invoices"]["q%d" % i] = _inv("Q-%d" % i, 1000 + i)
     out2 = _rc.check_xero_orphan_sales(cache)
     eq([e["kind"] for e in out2], ["invoice_numbering_unlinked"])
+
+
+# ---------------------------------------------------------------------------
+# Two mailboxes: the sales inbox and the accounts mailbox must never mix
+# ---------------------------------------------------------------------------
+
+@test
+def t_the_two_mailboxes_have_separate_tokens_and_caches():
+    """They are different Google accounts. Sharing a token file or an access
+    cache would mean reconciliation reading the sales inbox, or the Inbox tab
+    showing finance mail - both wrong, and both silent."""
+    ok(_gm.SALES.token_path != _gm.FINANCE.token_path,
+       "different token files: %s vs %s" % (_gm.SALES.token_path, _gm.FINANCE.token_path))
+    ok(_gm.SALES.access is not _gm.FINANCE.access, "and different access caches")
+    _gm.SALES.access["token"] = "sales-token"
+    _gm.FINANCE.access["token"] = "finance-token"
+    ok(_gm.SALES.access["token"] == "sales-token"
+       and _gm.FINANCE.access["token"] == "finance-token",
+       "setting one does not touch the other")
+    _gm.SALES.access["token"] = ""
+    _gm.FINANCE.access["token"] = ""
+    # The path is read live, so a test or a settings change that moves
+    # TOKEN_PATH still describes the same account.
+    saved = _gm.TOKEN_PATH
+    try:
+        _gm.TOKEN_PATH = SCRATCH + "/moved.json"
+        eq(_gm.SALES.token_path, SCRATCH + "/moved.json",
+           "the account follows its module path rather than a stale copy")
+    finally:
+        _gm.TOKEN_PATH = saved
+
+
+@test
+def t_one_token_file_cannot_serve_two_mailboxes():
+    """A shared token file would point reconciliation at the sales inbox while
+    the screen says it is reading the accounts mailbox: exactly the failure the
+    split exists to prevent, and silent. It is refused instead."""
+    saved = _gm.FINANCE_TOKEN_PATH
+    try:
+        _gm.FINANCE_TOKEN_PATH = _gm.TOKEN_PATH
+        ok(not _gm.FINANCE.usable(), "a colliding account is not usable")
+        ok(not _gm.connected(_gm.FINANCE), "and never reports itself connected")
+        try:
+            run_async(_gm._token(_gm.FINANCE))
+            ok(False, "minting a token for a colliding account must raise")
+        except _gm.GmailError as e:
+            ok("own path" in str(e), "and says how to fix it: " + str(e))
+        ok(_gm.SALES.usable(), "the sales inbox is unaffected")
+    finally:
+        _gm.FINANCE_TOKEN_PATH = saved
+    ok(_gm.FINANCE.usable(), "and it recovers once the paths differ again")
+
+
+@test
+def t_every_gmail_call_goes_to_the_account_it_was_asked_for():
+    """The isolation is the routing: if a read defaults to the sales account
+    when handed the finance one, reconciliation quietly audits the wrong post."""
+    seen = []
+
+    async def fake_call(method, path, params=None, body=None, acct=None):
+        seen.append((path.split("/")[0], acct.label if acct else "DEFAULT"))
+        if path == "threads":
+            return {"threads": [{"id": "t1"}]}
+        if path.startswith("threads/"):
+            return {"id": "t1", "messages": []}
+        return {"data": ""}
+
+    saved = _gm._call
+    _gm._call = fake_call
+    try:
+        run_async(_gm.list_thread_ids("q", acct=_gm.FINANCE))
+        run_async(_gm.get_thread("t1", acct=_gm.FINANCE))
+        run_async(_gm.attachment_bytes("m1", "a1", acct=_gm.FINANCE))
+        ok(all(label == "finance" for _p, label in seen),
+           "every finance read reached the finance account: %s" % seen)
+        seen.clear()
+        run_async(_gm.get_thread("t1"))
+        eq(seen[0][1], "sales", "and the default is still the sales inbox")
+    finally:
+        _gm._call = saved
+
+
+@test
+def t_reconciliation_is_wired_to_the_finance_mailbox_only():
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    seg = src.split("recon_engine.configure(")[1][:400]
+    ok("mail_store" not in seg,
+       "the engine no longer receives the Inbox tab's store at all")
+    wiring = src.split("_fin = google_mail.FINANCE")[1][:700]
+    for hook in ("attachment_bytes", "list_thread_ids", "get_thread"):
+        call = wiring.split(hook)[1][:120]
+        ok("acct=_fin" in call, hook + " is bound to the finance account: " + call[:60])
+
+
+@test
+def t_connecting_the_sales_mailbox_as_accounts_is_refused():
+    """The likeliest mistake in the whole walk: whoever clicks the link is
+    probably already signed in as the sales mailbox. Agreeing would leave
+    reconciliation reading the wrong post and reporting a clean board."""
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    cb = src.split("async def gmail_finance_callback")[1].split("\n    @mcp.custom_route")[0]
+    ok("addr.strip().lower() == sales.strip().lower()" in cb,
+       "the two addresses are compared, tolerant of case and whitespace")
+    ok("disconnect(google_mail.FINANCE)" in cb,
+       "and the wrong connection is thrown away rather than kept")
+    ok(cb.index("disconnect(google_mail.FINANCE)") < cb.index("That is the sales mailbox"),
+       "the token is dropped before the page is returned")
+
+
+@test
+def t_the_finance_token_is_a_credential_not_a_backup_item():
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    eq(src.count('getattr(google_mail, "FINANCE_TOKEN_PATH"'), 2,
+       "excluded from the backup AND blocked at restore, like every other token")
+
+
+@test
+def t_a_thread_still_queued_for_reading_is_not_marked_seen():
+    """The seen list is what stops a sweep refetching a year of mail. A thread
+    whose documents did not get read this time must come back, or its invoice
+    is dropped and nothing says so."""
+    stores = {"store": {"exceptions": {}, "watermarks": {}}, "cache": {}, "docs": {}}
+    threads = {("t%d" % i): {"id": "t%d" % i, "subject": "Invoice %d" % i,
+                             "messages": [{"id": "m%d" % i, "at": "2026-08-2%d" % (i % 10),
+                                           "from_email": "ap@supplier.com",
+                                           "files": [{"id": "a%d" % i, "name": "inv.pdf",
+                                                      "size": 100}]}]}
+               for i in range(12)}
+
+    async def search(q, mx=200, out_complete=None):
+        if out_complete is not None:
+            out_complete.append(True)
+        return set(threads)
+
+    async def thread(tid):
+        return threads[tid]
+
+    async def gbytes(mid, aid):
+        return b"%PDF-1.4 tiny"
+
+    fx = _FakeXero(invoices=[_raw_xinv("INV-1", "10.00")])
+    async def fake_tool_json(reg, name, args):
+        return {"orders": []} if name == "shopify_list_orders" else {"available": False}
+    saved_cap = _rc.DOCS_PER_SWEEP
+    _rc.DOCS_PER_SWEEP = 4
+    import copy as _copy
+    _rc.configure(xero=fx, registry={}, tool_json=fake_tool_json,
+                  mail_connected=lambda: True,
+                  mail_search=search, mail_thread=thread, gmail_bytes=gbytes, ai_call=None,
+                  load_store=lambda: _copy.deepcopy(stores["store"]),
+                  write_store=lambda d: stores.update(store=d),
+                  load_cache=lambda: _copy.deepcopy(stores["cache"]),
+                  write_cache=lambda d: stores.update(cache=d),
+                  load_docs=lambda: _copy.deepcopy(stores["docs"]),
+                  write_docs=lambda d: stores.update(docs=d))
+    try:
+        r = run_async(_rc.sweep())
+        ok(r["ok"], r)
+        seen = set(stores["store"].get("seen_threads") or [])
+        read = set(stores["docs"].keys())
+        eq(len(read), 4, "only the per-sweep budget was read: %d" % len(read))
+        ok(len(seen) == 4, "and only those threads are marked seen: %d" % len(seen))
+        ok(any("queued for later sweeps" in n for n in r["notes"]),
+           "the backlog is stated rather than silently dropped: %s" % r["notes"])
+        r2 = run_async(_rc.sweep())
+        ok(len(stores["docs"]) > 4, "the next sweep picks up where it stopped: %d"
+           % len(stores["docs"]))
+    finally:
+        _rc.DOCS_PER_SWEEP = saved_cap
+        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
+                      mail_connected=None, mail_thread=None, gmail_bytes=None,
+                      load_store=None, write_store=None,
+                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
+
+
+@test
+def t_no_accounts_mailbox_means_the_sweep_says_so():
+    """A sweep with no finance mail connected has checked no documents at all.
+    Silence there would read as 'no missing invoices'."""
+    fx = _FakeXero(invoices=[_raw_xinv("INV-1", "10.00")])
+    stores = _recon_world(fx, [])
+    try:
+        r = run_async(_rc.sweep())
+        ok(any("accounts mailbox is not connected" in n for n in r["notes"]),
+           "the gap is reported: %s" % r["notes"])
+    finally:
+        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
+                      mail_thread=None, load_store=None, write_store=None,
+                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
+
+
+def _mail_world(threads, gbytes=None, search=None, docs_cap=None):
+    """A reconciliation world with a working accounts mailbox behind it."""
+    import copy as _copy
+    stores = {"store": {"exceptions": {}, "watermarks": {}}, "cache": {}, "docs": {}}
+
+    async def default_search(q, mx=200, out_complete=None):
+        if out_complete is not None:
+            out_complete.append(True)
+        return set(threads)
+
+    async def thread(tid):
+        return threads[tid]
+
+    async def default_bytes(mid, aid):
+        return b"%PDF-1.4 tiny"
+
+    async def tools(reg, name, args):
+        return {"orders": []} if name == "shopify_list_orders" else {"available": False}
+
+    _rc.configure(xero=_FakeXero(invoices=[_raw_xinv("INV-1", "10.00")]), registry={},
+                  tool_json=tools, mail_connected=lambda: True,
+                  mail_search=search or default_search, mail_thread=thread,
+                  gmail_bytes=gbytes or default_bytes, ai_call=None,
+                  load_store=lambda: _copy.deepcopy(stores["store"]),
+                  write_store=lambda d: stores.update(store=d),
+                  load_cache=lambda: _copy.deepcopy(stores["cache"]),
+                  write_cache=lambda d: stores.update(cache=d),
+                  load_docs=lambda: _copy.deepcopy(stores["docs"]),
+                  write_docs=lambda d: stores.update(docs=d))
+    return stores
+
+
+def _mail_world_off():
+    _rc.configure(xero=None, registry=None, tool_json=None, mail_connected=None,
+                  mail_search=None, mail_thread=None, gmail_bytes=None,
+                  load_store=None, write_store=None, load_cache=None,
+                  write_cache=None, load_docs=None, write_docs=None)
+
+
+def _thread_with_pdf(i):
+    return {"id": "t%d" % i, "subject": "Invoice %d" % i,
+            "messages": [{"id": "m%d" % i, "at": "2026-08-20", "from_email": "ap@supplier.com",
+                          "files": [{"id": "a%d" % i, "name": "inv.pdf", "size": 100}]}]}
+
+
+@test
+def t_what_the_sweep_learned_survives_its_own_reload():
+    """The sweep reloads the store before merging, to avoid clobbering a status
+    someone set while it ran. Everything it learned has to cross that reload:
+    seen_threads did not, so the mailbox crawl reread its first threads forever
+    and never reached the rest of the mailbox."""
+    threads = {("t%d" % i): _thread_with_pdf(i) for i in range(3)}
+    stores = _mail_world(threads)
+    try:
+        run_async(_rc.sweep())
+        seen = stores["store"].get("seen_threads") or []
+        eq(sorted(seen), ["t0", "t1", "t2"],
+           "the walked threads persisted past the reload: %s" % seen)
+    finally:
+        _mail_world_off()
+
+
+@test
+def t_a_mailbox_that_cannot_be_read_is_never_a_clean_sweep():
+    """The house rule, on the exact read this feature exists for. A search that
+    fails has checked NO documents; silence there reads as 'no missing
+    invoices', which is the one thing this tool must never imply."""
+    async def broken(q, mx=200, out_complete=None):
+        raise RuntimeError("Gmail 503")
+    stores = _mail_world({}, search=broken)
+    try:
+        r = run_async(_rc.sweep())
+        ok(any("could not be read" in n for n in r["notes"]),
+           "the failure is on the report: %s" % r["notes"])
+    finally:
+        _mail_world_off()
+
+
+@test
+def t_a_document_that_could_not_be_read_comes_back_next_sweep():
+    """A thread is only 'seen' once its documents are actually IN the store. A
+    fetch that failed used to mark it seen anyway, so that supplier's
+    remittance became permanently invisible, with nothing said."""
+    calls = {"n": 0}
+
+    async def flaky(mid, aid):
+        calls["n"] += 1
+        if calls["n"] <= 1:
+            raise RuntimeError("Gmail 500 on the attachment")
+        return b"%PDF-1.4 tiny"
+
+    stores = _mail_world({"t1": _thread_with_pdf(1)}, gbytes=flaky)
+    try:
+        r = run_async(_rc.sweep())
+        eq(stores["docs"], {}, "nothing was stored")
+        eq(stores["store"].get("seen_threads") or [], [],
+           "and the thread is NOT written off as seen")
+        ok(any("could not be read" in n and "retried" in n for n in r["notes"]),
+           "the sweep says so: %s" % r["notes"])
+        run_async(_rc.sweep())
+        eq(len(stores["docs"]), 1, "the next sweep picks it up")
+        eq(stores["store"].get("seen_threads") or [], ["t1"], "and only then is it seen")
+    finally:
+        _mail_world_off()
+
+
+@test
+def t_a_disconnected_accounts_mailbox_is_reported_not_assumed():
+    """The note used to be keyed on whether a hook was wired, which in the real
+    app is always. So a disconnected mailbox produced a silent clean sweep."""
+    stores = _mail_world({"t1": _thread_with_pdf(1)})
+    try:
+        _rc.configure(mail_connected=lambda: False)
+        r = run_async(_rc.sweep())
+        ok(any("not connected" in n for n in r["notes"]),
+           "the sweep says the mailbox is not connected: %s" % r["notes"])
+        eq(stores["docs"], {}, "and nothing pretended to be checked")
+    finally:
+        _mail_world_off()
+
+
+@test
+def t_the_newest_mail_is_read_first():
+    """With a per-sweep budget, an unordered set means the newest invoice can
+    sit unread behind a year of old post."""
+    threads = {("t%03d" % i): _thread_with_pdf(i) for i in range(60)}
+    for i in range(60):
+        threads["t%03d" % i]["id"] = "t%03d" % i
+    saved = _rc.THREADS_PER_SWEEP
+    _rc.THREADS_PER_SWEEP = 5
+    stores = _mail_world(threads)
+    try:
+        run_async(_rc.sweep())
+        seen = sorted(stores["store"].get("seen_threads") or [])
+        eq(seen, ["t055", "t056", "t057", "t058", "t059"],
+           "the highest (newest) thread ids were read first: %s" % seen)
+    finally:
+        _rc.THREADS_PER_SWEEP = saved
+        _mail_world_off()
+
+
+@test
+def t_a_shared_token_file_cannot_delete_the_sales_connection():
+    """With colliding paths, a finance connect would write over the sales
+    token and a finance disconnect would delete it: either takes the Inbox tab
+    down with it."""
+    saved = _gm.FINANCE_TOKEN_PATH
+    try:
+        _gm.FINANCE_TOKEN_PATH = _gm.TOKEN_PATH
+        try:
+            _gm.save_connection("rt", "accounts@example.com", _gm.FINANCE)
+            ok(False, "saving a colliding account must raise")
+        except _gm.GmailError as e:
+            ok("own path" in str(e), str(e))
+        # And disconnect must not remove the file it would be sharing.
+        os.makedirs(os.path.dirname(_gm.TOKEN_PATH) or ".", exist_ok=True)
+        with open(_gm.TOKEN_PATH, "w", encoding="utf-8") as fh:
+            json.dump({"refresh_token": "sales-rt", "address": "sales@example.com"}, fh)
+        _gm.disconnect(_gm.FINANCE)
+        ok(os.path.exists(_gm.TOKEN_PATH), "the sales token file survived")
+    finally:
+        _gm.FINANCE_TOKEN_PATH = saved
+        try:
+            os.remove(_gm.TOKEN_PATH)
+        except FileNotFoundError:
+            pass
 
 
 # =========================== run ===========================================

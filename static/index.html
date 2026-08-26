@@ -4608,7 +4608,10 @@
             const xs = st.xero || {};
             row.append(el('span', 'lbl-chip ' + (xs.connected ? 'made' : 'bad'),
                 xs.connected ? ('XERO \u00b7 ' + (xs.tenant || 'CONNECTED')) : 'XERO NOT CONNECTED'));
-            row.append(el('span', 'lbl-chip ' + (st.gmail ? 'made' : 'warn'), st.gmail ? 'GMAIL' : 'GMAIL OFF'));
+            const mb = st.mailbox || {};
+            row.append(el('span', 'lbl-chip ' + (mb.connected ? 'made' : 'warn'),
+                mb.connected ? ('ACCOUNTS MAILBOX \u00b7 ' + (mb.address || 'CONNECTED'))
+                             : 'ACCOUNTS MAILBOX NOT CONNECTED'));
             row.append(el('span', 'sub', st.last_sync ? ('Last sweep ' + fmtDate(st.last_sync)) : 'Never swept'));
             if (st.docs) row.append(el('span', 'sub', st.docs + ' documents read'));
             const sw = el('button', 'btn btn-primary'); sw.append(ico(I.refresh),
@@ -4621,6 +4624,26 @@
             row.style.rowGap = '8px'; row.append(sw); card.append(row);
             (st.sweep_notes || []).forEach(n => card.append(el('div', 'field-help', n)));
             box.append(card);
+            /* The accounts mailbox: a SEPARATE Google account from the Inbox
+               tab's, so the card names both to make a wrong consent obvious. */
+            if (!mb.connected && mb.connect_path) {
+                const mc = el('div', 'card'); mc.style.marginBottom = '16px';
+                mc.append(el('div', 'know-title', 'Connect the accounts mailbox'));
+                mc.append(el('div', 'field-help',
+                    'Reconciliation reads remittances, supplier invoices and statements from '
+                    + 'the accounts mailbox. That is a different Google account from the one '
+                    + 'behind the Inbox tab'
+                    + (mb.sales_address ? ' (' + mb.sales_address + ')' : '')
+                    + ', and it will not appear there.'));
+                const link = el('div', 'field-help');
+                link.append(document.createTextNode('Open '));
+                link.append(el('b', null, location.origin + mb.connect_path));
+                link.append(document.createTextNode(
+                    ' and sign in as the accounts mailbox. If you sign in as the Inbox '
+                    + 'mailbox by mistake the connection is refused, so nothing breaks.'));
+                mc.append(link);
+                box.append(mc);
+            }
             /* Setup, master only, until Xero is connected */
             if (!xs.connected && st.setup && st.setup.env_needed) {
                 const su = el('div', 'card'); su.style.marginBottom = '16px';
