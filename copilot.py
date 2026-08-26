@@ -17415,6 +17415,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                   "client": fin["client"],
                                   "can_connect": _team_role(who) == "master",
                                   "redirect_uri": _gmail_fin_redirect_uri(request),
+                                  # The Cloud project is the numeric prefix of the
+                                  # client id, so the console link can go straight
+                                  # to the right project instead of whichever one
+                                  # the browser last had open.
+                                  "project": google_mail.project_number(),
                                   # Named so a wrong-account consent is obvious.
                                   "sales_address": google_mail.address()},
                       "model": MODEL_RECON,

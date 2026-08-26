@@ -4649,6 +4649,15 @@
                     + 'the Inbox tab already uses (APIs and Services, Credentials, your OAuth '
                     + 'client, Authorised redirect URIs). Until it is there Google refuses the '
                     + 'sign-in with "Access blocked: this app\u2019s request is invalid".'));
+                const proj = mb.project ? '?project=' + encodeURIComponent(mb.project) : '';
+                const openRow = el('div', 'field-help');
+                openRow.style.marginTop = '6px';
+                const ca = el('a', null, 'Open your OAuth clients in the Google console');
+                ca.href = 'https://console.cloud.google.com/auth/clients' + proj;
+                ca.target = '_blank'; ca.rel = 'noopener';
+                ca.style.color = 'var(--accent)';
+                openRow.append(ca);
+                mc.append(openRow);
                 const uriRow = el('div', 'field-help');
                 uriRow.style.marginTop = '6px';
                 const uri = el('b', null, mb.redirect_uri || '');
