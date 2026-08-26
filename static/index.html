@@ -170,32 +170,31 @@
 
         .view { flex: 1; min-height: 0; display: none; flex-direction: column; }
         .view.active { display: flex; }
-        .scroll { flex: 1; overflow-y: auto; }
+        /* scrollbar-gutter: a tab whose content scrolls used to be ~11px
+           narrower than one that does not, so the whole page jumped sideways
+           as you moved between them. The gutter is always reserved. */
+        .scroll { flex: 1; overflow-y: auto; scrollbar-gutter: stable; }
 
         /* ---------- Overview ---------- */
-        /* ONE width system, three measures.
-           --wrap is the page's own width and grows with the screen: this app is
-           used on a 1920 monitor and a 2560 iMac, where a fixed 1120 left a
-           third to a half of the screen as empty margin while the queue rows
-           and tables inside it were the crowded part.
+        /* ONE page width, every tab.
+           --wrap grows with the screen: this app is used on a 1920 monitor and
+           a 2560 iMac, where a fixed 1120 left a third to a half of the screen
+           as empty margin while the rows and tables inside it were the crowded
+           part.
+           There were briefly two tiers, reports held back at 1680 because a
+           stretched paragraph is unreadable. That risk now lives where it
+           belongs: prose caps ITSELF at a reading measure (the 52ch rule
+           below) whatever the container does. With text safe, a narrower
+           wrapper on some tabs bought nothing and cost the thing a person
+           actually notices - tabs that do not line up as you move between them.
            The ladder is min-width only, deliberately: a print page is never
-           1500px, so paper keeps the 1120 measure it was designed against.
-           What must NOT follow the screen is prose. --measure is the reading
-           width for body copy and stays put however wide the monitor is; a
-           paragraph at 2,200px is not generous, it is unreadable. Widening is
-           for lists, boards, tables and second panes. */
-        :root { --wrap-read: 1120px; --wrap-data: 1600px; --wrap-pad: 32px; }
-        /* Two tiers, four stops. A tab of stacked report cards has no shape
-           that improves past 1680, so the reading tier stops there; a board or
-           a queue keeps going. Every stop is min-width, so a printed page
-           (never 1500px wide) keeps the measure it was designed against. */
-        @media (min-width: 1500px) { :root { --wrap-read: 1400px; --wrap-data: 1800px; } }
-        @media (min-width: 1900px) { :root { --wrap-read: 1680px; --wrap-data: 2040px; --wrap-pad: 40px; } }
-        @media (min-width: 2400px) { :root { --wrap-data: 2160px; } }
-        .ov-wrap { max-width: var(--wrap, var(--wrap-read)); margin: 0 auto; width: 100%;
+           1500px, so paper keeps the 1120 measure it was designed against. */
+        :root { --wrap: 1120px; --wrap-pad: 32px; }
+        @media (min-width: 1500px) { :root { --wrap: 1800px; } }
+        @media (min-width: 1900px) { :root { --wrap: 2040px; --wrap-pad: 40px; } }
+        @media (min-width: 2400px) { :root { --wrap: 2160px; } }
+        .ov-wrap { max-width: var(--wrap); margin: 0 auto; width: 100%;
             padding: 32px var(--wrap-pad) 72px; }
-        /* The queues and boards opt into the wider tier. */
-        .wrap-data { --wrap: var(--wrap-data); }
         /* Body copy inside any tab: measured, never the full wrap.
            The cap is written in ch HERE rather than held in a custom property,
            because ch resolves against the font size of whatever element uses
@@ -782,6 +781,16 @@
         .nav-ask svg { width: 15px; height: 15px; }
         .nav-new-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
             flex: none; margin-left: auto; }
+        /* Beta: quieter than a warning, louder than nothing. It sits where the
+           unread dot sits, so the nav keeps one right-hand column. */
+        .beta-tag { margin-left: auto; flex: none; font-size: 11px; font-weight: 600;
+            letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--ink-3);
+            background: var(--surface-3); border: 1px solid var(--border);
+            border-radius: var(--r-xs); padding: 0 var(--sp-2); line-height: 1.6; }
+        .nav-item.active .beta-tag { color: var(--accent-ink); border-color: var(--accent-line);
+            background: var(--surface); }
+        /* In a page heading it sits on the baseline of the title, not above it. */
+        .ov-hero .beta-tag { margin-left: 8px; vertical-align: middle; position: relative; top: -2px; }
         .rel { border-top: 1px solid var(--line); padding: 12px 0; }
         .rel:first-of-type { border-top: 0; }
         .rel-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
@@ -800,8 +809,7 @@
         .req-title { font-size: 13px; font-weight: 600; color: var(--ink); }
         .req-detail { font-size: 12px; color: var(--ink-2); margin-top: 3px; white-space: pre-wrap; }
         .req-meta { font-size: 11px; color: var(--ink-3); margin-top: 3px; }
-        /* Kept as an alias so existing markup and tests still resolve. */
-        .crm-wrap { --wrap: var(--wrap-data); }
+
         /* The board earns the width; lists and charts read best at the house
            measure, so every other segment caps itself back to it. */
         .crm-seg { margin-top: var(--sp-3); }
@@ -821,7 +829,7 @@
         .crm-seg-leads { max-width: 760px; }
         .crm-seg-insights { max-width: 1120px; }
         /* Kept: older markup and the tests still name it. */
-        .crm-narrow { max-width: 1120px; margin-left: auto; margin-right: auto; }
+
         .crm-board { display: flex; gap: var(--sp-2); overflow-x: auto; align-items: flex-start;
             padding-bottom: var(--sp-3); min-height: 300px; }
         .crm-col { min-width: 228px; flex: 1 0 228px; max-width: 300px; background: var(--surface-2);
@@ -1779,20 +1787,20 @@
 
             <!-- Liability / accounts receivable -->
             <section class="view" id="view-liability">
-                <div class="scroll"><div class="ov-wrap wrap-data" id="liability-content"></div></div>
+                <div class="scroll"><div class="ov-wrap" id="liability-content"></div></div>
             </section>
             <section class="view" id="view-recon">
-                <div class="scroll"><div class="ov-wrap wrap-data" id="recon-content"></div></div>
+                <div class="scroll"><div class="ov-wrap" id="recon-content"></div></div>
             </section>
 
             <!-- Production labels -->
             <section class="view" id="view-crm">
-                <div class="scroll"><div class="ov-wrap crm-wrap" id="crm-content"></div></div>
+                <div class="scroll"><div class="ov-wrap" id="crm-content"></div></div>
             </section>
 
             <!-- Inbox: shared-mailbox ownership board -->
             <section class="view" id="view-mail">
-                <div class="scroll"><div class="ov-wrap crm-wrap" id="mail-content"></div></div>
+                <div class="scroll"><div class="ov-wrap" id="mail-content"></div></div>
             </section>
 
             <!-- Files -->
@@ -1805,7 +1813,7 @@
                 <div class="scroll"><div class="ov-wrap" id="team-content"></div></div>
             </section>
             <section class="view" id="view-labels">
-                <div class="scroll"><div class="ov-wrap wrap-data" id="labels-content"></div></div>
+                <div class="scroll"><div class="ov-wrap" id="labels-content"></div></div>
             </section>
 
             <!-- Memory -->
@@ -2003,8 +2011,10 @@
         $('nav-products').append(ico(I.box), document.createTextNode('Products'));
         $('nav-customers').append(ico(I.users), document.createTextNode('Customers'));
         $('nav-liability').append(ico(I.card), document.createTextNode('Liability'));
-        $('nav-recon').append(ico(I.check), document.createTextNode('Reconciliation'));
-        $('nav-crm').append(ico(I.briefcase), document.createTextNode('CRM'));
+        $('nav-recon').append(ico(I.check), document.createTextNode('Reconciliation'),
+            el('span', 'beta-tag', 'Beta'));
+        $('nav-crm').append(ico(I.briefcase), document.createTextNode('CRM'),
+            el('span', 'beta-tag', 'Beta'));
         $('nav-mail').append(ico(I.mail), document.createTextNode('Inbox'));
         $('nav-files').append(ico(I.folder), document.createTextNode('Files'));
         $('nav-team').append(ico(I.userCheck), document.createTextNode('Team'));
@@ -4572,7 +4582,9 @@
             const box = $('recon-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.check;
             const ht = el('div');
-            ht.append(el('h2', null, 'Reconciliation'),
+            const rTitle = el('h2', null, 'Reconciliation');
+            rTitle.append(el('span', 'beta-tag', 'Beta'));
+            ht.append(rTitle,
                 el('p', null, 'An independent check that Shopify, Xero and the inbox agree: '
                     + 'every sale in the books, every payout in the bank, every document accounted for. '
                     + 'It reads all three systems and writes to none of them.'));
@@ -8700,7 +8712,9 @@
             const hero = el('div', 'ov-hero');
             const badge = el('div', 'badge'); badge.innerHTML = I.briefcase;
             const ht = el('div');
-            ht.append(el('h2', null, 'CRM'),
+            const cTitle = el('h2', null, 'CRM');
+            cTitle.append(el('span', 'beta-tag', 'Beta'));
+            ht.append(cTitle,
                 el('p', null, 'Deals, activities and contacts for the sales desk. Every open deal '
                     + 'should carry a next activity; cards wearing the amber warning are the ones '
                     + 'with nothing scheduled, and a red edge means a deal has sat untouched too long.'));
@@ -13537,11 +13551,15 @@
             const n = document.querySelector('.nav-item.active');
             return (n && n.dataset.view) || '';
         }
+        const BETA_TABS = ['recon', 'crm'];
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
             ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'crm', 'mail', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
             const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', crm: 'CRM', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
+            /* Beta rides the topbar title as well: it is the only label still
+               on screen once the page is scrolled. */
+            if (BETA_TABS.indexOf(v) >= 0) $('view-title').append(el('span', 'beta-tag', 'Beta'));
             const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide' || v === 'crm' || v === 'mail' || v === 'files' || v === 'team' || v === 'recon') ? 'none' : '';
             if (v === 'guide') renderGuide();
             // Only offer the PDF when there is actually a report to print: the print

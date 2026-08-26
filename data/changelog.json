@@ -1,6 +1,24 @@
 {
  "releases": [
   {
+   "date": "2026-08-26",
+   "title": "One page width everywhere, and two tabs marked Beta",
+   "items": [
+    {
+     "kind": "added",
+     "text": "CRM and Reconciliation are marked Beta - in the sidebar, in the page heading, and in the title bar that stays visible when you scroll. They are the two newest parts of the app and the ones most likely to change; everything else has been in daily use long enough to have earned its silence."
+    },
+    {
+     "kind": "improved",
+     "text": "Every tab now uses the same page width and the same margins as the Production Manager. There were briefly two widths, with the report tabs held narrower to protect readability, but that job is now done properly by the text itself: paragraphs stop at a comfortable reading measure whatever the page does. So the narrower wrapper bought nothing and cost the thing you actually notice, which is tabs that do not line up as you move between them."
+    },
+    {
+     "kind": "fixed",
+     "text": "The page no longer shifts sideways by a few pixels when you move between a tab that scrolls and one that does not. The space for the scrollbar is always reserved."
+    }
+   ]
+  },
+  {
    "date": "2026-08-25",
    "title": "An auditor that never sleeps: Shopify, Xero and the inbox, cross-checked",
    "items": [

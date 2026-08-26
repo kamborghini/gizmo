@@ -1357,8 +1357,10 @@ def t_an_order_missing_its_terms_is_flagged_on_the_queue_row():
 def t_the_page_width_grows_with_the_screen():
     """A fixed 1120px wrap left a third of a 1920 monitor and half of a 2560
     iMac as empty margin, while the rows inside it were the crowded part."""
-    ok("--wrap-read" in CSS and "--wrap-data" in CSS, "there are two width tiers")
-    ok(".wrap-data" in CSS, "and a class a tab opts in with")
+    ok("--wrap:" in CSS, "there is one page-width token")
+    ok("--wrap-read" not in CSS and "--wrap-data" not in CSS,
+       "and only one: every tab uses the same page, so they line up as you "
+       "move between them")
     for stop in ("1500px", "1900px", "2400px"):
         ok("min-width: " + stop in CSS, "the ladder has a " + stop + " stop")
     ok("max-width: 1120px" not in re.search(r"\.ov-wrap \{[^}]*\}", CSS).group(0),
@@ -1376,8 +1378,8 @@ def _wrap_widening_is_min_width_only():
             elif CSS[i] == "}": depth -= 1
             i += 1
         block = CSS[block_start:i]
-        ok("--wrap-read:" not in block and "--wrap-data:" not in block,
-           "no max-width block moves a wrap token (found in the " + m.group(1) + "px block)")
+        ok("--wrap:" not in block,
+           "no max-width block moves the wrap token (found in the " + m.group(1) + "px block)")
 
 
 @test
@@ -1475,9 +1477,8 @@ def t_the_reconciliation_tab_exists_and_is_gated():
     ok('data-view="recon"' in HTML, "and its sidebar entry")
     ok("'recon'" in re.search(r"const TAB_KEYS = \[[^\]]+\]", SCRIPT).group(0),
        "the tab is in the permission list, so an admin can switch it off per account")
-    ok("wrap-data" in re.search(r'id="recon-content"[^>]*|[^>]*id="recon-content"', HTML).group(0)
-       or 'class="ov-wrap wrap-data" id="recon-content"' in HTML,
-       "a data tab rides the wide tier")
+    ok('class="ov-wrap" id="recon-content"' in HTML,
+       "and it uses the same page wrapper as every other tab")
 
 
 @test
@@ -1508,6 +1509,32 @@ def t_recon_csv_export_carries_the_armour():
     ok("replace(/\"/g" in fn.replace("'", '"') or 'replace(/"/g' in fn, "quotes are doubled")
     ok('[",\\n\\r]' in fn, "commas, newlines AND carriage returns quote the field")
     ok("^[=+\\-@" in fn, "formula injection is armoured")
+
+
+@test
+def t_the_beta_tabs_say_so_everywhere_they_are_named():
+    """CRM and Reconciliation are the two newest, least-proven tabs. A person
+    should know that from the sidebar, from the page heading, and from the
+    topbar title that survives scrolling - not just from one of the three."""
+    ok("BETA_TABS = ['recon', 'crm']" in SCRIPT, "the two beta tabs are declared once")
+    for nav in ("$('nav-recon')", "$('nav-crm')"):
+        block = SCRIPT.split(nav)[1][:180]
+        ok("beta-tag" in block, nav + " carries the badge in the sidebar")
+    ok("rTitle.append(el('span', 'beta-tag'" in SCRIPT
+       and "cTitle.append(el('span', 'beta-tag'" in SCRIPT,
+       "and both page headings carry it")
+    ok("BETA_TABS.indexOf(v) >= 0" in SCRIPT, "and the topbar title does too")
+    ok(".beta-tag {" in CSS, "the badge is styled")
+
+
+@test
+def t_every_tab_shares_one_page_wrapper():
+    """The complaint that started this: tabs that do not line up as you move
+    between them. Every view's content div is the same wrapper, no exceptions."""
+    wraps = re.findall(r'<div class="([^"]*ov-wrap[^"]*)" id="([a-z-]+)-content"', HTML)
+    ok(len(wraps) >= 12, "found the tab wrappers: %d" % len(wraps))
+    odd = [(cls, tab) for cls, tab in wraps if cls.strip() != "ov-wrap"]
+    ok(not odd, "no tab carries an extra width class: %s" % odd)
 
 
 if __name__ == "__main__":
