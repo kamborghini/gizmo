@@ -495,10 +495,24 @@
         .sk-more { background: transparent; border: 0; color: var(--accent-ink); font: inherit; font-size: 12px; font-weight: 600; padding: 7px 0 0; cursor: pointer; }
         .sk-meta { font-size: 11px; color: var(--ink-3); margin-top: 8px; }
         /* refresh all */
-        .nav-refresh { display: flex; align-items: center; gap: 8px; margin: 9px 12px 0; padding: 8px 12px; border-radius: var(--r-sm); border: 1px solid var(--border); background: transparent; color: var(--ink-2); font-size: 12px; font-weight: 500; transition: background .14s, color .14s, border-color .14s; }
-        .nav-refresh:hover { background: var(--surface-2); color: var(--ink); border-color: var(--border-2); }
+        /* The two secondary sidebar actions, as ONE rule. They used to be two
+           declarations that agreed on paper and differed on screen: the ask
+           button carried `font: inherit`, which pulls the body's 1.5 line
+           height, so its box came out 36px against the other's 33 - and an
+           identical 8px radius reads differently on boxes of different
+           heights. line-height is explicit here so neither can drift again;
+           only the margins differ, because only their positions do. */
+        .nav-refresh, .nav-ask { display: flex; align-items: center; gap: 8px;
+            padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-sm);
+            background: transparent; color: var(--ink-2); font-family: inherit;
+            font-size: 12px; font-weight: 500; line-height: 16px; text-align: left;
+            cursor: pointer; transition: background .14s, color .14s, border-color .14s; }
+        .nav-refresh { margin: 9px 12px 0; }
+        .nav-ask { margin: 6px 12px 0; }
+        .nav-refresh:hover, .nav-ask:hover { background: var(--surface-2); color: var(--ink);
+            border-color: var(--border-2); }
         .nav-refresh:disabled { cursor: default; opacity: .75; }
-        .nav-refresh svg { width: 15px; height: 15px; flex-shrink: 0; }
+        .nav-refresh svg, .nav-ask svg { width: 15px; height: 15px; flex-shrink: 0; }
         .nav-refresh.spin svg { animation: navspin 1s linear infinite; }
         @keyframes navspin { to { transform: rotate(360deg); } }
         /* per-page ask panel */
@@ -773,19 +787,8 @@
            only mid-drag, rotten deals tinted red as a whole card.
            ------------------------------------------------------------------ */
         /* Updates: release notes and the request box. */
-        /* The sidebar has ONE inset: .nav, .convos and .nav-refresh all sit
-           12px from each edge. This button used to be width:100% with no
-           horizontal margin, so it alone ran the full 264px, edge to edge,
-           and broke the line every other control in the column keeps. It is
-           the same kind of thing as Refresh all - a secondary sidebar action -
-           so it is now the same shape, padding, border and hover as that. */
-        .nav-ask { display: flex; align-items: center; gap: 8px; margin: 6px 12px 0;
-            padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-sm);
-            background: transparent; color: var(--ink-2); font: inherit; font-size: 12px;
-            font-weight: 500; cursor: pointer; text-align: left;
-            transition: background .14s, color .14s, border-color .14s; }
-        .nav-ask:hover { background: var(--surface-2); color: var(--ink); border-color: var(--border-2); }
-        .nav-ask svg { width: 15px; height: 15px; flex-shrink: 0; }
+        /* The sidebar's one inset, 12px from each edge, is kept by .nav,
+           .convos and both buttons above. */
         .nav-new-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
             flex: none; margin-left: auto; }
         /* Beta: quieter than a warning, louder than nothing. It sits where the

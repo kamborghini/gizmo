@@ -1542,8 +1542,15 @@ def t_the_sidebar_keeps_one_inset():
     """Every control in the sidebar sits 12px from each edge. The ask button
     used to be width:100% with no horizontal margin, so it alone ran the full
     264px and broke the line the whole column keeps."""
-    rule = re.search(r"\.nav-ask \{[^}]*\}", CSS).group(0)
-    ok("width: 100%" not in rule, "the ask button does not span the sidebar")
+    shared = re.search(r"\.nav-refresh, \.nav-ask \{[^}]*\}", CSS)
+    ok(shared, "the two sidebar buttons are declared as ONE rule, so their "
+               "size, radius and hover cannot drift apart")
+    ok("line-height:" in shared.group(0),
+       "with an explicit line-height: `font: inherit` once pulled the body's "
+       "1.5 and made one button 3px taller than the other")
+    rule = re.search(r"\.nav-ask \{ *margin[^}]*\}", CSS).group(0)
+    ok("width: 100%" not in CSS.split(".nav-refresh, .nav-ask")[1][:400],
+       "neither button spans the sidebar")
     # It sits with Refresh all, above the conversation list, not stranded at
     # the bottom of a column that flexes.
     order = [m.group(1) for m in re.finditer(
