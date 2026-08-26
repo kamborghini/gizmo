@@ -1537,6 +1537,22 @@ def t_every_tab_shares_one_page_wrapper():
     ok(not odd, "no tab carries an extra width class: %s" % odd)
 
 
+@test
+def t_the_sidebar_keeps_one_inset():
+    """Every control in the sidebar sits 12px from each edge. The ask button
+    used to be width:100% with no horizontal margin, so it alone ran the full
+    264px and broke the line the whole column keeps."""
+    rule = re.search(r"\.nav-ask \{[^}]*\}", CSS).group(0)
+    ok("width: 100%" not in rule, "the ask button does not span the sidebar")
+    ok(re.search(r"margin: *[0-9]+px 12px", rule),
+       "it carries the sidebar's own 12px inset: " + rule)
+    for sel, why in ((r"\.nav \{[^}]*\}", "the nav list"),
+                     (r"\.nav-refresh \{[^}]*\}", "refresh all"),
+                     (r"\.convos \{[^}]*\}", "the conversation list")):
+        block = re.search(sel, CSS).group(0)
+        ok("12px" in block, why + " shares that inset: " + block[:90])
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

@@ -773,12 +773,19 @@
            only mid-drag, rotten deals tinted red as a whole card.
            ------------------------------------------------------------------ */
         /* Updates: release notes and the request box. */
-        .nav-ask { display: flex; align-items: center; gap: 8px; width: 100%; margin: 4px 0 0;
-            padding: 8px 10px; border: 1px solid var(--border-2); border-radius: var(--r-sm);
-            background: var(--surface); color: var(--ink-2); font: inherit; font-size: 12px;
-            font-weight: 500; cursor: pointer; text-align: left; }
-        .nav-ask:hover { border-color: var(--accent); color: var(--accent); }
-        .nav-ask svg { width: 15px; height: 15px; }
+        /* The sidebar has ONE inset: .nav, .convos and .nav-refresh all sit
+           12px from each edge. This button used to be width:100% with no
+           horizontal margin, so it alone ran the full 264px, edge to edge,
+           and broke the line every other control in the column keeps. It is
+           the same kind of thing as Refresh all - a secondary sidebar action -
+           so it is now the same shape, padding, border and hover as that. */
+        .nav-ask { display: flex; align-items: center; gap: 8px; margin: 4px 12px 8px;
+            padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-sm);
+            background: transparent; color: var(--ink-2); font: inherit; font-size: 12px;
+            font-weight: 500; cursor: pointer; text-align: left;
+            transition: background .14s, color .14s, border-color .14s; }
+        .nav-ask:hover { background: var(--surface-2); color: var(--ink); border-color: var(--border-2); }
+        .nav-ask svg { width: 15px; height: 15px; flex-shrink: 0; }
         .nav-new-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
             flex: none; margin-left: auto; }
         /* Beta: quieter than a warning, louder than nothing. It sits where the
