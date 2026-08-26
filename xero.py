@@ -53,21 +53,30 @@ API_BASE = os.environ.get("XERO_API_BASE", "https://api.xero.com")
 IDENTITY_BASE = os.environ.get("XERO_IDENTITY_BASE", "https://identity.xero.com")
 LOGIN_BASE = os.environ.get("XERO_LOGIN_BASE", "https://login.xero.com")
 
-# EXACTLY what the fetchers below call, and nothing else. The first version
-# also asked for reports and attachments, which nothing here reads - Xero
-# answered the whole authorization with "invalid_scope", and a scope you do
-# not use is not worth a failed connection. Least privilege happens to be the
-# debuggable choice too.
-#   transactions.read -> Invoices, CreditNotes, Payments, BankTransactions
-#   contacts.read     -> Contacts
-#   settings.read     -> Accounts, TaxRates, Organisation
-#   journals.read     -> Journals (fetcher exists; no check uses it yet)
-#   openid            -> the id_token, which names the organisation just
-#                        authorised so consent binds to the right tenant
+# GRANULAR scopes, exactly matching the endpoints the fetchers below call.
+#
+# accounting.transactions.read is the old BROAD scope, and Xero deprecated it:
+# since March 2026 every new Web app is issued granular scopes only, so asking
+# for the broad one gets the whole authorization refused with "invalid_scope"
+# even though the name is still documented. Existing apps keep the broad
+# scopes until September 2027; new ones never had them.
+#
+# The mapping, from Xero's own scope table:
+#   invoices.read         -> Invoices AND CreditNotes (credit notes live with
+#                            invoices, not with payments - worth knowing)
+#   payments.read         -> Payments
+#   banktransactions.read -> BankTransactions
+#   contacts.read         -> Contacts
+#   settings.read         -> Accounts, TaxRates, Organisation
+#   journals.read         -> Journals (fetcher exists; no check uses it yet)
+#   openid                -> the id_token, which names the organisation just
+#                            authorised so consent binds to the right tenant
 # Overridable, so a scope problem never needs a code change to work around.
 SCOPES = os.environ.get(
     "XERO_SCOPES",
-    "openid offline_access accounting.transactions.read accounting.contacts.read "
+    "openid offline_access "
+    "accounting.invoices.read accounting.payments.read "
+    "accounting.banktransactions.read accounting.contacts.read "
     "accounting.settings.read accounting.journals.read")
 
 _state: dict = {"access": "", "access_exp": 0.0, "tenant": "", "tenant_name": ""}

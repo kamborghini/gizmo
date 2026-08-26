@@ -6,6 +6,10 @@
    "items": [
     {
      "kind": "fixed",
+     "text": "Xero would not authorise the connection at all, answering invalid scope. Xero replaced its broad permissions with granular ones in March 2026, and apps created since then are only issued the new kind, so the permission the app asked for no longer exists for it. It now asks for exactly the granular permissions covering the records it reads: invoices and credit notes, payments, bank transactions, contacts, settings and the general ledger."
+    },
+    {
+     "kind": "fixed",
      "text": "Xero connects with a button too. Its setup card had the same placeholder link the mailbox card had, which returns Forbidden when opened exactly as written. Both connections now mint a single-use link inside the app, and neither one's link can open the other."
     },
     {

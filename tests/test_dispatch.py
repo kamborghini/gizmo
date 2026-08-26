@@ -11417,12 +11417,25 @@ def t_the_xero_consent_asks_only_for_what_it_reads():
     ok("offline_access" in scopes, "the refresh token needs offline_access")
     # Every scope must correspond to something the client actually calls.
     src = open(os.path.join(HERE, "xero.py"), encoding="utf-8").read()
+    # Xero's granular scopes, and the endpoints each one actually covers.
+    # The broad accounting.transactions.read is deprecated and is refused
+    # outright for apps created since March 2026, which is what invalid_scope
+    # was: a documented name that new apps are not issued.
+    ok("accounting.transactions" not in " ".join(scopes),
+       "the deprecated broad scope is not asked for: %s" % sorted(scopes))
     reads = {
-        "accounting.transactions.read": ("Invoices", "CreditNotes", "Payments", "BankTransactions"),
+        "accounting.invoices.read": ("Invoices", "CreditNotes"),
+        "accounting.payments.read": ("Payments",),
+        "accounting.banktransactions.read": ("BankTransactions",),
         "accounting.contacts.read": ("Contacts",),
         "accounting.settings.read": ("Accounts", "TaxRates", "Organisation"),
         "accounting.journals.read": ("Journals",),
     }
+    # And every endpoint the client calls must be covered by a scope asked for.
+    covered = {e for sc, eps in reads.items() if sc in scopes for e in eps}
+    for endpoint in ("Invoices", "CreditNotes", "Payments", "BankTransactions",
+                     "Contacts", "Accounts", "TaxRates", "Journals", "Organisation"):
+        ok(endpoint in covered, endpoint + " is read by the client but no scope covers it")
     for scope, endpoints in reads.items():
         if scope in scopes:
             ok(any('"' + e + '"' in src for e in endpoints),
