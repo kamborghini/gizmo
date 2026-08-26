@@ -11262,7 +11262,7 @@ def t_connecting_the_accounts_mailbox_needs_no_secret_in_a_url():
             _gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET = saved
 
     def _connect_link_body():
-        r = post("/api/recon/connect-link", {})
+        r = post("/api/recon/connect-link", {"address": "accounts@example.com"})
         eq(r.status_code, 200, r.text[:160])
         url = r.json()["url"]
         ok(url.startswith("/oauth/gmail-finance/start?t="), url)
@@ -11307,9 +11307,14 @@ def t_the_consent_walk_names_the_mailbox_it_wants():
     the sales mailbox. Naming the address preselects the right one."""
     url = _gm.consent_url("https://x/cb", "st8", "accounts@example.com")
     ok("login_hint=accounts%40example.com" in url, url)
-    ok("prompt=consent+select_account" in url, "the chooser is still offered")
+    # select_account FORCES the picker, which is exactly what overrides a
+    # login_hint. Asking for both means the hint is ignored and the browser's
+    # existing session wins - the bug this fixes.
+    ok("select_account" not in url, "the picker does not override the hint: " + url)
+    ok("prompt=consent" in url, "and consent still guarantees a refresh token")
     plain = _gm.consent_url("https://x/cb", "st8")
-    ok("login_hint" not in plain, "and nothing is hinted when nothing was asked for")
+    ok("login_hint" not in plain, "nothing is hinted when nothing was asked for")
+    ok("select_account" in plain, "and without a hint the chooser is still forced")
 
 
 @test
@@ -11322,6 +11327,9 @@ def t_a_mailbox_other_than_the_one_asked_for_is_not_saved():
         saved = (_gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET, _gm.exchange_code)
         _gm.OAUTH_CLIENT_ID = _gm.OAUTH_CLIENT_SECRET = "demo"
         try:
+            blank = post("/api/recon/connect-link", {})
+            eq(blank.status_code, 400, "an empty address is refused: " + blank.text[:120])
+            ok("already signed into" in blank.text, "and says why it matters")
             r = post("/api/recon/connect-link", {"address": "accounts@example.com"})
             eq(r.status_code, 200, r.text[:140])
             url = r.json()["url"]

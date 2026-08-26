@@ -17452,8 +17452,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # The address they mean, so Google opens THAT account rather than
         # whichever one this browser is already signed into.
         want = str((body or {}).get("address") or "").strip()[:200]
-        if want and not _EDIT_EMAIL.match(want):
+        if not want:
+            return _json({"error": "Type the accounts mailbox address first. Without it "
+                                   "Google opens whichever account this browser is already "
+                                   "signed into."}, 400)
+        if not _EDIT_EMAIL.match(want):
             return _json({"error": "That does not look like an email address."}, 400)
+        if want.strip().lower() == (google_mail.address() or "").strip().lower():
+            return _json({"error": "That is the Inbox tab's mailbox. Reconciliation needs the "
+                                   "ACCOUNTS mailbox, which is a different Google account."}, 400)
         ticket = secrets.token_urlsafe(24)
         _fin_connect_tickets[ticket] = {"exp": now + MAIL_TICKET_SECONDS, "want": want}
         _track(who, "recon", "started connecting the accounts mailbox", want)

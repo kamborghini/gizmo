@@ -18,7 +18,7 @@
     },
     {
      "kind": "fixed",
-     "text": "Connecting the accounts mailbox now asks which address you mean, and Google opens that account. It kept offering the sales mailbox instead, because a browser already signed into one Google account lands on that account whatever the chooser says. If a different mailbox is connected anyway, nothing is saved and the page names both addresses so the mistake is obvious."
+     "text": "Connecting the accounts mailbox asks which address you mean, and Google opens that account. It kept offering the sales mailbox instead: the link was asking Google for the account picker, and the picker is exactly what overrides a named account, so the two cancelled out and whichever account the browser was already signed into won. The address is now required, because without it the same thing happens. If a different mailbox is connected anyway, nothing is saved and the page names both addresses."
     },
     {
      "kind": "added",

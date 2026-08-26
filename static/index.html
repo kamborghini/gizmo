@@ -4664,6 +4664,13 @@
                            await loses the user gesture and the browser blocks
                            it - which inside Shopify's iframe means the button
                            appears to do nothing at all. */
+                        if (!who.value.trim()) {
+                            who.focus();
+                            toastError('Type the accounts mailbox address first: without it '
+                                       + 'Google opens whichever account you are already '
+                                       + 'signed into.');
+                            return;
+                        }
                         const tab = window.open('', '_blank');
                         go.disabled = true;
                         try {
@@ -4688,10 +4695,10 @@
                     };
                     mc.append(go);
                     mc.append(el('div', 'field-help',
-                        'Type the accounts address above and Google will open that account. '
-                        + 'If it connects a different mailbox anyway, which happens when the '
-                        + 'browser is already signed in elsewhere, nothing is saved and it '
-                        + 'says so: sign out of Google or use a private window and try again.'));
+                        'The address is required: it is what makes Google open the right '
+                        + 'account rather than the one this browser is already signed into. '
+                        + 'If a different mailbox is connected anyway, nothing is saved and '
+                        + 'the page says which one it got, so try again in a private window.'));
                 } else {
                     mc.append(el('div', 'field-help',
                         'Ask the master account to connect it.'));

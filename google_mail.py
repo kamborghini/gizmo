@@ -177,11 +177,14 @@ def consent_url(redirect_uri: str, state: str, login_hint: str = "") -> str:
         "state": state,
     }
     if login_hint:
-        # Naming the mailbox we want. select_account shows the chooser, but a
-        # browser with one live Google session lands on THAT account anyway,
-        # and the person ends up connecting the mailbox they were already in
-        # rather than the one they meant. A hint preselects the right one.
+        # Naming the mailbox we want - and DROPPING select_account to do it.
+        # The two fight: select_account forces Google's account picker, which
+        # is precisely what overrides a login_hint, so asking for both means
+        # the hint is ignored and the browser's existing session wins again.
+        # With a hint we know which account is wanted, so the picker has no
+        # job; consent alone still guarantees a refresh token.
         params["login_hint"] = login_hint
+        params["prompt"] = "consent"
     return f"{AUTH_ENDPOINT}?{urlencode(params)}"
 
 
