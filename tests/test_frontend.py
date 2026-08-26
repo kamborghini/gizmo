@@ -1504,6 +1504,38 @@ def t_ignoring_a_discrepancy_demands_a_reason():
 
 
 @test
+def t_a_xero_token_warning_reaches_the_screen():
+    """The one warning that has a clock on it: Xero honours the previous
+    refresh token for about thirty minutes after a failed save, and after that
+    the connection is simply gone. It cannot live only in the server log."""
+    fn = SCRIPT.split("function renderRecon")[1].split("\n        function ")[0]
+    ok("xs.warning" in fn, "the status card reads the warning the server sends")
+    i = fn.index("xs.warning")
+    ok("mail-viewwarn" in fn[i:i + 400],
+       "and paints it as a warning, not as ordinary help text")
+
+
+@test
+def t_a_refused_revocation_asks_before_forgetting():
+    """Forgetting a token Xero would not revoke leaves it live there with
+    nothing left to kill it, so that is the merchant's call to make."""
+    fn = SCRIPT.split("function renderRecon")[1].split("\n        function ")[0]
+    ok("e.canForce" in fn, "the refusal is told apart from an ordinary error")
+    ok("uiConfirm" in fn.split("e.canForce")[1][:600],
+       "and it asks rather than deciding for them")
+    ok("force: 1" in fn, "insisting sends the force flag")
+    ok("data.can_force" in SCRIPT, "which api() carries off the response")
+
+
+@test
+def t_reconciliation_is_not_ticked_by_default():
+    ok("const OPT_IN_TABS = ['recon']" in SCRIPT,
+       "the tab is declared as one nobody inherits")
+    ok("Array.isArray(u.tabs) ? u.tabs : DEFAULT_TABS" in SCRIPT,
+       "so the team editor shows it unticked for an account with no list of its own")
+
+
+@test
 def t_recon_csv_export_carries_the_armour():
     fn = SCRIPT.split("function reconCSV")[1].split("\n        function ")[0]
     ok("replace(/\"/g" in fn.replace("'", '"') or 'replace(/"/g' in fn, "quotes are doubled")

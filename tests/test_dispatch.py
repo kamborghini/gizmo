@@ -11553,6 +11553,17 @@ def t_token_files_are_not_world_readable():
     mode2 = stat.S_IMODE(os.stat(_gm.FINANCE.token_path).st_mode)
     eq(mode2 & 0o077, 0, "and so is the mailbox token: %o" % mode2)
     _gm.disconnect(_gm.FINANCE)
+    # The records those tokens fetched are not less sensitive than the tokens:
+    # the cache is the books, and the docs store is the contents of bank
+    # statements and remittance advices.
+    copilot._write_recon_cache({"xero": {"invoices": {}}})
+    copilot._write_recon_docs({"t1": {"kind": "remittance"}})
+    copilot._write_recon({"exceptions": {}})
+    for path, what in ((copilot.RECON_CACHE_PATH, "the accounting cache"),
+                       (copilot.RECON_DOCS_PATH, "the extracted documents"),
+                       (copilot.RECON_PATH, "the exception list")):
+        m = stat.S_IMODE(os.stat(path).st_mode)
+        eq(m & 0o077, 0, "%s is owner-only: %o" % (what, m))
 
 
 @test

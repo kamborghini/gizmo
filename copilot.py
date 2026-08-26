@@ -7571,14 +7571,27 @@ def _load_recon() -> dict:
     return d if isinstance(d, dict) else {"exceptions": {}, "watermarks": {}}
 
 
-def _write_recon(d: dict) -> None:
-    if not _store_writable(RECON_PATH):
+def _write_private_json(path: str, key: str, d: dict) -> None:
+    """Atomic, and owner-only. These three stores hold accounting records, the
+    contents of bank statements and remittances, and the exception list built
+    from both. Data taken out of Xero and the accounts mailbox deserves the
+    same file mode as the tokens that fetched it, not the default 0644."""
+    if not _store_writable(path):
         return
-    os.makedirs(os.path.dirname(RECON_PATH) or ".", exist_ok=True)
-    tmp = RECON_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"recon": d}, fh, allow_nan=False)
-    os.replace(tmp, RECON_PATH)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump({key: d}, fh, allow_nan=False)
+    os.replace(tmp, path)
+    try:
+        os.chmod(path, 0o600)      # a pre-existing 0644 file keeps its mode
+    except OSError:
+        pass
+
+
+def _write_recon(d: dict) -> None:
+    _write_private_json(RECON_PATH, "recon", d)
 
 
 def _load_recon_cache() -> dict:
@@ -7587,13 +7600,7 @@ def _load_recon_cache() -> dict:
 
 
 def _write_recon_cache(d: dict) -> None:
-    if not _store_writable(RECON_CACHE_PATH):
-        return
-    os.makedirs(os.path.dirname(RECON_CACHE_PATH) or ".", exist_ok=True)
-    tmp = RECON_CACHE_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"cache": d}, fh, allow_nan=False)
-    os.replace(tmp, RECON_CACHE_PATH)
+    _write_private_json(RECON_CACHE_PATH, "cache", d)
 
 
 def _load_recon_docs() -> dict:
@@ -7602,13 +7609,7 @@ def _load_recon_docs() -> dict:
 
 
 def _write_recon_docs(d: dict) -> None:
-    if not _store_writable(RECON_DOCS_PATH):
-        return
-    os.makedirs(os.path.dirname(RECON_DOCS_PATH) or ".", exist_ok=True)
-    tmp = RECON_DOCS_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"docs": d}, fh, allow_nan=False)
-    os.replace(tmp, RECON_DOCS_PATH)
+    _write_private_json(RECON_DOCS_PATH, "docs", d)
 
 
 # The auditor's model: env-pinnable, otherwise the deep model, so upgrading is
