@@ -11305,16 +11305,24 @@ def t_the_consent_walk_names_the_mailbox_it_wants():
     """select_account shows Google's chooser, but a browser with one live
     session lands on THAT account anyway, so the merchant kept being offered
     the sales mailbox. Naming the address preselects the right one."""
+    from urllib.parse import urlparse, parse_qs, unquote
     url = _gm.consent_url("https://x/cb", "st8", "accounts@example.com")
-    ok("login_hint=accounts%40example.com" in url, url)
-    # select_account FORCES the picker, which is exactly what overrides a
-    # login_hint. Asking for both means the hint is ignored and the browser's
-    # existing session wins - the bug this fixes.
-    ok("select_account" not in url, "the picker does not override the hint: " + url)
-    ok("prompt=consent" in url, "and consent still guarantees a refresh token")
+    # AccountChooser SWITCHES the session to the named address, then continues
+    # to consent. login_hint alone is only a hint, and Google ignores it when
+    # another account is signed in, which is how this kept connecting sales.
+    ok(url.startswith("https://accounts.google.com/AccountChooser?"), url[:80])
+    q = parse_qs(urlparse(url).query)
+    eq(q["Email"][0], "accounts@example.com", "the chooser is told the address")
+    inner = q["continue"][0]
+    ok(inner.startswith(_gm.AUTH_ENDPOINT), "and continues to the consent screen: " + inner[:60])
+    iq = parse_qs(urlparse(inner).query)
+    eq(iq["login_hint"][0], "accounts@example.com", "which also carries the hint")
+    # select_account FORCES the picker, which is exactly what overrides a hint.
+    eq(iq["prompt"][0], "consent", "and does not also ask for the picker: %s" % iq["prompt"])
     plain = _gm.consent_url("https://x/cb", "st8")
-    ok("login_hint" not in plain, "nothing is hinted when nothing was asked for")
-    ok("select_account" in plain, "and without a hint the chooser is still forced")
+    ok("AccountChooser" not in plain and "login_hint" not in plain,
+       "nothing is forced when no address was given")
+    ok("select_account" in plain, "and without an address the chooser is still forced")
 
 
 @test
@@ -11337,8 +11345,11 @@ def t_a_mailbox_other_than_the_one_asked_for_is_not_saved():
             red = client.get(url, headers=h, follow_redirects=False)
             eq(red.status_code, 302, "the walk starts")
             loc = red.headers["location"]
-            ok("login_hint=accounts%40example.com" in loc, "Google is told which account: " + loc[:120])
-            state = loc.split("state=")[1].split("&")[0]
+            ok("AccountChooser" in loc and "Email=accounts%40example.com" in loc,
+               "Google is told which account: " + loc[:120])
+            from urllib.parse import urlparse, parse_qs
+            inner = parse_qs(urlparse(loc).query)["continue"][0]
+            state = parse_qs(urlparse(inner).query)["state"][0]
 
             # Google comes back having connected the WRONG mailbox.
             async def wrong(code, redirect_uri, acct=_gm.SALES):

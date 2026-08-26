@@ -1572,7 +1572,7 @@ def t_the_connect_tab_opens_inside_the_click():
     which inside Shopify's iframe means the button appears to do nothing while
     a cheerful toast claims a tab was opened."""
     # Anchor on the BUTTON, not the card title that shares its words.
-    fn = SCRIPT.split("go.append(ico(I.mail), document.createTextNode('Connect the accounts mailbox'))")[1][:2200]
+    fn = SCRIPT.split("go.append(ico(I.mail), document.createTextNode('Connect the accounts mailbox'))")[1][:2800]
     opened = fn.index("window.open('', '_blank')")
     awaited = fn.index("await api('/api/recon/connect-link'")
     ok(opened < awaited, "the tab is opened before the request, inside the click")

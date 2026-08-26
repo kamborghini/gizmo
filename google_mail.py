@@ -176,16 +176,22 @@ def consent_url(redirect_uri: str, state: str, login_hint: str = "") -> str:
         "prompt": "consent select_account",
         "state": state,
     }
-    if login_hint:
-        # Naming the mailbox we want - and DROPPING select_account to do it.
-        # The two fight: select_account forces Google's account picker, which
-        # is precisely what overrides a login_hint, so asking for both means
-        # the hint is ignored and the browser's existing session wins again.
-        # With a hint we know which account is wanted, so the picker has no
-        # job; consent alone still guarantees a refresh token.
-        params["login_hint"] = login_hint
-        params["prompt"] = "consent"
-    return f"{AUTH_ENDPOINT}?{urlencode(params)}"
+    if not login_hint:
+        return f"{AUTH_ENDPOINT}?{urlencode(params)}"
+    # Naming the mailbox we want, three ways, because one is not enough.
+    #
+    # login_hint alone is only a HINT: with an active session for another
+    # account Google frequently ignores it and consents as whoever is signed
+    # in, which is how this kept connecting the sales mailbox.
+    # select_account is dropped, because forcing the picker is precisely what
+    # overrides the hint - asking for both cancels both out.
+    # AccountChooser is the part with teeth: it switches the session to the
+    # named address first and only then continues to the consent screen.
+    params["login_hint"] = login_hint
+    params["prompt"] = "consent"
+    inner = f"{AUTH_ENDPOINT}?{urlencode(params)}"
+    return ("https://accounts.google.com/AccountChooser?"
+            + urlencode({"Email": login_hint, "continue": inner}))
 
 
 async def exchange_code(code: str, redirect_uri: str, acct: Account = SALES) -> bool:

@@ -21,6 +21,10 @@
      "text": "Connecting the accounts mailbox asks which address you mean, and Google opens that account. It kept offering the sales mailbox instead: the link was asking Google for the account picker, and the picker is exactly what overrides a named account, so the two cancelled out and whichever account the browser was already signed into won. The address is now required, because without it the same thing happens. If a different mailbox is connected anyway, nothing is saved and the page names both addresses."
     },
     {
+     "kind": "improved",
+     "text": "The accounts mailbox sign-in now switches Google to the address you typed before it asks for consent, rather than only hinting at it. A hint is only a hint: with another Google account already signed in, Google consents as that one regardless. The card also offers the link to open in a private window, which has no session to get in the way and always works."
+    },
+    {
      "kind": "added",
      "text": "If you sign in as the wrong mailbox during that connection, it is refused and says so, rather than quietly reconciling against the wrong post. That works in both directions, whichever mailbox you connect first."
     },

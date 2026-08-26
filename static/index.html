@@ -4681,6 +4681,11 @@
                                 addToast('Sign in as the ACCOUNTS mailbox in the new tab. '
                                          + 'This card updates itself when it lands.', 'good');
                                 watchReconMailbox();
+                                /* Google can still consent as whoever the browser
+                                   is signed in as: a hint is a hint. A private
+                                   window has no session to hijack the walk, so
+                                   the link is always offered as the way out. */
+                                reconPrivateLink(mc, location.origin + r.url);
                             } else {
                                 /* Pop-ups blocked: give them something to click,
                                    rather than a cheerful message about a tab
@@ -4787,6 +4792,27 @@
             });
             box.append(list);
             if (reconOpen) paintReconDetail(box);
+        }
+        function reconPrivateLink(card, absUrl) {
+            if (card.querySelector('.recon-priv')) return;
+            const row = el('div', 'field-help recon-priv');
+            row.style.marginTop = '8px';
+            row.append(document.createTextNode(
+                'Still landing on the wrong mailbox? Google consents as whichever account '
+                + 'the browser is signed into, whatever it is asked for. Open this in a '
+                + 'private window, where there is no session to get in the way: '));
+            const code = el('b', null, absUrl);
+            code.style.cssText = 'word-break:break-all;user-select:all;cursor:text';
+            row.append(code);
+            const copy = el('button', 'btn');
+            copy.style.marginTop = '6px';
+            copy.append(ico(I.copy), document.createTextNode('Copy link'));
+            copy.onclick = async () => {
+                try { await navigator.clipboard.writeText(absUrl); toastOk('Link copied.'); }
+                catch (e) { toastError('Select the link above and copy it.'); }
+            };
+            row.append(el('div').appendChild(copy).parentElement);
+            card.append(row);
         }
         function reconConnectFallback(card, url) {
             /* A real link, which carries the click through a pop-up blocker. */
