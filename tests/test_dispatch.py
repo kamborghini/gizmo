@@ -11411,7 +11411,7 @@ def t_the_xero_consent_asks_only_for_what_it_reads():
         url = xero_api.consent_url("https://x/cb", "st")
     finally:
         xero_api.CLIENT_ID = saved
-    ok("%20" in url and "scope=openid%20" in url,
+    ok("%20" in url and "scope=offline_access%20" in url,
        "scope separators are %20, not +: " + url[:150])
     scopes = set(parse_qs(urlparse(url).query)["scope"][0].split())
     ok("offline_access" in scopes, "the refresh token needs offline_access")
@@ -11431,11 +11431,23 @@ def t_the_xero_consent_asks_only_for_what_it_reads():
         "accounting.settings.read": ("Accounts", "TaxRates", "Organisation"),
         "accounting.journals.read": ("Journals",),
     }
-    # And every endpoint the client calls must be covered by a scope asked for.
+    # Everything the SWEEP reads must be covered. Fetchers no check calls are
+    # deliberately outside the consent: an app is assigned a set of granular
+    # scopes, and asking for one it was not assigned fails the whole
+    # authorization, so an unused scope is not a free extra.
     covered = {e for sc, eps in reads.items() if sc in scopes for e in eps}
-    for endpoint in ("Invoices", "CreditNotes", "Payments", "BankTransactions",
-                     "Contacts", "Accounts", "TaxRates", "Journals", "Organisation"):
-        ok(endpoint in covered, endpoint + " is read by the client but no scope covers it")
+    for endpoint in ("Invoices", "CreditNotes", "Payments", "BankTransactions"):
+        ok(endpoint in covered, endpoint + " is read every sweep but no scope covers it")
+    src_recon = open(os.path.join(HERE, "recon.py"), encoding="utf-8").read()
+    for scope, endpoints in reads.items():
+        if scope in scopes:
+            continue
+        for fetcher, needed in (("list_contacts", "Contacts"), ("list_accounts", "Accounts"),
+                                ("list_tax_rates", "TaxRates"), ("list_journals", "Journals"),
+                                ("organisation", "Organisation")):
+            if needed in endpoints:
+                ok("_xero." + fetcher + "(" not in src_recon,
+                   fetcher + " is called but its scope is not requested: add " + scope)
     for scope, endpoints in reads.items():
         if scope in scopes:
             ok(any('"' + e + '"' in src for e in endpoints),

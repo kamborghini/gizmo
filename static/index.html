@@ -4758,6 +4758,27 @@
                 su.append(step('3', 'Put the Client ID and Client Secret into the Railway variables ',
                     'XERO_CLIENT_ID and XERO_CLIENT_SECRET',
                     ' (never anywhere else), then redeploy.'));
+                if ((st.setup.scopes || []).length) {
+                    /* Xero refuses the WHOLE authorization if the app was not
+                       assigned one of these, and never says which. Showing
+                       them makes the comparison against the Xero app's own
+                       page possible instead of guesswork. */
+                    const sc = el('details', 'know-body');
+                    sc.append(el('summary', null, 'Permissions this will ask Xero for'));
+                    const list = el('div', 'field-help');
+                    list.style.marginTop = '6px';
+                    st.setup.scopes.forEach(x => {
+                        const li = el('div', null, x);
+                        li.style.cssText = 'font-family:ui-monospace,monospace;font-size:12px';
+                        list.append(li);
+                    });
+                    list.append(el('div', null,
+                        'If Xero answers "invalid scope", it was assigned a different set: '
+                        + 'compare this list with the permissions shown on the app in the '
+                        + 'Xero developer portal.'));
+                    sc.append(list);
+                    su.append(sc);
+                }
                 if (st.setup.configured) {
                     /* Same shape as the mailbox button: the tab opens inside the
                        click, or the browser blocks it. */

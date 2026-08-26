@@ -72,12 +72,21 @@ LOGIN_BASE = os.environ.get("XERO_LOGIN_BASE", "https://login.xero.com")
 #   openid                -> the id_token, which names the organisation just
 #                            authorised so consent binds to the right tenant
 # Overridable, so a scope problem never needs a code change to work around.
+#
+# FOUR scopes, because four is what the sweep reads. Granular names alone were
+# not enough: an app is ASSIGNED a set of granular scopes, and asking for one
+# outside that set fails the whole authorization rather than just that scope.
+# Contacts, settings and journals had fetchers but no check calling them, and
+# openid only fed a tenant-binding nicety with a fallback - none of them worth
+# a connection that will not open.
+#
+# Xero scopes are ADDITIVE: when a check needs contacts or the chart of
+# accounts, add the scope and send the merchant through the flow again, and it
+# is added to what they already consented to. Starting small costs nothing.
 SCOPES = os.environ.get(
     "XERO_SCOPES",
-    "openid offline_access "
-    "accounting.invoices.read accounting.payments.read "
-    "accounting.banktransactions.read accounting.contacts.read "
-    "accounting.settings.read accounting.journals.read")
+    "offline_access accounting.invoices.read "
+    "accounting.payments.read accounting.banktransactions.read")
 
 _state: dict = {"access": "", "access_exp": 0.0, "tenant": "", "tenant_name": ""}
 _refresh_lock = asyncio.Lock()
@@ -363,6 +372,9 @@ async def list_bank_transactions(modified_since: Optional[str] = None) -> list:
                         {"order": "UpdatedDateUTC ASC"}, modified_since)
 
 
+# The fetchers below read endpoints OUTSIDE the four scopes above. Nothing
+# calls them today. Whichever check needs one first must add its scope to
+# SCOPES and reconnect, or Xero will refuse the read.
 async def list_contacts(modified_since: Optional[str] = None) -> list:
     return await _paged("Contacts", "Contacts",
                         {"order": "UpdatedDateUTC ASC"}, modified_since)

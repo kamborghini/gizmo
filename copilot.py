@@ -17410,6 +17410,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # character. The secret itself never appears anywhere.
             setup = {"redirect_uri": _xero_redirect_uri(request),
                      "can_connect": True,
+                     # What the app will ask Xero for. Shown because a scope
+                     # the app was not ASSIGNED fails the whole authorization
+                     # with invalid_scope, and the only way to see the
+                     # mismatch is to compare this against the app's page.
+                     "scopes": xero_api.SCOPES.split(),
                      "env_needed": ["XERO_CLIENT_ID", "XERO_CLIENT_SECRET"],
                      "configured": xs["configured"]}
         fin = google_mail.status(google_mail.FINANCE)

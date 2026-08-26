@@ -6,7 +6,7 @@
    "items": [
     {
      "kind": "fixed",
-     "text": "Xero would not authorise the connection at all, answering invalid scope. Xero replaced its broad permissions with granular ones in March 2026, and apps created since then are only issued the new kind, so the permission the app asked for no longer exists for it. It now asks for exactly the granular permissions covering the records it reads: invoices and credit notes, payments, bank transactions, contacts, settings and the general ledger."
+     "text": "Xero would not authorise the connection, answering invalid scope. Xero replaced its broad permissions with granular ones in March 2026, and an app is assigned a specific set: asking for one outside that set fails the whole sign-in without saying which. It now asks for only the four permissions the nightly check actually reads - invoices and credit notes, payments, and bank transactions - and the card lists them so they can be compared against the app's own page in Xero if it ever happens again."
     },
     {
      "kind": "fixed",
