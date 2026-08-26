@@ -51,6 +51,7 @@ for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
 
 import jwt
 import server, copilot, worldoptions, pipedrive
+import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
 
@@ -11364,6 +11365,37 @@ def t_a_mailbox_other_than_the_one_asked_for_is_not_saved():
         finally:
             _gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET, _gm.exchange_code = saved
             _gm.disconnect(_gm.FINANCE)
+    with_accounts(go)
+
+
+@test
+def t_xero_connects_by_button_too():
+    """The Xero card had the same placeholder URL the mailbox card did, which
+    returns Forbidden when opened exactly as written."""
+    def go():
+        ensure_auth()
+        saved = (xero_api.CLIENT_ID, xero_api.CLIENT_SECRET)
+        xero_api.CLIENT_ID = xero_api.CLIENT_SECRET = "demo"
+        try:
+            src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+            ok("YOUR_CONNECT_SECRET" not in src,
+               "no placeholder secret is handed to anyone, for either connection")
+            r = post("/api/recon/xero-link", {})
+            eq(r.status_code, 200, r.text[:140])
+            url = r.json()["url"]
+            ok(url.startswith("/oauth/xero/start?t="), url)
+            h = {"Authorization": "Bearer " + tok()}
+            first = client.get(url, headers=h, follow_redirects=False)
+            eq(first.status_code, 302, "the ticket opens the walk")
+            ok("xero.com" in first.headers["location"], first.headers["location"][:80])
+            again = client.get(url, headers=h, follow_redirects=False)
+            eq(again.status_code, 403, "and cannot be replayed")
+            # A Gmail ticket must not open the Xero walk.
+            copilot._fin_connect_tickets["borrowed"] = {"exp": time.time() + 300, "want": ""}
+            cross = client.get("/oauth/xero/start?t=borrowed", headers=h, follow_redirects=False)
+            eq(cross.status_code, 403, "tickets are not interchangeable between connections")
+        finally:
+            xero_api.CLIENT_ID, xero_api.CLIENT_SECRET = saved
     with_accounts(go)
 
 

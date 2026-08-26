@@ -8908,6 +8908,7 @@ MAIL_VIEW_SECONDS = 25          # a heartbeat older than this no longer counts
 _mail_connect_tickets: dict = {}     # ticket -> expiry (wall clock)
 _fin_connect_tickets: dict = {}      # the same, for the ACCOUNTS mailbox
 _fin_expect: dict = {}               # state nonce -> the address that was asked for
+_xero_connect_tickets: dict = {}     # ticket -> expiry, for the Xero consent walk
 MAIL_TICKET_SECONDS = 300
 _mail_undo: dict = {}                # token -> what a bulk action changed, for putting back
 MAIL_UNDO_SECONDS = 600
@@ -17346,9 +17347,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
         if not xero_api.client_configured():
             return _oauth_page("Not configured", "Set XERO_CLIENT_ID / XERO_CLIENT_SECRET on the server first.")
-        key = request.query_params.get("key", "")
-        if not (google_data.CONNECT_SECRET and key and
-                secrets.compare_digest(key, google_data.CONNECT_SECRET)):
+        # A single-use ticket from the app's own button, or the standing secret
+        # as the recovery path. Handing someone a link with a placeholder where
+        # the secret goes is not a way in, and asking them to paste a server
+        # secret into a browser bar never was either.
+        ticket = request.query_params.get("t", "")
+        tx = _xero_connect_tickets.pop(ticket, None) if ticket else None
+        by_secret = _secret_ok(request.query_params.get("key", ""), google_data.CONNECT_SECRET)
+        if not ((tx is not None and tx > time.time()) or by_secret):
             return PlainTextResponse("Forbidden", status_code=403, headers=_API_HEADERS)
         now = time.time()
         for st, exp in list(_xero_oauth_states.items()):
@@ -17403,8 +17409,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # var names, so the developer-app walk cannot go wrong by a
             # character. The secret itself never appears anywhere.
             setup = {"redirect_uri": _xero_redirect_uri(request),
-                     "connect_path": "/oauth/xero/start?key=YOUR_CONNECT_SECRET"
-                     if google_data.CONNECT_SECRET else "",
+                     "can_connect": True,
                      "env_needed": ["XERO_CLIENT_ID", "XERO_CLIENT_SECRET"],
                      "configured": xs["configured"]}
         fin = google_mail.status(google_mail.FINANCE)
@@ -17428,6 +17433,30 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                       "open_counts": d.get("open_counts") or {},
                       "docs": len(docs),
                       "sweeping": recon_engine._sweeping["on"]})
+
+    @mcp.custom_route("/api/recon/xero-link", methods=["POST"])
+    async def recon_xero_link_route(request: Request):
+        """Master-only: a single-use ticket for the Xero consent walk."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        if _team_role(who) != "master":
+            return _json({"error": "Only the master account can connect Xero."}, 403)
+        if not xero_api.client_configured():
+            return _json({"error": "The server has no Xero credentials yet. Set XERO_CLIENT_ID "
+                                   "and XERO_CLIENT_SECRET in Railway, then redeploy."}, 400)
+        now = time.time()
+        for t, exp in list(_xero_connect_tickets.items()):
+            if exp < now:
+                _xero_connect_tickets.pop(t, None)
+        ticket = secrets.token_urlsafe(24)
+        _xero_connect_tickets[ticket] = now + MAIL_TICKET_SECONDS
+        _track(who, "recon", "started connecting Xero")
+        return _json({"url": f"/oauth/xero/start?t={ticket}",
+                      "expires_in": MAIL_TICKET_SECONDS})
 
     @mcp.custom_route("/api/recon/connect-link", methods=["POST"])
     async def recon_connect_link_route(request: Request):

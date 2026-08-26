@@ -4758,9 +4758,40 @@
                 su.append(step('3', 'Put the Client ID and Client Secret into the Railway variables ',
                     'XERO_CLIENT_ID and XERO_CLIENT_SECRET',
                     ' (never anywhere else), then redeploy.'));
-                su.append(step('4', 'Open ',
-                    location.origin + (st.setup.connect_path || '/oauth/xero/start?key=...'),
-                    ' and sign in as the organisation. The connection is read-only by construction.'));
+                if (st.setup.configured) {
+                    /* Same shape as the mailbox button: the tab opens inside the
+                       click, or the browser blocks it. */
+                    const xgo = el('button', 'btn btn-primary');
+                    xgo.style.marginTop = '10px';
+                    xgo.append(ico(I.link || I.check), document.createTextNode('Connect Xero'));
+                    xgo.onclick = async () => {
+                        const tab = window.open('', '_blank');
+                        xgo.disabled = true;
+                        try {
+                            const r = await api('/api/recon/xero-link', {});
+                            if (tab) {
+                                tab.location = r.url;
+                                addToast('Approve the connection in the new tab, and pick the '
+                                         + 'organisation. This card updates when it lands.', 'good');
+                                watchReconXero();
+                            } else {
+                                reconConnectFallback(su, r.url);
+                            }
+                        } catch (e) {
+                            if (tab) tab.close();
+                            toastError(e.message);
+                        }
+                        xgo.disabled = false;
+                    };
+                    su.append(xgo);
+                    su.append(el('div', 'field-help',
+                        'Sign in as the organisation and approve. Xero is connected read-only: '
+                        + 'the app can read the books and has no way to change them.'));
+                } else {
+                    su.append(el('div', 'field-help',
+                        '4. Set those two variables in Railway and redeploy. The Connect button '
+                        + 'appears here once the server has them.'));
+                }
                 if (!st.setup.configured) su.append(el('div', 'field-help',
                     'The server does not have the two variables yet: the connect link will say "Not configured" until they are set.'));
                 box.append(su);
@@ -4853,6 +4884,29 @@
             row.append(a2);
             row.append(document.createTextNode(' (the link works once, for five minutes).'));
             card.append(row);
+        }
+        let reconXeroWatch = null;
+        function watchReconXero() {
+            if (reconXeroWatch) clearInterval(reconXeroWatch);
+            let tries = 0;
+            reconXeroWatch = setInterval(async () => {
+                tries++;
+                try {
+                    const st = await api('/api/recon/status', {});
+                    if (st.xero && st.xero.connected) {
+                        clearInterval(reconXeroWatch); reconXeroWatch = null;
+                        toastOk('Xero connected: ' + (st.xero.tenant || ''));
+                        refreshRecon();
+                        return;
+                    }
+                } catch (e) { /* the approval tab may still be open */ }
+                if (tries >= 40) {
+                    clearInterval(reconXeroWatch); reconXeroWatch = null;
+                    toastError('Xero is still not connected. If Xero showed an error it is '
+                               + 'usually the redirect URI not matching the one registered '
+                               + 'on the app.');
+                }
+            }, 3000);
         }
         let reconWatch = null;
         function watchReconMailbox() {
