@@ -17737,7 +17737,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             logger.exception("Gmail (accounts) OAuth exchange error")
             ok = False
         if not ok:
-            return _oauth_page("Connection failed", "Couldn't complete the connection. Please try again.")
+            # The vague version of this page sent people round the loop with
+            # nothing to act on. These are the two causes in practice, in the
+            # order they actually happen.
+            return _oauth_page(
+                "Connection failed",
+                "Google would not complete the sign-in. Two things cause this: the callback "
+                "URL " + _gmail_fin_redirect_uri(request) + " is not listed in the OAuth "
+                "client's authorised redirect URIs, or the sign-in was cancelled part-way. "
+                "Add that exact URL in the Google console, then press Connect again.")
         addr = google_mail.address(google_mail.FINANCE) or "the mailbox"
         sales = google_mail.address()
         if sales and addr.strip().lower() == sales.strip().lower():

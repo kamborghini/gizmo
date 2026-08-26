@@ -1566,6 +1566,32 @@ def t_the_sidebar_keeps_one_inset():
         ok("12px" in block, why + " shares that inset: " + block[:90])
 
 
+@test
+def t_the_connect_tab_opens_inside_the_click():
+    """A window.open AFTER an await has lost the user gesture and is blocked,
+    which inside Shopify's iframe means the button appears to do nothing while
+    a cheerful toast claims a tab was opened."""
+    # Anchor on the BUTTON, not the card title that shares its words.
+    fn = SCRIPT.split("go.append(ico(I.mail), document.createTextNode('Connect the accounts mailbox'))")[1][:1600]
+    opened = fn.index("window.open('', '_blank')")
+    awaited = fn.index("await api('/api/recon/connect-link'")
+    ok(opened < awaited, "the tab is opened before the request, inside the click")
+    ok("tab.location = r.url" in fn, "and pointed at the URL once it arrives")
+    ok("reconConnectFallback" in fn,
+       "with a clickable link when the browser blocks it anyway")
+
+
+@test
+def t_connecting_reports_its_own_outcome():
+    """The old toast fired whatever happened, so a blocked tab or a failed
+    consent still read as success and the advice was to refresh forever."""
+    ok("function watchReconMailbox" in SCRIPT, "the card watches for the connection")
+    fn = SCRIPT.split("function watchReconMailbox")[1][:1400]
+    ok("st.mailbox && st.mailbox.connected" in fn, "it checks the real status")
+    ok("toastOk" in fn and "toastError" in fn, "and says so either way")
+    ok("callback URL missing" in fn, "naming the usual cause when it times out")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

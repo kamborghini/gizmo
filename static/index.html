@@ -4650,13 +4650,30 @@
                     go.append(ico(I.mail), document.createTextNode('Connect the accounts mailbox'));
                     go.style.marginTop = '10px';
                     go.onclick = async () => {
+                        /* The tab is opened SYNCHRONOUSLY, inside the click, and
+                           pointed at the URL afterwards. Opening it after the
+                           await loses the user gesture and the browser blocks
+                           it - which inside Shopify's iframe means the button
+                           appears to do nothing at all. */
+                        const tab = window.open('', '_blank');
                         go.disabled = true;
                         try {
                             const r = await api('/api/recon/connect-link', {});
-                            window.open(r.url, '_blank', 'noopener');
-                            addToast('Sign in as the accounts mailbox in the new tab, then come '
-                                     + 'back and refresh.', 'good');
-                        } catch (e) { toastError(e.message); }
+                            if (tab) {
+                                tab.location = r.url;
+                                addToast('Sign in as the ACCOUNTS mailbox in the new tab. '
+                                         + 'This card updates itself when it lands.', 'good');
+                                watchReconMailbox();
+                            } else {
+                                /* Pop-ups blocked: give them something to click,
+                                   rather than a cheerful message about a tab
+                                   that never opened. */
+                                reconConnectFallback(mc, r.url);
+                            }
+                        } catch (e) {
+                            if (tab) tab.close();
+                            toastError(e.message);
+                        }
                         go.disabled = false;
                     };
                     mc.append(go);
@@ -4751,6 +4768,44 @@
             });
             box.append(list);
             if (reconOpen) paintReconDetail(box);
+        }
+        function reconConnectFallback(card, url) {
+            /* A real link, which carries the click through a pop-up blocker. */
+            const row = el('div', 'field-help');
+            row.append(document.createTextNode('Your browser blocked the new tab. '));
+            const a2 = el('a', null, 'Open the Google sign-in here');
+            a2.href = url; a2.target = '_blank'; a2.rel = 'noopener';
+            a2.style.color = 'var(--accent)';
+            a2.onclick = () => watchReconMailbox();
+            row.append(a2);
+            row.append(document.createTextNode(' (the link works once, for five minutes).'));
+            card.append(row);
+        }
+        let reconWatch = null;
+        function watchReconMailbox() {
+            /* "Come back and refresh" is a poor instruction, and an easy one to
+               follow while nothing happens. Watch instead, and say something
+               either way rather than leaving a cheerful message on screen. */
+            if (reconWatch) clearInterval(reconWatch);
+            let tries = 0;
+            reconWatch = setInterval(async () => {
+                tries++;
+                try {
+                    const st = await api('/api/recon/status', {});
+                    if (st.mailbox && st.mailbox.connected) {
+                        clearInterval(reconWatch); reconWatch = null;
+                        toastOk('Accounts mailbox connected: ' + (st.mailbox.address || ''));
+                        refreshRecon();
+                        return;
+                    }
+                } catch (e) { /* keep watching; the sign-in tab may still be open */ }
+                if (tries >= 40) {
+                    clearInterval(reconWatch); reconWatch = null;
+                    toastError('The accounts mailbox is still not connected. If Google showed an '
+                               + 'error, it is almost always the callback URL missing from the '
+                               + 'OAuth client.');
+                }
+            }, 3000);
         }
         async function reconCSV() {
             /* The export is a report: it fetches everything matching the

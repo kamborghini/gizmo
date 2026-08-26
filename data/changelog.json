@@ -13,6 +13,10 @@
      "text": "The accounts mailbox is connected with a button in the Reconciliation tab, not by pasting a server secret into a browser. The first version handed out a link with a placeholder in it, which returns Forbidden when opened, exactly as written. The tab also shows the callback URL to add to the Google client, since that has to be done once before the connection can complete."
     },
     {
+     "kind": "fixed",
+     "text": "The Connect the accounts mailbox button opens its tab properly. It was opening the sign-in tab after asking the server for a link, by which point the browser no longer counts it as something you clicked, so the tab was blocked and the button appeared to do nothing while still saying it had worked. The card now watches for the connection and tells you when it lands, or what went wrong, instead of asking you to refresh."
+    },
+    {
      "kind": "added",
      "text": "If you sign in as the wrong mailbox during that connection, it is refused and says so, rather than quietly reconciling against the wrong post. That works in both directions, whichever mailbox you connect first."
     },
