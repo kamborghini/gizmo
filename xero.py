@@ -53,10 +53,22 @@ API_BASE = os.environ.get("XERO_API_BASE", "https://api.xero.com")
 IDENTITY_BASE = os.environ.get("XERO_IDENTITY_BASE", "https://identity.xero.com")
 LOGIN_BASE = os.environ.get("XERO_LOGIN_BASE", "https://login.xero.com")
 
-# Read-only scopes, and offline_access for the refresh token. accounting.reports.read
-# covers balances; accounting.attachments.read lets the audit trail show source docs.
-SCOPES = ("offline_access accounting.transactions.read accounting.contacts.read "
-          "accounting.settings.read accounting.reports.read accounting.attachments.read")
+# EXACTLY what the fetchers below call, and nothing else. The first version
+# also asked for reports and attachments, which nothing here reads - Xero
+# answered the whole authorization with "invalid_scope", and a scope you do
+# not use is not worth a failed connection. Least privilege happens to be the
+# debuggable choice too.
+#   transactions.read -> Invoices, CreditNotes, Payments, BankTransactions
+#   contacts.read     -> Contacts
+#   settings.read     -> Accounts, TaxRates, Organisation
+#   journals.read     -> Journals (fetcher exists; no check uses it yet)
+#   openid            -> the id_token, which names the organisation just
+#                        authorised so consent binds to the right tenant
+# Overridable, so a scope problem never needs a code change to work around.
+SCOPES = os.environ.get(
+    "XERO_SCOPES",
+    "openid offline_access accounting.transactions.read accounting.contacts.read "
+    "accounting.settings.read accounting.journals.read")
 
 _state: dict = {"access": "", "access_exp": 0.0, "tenant": "", "tenant_name": ""}
 _refresh_lock = asyncio.Lock()
@@ -108,9 +120,14 @@ def disconnect() -> None:
 
 
 def consent_url(redirect_uri: str, state: str) -> str:
+    # quote, not quote_plus: the default encodes the spaces between scopes as
+    # "+", and a parser that reads the value literally then sees one very long
+    # invalid scope rather than six valid ones. %20 is unambiguous to both
+    # readings, and costs nothing.
     q = urllib.parse.urlencode({
         "response_type": "code", "client_id": CLIENT_ID,
-        "redirect_uri": redirect_uri, "scope": SCOPES, "state": state})
+        "redirect_uri": redirect_uri, "scope": SCOPES, "state": state},
+        quote_via=urllib.parse.quote)
     return f"{LOGIN_BASE}/identity/connect/authorize?{q}"
 
 

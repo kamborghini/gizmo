@@ -11399,6 +11399,38 @@ def t_xero_connects_by_button_too():
     with_accounts(go)
 
 
+@test
+def t_the_xero_consent_asks_only_for_what_it_reads():
+    """Xero answered the first attempt with invalid_scope. Two things were
+    wrong: scopes nothing in the client reads, and spaces encoded as '+',
+    which a literal parser sees as one enormous invalid scope."""
+    from urllib.parse import urlparse, parse_qs
+    saved = xero_api.CLIENT_ID
+    xero_api.CLIENT_ID = "demo"
+    try:
+        url = xero_api.consent_url("https://x/cb", "st")
+    finally:
+        xero_api.CLIENT_ID = saved
+    ok("%20" in url and "scope=openid%20" in url,
+       "scope separators are %20, not +: " + url[:150])
+    scopes = set(parse_qs(urlparse(url).query)["scope"][0].split())
+    ok("offline_access" in scopes, "the refresh token needs offline_access")
+    # Every scope must correspond to something the client actually calls.
+    src = open(os.path.join(HERE, "xero.py"), encoding="utf-8").read()
+    reads = {
+        "accounting.transactions.read": ("Invoices", "CreditNotes", "Payments", "BankTransactions"),
+        "accounting.contacts.read": ("Contacts",),
+        "accounting.settings.read": ("Accounts", "TaxRates", "Organisation"),
+        "accounting.journals.read": ("Journals",),
+    }
+    for scope, endpoints in reads.items():
+        if scope in scopes:
+            ok(any('"' + e + '"' in src for e in endpoints),
+               scope + " is asked for and used")
+    extra = scopes - set(reads) - {"openid", "offline_access", "profile", "email"}
+    eq(extra, set(), "nothing is asked for that no fetcher uses: %s" % extra)
+
+
 # =========================== run ===========================================
 
 passed = failed = 0
