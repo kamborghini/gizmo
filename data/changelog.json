@@ -9,6 +9,10 @@
      "text": "Reconciliation now reads the accounts mailbox, which is a different Google account from the one behind the Inbox tab. It was reading the sales inbox, which is the wrong post: remittances and supplier invoices arrive in accounts. Connect it from the Reconciliation tab; the two mailboxes keep separate sign-ins, and neither can see the other's mail."
     },
     {
+     "kind": "fixed",
+     "text": "The accounts mailbox is connected with a button in the Reconciliation tab, not by pasting a server secret into a browser. The first version handed out a link with a placeholder in it, which returns Forbidden when opened, exactly as written. The tab also shows the callback URL to add to the Google client, since that has to be done once before the connection can complete."
+    },
+    {
      "kind": "added",
      "text": "If you sign in as the wrong mailbox during that connection, it is refused and says so, rather than quietly reconciling against the wrong post. That works in both directions, whichever mailbox you connect first."
     },

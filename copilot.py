@@ -8906,6 +8906,7 @@ MAIL_VIEW_SECONDS = 25          # a heartbeat older than this no longer counts
 # header — hence a ticket in the URL. Single-use and short-lived, so it is a
 # strictly smaller thing to leak than the standing connect secret.
 _mail_connect_tickets: dict = {}     # ticket -> expiry (wall clock)
+_fin_connect_tickets: dict = {}      # the same, for the ACCOUNTS mailbox
 MAIL_TICKET_SECONDS = 300
 _mail_undo: dict = {}                # token -> what a bulk action changed, for putting back
 MAIL_UNDO_SECONDS = 600
@@ -17411,8 +17412,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                       "mailbox": {"connected": fin["connected"],
                                   "address": fin["address"],
                                   "client": fin["client"],
-                                  "connect_path": ("/oauth/gmail-finance/start?key=YOUR_CONNECT_SECRET"
-                                                   if google_data.CONNECT_SECRET else ""),
+                                  "can_connect": _team_role(who) == "master",
                                   "redirect_uri": _gmail_fin_redirect_uri(request),
                                   # Named so a wrong-account consent is obvious.
                                   "sales_address": google_mail.address()},
@@ -17422,6 +17422,34 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                       "open_counts": d.get("open_counts") or {},
                       "docs": len(docs),
                       "sweeping": recon_engine._sweeping["on"]})
+
+    @mcp.custom_route("/api/recon/connect-link", methods=["POST"])
+    async def recon_connect_link_route(request: Request):
+        """Master-only: mint a single-use ticket for the accounts-mailbox
+        consent walk, so nobody has to paste a server secret into a URL."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        if _team_role(who) != "master":
+            return _json({"error": "Only the master account can connect the accounts mailbox."}, 403)
+        if not google_mail.client_configured():
+            return _json({"error": "The server has no Google client configured yet. "
+                                   "Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET."}, 400)
+        if not google_mail.FINANCE.usable():
+            return _json({"error": "The accounts mailbox is set to the same token file as the "
+                                   "sales inbox. Give GMAIL_FINANCE_TOKEN_PATH its own path."}, 400)
+        now = time.time()
+        for t, exp in list(_fin_connect_tickets.items()):
+            if exp < now:
+                _fin_connect_tickets.pop(t, None)
+        ticket = secrets.token_urlsafe(24)
+        _fin_connect_tickets[ticket] = now + MAIL_TICKET_SECONDS
+        _track(who, "recon", "started connecting the accounts mailbox")
+        return _json({"url": f"/oauth/gmail-finance/start?t={ticket}",
+                      "expires_in": MAIL_TICKET_SECONDS})
 
     @mcp.custom_route("/api/recon/sweep", methods=["POST"])
     async def recon_sweep_route(request: Request):
@@ -17672,7 +17700,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                "The accounts mailbox is set to the same token file as the "
                                "sales inbox. Give GMAIL_FINANCE_TOKEN_PATH its own path, "
                                "then try again.")
-        if not _secret_ok(request.query_params.get("key", ""), google_data.CONNECT_SECRET):
+        # Two ways in, the same as the sales mailbox: a single-use ticket minted
+        # for the master through the app (the button), or the standing connect
+        # secret, kept so the mailbox is recoverable when nobody can sign in.
+        ticket = request.query_params.get("t", "")
+        tx = _fin_connect_tickets.pop(ticket, None) if ticket else None
+        by_secret = _secret_ok(request.query_params.get("key", ""), google_data.CONNECT_SECRET)
+        if not ((tx is not None and tx > time.time()) or by_secret):
             return PlainTextResponse("Forbidden", status_code=403, headers=_API_HEADERS)
         now = time.time()
         for st, exp in list(_oauth_states.items()):

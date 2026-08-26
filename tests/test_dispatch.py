@@ -11246,6 +11246,59 @@ def t_a_shared_token_file_cannot_delete_the_sales_connection():
             pass
 
 
+@test
+def t_connecting_the_accounts_mailbox_needs_no_secret_in_a_url():
+    """The first attempt handed out /oauth/gmail-finance/start?key=YOUR_CONNECT_SECRET,
+    a literal placeholder, and opening it returned Forbidden. The sales mailbox
+    already had the better answer: a button that mints a single-use ticket."""
+    def go():
+        ensure_auth()
+        saved = (_gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET)
+        _gm.OAUTH_CLIENT_ID = _gm.OAUTH_CLIENT_SECRET = "demo"
+        try:
+            _connect_link_body()
+        finally:
+            _gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET = saved
+
+    def _connect_link_body():
+        r = post("/api/recon/connect-link", {})
+        eq(r.status_code, 200, r.text[:160])
+        url = r.json()["url"]
+        ok(url.startswith("/oauth/gmail-finance/start?t="), url)
+        ok("YOUR_CONNECT_SECRET" not in url and "key=" not in url,
+           "no server secret travels in the URL")
+        ticket = url.split("t=")[1]
+        ok(ticket in copilot._fin_connect_tickets, "the ticket is live")
+        # It opens the walk once, and only once.
+        h = {"Authorization": "Bearer " + tok()}
+        first = client.get(url, headers=h, follow_redirects=False)
+        ok(first.status_code in (302, 307), "the ticket opens the consent walk: %s" % first.status_code)
+        again = client.get(url, headers=h, follow_redirects=False)
+        eq(again.status_code, 403, "and cannot be replayed")
+        # A ticket for the sales mailbox must not open the accounts one.
+        copilot._mail_connect_tickets["borrowed"] = time.time() + 300
+        cross = client.get("/oauth/gmail-finance/start?t=borrowed", headers=h,
+                           follow_redirects=False)
+        eq(cross.status_code, 403, "the two mailboxes do not share tickets")
+    with_accounts(go)
+
+
+@test
+def t_only_the_master_can_connect_the_accounts_mailbox():
+    def go():
+        r = post("/api/team/user", {"op": "create", "name": "Admin Ann", "username": "ann",
+                                    "role": "admin"})
+        uid, pw = r.json()["id"], r.json()["starter_password"]
+        lg = client.post("/api/auth/login", json={"username": "ann", "password": pw},
+                         headers={"Authorization": "Bearer " + tok()}).json()
+        sess = lg.get("session")
+        ch = post_s(sess, "/api/auth/password", {"current": pw, "new": "ann-pw-55120"})
+        sess = ch.json().get("session") or sess
+        rr = post_s(sess, "/api/recon/connect-link", {})
+        eq(rr.status_code, 403, "an admin cannot connect a mailbox: " + rr.text[:120])
+    with_accounts(go)
+
+
 # =========================== run ===========================================
 
 passed = failed = 0

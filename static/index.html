@@ -4626,7 +4626,7 @@
             box.append(card);
             /* The accounts mailbox: a SEPARATE Google account from the Inbox
                tab's, so the card names both to make a wrong consent obvious. */
-            if (!mb.connected && mb.connect_path) {
+            if (!mb.connected) {
                 const mc = el('div', 'card'); mc.style.marginBottom = '16px';
                 mc.append(el('div', 'know-title', 'Connect the accounts mailbox'));
                 mc.append(el('div', 'field-help',
@@ -4635,13 +4635,38 @@
                     + 'behind the Inbox tab'
                     + (mb.sales_address ? ' (' + mb.sales_address + ')' : '')
                     + ', and it will not appear there.'));
-                const link = el('div', 'field-help');
-                link.append(document.createTextNode('Open '));
-                link.append(el('b', null, location.origin + mb.connect_path));
-                link.append(document.createTextNode(
-                    ' and sign in as the accounts mailbox. If you sign in as the Inbox '
-                    + 'mailbox by mistake the connection is refused, so nothing breaks.'));
-                mc.append(link);
+                /* A BUTTON, not a URL with a secret in it. Pasting a server
+                   secret into a browser bar is how the first attempt at this
+                   ended up as Forbidden, and the sales mailbox already had the
+                   better answer: mint a single-use ticket in the app. */
+                const step = el('div', 'field-help');
+                step.append(document.createTextNode(
+                    'One thing to do first: add this callback URL to the Google OAuth '
+                    + 'client, beside the one the Inbox tab already uses. '));
+                step.append(el('b', null, mb.redirect_uri || ''));
+                mc.append(step);
+                if (mb.can_connect) {
+                    const go = el('button', 'btn btn-primary');
+                    go.append(ico(I.mail), document.createTextNode('Connect the accounts mailbox'));
+                    go.style.marginTop = '10px';
+                    go.onclick = async () => {
+                        go.disabled = true;
+                        try {
+                            const r = await api('/api/recon/connect-link', {});
+                            window.open(r.url, '_blank', 'noopener');
+                            addToast('Sign in as the accounts mailbox in the new tab, then come '
+                                     + 'back and refresh.', 'good');
+                        } catch (e) { toastError(e.message); }
+                        go.disabled = false;
+                    };
+                    mc.append(go);
+                    mc.append(el('div', 'field-help',
+                        'Sign in as the ACCOUNTS mailbox. If you sign in as the Inbox '
+                        + 'mailbox by mistake the connection is refused, so nothing breaks.'));
+                } else {
+                    mc.append(el('div', 'field-help',
+                        'Ask the master account to connect it.'));
+                }
                 box.append(mc);
             }
             /* Setup, master only, until Xero is connected */
