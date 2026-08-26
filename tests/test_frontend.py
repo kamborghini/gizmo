@@ -1544,6 +1544,12 @@ def t_the_sidebar_keeps_one_inset():
     264px and broke the line the whole column keeps."""
     rule = re.search(r"\.nav-ask \{[^}]*\}", CSS).group(0)
     ok("width: 100%" not in rule, "the ask button does not span the sidebar")
+    # It sits with Refresh all, above the conversation list, not stranded at
+    # the bottom of a column that flexes.
+    order = [m.group(1) for m in re.finditer(
+        r'<(?:button|div) class="(nav-refresh|nav-ask|convos)"', HTML)]
+    ok(order[:2] == ["nav-refresh", "nav-ask"],
+       "the two sidebar actions are a stacked pair: %s" % order)
     ok(re.search(r"margin: *[0-9]+px 12px", rule),
        "it carries the sidebar's own 12px inset: " + rule)
     for sel, why in ((r"\.nav \{[^}]*\}", "the nav list"),

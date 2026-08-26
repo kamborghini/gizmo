@@ -779,7 +779,7 @@
            and broke the line every other control in the column keeps. It is
            the same kind of thing as Refresh all - a secondary sidebar action -
            so it is now the same shape, padding, border and hover as that. */
-        .nav-ask { display: flex; align-items: center; gap: 8px; margin: 4px 12px 8px;
+        .nav-ask { display: flex; align-items: center; gap: 8px; margin: 6px 12px 0;
             padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-sm);
             background: transparent; color: var(--ink-2); font: inherit; font-size: 12px;
             font-weight: 500; cursor: pointer; text-align: left;
@@ -1746,10 +1746,10 @@
                 <button class="nav-item" data-view="guide" id="nav-guide"></button>
             </div>
             <button class="nav-refresh" id="refresh-all" title="Refresh all reports"></button>
+            <button class="nav-ask" id="ask-feature" title="Ask for something the app cannot do yet"></button>
             <div class="convo-head"><span>Conversations</span>
                 <button class="icon-btn" id="new-convo" title="New chat"></button></div>
             <div class="convos" id="convos"></div>
-            <button class="nav-ask" id="ask-feature" title="Ask for something the app cannot do yet"></button>
             <div class="side-foot"><span class="dot"></span><span class="auth-account" id="auth-account"></span>
                 <button class="btn" id="clock-btn" style="display:none;margin-left:auto"></button>
                 <button class="icon-btn" id="logout-btn" title="Log out"></button>

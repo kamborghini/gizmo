@@ -18,7 +18,7 @@
     },
     {
      "kind": "fixed",
-     "text": "The Ask for a feature button matches the rest of the sidebar. It ran the full width of the column while every other control sits inset from the edges, and it used a slightly different border, padding and hover to the Refresh all button directly above it. It is now the same shape as its neighbour."
+     "text": "The Ask for a feature button now sits directly under Refresh all, and matches it. It used to be stranded at the bottom of the sidebar below the conversation list, running the full width of the column while every other control sits inset from the edges, with a different border, padding and hover to the button it now pairs with."
     }
    ]
   },
