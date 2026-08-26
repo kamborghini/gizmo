@@ -13707,8 +13707,14 @@
                         save.disabled = true;
                         const picked = boxes.filter(b => b.checked).map(b => b.dataset.k);
                         try {
-                            await api('/api/team/user', { op: 'tabs', id: u.id,
-                                tabs: picked.length === TAB_KEYS.length ? null : picked });
+                            /* Always the explicit list. This used to collapse a
+                               fully ticked panel to null, meaning "no list of
+                               its own", which the server now reads as the
+                               DEFAULT tabs. Since Reconciliation is not in the
+                               default set, ticking every box and saving
+                               withheld the one tab the admin had just ticked,
+                               and the activity ledger recorded the opposite. */
+                            await api('/api/team/user', { op: 'tabs', id: u.id, tabs: picked });
                             teamTabsOpen = '';
                         } catch (e) { toastError(e.message); save.disabled = false; return; }
                         loadTeam();

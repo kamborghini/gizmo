@@ -10524,9 +10524,9 @@ class _FakeXero:
         self.bank, self.notes = bank or [], notes_ or []
     def connected(self): return True
     async def list_invoices(self, since=None, modified_since=None): return list(self.invoices)
-    async def list_payments(self, modified_since=None): return list(self.payments)
-    async def list_bank_transactions(self, modified_since=None): return list(self.bank)
-    async def list_credit_notes(self, modified_since=None): return list(self.notes)
+    async def list_payments(self, since=None, modified_since=None): return list(self.payments)
+    async def list_bank_transactions(self, since=None, modified_since=None): return list(self.bank)
+    async def list_credit_notes(self, since=None, modified_since=None): return list(self.notes)
 
 
 def _recon_world(fx, orders):
@@ -11740,6 +11740,37 @@ def t_the_books_are_not_handed_out_with_the_account():
 
 
 @test
+def t_the_xero_double_cannot_drift_from_the_real_client():
+    """This double once fell a parameter behind the real client. Three of the
+    four reads raised TypeError, the sweep's per-source try/except turned each
+    into a note, and the suite went on passing green over a sweep that had read
+    a quarter of the accounts. A fake that no longer matches is not a test."""
+    import inspect
+    for name in ("list_invoices", "list_payments", "list_bank_transactions",
+                 "list_credit_notes"):
+        real = set(inspect.signature(getattr(xero_api, name)).parameters)
+        fake = set(inspect.signature(getattr(_FakeXero, name)).parameters) - {"self"}
+        eq(fake, real, name + ": the double has drifted from the real client")
+
+
+@test
+def t_a_sweep_that_could_not_read_an_account_says_so_out_loud():
+    """The swallow-and-note handler is right, but it is also how a broken read
+    hides. Any sweep in this suite that cannot read one of the four Xero
+    endpoints must fail here rather than quietly check three of them."""
+    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")],
+                   payments=[], bank=[], notes_=[])
+    st = _recon_world(fx, [_raw_order(1, "#104275", "842.00")])
+    r = run(_rc.sweep())
+    ok(r.get("ok"), "the sweep ran: %r" % (r,))
+    bad = [n for n in (r.get("notes") or []) if "could not be read" in n]
+    eq(bad, [], "no account went unread")
+    for bucket in ("invoices", "payments", "bank_transactions", "credit_notes"):
+        ok(bucket in (st["cache"].get("xero") or {}),
+           "every Xero bucket was actually populated, including %s" % bucket)
+
+
+@test
 def t_every_xero_read_is_windowed():
     """Only invoices were filtered by date, so a first sync pulled the whole
     history of payments, bank lines and credit notes to reconcile four months
@@ -11768,11 +11799,33 @@ def t_every_xero_read_is_windowed():
 
 @test
 def t_the_sweep_asks_for_one_window_not_all_history():
-    src = open(os.path.join(HERE, "recon.py"), encoding="utf-8").read()
-    seg = src.split("for name, fetch, slimmer, key in (")[1][:900]
-    ok("modified_since=marks.get(name)" in seg, "the incremental watermark is still used")
-    ok(seg.count("since=_cutoff_day()") == 1 and 'if name == "invoices"' not in seg,
-       "all four reads take the same window, with no special case: " + seg[-200:])
+    """Watch what the sweep actually SENDS. Only invoices were windowed, so a
+    first sync pulled every payment, bank line and credit note the business had
+    ever recorded in order to check four months of them."""
+    asked = {}
+
+    class _Recorder(_FakeXero):
+        async def list_invoices(self, since=None, modified_since=None):
+            asked["invoices"] = since; return []
+        async def list_payments(self, since=None, modified_since=None):
+            asked["payments"] = since; return []
+        async def list_bank_transactions(self, since=None, modified_since=None):
+            asked["bank_transactions"] = since; return []
+        async def list_credit_notes(self, since=None, modified_since=None):
+            asked["credit_notes"] = since; return []
+
+    _recon_world(_Recorder(), [])
+    r = run(_rc.sweep())
+    ok(r.get("ok"), "the sweep ran: %r" % (r,))
+    eq(sorted(asked), ["bank_transactions", "credit_notes", "invoices", "payments"],
+       "all four reads happened")
+    eq(len(set(asked.values())), 1, "and all four asked for the SAME window: %r" % (asked,))
+    # The horizon must be the one we KEEP records to, not the shorter window
+    # the checks use, or a record still in the cache can never be refreshed.
+    eq(list(asked.values())[0], _rc._cutoff_day(_rc.FETCH_DAYS),
+       "the window is the retention horizon")
+    eq(_rc.FETCH_DAYS, _rc.CACHE_KEEP_DAYS,
+       "which is the same number we prune at, by construction")
 
 
 @test
@@ -11809,6 +11862,126 @@ def t_reconciliation_stores_do_not_keep_records_for_ever():
        "while keeping what was decided: the audit trail is the point")
     ok(live["evidence"], "an OPEN discrepancy keeps its evidence however old it is")
     ok(any("dropped" in n for n in notes), "and the sweep reports the deletions: %s" % notes)
+
+
+@test
+def t_granting_every_tab_grants_every_tab():
+    """The picker used to send null for a fully ticked panel, meaning 'no list
+    of its own'. Once that resolved to the DEFAULT tabs, ticking every box and
+    saving WITHHELD Reconciliation, and the ledger recorded 'can open
+    everything'. The obvious action did the opposite of its label and said so
+    in the permanent record."""
+    def go():
+        r = post("/api/team/user", {"op": "create", "name": "Ruth", "username": "ruthx",
+                                    "role": "member"})
+        uid, pw = r.json()["id"], r.json()["starter_password"]
+        # What the tab panel sends when every box is ticked.
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": list(copilot.TAB_KEYS)})
+        ok("recon" in (copilot._user_tabs(uid) or []),
+           "an explicitly complete grant includes the books")
+
+        lg = client.post("/api/auth/login", json={"username": "ruthx", "password": pw},
+                         headers={"Authorization": "Bearer " + tok()}).json()
+        sess = lg.get("session")
+        ch = post_s(sess, "/api/auth/password", {"current": pw, "new": "ruth-pw-40217"})
+        sess = ch.json().get("session") or sess
+        eq(post_s(sess, "/api/recon/status", {}).status_code, 200,
+           "and the door actually opens")
+
+        # And the null form, which means "no list of its own", must not be
+        # written into the record as a grant of everything.
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": None})
+        ok("recon" not in (copilot._user_tabs(uid) or []), "null falls back to the default set")
+        ev = [e for e in copilot._load_events()[-12:] if "access" in json.dumps(e).lower()
+              or "open" in json.dumps(e).lower()]
+        said = json.dumps(ev)
+        ok("can open everything" not in said,
+           "and the ledger does not claim a grant that was not made: " + said[-260:])
+    with_accounts(go)
+
+
+@test
+def t_pruning_never_deletes_the_evidence_of_an_open_discrepancy():
+    """The retention pass and the merge loop knew nothing about each other.
+    Prune the record an open finding was built from and the next sweep cannot
+    re-detect it; the merge sees a check that ran and did not emit it, and
+    writes 'no longer detected'. The discrepancy leaves the board looking
+    resolved while the money is still missing."""
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    old = (_dt.now(_tz.utc) - _td(days=400)).strftime("%Y-%m-%d")
+    cache = {"xero": {"bank_transactions": {
+                 "T-open": {"id": "T-open", "date": old},
+                 "T-settled": {"id": "T-settled", "date": old},
+                 "T-loose": {"id": "T-loose", "date": old}}},
+             "shopify": {"orders": {}}}
+    live = _rc.make_exc("stale_unreconciled", "high", "Still unreconciled", ["T-open"])
+    done = _rc.make_exc("stale_unreconciled", "high", "Dealt with", ["T-settled"])
+    done["status"] = "explained"
+    done["updated"] = (_dt.now(_tz.utc) - _td(days=400)).isoformat()
+    store = {"exceptions": {live["id"]: live, done["id"]: done}}
+
+    _rc.prune(cache, {}, store)
+    rows = cache["xero"]["bank_transactions"]
+    ok("T-open" in rows,
+       "the record an OPEN discrepancy points at survives its own age")
+    ok("T-settled" not in rows and "T-loose" not in rows,
+       "while settled and unreferenced records go: %r" % (sorted(rows),))
+    eq(sorted(store["retention_dropped"]), ["T-loose", "T-settled"],
+       "and what went is remembered, so the next sweep can word it honestly")
+
+
+@test
+def t_a_record_we_deleted_ourselves_is_not_a_resolved_discrepancy():
+    """Two facts that must never share a sentence: 'the discrepancy went away'
+    and 'we deleted our copy of the records behind it'."""
+    fx = _FakeXero()
+    st = _recon_world(fx, [])
+    old = _rc.make_exc("stale_unreconciled", "high", "Was open", ["T-gone"])
+    st["store"]["exceptions"] = {old["id"]: old}
+    st["store"]["retention_dropped"] = ["T-gone"]
+    run(_rc.sweep())
+    e = st["store"]["exceptions"][old["id"]]
+    ok(e.get("stale"), "it did drop off the live board")
+    ok(e.get("retention_dropped"), "flagged as OUR deletion, not their resolution")
+    note = (e["history"] or [])[-1]["note"]
+    ok("retention" in note and "not a sign it was resolved" in note,
+       "and the audit trail says which of the two happened: " + note)
+
+
+@test
+def t_a_payout_older_than_the_bank_lines_is_not_a_missing_deposit():
+    """Shopify hands back payouts with no date window and nothing pruned them,
+    so they outlived the Xero bank lines they are matched against. Every one of
+    them then read as 'no matching bank transaction in Xero' at high severity,
+    for deposits that were in the books the whole time."""
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    ancient = (_dt.now(_tz.utc) - _td(days=300)).strftime("%Y-%m-%d")
+    recent = (_dt.now(_tz.utc) - _td(days=3)).strftime("%Y-%m-%d")
+    cache = {"shopify": {"payouts": {
+                 "P-old": {"id": "P-old", "date": ancient, "pence": 420000,
+                           "currency": "GBP", "status": "paid", "fees_pence": None},
+                 "P-new": {"id": "P-new", "date": recent, "pence": 51000,
+                           "currency": "GBP", "status": "paid", "fees_pence": None}}},
+             "xero": {"bank_transactions": {}}}
+    found = _rc.check_payouts_vs_bank(cache)
+    kinds = [(e["kind"], e["refs"]) for e in found]
+    ok(not any("P-old" in r for _, r in kinds),
+       "the payout older than the bank data is not accused: %r" % (kinds,))
+    ok(any("P-new" in r for _, r in kinds),
+       "while one inside the window still is: %r" % (kinds,))
+
+
+@test
+def t_payouts_and_disputes_are_pruned_like_everything_else():
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    old = (_dt.now(_tz.utc) - _td(days=400)).strftime("%Y-%m-%d")
+    recent = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+    cache = {"shopify": {
+        "payouts": {"po": {"id": "po", "date": old}, "pn": {"id": "pn", "date": recent}},
+        "disputes": {"do": {"id": "do", "date": old}, "dn": {"id": "dn", "date": recent}}}}
+    _rc.prune(cache, {}, {"exceptions": {}})
+    eq(set(cache["shopify"]["payouts"]), {"pn"}, "payouts are pruned")
+    eq(set(cache["shopify"]["disputes"]), {"dn"}, "and so are disputes")
 
 
 # =========================== run ===========================================

@@ -65,6 +65,13 @@ SEEN_CAP = int(os.environ.get("RECON_SEEN_CAP", "4000"))
 CACHE_KEEP_DAYS = int(os.environ.get("RECON_CACHE_KEEP_DAYS", str(WINDOW_DAYS + 60)))
 DOCS_KEEP_DAYS = int(os.environ.get("RECON_DOCS_KEEP_DAYS", str(WINDOW_DAYS + 60)))
 CLOSED_KEEP_DAYS = int(os.environ.get("RECON_CLOSED_KEEP_DAYS", "365"))
+# How far back every sweep FETCHES. Deliberately the same number as the
+# retention horizon, and not the shorter check window: whatever is still in the
+# cache must still be refetchable. Ask Xero only for the last WINDOW_DAYS and a
+# bank line dated before that can never be refreshed - so when the bookkeeper
+# finally reconciles it, our copy still says unreconciled and the check goes on
+# reporting a discrepancy that was settled weeks ago.
+FETCH_DAYS = CACHE_KEEP_DAYS
 
 # Injected by copilot.configure(): the engine owns logic, never transport.
 _registry: Optional[dict] = None          # Shopify tool registry
@@ -509,8 +516,16 @@ def check_payouts_vs_bank(cache: dict) -> list:
         if t["type"] == "RECEIVE" and t["pence"] is not None and _live(t):
             receives.setdefault(t["pence"], []).append(t)
     claimed: set = set()
+    horizon = _cutoff_day(FETCH_DAYS)
     for p in payouts.values():
         if p["status"] in ("canceled", "failed") or p["pence"] in (None, 0):
+            continue
+        # Older than the bank lines we hold: "no matching transaction" would
+        # only mean "we did not fetch the transaction". Shopify hands back
+        # payouts with no window, so without this the check invents a
+        # high-severity missing deposit for every payout that outlives the
+        # bank data it is matched against.
+        if str(p.get("date") or "") < horizon:
             continue
         hit = None
         for t in receives.get(p["pence"], []):
@@ -842,9 +857,12 @@ def check_disputes(cache: dict) -> list:
     out = []
     bank = cache.get("xero", {}).get("bank_transactions", {})
     notes = cache.get("xero", {}).get("credit_notes", {})
+    horizon = _cutoff_day(FETCH_DAYS)
     for d in cache.get("shopify", {}).get("disputes", {}).values():
         if d["status"] in ("won",) or d["pence"] in (None, 0):
             continue                       # a won dispute takes nothing
+        if str(d.get("date") or "") < horizon:
+            continue                       # older than the books we hold
         hit = False
         for t in bank.values():
             if t["type"] == "SPEND" and t["pence"] == d["pence"] and _live(t):
@@ -934,23 +952,46 @@ def prune(cache: dict, docs: dict, store: dict) -> list:
     them."""
     notes = []
     cutoff = _cutoff_day(CACHE_KEEP_DAYS)
-    dropped = 0
-    for bucket in ("invoices", "credit_notes", "payments", "bank_transactions"):
-        rows = cache.get("xero", {}).get(bucket)
-        if not rows:
+    # A record an OPEN discrepancy is built from is evidence, not history.
+    # Delete it and the next sweep cannot re-detect the finding; the merge sees
+    # a check that ran and did not emit it, and marks it "no longer detected".
+    # The discrepancy would drop off the board looking resolved, which is the
+    # one outcome this tool exists to prevent.
+    keep = set()
+    for e in (store.get("exceptions") or {}).values():
+        if e.get("stale") or e.get("status") not in ("new", "investigating"):
             continue
-        old = [k for k, v in rows.items() if str(v.get("date") or "") < cutoff]
+        for r in (e.get("refs") or []):
+            keep.add(str(r))
+    gone: list = []
+
+    def _sweep_bucket(rows, datekey):
+        if not rows:
+            return
+        old = [k for k, v in rows.items()
+               if str(v.get(datekey) or "") < cutoff and str(k) not in keep]
         for k in old:
             rows.pop(k, None)
-        dropped += len(old)
-    orders = cache.get("shopify", {}).get("orders") or {}
-    old_orders = [k for k, v in orders.items() if str(v.get("created_at") or "") < cutoff]
-    for k in old_orders:
-        orders.pop(k, None)
-    dropped += len(old_orders)
-    if dropped:
-        notes.append(f"{dropped} records older than {CACHE_KEEP_DAYS} days were dropped from "
+        gone.extend(str(k) for k in old)
+
+    for bucket in ("invoices", "credit_notes", "payments", "bank_transactions"):
+        _sweep_bucket(cache.get("xero", {}).get(bucket), "date")
+    shop = cache.get("shopify", {})
+    _sweep_bucket(shop.get("orders"), "created_at")
+    # Payouts and disputes were pulled with no window at all and pruned by
+    # nothing, so they outlived the bank lines they are matched against: a
+    # payout whose deposit had been dropped read as "no matching bank
+    # transaction in Xero" at high severity, for a deposit that was there all
+    # along.
+    _sweep_bucket(shop.get("payouts"), "date")
+    _sweep_bucket(shop.get("disputes"), "date")
+    if gone:
+        notes.append(f"{len(gone)} records older than {CACHE_KEEP_DAYS} days were dropped from "
                      "the local copy; they are still in Xero and Shopify.")
+    # Remembered so the NEXT sweep can tell "we deleted our copy" from "the
+    # discrepancy went away", which are not the same fact and must not share a
+    # sentence. Capped: this is a hint for wording, not a second ledger.
+    store["retention_dropped"] = sorted(set(gone))[:3000]
 
     doc_cut = _cutoff_day(DOCS_KEEP_DAYS)
     stale_docs = [k for k, d in docs.items() if _day(d.get("date")) and _day(d.get("date")) < doc_cut]
@@ -1445,7 +1486,8 @@ async def _sweep_inner(deep_docs: bool) -> dict:
                 # one filtered by date, so the first sweep pulled the whole
                 # history of payments, bank lines and credit notes to check
                 # four months of them.
-                rows = await fetch(since=_cutoff_day(), modified_since=marks.get(name))
+                rows = await fetch(since=_cutoff_day(FETCH_DAYS),
+                                   modified_since=marks.get(name))
                 bucket = x.setdefault(name, {})
                 truncated = False
                 for r in rows:
@@ -1487,7 +1529,7 @@ async def _sweep_inner(deep_docs: bool) -> dict:
             while fetched < 1500:
                 d = await _tool_json(_registry, "shopify_list_orders", {
                     "limit": 250, "status": "any", "since_id": since_id or None,
-                    "created_at_min": _cutoff_day() + "T00:00:00Z"})
+                    "created_at_min": _cutoff_day(FETCH_DAYS) + "T00:00:00Z"})
                 if d.get("_failed"):
                     notes.append("Shopify orders could not be read; sale checks ran on the cached copy.")
                     break
@@ -1643,11 +1685,23 @@ async def _sweep_inner(deep_docs: bool) -> dict:
         if old.get("kind") not in ran_kinds:
             continue
         if xid not in fresh and not old.get("stale"):
+            # Third case, alongside the two above: our own retention pass
+            # deleted the records this was built from. That is not evidence of
+            # anything having been fixed, and it must not be written as if it
+            # were.
+            dropped_local = set(store.get("retention_dropped") or [])
+            expired = dropped_local and any(str(r) in dropped_local
+                                            for r in (old.get("refs") or []))
             old["stale"] = True
             old["updated"] = _now()
+            if expired:
+                old["retention_dropped"] = True
             old["history"] = (old.get("history") or []) + [{
                 "at": _now(), "by": "sweep", "from": old["status"], "to": old["status"],
-                "note": "No longer detected by the latest sweep; kept for the audit trail."}]
+                "note": ("The records behind this passed the retention window and were deleted "
+                         "from the local copy, so the latest sweep could not look for it again. "
+                         "That is not a sign it was resolved.") if expired else
+                        "No longer detected by the latest sweep; kept for the audit trail."}]
 
     try:
         notes.extend(prune(cache, docs, store))

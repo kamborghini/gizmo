@@ -15373,8 +15373,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     return _json({"error": "You cannot manage that account."}, 403)
                 raw = body.get("tabs")
                 if raw is None:
+                    # No list of its own, which is NOT the same as every tab:
+                    # _user_tabs resolves that to DEFAULT_TABS, and the opt-in
+                    # tabs are not in it. The ledger has to say what actually
+                    # happened, or it records a grant that was never made.
                     u.pop("tabs", None)
-                    detail = f"{label} can open everything"
+                    detail = (f"{label} can open the default tabs (not "
+                              + ", ".join(OPT_IN_TABS) + ")")
                     _write_users(d)
                 else:
                     if not isinstance(raw, list):

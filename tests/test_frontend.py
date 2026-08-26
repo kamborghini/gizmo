@@ -1528,6 +1528,17 @@ def t_a_refused_revocation_asks_before_forgetting():
 
 
 @test
+def t_the_tab_picker_sends_what_it_shows():
+    """It used to collapse a fully ticked panel to null. Once null resolved to
+    the DEFAULT tabs on the server, that silently withheld the opt-in tab the
+    admin had just ticked."""
+    ok("picked.length === TAB_KEYS.length ? null" not in SCRIPT,
+       "a complete tick list is no longer collapsed to the null sentinel")
+    ok("{ op: 'tabs', id: u.id, tabs: picked }" in SCRIPT,
+       "the picker sends the explicit list it is showing")
+
+
+@test
 def t_reconciliation_is_not_ticked_by_default():
     ok("const OPT_IN_TABS = ['recon']" in SCRIPT,
        "the tab is declared as one nobody inherits")
