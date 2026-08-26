@@ -2197,6 +2197,8 @@
                 const err = new Error(data.error);
                 // The server may attach what it actually sent and what came back.
                 if (data.tech) err.tech = data.tech;
+                // Some refusals are recoverable by the caller insisting.
+                if (data.can_force) err.canForce = true;
                 throw err;
             }
             return data;
@@ -4629,12 +4631,25 @@
                           + 'deleted. Nothing in the mailbox itself is touched.';
                     if (!await uiConfirm(msg, { title: 'Disconnect', okText: 'Disconnect' })) return;
                     b2.disabled = true;
-                    try {
-                        const r = await api('/api/recon/disconnect', { what });
+                    const go = async (force) => {
+                        const r = await api('/api/recon/disconnect', force ? { what, force: 1 } : { what });
                         (r.notes || []).forEach(n => addToast(n));
                         toastOk('Disconnected.');
                         refreshRecon();
-                    } catch (e) { toastError(e.message); b2.disabled = false; }
+                    };
+                    try { await go(false); }
+                    catch (e) {
+                        if (!e.canForce) { toastError(e.message); b2.disabled = false; return; }
+                        /* Xero would not accept the revocation, so the token is
+                           still live there. Forgetting it here would leave that
+                           connection alive with no way left to end it, so this
+                           asks rather than assumes. */
+                        const ok2 = await uiConfirm(e.message + '\n\nForget the connection here anyway?',
+                            { title: 'Could not revoke at Xero', okText: 'Forget it anyway' });
+                        if (!ok2) { b2.disabled = false; return; }
+                        try { await go(true); }
+                        catch (e2) { toastError(e2.message); b2.disabled = false; }
+                    }
                 };
                 row.append(b2);
             };
@@ -4649,6 +4664,14 @@
             discon('xero', 'Disconnect Xero', xs.connected);
             discon('mailbox', 'Disconnect mailbox', mb.connected);
             card.append(row);
+            /* A token that could not be saved is a connection with a fuse
+               burning: Xero honours the previous one for about half an hour and
+               then the link is gone. A log line nobody reads is not a warning. */
+            if (xs.warning) {
+                const xw = el('div', 'mail-viewwarn', xs.warning);
+                xw.style.cssText = 'margin-top:12px;margin-bottom:0';
+                card.append(xw);
+            }
             (st.sweep_notes || []).forEach(n => card.append(el('div', 'field-help', n)));
             box.append(card);
             /* The accounts mailbox: a SEPARATE Google account from the Inbox
@@ -13307,6 +13330,12 @@
         }
         const TAB_KEYS = ['overview', 'seo', 'keywords', 'products', 'customers', 'liability',
                           'crm', 'mail', 'files', 'labels', 'memory', 'skills', 'chat', 'recon'];
+        /* Reconciliation is not part of the default grant: it holds the books,
+           the bank line and the accounts mailbox, so it is handed over on
+           purpose rather than inherited by having an account. Mirrors
+           OPT_IN_TABS on the server, which is the side that actually decides. */
+        const OPT_IN_TABS = ['recon'];
+        const DEFAULT_TABS = TAB_KEYS.filter(k => OPT_IN_TABS.indexOf(k) < 0);
         function tabAllowed(v) {
             if (!teamMe || !Array.isArray(teamMe.tabs)) return true;
             if (TAB_KEYS.indexOf(v) < 0) return true;   // guide and team are governed elsewhere
@@ -13658,7 +13687,7 @@
                         crm: 'CRM', mail: 'Inbox', files: 'Files', labels: 'Production Manager',
                         memory: 'Memory', skills: 'Skills', chat: 'Chat',
                         recon: 'Reconciliation' };
-                    const chosen = new Set(Array.isArray(u.tabs) ? u.tabs : TAB_KEYS);
+                    const chosen = new Set(Array.isArray(u.tabs) ? u.tabs : DEFAULT_TABS);
                     const boxes = [];
                     const group = el('div');
                     group.setAttribute('role', 'group');

@@ -11531,6 +11531,9 @@ def t_only_the_master_can_disconnect():
         sess = lg.get("session")
         ch = post_s(sess, "/api/auth/password", {"current": pw, "new": "adam-pw-77120"})
         sess = ch.json().get("session") or sess
+        # Hand this admin the tab explicitly, so what the test proves is the
+        # master-only check and not the opt-in gate in front of it.
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": list(copilot.TAB_KEYS)})
         for what in ("xero", "mailbox"):
             rr = post_s(sess, "/api/recon/disconnect", {"what": what})
             eq(rr.status_code, 403, "an admin cannot disconnect " + what)
@@ -11550,6 +11553,251 @@ def t_token_files_are_not_world_readable():
     mode2 = stat.S_IMODE(os.stat(_gm.FINANCE.token_path).st_mode)
     eq(mode2 & 0o077, 0, "and so is the mailbox token: %o" % mode2)
     _gm.disconnect(_gm.FINANCE)
+
+
+@test
+def t_a_xero_outage_is_not_reported_as_a_dead_token():
+    """A 503 from Xero and a revoked refresh token look nothing alike, and the
+    advice differs completely: one says wait, the other says reconnect, and
+    reconnecting spends a healthy token on a revocation. Only invalid_grant
+    means the credential is gone."""
+    saved = (xero_api.httpx.AsyncClient, xero_api.RETRY_WAITS,
+             xero_api.CLIENT_ID, xero_api.CLIENT_SECRET)
+    xero_api.RETRY_WAITS = (0.0, 0.0)     # the retry policy, without the wait
+    xero_api.CLIENT_ID = xero_api.CLIENT_SECRET = "demo"
+    tries = {"n": 0}
+    body = {"status": 503, "json": {}}
+
+    class _R:
+        @property
+        def status_code(self): return body["status"]
+        text = "upstream"
+        def json(self): return body["json"]
+
+    class _C:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, **kw):
+            tries["n"] += 1
+            return _R()
+    xero_api.httpx.AsyncClient = lambda *a, **k: _C()
+    try:
+        xero_api._write_token({"refresh_token": "rt-healthy", "tenant_id": "t1"})
+        xero_api._state["access"] = ""
+        xero_api._state["access_exp"] = 0.0
+
+        err = None
+        try:
+            run(xero_api._access_token())
+        except Exception as e:
+            err = e
+        ok(isinstance(err, xero_api.XeroTransient),
+           "a 5xx is a transient, not a dead credential: %r" % (err,))
+        eq(tries["n"], 3, "and it was retried rather than given up on at once")
+        ok("reconnect" not in str(err).lower() or "only if it persists" in str(err).lower(),
+           "the advice does not tell them to reconnect: %s" % err)
+        ok(xero_api.connected(), "the healthy refresh token was NOT thrown away")
+
+        # Now Xero actually refuses the credential.
+        body["status"], body["json"] = 400, {"error": "invalid_grant"}
+        xero_api._state["access_exp"] = 0.0
+        err = None
+        try:
+            run(xero_api._access_token())
+        except Exception as e:
+            err = e
+        ok(not isinstance(err, xero_api.XeroTransient), "invalid_grant is not transient")
+        ok("reconnect" in str(err).lower(), "and THAT one says reconnect: %s" % err)
+    finally:
+        (xero_api.httpx.AsyncClient, xero_api.RETRY_WAITS,
+         xero_api.CLIENT_ID, xero_api.CLIENT_SECRET) = saved
+        xero_api._state["token_error"] = ""
+        xero_api.disconnect()
+
+
+@test
+def t_a_token_that_could_not_be_saved_retries_inside_xeros_grace():
+    """Xero rotates the refresh token on every use and honours the previous one
+    for about 30 minutes. If the new one cannot be written, that grace is the
+    whole safety margin: cache the access token for minutes rather than half an
+    hour, and put it somewhere a person will see."""
+    saved = (xero_api.httpx.AsyncClient, xero_api._write_token,
+             xero_api.CLIENT_ID, xero_api.CLIENT_SECRET)
+    xero_api.CLIENT_ID = xero_api.CLIENT_SECRET = "demo"
+
+    class _R:
+        status_code = 200
+        text = ""
+        def json(self):
+            return {"access_token": "at-new", "refresh_token": "rt-rotated",
+                    "expires_in": 1800}
+
+    class _C:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, **kw): return _R()
+    try:
+        xero_api._write_token({"refresh_token": "rt-old", "tenant_id": "t1",
+                               "tenant_name": "Projected Image"})
+        xero_api.httpx.AsyncClient = lambda *a, **k: _C()
+        def _boom(d):
+            raise OSError("read-only file system")
+        xero_api._write_token = _boom
+        xero_api._state["access"] = ""
+        xero_api._state["access_exp"] = 0.0
+        at = run(xero_api._access_token())
+        eq(at, "at-new", "the call still worked: the token itself is fine")
+        left = xero_api._state["access_exp"] - time.monotonic()
+        ok(left < 600, "the access token is cached for minutes, not the full 30: %.0fs" % left)
+        st = xero_api.status()
+        ok(st.get("warning"), "and the failure is on the status the tab reads")
+        ok("volume" in st["warning"] or "save" in st["warning"].lower(),
+           "in words that name the actual problem: %s" % st["warning"])
+    finally:
+        (xero_api.httpx.AsyncClient, xero_api._write_token,
+         xero_api.CLIENT_ID, xero_api.CLIENT_SECRET) = saved
+        xero_api._state["save_failed_at"] = 0.0
+        xero_api.disconnect()
+
+
+@test
+def t_a_failed_revocation_keeps_the_token_rather_than_stranding_it():
+    """Deleting our only copy of a token Xero would not revoke leaves a live
+    credential in their hands with nothing left to kill it with. Keep it, say
+    so, and let the merchant insist."""
+    def go():
+        ensure_auth()
+        saved = (xero_api.CLIENT_ID, xero_api.CLIENT_SECRET, xero_api.httpx.AsyncClient)
+        xero_api.CLIENT_ID = xero_api.CLIENT_SECRET = "demo"
+
+        class _R:
+            status_code = 500
+            text = "boom"
+
+        class _C:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def post(self, url, **kw): return _R()
+        xero_api.httpx.AsyncClient = lambda *a, **k: _C()
+        try:
+            xero_api._write_token({"refresh_token": "rt-live", "tenant_id": "t1"})
+            copilot._write_recon_cache({"xero": {"invoices": {"a": {"id": "a"}}}})
+            r = post("/api/recon/disconnect", {"what": "xero"})
+            eq(r.status_code, 502, r.text[:200])
+            ok(r.json().get("can_force"), "the merchant is offered the way out")
+            ok(xero_api.connected(), "the token is still here, so revoking can be retried")
+            ok(copilot._load_recon_cache().get("xero"),
+               "and the books were not deleted for a disconnect that did not happen")
+            # Insisting forgets it anyway.
+            r2 = post("/api/recon/disconnect", {"what": "xero", "force": 1})
+            eq(r2.status_code, 200, r2.text[:200])
+            ok(not xero_api.connected(), "forced, it is gone")
+            eq(copilot._load_recon_cache().get("xero"), None, "and so are the books")
+        finally:
+            xero_api.CLIENT_ID, xero_api.CLIENT_SECRET, xero_api.httpx.AsyncClient = saved
+            xero_api.disconnect()
+    with_accounts(go)
+
+
+@test
+def t_the_books_are_not_handed_out_with_the_account():
+    """Reconciliation reads the company's accounting records, its bank line and
+    the accounts mailbox. A new dispatch login must not arrive already holding
+    all three: it is granted deliberately, or not at all."""
+    def go():
+        r = post("/api/team/user", {"op": "create", "name": "Nia", "username": "niax",
+                                    "role": "member"})
+        uid, pw = r.json()["id"], r.json()["starter_password"]
+        tabs = copilot._user_tabs(uid)
+        ok(isinstance(tabs, list), "a member is not given the unrestricted None")
+        ok("recon" not in tabs, "and reconciliation is not in the default grant")
+        ok("labels" in tabs and "mail" in tabs,
+           "while the everyday tabs still are: %r" % (tabs,))
+
+        lg = client.post("/api/auth/login", json={"username": "niax", "password": pw},
+                         headers={"Authorization": "Bearer " + tok()}).json()
+        sess = lg.get("session")
+        ch = post_s(sess, "/api/auth/password", {"current": pw, "new": "nia-pw-88231"})
+        sess = ch.json().get("session") or sess
+        rr = post_s(sess, "/api/recon/status", {})
+        eq(rr.status_code, 403, "and the door is shut, not merely hidden")
+
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["labels", "recon"]})
+        rr2 = post_s(sess, "/api/recon/status", {})
+        eq(rr2.status_code, 200, "granted explicitly, it opens")
+    with_accounts(go)
+
+
+@test
+def t_every_xero_read_is_windowed():
+    """Only invoices were filtered by date, so a first sync pulled the whole
+    history of payments, bank lines and credit notes to reconcile four months
+    of them. The safest copy of a record is the one never made."""
+    sent = []
+
+    async def fake_paged(path, key, params=None, ims=None, max_pages=50):
+        sent.append((path, dict(params or {})))
+        return []
+
+    saved = xero_api._paged
+    xero_api._paged = fake_paged
+    try:
+        run_async(xero_api.list_invoices(since="2026-05-01"))
+        run_async(xero_api.list_payments(since="2026-05-01"))
+        run_async(xero_api.list_bank_transactions(since="2026-05-01"))
+        run_async(xero_api.list_credit_notes(since="2026-05-01"))
+    finally:
+        xero_api._paged = saved
+    eq(len(sent), 4, sent)
+    for path, params in sent:
+        ok("where" in params, path + " is read without a date window")
+        eq(params["where"], "Date >= DateTime(2026,5,1)",
+           path + " uses the shared window: " + params["where"])
+
+
+@test
+def t_the_sweep_asks_for_one_window_not_all_history():
+    src = open(os.path.join(HERE, "recon.py"), encoding="utf-8").read()
+    seg = src.split("for name, fetch, slimmer, key in (")[1][:900]
+    ok("modified_since=marks.get(name)" in seg, "the incremental watermark is still used")
+    ok(seg.count("since=_cutoff_day()") == 1 and 'if name == "invoices"' not in seg,
+       "all four reads take the same window, with no special case: " + seg[-200:])
+
+
+@test
+def t_reconciliation_stores_do_not_keep_records_for_ever():
+    """Every other store in this app prunes. These held third parties'
+    financial records and document text with no expiry at all."""
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    old = (_dt.now(_tz.utc) - _td(days=400)).strftime("%Y-%m-%d")
+    recent = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+    cache = {"xero": {"invoices": {"old": {"id": "old", "date": old},
+                                   "new": {"id": "new", "date": recent}},
+                      "payments": {"po": {"id": "po", "date": old}}},
+             "shopify": {"orders": {"oo": {"id": "oo", "created_at": old},
+                                    "on": {"id": "on", "created_at": recent}}}}
+    docs = {"d_old": {"date": old + "T09:00:00Z", "doc_type": "remittance"},
+            "d_new": {"date": recent + "T09:00:00Z", "doc_type": "remittance"}}
+    settled = _rc.make_exc("duplicate_bill_number", "high", "Settled long ago", ["s1"],
+                           evidence=[_rc.ev("xero", "bill", "Bill 1", {"id": "b"}, 1)])
+    settled["status"] = "explained"
+    settled["updated"] = (_dt.now(_tz.utc) - _td(days=400)).isoformat()
+    live = _rc.make_exc("overpaid_invoice", "high", "Still open", ["s2"],
+                        evidence=[_rc.ev("xero", "invoice", "Invoice 2", {"id": "i"}, 1)])
+    live["updated"] = (_dt.now(_tz.utc) - _td(days=400)).isoformat()
+    store = {"exceptions": {settled["id"]: settled, live["id"]: live}}
+
+    notes = _rc.prune(cache, docs, store)
+    eq(set(cache["xero"]["invoices"]), {"new"}, "records past the window are dropped")
+    eq(cache["xero"]["payments"], {}, "including payments, not just invoices")
+    eq(set(cache["shopify"]["orders"]), {"on"}, "and the Shopify side too")
+    eq(set(docs), {"d_new"}, "old documents go with them")
+    eq(settled["evidence"], [], "a settled discrepancy sheds its copied records")
+    ok(settled.get("evidence_dropped"), "and says that it did")
+    ok(settled["title"] and settled["status"] == "explained",
+       "while keeping what was decided: the audit trail is the point")
+    ok(live["evidence"], "an OPEN discrepancy keeps its evidence however old it is")
+    ok(any("dropped" in n for n in notes), "and the sweep reports the deletions: %s" % notes)
 
 
 # =========================== run ===========================================

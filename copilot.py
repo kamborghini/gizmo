@@ -10564,13 +10564,24 @@ _TAB_ROUTES = (
 )
 
 
+# Tabs nobody inherits merely by having an account. Reconciliation holds the
+# company's accounting records, its bank line and the finance mailbox, so a new
+# stock or dispatch login must not arrive already holding the books: an admin
+# hands it over deliberately, or not at all.
+OPT_IN_TABS = ("recon",)
+DEFAULT_TABS = tuple(k for k in TAB_KEYS if k not in OPT_IN_TABS)
+
+
 def _user_tabs(uid: Optional[str]):
-    """None = everything. The master is unrestrictable by construction."""
+    """None = everything, and only the master gets that. An account with no
+    tab list of its own gets the DEFAULT set, which is not the whole set."""
     u = _team_user(uid)
     if not u or u.get("role") == "master":
         return None
     t = u.get("tabs")
-    return None if not isinstance(t, list) else [k for k in t if k in TAB_KEYS]
+    if not isinstance(t, list):
+        return list(DEFAULT_TABS)
+    return [k for k in t if k in TAB_KEYS]
 
 
 def _tab_denied(request: Request) -> Optional[JSONResponse]:
@@ -17526,9 +17537,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if body is None:
             return _json({"error": "Request too large."}, 413)
         what = str(body.get("what") or "")
+        force = bool(body.get("force"))
         notes = []
         if what == "xero":
-            r = await xero_api.revoke()
+            r = await xero_api.revoke(force=force)
+            if r.get("kept"):
+                # Xero would not accept the revocation, so the token is still
+                # ours and still live. Deleting the books now would leave a
+                # connected app with nothing to show for it: stop, say so, and
+                # let them retry or force it.
+                return _json({"ok": False, "kept": True, "error": r.get("note") or
+                              "Xero would not accept the revocation.",
+                              "can_force": True}, 502)
             if r.get("note"):
                 notes.append(r["note"])
             # The books go too. The exception list stays: it is the audit

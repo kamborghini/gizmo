@@ -88,7 +88,11 @@ SCOPES = os.environ.get(
     "offline_access accounting.invoices.read "
     "accounting.payments.read accounting.banktransactions.read")
 
-_state: dict = {"access": "", "access_exp": 0.0, "tenant": "", "tenant_name": ""}
+_state: dict = {"access": "", "access_exp": 0.0, "tenant": "", "tenant_name": "",
+                # Why the last refresh went wrong, if it did. Kept in memory
+                # and surfaced on status(), because a warning that lives only
+                # in the log is a warning nobody gets.
+                "save_failed_at": 0.0, "token_error": ""}
 _refresh_lock = asyncio.Lock()
 # Self-pacing: timestamps of recent calls, kept under the 60/minute ceiling.
 _recent_calls: list = []
@@ -145,18 +149,23 @@ def disconnect() -> None:
         os.remove(TOKEN_PATH)
     except FileNotFoundError:
         pass
-    _state.update({"access": "", "access_exp": 0.0, "tenant": "", "tenant_name": ""})
+    _state.update({"access": "", "access_exp": 0.0, "tenant": "", "tenant_name": "",
+                   "save_failed_at": 0.0, "token_error": ""})
 
 
-async def revoke() -> dict:
+async def revoke(force: bool = False) -> dict:
     """End the connection at XERO, then forget it here.
 
     Xero's revocation endpoint kills the refresh token and removes every
     connection this app holds for that user. Without it, disconnecting in
     gizmo leaves a live credential in Xero's hands for up to 60 days, which is
-    not what anyone means by disconnect. Returns {ok, note}: the local forget
-    happens either way, because leaving a token we intend to abandon is worse
-    than a failed revoke we can report."""
+    not what anyone means by disconnect.
+
+    If the revocation FAILS the token is deliberately kept, because deleting
+    our only copy would leave that live credential at Xero with nothing left
+    to revoke it with. Returns {ok, note, kept}. force=True forgets it anyway,
+    for the case where the connection has already been removed at Xero's end
+    and the local copy is just litter."""
     d = _load_token()
     rt = d.get("refresh_token")
     note = ""
@@ -174,8 +183,16 @@ async def revoke() -> dict:
             logger.exception("xero revoke failed")
     elif rt:
         note = "No client credentials on this server, so the token could only be forgotten locally."
+    if note and rt and not force:
+        # Deleting our copy now would leave a LIVE token in Xero's hands with
+        # no way left to revoke it. Keep it, say what happened, and let them
+        # try again or remove the app in Xero directly.
+        return {"ok": False, "kept": True,
+                "note": note + " The connection was left in place so revoking can be retried. "
+                               "You can also remove gizmo under Connected Apps in Xero, then "
+                               "disconnect here again."}
     disconnect()
-    return {"ok": not note, "note": note}
+    return {"ok": not note, "kept": False, "note": note}
 
 
 def consent_url(redirect_uri: str, state: str) -> str:
@@ -190,20 +207,53 @@ def consent_url(redirect_uri: str, state: str) -> str:
     return f"{LOGIN_BASE}/identity/connect/authorize?{q}"
 
 
-async def _token_request(data: dict) -> Optional[dict]:
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{IDENTITY_BASE}/connect/token", data=data,
-                auth=(CLIENT_ID, CLIENT_SECRET), timeout=30.0)
-        if resp.status_code != 200:
-            logger.error("xero token endpoint answered %s: %s",
-                         resp.status_code, resp.text[:200])
-            return None
-        return resp.json()
-    except Exception:
-        logger.exception("xero token request failed")
-        return None
+# Waits between retries of the token endpoint. One entry per retry, so the
+# count of attempts and the patience between them are the same knob.
+RETRY_WAITS = (1.0, 2.0)
+
+
+class XeroTransient(RuntimeError):
+    """Xero could not be reached, or answered a 5xx. The credential is fine;
+    the network or their service is not. Distinct from a dead token because
+    the ADVICE differs, and 'reconnect Xero' spends a healthy refresh token on
+    a revocation for the sake of a ninety-second outage."""
+
+
+async def _token_request(data: dict) -> dict:
+    """Returns the token payload. Raises XeroTransient for anything that is
+    worth retrying, and returns {"error": ...} only when Xero has actually
+    refused the credential."""
+    last = None
+    for attempt in range(len(RETRY_WAITS) + 1):
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"{IDENTITY_BASE}/connect/token", data=data,
+                    auth=(CLIENT_ID, CLIENT_SECRET), timeout=30.0)
+        except (httpx.TimeoutException, httpx.TransportError) as e:
+            last = "could not reach Xero: " + type(e).__name__
+            if attempt < len(RETRY_WAITS):
+                await asyncio.sleep(RETRY_WAITS[attempt])
+                continue
+            raise XeroTransient(last)
+        if resp.status_code == 200:
+            return resp.json()
+        if resp.status_code >= 500:
+            last = f"Xero answered {resp.status_code}"
+            if attempt < len(RETRY_WAITS):
+                await asyncio.sleep(RETRY_WAITS[attempt])
+                continue
+            raise XeroTransient(last)
+        # A 4xx IS Xero refusing us; carry their reason back so the caller can
+        # tell "the token is dead" from "the client id is wrong".
+        try:
+            body = resp.json()
+        except Exception:
+            body = {}
+        logger.error("xero token endpoint answered %s: %s", resp.status_code, resp.text[:200])
+        return {"error": str(body.get("error") or resp.status_code),
+                "error_description": str(body.get("error_description") or "")[:200]}
+    raise XeroTransient(last or "Xero token request failed")
 
 
 async def exchange_code(code: str, redirect_uri: str) -> bool:
@@ -255,7 +305,9 @@ async def exchange_code(code: str, redirect_uri: str) -> bool:
                   "connected_at": time.time(), "last_refresh": time.time()})
     _state.update({"access": access,
                    "access_exp": time.monotonic() + float(tok.get("expires_in") or 1800) - 60,
-                   "tenant": tenant_id, "tenant_name": tname})
+                   "tenant": tenant_id, "tenant_name": tname,
+                   # A fresh consent answers whatever the last one died of.
+                   "save_failed_at": 0.0, "token_error": ""})
     return True
 
 
@@ -274,24 +326,41 @@ async def _access_token() -> str:
         if not rt:
             raise RuntimeError("Xero is not connected.")
         tok = await _token_request({"grant_type": "refresh_token", "refresh_token": rt})
-        if not tok or not tok.get("access_token"):
-            raise RuntimeError("Xero refused the refresh token. Reconnect Xero "
-                               "from Settings, Connections.")
+        if tok.get("error") or not tok.get("access_token"):
+            err = str(tok.get("error") or "")
+            if err == "invalid_grant":
+                _state["token_error"] = ("Xero refused the refresh token. Reconnect Xero "
+                                         "from the Reconciliation tab.")
+                raise RuntimeError(_state["token_error"])
+            # Anything else is Xero having a moment. Telling the merchant to
+            # reconnect would spend a healthy token on a revocation.
+            raise XeroTransient("Xero would not issue a token just now ("
+                                + (err or "no reason given")
+                                + "). This usually passes; reconnect only if it persists.")
         # The ROTATED refresh token is the crown jewels: write it before
         # anything else can fail, or the old (now spent) one is all we have.
         if tok.get("refresh_token"):
             d["refresh_token"] = str(tok["refresh_token"])
             d["last_refresh"] = time.time()
+            _state["token_error"] = ""
             try:
                 _write_token(d)
+                _state["save_failed_at"] = 0.0
             except Exception:
-                # The disk refused it. Xero keeps the OLD token usable for 30
-                # minutes precisely for this, so the connection is not lost
-                # yet - but it will be if nobody notices, and a silent
-                # continue would burn that window quietly.
-                logger.exception("xero: the rotated refresh token could NOT be saved. Xero "
-                                 "honours the previous one for about 30 minutes; fix the data "
-                                 "volume before that runs out or Xero must be reconnected.")
+                # The disk refused it. Xero honours the PREVIOUS token for 30
+                # minutes precisely for this, so the connection is not lost -
+                # yet. Two things follow, and both matter: cache the access
+                # token for minutes rather than half an hour so the retry
+                # lands well inside that grace, and record the failure where a
+                # person will see it, because a log line at a dispatch desk
+                # means never.
+                logger.exception("xero: the rotated refresh token could NOT be saved")
+                _state["save_failed_at"] = time.time()
+                _state["access"] = str(tok["access_token"])
+                _state["access_exp"] = time.monotonic() + 240
+                _state["tenant"] = str(d.get("tenant_id") or "")
+                _state["tenant_name"] = str(d.get("tenant_name") or "")
+                return _state["access"]
         _state["access"] = str(tok["access_token"])
         _state["access_exp"] = time.monotonic() + float(tok.get("expires_in") or 1800) - 60
         _state["tenant"] = str(d.get("tenant_id") or "")
@@ -392,9 +461,14 @@ async def _paged(path: str, key: str, params: Optional[dict] = None,
 # between the audit trail and the system of record.
 # ---------------------------------------------------------------------------
 
-async def list_invoices(since: Optional[str] = None, modified_since: Optional[str] = None) -> list:
-    """Sales invoices AND bills: Type ACCREC / ACCPAY. `since` filters by
-    document date; `modified_since` is the incremental-sync watermark."""
+def _window(since: Optional[str]) -> dict:
+    """Query params for one reconciliation window.
+
+    EVERY list read takes this. Only invoices did before, so a first sync
+    pulled the organisation's entire payment, bank and credit-note history -
+    years of it - to reconcile a hundred and twenty days. Holding books nobody
+    is going to check is the kind of thing a security review asks about, and
+    rightly: the safest copy of a record is the one never made."""
     params: dict = {"order": "UpdatedDateUTC ASC"}
     if since:
         try:
@@ -404,22 +478,28 @@ async def list_invoices(since: Optional[str] = None, modified_since: Optional[st
             params["where"] = f"Date >= DateTime({y},{m},{d})"
         except ValueError:
             pass                          # a bad date filters nothing, never crashes
-    return await _paged("Invoices", "Invoices", params, modified_since)
+    return params
 
 
-async def list_credit_notes(modified_since: Optional[str] = None) -> list:
-    return await _paged("CreditNotes", "CreditNotes",
-                        {"order": "UpdatedDateUTC ASC"}, modified_since)
+async def list_invoices(since: Optional[str] = None, modified_since: Optional[str] = None) -> list:
+    """Sales invoices AND bills: Type ACCREC / ACCPAY. `since` filters by
+    document date; `modified_since` is the incremental-sync watermark."""
+    return await _paged("Invoices", "Invoices", _window(since), modified_since)
 
 
-async def list_payments(modified_since: Optional[str] = None) -> list:
-    return await _paged("Payments", "Payments",
-                        {"order": "UpdatedDateUTC ASC"}, modified_since)
+async def list_credit_notes(since: Optional[str] = None,
+                            modified_since: Optional[str] = None) -> list:
+    return await _paged("CreditNotes", "CreditNotes", _window(since), modified_since)
 
 
-async def list_bank_transactions(modified_since: Optional[str] = None) -> list:
-    return await _paged("BankTransactions", "BankTransactions",
-                        {"order": "UpdatedDateUTC ASC"}, modified_since)
+async def list_payments(since: Optional[str] = None,
+                        modified_since: Optional[str] = None) -> list:
+    return await _paged("Payments", "Payments", _window(since), modified_since)
+
+
+async def list_bank_transactions(since: Optional[str] = None,
+                                 modified_since: Optional[str] = None) -> list:
+    return await _paged("BankTransactions", "BankTransactions", _window(since), modified_since)
 
 
 # The fetchers below read endpoints OUTSIDE the four scopes above. Nothing
@@ -454,6 +534,14 @@ async def organisation() -> dict:
 
 def status() -> dict:
     d = _load_token()
-    return {"configured": client_configured(), "connected": connected(),
-            "tenant": str(d.get("tenant_name") or ""),
-            "last_refresh": d.get("last_refresh") or 0}
+    out = {"configured": client_configured(), "connected": connected(),
+           "tenant": str(d.get("tenant_name") or ""),
+           "last_refresh": d.get("last_refresh") or 0, "warning": ""}
+    failed_at = _state.get("save_failed_at") or 0
+    if failed_at and time.time() - failed_at < 3600:
+        out["warning"] = ("The refreshed Xero token could not be saved to the data volume. "
+                          "Xero honours the previous one for about 30 minutes: fix the volume "
+                          "now, or Xero will need reconnecting.")
+    elif _state.get("token_error"):
+        out["warning"] = _state["token_error"]
+    return out

@@ -56,6 +56,15 @@ THREADS_PER_SWEEP = int(os.environ.get("RECON_THREADS_PER_SWEEP", "40"))
 # may be walked again: wasted budget, never a lost document, because a thread
 # is only ever skipped when its documents were already read into the store.
 SEEN_CAP = int(os.environ.get("RECON_SEEN_CAP", "4000"))
+# RETENTION. Every other store in this app prunes; these three held third
+# parties' financial records and document text for ever. Nothing is kept
+# beyond what a sweep can still reconcile, plus a margin: a record older than
+# the window cannot be matched against anything, so keeping it is a liability
+# with no use. Resolved discrepancies keep their evidence for a while, because
+# the audit trail is the point, then shed it.
+CACHE_KEEP_DAYS = int(os.environ.get("RECON_CACHE_KEEP_DAYS", str(WINDOW_DAYS + 60)))
+DOCS_KEEP_DAYS = int(os.environ.get("RECON_DOCS_KEEP_DAYS", str(WINDOW_DAYS + 60)))
+CLOSED_KEEP_DAYS = int(os.environ.get("RECON_CLOSED_KEEP_DAYS", "365"))
 
 # Injected by copilot.configure(): the engine owns logic, never transport.
 _registry: Optional[dict] = None          # Shopify tool registry
@@ -919,6 +928,60 @@ def check_xero_orphan_sales(cache: dict) -> list:
         for v in orphans[:40]]
 
 
+def prune(cache: dict, docs: dict, store: dict) -> list:
+    """Drop what can no longer be reconciled. Returns notes, because a tool
+    that quietly deletes financial records is worse than one that keeps
+    them."""
+    notes = []
+    cutoff = _cutoff_day(CACHE_KEEP_DAYS)
+    dropped = 0
+    for bucket in ("invoices", "credit_notes", "payments", "bank_transactions"):
+        rows = cache.get("xero", {}).get(bucket)
+        if not rows:
+            continue
+        old = [k for k, v in rows.items() if str(v.get("date") or "") < cutoff]
+        for k in old:
+            rows.pop(k, None)
+        dropped += len(old)
+    orders = cache.get("shopify", {}).get("orders") or {}
+    old_orders = [k for k, v in orders.items() if str(v.get("created_at") or "") < cutoff]
+    for k in old_orders:
+        orders.pop(k, None)
+    dropped += len(old_orders)
+    if dropped:
+        notes.append(f"{dropped} records older than {CACHE_KEEP_DAYS} days were dropped from "
+                     "the local copy; they are still in Xero and Shopify.")
+
+    doc_cut = _cutoff_day(DOCS_KEEP_DAYS)
+    stale_docs = [k for k, d in docs.items() if _day(d.get("date")) and _day(d.get("date")) < doc_cut]
+    for k in stale_docs:
+        docs.pop(k, None)
+    if stale_docs:
+        notes.append(f"{len(stale_docs)} documents older than {DOCS_KEEP_DAYS} days were "
+                     "dropped; the originals are untouched in the mailbox.")
+
+    # A settled discrepancy keeps its evidence for a year, then keeps only the
+    # story: what it was, what was decided, by whom.
+    closed_cut = _cutoff_day(CLOSED_KEEP_DAYS)
+    slimmed = 0
+    for e in (store.get("exceptions") or {}).values():
+        if e.get("status") in ("new", "investigating"):
+            continue
+        if str(e.get("updated") or "")[:10] >= closed_cut:
+            continue
+        if e.get("evidence"):
+            e["evidence"] = []
+            e["evidence_dropped"] = True
+            slimmed += 1
+        hist = e.get("history") or []
+        if len(hist) > 40:
+            e["history"] = hist[:5] + hist[-35:]
+    if slimmed:
+        notes.append(f"{slimmed} settled discrepancies older than {CLOSED_KEEP_DAYS} days kept "
+                     "their decision and lost their copied records.")
+    return notes
+
+
 ALL_CHECKS = [check_orders_vs_invoices, check_refunds, check_payouts_vs_bank,
               check_stale_unreconciled, check_duplicates, check_overpayments,
               check_disputes, check_xero_orphan_sales]
@@ -1378,10 +1441,11 @@ async def _sweep_inner(deep_docs: bool) -> dict:
                 ("bank_transactions", _xero.list_bank_transactions, slim_bank_txn, "id"),
                 ("credit_notes", _xero.list_credit_notes, slim_credit_note, "id")):
             try:
-                if name == "invoices":
-                    rows = await fetch(since=_cutoff_day(), modified_since=marks.get(name))
-                else:
-                    rows = await fetch(modified_since=marks.get(name))
+                # The SAME window for all four. Invoices used to be the only
+                # one filtered by date, so the first sweep pulled the whole
+                # history of payments, bank lines and credit notes to check
+                # four months of them.
+                rows = await fetch(since=_cutoff_day(), modified_since=marks.get(name))
                 bucket = x.setdefault(name, {})
                 truncated = False
                 for r in rows:
@@ -1585,6 +1649,11 @@ async def _sweep_inner(deep_docs: bool) -> dict:
                 "at": _now(), "by": "sweep", "from": old["status"], "to": old["status"],
                 "note": "No longer detected by the latest sweep; kept for the audit trail."}]
 
+    try:
+        notes.extend(prune(cache, docs, store))
+    except Exception:
+        logger.exception("recon: pruning failed")
+        notes.append("The retention pass failed this sweep; nothing was deleted.")
     store["last_sync"] = _now()
     store["last_notes"] = notes[:12]
     counts = {s: 0 for s in SEVERITIES}
