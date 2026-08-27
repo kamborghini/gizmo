@@ -11869,6 +11869,35 @@ def t_reconciliation_stores_do_not_keep_records_for_ever():
 
 
 @test
+def t_the_panel_shows_the_fields_a_courier_actually_rejects():
+    """Two fixes were shipped against one captured envelope without anyone -
+    including the person who wrote them - being able to tell whether the values
+    had changed, because the redaction masked the postcode and the county: the
+    exact two fields the courier was complaining about. A diagnostic that hides
+    the evidence is not a diagnostic. Identity stays hidden; geography does
+    not."""
+    xml = ("<wo:RecipientsDetails>"
+           "<m:Name>Alexander Robertson</m:Name><m:Address1>Unit A2 Bluebell</m:Address1>"
+           "<m:Company>Alexander Robertson</m:Company><m:Email>a@b.c</m:Email>"
+           "<m:Phone>0123</m:Phone><m:City>Dublin</m:City>"
+           "<m:Postalcode>D12 VC2N</m:Postalcode><m:State_Code>IE</m:State_Code>"
+           "</wo:RecipientsDetails>")
+    out = worldoptions._redacted(xml)
+    for shown in ("D12 VC2N", "IE"):
+        ok(shown in out, "%r is visible, because a courier validates it: %s" % (shown, out))
+    for hidden in ("Alexander Robertson", "Unit A2 Bluebell", "a@b.c", "0123", "Dublin"):
+        ok(hidden not in out, "%r stays hidden" % hidden)
+    # Credentials never appear, whatever else changes.
+    creds = worldoptions._redacted("<m:Key>secret</m:Key><m:Password>pw</m:Password>"
+                                   "<m:MeterNumber>123</m:MeterNumber><ad:ReceiverTaxId>IE99</ad:ReceiverTaxId>")
+    for never in ("secret", "pw", "123", "IE99"):
+        ok(never not in creds, "%r is never shown" % never)
+    # A blank stays visibly blank: which fields were EMPTY is half the evidence.
+    eq(worldoptions._redacted("<m:State></m:State>"), "<m:State></m:State>",
+       "an empty element is not turned into stars")
+
+
+@test
 def t_an_international_postcode_is_alphanumeric_but_a_uk_one_is_untouched():
     """UPS validates the "sold to" party on an INTERNATIONAL shipment, and wants
     its fields alphanumeric. An Eircode is written with a space. Every UPS

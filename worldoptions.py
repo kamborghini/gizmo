@@ -499,13 +499,23 @@ def _t(prefix: str, name: str, value) -> str:
 # Credentials AND personal data: the envelope carries the customer's address,
 # phone, email and any tax identifiers, none of which belong in a log file. The
 # element names are kept so the shape of the request stays readable.
+# Deliberately NOT redacted: postcode and state/province. Those are the
+# fields a carrier validates and rejects, and masking them made this panel
+# useless for the one job it exists to do - two fixes were shipped against this
+# envelope without anyone, including its author, being able to see whether the
+# values had changed. A postcode names an area and a county names a region;
+# neither identifies a person, and the merchant reading the panel is looking at
+# an address they already have on the order. The name, the street, the town, the
+# phone, the email and every tax identifier stay hidden - the town because an
+# earlier decision here reasoned that with the address lines it completes a
+# customer's location in a file that outlives the failure, and a courier
+# rejecting a TOWN is not the case this panel is for.
 _REDACT_EL_RE = re.compile(
     r"<(m|wo|sd|ad):(Key|Password|MeterNumber|SubUserKey|Email|OtherEmailAddress"
     r"|RecipientEmailAddress|Phone|PhoneDialCode|Fax|Address1|Address2|Address3"
-    r"|Name|Company|Postalcode|PostalCode|PostCode|EORINumber|ReceiverTaxId"
+    r"|Name|Company|EORINumber|ReceiverTaxId"
     r"|ReceiverCompanyNumber|SenderVatNo|DutiesAccNumber|TransportationAccNumber"
-    r"|PersonalMessage|City|State|State_Code|DeliveryCity|DeliveryPostCode"
-    r"|CollectionCity|CollectionPostCode)>([^<]*)</\1:\2>")
+    r"|PersonalMessage|City|DeliveryCity|CollectionCity)>([^<]*)</\1:\2>")
 
 
 def _redacted(xml: str) -> str:
