@@ -167,7 +167,7 @@
         .btn { border: 1px solid var(--border); background: var(--surface); color: var(--ink); border-radius: var(--r-sm);
             padding: 6px 12px; font-size: var(--t-md); font-weight: var(--w-medium); line-height: 20px; white-space: nowrap;
             display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-            transition: background .12s ease, border-color .12s ease, color .12s ease; min-height: 32px; }
+            transition: background .12s ease, border-color .12s ease, color .12s ease; min-height: 34px; }
         .btn:hover { background: var(--surface-2); }
         .btn:active { background: var(--surface-3); }
         .btn[disabled], .btn:disabled { background: var(--surface-2); color: var(--ink-3);
@@ -405,7 +405,7 @@
         .ptools .grow { flex: 1; min-width: 200px; }
         .psel { border-radius: var(--r-sm); padding: 8px 12px; font-size: var(--t-md); }
         select.psel { cursor: pointer; } .pnum { width: 110px; }
-        .btn.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); font-weight: var(--w-medium); }
+        .btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); font-weight: var(--w-medium); }
         .btn.ghost:hover { background: var(--surface-2); }
         .pfilters { display: none; flex-wrap: wrap; gap: 12px 12px; padding: 16px 16px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); box-shadow: var(--sh-1); }
         .pfilters.show { display: flex; }
@@ -587,7 +587,7 @@
         .lbl-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--surface); border: 1px solid var(--border);
             border-radius: var(--r-sm); margin-bottom: 8px; cursor: pointer; transition: border-color .14s, background .14s; text-align: left; width: 100%; }
         .lbl-row:hover { background: var(--surface-2); border-color: var(--border-2); }
-        .lbl-row.on { border-color: var(--accent-line); background: var(--accent-soft); }
+        .lbl-row.on { border-color: var(--accent); background: var(--surface); }
         .lbl-num { font-size: var(--t-md); font-weight: var(--w-medium); font-variant-numeric: tabular-nums; min-width: 92px; }
         /* min-width:120px stopped this flex child shrinking, so the ellipsis
            never fired and the sub-line and status chips clipped mid-glyph.
@@ -705,8 +705,8 @@
         /* Sits in the same toolbar as .btn, so it matches .btn metrics exactly:
            it read as a squashed "thin" control when it had its own padding. */
         .lbl-size { background: var(--surface); border: 1px solid var(--border-2); border-radius: var(--r-sm);
-            color: var(--ink); font: inherit; font-size: var(--t-md); font-weight: var(--w-medium); padding: 8px 12px;
-            line-height: 1.35; cursor: pointer; transition: all .14s; }
+            color: var(--ink); font: inherit; font-size: var(--t-md); font-weight: var(--w-medium); padding: 6px 12px;
+            line-height: 20px; cursor: pointer; transition: all .14s; min-height: 34px; }
         .lbl-size:hover { background: var(--surface-3); border-color: var(--border-3); }
         .lbl-find { min-width: 190px; font-weight: var(--w-normal); }
         .lbl-nameline { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
@@ -727,7 +727,7 @@
         .proof-frame { display: block; width: 100%; height: min(76vh, 820px); border: 0;
             border-radius: 0 0 var(--r) var(--r); background: #fff; }
         .proof-ext { margin-left: auto; margin-right: 12px; font-size: var(--t-xs); color: var(--accent);
-            text-decoration: none; font-weight: var(--w-medium); }
+            text-decoration: underline; font-weight: var(--w-medium); text-underline-offset: 2px; text-decoration-color: var(--border-3); }
         .proof-ext:hover { text-decoration: underline; }
         /* ---- production lifecycle segments + dispatch ---- */
         /* flex-wrap, not nowrap: at 375px a five-item bar measured 422px wide,
@@ -945,7 +945,7 @@
         .mail-labelerr { font-size: var(--t-xs); color: var(--warn); }
         /* ---- the list: an inbox reads as rows, not columns ---- */
         .mlist { border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); overflow: hidden; }
-        .mrow { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+        .mrow { display: flex; align-items: center; gap: 10px; padding: 12px 16px;
             border-top: 0.5px solid var(--line); font-size: var(--t-md); cursor: pointer; }
         .mrow:first-child { border-top: 0; }
         .mrow:hover { background: var(--bg-2); }
@@ -1131,7 +1131,7 @@
         .crm-ta-sub { font-size: var(--t-xs); color: var(--ink-3); }
         .crm-cline { display: flex; align-items: center; gap: var(--sp-2); padding: 6px 0; font-size: var(--t-md); }
         .crm-cline svg { width: 15px; height: 15px; color: var(--ink-3); flex: none; }
-        .crm-cline a { color: var(--accent); text-decoration: none; word-break: break-all; }
+        .crm-cline a { color: var(--accent); text-decoration: underline; word-break: break-all; text-underline-offset: 2px; text-decoration-color: var(--border-3); }
         .crm-cf { display: grid; grid-template-columns: minmax(90px, 150px) 1fr; gap: var(--sp-1) 10px;
             font-size: var(--t-md); }
         .crm-cf-k { color: var(--ink-3); font-size: var(--t-xs); padding-top: 2px; }
@@ -1299,9 +1299,9 @@
             .lia-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 280px));
                 justify-content: start; }
         }
-        .lia-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm);
-            padding: 12px 16px; box-shadow: var(--sh-1); }
-        .lia-k { font-size: var(--t-xs); font-weight: var(--w-medium); text-transform: none; letter-spacing: normal; color: var(--ink-3); }
+        .lia-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+            padding: var(--sp-5) var(--sp-6); box-shadow: var(--sh-1); }
+        .lia-k { font-size: var(--t-md); font-weight: var(--w-normal); text-transform: none; letter-spacing: normal; color: var(--ink-3); }
         .lia-v { font-size: var(--t-xl); font-weight: var(--w-bold); letter-spacing: -.02em; margin-top: 4px; font-variant-numeric: tabular-nums; }
         .lia-card.ok .lia-v { color: var(--win); }
         .lia-card.warn .lia-v { color: var(--warn); }
@@ -1313,10 +1313,10 @@
         /* The four overdue buckets were the SAME pink, so the aged-debt bar -
            whose entire job is showing how deep the debt is aged - read as one
            undifferentiated block. A ramp from the danger tint to full danger. */
-        .lia-seg.o1 { background: var(--danger-bg); }
-        .lia-seg.o2 { background: #fca5a5; }
-        .lia-seg.o3 { background: #ef4444; }
-        .lia-seg.o4 { background: var(--danger); }
+        .lia-seg.o1, .lia-dot.o1 { background: #fca5a5; }
+        .lia-seg.o2, .lia-dot.o2 { background: #ef4444; }
+        .lia-seg.o3, .lia-dot.o3 { background: var(--danger); }
+        .lia-seg.o4, .lia-dot.o4 { background: #7f1d1d; }
         .lia-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: var(--t-xs); color: var(--ink-2); margin-bottom: 16px; }
         .lia-leg-item { display: inline-flex; align-items: center; gap: 4px; }
         .lia-dot { width: 9px; height: 9px; border-radius: var(--r-xs); display: inline-block; }
@@ -1324,10 +1324,6 @@
            the page colour, so the key read as blank space. */
         .lia-dot.within { background: var(--win); }
         .lia-dot.soon { background: var(--warn); }
-        .lia-dot.o1 { background: #fca5a5; }
-        .lia-dot.o2 { background: #f6bdb0; }
-        .lia-dot.o3 { background: #e07a5f; }
-        .lia-dot.o4 { background: var(--danger); }
         .lia-name { font-size: var(--t-md); font-weight: var(--w-medium); min-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .lbl-chip.deep { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
         .cov-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -1409,7 +1405,7 @@
         .run-gate { max-width: 480px; margin: 7vh auto 0; text-align: center; display: flex; flex-direction: column; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 40px 32px; box-shadow: var(--sh-1); animation: fadeUp .4s ease backwards; }
         .run-gate .rg-ic { width: 56px; height: 56px; border-radius: var(--r); background: var(--accent-soft); color: var(--accent-ink); display: grid; place-items: center; box-shadow: inset 0 0 0 1px var(--accent-line); margin-bottom: 16px; }
         .run-gate .rg-ic svg { width: 26px; height: 26px; }
-        .run-gate h2 { font-size: var(--t-xl); font-weight: var(--w-bold); letter-spacing: -.02em; margin: 0 0 8px; }
+        .run-gate h2 { font-size: var(--t-xl); font-weight: var(--w-medium); letter-spacing: -.025em; margin: 0 0 8px; }
         .run-gate p { color: var(--ink-2); font-size: var(--t-md); line-height: 1.6; margin: 0 0 22px; max-width: 42ch; }
         .run-gate .rg-btn { font-size: var(--t-md); padding: 12px 20px; }
         .run-gate .rg-btn svg { width: 15px; height: 15px; }
@@ -1550,7 +1546,7 @@
         .empty-chat .big { width: 56px; height: 56px; border-radius: var(--r); background: linear-gradient(140deg, var(--accent), var(--accent-2));
             display: grid; place-items: center; margin-bottom: 16px; }
         .empty-chat .big svg { width: 27px; height: 27px; color: #fff; }
-        .empty-chat h2 { font-size: var(--t-xl); margin: 0 0 7px; font-weight: var(--w-bold); letter-spacing: -.025em; }
+        .empty-chat h2 { font-size: var(--t-2xl); margin: 0 0 var(--sp-2); font-weight: var(--w-normal); letter-spacing: -.025em; line-height: 1.15; }
         .empty-chat p { color: var(--ink-2); margin: 0 0 22px; max-width: 430px; line-height: 1.6; }
         .starters { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 580px; }
 
@@ -1671,7 +1667,7 @@
             /* The only way into a folder was the 20px line box of its name.
                The padding is the touch target; the negative margin cancels
                its effect on the row, which keeps its old height. */
-            padding: 5px 0; margin: -5px 0; }
+            padding: 5px 0; margin: -5px 0; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-3); }
         .files-name:hover { color: var(--accent-ink); text-decoration: underline; }
         .files-name.still { cursor: default; }
         .files-name.still:hover { color: var(--ink); text-decoration: none; }
@@ -4220,12 +4216,12 @@
         function liaChip(r) {
             if (r.status === 'overdue') {
                 const c = el('span', 'lbl-chip bad' + (r.bucket === '60+' || r.bucket === '31-60' ? ' deep' : ''),
-                    'OVERDUE ' + r.days_over + 'D');
+                    'Overdue ' + r.days_over + 'D');
                 c.title = 'Due ' + fmtDate(r.due);
                 return c;
             }
-            if (r.status === 'due_soon') return el('span', 'lbl-chip warn', 'DUE IN ' + r.days_to_due + 'D');
-            return el('span', 'lbl-chip made', 'WITHIN TERMS');
+            if (r.status === 'due_soon') return el('span', 'lbl-chip warn', 'Due in ' + r.days_to_due + 'D');
+            return el('span', 'lbl-chip made', 'Within terms');
         }
         function liaOrderPasses(r) {
             if (liaF.status !== 'all') {
@@ -4415,11 +4411,11 @@
                        scoped to that class, so without it the money figure
                        refused to give way and the chips were cut in half. */
                     line.append(el('b', 'lbl-name', liaMoney(c.total, cur, 0)));
-                    if (c.overdue > 0) line.append(el('span', 'lbl-chip bad', 'OVERDUE ' + liaMoney(c.overdue, cur, 0)));
-                    else line.append(el('span', 'lbl-chip made', 'WITHIN TERMS'));
+                    if (c.overdue > 0) line.append(el('span', 'lbl-chip bad', 'Overdue ' + liaMoney(c.overdue, cur, 0)));
+                    else line.append(el('span', 'lbl-chip made', 'Within terms'));
                     if (c.last_chased && c.last_chased.at) {
                         const days = Math.max(0, Math.floor((Date.now() - Date.parse(c.last_chased.at)) / 86400000));
-                        line.append(el('span', 'lbl-chip note', days === 0 ? 'CHASED TODAY' : 'CHASED ' + days + 'D AGO'));
+                        line.append(el('span', 'lbl-chip note', days === 0 ? 'Chased today' : 'Chased ' + days + 'd ago'));
                     }
                     mid.append(line);
                     mid.append(el('span', 'sub', rows.length + (rows.length === 1 ? ' order' : ' orders')
@@ -4664,11 +4660,11 @@
             const row = el('div'); row.style.cssText = 'display:flex;gap:16px;align-items:center;flex-wrap:wrap';
             const xs = st.xero || {};
             row.append(el('span', 'lbl-chip ' + (xs.connected ? 'made' : 'bad'),
-                xs.connected ? ('XERO \u00b7 ' + (xs.tenant || 'CONNECTED')) : 'XERO NOT CONNECTED'));
+                xs.connected ? ('Xero \u00b7 ' + (xs.tenant || 'Connected')) : 'Xero not connected'));
             const mb = st.mailbox || {};
             row.append(el('span', 'lbl-chip ' + (mb.connected ? 'made' : 'warn'),
-                mb.connected ? ('ACCOUNTS MAILBOX \u00b7 ' + (mb.address || 'CONNECTED'))
-                             : 'ACCOUNTS MAILBOX NOT CONNECTED'));
+                mb.connected ? ('Accounts mailbox \u00b7 ' + (mb.address || 'Connected'))
+                             : 'Accounts mailbox not connected'));
             row.append(el('span', 'sub', st.last_sync ? ('Last sweep ' + fmtDate(st.last_sync)) : 'Never swept'));
             if (st.docs) row.append(el('span', 'sub', st.docs + ' documents read'));
             /* Disconnecting has to be possible, and has to mean it: the token
@@ -5982,7 +5978,7 @@
                 }
                 if (st.made_at && !dsp.tracking_number) nameLine.append(el('span', 'lbl-chip made', 'Made'));
                 else if (st.printed_at && !dsp.tracking_number) {
-                    const pc = el('span', 'lbl-chip note', 'PRINTED');
+                    const pc = el('span', 'lbl-chip note', 'Printed');
                     pc.title = 'Printed ' + fmtDate(st.printed_at);
                     nameLine.append(pc);
                 }
@@ -7572,7 +7568,7 @@
                     if (!known && op.product_code) top.append(el('span', 'lbl-chip', op.product_code));
                     if (op.product_code) rowl.title = (known ? op.carrier_label + ' ' : '')
                         + (op.service_name || '') + ' (World Options service ' + op.product_code + ')';
-                    if (Number(op.amount) === cheapest) top.append(el('span', 'lbl-chip made', 'CHEAPEST'));
+                    if (Number(op.amount) === cheapest) top.append(el('span', 'lbl-chip made', 'Cheapest'));
                     if (drop) top.append(el('span', 'lbl-chip note', 'DROP-OFF'));
                     if (op.no_signature) {
                         const ns = el('span', 'lbl-chip note', 'NO SIGNATURE');
@@ -8134,7 +8130,7 @@
                     top.append(el('span', 'disp-opt-prov' + (known ? '' : ' disp-opt-unknown'),
                         known ? op.carrier_label : 'Carrier not named'));
                     top.append(el('span', 'disp-opt-carrier', op.service_name || (known ? '' : 'Courier service')));
-                    if (Number(op.amount) === cheapest) top.append(el('span', 'lbl-chip made', 'CHEAPEST'));
+                    if (Number(op.amount) === cheapest) top.append(el('span', 'lbl-chip made', 'Cheapest'));
                     if (op.shops && op.shops.length) top.append(el('span', 'lbl-chip note', 'DROP-OFF'));
                     if (op.no_signature) top.append(el('span', 'lbl-chip note', 'NO SIGNATURE'));
                     if (op.delivery_dropoff) top.append(el('span', 'lbl-chip warn', 'COLLECT FROM SHOP'));
