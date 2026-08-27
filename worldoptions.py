@@ -573,6 +573,21 @@ _STATE_CODES = {
 # recognise is REFUSED, while sending none is explicitly fine.
 _STATE_REQUIRED = {"US", "CA", "MX", "AU", "BR", "IN", "CN", "JP", "IT", "ES", "AR"}
 
+# Countries where the carrier wants one specific literal in that field rather
+# than a real subdivision.
+#
+# The Republic of Ireland is the one that cost this app three wrong fixes. UPS
+# refuses "Invalid sold to state province code" for an Irish address whether the
+# field carries Shopify's ISO county code ("Dublin" -> "D") or nothing at all.
+# It wants the string "IE". That is not a subdivision, and it is not guessable:
+# it is what UPS's own error guidance tells shippers to put there, and it is
+# what the shipping platforms that hit this error before us do.
+#
+# The message blames the length throughout, and the length was never the
+# problem - "D" is one character inside a limit of five. The word that matters
+# is Invalid.
+_STATE_LITERAL = {"IE": "IE"}
+
 
 def _state_code(value, country="") -> str:
     """A state/province the carrier will actually accept, or nothing.
@@ -587,19 +602,18 @@ def _state_code(value, country="") -> str:
     and otherwise send NOTHING. Empty is explicitly valid, and for a GB or IE
     address the postcode identifies the destination on its own - whereas a
     truncated "Dubli" would be wrong data dressed up as right."""
+    cc = str(country or "").strip().upper()
+    if cc in _STATE_LITERAL:
+        return _STATE_LITERAL[cc]
     raw = ("" if value is None else str(value)).strip()
     if not raw:
         return ""
-    cc = str(country or "").strip().upper()
     if cc and cc not in _STATE_REQUIRED:
-        # Measured, not assumed. Every UK order in this store ships on UPS with
-        # province "ENG" and goes through; the Irish ones are refused with
-        # "Invalid sold to state province code", and the ONE Irish order that
-        # shipped went by DHL, which does not run this check. Shopify gives an
-        # Irish county the ISO 3166-2 code ("Dublin" -> "D") and UPS does not
-        # accept it. The message blames the length, but a one-character code is
-        # inside 0 to 5: the operative word is Invalid, and the length note is
-        # boilerplate UPS appends either way.
+        # Everywhere else the postcode routes the parcel and a subdivision is
+        # optional, so a value the carrier does not recognise is worse than
+        # none: an unrecognised code is REFUSED, while nothing is accepted.
+        # Britain sends nothing now, and every UK order ships on UPS regardless
+        # - "ENG" was never a county and never routed anything.
         return ""
     if len(raw) <= 5 and raw.isalnum():
         return raw.upper() if len(raw) <= 3 else raw

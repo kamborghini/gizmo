@@ -11921,10 +11921,14 @@ def t_a_county_nobody_can_abbreviate_is_sent_as_nothing():
     destination on its own, so an unusable county is dropped rather than
     truncated into wrong data."""
     for raw, cc, want, why in [
-        # Ireland is the case that started this. Shopify gives an Irish county
-        # the ISO 3166-2 code, and UPS refuses it.
-        ("D", "IE", "", "the Irish county code Shopify supplies is not sent to the courier"),
-        ("Dublin", "IE", "", "nor the county spelled out"),
+        # Ireland is the case that started this, and it cost three wrong fixes.
+        # UPS refuses an Irish address whether the field carries Shopify's ISO
+        # county code ("Dublin" -> "D") or nothing at all: it wants the literal
+        # "IE", which is what UPS's own error guidance tells shippers to send.
+        ("D", "IE", "IE", "the Irish county code Shopify supplies is replaced"),
+        ("Dublin", "IE", "IE", "and so is the county spelled out"),
+        ("", "IE", "IE", "and an EMPTY one, which UPS refuses just as firmly"),
+        (None, "IE", "IE", "and a missing one"),
         # Britain ships fine today, and sends nothing meaningful either way:
         # "ENG" is not a county and UPS routes GB on the postcode.
         ("England", "GB", "", "nor a UK nation"),
@@ -11940,7 +11944,7 @@ def t_a_county_nobody_can_abbreviate_is_sent_as_nothing():
     ]:
         eq(worldoptions._state_code(raw, cc), want, "%r/%s: %s" % (raw, cc, why))
     for raw, cc in (("England", "GB"), ("Tyne and Wear", "GB"), ("Co. Dublin", "IE"),
-                    ("California", "US"), ("South Yorkshire", "GB")):
+                    ("California", "US"), ("South Yorkshire", "GB"), ("", "IE")):
         out = worldoptions._state_code(raw, cc)
         ok(len(out) <= 5 and (out.isalnum() or out == ""),
            "%r/%s produced %r, which the courier would refuse" % (raw, cc, out))
