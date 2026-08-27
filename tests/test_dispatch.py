@@ -11869,6 +11869,48 @@ def t_reconciliation_stores_do_not_keep_records_for_ever():
 
 
 @test
+def t_a_county_nobody_can_abbreviate_is_sent_as_nothing():
+    """Order #104294, Dublin, refused with "Invalid sold to state province
+    code. Valid length is 0 to 5 alphanumeric". The delivery address was fine -
+    Shopify gives Dublin the code "D". The offender was the SENDER's county,
+    typed by a person into a free-text "County / state" box the way people
+    actually say it. "England" is seven characters; "Tyne and Wear" is
+    thirteen. Empty is explicitly valid, and a GB or IE postcode identifies the
+    destination on its own, so an unusable county is dropped rather than
+    truncated into wrong data."""
+    for raw, want, why in [
+        ("England", "ENG", "a UK nation becomes its ISO code"),
+        ("Scotland", "SCT", "and so do the others"),
+        ("Dublin", "D", "an Irish county becomes the code Shopify itself uses"),
+        ("Co. Dublin", "D", "however it is written"),
+        ("County Cork", "CO", "prefix and all"),
+        ("Tyne and Wear", "", "a county with no code is dropped, never cut short"),
+        ("Greater London", "", "same"),
+        ("D", "D", "something already valid is left alone"),
+        ("CA", "CA", "including a US state"),
+        ("", "", "and nothing stays nothing"),
+    ]:
+        eq(worldoptions._state_code(raw), want, "%r: %s" % (raw, why))
+    for raw in ("England", "Tyne and Wear", "Co. Dublin", "South Yorkshire"):
+        out = worldoptions._state_code(raw)
+        ok(len(out) <= 5 and (out.isalnum() or out == ""),
+           "%r produced %r, which the courier would refuse" % (raw, out))
+
+
+@test
+def t_every_address_block_normalises_its_state():
+    """Four places a state crosses the wire: the quote's delivery and
+    collection, and the booking's recipient and sender. One of them being
+    unguarded is all it takes to lose a booking."""
+    src = open(os.path.join(HERE, "worldoptions.py"), encoding="utf-8").read()
+    emits = re.findall(r'_ts?\(\s*"m",\s*"(DeliveryState|CollectionCountryState|State_Code|State)"\s*,\s*([^)]*\)?[^)]*)\)', src)
+    eq(len(emits), 4, "all four wire sites are present: %r" % (emits,))
+    for field, arg in emits:
+        ok("_state_code(" in arg,
+           "%s goes through the normaliser, not raw: %s" % (field, arg.strip()[:60]))
+
+
+@test
 def t_a_real_route_comes_back_compressed():
     """The unit test above proves the middleware. This proves it is actually IN
     the stack the merchant's requests go through, which is a different claim and

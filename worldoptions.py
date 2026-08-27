@@ -526,6 +526,52 @@ def _ts(prefix: str, name: str, value) -> str:
     return f"<{prefix}:{name}>{_xml_escape(v)}</{prefix}:{name}>"
 
 
+# Counties and regions people actually type into an address, and the codes the
+# carriers accept for them. Not a world list: the ones this merchant ships to.
+_STATE_CODES = {
+    # United Kingdom - carriers want the ISO region code, or nothing at all.
+    "england": "ENG", "scotland": "SCT", "wales": "WLS", "cymru": "WLS",
+    "northern ireland": "NIR",
+    # Ireland - ISO 3166-2:IE, which is what Shopify's province_code gives.
+    "dublin": "D", "co dublin": "D", "county dublin": "D",
+    "cork": "CO", "co cork": "CO", "county cork": "CO",
+    "galway": "G", "co galway": "G", "county galway": "G",
+    "limerick": "LK", "kerry": "KY", "mayo": "MO", "donegal": "DL",
+    "kildare": "KE", "meath": "MH", "wicklow": "WW", "wexford": "WX",
+    "waterford": "WD", "clare": "CE", "tipperary": "TA", "kilkenny": "KK",
+    "louth": "LH", "sligo": "SO", "westmeath": "WH", "offaly": "OY",
+    "laois": "LS", "cavan": "CN", "roscommon": "RN", "monaghan": "MN",
+    "carlow": "CW", "longford": "LD", "leitrim": "LM",
+}
+
+
+def _state_code(value) -> str:
+    """A state/province the carrier will actually accept, or nothing.
+
+    Carriers cap this field at 5 alphanumeric characters, and reject the whole
+    booking when it is longer - "Invalid sold to state province code. Valid
+    length is 0 to 5 alphanumeric". A person filling in an address types the
+    county the way they say it ("England", "Co. Dublin", "Tyne and Wear"), and
+    every one of those is too long.
+
+    So: use it as-is when it already fits, translate it when we know the code,
+    and otherwise send NOTHING. Empty is explicitly valid, and for a GB or IE
+    address the postcode identifies the destination on its own - whereas a
+    truncated "Dubli" would be wrong data dressed up as right."""
+    raw = ("" if value is None else str(value)).strip()
+    if not raw:
+        return ""
+    if len(raw) <= 5 and raw.isalnum():
+        return raw.upper() if len(raw) <= 3 else raw
+    key = re.sub(r"[^a-z ]", "", raw.lower()).replace("  ", " ").strip()
+    hit = _STATE_CODES.get(key) or _STATE_CODES.get(key.replace("county ", "").replace("co ", ""))
+    if hit:
+        return hit
+    logger.info("world options: dropping an unusable state/province %r "
+                "(over 5 characters and not a county we know a code for)", raw[:40])
+    return ""
+
+
 def _b(prefix: str, name: str, value: bool) -> str:
     return f"<{prefix}:{name}>{'true' if value else 'false'}</{prefix}:{name}>"
 
@@ -799,14 +845,14 @@ async def quote(origin: dict, destination: dict, boxes: list,
         + _t("m", "DeliveryCity", d.get("city"))
         + _t("m", "DeliveryCountryCode", (d.get("country") or "").upper())
         + _t("m", "DeliveryPostCode", d.get("postcode"))
-        + _t("m", "DeliveryState", d.get("state"))
+        + _t("m", "DeliveryState", _state_code(d.get("state")))
         + _b("m", "IsResidential", bool(residential))
         + "</wo:RecipientDetails>"
         # SenderDetails (wsCollectionDetail), alpha
         + "<wo:SenderDetails>"
         + _t("m", "CollectionCity", o.get("city"))
         + _t("m", "CollectionCountryCode", (o.get("country") or "").upper())
-        + _t("m", "CollectionCountryState", o.get("state"))
+        + _t("m", "CollectionCountryState", _state_code(o.get("state")))
         + _t("m", "CollectionPostCode", o.get("postcode"))
         + "</wo:SenderDetails>"
         # ShippingDetails (wsShippingDetails), XSD sequence order.
@@ -995,7 +1041,7 @@ def _recipient_block(d: dict) -> str:
             + _ts("m", "PhoneDialCode", "")
             + _ts("m", "Postalcode", d.get("postcode"))
             + _b("m", "Residential", not (d.get("company") or "").strip())
-            + _ts("m", "State_Code", d.get("state"))
+            + _ts("m", "State_Code", _state_code(d.get("state")))
             + "</wo:RecipientsDetails>")
 
 
@@ -1016,7 +1062,7 @@ def _sender_block(o: dict) -> str:
             + _ts("m", "Phone", o.get("phone"))
             + _ts("m", "PhoneDialCode", "")
             + _ts("m", "PostalCode", o.get("postcode"))
-            + _ts("m", "State", o.get("state"))
+            + _ts("m", "State", _state_code(o.get("state")))
             + "</wo:SendersDetails>")
 
 
