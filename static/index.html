@@ -7793,7 +7793,12 @@
                         const unknown = e.noReply || /MAY still|check this order|did not get a reply/i.test(msg);
                         toastError(msg);
                         const tech = techPanel(e.tech);
-                        if (tech) { conf.querySelectorAll('.disp-tech').forEach(n => n.remove()); conf.append(tech); }
+                        /* Open, not collapsed. A booking that will not go through is
+                           precisely the moment somebody needs to see what was sent,
+                           and a shut drawer marked "technical details" is a drawer
+                           nobody opens. The label path already did this. */
+                        if (tech) { tech.open = true;
+                            conf.querySelectorAll('.disp-tech').forEach(n => n.remove()); conf.append(tech); }
                         if (unknown) {
                             book.textContent = 'Check before booking again';
                             const warn = el('div', 'disp-warn', msg + ' Close this window, press Refresh, and look for a BOOKED chip on the order before trying again.');
