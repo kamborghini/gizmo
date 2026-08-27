@@ -11869,6 +11869,31 @@ def t_reconciliation_stores_do_not_keep_records_for_ever():
 
 
 @test
+def t_a_quote_that_will_not_price_hands_over_the_evidence():
+    """A courier rejected a Dublin shipment with "Invalid sold to state province
+    code" and the operator had nothing to look at, because the QUOTE path threw
+    the exception away and kept only str(e). The booking path has handed the
+    envelope over since it was written; quoting is what fails FIRST, so it was
+    the one failure in the dispatch flow that left the desk empty-handed."""
+    class _Boom(worldoptions.WorldOptionsError):
+        pass
+    e = _Boom("Invalid sold to state province code. Valid length is 0 to 5 alphanumeric")
+    e.raw = "<s:Fault>...</s:Fault>"
+    e.envelope = "<wo:SenderDetails><m:State></m:State></wo:SenderDetails>"
+    tech = copilot._wo_tech(e, "104294")
+    eq(tech.get("reply"), "<s:Fault>...</s:Fault>", "what they said comes back")
+    ok("State" in (tech.get("request") or ""), "and what we sent, blanks visible")
+    eq(tech.get("order"), "104294", "tagged with the order it belongs to")
+    ok(tech.get("when"), "and when")
+    # Nothing to show is not a panel with nothing in it.
+    eq(copilot._wo_tech(_Boom("no detail")), {}, "an error carrying no evidence makes no panel")
+    # One implementation, so the two paths cannot drift apart again.
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    eq(src.count("def _wo_tech("), 1, "there is exactly one of these")
+    ok(src.count("_wo_tech(") >= 3, "and both the quote and the booking paths call it")
+
+
+@test
 def t_a_county_nobody_can_abbreviate_is_sent_as_nothing():
     """Order #104294, Dublin, refused with "Invalid sold to state province
     code. Valid length is 0 to 5 alphanumeric". The delivery address was fine -

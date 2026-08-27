@@ -5179,13 +5179,35 @@ async def _customs_items(registry: dict, o: dict) -> list:
     return out
 
 
+def _wo_tech(e: BaseException, order_id="") -> dict:
+    """What World Options was sent and what it said back, safe to show.
+
+    Their errors name a .NET parameter rather than a field, so the request is
+    the only way to tell WHICH field they meant. The booking path has handed
+    this over since it was written; the quote path threw the exception away and
+    kept only str(e), which is how an operator ends up staring at "Invalid sold
+    to state province code" with no way to find out which address it means."""
+    tech: dict = {}
+    if getattr(e, "raw", ""):
+        tech["reply"] = str(e.raw)[:2000]
+    tech["sent"] = bool(getattr(e, "envelope", "")) or bool(getattr(e, "sent", False))
+    if getattr(e, "envelope", ""):
+        tech["request"] = str(e.envelope)[:20000]
+    if not (tech.get("reply") or tech.get("request")):
+        return {}
+    tech["when"] = datetime.now(timezone.utc).isoformat()
+    tech["order"] = str(order_id)
+    return tech
+
+
 async def _quote_options(origin: dict, dest: dict, boxes: list, currency: str,
                          insurance: str, cfg: dict) -> tuple:
     """Every courier option for one parcel to one address, as a single priced list.
 
     Takes plain data and no order, so the queue and a pasted address are priced by
     exactly the same code: a service that appears for one appears for the other.
-    Returns (options, currency, error)."""
+    Returns (options, currency, error, exception). The exception rides along
+    because str(e) drops the envelope, and the envelope is the evidence."""
     residential = not str(dest.get("company") or "").strip()
     dropoff = (cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages")
     # The caller has already stamped each box with its declared value.
@@ -5221,11 +5243,11 @@ async def _quote_options(origin: dict, dest: dict, boxes: list, currency: str,
         door, nosig = got[0], got[1]
         point = got[2] if show_shop else {"options": []}
     except worldoptions.WorldOptionsError as e:
-        return [], currency, str(e)
+        return [], currency, str(e), e
     except Exception as e:
         logger.exception("dispatch quote failed")
         _record_error("getting courier quotes", e)
-        return [], currency, "Couldn't get courier quotes. Check the server logs."
+        return [], currency, "Couldn't get courier quotes. Check the server logs.", e
     if isinstance(nosig, Exception):
         logger.info("no-signature quote unavailable: %s", nosig)
         nosig = {"options": []}
@@ -5233,9 +5255,9 @@ async def _quote_options(origin: dict, dest: dict, boxes: list, currency: str,
         if isinstance(point, Exception):
             err = door
             if isinstance(err, worldoptions.WorldOptionsError):
-                return [], currency, str(err)
+                return [], currency, str(err), err
             logger.exception("dispatch quote failed", exc_info=door)
-            return [], currency, "Couldn't get courier quotes. Check the server logs."
+            return [], currency, "Couldn't get courier quotes. Check the server logs.", door
         door = {"options": []}
     if isinstance(point, Exception):
         logger.info("pickup-point quote unavailable: %s", point)
@@ -5286,8 +5308,8 @@ async def _quote_options(origin: dict, dest: dict, boxes: list, currency: str,
     merged.sort(key=lambda x: (x.get("amount") is None, x.get("amount") or 0))
     if not merged:
         return [], currency, ("World Options returned no courier options for this address and parcel. "
-                              "Check the postcode and the parcel size, then try again.")
-    return merged, (res.get("currency") or currency), ""
+                              "Check the postcode and the parcel size, then try again."), None
+    return merged, (res.get("currency") or currency), "", None
 
 
 async def run_dispatch_quote(registry: dict, order_id, boxes: list,
@@ -5321,9 +5343,14 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
     # Declared value rides on every parcel (customs + insurance + liability basis).
     goods_value = _order_goods_value(o)
     boxes = _spread_value([dict(b) for b in boxes], goods_value)
-    options, quoted, err = await _quote_options(origin, dest, boxes, currency, insurance, cfg)
+    options, quoted, err, exc = await _quote_options(origin, dest, boxes, currency, insurance, cfg)
     if err:
-        return {"error": err}
+        out = {"error": err}
+        tech = _wo_tech(exc, order_id) if exc is not None else {}
+        if tech:
+            out["tech"] = tech
+            _record_wo_failure(tech)
+        return out
     show_shop = bool(cfg.get("show_parcelshop", False))
     return {
         "options": options,
@@ -5400,9 +5427,14 @@ async def run_custom_quote(registry: dict, dest: dict, boxes: list,
         except (TypeError, ValueError):
             declared = 0.0
     boxes = _spread_value([dict(b) for b in boxes], declared)
-    options, quoted, err = await _quote_options(origin, dest, boxes, currency, insurance, cfg)
+    options, quoted, err, exc = await _quote_options(origin, dest, boxes, currency, insurance, cfg)
     if err:
-        return {"error": err}
+        out = {"error": err}
+        tech = _wo_tech(exc) if exc is not None else {}
+        if tech:
+            out["tech"] = tech
+            _record_wo_failure(tech)
+        return out
     international = str(dest.get("country") or "").upper() not in ("GB", "")
     return {
         "options": options,
@@ -6102,15 +6134,8 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
         if getattr(e, "retried", False):
             msg += " The app already retried once for you; if this keeps happening it is a World Options outage."
         out = {"error": msg}
-        tech = {}
-        if getattr(e, "raw", ""):
-            tech["reply"] = str(e.raw)[:2000]
-        tech["sent"] = bool(getattr(e, "envelope", "")) or bool(getattr(e, "sent", False))
-        if getattr(e, "envelope", ""):
-            tech["request"] = str(e.envelope)[:20000]
+        tech = _wo_tech(e, order_id)
         if tech:
-            tech["when"] = datetime.now(timezone.utc).isoformat()
-            tech["order"] = str(order_id)
             out["tech"] = tech
             _record_wo_failure(tech)
         return out

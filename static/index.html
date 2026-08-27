@@ -7395,7 +7395,16 @@
                     quoteCache.set(String(o.id), { sig: boxSig(bx, lastInsurance), quote: quote, at: Date.now() });
                     chosen = null; renderOptions();
                 }
-                catch (e) { quoteWrap.innerHTML = ''; quoteWrap.append(errBubble(e.message || 'Could not get quotes')); }
+                catch (e) {
+                    quoteWrap.innerHTML = '';
+                    quoteWrap.append(errBubble(e.message || 'Could not get quotes'));
+                    /* Show what was actually sent, open, exactly as a failed
+                       booking does. A quote that will not price is the FIRST
+                       thing that blocks a dispatch, and it was the one failure
+                       in this flow that handed the operator nothing to look at. */
+                    const qt = techPanel(e.tech);
+                    if (qt) { qt.open = true; quoteWrap.append(qt); }
+                }
                 quoteBtn.disabled = false;
             };
 
