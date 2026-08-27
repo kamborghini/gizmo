@@ -11920,23 +11920,30 @@ def t_a_county_nobody_can_abbreviate_is_sent_as_nothing():
     thirteen. Empty is explicitly valid, and a GB or IE postcode identifies the
     destination on its own, so an unusable county is dropped rather than
     truncated into wrong data."""
-    for raw, want, why in [
-        ("England", "ENG", "a UK nation becomes its ISO code"),
-        ("Scotland", "SCT", "and so do the others"),
-        ("Dublin", "D", "an Irish county becomes the code Shopify itself uses"),
-        ("Co. Dublin", "D", "however it is written"),
-        ("County Cork", "CO", "prefix and all"),
-        ("Tyne and Wear", "", "a county with no code is dropped, never cut short"),
-        ("Greater London", "", "same"),
-        ("D", "D", "something already valid is left alone"),
-        ("CA", "CA", "including a US state"),
-        ("", "", "and nothing stays nothing"),
+    for raw, cc, want, why in [
+        # Ireland is the case that started this. Shopify gives an Irish county
+        # the ISO 3166-2 code, and UPS refuses it.
+        ("D", "IE", "", "the Irish county code Shopify supplies is not sent to the courier"),
+        ("Dublin", "IE", "", "nor the county spelled out"),
+        # Britain ships fine today, and sends nothing meaningful either way:
+        # "ENG" is not a county and UPS routes GB on the postcode.
+        ("England", "GB", "", "nor a UK nation"),
+        ("Tyne and Wear", "GB", "", "nor a county with no code"),
+        # Where the carrier genuinely requires one, it is sent, and a spelled
+        # out name is translated rather than dropped.
+        ("CA", "US", "CA", "a US state is sent, because UPS requires one"),
+        ("California", "US", "CA", "spelled out, it is translated"),
+        ("New York", "US", "NY", "two words and all"),
+        ("Ontario", "CA", "ON", "and Canadian provinces too"),
+        ("QLD", "AU", "QLD", "an Australian state passes through"),
+        ("", "US", "", "nothing stays nothing"),
     ]:
-        eq(worldoptions._state_code(raw), want, "%r: %s" % (raw, why))
-    for raw in ("England", "Tyne and Wear", "Co. Dublin", "South Yorkshire"):
-        out = worldoptions._state_code(raw)
+        eq(worldoptions._state_code(raw, cc), want, "%r/%s: %s" % (raw, cc, why))
+    for raw, cc in (("England", "GB"), ("Tyne and Wear", "GB"), ("Co. Dublin", "IE"),
+                    ("California", "US"), ("South Yorkshire", "GB")):
+        out = worldoptions._state_code(raw, cc)
         ok(len(out) <= 5 and (out.isalnum() or out == ""),
-           "%r produced %r, which the courier would refuse" % (raw, out))
+           "%r/%s produced %r, which the courier would refuse" % (raw, cc, out))
 
 
 @test
@@ -11945,11 +11952,14 @@ def t_every_address_block_normalises_its_state():
     collection, and the booking's recipient and sender. One of them being
     unguarded is all it takes to lose a booking."""
     src = open(os.path.join(HERE, "worldoptions.py"), encoding="utf-8").read()
-    emits = re.findall(r'_ts?\(\s*"m",\s*"(DeliveryState|CollectionCountryState|State_Code|State)"\s*,\s*([^)]*\)?[^)]*)\)', src)
+    emits = re.findall(r'_ts?\(\s*"m",\s*"(DeliveryState|CollectionCountryState|State_Code|State)"\s*,\s*(_state_code\([^)]*\)[^)]*)\)', src)
     eq(len(emits), 4, "all four wire sites are present: %r" % (emits,))
     for field, arg in emits:
         ok("_state_code(" in arg,
            "%s goes through the normaliser, not raw: %s" % (field, arg.strip()[:60]))
+        ok("country" in arg,
+           "%s passes the COUNTRY too, since whether to send one depends on it: %s"
+           % (field, arg.strip()[:70]))
 
 
 @test

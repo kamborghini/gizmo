@@ -542,10 +542,39 @@ _STATE_CODES = {
     "louth": "LH", "sligo": "SO", "westmeath": "WH", "offaly": "OY",
     "laois": "LS", "cavan": "CN", "roscommon": "RN", "monaghan": "MN",
     "carlow": "CW", "longford": "LD", "leitrim": "LM",
+    # US states and Canadian provinces, because those are countries where the
+    # carrier REQUIRES a subdivision: dropping an unmappable one there would
+    # break the address rather than tidy it. Shopify supplies the two-letter
+    # code for both, so this is the belt to that braces.
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "district of columbia": "DC", "florida": "FL", "georgia": "GA", "hawaii": "HI",
+    "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+    "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI",
+    "south carolina": "SC", "south dakota": "SD", "tennessee": "TN", "texas": "TX",
+    "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA",
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+    "alberta": "AB", "british columbia": "BC", "manitoba": "MB",
+    "new brunswick": "NB", "newfoundland and labrador": "NL", "nova scotia": "NS",
+    "ontario": "ON", "prince edward island": "PE", "quebec": "QC",
+    "saskatchewan": "SK", "northwest territories": "NT", "nunavut": "NU",
+    "yukon": "YT",
 }
 
 
-def _state_code(value) -> str:
+# Countries whose carriers genuinely require a subdivision, and validate it
+# against their own list. Everywhere else the postcode routes the parcel and a
+# subdivision is optional - which matters, because a code the carrier does not
+# recognise is REFUSED, while sending none is explicitly fine.
+_STATE_REQUIRED = {"US", "CA", "MX", "AU", "BR", "IN", "CN", "JP", "IT", "ES", "AR"}
+
+
+def _state_code(value, country="") -> str:
     """A state/province the carrier will actually accept, or nothing.
 
     Carriers cap this field at 5 alphanumeric characters, and reject the whole
@@ -561,14 +590,31 @@ def _state_code(value) -> str:
     raw = ("" if value is None else str(value)).strip()
     if not raw:
         return ""
+    cc = str(country or "").strip().upper()
+    if cc and cc not in _STATE_REQUIRED:
+        # Measured, not assumed. Every UK order in this store ships on UPS with
+        # province "ENG" and goes through; the Irish ones are refused with
+        # "Invalid sold to state province code", and the ONE Irish order that
+        # shipped went by DHL, which does not run this check. Shopify gives an
+        # Irish county the ISO 3166-2 code ("Dublin" -> "D") and UPS does not
+        # accept it. The message blames the length, but a one-character code is
+        # inside 0 to 5: the operative word is Invalid, and the length note is
+        # boilerplate UPS appends either way.
+        return ""
     if len(raw) <= 5 and raw.isalnum():
         return raw.upper() if len(raw) <= 3 else raw
     key = re.sub(r"[^a-z ]", "", raw.lower()).replace("  ", " ").strip()
     hit = _STATE_CODES.get(key) or _STATE_CODES.get(key.replace("county ", "").replace("co ", ""))
     if hit:
         return hit
-    logger.info("world options: dropping an unusable state/province %r "
-                "(over 5 characters and not a county we know a code for)", raw[:40])
+    if cc in _STATE_REQUIRED:
+        # Loud, because here it matters: this country's carriers demand a
+        # subdivision and we are about to send none.
+        logger.error("world options: %s needs a state/province and %r maps to no code "
+                     "we know - the address may be refused", cc, raw[:40])
+    else:
+        logger.info("world options: dropping an unusable state/province %r "
+                    "(over 5 characters and not a county we know a code for)", raw[:40])
     return ""
 
 
@@ -845,14 +891,14 @@ async def quote(origin: dict, destination: dict, boxes: list,
         + _t("m", "DeliveryCity", d.get("city"))
         + _t("m", "DeliveryCountryCode", (d.get("country") or "").upper())
         + _t("m", "DeliveryPostCode", d.get("postcode"))
-        + _t("m", "DeliveryState", _state_code(d.get("state")))
+        + _t("m", "DeliveryState", _state_code(d.get("state"), d.get("country")))
         + _b("m", "IsResidential", bool(residential))
         + "</wo:RecipientDetails>"
         # SenderDetails (wsCollectionDetail), alpha
         + "<wo:SenderDetails>"
         + _t("m", "CollectionCity", o.get("city"))
         + _t("m", "CollectionCountryCode", (o.get("country") or "").upper())
-        + _t("m", "CollectionCountryState", _state_code(o.get("state")))
+        + _t("m", "CollectionCountryState", _state_code(o.get("state"), o.get("country")))
         + _t("m", "CollectionPostCode", o.get("postcode"))
         + "</wo:SenderDetails>"
         # ShippingDetails (wsShippingDetails), XSD sequence order.
@@ -1057,7 +1103,7 @@ def _recipient_block(d: dict) -> str:
             + _ts("m", "PhoneDialCode", "")
             + _ts("m", "Postalcode", d.get("postcode"))
             + _b("m", "Residential", not (d.get("company") or "").strip())
-            + _ts("m", "State_Code", _state_code(d.get("state")))
+            + _ts("m", "State_Code", _state_code(d.get("state"), d.get("country")))
             + "</wo:RecipientsDetails>")
 
 
@@ -1078,7 +1124,7 @@ def _sender_block(o: dict) -> str:
             + _ts("m", "Phone", o.get("phone"))
             + _ts("m", "PhoneDialCode", "")
             + _ts("m", "PostalCode", o.get("postcode"))
-            + _ts("m", "State", _state_code(o.get("state")))
+            + _ts("m", "State", _state_code(o.get("state"), o.get("country")))
             + "</wo:SendersDetails>")
 
 
