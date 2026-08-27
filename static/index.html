@@ -2801,10 +2801,19 @@
             refreshingAll = true;
             const btn = $('refresh-all'); btn.disabled = true; btn.classList.add('spin');
             const steps = [['Overview', () => loadOverview(true)], ['SEO', () => loadSEO(true)], ['Keywords', () => loadKeywords(true)], ['Customers', () => loadCustomers(true)]];
-            for (const [name, fn] of steps) {
-                setRefreshLabel('Refreshing ' + name + '…');
-                try { await fn(); } catch (e) { /* each loader shows its own error in-tab */ }
-            }
+            /* Four independent audits, run together rather than one after the
+               other: the wait is now the longest of them instead of the sum.
+               The label counts finishes rather than naming one, because with
+               four in flight "Refreshing SEO" would be picking one at random.
+               Each loader still shows its own error in its own tab, and
+               allSettled means one failing does not cancel the other three. */
+            let done = 0;
+            setRefreshLabel('Refreshing reports (0 of ' + steps.length + ')…');
+            await Promise.allSettled(steps.map(([, fn]) =>
+                Promise.resolve().then(fn).finally(() => {
+                    done += 1;
+                    setRefreshLabel('Refreshing reports (' + done + ' of ' + steps.length + ')…');
+                })));
             btn.classList.remove('spin'); btn.disabled = false; refreshingAll = false;
             setRefreshLabel('Refresh all');
             addToast('Reports refreshed. Open any tab to see the latest.');
@@ -4581,10 +4590,25 @@
         let reconCache = null, reconFilter = { severity: '', status: '', q: '' }, reconOpen = null;
         async function showReconView() { renderRecon(); refreshRecon(); }
         async function refreshRecon() {
+            /* Two independent reads, fired together rather than one after the
+               other. The status half is the expensive one: it reads the whole
+               reconciliation store and asks Xero and Gmail whether they are
+               still connected. */
             try {
-                const st = await api('/api/recon/status', {});
-                const ex = await api('/api/recon/exceptions', reconFilter);
+                const [st, ex] = await Promise.all([
+                    api('/api/recon/status', {}),
+                    api('/api/recon/exceptions', reconFilter)]);
                 reconCache = { st, ex };
+            } catch (e) { reconCache = { error: e.message }; }
+            if (document.querySelector('#view-recon.active')) renderRecon();
+        }
+        async function refreshReconList() {
+            /* Changing a filter changes which discrepancies are listed. It
+               cannot change whether Xero is connected or when the last sweep
+               ran, so it does not ask. */
+            if (!reconCache || reconCache.error) return refreshRecon();
+            try {
+                reconCache = { st: reconCache.st, ex: await api('/api/recon/exceptions', reconFilter) };
             } catch (e) { reconCache = { error: e.message }; }
             if (document.querySelector('#view-recon.active')) renderRecon();
         }
@@ -4874,7 +4898,7 @@
                 const stat = el('div', 'stat' + (counts[k] && (k === 'critical' || k === 'high') ? ' stat-bad' : ''));
                 stat.style.cursor = 'pointer';
                 stat.append(el('div', 'stat-l', lab), el('div', 'stat-v', String(counts[k] || 0)));
-                stat.onclick = () => { reconFilter.severity = reconFilter.severity === k ? '' : k; refreshRecon(); };
+                stat.onclick = () => { reconFilter.severity = reconFilter.severity === k ? '' : k; refreshReconList(); };
                 if (reconFilter.severity === k) stat.classList.add('on');
                 mets.append(stat);
             });
@@ -4884,10 +4908,10 @@
             bar.append(segControl([{ value: '', label: 'Open' }, { value: 'investigating', label: 'Investigating' },
                 { value: 'explained', label: 'Explained' }, { value: 'confirmed_error', label: 'Errors' },
                 { value: 'ignored', label: 'Ignored' }], reconFilter.status,
-                v => { reconFilter.status = v; refreshRecon(); }));
+                v => { reconFilter.status = v; refreshReconList(); }));
             const search = el('input', 'mail-search'); search.placeholder = 'Search discrepancies';
             search.value = reconFilter.q;
-            search.onchange = () => { reconFilter.q = search.value; refreshRecon(); };
+            search.onchange = () => { reconFilter.q = search.value; refreshReconList(); };
             bar.append(search);
             const exp = el('button', 'btn'); exp.append(ico(I.download), document.createTextNode('Export CSV'));
             exp.onclick = reconCSV; bar.append(exp);
@@ -5542,8 +5566,14 @@
                 if (!boxes || cachedQuote(o.id, boxes, 0)) continue;
                 try {
                     const q = await api('/api/dispatch/quote', { order_id: o.id, boxes: boxes, insurance: 0 });
-                    if (run !== prefetchRun) return;
+                    /* Keep it FIRST, abandon second. A quote that arrives after
+                       the queue repainted is still the right price for that
+                       order and that box signature, and cachedQuote revalidates
+                       both plus the eight minute age before anything uses it.
+                       Throwing it away meant a courier round trip of several
+                       seconds, already paid for, was binned every repaint. */
                     quoteCache.set(String(o.id), { sig: boxSig(boxes, 0), quote: q, at: Date.now() });
+                    if (run !== prefetchRun) return;
                 } catch (e) {
                     // A pre-fetch is a convenience: a failure here must never reach
                     // the operator, who has not asked for anything yet.
@@ -12611,6 +12641,10 @@
            30-day trash, never instant.
            ================================================================== */
         let filesCache = null, filesFolder = '', filesQ = '', filesSeg = 'files';
+        /* How many search hits are painted at a time. The remainder is never
+           hidden: the count of what is left sits on the Show more button. */
+        const FILES_HIT_STEP = 60;
+        let filesHitCap = FILES_HIT_STEP;
         let filesSort = 'name', filesSel = new Set();
         let filesUploads = [], filesQueue = [], filesActive = 0, filesNewFolder = false;
 
@@ -12891,7 +12925,16 @@
             bar.append(nf);
             const q = document.createElement('input');
             q.type = 'search'; q.placeholder = 'Search files…'; q.className = 'lbl-size'; q.value = filesQ;
-            q.oninput = () => { filesQ = q.value.trim(); paintCrumbs(); paintList(); };
+            filesHitCap = FILES_HIT_STEP;
+            /* Debounced, like the labels Find box. Measured against 8,000 files:
+               a broad term that matches everything cost 1,912 ms of blocked JS
+               per keystroke, and with no debounce a five letter word ran that
+               five times, the early letters being the broadest and slowest. */
+            q.oninput = () => {
+                filesQ = q.value.trim();
+                clearTimeout(q._t);
+                q._t = setTimeout(() => { filesHitCap = FILES_HIT_STEP; paintCrumbs(); paintList(); }, 180);
+            };
             bar.append(q);
             const srt = el('select', 'lbl-size');
             srt.setAttribute('aria-label', 'Sort files');
@@ -13098,7 +13141,17 @@
                     const hits = sortFiles(Object.entries(fmap)
                         .filter(([, f]) => f.name.toLowerCase().includes(ql)));
                     if (!hits.length) list.append(el('div', 'files-empty', 'No file matches that search.'));
-                    hits.forEach(([fid, f]) => list.append(fileRow(fid, f, true)));
+                    /* Painted in pages, the way the CRM contacts list already
+                       is. The count of what is not on screen is ON screen, so
+                       nobody is ever shown fewer matches than there are. */
+                    hits.slice(0, filesHitCap).forEach(([fid, f]) => list.append(fileRow(fid, f, true)));
+                    if (hits.length > filesHitCap) {
+                        const more = el('button', 'btn',
+                            'Show more (' + (hits.length - filesHitCap) + ' remaining)');
+                        more.style.cssText = 'margin:8px auto;display:block';
+                        more.onclick = () => { filesHitCap += FILES_HIT_STEP; paintList(); };
+                        list.append(more);
+                    }
                     listHost.append(list);
                     return;
                 }

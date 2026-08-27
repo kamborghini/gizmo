@@ -1528,6 +1528,48 @@ def t_a_refused_revocation_asks_before_forgetting():
 
 
 @test
+def t_the_files_search_is_debounced_and_paged():
+    """Measured against 8,000 files: a broad term matching everything cost
+    1,912 ms of blocked JS per keystroke, and with no debounce a five letter
+    word ran it five times, the early letters being the broadest and slowest."""
+    fn = SCRIPT.split("function renderFilesBrowser")[1].split("\n        function ")[0]
+    i = fn.index("q.oninput")
+    seg = fn[i:i + 400]
+    ok("clearTimeout(q._t)" in seg and "setTimeout(" in seg, "typing is debounced")
+    ok("FILES_HIT_STEP" in SCRIPT and "filesHitCap" in fn, "and the hits are paged")
+    ok("remaining)" in fn,
+       "with the number NOT shown on screen, so nothing is quietly dropped")
+
+
+@test
+def t_a_paid_for_courier_quote_is_kept():
+    """A quote is several seconds of SOAP round trip. It was cached only if the
+    queue had not repainted while it was in flight, so a repaint binned an
+    answer that was already bought and is still correct."""
+    fn = SCRIPT.split("async function prefetchQuotes")[1].split("\n        function ")[0] \
+        if "async function prefetchQuotes" in SCRIPT else SCRIPT
+    i = fn.index("quoteCache.set(String(o.id)")
+    before = fn[:i]
+    ok(before.rindex("const q = await api('/api/dispatch/quote'") < i,
+       "the quote is cached after it arrives")
+    after = fn[i:i + 200]
+    ok("if (run !== prefetchRun) return;" in after,
+       "and the abandon check comes after the cache write, not before it")
+
+
+@test
+def t_independent_reads_are_not_run_one_after_the_other():
+    ok("Promise.all([\n                    api('/api/recon/status', {})" in SCRIPT
+       or "Promise.all([" in SCRIPT.split("async function refreshRecon")[1][:400],
+       "Reconciliation asks for its status and its list together")
+    ok("refreshReconList" in SCRIPT, "and a filter change asks only for the list")
+    ra = SCRIPT.split("async function refreshAll")[1][:1200]
+    ok("Promise.allSettled" in ra, "Refresh all runs its four audits together")
+    ok("of ' + steps.length" in ra,
+       "and counts finishes rather than naming one of four in flight")
+
+
+@test
 def t_the_tab_picker_sends_what_it_shows():
     """It used to collapse a fully ticked panel to null. Once null resolved to
     the DEFAULT tabs on the server, that silently withheld the opt-in tab the

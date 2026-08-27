@@ -2936,8 +2936,17 @@ def _month_axis(months: int) -> list:
 # payload, because production state, dispatch state and the gobo size sheet all
 # change it without touching Shopify; those are cheap local reads and stay live.
 # ---------------------------------------------------------------------------
-ORDER_CACHE_SECS = int(os.environ.get("ORDER_CACHE_SECS", "45"))   # how long a swept order list may be reused
-ORDER_CACHE_MAX  = 6                                              # distinct (days, fields) sweeps kept in memory
+# How long a swept order list may be reused. Every queue segment needs the SAME
+# sweep, so at 45 seconds a merchant who read one screen before clicking the
+# next paid the whole 8-page fan-out again. Correctness does not rest on the
+# TTL: _bust_orders() clears these the moment an order webhook lands or the app
+# writes a tag, so a real change is never waited out.
+ORDER_CACHE_SECS = int(os.environ.get("ORDER_CACHE_SECS", "180"))
+# Distinct (days, fields) sweeps kept. There are about seven in the codebase,
+# so with a longer TTL this became the binding constraint rather than the
+# clock: at 6, an Overview or Margins run could evict the production queue's
+# entry and make the next click cold again.
+ORDER_CACHE_MAX  = 8
 _orders_cache: dict = {}      # (days, fields) -> {"at", "epoch", "orders", "meta"}
 _orders_inflight: dict = {}   # (days, fields) -> the Task sweeping, so concurrent misses share one fetch
 _orders_epoch = 0             # bumped by every write that changes what a sweep returns
@@ -4213,17 +4222,38 @@ def _order_weight_kg(o: dict) -> float:
     return round(grams / 1000.0, 3) if grams else 0.0
 
 
+# The shop's own record: its name, address, phone and email. It changes when
+# the merchant edits it in Shopify, which is to say almost never, and it was
+# re-fetched on every dispatch quote and every booking - a Shopify round trip
+# added to a path where somebody is already waiting on a courier.
+#
+# Cached ONLY on success. A failed read must never become an answer, so a
+# Shopify hiccup falls through to the empty dict exactly as it did before.
+_shop_cache: dict = {}
+SHOP_CACHE_SECS = int(os.environ.get("SHOP_CACHE_SECS", "900"))
+
+
+async def _shop_record(registry: dict) -> dict:
+    hit = _shop_cache.get("v")
+    if hit and time.monotonic() - _shop_cache.get("at", 0) < SHOP_CACHE_SECS:
+        return hit
+    try:
+        shop = await _tool_json(registry, "shopify_get_shop", {})
+    except Exception:
+        shop = {}
+    shop = shop if isinstance(shop, dict) and _ok(shop) else {}
+    if shop:
+        _shop_cache.update({"v": shop, "at": time.monotonic()})
+    return shop
+
+
 async def _origin_address(registry: dict) -> dict:
     """Our shop's dispatch origin: the saved Settings address, else the Shopify
     shop address as a sensible default."""
     o = dict(_load_shipping().get("origin") or {})
     # Always merge per-field with the Shopify shop record: a saved origin that
     # lacks phone/email must not lose the shop's (bookings REQUIRE both).
-    try:
-        shop = await _tool_json(registry, "shopify_get_shop", {})
-    except Exception:
-        shop = {}
-    shop = shop if isinstance(shop, dict) else {}
+    shop = await _shop_record(registry)
 
     return {
         "name":      o.get("name") or shop.get("name") or "",
@@ -4759,11 +4789,23 @@ async def _variant_costs(registry: dict, variant_ids: list) -> dict:
             stale.append(vid)
 
     if stale:
+        # Two different lifetimes were being treated as one. The COST goes stale
+        # after COST_CACHE_DAYS; the variant's inventory_item_id does not - it
+        # is a permanent property of the variant, and the cache row already
+        # holds it. Re-asking Shopify for it turned every refresh into
+        # N + ceil(N/100) calls instead of ceil(N/100).
+        known, unknown = [], []
+        for vid in stale:
+            inv = ((cache.get(str(vid)) or {}).get("inventory_item_id"))
+            (known if inv else unknown).append((vid, inv))
+
         async def _inv_id(vid):
             v = await _tool_json(registry, "shopify_get_variant", {"variant_id": vid})
             return vid, (v or {}).get("inventory_item_id")
-        pairs = await asyncio.gather(*[_inv_id(v) for v in stale], return_exceptions=True)
-        pairs = [p for p in pairs if isinstance(p, tuple) and p[1]]
+        looked_up = await asyncio.gather(*[_inv_id(v) for v, _ in unknown],
+                                         return_exceptions=True)
+        pairs = known + [p for p in looked_up if isinstance(p, tuple) and p[1]]
+        pairs = [p for p in pairs if p[1]]
         by_inv = {}
         ids = [str(int(p[1])) for p in pairs]
         for i in range(0, len(ids), 100):          # their cap is 100 per call
@@ -5254,7 +5296,9 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
     if not worldoptions or not worldoptions.configured():
         return {"error": "World Options is not connected. Add your credentials in Settings."}
 
-    o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+    o, origin = await asyncio.gather(
+        _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)}),
+        _origin_address(registry))
     if not _ok(o) or not o.get("id"):
         return {"error": "Order not found."}
     if _order_status(o) == "cancelled":
@@ -5267,7 +5311,6 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
     if why:
         return {"error": f"This order's shipping address can't be quoted. {why}. "
                          "Fix the address in Shopify, then try again."}
-    origin = await _origin_address(registry)
     why = _addr_ready(origin)
     if why:
         return {"error": f"Your dispatch (origin) address is incomplete. {why}. "
