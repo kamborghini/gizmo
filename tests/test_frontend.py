@@ -928,10 +928,13 @@ def t_no_dark_theme_colour_literals_survive():
     KPI card ended up with a PALER border than an ordinary card."""
     stray = [ln for ln in HTML.splitlines()
              if re.search(r"rgba\(\s*\d+", ln)
-             and not re.search(r"rgba\(\s*(26,\s*26,\s*26|0,\s*0,\s*0|255,\s*255,\s*255|91,\s*75,\s*219)", ln)]
+             and not re.search(r"rgba\(\s*(26,\s*26,\s*26|0,\s*0,\s*0|255,\s*255,\s*255)", ln)]
     ok(not stray, "off-palette rgba survives: " + "; ".join(x.strip()[:70] for x in stray[:3]))
     ok(".stat.warn { border-color" not in HTML,
        "the warn card takes the ordinary card border rather than a paler one")
+    # The old brand purple is gone from the palette; this keeps it gone.
+    ok("91, 75, 219" not in HTML and "#5b4bdb" not in HTML.lower(),
+       "no purple survives the move to the neutral palette")
 
 
 @test
@@ -1021,13 +1024,14 @@ def t_every_status_chip_has_the_same_geometry():
     """Chips split 6px against 12px roughly along tab lines, so the same kind of
     label was a rounded rectangle in one tab and a capsule in the next. The
     radius scale's own comment names the three steps card, control, chip, which
-    settles which of the two is the chip: --r-xs."""
+    settles which of the two is the chip. Under the neutral system that shape is
+    a capsule, --r-pill, and it has to be the SAME capsule everywhere."""
     chips = ["pill", "mem-tag", "mail-order-stage", "lbl-chip", "fchip", "mail-owner",
              "mcount", "mrule-tag", "g-badge", "mail-claim", "mail-crmchip"]
     for c in chips:
         rule = re.search(r"\." + c + r" \{[^}]*\}", HTML, re.S)
         ok(rule, "the .%s rule is still there" % c)
-        ok("border-radius: var(--r-xs)" in rule.group(0),
+        ok("border-radius: var(--r-pill)" in rule.group(0),
            ".%s takes the chip radius from the token, not a literal" % c)
     ok("border-radius: 12px" not in re.search(r"\.fchip \{[^}]*\}", HTML).group(0),
        "and no chip keeps the control radius")
@@ -1135,19 +1139,23 @@ def t_reordering_kpis_works_without_a_drag():
 
 
 @test
-def t_one_tracking_value_for_the_micro_label():
-    """The 11px uppercase micro-label is the app's most repeated typographic
-    unit and it was set at .04, .05, .06 and .08em in different places."""
-    ok("--track-caps" in HTML, "there is one token for it")
+def t_nothing_shouts_in_letterspaced_capitals():
+    """This used to guard the 11px uppercase micro-label, which was set at .04,
+    .05, .06 and .08em in different places. Under the neutral system that unit
+    does not exist at all: the reference has not one uppercase label anywhere,
+    and a quiet label is quiet because it is small and grey. Guarding its
+    absence is the stronger rule, because micro-caps creep back one rule at a
+    time."""
     style = HTML[HTML.index("<style>"):HTML.index("</style>")]
-    stray = []
-    for m in re.finditer(r"\n\s*([^\n{}]+)\{([^}]*)\}", style):
-        body = m.group(2)
-        if "font-size: 11px" in body and "text-transform: uppercase" in body:
-            ls = re.search(r"letter-spacing:\s*([^;]+)", body)
-            if ls and "var(" not in ls.group(1):
-                stray.append(m.group(1).strip()[:46] + " -> " + ls.group(1).strip())
-    ok(not stray, "every 11px uppercase label reads the token: " + "; ".join(stray[:3]))
+    caps = [m.group(1).strip()[:52] for m in
+            re.finditer(r"\n\s*([^\n{}]+)\{([^}]*text-transform:\s*uppercase[^}]*)\}", style)]
+    ok(not caps, "no rule sets uppercase: " + "; ".join(caps[:4]))
+    ok("--track-caps" not in HTML,
+       "and the tracking token that only ever served them is retired, not left as a trap")
+    # Body copy is untracked; only headings tighten.
+    body = re.search(r"\n\s*body \{([^}]*)\}", style).group(1)
+    ok("letter-spacing: normal" in body,
+       "body text is not tracked: " + body.strip()[:80])
 
 
 @test
