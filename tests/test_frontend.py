@@ -1139,6 +1139,24 @@ def t_reordering_kpis_works_without_a_drag():
 
 
 @test
+def t_a_link_is_still_identifiable_without_colour():
+    """The palette is monochrome now, so a link has no hue left to mark it
+    with: near-black link text on white is exactly body text. The underline
+    stops being decoration and becomes the entire affordance, which is why the
+    reference underlines its links too."""
+    style = HTML[HTML.index("<style>"):HTML.index("</style>")]
+    for sel in [".lbl-num-link, .modal-order-link", ".mail-order-name", ".miss-open",
+                ".seclink", ".sk-more", ".linkish"]:
+        i = style.find("\n        " + sel + " {")
+        ok(i >= 0, "the %s rule is still there" % sel)
+        body = style[i:style.index("}", i)]
+        ok("text-decoration: underline" in body,
+           "%s is underlined, since colour can no longer mark it" % sel)
+        ok("text-decoration: none" not in body,
+           "%s does not then turn the underline back off" % sel)
+
+
+@test
 def t_nothing_shouts_in_letterspaced_capitals():
     """This used to guard the 11px uppercase micro-label, which was set at .04,
     .05, .06 and .08em in different places. Under the neutral system that unit
