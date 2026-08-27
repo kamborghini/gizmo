@@ -1151,6 +1151,20 @@ def t_reordering_kpis_works_without_a_drag():
 
 
 @test
+def t_paying_a_customers_duty_warns_that_it_makes_us_liable():
+    """A standing decision of this business, and the pressure to break it comes
+    at exactly the wrong moment: a courier refuses an international booking, and
+    paying the duty ourselves makes the error go away. It also makes the
+    business liable for the customer's import charges."""
+    ok("dpWarn" in SCRIPT, "the setting carries a warning")
+    i = SCRIPT.index("dpWarn")
+    seg = SCRIPT[i:i + 900]
+    ok("liable" in seg, "which names the actual consequence")
+    ok("Duties_To_Be_Paid_By_Receiver" in seg,
+       "and it appears only when the setting moves OFF the customer")
+
+
+@test
 def t_a_link_is_still_identifiable_without_colour():
     """The palette is monochrome now, so a link has no hue left to mark it
     with: near-black link text on white is exactly body text. The underline

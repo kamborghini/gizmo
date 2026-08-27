@@ -8480,6 +8480,20 @@
             const DP_LABELS = { 'Duties_To_Be_Paid_By_Receiver': 'The customer (receiver) pays duties', 'Duties_To_Be_Paid_By_Sender': 'We (the sender) pay duties', 'Duties_To_Be_Paid_By_Third_Party': 'A third party pays duties' };
             (cfg.duties_payors || Object.keys(DP_LABELS)).forEach(v => { const op4 = el('option', null, DP_LABELS[v] || v); op4.value = v; if (v === (cfg.duties_payor || 'Duties_To_Be_Paid_By_Receiver')) op4.selected = true; dpSel.append(op4); });
             dpF.append(dpSel); body.append(dpF);
+            /* A standing decision of this business, written here because the
+               pressure to change it comes at exactly the wrong moment: a
+               courier refuses an international booking, and paying the duty
+               ourselves makes the error go away. It also makes us liable for
+               the customer's import charges, which is why the answer is no. */
+            const dpWarn = el('div', 'mail-viewwarn');
+            dpWarn.style.cssText = 'margin-top:8px;margin-bottom:0;display:none';
+            dpWarn.textContent = 'Paying duties on the customer\u2019s behalf makes this business '
+                + 'liable for their import charges. This is deliberately set to the customer, and a '
+                + 'courier refusing a booking is not a reason to change it.';
+            body.append(dpWarn);
+            const dpShow = () => { dpWarn.style.display =
+                dpSel.value === 'Duties_To_Be_Paid_By_Receiver' ? 'none' : ''; };
+            dpSel.onchange = dpShow; dpShow();
 
             // Box presets
             body.append(el('div', 'section-title', 'Box presets'));
