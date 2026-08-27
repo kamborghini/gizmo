@@ -382,7 +382,7 @@ def _save_profile(data: dict) -> dict:
     os.makedirs(os.path.dirname(PROFILE_PATH) or ".", exist_ok=True)
     tmp = PROFILE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(clean, fh)
+        fh.write(json.dumps(clean))
     os.replace(tmp, PROFILE_PATH)
     return clean
 
@@ -437,7 +437,7 @@ def _write_memory(memories: list[dict]) -> list[dict]:
     os.makedirs(os.path.dirname(MEMORY_PATH) or ".", exist_ok=True)
     tmp = MEMORY_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"memories": memories}, fh)
+        fh.write(json.dumps({"memories": memories}))
     os.replace(tmp, MEMORY_PATH)
     return memories
 
@@ -572,7 +572,7 @@ def _write_skills(skills: list[dict]) -> list[dict]:
     os.makedirs(os.path.dirname(SKILLS_PATH) or ".", exist_ok=True)
     tmp = SKILLS_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"skills": skills}, fh)
+        fh.write(json.dumps({"skills": skills}))
     os.replace(tmp, SKILLS_PATH)
     return skills
 
@@ -722,7 +722,7 @@ def _save_analysis(kind: str, result: dict) -> dict:
         os.makedirs(os.path.dirname(ANALYSIS_CACHE_PATH) or ".", exist_ok=True)
         tmp = ANALYSIS_CACHE_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(cache, fh)
+            fh.write(json.dumps(cache))
         os.replace(tmp, ANALYSIS_CACHE_PATH)
     except Exception:
         logger.exception("analysis cache: failed to save %s", kind)
@@ -756,7 +756,7 @@ def _save_customer_segment(seg_key: str, result: dict) -> dict:
         os.makedirs(os.path.dirname(ANALYSIS_CACHE_PATH) or ".", exist_ok=True)
         tmp = ANALYSIS_CACHE_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(cache, fh)
+            fh.write(json.dumps(cache))
         os.replace(tmp, ANALYSIS_CACHE_PATH)
     except Exception:
         logger.exception("analysis cache: failed to save customer segment %s", seg_key)
@@ -930,7 +930,7 @@ def _save_shipping(cfg: dict) -> dict:
     with open(tmp, "w", encoding="utf-8") as fh:
         # allow_nan=False, like the CRM and mail stores: a NaN saves and reads
         # back fine but kills every later JSON response built from it.
-        json.dump(keep, fh, allow_nan=False)
+        fh.write(json.dumps(keep, allow_nan=False))
     os.replace(tmp, SHIPPING_PATH)
     return keep
 
@@ -966,7 +966,7 @@ def _save_wo_creds(meter=None, key=None, password=None) -> bool:
     os.makedirs(os.path.dirname(WO_SECRET_PATH) or ".", exist_ok=True)
     tmp = WO_SECRET_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(disk, fh)
+        fh.write(json.dumps(disk))
     os.replace(tmp, WO_SECRET_PATH)
     try:
         os.chmod(WO_SECRET_PATH, 0o600)
@@ -1098,7 +1098,7 @@ def _save_dispatch_labels(order_id, labels: list) -> None:
         path = _label_path(order_id)
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"labels": labels or []}, fh)
+            fh.write(json.dumps({"labels": labels or []}))
         os.replace(tmp, path)
         # With print images a label file is ~1MB, and nothing ever pruned this
         # directory. Oldest go first; a months-old label is in the courier's past
@@ -1162,7 +1162,7 @@ def _record_wo_failure(tech: dict) -> None:
             os.makedirs(os.path.dirname(WO_FAILURES_PATH) or ".", exist_ok=True)
             tmp = WO_FAILURES_PATH + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump({"failures": rows}, fh)
+                fh.write(json.dumps({"failures": rows}))
             os.replace(tmp, WO_FAILURES_PATH)
     except Exception:
         logger.exception("could not record the World Options failure")
@@ -1191,7 +1191,7 @@ def _record_error(where: str, exc: BaseException) -> None:
             os.makedirs(os.path.dirname(ERRORS_PATH) or ".", exist_ok=True)
             tmp = ERRORS_PATH + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump({"errors": rows}, fh)
+                fh.write(json.dumps({"errors": rows}))
             os.replace(tmp, ERRORS_PATH)
     except Exception:
         logger.exception("could not record an app error")
@@ -1303,7 +1303,7 @@ def _note_backup(kind: str) -> None:
             os.makedirs(os.path.dirname(BACKUP_STATE_PATH) or ".", exist_ok=True)
             tmp = BACKUP_STATE_PATH + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump({"backup": st}, fh)
+                fh.write(json.dumps({"backup": st}))
             os.replace(tmp, BACKUP_STATE_PATH)
     except Exception:
         logger.exception("could not record the backup time")
@@ -1370,7 +1370,7 @@ def _write_dispatch(orders: dict) -> dict:
     os.makedirs(os.path.dirname(DISPATCH_STATE_PATH) or ".", exist_ok=True)
     tmp = DISPATCH_STATE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"orders": orders}, fh)
+        fh.write(json.dumps({"orders": orders}))
     os.replace(tmp, DISPATCH_STATE_PATH)
     return orders
 
@@ -1436,7 +1436,7 @@ def _write_prod_state(orders: dict) -> dict:
     os.makedirs(os.path.dirname(PRODUCTION_STATE_PATH) or ".", exist_ok=True)
     tmp = PRODUCTION_STATE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"orders": orders}, fh)
+        fh.write(json.dumps({"orders": orders}))
     os.replace(tmp, PRODUCTION_STATE_PATH)
     return orders
 
@@ -1507,7 +1507,7 @@ def _write_impact(items: list[dict]) -> list[dict]:
     os.makedirs(os.path.dirname(IMPACT_PATH) or ".", exist_ok=True)
     tmp = IMPACT_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"items": items[:IMPACT_MAX]}, fh)
+        fh.write(json.dumps({"items": items[:IMPACT_MAX]}))
     os.replace(tmp, IMPACT_PATH)
     return items[:IMPACT_MAX]
 
@@ -1631,7 +1631,7 @@ def _save_knowledge(text: str, sources: list[str]) -> dict:
     os.makedirs(os.path.dirname(KNOWLEDGE_PATH) or ".", exist_ok=True)
     tmp = KNOWLEDGE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(data, fh)
+        fh.write(json.dumps(data))
     os.replace(tmp, KNOWLEDGE_PATH)
     return data
 
@@ -1818,7 +1818,7 @@ def _log_usage(kind: str, model: str, usage) -> None:
         os.makedirs(os.path.dirname(USAGE_PATH) or ".", exist_ok=True)
         tmp = USAGE_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"events": events}, fh)
+            fh.write(json.dumps({"events": events}))
         os.replace(tmp, USAGE_PATH)
         # Monthly rollup survives the event log trimming itself: the pricing
         # dataset must not evaporate at USAGE_MAX.
@@ -1839,7 +1839,7 @@ def _log_usage(kind: str, model: str, usage) -> None:
         k["cost"] = round(k["cost"] + rec["cost"], 6)
         tmp2 = rollup_path + ".tmp"
         with open(tmp2, "w", encoding="utf-8") as fh:
-            json.dump(roll, fh)
+            fh.write(json.dumps(roll))
         os.replace(tmp2, rollup_path)
     except Exception:
         logger.exception("usage log failed")
@@ -3428,7 +3428,8 @@ def _gobo_sizes() -> dict:
         sheet_at = datetime.fromtimestamp(os.path.getmtime(sizes_path), timezone.utc).isoformat()
     except OSError:
         sheet_at = None
-    _gobo_cache.update({"mtime": mtime, "by_mm": by_mm, "by_model": by_model,
+    _gobo_cache.update({"mtime": mtime, "lookup_memo": {},
+                        "by_mm": by_mm, "by_model": by_model,
                         "by_mm_loose": by_mm_loose, "by_model_loose": by_model_loose,
                         "by_mm_digit": by_mm_digit, "by_model_digit": by_model_digit,
                         "rows": rows, "domain_rules": domain_rules,
@@ -3527,6 +3528,17 @@ def _gobo_lookup(manufacturer: str, model: str, cache: Optional[dict] = None):
     if not raw:
         return None, "No model specified on this item"
     nmfr, lmfr = _norm_key(manufacturer), _loose_key(manufacturer)
+    # A MISS is the expensive case: it falls through every index and ends in a
+    # word-run scan of all 2,155 sheet rows, measured at 0.63 ms against 0.008
+    # ms for a hit. A small manufacturer sells the same fixtures over and over,
+    # so the same miss is paid again for every line item of every order in the
+    # queue: 67 ms to shape 900 orders with no misses, 1,799 ms at 30% misses.
+    # The memo lives on the sheet cache and is thrown away with it, so a
+    # re-uploaded sheet can never be answered from the old one.
+    memo = cache.setdefault("lookup_memo", {})
+    memo_key = (nmfr, raw)
+    if memo_key in memo:
+        return memo[memo_key]
     notes: set = set()
     resolved = _gobo_resolve_part(cache, nmfr, lmfr, raw, notes)
     if not resolved:
@@ -3539,17 +3551,21 @@ def _gobo_lookup(manufacturer: str, model: str, cache: Optional[dict] = None):
             for i, part in enumerate(parts):
                 got = _gobo_resolve_part(cache, nmfr, lmfr, head + " " + part, notes) if i and head else None
                 resolved.extend(got or _gobo_resolve_part(cache, nmfr, lmfr, part, notes) or [])
+    def _out(result):
+        memo[memo_key] = result
+        return result
+
     if not resolved:
         if "ambiguous" in notes:
-            return None, "Model matches more than one manufacturer in the size list"
-        return None, "Model not found in the size list"
+            return _out((None, "Model matches more than one manufacturer in the size list"))
+        return _out((None, "Model not found in the size list"))
     sizes = {e["production_size"] for e in resolved}
     if len(sizes) > 1:
-        return None, "More than one production size listed for this model"
+        return _out((None, "More than one production size listed for this model"))
     hit = resolved[0]
     if not hit["production_size"]:
-        return hit, (hit["review"] or "No production size listed for this model")
-    return hit, None
+        return _out((hit, (hit["review"] or "No production size listed for this model")))
+    return _out((hit, None))
 
 
 # The merchant's brand lockup, lifted from their own label tool ("Order Label
@@ -4291,7 +4307,14 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None) -> di
 async def run_production_labels(registry: dict, tag: Optional[str] = None,
                                 days: Optional[int] = None,
                                 order_id: Optional[int] = None,
-                                fresh: bool = False) -> dict:
+                                fresh: bool = False,
+                                state: Optional[dict] = None,
+                                dispatch: Optional[dict] = None) -> dict:
+    """`state` and `dispatch` let a CALLER that is already fetching many orders
+    read those two stores once instead of once per order. Printing fifty labels
+    re-parsed a 324 KB and a 572 KB store fifty times each: 266 ms of blocking
+    parse on the event loop for 5 ms of actual data. Left as None, every path
+    behaves exactly as before and reads them fresh."""
     # Deep-link path (the admin's More actions menu): fetch ONE order by id,
     # regardless of tag or age, so the merchant can print for exactly that order.
     if order_id:
@@ -4303,9 +4326,11 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
             registry, [li.get("product_id") for li in (o.get("line_items") or []) if _variant_is_real(li)])
         shaped = _shape_label_order(o, names, cache=_gobo_sizes())
         oid = str(shaped["id"])
+        st = state if state is not None else _load_prod_state()
+        dp = dispatch if dispatch is not None else _load_dispatch()
         return {"tag": PRODUCTION_TAG, "days": 0, "count": 1, "orders": [shaped],
-                "state": {oid: _load_prod_state().get(oid, {})},
-                "dispatch": {oid: _load_dispatch().get(oid, {})},
+                "state": {oid: st.get(oid, {})},
+                "dispatch": {oid: dp.get(oid, {})},
                 "single": True}
 
     tag = (tag or PRODUCTION_TAG).strip() or PRODUCTION_TAG
@@ -4763,7 +4788,7 @@ async def _variant_costs(registry: dict, variant_ids: list) -> dict:
                 os.makedirs(os.path.dirname(COST_CACHE_PATH) or ".", exist_ok=True)
                 tmp = COST_CACHE_PATH + ".tmp"
                 with open(tmp, "w", encoding="utf-8") as fh:
-                    json.dump({"variants": cache}, fh)
+                    fh.write(json.dumps({"variants": cache}))
                 os.replace(tmp, COST_CACHE_PATH)
         except Exception:
             logger.exception("could not save the cost cache")
@@ -4821,7 +4846,7 @@ def _remember_customs(lines: list) -> None:
             os.makedirs(os.path.dirname(CUSTOMS_MEMORY_PATH) or ".", exist_ok=True)
             tmp = CUSTOMS_MEMORY_PATH + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump({"items": mem}, fh)
+                fh.write(json.dumps({"items": mem}))
             os.replace(tmp, CUSTOMS_MEMORY_PATH)
     except Exception:
         logger.exception("could not remember the customs values")
@@ -6284,7 +6309,7 @@ def _mark_chased(key: str, by: str = "") -> dict:
     os.makedirs(os.path.dirname(CHASE_LOG_PATH) or ".", exist_ok=True)
     tmp = CHASE_LOG_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"accounts": accounts}, fh)
+        fh.write(json.dumps({"accounts": accounts}))
     os.replace(tmp, CHASE_LOG_PATH)
     return accounts[str(key)]
 
@@ -6566,7 +6591,7 @@ def _write_zeta_pending(p: dict) -> bool:
         os.makedirs(os.path.dirname(ZETA_SYNC_PATH) or ".", exist_ok=True)
         tmp = ZETA_SYNC_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"pending": p}, fh)
+            fh.write(json.dumps({"pending": p}))
         os.replace(tmp, ZETA_SYNC_PATH)
         return True
     except Exception:
@@ -6786,7 +6811,9 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
         if start <= made.astimezone(tz) < end:
             made_ids.append(int(oid))
     made_ids = made_ids[:150]
-    fetched = await asyncio.gather(*[run_production_labels(registry, order_id=i)
+    st_once, dp_once = _load_prod_state(), _load_dispatch()
+    fetched = await asyncio.gather(*[run_production_labels(registry, order_id=i,
+                                                           state=st_once, dispatch=dp_once)
                                      for i in made_ids], return_exceptions=True)
     rows: dict = {}
     unresolved: dict = {}
@@ -7582,7 +7609,7 @@ def _write_private_json(path: str, key: str, d: dict) -> None:
     tmp = path + ".tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump({key: d}, fh, allow_nan=False)
+        fh.write(json.dumps({key: d}, allow_nan=False))
     os.replace(tmp, path)
     try:
         os.chmod(path, 0o600)      # a pre-existing 0644 file keeps its mode
@@ -7814,7 +7841,7 @@ def _save_schedule(cfg: dict, _internal: bool = False) -> dict:
     os.makedirs(os.path.dirname(SCHEDULE_PATH) or ".", exist_ok=True)
     tmp = SCHEDULE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(cur, fh)
+        fh.write(json.dumps(cur))
     os.replace(tmp, SCHEDULE_PATH)
     return cur
 
@@ -7829,7 +7856,7 @@ def _write_alerts(alerts: list) -> list:
     os.makedirs(os.path.dirname(ALERTS_PATH) or ".", exist_ok=True)
     tmp = ALERTS_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"alerts": alerts[:ALERTS_MAX]}, fh)
+        fh.write(json.dumps({"alerts": alerts[:ALERTS_MAX]}))
     os.replace(tmp, ALERTS_PATH)
     return alerts[:ALERTS_MAX]
 
@@ -7878,7 +7905,7 @@ def _save_watch(state: dict) -> None:
         os.makedirs(os.path.dirname(WATCH_PATH) or ".", exist_ok=True)
         tmp = WATCH_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(state, fh)
+            fh.write(json.dumps(state))
         os.replace(tmp, WATCH_PATH)
     except Exception:
         logger.exception("watch state write failed")
@@ -8291,7 +8318,7 @@ def _write_crm(d: dict) -> None:
         # allow_nan=False: Python would happily WRITE NaN, which is not JSON,
         # so the next read would poison the store and brick the CRM. Refusing
         # here fails one request and preserves everything.
-        json.dump({"crm": d}, fh, allow_nan=False)
+        fh.write(json.dumps({"crm": d}, allow_nan=False))
     os.replace(tmp, CRM_PATH)
 
 
@@ -8675,7 +8702,7 @@ def _write_files(d: dict) -> None:
         os.makedirs(os.path.dirname(FILES_PATH) or ".", exist_ok=True)
         tmp = FILES_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"files_store": d}, fh)
+            fh.write(json.dumps({"files_store": d}))
         os.replace(tmp, FILES_PATH)
         _files_mem = d
     except Exception:
@@ -9109,7 +9136,7 @@ def _write_mail(d: dict) -> None:
         os.makedirs(os.path.dirname(MAILBOX_PATH) or ".", exist_ok=True)
         tmp = MAILBOX_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"mailbox": d}, fh, allow_nan=False)
+            fh.write(json.dumps({"mailbox": d}, allow_nan=False))
         os.replace(tmp, MAILBOX_PATH)
     except Exception:
         _mail_mem = None      # force a re-read; never serve an unsaved board
@@ -9745,13 +9772,19 @@ async def _mail_label_reconcile(store: dict, limit: int = 12, budget: float = 6.
         logger.info("mail: label reconcile hit its time budget; the rest waits for the next sync")
 
 
-async def _mail_sync_labels(t: dict, owner_name: str = "") -> None:
+async def _mail_sync_labels(t: dict, owner_name: str = "") -> bool:
     """Carry ownership back into Gmail as a label, best-effort and BOUNDED:
     a Gmail hiccup must never hold a state change hostage, so the whole
     label trip gets eight seconds and then the change proceeds without it.
-    The record notes any failure so the card can show it."""
+    The record notes any failure so the card can show it.
+
+    Returns whether it CHANGED anything worth writing. Every caller writes the
+    store before this (durable first, Gmail second) and used to write it again
+    after, unconditionally - a second full serialisation of the whole mailbox
+    for a call that most often had nothing to record. Measured at 3,000
+    threads: a claim cost 225 ms, 223 ms of it in those two writes."""
     if not google_mail.connected():
-        return
+        return False
     store = _load_mail()
     want = ""
     if t.get("state") == "done":
@@ -9760,7 +9793,7 @@ async def _mail_sync_labels(t: dict, owner_name: str = "") -> None:
         want = f"Copilot/{owner_name}"
     have = t.get("gmail_label") or ""
     if want == have:
-        return
+        return False
     labels = store.setdefault("labels", {})
 
     async def run():
@@ -9783,6 +9816,9 @@ async def _mail_sync_labels(t: dict, owner_name: str = "") -> None:
         # names involved so the next attempt re-lists and heals itself.
         labels.pop(want, None)
         labels.pop(have, None)
+    # Either branch wrote to the thread, and the failure branch also evicted
+    # cached label ids: both must reach disk.
+    return True
 
 
 # What the board is FOR: live work, plus recently closed conversations for
@@ -10187,7 +10223,7 @@ def _write_feedback(d: dict) -> None:
     os.makedirs(os.path.dirname(FEEDBACK_PATH) or ".", exist_ok=True)
     tmp = FEEDBACK_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"feedback": d}, fh, allow_nan=False)
+        fh.write(json.dumps({"feedback": d}, allow_nan=False))
     os.replace(tmp, FEEDBACK_PATH)
 
 
@@ -10260,7 +10296,7 @@ def _write_users(d: dict) -> None:
         os.makedirs(os.path.dirname(USERS_PATH) or ".", exist_ok=True)
         tmp = USERS_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"users_store": d}, fh)
+            fh.write(json.dumps({"users_store": d}))
         os.replace(tmp, USERS_PATH)
     except Exception:
         _users_mem = None
@@ -10284,7 +10320,7 @@ def _write_sessions(d: dict) -> None:
     os.makedirs(os.path.dirname(SESSIONS_PATH) or ".", exist_ok=True)
     tmp = SESSIONS_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"sessions": d}, fh)
+        fh.write(json.dumps({"sessions": d}))
     os.replace(tmp, SESSIONS_PATH)
 
 
@@ -10645,7 +10681,7 @@ def _write_work(d: dict) -> None:
         os.makedirs(os.path.dirname(WORK_PATH) or ".", exist_ok=True)
         tmp = WORK_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"work_store": d}, fh)
+            fh.write(json.dumps({"work_store": d}))
         os.replace(tmp, WORK_PATH)
     except Exception:
         _work_mem = None
@@ -10728,7 +10764,7 @@ def _events_flush() -> None:
             os.makedirs(os.path.dirname(ACTIVITY_PATH) or ".", exist_ok=True)
             tmp = ACTIVITY_PATH + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump({"events": rows}, fh)
+                fh.write(json.dumps({"events": rows}))
             os.replace(tmp, ACTIVITY_PATH)
         _events_dirty = False
     except Exception:
@@ -12044,8 +12080,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # Durable FIRST, Gmail second: the ownership change must survive a
         # restart even if the label trip hangs or fails.
         _write_mail(_load_mail())
-        await _mail_sync_labels(t, _team_name(who))
-        _write_mail(_load_mail())
+        if await _mail_sync_labels(t, _team_name(who)):
+            _write_mail(_load_mail())
         _track(who, "mail", "claimed an email", (t.get("subject") or "")[:60])
         return _json({"ok": True})
 
@@ -12089,8 +12125,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         else:
             _mail_log(t, who, "released", ("note: " + note[:80]) if note else "")
         _write_mail(_load_mail())
-        await _mail_sync_labels(t, _team_name(target) if target else "")
-        _write_mail(_load_mail())
+        if await _mail_sync_labels(t, _team_name(target) if target else ""):
+            _write_mail(_load_mail())
         _track(who, "mail",
                ("assigned an email to " + (_team_name(target) or "someone")) if target
                else "released an email",
@@ -12123,8 +12159,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _mail_log(t, who, {"assigned": "moved it back to assigned", "progress": "started work",
                            "waiting": "is waiting on the customer", "done": "marked it done"}[state])
         _write_mail(_load_mail())
-        await _mail_sync_labels(t, _team_name(t.get("owner") or ""))
-        _write_mail(_load_mail())
+        if await _mail_sync_labels(t, _team_name(t.get("owner") or "")):
+            _write_mail(_load_mail())
         _track(who, "mail", "email " + ("done" if state == "done" else "moved to " + state),
                (t.get("subject") or "")[:60])
         return _json({"ok": True})
@@ -16088,7 +16124,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 os.makedirs(os.path.dirname(USAGE_SHEETS_PATH) or ".", exist_ok=True)
                 tmp = USAGE_SHEETS_PATH + ".tmp"
                 with open(tmp, "w", encoding="utf-8") as fh:
-                    json.dump({"sheets": sheets}, fh)
+                    fh.write(json.dumps({"sheets": sheets}))
                 os.replace(tmp, USAGE_SHEETS_PATH)
         except Exception:
             logger.exception("usage sheet record failed (the stock app HAS the sheet)")
@@ -17074,7 +17110,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                  "2x4": (50.8, 101.6), "a4": (210, 297)}
         w, h = sizes.get(str(request.query_params.get("size") or "4x6"), sizes["4x6"])
 
-        results = await asyncio.gather(*[run_production_labels(registry, order_id=i)
+        st_once, dp_once = _load_prod_state(), _load_dispatch()
+        results = await asyncio.gather(*[run_production_labels(registry, order_id=i,
+                                                               state=st_once, dispatch=dp_once)
                                          for i in ids], return_exceptions=True)
         orders, got_ids = [], set()
         for r in results:

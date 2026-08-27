@@ -124,7 +124,7 @@ def _write_token(d: dict) -> None:
     # world-readable file holding exactly that.
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump(d, fh)
+        fh.write(json.dumps(d))
     os.replace(tmp, TOKEN_PATH)
     try:
         os.chmod(TOKEN_PATH, 0o600)

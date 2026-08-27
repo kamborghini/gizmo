@@ -73,7 +73,7 @@ def save_refresh_token(token: str) -> None:
     os.makedirs(os.path.dirname(OAUTH_TOKEN_PATH) or ".", exist_ok=True)
     tmp = OAUTH_TOKEN_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"refresh_token": token, "connected_at": datetime.now(timezone.utc).isoformat()}, fh)
+        fh.write(json.dumps({"refresh_token": token, "connected_at": datetime.now(timezone.utc).isoformat()}))
     os.replace(tmp, OAUTH_TOKEN_PATH)
     _access["token"], _access["exp"] = "", 0.0  # invalidate cache
 

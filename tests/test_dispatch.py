@@ -193,7 +193,9 @@ async def fake_soap_call(service, action, inner, retryable=True):
     return ET.fromstring("<Envelope><Body/></Envelope>")
 worldoptions._soap_call = fake_soap_call
 
-client = TestClient(server.mcp.streamable_http_app())
+# The app AS SERVED, middleware and all - not a bare inner app that would let
+# the suite pass over a stack the merchant never runs.
+client = TestClient(server.build_app())
 APP_AUTH = {"session": "", "master": ""}
 MASTER_PW = "test-password-123"
 def ensure_auth():
@@ -9820,14 +9822,16 @@ def t_a_post_is_not_replayed_after_an_ambiguous_failure():
                 return _Resp()
             raise _hx.TimeoutException("lost")
 
-    saved_client, saved_hdr = _hx.AsyncClient, server._headers
+    saved_client, saved_hdr = server._http, server._headers
     saved_store = server.SHOPIFY_STORE
     server.SHOPIFY_STORE = server.SHOPIFY_STORE or "test-store"
 
     async def _hdr():
         return {}
 
-    _hx.AsyncClient, server._headers = (lambda *a, **k: _Client()), _hdr
+    # Patch the pooled-client seam, not httpx itself: the client is built once
+    # and held, so replacing the class after that changes nothing.
+    server._http, server._headers = (lambda: _Client()), _hdr
     try:
         try:
             run_async(server._request("POST", "fulfillments.json", body={"x": 1}))
@@ -9841,7 +9845,7 @@ def t_a_post_is_not_replayed_after_an_ambiguous_failure():
             pass
         ok(len(calls) > 1, "while a GET still retries: %d attempts" % len(calls))
     finally:
-        _hx.AsyncClient, server._headers = saved_client, saved_hdr
+        server._http, server._headers = saved_client, saved_hdr
         server.SHOPIFY_STORE = saved_store
 
 
@@ -11862,6 +11866,226 @@ def t_reconciliation_stores_do_not_keep_records_for_ever():
        "while keeping what was decided: the audit trail is the point")
     ok(live["evidence"], "an OPEN discrepancy keeps its evidence however old it is")
     ok(any("dropped" in n for n in notes), "and the sweep reports the deletions: %s" % notes)
+
+
+@test
+def t_a_real_route_comes_back_compressed():
+    """The unit test above proves the middleware. This proves it is actually IN
+    the stack the merchant's requests go through, which is a different claim and
+    the one that was silently false while the suite built its own bare app."""
+    def go():
+        # Enough contacts to clear the 1 KB floor comfortably.
+        for i in range(60):
+            post("/api/crm/contact", {"op": "create", "name": "Contact %d" % i,
+                                      "email": "c%d@example.com" % i,
+                                      "notes": "Repeat customer, gobo orders " * 6})
+        copilot._rl_hits.clear(); copilot._rl_global.clear()
+        r = client.post("/api/crm/board", json={},
+                        headers={"Authorization": "Bearer " + tok(),
+                                 "X-App-Session": ensure_auth(),
+                                 "Accept-Encoding": "gzip"})
+        eq(r.status_code, 200, r.text[:160])
+        eq(r.headers.get("content-encoding"), "gzip",
+           "the board came back compressed through the real stack")
+        ok("accept-encoding" in (r.headers.get("vary") or "").lower(), "and varies on it")
+        wire = int(r.headers["content-length"])
+        plain = len(json.dumps(r.json()).encode())
+        ok(wire < plain / 2, "%d bytes on the wire for %d of JSON" % (wire, plain))
+        body = r.json()
+        ok(isinstance(body, dict) and not body.get("error"),
+           "and the data survived the trip: %s" % str(body)[:120])
+    with_accounts(go)
+
+
+@test
+def t_an_inbox_click_writes_the_mailbox_once_not_twice():
+    """Measured at 3,000 threads: claiming an email cost 225 ms, 223 ms of it
+    inside two full serialisations of a 6 MB store, on the event loop. The
+    second one exists to persist whatever the Gmail label trip recorded, which
+    most of the time is nothing at all. The durable-write-before-Gmail ordering
+    is unchanged: the first write still happens first."""
+    writes = []
+    saved = copilot._write_mail
+
+    def counting(d):
+        writes.append(1)
+        return saved(d)
+    copilot._write_mail = counting
+    try:
+        # Gmail not connected: the label trip has nothing to record.
+        t = {"id": "t1", "state": "assigned", "owner": "u1"}
+        changed = run_async(copilot._mail_sync_labels(t, "Ruth"))
+        eq(changed, False, "a disconnected mailbox changes nothing")
+        eq(writes, [], "and asks for no write of its own")
+
+        # Nothing to do, because the label already says what it should.
+        t2 = {"id": "t2", "state": "done", "gmail_label": "Copilot/Done"}
+        eq(run_async(copilot._mail_sync_labels(t2, "Ruth")), False,
+           "a label already correct is not rewritten")
+    finally:
+        copilot._write_mail = saved
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    eq(src.count("if await _mail_sync_labels("), 3,
+       "every route guards its follow-up write on there being something to write")
+    ok("await _mail_sync_labels(t, _team_name(who))\n        _write_mail" not in src,
+       "and none of them writes unconditionally any more")
+
+
+@test
+def t_a_gobo_miss_is_only_paid_once_per_sheet():
+    """A miss falls through every index into a word-run scan of all 2,155 sheet
+    rows: measured at 0.63 ms against 0.008 ms for a hit. The same fixtures come
+    back order after order, so without a memo the same scan is repeated for
+    every line item in the queue."""
+    cache = copilot._gobo_sizes()
+    cache.setdefault("lookup_memo", {}).clear()
+    miss = ("Nonesuch Lighting", "Fixture That Does Not Exist 9000")
+    r1 = copilot._gobo_lookup(*miss, cache=cache)
+    eq(r1[0], None, "it is genuinely a miss")
+    ok(len(cache["lookup_memo"]) == 1, "and the answer was remembered")
+    t0 = time.perf_counter()
+    for _ in range(200):
+        rn = copilot._gobo_lookup(*miss, cache=cache)
+    per = (time.perf_counter() - t0) / 200
+    eq(rn, r1, "the remembered answer is the same answer")
+    ok(per < 0.0001, "and costs almost nothing to repeat: %.4f ms" % (per * 1000))
+
+    # A hit is remembered too, and by reference to the same sheet row.
+    copilot._gobo_lookup("Robe", "Robin Viva", cache=cache)
+    before = len(cache["lookup_memo"])
+    ok(before >= 1, "hits are remembered as well")
+
+    # And a new sheet must never be answered out of the old one's memo.
+    copilot._gobo_cache["mtime"] = -1
+    fresh = copilot._gobo_sizes()
+    eq(fresh.get("lookup_memo"), {},
+       "reloading the sheet throws the memo away with it")
+
+
+@test
+def t_a_reaped_connection_is_retried_but_an_ambiguous_one_is_not():
+    """Pooling adds exactly one failure mode a fresh connection never had: the
+    far end reaps an idle keep-alive between our requests. That failure happens
+    BEFORE anything is sent, so it is the one transport error a POST may be
+    replayed after. Everything else stays unreplayable."""
+    import httpx as _hx
+    tries = []
+
+    class _Resp:
+        status_code = 200
+        headers: dict = {}
+        text = "{}"
+        def json(self): return {"ok": True}
+        def raise_for_status(self): return None
+
+    class _Client:
+        def __init__(self, boom, fail_times):
+            self.boom, self.left = boom, fail_times
+        async def request(self, method, url, **kw):
+            tries.append(method)
+            if self.left > 0:
+                self.left -= 1
+                raise self.boom
+            return _Resp()
+
+    saved = (server._http, server._headers, server.SHOPIFY_STORE, server.asyncio.sleep)
+    server.SHOPIFY_STORE = server.SHOPIFY_STORE or "test-store"
+
+    async def _hdr(): return {}
+    async def _nosleep(_s): return None
+    server._headers, server.asyncio.sleep = _hdr, _nosleep
+    try:
+        # Connection never established: nothing was sent, so retry the POST.
+        c = _Client(_hx.ConnectError("connection reset"), 1)
+        server._http = lambda: c
+        tries.clear()
+        r = run_async(server._request("POST", "fulfillments.json", body={"x": 1}))
+        eq(r, {"ok": True}, "the write went through on the retry")
+        eq(len(tries), 2, "which took exactly one retry")
+
+        # Ambiguous: it may have arrived and been acted on. Do not replay.
+        c2 = _Client(_hx.ReadTimeout("lost the answer"), 1)
+        server._http = lambda: c2
+        tries.clear()
+        raised = None
+        try:
+            run_async(server._request("POST", "fulfillments.json", body={"x": 1}))
+        except Exception as e:
+            raised = e
+        ok(isinstance(raised, _hx.TimeoutException), "it surfaced: %r" % (raised,))
+        eq(len(tries), 1, "and the POST was tried exactly once")
+    finally:
+        server._http, server._headers, server.SHOPIFY_STORE, server.asyncio.sleep = saved
+
+
+@test
+def t_one_pooled_client_is_reused_across_calls():
+    """The measured cost of not doing this: 89 ms per Shopify call instead of
+    29 ms, paid 8 times on a cold production queue and 30 on the Liability tab."""
+    server._pool = None
+    a = server._http()
+    b = server._http()
+    ok(a is b, "the same client answers every call")
+    ok(a.is_closed is False, "and it is live")
+    lim = getattr(a, "_limits", None) or getattr(a, "limits", None)
+    if lim is not None:
+        ok((lim.max_keepalive_connections or 0) > 0, "with keep-alive actually enabled")
+        ok(lim.keepalive_expiry and lim.keepalive_expiry <= 60,
+           "and a short idle life, so the far end does not reap it under us")
+
+
+@test
+def t_big_answers_are_compressed_and_streams_are_left_alone():
+    """The measured reason: the Complete production queue is 1,117 KB of JSON
+    and the CRM board 1,162 KB, sent raw, on every tab switch. The measured
+    danger: Starlette's own GZipMiddleware would buffer the chat SSE route to
+    compress it, turning a live stream into one late lump. Compression keys on
+    Content-Length, which a streaming response never sets."""
+    import gzip as _gz
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse as _JR, StreamingResponse, Response as _Rsp
+    from starlette.routing import Route
+
+    big = {"rows": [{"id": i, "name": "Northern Stage Ltd", "note": "x" * 40}
+                    for i in range(400)]}
+    ticks = []
+
+    async def _big(request): return _JR(big)
+    async def _small(request): return _JR({"ok": True})
+    async def _img(request): return _Rsp(b"\x89PNG" + b"y" * 40000, media_type="image/png")
+
+    async def _stream(request):
+        async def gen():
+            for i in range(3):
+                ticks.append(i)
+                yield ("data: chunk %d\n\n" % i).encode()
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
+    app = Starlette(routes=[Route("/big", _big), Route("/small", _small),
+                            Route("/img", _img), Route("/stream", _stream)])
+    app.add_middleware(server.CompressionMiddleware)
+    c = TestClient(app)
+
+    r = c.get("/big", headers={"Accept-Encoding": "gzip"})
+    eq(r.headers.get("content-encoding"), "gzip", "a big JSON answer is compressed")
+    ok("accept-encoding" in (r.headers.get("vary") or "").lower(), "and says what it varies on")
+    raw = json.dumps(big).encode()
+    sent = int(r.headers["content-length"])
+    ok(sent < len(raw) / 4, "meaningfully smaller: %d -> %d bytes" % (len(raw), sent))
+    eq(r.json(), big, "and it is the same data on the other side")
+
+    # The one that matters. A stream has no Content-Length, so it is never held.
+    rs = c.get("/stream", headers={"Accept-Encoding": "gzip"})
+    eq(rs.headers.get("content-encoding"), None, "a stream is NOT compressed")
+    eq(rs.text.count("data:"), 3, "and arrives whole")
+
+    eq(c.get("/small", headers={"Accept-Encoding": "gzip"}).headers.get("content-encoding"),
+       None, "a small answer is not worth the CPU")
+    eq(c.get("/img", headers={"Accept-Encoding": "gzip"}).headers.get("content-encoding"),
+       None, "already-compressed bytes are left alone")
+    r2 = c.get("/big", headers={"Accept-Encoding": "identity"})
+    eq(r2.headers.get("content-encoding"), None, "a client that cannot read gzip is not sent it")
+    eq(r2.json(), big, "and still gets its data")
 
 
 @test

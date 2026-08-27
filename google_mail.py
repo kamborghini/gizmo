@@ -128,8 +128,8 @@ def save_connection(refresh_token: str, addr: str, acct: Account = SALES) -> Non
     # file is a mailbox anyone on the box can read.
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump({"refresh_token": refresh_token, "address": addr,
-                   "connected_at": datetime.now(timezone.utc).isoformat()}, fh)
+        fh.write(json.dumps({"refresh_token": refresh_token, "address": addr,
+                             "connected_at": datetime.now(timezone.utc).isoformat()}))
     os.replace(tmp, acct.token_path)
     try:
         os.chmod(acct.token_path, 0o600)
