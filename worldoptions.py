@@ -632,6 +632,33 @@ def _state_code(value, country="") -> str:
     return ""
 
 
+def _postcode(value, country="") -> str:
+    """A postcode the carrier will accept.
+
+    UPS validates the "sold to" party on an INTERNATIONAL shipment - the
+    importer of record, which exists only because duties are billed to the
+    receiver - and it wants those fields alphanumeric. An Eircode is written
+    with a space ("D12 VC2N"), and a space is not alphanumeric.
+
+    Scoped to non-GB deliberately. Every UPS shipment this app has ever booked
+    was GB to GB, which is DOMESTIC: no customs block, no commercial invoice
+    and no sold-to party at all. So no UK postcode has ever been through this
+    validation, and the working path is left byte-identical rather than
+    "improved" on a hunch.
+
+    Only whitespace goes. Hyphens stay, because Brazil, Poland and Portugal
+    write real postcodes with them."""
+    raw = ("" if value is None else str(value)).strip()
+    cc = str(country or "").strip().upper()
+    if not raw or cc in ("", "GB"):
+        return raw
+    tight = re.sub(r"\s+", "", raw)
+    if tight != raw:
+        logger.info("world options: %s postcode %r sent as %r - the carrier wants it "
+                    "alphanumeric", cc, raw[:12], tight[:12])
+    return tight
+
+
 def _b(prefix: str, name: str, value: bool) -> str:
     return f"<{prefix}:{name}>{'true' if value else 'false'}</{prefix}:{name}>"
 
@@ -904,7 +931,7 @@ async def quote(origin: dict, destination: dict, boxes: list,
         + "<wo:RecipientDetails>"
         + _t("m", "DeliveryCity", d.get("city"))
         + _t("m", "DeliveryCountryCode", (d.get("country") or "").upper())
-        + _t("m", "DeliveryPostCode", d.get("postcode"))
+        + _t("m", "DeliveryPostCode", _postcode(d.get("postcode"), d.get("country")))
         + _t("m", "DeliveryState", _state_code(d.get("state"), d.get("country")))
         + _b("m", "IsResidential", bool(residential))
         + "</wo:RecipientDetails>"
@@ -1115,7 +1142,7 @@ def _recipient_block(d: dict) -> str:
             + _ts("m", "Name", name or d.get("company"))
             + _ts("m", "Phone", d.get("phone"))
             + _ts("m", "PhoneDialCode", "")
-            + _ts("m", "Postalcode", d.get("postcode"))
+            + _ts("m", "Postalcode", _postcode(d.get("postcode"), d.get("country")))
             + _b("m", "Residential", not (d.get("company") or "").strip())
             + _ts("m", "State_Code", _state_code(d.get("state"), d.get("country")))
             + "</wo:RecipientsDetails>")

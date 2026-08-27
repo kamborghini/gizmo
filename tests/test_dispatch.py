@@ -11869,6 +11869,31 @@ def t_reconciliation_stores_do_not_keep_records_for_ever():
 
 
 @test
+def t_an_international_postcode_is_alphanumeric_but_a_uk_one_is_untouched():
+    """UPS validates the "sold to" party on an INTERNATIONAL shipment, and wants
+    its fields alphanumeric. An Eircode is written with a space. Every UPS
+    shipment this app has ever booked was GB to GB - domestic, no customs, no
+    sold-to party - so no UK postcode has ever been through that validation,
+    which is why the domestic path is left exactly as it is rather than tidied
+    on a hunch."""
+    eq(worldoptions._postcode("D12 VC2N", "IE"), "D12VC2N", "an Eircode loses its space")
+    eq(worldoptions._postcode("D02 XK40", "IE"), "D02XK40", "every Eircode does")
+    eq(worldoptions._postcode("NE1 5HX", "GB"), "NE1 5HX", "a UK postcode is untouched")
+    eq(worldoptions._postcode("CV8 1NP", "GB"), "CV8 1NP", "the working path is byte-identical")
+    eq(worldoptions._postcode("01310-100", "BR"), "01310-100",
+       "a hyphen stays: Brazil, Poland and Portugal write real postcodes with them")
+    eq(worldoptions._postcode("408555", "SG"), "408555", "and one with nothing to strip is left alone")
+    eq(worldoptions._postcode("", "IE"), "", "nothing stays nothing")
+    eq(worldoptions._postcode("D12 VC2N", ""), "D12 VC2N", "an unknown country is not guessed at")
+    # Both the quote and the booking send it through.
+    src = open(os.path.join(HERE, "worldoptions.py"), encoding="utf-8").read()
+    for field in ("DeliveryPostCode", "Postalcode"):
+        m = re.search(r'_ts?\(\s*"m",\s*"' + field + r'"\s*,\s*([^\n]*)', src)
+        ok(m and "_postcode(" in m.group(1),
+           "%s goes through the normaliser: %s" % (field, m.group(1)[:60] if m else "(absent)"))
+
+
+@test
 def t_every_courier_call_carries_its_envelope_out():
     """The booking attached the envelope it sent; the quote and the cancellation
     did not. That is how a Dublin shipment came to be refused for naming a field
