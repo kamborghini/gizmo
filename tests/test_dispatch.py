@@ -11869,6 +11869,23 @@ def t_reconciliation_stores_do_not_keep_records_for_ever():
 
 
 @test
+def t_every_courier_call_carries_its_envelope_out():
+    """The booking attached the envelope it sent; the quote and the cancellation
+    did not. That is how a Dublin shipment came to be refused for naming a field
+    nobody could see. Their errors name a .NET parameter rather than a field, so
+    the request is the only way to tell WHICH address they mean, and a quote is
+    what fails first."""
+    src = open(os.path.join(HERE, "worldoptions.py"), encoding="utf-8").read()
+    # Every _reply_status call sits inside a handler that attaches the envelope.
+    for m in re.finditer(r'_reply_status\(reply, "', src):     # calls, not the def
+        seg = src[m.start():m.start() + 700]
+        ok("e.envelope = _redacted(inner)" in seg,
+           "the call at offset %d carries its envelope: %s" % (m.start(), ' '.join(seg.split())[:90]))
+    eq(src.count("e.envelope = _redacted(inner)"), 5,
+       "rate, booking (both branches) and cancel all attach it")
+
+
+@test
 def t_a_quote_that_will_not_price_hands_over_the_evidence():
     """A courier rejected a Dublin shipment with "Invalid sold to state province
     code" and the operator had nothing to look at, because the QUOTE path threw

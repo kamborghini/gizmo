@@ -878,11 +878,27 @@ async def quote(origin: dict, destination: dict, boxes: list,
         + "</wo:ShippingDetails>"
         + "</tem:request></tem:GetAllServicesAndRates>"
     )
-    root = await _soap_call("RateService", "http://tempuri.org/IRateService/GetAllServicesAndRates", inner)
+    try:
+        root = await _soap_call("RateService", "http://tempuri.org/IRateService/GetAllServicesAndRates", inner)
+    except WorldOptionsError as e:
+        e.envelope = _redacted(inner)
+        logger.error("world options: rate request rejected: %s\nEnvelope sent:\n%s", e, e.envelope)
+        raise
     reply = _find(root, "GetAllServicesAndRatesResult")
-    if reply is None:
-        raise WorldOptionsError("World Options returned no rate result.")
-    _reply_status(reply, "price this shipment")
+    try:
+        if reply is None:
+            raise WorldOptionsError("World Options returned no rate result.")
+        _reply_status(reply, "price this shipment")
+    except WorldOptionsError as e:
+        # Same rule the booking has followed since it was written: their errors
+        # name a .NET parameter rather than a field, so the envelope IS the
+        # evidence, and a quote is what fails FIRST. Without this, an operator
+        # is told a field is wrong and has no way to see which one.
+        e.envelope = _redacted(inner)
+        e.sent = True
+        logger.error("world options: rate request answered FAILED: %s\nEnvelope sent:\n%s",
+                     e, e.envelope)
+        raise
     cur = (currency or "GBP")[:3].upper()
     options = []
     for opt in _findall_direct(reply, "wsAvailableServicesAndRates"):
@@ -1470,7 +1486,12 @@ async def cancel(tracking_number: str) -> dict:
     reply = _find(root, "VoidShipmentResult")
     if reply is None:
         raise WorldOptionsError("World Options returned no cancellation result.")
-    msg, _notif = _reply_status(reply, "cancel this shipment")
+    try:
+        msg, _notif = _reply_status(reply, "cancel this shipment")
+    except WorldOptionsError as e:
+        e.envelope = _redacted(inner)
+        e.sent = True
+        raise
     return {"canceled": True, "message": msg}
 
 
