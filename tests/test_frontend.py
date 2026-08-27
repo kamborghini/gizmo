@@ -894,9 +894,21 @@ def t_the_dead_elevation_token_is_gone():
         rule = re.search(r"\." + cls + r" \{[^}]*\}", HTML, re.S)
         ok(rule and "var(--sh-1)" in rule.group(0),
            ".%s carries the house card elevation like every other card" % cls)
-    rule = re.search(r"\.lbl-segbtn\.on \{[^}]*\}", HTML)
-    ok(rule and "var(--sh-1)" in rule.group(0),
-       "the active segment is lifted off its track, which is the point of the control")
+    # This used to assert the rule carried var(--sh-1), and it went on passing
+    # after --sh-1 became `none` under the neutral palette - so every segmented
+    # control in the app silently lost its selected state while the guard stayed
+    # green. A marker has to be asserted by its EFFECT, never by the presence of
+    # a token that may resolve to nothing.
+    for sel in (r"\.lbl-segbtn\.on", r"\.seg button\.on"):
+        rule = re.search(sel + r" \{[^}]*\}", HTML, re.S)
+        ok(rule, "the %s rule is still there" % sel)
+        shadow = re.search(r"box-shadow:\s*([^;}]+)", rule.group(0))
+        ok(shadow, "%s marks itself somehow" % sel)
+        val = shadow.group(1).strip()
+        ok(val != "none" and "var(--sh-1)" not in val,
+           "%s is marked by something that actually paints, not %r" % (sel, val))
+        ok("inset" in val,
+           "and by an inset hairline rather than a shadow, since a thumb does not float")
     ok(".lbl-filt" not in HTML,
        "and the second, near-identical segmented track has been folded into it")
 
@@ -1375,7 +1387,7 @@ def t_an_order_missing_its_terms_is_flagged_on_the_queue_row():
     big print run has no toast at all."""
     ok("st.terms_error" in SCRIPT, "the queue row reads the flag the server left")
     f = re.search(r"if \(st\.terms_error\)[\s\S]{0,400}", SCRIPT).group(0)
-    ok("NO TERMS" in f, "and shows it")
+    ok("No terms" in f, "and shows it")
     ok("lbl-chip bad" in f, "in red, like the other things that need attention")
 
 
