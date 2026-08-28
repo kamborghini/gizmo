@@ -293,16 +293,21 @@
            screen into eleven 170px strips with the labels wrapping; a metric
            card wants to be read at a glance, so the tiles grow to a comfortable
            size and then stop, and the row simply holds fewer of them. */
-        .metrics { display: grid; gap: 12px; margin-bottom: 24px;
-            grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
-        @media (min-width: 1500px) {
-            .metrics { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
-        }
-        @media (min-width: 1800px) {
-            .metrics { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
-        }
+        /* Four across, and four however wide the screen gets. The reference
+           does not keep adding columns as the monitor grows: a KPI row of eight
+           tiny tiles is a different thing from a KPI row. */
+        .metrics { display: grid; gap: var(--sp-4); margin-bottom: var(--sp-6);
+            grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        @media (max-width: 1100px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 620px) { .metrics { grid-template-columns: 1fr; } }
         .stat { position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
-            padding: var(--sp-5) var(--sp-6); box-shadow: var(--sh-1); animation: fadeUp .4s ease backwards; }
+            padding: var(--sp-4); box-shadow: var(--sh-1); animation: fadeUp .4s ease backwards;
+            display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-1);
+            min-height: 154px; justify-content: flex-start; }
+        .stat .stat-note { margin-top: var(--sp-1); }
+        /* The sparkline sinks to the bottom so every card's NUMBER lines up
+           with its neighbours, whatever length of label or note sits above. */
+        .stat .stat-spark { margin-top: auto; padding-top: var(--sp-2); height: 34px; }
         /* No corner glow: on a light card it reads as a stain behind the number. */
         .stat .label { font-size: var(--t-md); color: var(--ink-3); font-weight: var(--w-normal); text-transform: none; letter-spacing: normal; margin-bottom: 8px; position: relative; }
         /* Number and change sit on ONE line in the reference, aligned, rather
@@ -346,9 +351,11 @@
         .data-src-label { font-size: var(--t-xs); text-transform: none; letter-spacing: normal; color: var(--ink-3); font-weight: var(--w-medium); margin-bottom: 4px; }
         .data-src-pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--t-xs); color: var(--ink-2); white-space: pre-wrap; word-break: break-word; background: var(--surface-3); border-radius: var(--r-sm); padding: 8px 8px; line-height: 1.5; }
 
-        .section-title { font-size: var(--t-xs); font-weight: var(--w-medium); text-transform: none; letter-spacing: normal; color: var(--ink-3);
-            margin: var(--sp-6) 0 var(--sp-3); display: flex; align-items: center; gap: var(--sp-2); }
-        .section-title::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+        .section-title { font-size: var(--t-lg); font-weight: var(--w-medium); text-transform: none; letter-spacing: normal; color: var(--ink);
+            line-height: 22px; margin: var(--sp-6) 0 var(--sp-3); display: flex; align-items: center; gap: var(--sp-2); }
+        /* No rule across the page. The reference separates sections with the
+           gap between cards and nothing else. */
+        .section-title::after { content: ""; flex: 1; }
         /* ::after is always the last flex item, so a control inside the heading has
            to be ordered past it to leave the hairline in between. The heading
            tracking would otherwise inherit and stretch the button labels. */
@@ -1470,7 +1477,21 @@
         .run-gate .rg-btn svg { width: 15px; height: 15px; }
         .run-gate .rg-note { margin-top: 12px; font-size: var(--t-xs); color: var(--ink-3); }
         /* ---------- Keywords tab ---------- */
-        .ktable-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--sh-1); }
+        /* A table in the reference always sits inside a card, under a header,
+           and runs edge to edge within it. This wrapper IS that card: the
+           header above it is a .section-title, and the rows meet the card
+           border rather than floating inside a second inset box. */
+        .ktable-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r);
+            box-shadow: var(--sh-1); background: var(--surface); margin-bottom: var(--sp-6); }
+        /* Inside a card it is already in a bordered box: no second frame, no
+           second radius, and no bottom margin fighting the card padding. */
+        .card .ktable-wrap, .card-bleed .ktable-wrap { border: 0; border-radius: 0;
+            box-shadow: none; margin-bottom: 0; background: transparent; }
+        .card-bleed .ktable th:first-child, .card-bleed .ktable td:first-child { padding-left: var(--sp-4); }
+        .card-bleed .ktable th:last-child, .card-bleed .ktable td:last-child { padding-right: var(--sp-4); }
+        .ktable-wrap .ktable tr:last-child td { border-bottom: 0; }
+        .ktable th:first-child, .ktable td:first-child { padding-left: var(--sp-4); }
+        .ktable th:last-child, .ktable td:last-child { padding-right: var(--sp-4); }
         .ktable { width: 100%; border-collapse: collapse; font-size: var(--t-md); background: var(--surface); min-width: 460px; }
         .ktable th { text-align: left; font-size: var(--t-md); text-transform: none; letter-spacing: normal; color: var(--ink); font-weight: var(--w-medium); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); white-space: nowrap; height: 44px; }
         .ktable td { padding: var(--sp-4); border-bottom: 1px solid var(--border); color: var(--ink-2); font-size: var(--t-md); }
@@ -1513,10 +1534,16 @@
         .seg-card .seg-rev { font-size: var(--t-xs); color: var(--ink-2); margin-top: 8px; }
 
         /* ---------- Charts ---------- */
-        .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--sh-1); padding: 16px 16px 8px; margin-bottom: 12px; position: relative; }
-        .chart-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
-        .chart-head .ct { font-size: var(--t-xs); font-weight: var(--w-medium); text-transform: none; letter-spacing: normal; color: var(--ink-3); }
-        .chart-head .cv { font-size: var(--t-xl); font-weight: var(--w-bold); letter-spacing: -.03em; margin-top: 4px; display: flex; align-items: center; }
+        .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+            box-shadow: var(--sh-1); padding: var(--sp-4); margin-bottom: var(--sp-4); position: relative; }
+        .chart-head { display: flex; align-items: flex-start; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+        /* Title over a muted line, like every card header in the reference -
+           not a micro-label over a big number, which is the KPI pattern and
+           does not belong on a chart. */
+        .chart-head .ct { font-size: var(--t-lg); font-weight: var(--w-medium); text-transform: none;
+            letter-spacing: normal; color: var(--ink); line-height: 22px; }
+        .chart-head .cv { font-size: var(--t-md); font-weight: var(--w-normal); letter-spacing: normal;
+            margin-top: 2px; display: flex; align-items: center; color: var(--ink-3); }
         .chart-head .cd { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); font-weight: var(--w-medium); padding: 2px 8px; border-radius: var(--r-pill); margin-left: 9px; flex: none; line-height: 16px; }
         .chart-head .cd > span { display: grid; place-items: center; } .chart-head .cd svg { width: 12px; height: 12px; display: block; }
         .cd.up { color: var(--win); background: var(--win-bg); } .cd.down { color: var(--danger); background: var(--danger-bg); } .cd.flat { color: var(--ink-3); background: var(--surface-3); }
@@ -2319,13 +2346,23 @@
             const labelEl = el('div', 'label', m.label);
             const help = metricHelp(m.label);
             if (help) { labelEl.title = help; labelEl.classList.add('has-help'); }
-            c.append(labelEl, el('div', 'value', m.value));
+            c.append(labelEl);
+            /* Number and change on ONE line, as the reference has them: the
+               change is a small pill beside the figure, not a tinted bar
+               spanning the card, which is what it became when it was a block
+               of its own. */
+            const row = el('div', 'stat-row');
+            row.append(el('div', 'value', m.value));
             if (m.delta) {
                 const d = el('div', 'delta ' + (m.trend || 'flat'));
                 if (m.trend === 'up') d.append(ico(I.up)); else if (m.trend === 'down') d.append(ico(I.down));
                 d.append(document.createTextNode(m.delta));
-                c.append(d);
+                row.append(d);
             }
+            c.append(row);
+            /* The quiet line under the number, saying what it is OF. The
+               reference gives every KPI one. */
+            if (m.note) c.append(el('p', 'stat-note', m.note));
             if (Array.isArray(m.spark) && m.spark.length > 1) {
                 const sw = el('div', 'stat-spark');
                 const col = m.trend === 'up' ? CH_UP : m.trend === 'down' ? CH_DOWN : CH[0];
@@ -2382,6 +2419,21 @@
             const h = new Set(ovLayout.hidden || []);
             h.has(label) ? h.delete(label) : h.add(label);
             ovLayout.hidden = [...h]; saveOvLayout(); renderOverview(overviewCache);
+        }
+        /* One block, the reference's way: a card whose header carries the
+           title and one muted line, and whose body runs to the card edge so a
+           table or a chart meets the border instead of floating in a second
+           inset box. Everything that used to be a bare heading over loose
+           content becomes one of these. */
+        function cardSection(title, desc, body, action) {
+            const c = el('div', 'card');
+            const h = el('div', 'card-head');
+            h.append(el('h3', 'card-title', title));
+            if (desc) h.append(el('p', 'card-desc', desc));
+            if (action) { const a = el('div', 'card-act'); a.append(action); h.append(a); }
+            c.append(h);
+            if (body) { const b = el('div', 'card-bleed'); b.append(body); c.append(b); }
+            return c;
         }
         function metricsGridCustom(metrics) {
             const g = el('div', 'metrics');
@@ -3195,8 +3247,9 @@
                 box.append(metricsGridCustom(withSparks(data.metrics, data.trends)));
             }
             if (Array.isArray(data.sector_sales) && data.sector_sales.length) {
-                box.append(el('div', 'section-title', 'Sales by sector'));
-                box.append(sectorSalesTable(data.sector_sales, data.currency));
+                box.append(cardSection('Sales by sector',
+                    'Revenue, orders and average order value by the sector each customer trades in.',
+                    sectorSalesTable(data.sector_sales, data.currency)));
             }
             renderTrendsBlock(box, data.trends, data.currency, ovRange, (v) => { ovRange = v; renderOverview(overviewCache); });
             const s = Object.assign({}, data.structured); delete s.summary;
