@@ -2435,6 +2435,56 @@
             if (body) { const b = el('div', 'card-bleed'); b.append(body); c.append(b); }
             return c;
         }
+        /* Turn the app's bare headings into the reference's cards.
+           
+           The reference never puts a heading on the page with loose content
+           under it: every block is a card whose header carries the title, with
+           the content inside. This app had fifty-six of the former, written
+           over a year, and rewriting each call site by hand would be a long
+           edit with a lot of ways to go wrong. So the shape is applied after
+           the fact instead: walk what a view just rendered, and fold each
+           heading and the block it introduces into one card.
+           
+           A heading that introduces a ROW OF CARDS is left alone. The reference
+           has those too - a group of cards under a label - and wrapping cards
+           in a card is how you get a double border. */
+        function cardifySections(root) {
+            if (!root) return;
+            [].slice.call(root.children).forEach(function (node) {
+                if (!node.classList || !node.classList.contains('section-title')) return;
+                if (node.dataset.carded) return;
+                var body = [], n = node.nextElementSibling;
+                while (n && !(n.classList && n.classList.contains('section-title'))) {
+                    body.push(n); n = n.nextElementSibling;
+                }
+                if (!body.length) return;
+                // Already card-shaped? Then this is a group label, not a header.
+                var hasCard = body.some(function (b) {
+                    return b.classList && (b.classList.contains('card')
+                        || b.classList.contains('chart-card') || b.classList.contains('charts-grid')
+                        || b.classList.contains('metrics') || b.classList.contains('actions'));
+                });
+                if (hasCard) { node.dataset.carded = 'group'; return; }
+                var card = el('div', 'card');
+                var head = el('div', 'card-head');
+                var title = el('h3', 'card-title');
+                // A control that lived in the heading becomes the card's action.
+                [].slice.call(node.childNodes).forEach(function (c) {
+                    if (c.nodeType === 1 && (c.classList.contains('seg') || c.tagName === 'BUTTON'
+                        || c.classList.contains('lbl-seg'))) {
+                        var act = head.querySelector('.card-act') || el('div', 'card-act');
+                        act.append(c); if (!act.parentNode) head.append(act);
+                    } else { title.append(c); }
+                });
+                head.insertBefore(title, head.firstChild);
+                card.append(head);
+                var wrap = el('div', 'card-bleed');
+                body.forEach(function (b) { wrap.append(b); });
+                card.append(wrap);
+                node.parentNode.insertBefore(card, node);
+                node.remove();
+            });
+        }
         function metricsGridCustom(metrics) {
             const g = el('div', 'metrics');
             const byLabel = {}; metrics.forEach(m => byLabel[m.label] = m);
@@ -3256,6 +3306,7 @@
             if (s.insights && s.insights.length) box.append(el('div', 'section-title', 'What’s notable'));
             renderStructured(box, s, { noFollowups: true });
             box.append(pageChatPanel('overview', data));
+            cardifySections(box);
             syncPrintBtn();
         }
 
@@ -3316,6 +3367,7 @@
                 s.sections.forEach(sec => box.append(sectionCard(sec)));
             }
             box.append(pageChatPanel('seo', data));
+            cardifySections(box);
             syncPrintBtn();
         }
 
@@ -3458,6 +3510,7 @@
             box.append(renderCPC(data.ads, cur));
             if (Array.isArray(s.sections) && s.sections.length) { box.append(el('div', 'section-title', 'Details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
             box.append(pageChatPanel('keywords', data));
+            cardifySections(box);
             syncPrintBtn();
         }
 
@@ -3697,6 +3750,7 @@
             }
             if (Array.isArray(s.sections) && s.sections.length) { box.append(el('div', 'section-title', 'Details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
             box.append(pageChatPanel('customers', data));
+            cardifySections(box);
             syncPrintBtn();
         }
 
@@ -4649,6 +4703,7 @@
                 panel.append(bar);
                 return panel;
             }
+            cardifySections(box);
         }
 
         /* ---------- production labels ---------- */
