@@ -11932,6 +11932,41 @@ def t_a_booking_can_carry_its_own_collection_arrangement():
 
 
 @test
+def t_a_collection_is_read_from_the_couriers_own_reference():
+    """World Options returns a collection reference on the booking reply -
+    CollectionDateNumber - and it has been kept on every dispatch record since
+    long before any of this was built. That is the courier's own answer to "is a
+    van coming", so it is worth more than a ledger this app keeps beside it, and
+    it covers shipments booked before the ledger existed."""
+    from datetime import datetime as _dt, timezone as _tz
+    today = _dt.now(_tz.utc).date().isoformat()
+    copilot._write_dispatch({
+        "9001": {"carrier_name": "DHL", "carrier_label": "DHL Express",
+                 "collection_date": "CN-8842", "order_name": "#104294",
+                 "dispatched_at": today + "T09:12:00+00:00"},
+        "9002": {"carrier_name": "UPS", "carrier_label": "UPS",
+                 "collection_date": "", "order_name": "#104290",
+                 "dispatched_at": today + "T09:20:00+00:00"},
+        "9003": {"carrier_name": "DHL", "carrier_label": "DHL Express",
+                 "collection_date": "CN-1", "order_name": "#104100",
+                 "dispatched_at": "2020-01-01T09:00:00+00:00"},
+    })
+    got = copilot._collections_from_dispatch(today)
+    ok("DHL" in got, "the courier that confirmed a collection is there")
+    eq(got["DHL"]["ref"], "CN-8842", "with World Options' own reference")
+    eq(got["DHL"]["order"], "#104294", "and the order that secured it")
+    ok("UPS" not in got, "a booking with no collection reference is not one")
+    # Yesterday's van is not today's.
+    eq(len([k for k in got if got[k]["date"] == today]), 1, "and only this day counts")
+    # And that answer suppresses a second ask.
+    cfg = {"collection_by_carrier": {"DHL": "I_Need_To_Book_A_Collection"}}
+    plan = copilot._collection_plan(cfg, "DHL", got)
+    eq(plan["arrangement"], "I_Already_Have_Collection_Scheduled",
+       "so the next DHL parcel does not book a second pickup")
+    copilot._write_dispatch({})
+
+
+@test
 def t_collections_shows_what_this_app_booked_and_says_so():
     """World Options cannot be asked what is scheduled: their service exposes
     exactly three operations - DoShipment, GetAllServicesAndRates and

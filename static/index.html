@@ -8248,9 +8248,9 @@
         async function openBookCollection() {
             const body = el('div');
             body.append(el('p', 'field-help',
-                'What is coming today, and from whom. These are the collections this app booked: '
-                + 'World Options has no way of being asked what is scheduled, so anything booked '
-                + 'in their portal directly will not show here.'));
+                'What is coming today, and from whom, by World Options\u2019 own collection '
+                + 'reference from the booking. Their service cannot be asked what is scheduled, so '
+                + 'a collection booked in their portal rather than here will not show.'));
             const host = el('div'); body.append(host);
             host.append(el('div', 'empty', 'Loading\u2026'));
             const dlg = uiConfirm(body, { title: 'Collections', okText: 'Done', hideCancel: true });
@@ -8277,7 +8277,11 @@
                     top.append(el('span', 'lbl-chip made', 'Collection booked'));
                     row.append(top);
                     const sub = [];
-                    if (r.order) sub.push('Secured by ' + r.order);
+                    /* World Options' own collection reference, off the booking
+                       reply. It is the courier's answer rather than this app's
+                       inference, and it is what to quote them on the phone. */
+                    if (r.ref) sub.push('Collection ' + r.ref);
+                    if (r.order) sub.push('booked with ' + r.order);
                     if (r.booked_at) sub.push('at ' + fmtDate(r.booked_at));
                     if (sub.length) row.append(el('div', 'sub', sub.join(' \u00b7 ')));
                     /* The van has been and gone and another parcel needs one:

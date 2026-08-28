@@ -1407,6 +1407,34 @@ def _write_collections(d: dict) -> None:
     _write_private_json(COLLECTIONS_PATH, "collections", d)
 
 
+def _collections_from_dispatch(day: str) -> dict:
+    """Collections the COURIER confirmed, per carrier, for one day.
+
+    World Options returns a collection reference on the booking reply
+    (CollectionDateNumber), and it is kept on the dispatch record. That is the
+    courier's own answer to "is a van coming", so it is worth more than the
+    ledger this app keeps alongside it - and it is already there for every
+    shipment ever booked, including the ones booked before any of this existed."""
+    out: dict = {}
+    try:
+        for oid, e in (_load_dispatch() or {}).items():
+            if not isinstance(e, dict) or not e.get("collection_date"):
+                continue
+            when = str(e.get("dispatched_at") or "")[:10]
+            if when != day:
+                continue
+            code = str(e.get("carrier_name") or "").strip().upper()
+            if not code or code in out:
+                continue
+            out[code] = {"date": day, "at": str(e.get("dispatched_at") or ""),
+                         "order": str(e.get("order_name") or oid or ""),
+                         "service": str(e.get("carrier_label") or e.get("service_name") or ""),
+                         "ref": str(e.get("collection_date") or "")}
+    except Exception:
+        logger.exception("could not read collections off the dispatch record")
+    return out
+
+
 def _collection_row(v) -> dict:
     """One ledger entry, whichever shape it was written in. The first version of
     this stored a bare date; anything read here may still be one."""
@@ -6050,7 +6078,9 @@ def _collection_plan(cfg: dict, carrier: str, booked: Optional[dict] = None) -> 
     if not arrangement.startswith("I_Need_To_Book_A_Collection"):
         return {"arrangement": arrangement, "already": False,
                 "message": COLLECTION_MESSAGES.get(arrangement, "")}
-    booked = booked if isinstance(booked, dict) else _load_collections()
+    if not isinstance(booked, dict):
+        booked = dict(_load_collections())
+        booked.update(_collections_from_dispatch(_collection_target(arrangement)))
     target = _collection_target(arrangement)
     if key and _collection_row(booked.get(key)).get("date") == target:
         when = "tomorrow" if arrangement.endswith("For_Next_Day") else "today"
@@ -16730,7 +16760,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Request too large."}, 413)
         day = str(body.get("date") or "")[:10] or datetime.now(timezone.utc).date().isoformat()
         cfg = _load_shipping()
-        booked = _load_collections()
+        # The courier's own confirmations for the day, over this app's ledger.
+        booked = dict(_load_collections())
+        booked.update(_collections_from_dispatch(day))
         by_carrier = cfg.get("collection_by_carrier")
         by_carrier = by_carrier if isinstance(by_carrier, dict) else {}
         rows = []
@@ -16747,6 +16779,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 "booked_at": row.get("at") if scheduled else "",
                 "order": row.get("order") if scheduled else "",
                 "service": row.get("service") if scheduled else "",
+                # World Options' own collection reference, off the booking reply.
+                "ref": (booked.get(code) or {}).get("ref", "") if scheduled else "",
                 # Nothing is coming and nothing needs to: they call anyway.
                 "standing": arrangement in ("I_Have_Daily_Collection",
                                             "I_Already_Have_Collection_Scheduled"),
@@ -16762,9 +16796,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _track(who, "dispatch", "cleared a collection", code)
                 return _json({"ok": True, "cleared": code})
         return _json({"date": day, "rows": rows,
-                      "note": "These are the collections this app booked. World Options has no way "
-                              "to be asked what is scheduled, so anything booked in their portal "
-                              "directly will not appear here."})
+                      "note": "Collections World Options confirmed on the booking, by their own "
+                              "reference. Their service cannot be asked what is scheduled, so a "
+                              "collection booked in their portal rather than here will not show."})
 
     @mcp.custom_route("/api/dispatch/quote", methods=["POST"])
     async def dispatch_quote_route(request: Request):
