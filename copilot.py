@@ -5447,6 +5447,8 @@ async def run_custom_quote(registry: dict, dest: dict, boxes: list,
         "goods_value": declared,
         "insurance": insurance,
         "dropoff": (cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages"),
+        "collection_option": str(cfg.get("collection_option") or ""),
+        "collection_options": (worldoptions.COLLECTION_OPTIONS if worldoptions else []),
         "show_parcelshop": bool(cfg.get("show_parcelshop", False)),
         "has_eori": bool(cfg.get("eori")),
         "default_hs_code": cfg.get("default_hs_code") or "",
@@ -5874,7 +5876,8 @@ async def run_dispatch_diagnose(registry: dict, order_id, boxes: list) -> dict:
 async def run_dispatch_book(registry: dict, order_id, option: dict, boxes: list,
                             notify: Optional[bool] = None, force: bool = False,
                             insurance: str = "", signature: str = "",
-                            customs_body: Optional[dict] = None, by: str = "") -> dict:
+                            customs_body: Optional[dict] = None, by: str = "",
+                            collection_option: str = "") -> dict:
     """Book the chosen courier option (this CHARGES the World Options account),
     then move the order's tag to Dispatched and create the Shopify fulfillment
     with tracking. Returns everything the UI needs to confirm what happened.
@@ -5889,7 +5892,8 @@ async def run_dispatch_book(registry: dict, order_id, option: dict, boxes: list,
         return {"error": "A courier option must be selected before booking."}
     async with _dispatch_lock(order_id):
         return await _dispatch_book_locked(registry, order_id, option, boxes, notify, force,
-                                           insurance, signature, customs_body, by)
+                                           insurance, signature, customs_body, by,
+                                           collection_option)
 
 
 # Their infrastructure wobbles ("Could not create SSL/TLS secure channel"), and
@@ -5968,7 +5972,8 @@ def _collection_ready(cfg: dict, now=None):
 
 async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: list,
                                 notify, force: bool, insurance: str, signature: str,
-                                customs_body: Optional[dict], by: str = "") -> dict:
+                                customs_body: Optional[dict], by: str = "",
+                                collection_option: str = "") -> dict:
     book_store = _load_dispatch()
     if DISPATCH_STATE_PATH in _poisoned_stores:
         return {"error": "The dispatch record cannot be read, so there is no way to tell "
@@ -6116,7 +6121,13 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
                                            ready_time=_ready_hm,
                                            ready_date=_ready_dmy,
                                            close_time=str(cfg.get("close_time") or ""),
-                                           collection_option=str(cfg.get("collection_option") or ""),
+                                           # This job's arrangement if one was chosen at the
+                                           # desk, otherwise the standing setting. A collection
+                                           # rides on a shipment - World Options has no endpoint
+                                           # for booking one on its own - so "book a collection"
+                                           # means asking for one alongside this parcel.
+                                           collection_option=str(collection_option
+                                                                 or cfg.get("collection_option") or ""),
                                            insurance=insurance,
                                            # The option's own signature wins: it is what the
                                            # displayed price was quoted under.
@@ -16656,11 +16667,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         notify = None if notify is None else bool(notify)
         customs_body = body.get("customs") if isinstance(body.get("customs"), dict) else None
         try:
+            co = str(body.get("collection_option") or "").strip()
+            if co and worldoptions and co not in worldoptions.COLLECTION_OPTIONS:
+                return _json({"error": "That is not a collection arrangement World Options offers."}, 400)
             res = await run_dispatch_book(registry, oid, option, boxes, notify=notify,
                                           force=bool(body.get("force")),
                                           insurance=_insurance_amount(body),
                                           signature=str(body.get("signature") or "")[:60],
-                                          customs_body=customs_body, by=_who)
+                                          customs_body=customs_body, by=_who,
+                                          collection_option=co)
             if not res.get("error"):
                 nm = re.sub(r"[^#\w-]", "", str(body.get("name") or ""))[:20] or f"order {oid}"
                 svc = str(option.get("service") or "").strip()[:40]

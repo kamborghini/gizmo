@@ -11898,6 +11898,42 @@ def t_the_panel_shows_the_fields_a_courier_actually_rejects():
 
 
 @test
+def t_a_booking_can_carry_its_own_collection_arrangement():
+    """World Options has no endpoint for booking a collection on its own - their
+    service exposes Rate, Shipment and Void and nothing else - so a collection
+    is asked for ALONGSIDE a parcel. The arrangement was buried in Settings and
+    applied to every booking; it can now be chosen for one job, because a
+    different job may go out with a different carrier."""
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    ok("collection_option: str = \"\"" in src, "the booking takes one")
+    i = src.index("collection_option=str(collection_option")
+    seg = ' '.join(src[i:i + 160].split())
+    ok("or cfg.get(\"collection_option\")" in seg,
+       "and falls back to the standing setting when none was chosen: " + seg[:90])
+    # It must not accept anything the courier does not offer.
+    ok("not in worldoptions.COLLECTION_OPTIONS" in src,
+       "the route validates it against the courier's own list")
+    for v in ("I_Need_To_Book_A_Collection", "I_Have_Daily_Collection",
+              "I_Already_Have_Collection_Scheduled"):
+        ok(v in worldoptions.COLLECTION_OPTIONS, "%s is a real arrangement" % v)
+
+
+@test
+def t_asking_for_a_collection_is_spent_once_it_is_used():
+    """The mistake that costs money here is asking five times in a morning and
+    being charged for five pickups."""
+    html = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    i = html.index("function renderResult(res)")
+    seg = html[i:i + 900]
+    ok("collectionForRun = null" in seg,
+       "a booking that carried the arrangement clears it")
+    ok("askedCollection" in seg,
+       "and only when it was THIS booking that carried it, not any booking")
+    ok("collection_option: askedCollection" in html,
+       "the value actually rides on the request")
+
+
+@test
 def t_an_international_postcode_is_alphanumeric_but_a_uk_one_is_untouched():
     """UPS validates the "sold to" party on an INTERNATIONAL shipment, and wants
     its fields alphanumeric. An Eircode is written with a space. Every UPS

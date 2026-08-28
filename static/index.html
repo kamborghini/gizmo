@@ -2644,7 +2644,19 @@
             svg.append(gy);
             const gx = svgEl('g', { class: 'axis-x' }), step = Math.max(1, Math.ceil(n / (c.xEvery || 6)));
             const idxs = []; for (let i = 0; i < n; i += step) idxs.push(i); if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
-            idxs.forEach(i => { const tx = svgEl('text', { x: X(i), y: H - padB + 15, 'text-anchor': 'middle' }); tx.textContent = labels[i]; gx.append(tx); });
+            /* Keep every date inside the plot. Centring one on the first or
+               last point hangs half of it over the card border, which is what
+               made the ends look squashed. The reference does the same thing:
+               its last label ends FLUSH with the right edge rather than
+               straddling it, and its first sits in from the left. An estimate
+               of half the label's width is enough to decide - it only has to
+               be right near the two edges. */
+            idxs.forEach(i => {
+                const x = X(i), halfish = String(labels[i] || '').length * 3.1;
+                const anchor = x - halfish < 2 ? 'start' : (x + halfish > W - 2 ? 'end' : 'middle');
+                const tx = svgEl('text', { x: x, y: H - padB + 15, 'text-anchor': anchor });
+                tx.textContent = labels[i]; gx.append(tx);
+            });
             svg.append(gx);
             /* No axis titles. The reference names a chart in its card header
                and puts nothing down the side of the plot. */
@@ -6013,6 +6025,15 @@
             newShip.title = 'Book a courier to an address you paste in, with no Shopify order behind it';
             newShip.onclick = openCustomShip;
             bar.append(newShip);
+            /* Says what it will do rather than only what it is: once an
+               arrangement is chosen the button carries it, so nobody has to
+               remember what the next booking is going to ask for. */
+            const coll = el('button', 'btn' + (collectionForRun ? ' on' : ''));
+            coll.append(ico(I.truck), document.createTextNode(
+                collectionForRun ? ('Collection: ' + collectionSummary()) : 'Book collection'));
+            coll.title = 'Choose how the courier collects the next parcel you book';
+            coll.onclick = openBookCollection;
+            bar.append(coll);
             if (unprinted.length && unprinted.length < printable.length) {
                 const pn = el('button', 'btn btn-primary'); pn.append(ico(I.printer), document.createTextNode('Print new (' + unprinted.length + ')'));
                 pn.onclick = () => printLabels(unprinted);
@@ -7997,10 +8018,12 @@
                     book.textContent = 'Booking with ' + (carrierLabel(chosen.carrier_name || '') || optionName(chosen))
                         + '… do not close this window';
                     x.disabled = true;
+                    const askedCollection = collectionForRun || '';
                     const doBook = (force) => api('/api/dispatch/book', {
                         order_id: o.id, name: orderNo(o), option: chosen, boxes: lastBoxes, notify: nb.checked, force: !!force,
                         insurance: lastInsurance, signature: sigSel ? sigSel.value : '',
-                        customs: quote.international ? collectCustoms() : null
+                        customs: quote.international ? collectCustoms() : null,
+                        collection_option: askedCollection
                     });
                     try {
                         let res;
@@ -8045,6 +8068,17 @@
             function renderResult(res) {
                 body.innerHTML = '';
                 const s = res.shipment || {};
+                /* The arrangement has now been carried by a real booking, so it
+                   goes back to the standing setting. Leaving it armed is how a
+                   morning of parcels turns into a morning of pickup charges. */
+                if (askedCollection && collectionForRun === askedCollection) {
+                    collectionForRun = null;
+                    if (askedCollection.indexOf('Need_To_Book') >= 0) {
+                        body.append(el('div', 'disp-ok-line',
+                            'A collection was requested with this booking. The next one goes back to '
+                            + 'your standing arrangement, so you are not charged for a second pickup.'));
+                    }
+                }
                 const okBar = el('div', 'disp-result-head');
                 okBar.append(ico(I.check), el('span', null, 'Dispatched with ' + shipmentName(s)));
                 body.append(okBar);
@@ -8143,6 +8177,61 @@
             ['phone', 'Phone', 'The courier may need it'], ['email', 'Email', 'For tracking updates'],
         ];
 
+        /* The collection arrangement for the run in progress.
+
+           World Options has no endpoint for booking a collection on its own -
+           their service exposes Rate, Shipment and Void and nothing else - so a
+           collection is always asked for ALONGSIDE a parcel. "Book collection"
+           therefore means: the next parcel you book also asks the courier to
+           come and get it.
+
+           It clears itself once a booking has carried it, because the mistake
+           that costs money here is asking five times in a morning and being
+           charged for five pickups. */
+        let collectionForRun = null;
+        const COLLECTION_LABELS = {
+            'I_Need_To_Book_A_Collection': 'Book a collection today',
+            'I_Need_To_Book_A_Collection_For_Next_Day': 'Book a collection for tomorrow',
+            'I_Have_Daily_Collection': 'We have a daily collection',
+            'I_Already_Have_Collection_Scheduled': 'A collection is already booked',
+            'I_Am_Going_To_Drop_Off_My_Packages': 'We are dropping these off',
+        };
+        function collectionSummary() {
+            return collectionForRun ? (COLLECTION_LABELS[collectionForRun] || collectionForRun) : '';
+        }
+        async function openBookCollection() {
+            const cfg = await ensureShippingCfg().catch(() => null);
+            const opts = (cfg && cfg.collection_options && cfg.collection_options.length)
+                ? cfg.collection_options : Object.keys(COLLECTION_LABELS);
+            const standing = (cfg && cfg.collection_option) || '';
+            const body = el('div');
+            body.append(el('p', 'field-help',
+                'A courier collection is arranged with the parcel, not on its own, so this '
+                + 'applies to the NEXT shipment you book. The courier is whichever service you '
+                + 'pick when you book it, so a different job can go out with a different carrier.'));
+            const sel = el('select', 'psel');
+            opts.forEach(v => {
+                const o = el('option', null, COLLECTION_LABELS[v] || v.replace(/_/g, ' '));
+                o.value = v;
+                if (v === (collectionForRun || standing)) o.selected = true;
+                sel.append(o);
+            });
+            const f = el('label', 'disp-fld');
+            f.append(el('span', 'disp-fld-lab', 'For the next booking'), sel);
+            body.append(f);
+            if (standing) {
+                body.append(el('p', 'field-help',
+                    'Your standing setting is "' + (COLLECTION_LABELS[standing] || standing)
+                    + '". Anything chosen here is used once and then goes back to it, so a '
+                    + 'morning of parcels cannot quietly book a morning of pickups.'));
+            }
+            if (!await uiConfirm(body, { title: 'Book collection', okText: 'Use for next booking' })) return;
+            collectionForRun = sel.value;
+            renderLabels();
+            addToast(sel.value === standing
+                ? 'The next booking uses your standing arrangement.'
+                : 'The next booking will ask for: ' + (COLLECTION_LABELS[sel.value] || sel.value));
+        }
         async function openCustomShip() {
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal disp-modal');
