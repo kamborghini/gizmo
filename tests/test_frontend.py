@@ -1950,6 +1950,86 @@ def t_the_table_toolbar_and_pager_match_the_reference():
     ok("total: items.length" in call, "the CRM pager counts what the search left")
 
 
+@test
+def t_the_production_toolbar_is_sorted_not_shortened():
+    """It carried twenty controls across two bars, which is the same as no order
+    at all: everything looked equally important, so nothing did. The reports and
+    the setup are behind More now. The point of this guard is the second half -
+    that sorting them did not quietly lose any of them."""
+    fn = SCRIPT.split("function renderLabels() {")[1]
+    fn = fn[:fn.index("\n        function ")]
+    ok("const qCard = el('div', 'card')" in fn, "the queue is a card, header and all")
+    ok("tableTools([findWrap, filtTabs]" in fn, "search and filters on the toolbar")
+    ok("filterTabs([['all'" in fn, "the filters are counted tabs, not a segmented control")
+    # The two page-level rails are unstyled holders now: their children are
+    # taken out and placed, and neither is ever appended to the page.
+    ok("const bar = el('div');" in fn and "const tools = el('div');" in fn,
+       "the old bars are holding rails, not layout")
+    ok("box.append(bar, tools)" not in fn, "and neither is rendered")
+    # Every action that used to be on a bar is still reachable from somewhere.
+    for handler, what in [("runCoverage", "size check"), ("printDaySheet", "day sheet"),
+                          ("openDispatchManifest", "dispatch manifest"), ("openStockUsage", "stock usage"),
+                          ("openMargins", "margins"), ("fileIn.click()", "update size list"),
+                          ("openShippingSettings", "shipping settings"), ("openCustomShip", "new shipment"),
+                          ("openBookCollection", "collections"), ("printLabels(unprinted)", "print new"),
+                          ("printLabels(printable)", "print all"),
+                          ("printShippingLabelsFor(shipLabels)", "print shipping labels"),
+                          ("loadLabels(true, true)", "refresh")]:
+        ok(handler in fn, "the " + what + " action survived the sort")
+    # The hidden file input has to travel with the menu item that opens it.
+    ok("qCard.append(fileIn)" in fn, "the size-list picker is still in the page")
+    # And the page does not print the same sentence twice.
+    ok(fn.count("el('p', null, heroCopy)") == 0, "the hero no longer repeats the queue's own line")
+    ok("el('p', 'card-desc', data.single" in fn, "which the card carries instead")
+
+
+@test
+def t_a_dropdown_menu_can_always_be_got_out_of():
+    """A menu that will not close is a modal nobody meant to open. This one shuts
+    on Escape, on a click anywhere else, on a second press of its own trigger and
+    on scrolling the page under it, and hands focus back each time. Verified in a
+    browser as well as here; the suite can only read the source."""
+    fn = SCRIPT.split("function dropMenu(anchor, items) {")[1][:3400]
+    close = SCRIPT.split("function closeDMenu() {")[1][:1200]
+    ok("dmenuOpen.anchor === anchor" in fn, "a second press of the trigger closes it")
+    ok("e.key === 'Escape'" in fn, "Escape closes it")
+    ok("!panel.contains(e.target)" in fn, "a click anywhere else closes it")
+    ok("dmenuScroller" in fn and "'scroll', closeDMenu" in fn,
+       "and it closes rather than drifting away from its own button")
+    ok("removeEventListener('keydown'" in close and "removeEventListener('pointerdown'" in close,
+       "every listener it added comes off again")
+    ok("dmenuScroller.removeEventListener('scroll'" in close,
+       "including the one on the scroller, which outlives the panel otherwise")
+    ok("anchor.focus()" in close, "and focus goes back to the button that opened it")
+    ok("aria-expanded" in fn and "aria-haspopup" in fn, "the trigger says what it does")
+    ok("ArrowDown" in fn and "ArrowUp" in fn, "and the list can be walked with the arrows")
+    # Opening one closes the other: two open menus is a state nobody can leave.
+    ok(fn.index("closeDMenu();") < fn.index("const panel = el('div', 'dmenu')"),
+       "opening a menu closes whatever was already open")
+
+
+@test
+def t_the_menu_and_tabs_are_the_reference_measurements():
+    """Read off the reference: a 10px panel whose edge is a ring rather than a
+    border, 4px of padding, 28px items at the control radius; and filter tabs
+    that are 24px, 12px, and marked by ink alone with no filled pill."""
+    panel = CSS.split(".dmenu {")[1].split("}")[0]
+    ok("border-radius: var(--r-md)" in panel, "the panel is at the base radius")
+    ok("padding: 4px" in panel, "padded 4px")
+    ok("0 0 0 1px rgba(10,10,10,.1)" in panel, "its edge is a ring, not a border")
+    ok("border:" not in panel, "and it has no border at all")
+    item = CSS.split(".dmenu-item {")[1].split("}")[0]
+    ok("height: 28px" in item, "items are 28px")
+    ok("padding: 4px 32px 4px 6px" in item, "with room on the right for a tick")
+    ok("border-radius: var(--r-sm)" in item, "at the control radius")
+    tab = CSS.split(".ftab {")[1].split("}")[0]
+    ok("height: 24px" in tab and "padding: 2px 6px" in tab, "tabs are 24px")
+    ok("background: none" in tab, "with no filled pill")
+    on = CSS.split(".ftab.on {")[1].split("}")[0]
+    ok("color: var(--ink)" in on and "background" not in on,
+       "the live tab is marked by ink alone, the way the reference marks it")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

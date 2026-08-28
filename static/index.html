@@ -1563,6 +1563,35 @@
             .tbl-pager { gap: var(--sp-4); margin-left: auto; }
             .tbl-rows { display: none; }
         }
+        /* ---------- dropdown menu, to the reference's measurements ----------
+           The panel carries no border: its edge is the same 1px ring the cards
+           use, over a two-layer shadow. Items are 28px at the control radius,
+           padded 32px on the right so a tick has somewhere to sit. */
+        .dmenu { position: fixed; z-index: 70; min-width: 128px; padding: 4px;
+            background: var(--surface); border-radius: var(--r-md);
+            box-shadow: 0 0 0 1px rgba(10,10,10,.1), 0 4px 6px -1px rgba(0,0,0,.1),
+                        0 2px 4px -2px rgba(0,0,0,.1);
+            max-height: 70vh; overflow-y: auto; }
+        .dmenu-item { display: flex; align-items: center; gap: 6px; width: 100%;
+            height: 28px; padding: 4px 32px 4px 6px; border: 0; background: none;
+            border-radius: var(--r-sm); font: inherit; font-size: var(--t-md);
+            color: var(--ink); text-align: left; cursor: pointer; white-space: nowrap; }
+        .dmenu-item:hover, .dmenu-item:focus-visible { background: var(--surface-2); outline: none; }
+        .dmenu-item[disabled] { color: var(--ink-3); cursor: not-allowed; background: none; }
+        .dmenu-item svg { width: 15px; height: 15px; flex: none; }
+        .dmenu-item .ic { color: var(--ink-3); }
+        .dmenu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+        .dmenu-label { padding: 6px 6px 2px; font-size: var(--t-xs); color: var(--ink-3); }
+        /* Filter tabs: counts in the label, no filled pill. The reference marks
+           the live one by ink alone; its inactive tabs are the foreground at
+           60%, which over white is this palette's muted ink to within a shade. */
+        .ftabs { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .ftab { height: 24px; padding: 2px 6px; border: 0; background: none;
+            border-radius: var(--r-sm); font: inherit; font-size: var(--t-xs);
+            font-weight: var(--w-medium); color: var(--ink-3); cursor: pointer;
+            white-space: nowrap; }
+        .ftab:hover { background: var(--surface-2); }
+        .ftab.on { color: var(--ink); }
         .kbadge { display: inline-block; font-size: var(--t-xs); font-weight: var(--w-medium); text-transform: none; letter-spacing: normal; padding: 2px 8px; border-radius: var(--r-pill); margin-left: 8px; background: var(--warn-bg); color: var(--warn); vertical-align: middle; flex: none; }
         .kbadge.win { background: var(--win-bg); color: var(--win); }
         .scan-card { padding: 16px 16px; margin-bottom: 12px; }
@@ -2557,6 +2586,95 @@
            A heading that introduces a ROW OF CARDS is left alone. The reference
            has those too - a group of cards under a label - and wrapping cards
            in a card is how you get a double border. */
+        /* ---------- one dropdown menu, for the whole app ----------
+           Items are {label, icon, onClick, disabled, danger, checked}, the
+           string '-' is a separator, and {label, heading:true} is a group
+           label. Opening one closes any other: two open menus is a state
+           nobody meant and nobody can get out of by clicking. */
+        let dmenuOpen = null;
+        function closeDMenu() {
+            if (!dmenuOpen) return;
+            const { panel, onKey, onDown, anchor } = dmenuOpen;
+            dmenuOpen = null;
+            panel.remove();
+            document.removeEventListener('keydown', onKey, true);
+            document.removeEventListener('pointerdown', onDown, true);
+            window.removeEventListener('resize', closeDMenu);
+            /* Scroll listener was captured on the way in, so it comes off the
+               same way: a menu left listening to a scroller it no longer has a
+               panel for is a leak that only shows up after a long shift. */
+            if (dmenuScroller) { dmenuScroller.removeEventListener('scroll', closeDMenu); dmenuScroller = null; }
+            if (anchor) { anchor.setAttribute('aria-expanded', 'false'); if (anchor.focus) anchor.focus(); }
+        }
+        let dmenuScroller = null;
+        function dropMenu(anchor, items) {
+            /* A second click on the same trigger closes it, which is what every
+               menu everywhere does and what the hand expects. */
+            if (dmenuOpen && dmenuOpen.anchor === anchor) { closeDMenu(); return; }
+            closeDMenu();
+            const panel = el('div', 'dmenu');
+            panel.setAttribute('role', 'menu');
+            (items || []).filter(Boolean).forEach(it => {
+                if (it === '-') { panel.append(el('div', 'dmenu-sep')); return; }
+                if (it.heading) { panel.append(el('div', 'dmenu-label', it.label)); return; }
+                const b = el('button', 'dmenu-item');
+                b.type = 'button';
+                b.setAttribute('role', 'menuitem');
+                if (it.icon) b.append(ico(it.icon));
+                b.append(el('span', null, it.label));
+                if (it.title) b.title = it.title;
+                if (it.disabled) b.disabled = true;
+                else b.onclick = () => { closeDMenu(); it.onClick(); };
+                panel.append(b);
+            });
+            document.body.append(panel);
+            const r = anchor.getBoundingClientRect();
+            const pw = panel.offsetWidth, ph = panel.offsetHeight;
+            /* Right-aligned to the trigger when left-aligning would run off the
+               screen, and flipped above when there is no room below. */
+            let left = r.left;
+            if (left + pw > window.innerWidth - 8) left = Math.max(8, r.right - pw);
+            let top = r.bottom + 4;
+            if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 4);
+            panel.style.left = Math.round(left) + 'px';
+            panel.style.top = Math.round(top) + 'px';
+            const buttons = () => [...panel.querySelectorAll('.dmenu-item:not([disabled])')];
+            const onKey = (e) => {
+                if (e.key === 'Escape') { e.stopPropagation(); closeDMenu(); return; }
+                if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+                e.preventDefault();
+                const bs = buttons(); if (!bs.length) return;
+                const i = bs.indexOf(document.activeElement);
+                const next = e.key === 'ArrowDown' ? (i + 1) % bs.length : (i <= 0 ? bs.length - 1 : i - 1);
+                bs[next].focus();
+            };
+            const onDown = (e) => { if (!panel.contains(e.target) && e.target !== anchor) closeDMenu(); };
+            document.addEventListener('keydown', onKey, true);
+            document.addEventListener('pointerdown', onDown, true);
+            window.addEventListener('resize', closeDMenu);
+            /* Fixed position cannot follow a scrolling page, so it closes
+               instead of drifting away from the button that opened it. */
+            dmenuScroller = anchor.closest('.scroll') || null;
+            if (dmenuScroller) dmenuScroller.addEventListener('scroll', closeDMenu);
+            anchor.setAttribute('aria-haspopup', 'menu');
+            anchor.setAttribute('aria-expanded', 'true');
+            dmenuOpen = { panel, onKey, onDown, anchor };
+            const first = buttons()[0]; if (first) first.focus();
+        }
+        /* A row of filter tabs with their counts in the label, the way the
+           reference writes them: "All (156)", and the live one marked by ink. */
+        function filterTabs(options, current, onPick) {
+            const bar = el('div', 'ftabs');
+            options.forEach(([key, label]) => {
+                const b = el('button', 'ftab' + (current === key ? ' on' : ''), label);
+                b.type = 'button';
+                b.setAttribute('aria-pressed', current === key ? 'true' : 'false');
+                b.onclick = () => onPick(key);
+                bar.append(b);
+            });
+            return bar;
+        }
+
         /* ---------- the reference's table card, in three pieces ----------
            A search field, a toolbar to hang it and the filters on, and a pager.
            Pieces rather than one component on purpose: the tables in this app
@@ -6176,7 +6294,12 @@
                 : unproc ? 'New orders not yet released to the workbench. Press Ready to make when one should join the To make queue.'
                 : 'Orders tagged "' + (data.tag || LABEL_TAG) + '". Select an order to preview its label, then print.';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
-            const ht = el('div'); ht.append(el('h2', null, 'Production Manager'), el('p', null, heroCopy));
+            /* The page says what the page is; the queue card below says what
+               THIS queue is. Printing heroCopy in both put the same sentence on
+               the screen twice, six lines apart. */
+            const ht = el('div'); ht.append(el('h2', null, 'Production Manager'),
+                el('p', null, 'The bench queue, from a new order through to a booked courier. '
+                    + 'Pick a queue below, then an order to work on.'));
             hero.append(badge, ht);
             hero.append(el('div', 'ov-updated', freshLabel(labelsCache.at)));
             box.append(hero);
@@ -6194,12 +6317,16 @@
             });
             box.append(seg);
 
-            const bar = el('div', 'lbl-toolbar');
-            const tools = el('div', 'lbl-tools');    // reports and setup: quieter, second
-            const reload = el('button', 'btn'); reload.append(ico(I.refresh), document.createTextNode('Refresh')); reload.onclick = () => loadLabels(true, true);
+            /* Two holding rails. Everything below still builds into them so the
+               construction reads as it always has; the composition at the end
+               takes the named buttons out and puts them where they belong. */
+            const bar = el('div');
+            const tools = el('div');
+            let pnBtn = null, allBtn = null, slBtn = null, filtTabs = null;
+            const reload = el('button', 'btn btn-sm'); reload.append(ico(I.refresh), document.createTextNode('Refresh')); reload.onclick = () => loadLabels(true, true);
             bar.append(reload);
             // A parcel that is not an order: paste an address and book it.
-            const newShip = el('button', 'btn');
+            const newShip = el('button', 'btn btn-sm');
             newShip.append(ico(I.truck), document.createTextNode('New shipment'));
             newShip.title = 'Book a courier to an address you paste in, with no Shopify order behind it';
             newShip.onclick = openCustomShip;
@@ -6207,22 +6334,22 @@
             /* Says what it will do rather than only what it is: once an
                arrangement is chosen the button carries it, so nobody has to
                remember what the next booking is going to ask for. */
-            const coll = el('button', 'btn' + (collectionForRun ? ' on' : ''));
+            const coll = el('button', 'btn btn-sm' + (collectionForRun ? ' on' : ''));
             coll.append(ico(I.truck), document.createTextNode(
                 collectionForRun ? ('Collection: ' + collectionSummary()) : 'Collections'));
             coll.title = 'How each courier collects, and a one-off change for the next booking';
             coll.onclick = openBookCollection;
             bar.append(coll);
             if (unprinted.length && unprinted.length < printable.length) {
-                const pn = el('button', 'btn btn-primary'); pn.append(ico(I.printer), document.createTextNode('Print new (' + unprinted.length + ')'));
-                pn.onclick = () => printLabels(unprinted);
-                bar.append(pn);
+                pnBtn = el('button', 'btn btn-sm btn-primary');
+                pnBtn.append(ico(I.printer), document.createTextNode('Print new (' + unprinted.length + ')'));
+                pnBtn.onclick = () => printLabels(unprinted);
             }
             if (printable.length) {
                 // Cancelled, refunded and already-fulfilled orders never join a bulk print.
-                const all = el('button', 'btn'); all.append(ico(I.printer), document.createTextNode('Print all (' + printable.length + ')'));
-                all.onclick = () => printLabels(printable);
-                bar.append(all);
+                allBtn = el('button', 'btn btn-sm');
+                allBtn.append(ico(I.printer), document.createTextNode('Print all (' + printable.length + ')'));
+                allBtn.onclick = () => printLabels(printable);
             }
             /* Courier labels for everything in view that has actually been
                dispatched. Separate from the gobo-label buttons above: that
@@ -6230,26 +6357,24 @@
                4x6 sheet, and they are never the same run. */
             const shipLabels = shown.filter(shipLabelEligible);
             if (shipLabels.length) {
-                const sl = el('button', 'btn');
-                sl.append(ico(I.truck), document.createTextNode(
+                slBtn = el('button', 'btn btn-sm');
+                slBtn.append(ico(I.truck), document.createTextNode(
                     'Print shipping labels (' + shipLabels.length + ')'));
-                sl.title = 'Reprint the courier labels for dispatched orders in this list';
-                sl.onclick = () => printShippingLabelsFor(shipLabels);
-                bar.append(sl);
+                slBtn.title = 'Reprint the courier labels for dispatched orders in this list';
+                slBtn.onclick = () => printShippingLabelsFor(shipLabels);
             }
             if (!dispatched) {
-                const filt = el('div', 'lbl-seg tight');
-                [['all', 'All'], ['unprinted', 'Unprinted (' + unprinted.length + ')'], ['unmade', 'Not made (' + unmade.length + ')']].forEach(([k, lab]) => {
-                    const b = el('button', 'lbl-segbtn' + (labelsFilter === k ? ' on' : ''), lab);
-                    b.onclick = () => { labelsFilter = k; renderLabels(); };
-                    filt.append(b);
-                });
-                bar.append(filt);
+                filtTabs = filterTabs([['all', 'All (' + printable.length + ')'],
+                                       ['unprinted', 'Unprinted (' + unprinted.length + ')'],
+                                       ['unmade', 'Not made (' + unmade.length + ')']],
+                                      labelsFilter, (k) => { labelsFilter = k; renderLabels(); });
             }
-            const find = document.createElement('input');
-            find.type = 'search'; find.className = 'lbl-size lbl-find';
-            find.placeholder = 'Find order or customer';
-            find.value = labelsSearch;
+            const findWrap = tableSearch('Find order, customer or tracking', labelsSearch, null);
+            const find = findWrap.input;
+            find.classList.add('lbl-find');
+            /* Debounced, and the caret is put back where it was: this repaints
+               the whole queue, and a search that loses its own cursor after
+               every letter cannot be typed into. */
             find.oninput = () => {
                 labelsSearch = find.value.trim();
                 clearTimeout(find._t);
@@ -6259,8 +6384,7 @@
                     if (again) { again.focus(); try { again.setSelectionRange(at, at); } catch (e) {} }
                 }, 180);
             };
-            bar.append(find);
-            const oldf = el('button', 'btn' + (labelsOldest ? ' on' : ''));
+            const oldf = el('button', 'btn btn-sm' + (labelsOldest ? ' on' : ''));
             oldf.append(ico(I.up), document.createTextNode(labelsOldest ? 'Oldest first' : 'Newest first'));
             oldf.title = 'Flip the queue order';
             oldf.onclick = () => { labelsOldest = !labelsOldest; renderLabels(); };
@@ -6323,22 +6447,59 @@
             shipBtn.title = 'Connect World Options and set your dispatch address, boxes and options';
             shipBtn.onclick = openShippingSettings;
             tools.append(shipBtn);
-            tools.append(el('div', 'lbl-count', data.single ? 'Opened from the order page. Refresh shows the full production list.'
-                : (orders.length + (orders.length === 1 ? ' order' : ' orders') + (dispatched ? ' dispatched' : shipMode ? ' ready to ship' : ' in production'))));
-            box.append(bar, tools);
             if (labelsMissing && labelsMissing.data && (labelsMissing.data.missing || []).length) box.append(missingStrip());
             if (labelsCoverage) box.append(coverageCard());
+
+            /* The queue, composed the way the reference composes a list page: a
+               counted title with one line saying what this queue is, the few
+               actions the bench actually presses beside it, the search and the
+               filters on a toolbar under that, then the list.
+
+               It was twenty controls across two bars, which is the same as no
+               order at all: everything looked equally important, so nothing
+               did. Nothing has been taken away, only sorted. */
+            const qCard = el('div', 'card');
+            const qHead = el('div', 'card-head');
+            qHead.append(el('h3', 'card-title', data.single
+                ? 'One order'
+                : orders.length + (orders.length === 1 ? ' order' : ' orders')
+                  + (dispatched ? ' dispatched' : shipMode ? ' ready to ship'
+                     : unproc ? ' waiting' : ' in production')));
+            qHead.append(el('p', 'card-desc', data.single
+                ? 'Opened from the order page. Refresh shows the full production list.'
+                : heroCopy));
+            const qAct = el('div', 'card-act');
+            const more = el('button', 'btn btn-sm');
+            more.append(ico(I.grid), document.createTextNode('More'));
+            more.title = 'Reports and setup';
+            more.onclick = () => dropMenu(more, [
+                { label: 'Size check', icon: I.check, title: cov.title, onClick: runCoverage },
+                { label: 'Day sheet', icon: I.grid, title: day.title, onClick: printDaySheet },
+                { label: 'Dispatch manifest', icon: I.truck, title: dm.title, onClick: openDispatchManifest },
+                { label: 'Stock usage', icon: I.box, title: su.title, onClick: openStockUsage },
+                { label: 'Margins', icon: I.spark, title: mg.title, onClick: openMargins },
+                '-',
+                { label: 'Update size list', icon: I.plus, title: upBtn.title, onClick: () => fileIn.click() },
+                { label: 'Shipping settings', icon: I.settings, title: shipBtn.title, onClick: openShippingSettings },
+            ]);
+            [pnBtn, coll, newShip, reload, more].filter(Boolean).forEach(b => qAct.append(b));
+            qHead.append(qAct);
+            qCard.append(qHead);
+            qCard.append(tableTools([findWrap, filtTabs],
+                                    [allBtn, slBtn, oldf, sizeSel].filter(Boolean)));
+            qCard.append(fileIn);          // the hidden picker More reaches for
+            box.append(qCard);
 
             if (!orders.length) {
                 const emptyCopy = dispatched ? 'No orders have been dispatched yet. Dispatch one from the "To ship" queue.'
                     : queueMode === 'ship' ? 'Nothing is ready to ship. Mark orders made in "To make" to move them here.'
                     : unproc ? 'Nothing is waiting. New orders tagged "Unprocessed" in Shopify will appear here for release.'
                     : 'No orders are currently tagged "' + (data.tag || LABEL_TAG) + '". Add that tag to an order in Shopify and refresh.';
-                box.append(el('div', 'empty', emptyCopy));
+                qCard.append(el('div', 'empty', emptyCopy));
                 return;
             }
             if (!shown.length) {
-                box.append(el('div', 'empty', labelsSearch
+                qCard.append(el('div', 'empty', labelsSearch
                     ? ('Nothing in this queue matches "' + labelsSearch + '". Clear the search, or check another queue tab.')
                     : (labelsFilter === 'unprinted' ? 'Every live order has been printed.' : 'Every live order is marked made.')));
                 return;
@@ -6349,12 +6510,12 @@
                rest of the queue moves. Below 1500px it stays inline, which is
                right on a tablet where there is no room for a second column. */
             const wideSplit = window.matchMedia('(min-width: 1500px)').matches;
-            const list = wideSplit ? el('div', 'lbl-list') : box;
+            const list = wideSplit ? el('div', 'lbl-list') : qCard;
             const pane = wideSplit ? el('aside', 'lbl-pane') : null;
             if (wideSplit) {
                 const split = el('div', 'lbl-split');
                 split.append(list, pane);
-                box.append(split);
+                qCard.append(split);
             }
             shown.forEach(o => {
                 const st = prodStateOf(o);
