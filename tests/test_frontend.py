@@ -1808,6 +1808,90 @@ def t_connecting_reports_its_own_outcome():
     ok("callback URL missing" in fn, "naming the usual cause when it times out")
 
 
+@test
+def t_a_charged_booking_can_never_leave_a_blank_window():
+    """Reported live: "the window with the tracking is blank until i close it and
+    press the shipment button again".
+
+    Both result panels used to clear the body FIRST and append as they went, so
+    anything that threw part way through left an empty window - after the courier
+    was booked and the account charged, with the tracking number nowhere on
+    screen. They build off screen now and swap in one go, so a throw leaves what
+    was there, and the fallback still puts the tracking number up."""
+    for name, res in (("renderResult", "res"), ("renderBooked", "r")):
+        fn = SCRIPT.split("function " + name + "(" + res + ") {")[1]
+        fn = fn[:fn.index("\n            function ")]
+        swap = fn.index("body.innerHTML = '';")
+        ok(fn.count("body.innerHTML = '';") == 1, name + " clears the body exactly once")
+        ok("body.append(out);" in fn, name + " swaps the finished panel in")
+        # Nothing may touch the live body before the swap.
+        ok("body.append" not in fn[:swap], name + " builds nothing into the live window")
+        ok("labelButtons(body" not in fn, name + " does not hand the live window to labelButtons")
+        ok(fn.index("const out = el('div');") < swap, name + " builds off screen first")
+
+    # The safe wrappers are what the booking actually calls.
+    ok("renderResultSafe(res);" in SCRIPT and "renderBookedSafe(r);" in SCRIPT,
+       "both booking paths go through the wrapper")
+    body = SCRIPT.split("try { res = await doBook(false); }")[1][:2600]
+    ok("renderResult(res);" not in body, "and never call the bare renderer after a charge")
+    for name in ("renderResultSafe", "renderBookedSafe"):
+        fn = SCRIPT.split("function " + name + "(")[1][:1800]
+        ok("tracking_number" in fn, name + " still shows the tracking number")
+        ok("catch (e2)" in fn, name + " has a last resort with no helpers in it")
+
+
+@test
+def t_a_double_click_cannot_book_twice():
+    """The Book button was disabled AFTER the confirm dialog was answered, so a
+    reflex double click opened two dialogs - and answering both booked, and paid
+    for, two labels on one order."""
+    for anchor, btn in (("This books the courier and charges your World Options account.", "book"),
+                        ("? Your World Options account is charged.", "bk")):
+        i = SCRIPT.index(anchor)
+        seg = SCRIPT[max(0, i - 700):i]
+        ok(btn + ".disabled = true;" in seg,
+           "the button is disabled before the question is asked (" + btn + ")")
+        after = SCRIPT[i:i + 400]
+        ok(btn + ".disabled = false; return;" in after,
+           "and armed again only if the answer is no (" + btn + ")")
+
+
+@test
+def t_a_failed_booking_reports_where_it_can_be_seen():
+    """The error was appended to the confirm card, which a half-drawn result may
+    already have detached. An error nobody can see is not a report."""
+    seg = SCRIPT.split("const unknown = e.noReply")[1][:1400]
+    ok("conf.isConnected ? conf : body" in seg,
+       "it goes wherever is still on screen")
+    ok("conf.append" not in seg, "and never straight into a card that may be gone")
+
+
+@test
+def t_a_tab_left_open_is_told_it_is_out_of_date():
+    """Shopify admin holds an embedded app open for days. A tab left open across
+    a deploy keeps running the old JavaScript, which from the desk is invisible:
+    it looks exactly like a bug that has already been fixed."""
+    ok("const MY_BUILD = (() => {" in SCRIPT, "the page knows which build it is")
+    ok('meta[name="app-build"]' in SCRIPT, "read off a marker the server puts in the page")
+    ok("/assets/app.js?v=" not in SCRIPT.split("const MY_BUILD")[1][:400],
+       "never the asset hash: that one is a key to the client source, not an id")
+    ok("noteBuild(res.headers.get('X-App-Build'))" in SCRIPT,
+       "and compares it against the build the server replies with")
+    fn = SCRIPT.split("function noteBuild(serverBuild) {")[1][:1400]
+    ok("serverBuild === MY_BUILD" in fn and "!MY_BUILD" in fn,
+       "it says nothing when they match, or when the page cannot tell")
+    ok("location.reload()" in fn and "go.onclick" in fn,
+       "reloading is a button, never automatic: a booking must not be interrupted")
+    ok("setTimeout" not in fn and "setInterval" not in fn, "and nothing reloads on a timer")
+    # Below the modal layer, so it can never cover a booking window.
+    bar = CSS.split(".build-bar {")[1][:400]
+    z = int(re.search(r"z-index:\s*(\d+)", bar).group(1))
+    mz = re.search(r"\.modal-overlay \{[^}]*z-index:\s*(\d+)", CSS)
+    ok(mz is not None, "the modal layer still declares a z-index")
+    modal = int(mz.group(1))
+    ok(z < modal, "the notice sits under any open modal (%d < %d)" % (z, modal))
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

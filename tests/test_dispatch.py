@@ -11977,6 +11977,58 @@ def t_the_latest_booking_of_the_day_is_the_one_that_counts():
 
 
 @test
+def t_every_reply_says_which_build_answered_it():
+    """Shopify admin holds an embedded app open for days, so a tab can outlive
+    several deploys and keep running the old page. From the desk that is
+    invisible: it looks exactly like a bug that was already fixed. Every reply
+    carries the hash of the JavaScript this server serves, and the page compares
+    it against the one it was loaded with."""
+    got = client.post("/api/dispatch/collections", json={})   # no auth needed: 401 is a reply too
+    build = got.headers.get("X-App-Build")
+    ok(build, "the header is there whatever the outcome (status %s)" % got.status_code)
+    ok(len(build) >= 8, "long enough not to collide between builds")
+    # NOT the asset hash. That hash is the token /assets/app.js checks before it
+    # serves, and this header rides on unauthenticated replies too - publishing
+    # it would hand the app's whole client source to anyone who called an
+    # endpoint. Proved by asking for the source with the header's value.
+    ok(build != copilot._asset_hashes.get("js"),
+       "the header is not the token that unlocks the client source")
+    leak = client.get("/assets/app.js?v=" + build)
+    eq(leak.status_code, 404, "and it does not open that door")
+    shell, _assets = copilot._page_parts()
+    ok('content="%s"' % build in shell, "the page carries the same marker to compare against")
+    ok('content="%s"' % copilot._asset_hashes.get("js") not in shell,
+       "and the page never prints the asset token as a build marker")
+    # It follows the file: change the JS and the header changes with it.
+    import copy as _copy
+    saved = (copilot._page_cache, copilot._page_assets, dict(copilot._asset_hashes))
+    try:
+        copilot._page_cache = None
+        copilot._page_assets = None
+        copilot._asset_hashes.clear()
+        real = copilot._PAGE_PATH
+        with open(real, encoding="utf-8") as fh:
+            page = fh.read()
+        import tempfile as _tf
+        with _tf.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as fh:
+            fh.write(page.replace("<script>\n    (function ()",
+                                  "<script>\n    (function () /*moved*/", 1))
+            tmp = fh.name
+        copilot._PAGE_PATH = tmp
+        moved = copilot._build_id()
+        ok(moved and moved != build, "a changed page is a changed build id")
+    finally:
+        copilot._PAGE_PATH = real
+        copilot._page_cache, copilot._page_assets = saved[0], saved[1]
+        copilot._asset_hashes.clear(); copilot._asset_hashes.update(saved[2])
+        try:
+            os.unlink(tmp)
+        except Exception:
+            pass
+    eq(copilot._build_id(), build, "and the real one is unchanged afterwards")
+
+
+@test
 def t_a_collection_belongs_to_the_day_the_van_comes():
     """Found auditing this week's work. Every other dispatch date in the app is
     reckoned in Europe/London and the ready window can push a booking to the
@@ -12282,11 +12334,13 @@ def t_asking_for_a_collection_is_spent_once_it_is_used():
     being charged for five pickups."""
     html = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
     i = html.index("function renderResult(res)")
-    seg = html[i:i + 900]
-    ok("collectionForRun = null" in seg,
-       "a booking that carried the arrangement clears it")
-    ok("askedCollection" in seg,
-       "and only when it was THIS booking that carried it, not any booking")
+    seg = html[i:html.index("function renderResultSafe(", i)]
+    ok("collectionForRun === askedCollection" in seg,
+       "a booking that carried the arrangement clears it, and only THAT booking")
+    # After the panel is on screen, not before it: clearing first and then
+    # failing to paint would drop the arrangement without ever saying so.
+    ok(seg.index("collectionForRun = null") > seg.index("body.append(out);"),
+       "and only once the result is actually up")
     ok("collection_option: askedCollection" in html,
        "the value actually rides on the request")
 

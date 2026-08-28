@@ -1831,6 +1831,16 @@
         .toast-x svg { width: 14px; height: 14px; }
         .toast.out { opacity: 0; transition: opacity .32s; }
         @keyframes toastin { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+        /* Says the tab is out of date. Deliberately a bar and not a dialog, and
+           BELOW the modal layer (50) on purpose: a booking window must never be
+           covered by a notice about versions. It never reloads on its own. */
+        .build-bar { position: fixed; left: 16px; bottom: 16px; z-index: 40; max-width: 460px;
+            display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap;
+            background: var(--surface); border: 1px solid var(--border-2); border-left: 3px solid var(--accent);
+            border-radius: var(--r-sm); padding: 12px 14px; box-shadow: var(--sh-2);
+            font-size: var(--t-md); color: var(--ink); line-height: 1.42; }
+        .build-bar span { flex: 1 1 100%; }
+        @media print { .build-bar { display: none !important; } }
         body.printing-label #toast-host { display: none !important; }
         .confirm-overlay { z-index: 60; }
         .confirm-modal { max-width: 460px; width: 92vw; }
@@ -2293,6 +2303,32 @@
         let memSession = '';   // storage can be blocked in some browsers; memory carries the page
         function appSession() { try { return localStorage.getItem('sc_app_session') || memSession; } catch (e) { return memSession; } }
         function setAppSession(t) { memSession = t || ''; try { t ? localStorage.setItem('sc_app_session', t) : localStorage.removeItem('sc_app_session'); } catch (e) {} }
+        /* Which build this PAGE is running. A tab left open across a deploy
+           keeps running the old JavaScript, which is invisible from the desk
+           and looks exactly like a bug that has already been fixed. Every API
+           reply carries the build the SERVER is on, and the two are compared. */
+        const MY_BUILD = (() => {
+            try {
+                const m = document.querySelector('meta[name="app-build"]');
+                return (m && m.getAttribute('content')) || '';
+            } catch (e) { return ''; }
+        })();
+        let buildBar = null;
+        function noteBuild(serverBuild) {
+            if (!serverBuild || !MY_BUILD || serverBuild === MY_BUILD || buildBar) return;
+            buildBar = el('div', 'build-bar');
+            buildBar.append(el('span', null,
+                'gizmo has been updated since this tab was opened, so it is still running the '
+                + 'old version. Reload when you are between jobs.'));
+            const go = el('button', 'btn btn-primary', 'Reload');
+            go.onclick = () => location.reload();
+            const later = el('button', 'btn', 'Not now');
+            /* Dismissed for this tab only, and it comes back on the next open:
+               nagging is worse than useless, but so is letting it be forgotten. */
+            later.onclick = () => { buildBar.remove(); };
+            buildBar.append(go, later);
+            document.body.append(buildBar);
+        }
         async function api(path, payload) {
             const hdrs = Object.assign({ 'Content-Type': 'application/json' }, await authHeaders());
             const sess = appSession();
@@ -2302,6 +2338,7 @@
                 headers: hdrs,
                 body: JSON.stringify(payload || {}),
             });
+            try { noteBuild(res.headers.get('X-App-Build')); } catch (e) {}
             if (res.status === 401) {
                 // The embed token was fine, so this is the app's own door: the
                 // session is missing or expired. Show the login screen.
@@ -8060,8 +8097,12 @@
                     }
                     const cprob = customsProblem();
                     if (cprob) { addToast(cprob); return; }
-                    if (!await uiConfirm('Book ' + optionName(chosen) + ' for ' + fmtPrice(chosen.amount, chosen.currency) + ' inc VAT?\n\nThis books the courier and charges your World Options account.', { title: 'Book this courier', okText: 'Book & dispatch' })) return;
-                    book.disabled = true; booking = true;
+                    /* Disabled BEFORE the question, not after it. A double click
+                       used to open two confirm dialogs, and answering both booked
+                       and paid for two labels on one order. */
+                    book.disabled = true;
+                    if (!await uiConfirm('Book ' + optionName(chosen) + ' for ' + fmtPrice(chosen.amount, chosen.currency) + ' inc VAT?\n\nThis books the courier and charges your World Options account.', { title: 'Book this courier', okText: 'Book & dispatch' })) { book.disabled = false; return; }
+                    booking = true;
                     book.textContent = 'Booking with ' + (carrierLabel(chosen.carrier_name || '') || optionName(chosen))
                         + '… do not close this window';
                     x.disabled = true;
@@ -8084,8 +8125,10 @@
                         booking = false; x.disabled = false;
                         quoteCache.delete(String(o.id));
                         setDispatchState(o.id, res.dispatch || {});
-                        renderResult(res);
-                        if (labelsCache && document.querySelector('#view-labels.active')) renderLabels();
+                        renderResultSafe(res);
+                        // The queue behind this window is a nicety; the result is not.
+                        try { if (labelsCache && document.querySelector('#view-labels.active')) renderLabels(); }
+                        catch (e) { addToast('The result is below. The queue behind this window could not be redrawn; press Refresh when you are done.'); }
                     } catch (e) {
                         booking = false; x.disabled = false;
                         const msg = String(e.message || 'Booking failed');
@@ -8098,12 +8141,17 @@
                            precisely the moment somebody needs to see what was sent,
                            and a shut drawer marked "technical details" is a drawer
                            nobody opens. The label path already did this. */
+                        /* The confirm card is inside the body, and a result that
+                           got half way through drawing may have replaced it. An
+                           error appended to a detached card is an error nobody
+                           ever sees, so it goes wherever is still on screen. */
+                        const host = conf.isConnected ? conf : body;
                         if (tech) { tech.open = true;
-                            conf.querySelectorAll('.disp-tech').forEach(n => n.remove()); conf.append(tech); }
+                            host.querySelectorAll('.disp-tech').forEach(n => n.remove()); host.append(tech); }
                         if (unknown) {
                             book.textContent = 'Check before booking again';
                             const warn = el('div', 'disp-warn', msg + ' Close this window, press Refresh, and look for a BOOKED chip on the order before trying again.');
-                            conf.append(warn);
+                            host.append(warn);
                         } else {
                             book.disabled = false; setLabel();
                         }
@@ -8112,50 +8160,91 @@
                 conf.append(book);
             }
 
+            /* The courier is booked and the account is charged before any of
+               this runs, so nothing here may leave the operator with an empty
+               window. The result is built OFF SCREEN and swapped in once: a
+               throw half way through leaves what was already on screen, and the
+               fallback below still puts the tracking number in front of them.
+               Clearing the body first and appending as we went is exactly how a
+               charged booking once showed a blank panel. */
             function renderResult(res) {
-                body.innerHTML = '';
+                const out = el('div');
                 const s = res.shipment || {};
-                /* The arrangement has now been carried by a real booking, so it
-                   goes back to the standing setting. Leaving it armed is how a
-                   morning of parcels turns into a morning of pickup charges. */
+                let clearArranged = false;
                 if (askedCollection && collectionForRun === askedCollection) {
-                    collectionForRun = null;
+                    clearArranged = true;
                     if (askedCollection.indexOf('Need_To_Book') >= 0) {
-                        body.append(el('div', 'disp-ok-line',
+                        out.append(el('div', 'disp-ok-line',
                             'A collection was requested with this booking. The next one goes back to '
                             + 'your standing arrangement, so you are not charged for a second pickup.'));
                     }
                 }
                 const okBar = el('div', 'disp-result-head');
                 okBar.append(ico(I.check), el('span', null, 'Dispatched with ' + shipmentName(s)));
-                body.append(okBar);
-                const tb = el('div', 'disp-track'); tb.append(el('span', null, 'Tracking '), el('b', null, s.tracking_number || '(pending)')); body.append(tb);
+                out.append(okBar);
+                const tb = el('div', 'disp-track'); tb.append(el('span', null, 'Tracking '), el('b', null, s.tracking_number || '(pending)')); out.append(tb);
                 if (s.amount != null) {
-                    body.append(el('div', 'sub', 'Quoted ' + fmtPrice(s.amount, s.currency) + ' inc VAT'
+                    out.append(el('div', 'sub', 'Quoted ' + fmtPrice(s.amount, s.currency) + ' inc VAT'
                         + (s.amount_ex_vat != null && s.vat ? ' (' + fmtPrice(s.amount_ex_vat, s.currency) + ' ex VAT)' : '')
                         + '. Your World Options invoice shows the final charge.'));
                 }
-                if (res.warning) body.append(el('div', 'disp-warn', res.warning));
-                if (s.collection_date) body.append(el('div', 'sub',
+                if (res.warning) out.append(el('div', 'disp-warn', res.warning));
+                if (s.collection_date) out.append(el('div', 'sub',
                     'Collection reference: ' + collRefText(s.collection_date)));
-                if (res.insured) body.append(el('div', 'sub', 'Insured for ' + fmtPrice(parseFloat(res.insured), s.currency) + '.'));
-                if (res.delivery_shop) body.append(el('div', 'disp-warn', 'The customer collects this from ' + res.delivery_shop + '. It is not delivered to their address.'));
-                if (res.dropoff_shop) body.append(el('div', 'disp-warn', 'Drop the parcel at: ' + [res.dropoff_shop.name, res.dropoff_shop.street, res.dropoff_shop.city, res.dropoff_shop.postcode].filter(Boolean).join(', ') + '. The courier will NOT collect from you.'));
-                if (res.international) body.append(el('div', 'sub', 'Customs declaration sent; World Options generates the commercial invoice.'));
-                if (res.contact_note) body.append(el('div', 'disp-warn', res.contact_note));
-                if (res.book_note) body.append(el('div', 'disp-warn', res.book_note));
+                if (res.insured) out.append(el('div', 'sub', 'Insured for ' + fmtPrice(parseFloat(res.insured), s.currency) + '.'));
+                if (res.delivery_shop) out.append(el('div', 'disp-warn', 'The customer collects this from ' + res.delivery_shop + '. It is not delivered to their address.'));
+                if (res.dropoff_shop) out.append(el('div', 'disp-warn', 'Drop the parcel at: ' + [res.dropoff_shop.name, res.dropoff_shop.street, res.dropoff_shop.city, res.dropoff_shop.postcode].filter(Boolean).join(', ') + '. The courier will NOT collect from you.'));
+                if (res.international) out.append(el('div', 'sub', 'Customs declaration sent; World Options generates the commercial invoice.'));
+                if (res.contact_note) out.append(el('div', 'disp-warn', res.contact_note));
+                if (res.book_note) out.append(el('div', 'disp-warn', res.book_note));
                 const f = res.fulfillment || {};
                 if (res.awaiting_made) {
-                    body.append(el('div', 'disp-await', 'Not shipped yet. Shopify stays unfulfilled and the customer is not emailed until you mark this order made.'));
+                    out.append(el('div', 'disp-await', 'Not shipped yet. Shopify stays unfulfilled and the customer is not emailed until you mark this order made.'));
                 }
-                else if (f.ok) body.append(el('div', 'disp-ok-line', res.notified ? 'Order marked fulfilled in Shopify and the customer was emailed tracking.' : 'Order marked fulfilled in Shopify.'));
-                else if (f.reason === 'permission') body.append(el('div', 'disp-warn', 'Booked, but the app could not mark the order fulfilled (missing the write_fulfillments permission). Fulfil it manually in Shopify, or grant the permission and it will work next time.'));
-                else if (f.reason === 'nothing_to_fulfill') body.append(el('div', 'sub', 'Shopify had nothing left to fulfil for this order.'));
-                else if (f.reason && f.reason !== 'not_attempted') body.append(el('div', 'disp-warn', f.detail || 'Shopify fulfillment could not be completed.'));
-                if (res.tag && !res.tag.ok && res.tag.note) body.append(el('div', 'disp-warn', res.tag.note));
-                labelButtons(body, s.labels);
+                else if (f.ok) out.append(el('div', 'disp-ok-line', res.notified ? 'Order marked fulfilled in Shopify and the customer was emailed tracking.' : 'Order marked fulfilled in Shopify.'));
+                else if (f.reason === 'permission') out.append(el('div', 'disp-warn', 'Booked, but the app could not mark the order fulfilled (missing the write_fulfillments permission). Fulfil it manually in Shopify, or grant the permission and it will work next time.'));
+                else if (f.reason === 'nothing_to_fulfill') out.append(el('div', 'sub', 'Shopify had nothing left to fulfil for this order.'));
+                else if (f.reason && f.reason !== 'not_attempted') out.append(el('div', 'disp-warn', f.detail || 'Shopify fulfillment could not be completed.'));
+                if (res.tag && !res.tag.ok && res.tag.note) out.append(el('div', 'disp-warn', res.tag.note));
+                labelButtons(out, s.labels);
                 const done = el('button', 'btn'); done.style.marginTop = '14px'; done.textContent = 'Done'; done.onclick = close;
-                body.append(done);
+                out.append(done);
+                body.innerHTML = '';
+                body.append(out);
+                /* Only now that a real booking has carried it: leaving it armed
+                   is how a morning of parcels turns into a morning of pickup
+                   charges, and clearing it before the paint could throw would
+                   lose the arrangement without ever saying so. */
+                if (clearArranged) collectionForRun = null;
+            }
+
+            /* Whatever goes wrong drawing the result, the tracking number reaches
+               the desk. Money has already moved by the time this is called. */
+            function renderResultSafe(res) {
+                try { renderResult(res); return; }
+                catch (err) {
+                    const tn = (((res || {}).shipment) || {}).tracking_number || '';
+                    try {
+                        body.innerHTML = '';
+                        const h = el('div', 'disp-result-head');
+                        h.append(ico(I.check), el('span', null, 'Booked and charged'));
+                        body.append(h);
+                        const tb = el('div', 'disp-track');
+                        tb.append(el('span', null, 'Tracking '), el('b', null, tn || '(none returned)'));
+                        body.append(tb);
+                        body.append(el('div', 'disp-warn',
+                            'The courier is booked, but this window could not be drawn: '
+                            + String((err && err.message) || err)
+                            + '. Write the tracking number down, then close this and press '
+                            + 'Dispatch again to see the shipment and print the label.'));
+                        const done = el('button', 'btn'); done.style.marginTop = '14px';
+                        done.textContent = 'Done'; done.onclick = close; body.append(done);
+                    } catch (e2) {
+                        // No helpers left. Plain text still carries the number.
+                        body.textContent = 'Booked and charged. Tracking: ' + (tn || 'unknown')
+                            + '. Close this and press Dispatch again for the label.';
+                    }
+                }
             }
 
             function renderShipmentSummary(d) {
@@ -8704,10 +8793,13 @@
                 bk.onclick = async () => {
                     const boxes = collectBoxes();
                     if (!boxes) { toastError('Fill in the parcel size and weight first.'); return; }
+                    /* Disabled BEFORE the question: a double click here opened
+                       two dialogs, and answering both booked two labels. */
+                    bk.disabled = true;
                     if (!await uiConfirm('Book this courier for ' + fmtPrice(chosen.amount, chosen.currency)
                         + '? Your World Options account is charged.',
-                        { title: 'Book the courier', okText: 'Book it' })) return;
-                    bk.disabled = true; booking = true;
+                        { title: 'Book the courier', okText: 'Book it' })) { bk.disabled = false; return; }
+                    booking = true;
                     try {
                         const r = await api('/api/custom/book', {
                             id: shipId, option: chosen, address: readAddress(), boxes: boxes,
@@ -8718,7 +8810,7 @@
                             customs: collectCustoms(),
                         });
                         booking = false;
-                        renderBooked(r);
+                        renderBookedSafe(r);
                     } catch (e) {
                         booking = false;
                         bk.disabled = false;
@@ -8728,30 +8820,60 @@
                 bar.append(bk); confirmWrap.append(bar);
             }
 
+            /* Built off screen and swapped in once, for the same reason the
+               order panel is: the account has already been charged by the time
+               this runs, and a half-drawn panel would take the tracking number
+               down with it. */
             function renderBooked(r) {
-                body.innerHTML = '';
+                const out = el('div');
                 const d = r.dispatch || {};
                 const h = el('div', 'disp-result-head');
                 h.append(ico(I.check), el('span', null, 'Booked with '
                     + (d.carrier_label || d.carrier_name || 'the courier')));
-                body.append(h);
+                out.append(h);
                 const tb = el('div', 'disp-track');
                 tb.append(el('span', null, 'Tracking '), el('b', null, d.tracking_number || ''));
-                body.append(tb);
-                if (d.amount != null) body.append(el('div', 'sub', 'Charged ' + fmtPrice(d.amount, d.currency)));
-                if (d.customer) body.append(el('div', 'sub', 'To ' + d.customer));
-                if (r.contact_note) body.append(el('div', 'sub', r.contact_note));
-                if (r.note) body.append(el('div', 'msg error', r.note));
-                if (!printLabelImages((r.shipment && r.shipment.labels) || [])) {
-                    labelButtons(body, (r.shipment || {}).labels, 'Print label');
-                }
+                out.append(tb);
+                if (d.amount != null) out.append(el('div', 'sub', 'Charged ' + fmtPrice(d.amount, d.currency)));
+                if (d.customer) out.append(el('div', 'sub', 'To ' + d.customer));
+                if (r.contact_note) out.append(el('div', 'sub', r.contact_note));
+                if (r.note) out.append(el('div', 'msg error', r.note));
+                const printed = printLabelImages((r.shipment && r.shipment.labels) || []);
+                if (!printed) labelButtons(out, (r.shipment || {}).labels, 'Print label');
                 const bar = el('div', 'disp-actions');
                 const rp = el('button', 'btn btn-primary');
                 rp.append(ico(I.printer), document.createTextNode('Reprint label'));
                 rp.onclick = () => reprintCustom(r.id || shipId, body, rp);
                 bar.append(rp);
                 const done = el('button', 'btn', 'Done'); done.onclick = close;
-                bar.append(done); body.append(bar);
+                bar.append(done); out.append(bar);
+                body.innerHTML = '';
+                body.append(out);
+            }
+
+            function renderBookedSafe(r) {
+                try { renderBooked(r); return; }
+                catch (err) {
+                    const tn = (((r || {}).dispatch) || {}).tracking_number || '';
+                    try {
+                        body.innerHTML = '';
+                        const h = el('div', 'disp-result-head');
+                        h.append(ico(I.check), el('span', null, 'Booked and charged'));
+                        body.append(h);
+                        const tb = el('div', 'disp-track');
+                        tb.append(el('span', null, 'Tracking '), el('b', null, tn || '(none returned)'));
+                        body.append(tb);
+                        body.append(el('div', 'msg error',
+                            'The courier is booked, but this window could not be drawn: '
+                            + String((err && err.message) || err)
+                            + '. Write the tracking number down, then close this and press '
+                            + 'New shipment again: it is listed under Already booked, with Reprint.'));
+                        const done = el('button', 'btn', 'Done'); done.onclick = close; body.append(done);
+                    } catch (e2) {
+                        body.textContent = 'Booked and charged. Tracking: ' + (tn || 'unknown')
+                            + '. Close this and press New shipment again to reprint.';
+                    }
+                }
             }
 
             // ---- already booked, from this desk or an earlier one ----

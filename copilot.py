@@ -7734,7 +7734,8 @@ def _split_page(html: str):
     js_url = "/assets/app.js?v=" + _asset_hashes["js"]
     shell = (html[:s0 - len("    <style>")]
              + f'<link rel="stylesheet" href="{css_url}" />\n'
-               f'    <link rel="preload" as="script" href="{js_url}" />'
+               f'    <link rel="preload" as="script" href="{js_url}" />\n'
+               f'    <meta name="app-build" content="{_build_marker(_asset_hashes["js"])}" />'
              + html[s1 + len("    </style>"):j0 - len("    <script>")]
              + f'<script src="{js_url}"></script>'
              + html[j1 + len("    </script>"):])
@@ -7762,6 +7763,12 @@ def _page_parts() -> tuple:
                         len(shell) // 1024, len(css) // 1024, len(js) // 1024)
         _page_cache, _page_assets = shell, assets
     return _page_cache, _page_assets
+
+
+def _build_marker(js_hash: str) -> str:
+    """An id that changes exactly when the JavaScript changes, and that opens
+    nothing if it leaks. See _build_id for why it is not the hash itself."""
+    return hashlib.sha256(("gizmo-build|" + js_hash).encode("utf-8")).hexdigest()[:12]
 
 
 def _render_page() -> str:
@@ -7870,8 +7877,30 @@ def _frame_headers(request: Request) -> dict:
     }
 
 
+def _build_id() -> str:
+    """Which build answered, in every API reply.
+
+    A browser tab left open across a deploy keeps running the old page - Shopify
+    admin holds an embedded app open for days - and from the desk that is
+    invisible: it looks exactly like a bug that was already fixed. The page
+    carries the same marker in a meta tag and compares the two.
+
+    Derived from the asset hash rather than being it. That hash is the token
+    /assets/app.js checks before serving, and an unauthenticated call gets a
+    reply (a 401 is a reply), so publishing it here would hand the app's whole
+    client source to anyone who asked. This changes when the JavaScript does and
+    opens nothing."""
+    try:
+        _page_parts()                       # fills _asset_hashes, then cached
+        h = _asset_hashes.get("js", "")
+        return _build_marker(h) if h else ""
+    except Exception:
+        return ""
+
+
 def _json(data: dict, status: int = 200) -> JSONResponse:
-    return JSONResponse(data, status_code=status, headers=_API_HEADERS)
+    return JSONResponse(data, status_code=status,
+                        headers={**_API_HEADERS, "X-App-Build": _build_id()})
 
 
 # ---------------------------------------------------------------------------
