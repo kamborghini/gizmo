@@ -123,6 +123,23 @@
             display: grid; place-items: center; color: #fff; box-shadow: none; }
         .brand .logo svg { width: 16px; height: 16px; }
         .nav { padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }
+        /* 12px medium in muted ink, 32px tall with the same 8px inset as an
+           item, so the label sits on the item grid rather than beside it. */
+        /* The reference's Finance page puts Dashboard / Accounts / Transactions
+           in one strip under the title, so the parts of the money area read as
+           one place rather than separate destinations. Liability and
+           Reconciliation are that same pair, and this is the strip that joins
+           them. Each still routes to its own view, so the permission that
+           gates Reconciliation keeps working - the tab simply is not built
+           for an account that cannot open it. */
+        .page-tabs { display: flex; align-items: center; gap: var(--sp-3);
+            flex-wrap: wrap; margin-bottom: var(--sp-5); }
+        .page-tabs .spacer { flex: 1 1 auto; }
+        .page-tabs .updated { font-size: var(--t-xs); color: var(--ink-3); }
+        .nav-group { font-size: var(--t-xs); font-weight: var(--w-medium); color: var(--ink-3);
+            height: 32px; display: flex; align-items: center; padding: 0 var(--sp-2);
+            margin-top: var(--sp-2); }
+        .nav-group:first-child { margin-top: 0; }
         .nav-item { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: var(--r-sm);
             border: 0; background: transparent; color: var(--ink-2); font-size: var(--t-md); font-weight: var(--w-medium); width: 100%; text-align: left; transition: background .14s, color .14s; }
         .nav-item:hover { background: var(--surface-2); color: var(--ink); }
@@ -210,12 +227,16 @@
            actually notices - tabs that do not line up as you move between them.
            The ladder is min-width only, deliberately: a print page is never
            1500px, so paper keeps the 1120 measure it was designed against. */
-        :root { --wrap: 1120px; --wrap-pad: 32px; }
-        @media (min-width: 1500px) { :root { --wrap: 1800px; } }
-        @media (min-width: 1900px) { :root { --wrap: 2040px; --wrap-pad: 40px; } }
-        @media (min-width: 2400px) { :root { --wrap: 2160px; } }
-        .ov-wrap { max-width: var(--wrap); margin: 0 auto; width: 100%;
-            padding: 32px var(--wrap-pad) 72px; }
+        /* The reference does not centre its content and has no max width: the
+           page is the sidebar plus a full-bleed column with 24px of padding,
+           and the cards inside grow to fill it. The earlier ladder here
+           (1120/1800/2040/2160, centred) was a different answer to the same
+           question, and this app now follows the reference. --wrap survives as
+           the one page-width token because print and a handful of narrow
+           panels still read it. */
+        :root { --wrap: none; --wrap-pad: 24px; }
+        .ov-wrap { max-width: var(--wrap); margin: 0; width: 100%;
+            padding: var(--sp-4) var(--wrap-pad) var(--sp-8); }
         /* Body copy inside any tab: measured, never the full wrap.
            The cap is written in ch HERE rather than held in a custom property,
            because ch resolves against the font size of whatever element uses
@@ -243,10 +264,17 @@
         /* An insight or action is a flex row with an icon, so cap the text
            block rather than the row, which owns the card's background. */
         .insight > div:not(.ico), .action > div:not(.ico) { min-width: 0; }
-        .ov-hero { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 24px; }
+        .ov-hero { display: flex; align-items: flex-start; gap: 16px; margin-bottom: var(--sp-6); }
+        /* No icon beside a page title: the reference does not have one on any
+           of its pages, and at 30px the title carries the page on its own. */
         .ov-hero .badge { width: 36px; height: 36px; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink-2);
             display: grid; place-items: center; flex-shrink: 0; box-shadow: inset 0 0 0 1px var(--accent-line); }
         .ov-hero .badge svg { width: 18px; height: 18px; }
+        /* No icon beside a page title. The reference does not have one on any
+           of its pages, and at 30px the title carries the page by itself. The
+           rule above is left intact so the treatment is one edit away if it is
+           ever wanted back. */
+        .ov-hero .badge { display: none; }
         .ov-hero h2 { font-size: var(--t-2xl); margin: 0 0 var(--sp-2); font-weight: var(--w-normal); letter-spacing: -.025em; line-height: 1.15; }
         .ov-hero p { margin: 0; color: var(--ink-3); font-size: var(--t-md); line-height: 1.5; max-width: 62ch; }
         .ov-updated { font-size: var(--t-xs); color: var(--ink-3); margin-left: auto; white-space: nowrap; padding-top: 6px; }
@@ -277,8 +305,14 @@
             padding: var(--sp-5) var(--sp-6); box-shadow: var(--sh-1); animation: fadeUp .4s ease backwards; }
         /* No corner glow: on a light card it reads as a stain behind the number. */
         .stat .label { font-size: var(--t-md); color: var(--ink-3); font-weight: var(--w-normal); text-transform: none; letter-spacing: normal; margin-bottom: 8px; position: relative; }
-        .stat .value { font-size: var(--t-2xl); font-weight: var(--w-medium); letter-spacing: -.025em; line-height: 1.1; position: relative; }
-        .stat .delta { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); font-weight: var(--w-medium); margin-top: 8px; padding: 2px 8px; border-radius: var(--r-pill); position: relative; flex: none; line-height: 16px; }
+        /* Number and change sit on ONE line in the reference, aligned, rather
+           than the change dropping to a row of its own beneath. */
+        .stat-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .stat .value { font-size: var(--t-2xl); font-weight: var(--w-medium); letter-spacing: -.025em; line-height: 30px; position: relative; }
+        .stat .delta { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); font-weight: var(--w-medium); margin-top: 0; padding: 2px 8px; border-radius: var(--r-pill); position: relative; flex: none; line-height: 16px; }
+        /* The line of context the reference gives every KPI: what the number is
+           OF, in the same muted ink as the label above it. */
+        .stat-note { margin: var(--sp-2) 0 0; font-size: var(--t-md); line-height: 20px; color: var(--ink-3); }
         .stat .delta svg { width: 12px; height: 12px; }
         .delta.up { color: var(--win); background: var(--win-bg); } .delta.down { color: var(--danger); background: var(--danger-bg); } .delta.flat { color: var(--ink-3); background: var(--surface-3); }
         .stat.warn .value { color: var(--warn); }
@@ -444,7 +478,32 @@
         .insight.warning .ico { background: var(--warn-bg); color: var(--warn); }
         .insight.opportunity .ico { background: var(--opp-bg); color: var(--opp); }
 
-        .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--sh-1); padding: var(--sp-6); }
+        /* The reference's card: 16px top and bottom on the CARD, 16px left and
+           right on each of its parts. Doing it that way is what lets a table or
+           a chart run edge to edge inside a padded card, which is how every
+           data card in the reference is built. Existing cards keep their
+           horizontal padding through the child rule, so nothing has to be
+           re-marked-up to get it. */
+        .card { background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--r); box-shadow: var(--sh-1);
+            padding: var(--sp-4) 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+        .card > * { padding-left: var(--sp-4); padding-right: var(--sp-4); }
+        /* Opt out, for the things that should touch the card edge. */
+        .card > .card-bleed { padding-left: 0; padding-right: 0; }
+        /* Header: title, one line of muted description, and an action rail on
+           the right that drops under on a narrow card. */
+        .card-head { display: grid; grid-template-columns: 1fr auto; align-items: start;
+            gap: var(--sp-1) var(--sp-4); }
+        .card-title { font-size: var(--t-lg); font-weight: var(--w-medium);
+            line-height: 22px; margin: 0; }
+        .card-desc { grid-column: 1; font-size: var(--t-md); color: var(--ink-3);
+            line-height: 20px; margin: 0; }
+        .card-act { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center;
+            gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
+        @media (max-width: 640px) {
+            .card-head { grid-template-columns: 1fr; }
+            .card-act { grid-column: 1; grid-row: auto; justify-content: flex-start; }
+        }
 
         /* ---------- Form controls: one recipe, applied by element ---------- */
         input[type=text], input[type=number], input[type=date], input[type=search],
@@ -1748,18 +1807,26 @@
         <aside class="sidebar" id="sidebar">
             <div class="brand"><span class="logo" id="ic-logo"></span> Store Copilot</div>
             <div class="nav">
+                <!-- Grouped, like the reference's sidebar: a 12px medium label
+                     over each set. It also settles where Reconciliation lives -
+                     next to Liability under Finance, rather than as its own
+                     island halfway down a flat list of sixteen. -->
+                <div class="nav-group">Dashboards</div>
                 <button class="nav-item active" data-view="overview" id="nav-overview"></button>
                 <button class="nav-item" data-view="seo" id="nav-seo"></button>
                 <button class="nav-item" data-view="keywords" id="nav-keywords"></button>
                 <button class="nav-item" data-view="products" id="nav-products"></button>
                 <button class="nav-item" data-view="customers" id="nav-customers"></button>
+                <div class="nav-group">Finance</div>
                 <button class="nav-item" data-view="liability" id="nav-liability"></button>
                 <button class="nav-item" data-view="recon" id="nav-recon"></button>
+                <div class="nav-group">Operations</div>
+                <button class="nav-item" data-view="labels" id="nav-labels"></button>
                 <button class="nav-item" data-view="crm" id="nav-crm"></button>
                 <button class="nav-item" data-view="mail" id="nav-mail"></button>
                 <button class="nav-item" data-view="files" id="nav-files"></button>
+                <div class="nav-group">Workspace</div>
                 <button class="nav-item" data-view="team" id="nav-team" style="display:none"></button>
-                <button class="nav-item" data-view="labels" id="nav-labels"></button>
                 <button class="nav-item" data-view="memory" id="nav-memory"></button>
                 <button class="nav-item" data-view="skills" id="nav-skills"></button>
                 <button class="nav-item" data-view="chat" id="nav-chat"></button>
@@ -4245,19 +4312,39 @@
             }
             return true;
         }
+        /* The strip that makes Liability and Reconciliation one area rather
+           than two destinations, built exactly like the reference's Finance
+           tabs: a segmented control on the left, a muted "updated" line and
+           any actions on the right. Reconciliation is only offered to an
+           account that may open it, so the tab cannot become a door round the
+           permission. */
+        function financeTabs(active, updated) {
+            const row = el('div', 'page-tabs');
+            const seg = el('div', 'lbl-seg');
+            const tab = (key, label) => {
+                const b = el('button', 'lbl-segbtn' + (key === active ? ' on' : ''), label);
+                if (key !== active) b.onclick = () => showView(key);
+                seg.append(b);
+            };
+            tab('liability', 'Liability');
+            if (tabAllowed('recon')) tab('recon', 'Reconciliation');
+            row.append(seg, el('div', 'spacer'));
+            if (updated) row.append(el('div', 'updated', updated));
+            return row;
+        }
         function renderLiability() {
             const box = $('liability-content'); box.innerHTML = '';
             const d = liabilityCache.data;
             const cur = d.currency;
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.spark;
-            const ht = el('div'); ht.append(el('h2', null, 'Liability'),
+            const ht = el('div'); ht.append(el('h2', null, 'Finance'),
                 el('p', null, 'Credit extended to customers, from orders tagged '
                     + (d.tags || []).map(t => '"' + t + '"').join(', ')
                     + '. Terms come from the order itself, then a Net tag on the customer, otherwise Net '
                     + d.default_terms + ' is assumed and marked.'));
             hero.append(badge, ht);
-            hero.append(el('div', 'ov-updated', freshLabel(liabilityCache.at)));
             box.append(hero);
+            box.append(financeTabs('liability', freshLabel(liabilityCache.at)));
 
             // Summary cards.
             const grid = el('div', 'lia-grid');
@@ -4645,13 +4732,16 @@
             const box = $('recon-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.check;
             const ht = el('div');
-            const rTitle = el('h2', null, 'Reconciliation');
+            const rTitle = el('h2', null, 'Finance');
             rTitle.append(el('span', 'beta-tag', 'Beta'));
             ht.append(rTitle,
                 el('p', null, 'An independent check that Shopify, Xero and the inbox agree: '
                     + 'every sale in the books, every payout in the bank, every document accounted for. '
                     + 'It reads all three systems and writes to none of them.'));
             hero.append(badge, ht); box.append(hero);
+            box.append(financeTabs('recon',
+                (reconCache && reconCache.st && reconCache.st.last_sync)
+                    ? ('Last sweep ' + fmtDate(reconCache.st.last_sync)) : ''));
             if (!reconCache) { box.append(el('div', 'empty', 'Loading\u2026')); return; }
             if (reconCache.error) { box.append(loadFailure('The reconciliation state could not be read. ' + reconCache.error, refreshRecon)); return; }
             const st = reconCache.st || {};

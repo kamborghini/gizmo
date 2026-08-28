@@ -1406,17 +1406,23 @@ def t_an_order_missing_its_terms_is_flagged_on_the_queue_row():
 
 
 @test
-def t_the_page_width_grows_with_the_screen():
+def t_the_page_uses_the_whole_screen():
     """A fixed 1120px wrap left a third of a 1920 monitor and half of a 2560
-    iMac as empty margin, while the rows inside it were the crowded part."""
+    iMac as empty margin, while the rows inside it were the crowded part. The
+    ladder that replaced it (1120/1800/2040/2160, centred) was one answer; the
+    reference gives another and this app now follows it: no max width at all,
+    no centring, a single padded column that the cards grow to fill."""
     ok("--wrap:" in CSS, "there is one page-width token")
     ok("--wrap-read" not in CSS and "--wrap-data" not in CSS,
        "and only one: every tab uses the same page, so they line up as you "
        "move between them")
+    rule = re.search(r"\.ov-wrap \{[^}]*\}", CSS).group(0)
+    ok("max-width: var(--wrap)" in rule, "the wrap reads the token")
+    ok(re.search(r"--wrap:\s*none", CSS), "which is none: the page is full bleed")
+    ok("margin: 0 auto" not in rule, "and the column is not centred")
     for stop in ("1500px", "1900px", "2400px"):
-        ok("min-width: " + stop in CSS, "the ladder has a " + stop + " stop")
-    ok("max-width: 1120px" not in re.search(r"\.ov-wrap \{[^}]*\}", CSS).group(0),
-       "the wrap no longer hard-codes 1120")
+        ok("min-width: " + stop + " ) { :root { --wrap" not in CSS.replace(" ", " "),
+           "no width ladder survives (%s)" % stop)
 
 
 def _wrap_widening_is_min_width_only():
