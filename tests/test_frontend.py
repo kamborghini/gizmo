@@ -1165,6 +1165,36 @@ def t_paying_a_customers_duty_warns_that_it_makes_us_liable():
 
 
 @test
+def t_the_charts_are_drawn_to_the_reference_spec():
+    """Measured off the reference's own rendered SVG, not eyeballed: five
+    horizontal rules in #ccc at half opacity spanning the FULL width, no
+    verticals, no axis line, no tick marks, NO y-axis labels at all, dates at
+    12px in #666, lines at 1.4, and an area wash from the light end of the ramp.
+    Its chart carries no average rule, no peak label and no resting dot - every
+    text node in it is an x-axis date."""
+    css = CSS
+    grid = re.search(r"\.chart-wrap \.gridline \{[^}]*\}", css).group(0)
+    ok("stroke: #ccc" in grid and "stroke-opacity: .5" in grid,
+       "the grid is #ccc at half opacity: " + grid)
+    ok("dasharray" not in grid, "and solid, not dashed")
+    line = re.search(r"\.chart-line \{[^}]*\}", css).group(0)
+    ok("stroke-width: 1.4" in line, "lines are 1.4, not a marker pen: " + line)
+    axis = re.search(r"\.chart-wrap \.axis-x text[^{]*\{[^}]*\}", css).group(0)
+    ok("#666666" in axis, "dates are #666: " + axis)
+    # The frame draws the rules edge to edge and only labels the y axis on ask.
+    frame = SCRIPT[SCRIPT.index("function drawFrame"):]
+    frame = frame[:frame.index("\n        function ", 10)]
+    ok("x1: 0, y1: yy, x2: W" in frame, "rules span the full width, not just the plot box")
+    ok("if (c.yTicks)" in frame, "y-axis numbers are opt-in, and nothing opts in")
+    ok("rotate(-90" not in frame, "no rotated axis title down the side")
+    ok("yTicks: false" in SCRIPT, "both chart types ask for no y numbers")
+    # Nothing decorates the plot at rest.
+    ok("chart-end-dot" not in SCRIPT, "no dot at the end of the line")
+    ok("annotate(svg" not in SCRIPT.replace("function annotate(svg", ""),
+       "and no average rule or peak label is drawn")
+
+
+@test
 def t_a_link_is_still_identifiable_without_colour():
     """The palette is monochrome now, so a link has no hue left to mark it
     with: near-black link text on white is exactly body text. The underline
