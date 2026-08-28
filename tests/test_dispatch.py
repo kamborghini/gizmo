@@ -11932,6 +11932,86 @@ def t_a_booking_can_carry_its_own_collection_arrangement():
 
 
 @test
+def t_clearing_a_collection_actually_clears_it():
+    """Found auditing this week's work, and it made the button a lie. Clearing
+    popped the ledger entry, but the booking that secured the collection is
+    still on the dispatch record, so the very next read re-derived it. "The van
+    has been, book another" did nothing at all."""
+    from datetime import datetime as _dt, timezone as _tz
+    today = _dt.now(_tz.utc).date().isoformat()
+    copilot._write_dispatch({"9001": {"carrier_name": "DHL", "carrier_label": "DHL Express",
+                                      "collection_date": "CN-1", "order_name": "#1",
+                                      "ready_date": "", "dispatched_at": today + "T09:00:00+00:00"}})
+    copilot._write_collections({})
+    ok("DHL" in copilot._collections_for(today), "the courier's booking shows a van coming")
+    # Clear it the way the route does.
+    copilot._write_collections({"DHL": {"date": today, "cleared": True}})
+    ok("DHL" not in copilot._collections_for(today),
+       "and once cleared it stays cleared, though the booking is still on record")
+    # Which means the next parcel asks again, as intended.
+    cfg = {"collection_by_carrier": {"DHL": "I_Need_To_Book_A_Collection"}}
+    eq(copilot._collection_plan(cfg, "DHL", copilot._collections_for(today))["arrangement"],
+       "I_Need_To_Book_A_Collection", "so the next DHL parcel books a fresh one")
+    # A clear for a DIFFERENT day does not silence today.
+    copilot._write_collections({"DHL": {"date": "2020-01-01", "cleared": True}})
+    ok("DHL" in copilot._collections_for(today), "yesterday's clear is not today's")
+    copilot._write_collections({}); copilot._write_dispatch({})
+
+
+@test
+def t_the_latest_booking_of_the_day_is_the_one_that_counts():
+    """Dict order is insertion order, so "first one found" meant the OLDEST
+    booking of the day. After a clear and a re-book that is the stale one, and
+    its reference is the one that would be read out to the courier."""
+    from datetime import datetime as _dt, timezone as _tz
+    today = _dt.now(_tz.utc).date().isoformat()
+    copilot._write_dispatch({
+        "1": {"carrier_name": "DHL", "collection_date": "OLD-1", "order_name": "#1",
+              "dispatched_at": today + "T08:00:00+00:00"},
+        "2": {"carrier_name": "DHL", "collection_date": "NEW-2", "order_name": "#2",
+              "dispatched_at": today + "T15:00:00+00:00"},
+    })
+    got = copilot._collections_from_dispatch(today)
+    eq(got["DHL"]["ref"], "NEW-2", "the most recent collection of the day is the live one")
+    copilot._write_dispatch({})
+
+
+@test
+def t_a_collection_belongs_to_the_day_the_van_comes():
+    """Found auditing this week's work. Every other dispatch date in the app is
+    reckoned in Europe/London and the ready window can push a booking to the
+    next working day - book after the close on a Friday and the van comes
+    Monday. The ledger was writing UTC "today", so Monday would look
+    uncollected and the first parcel that morning would book, and pay for, a
+    second pickup."""
+    eq(copilot._dmy_to_iso("31/08/2026"), "2026-08-31", "their dd/MM/yyyy becomes a real date")
+    eq(copilot._dmy_to_iso("1/9/2026"), "2026-09-01", "single digits too")
+    eq(copilot._dmy_to_iso("rubbish"), "", "and nonsense is not guessed at")
+    # The ready date wins over whatever day it happens to be.
+    eq(copilot._collection_target("I_Need_To_Book_A_Collection", "31/08/2026"), "2026-08-31",
+       "the collection is dated by the day the courier was asked to come")
+    # With no ready date it falls back to London's today, not UTC's.
+    from zoneinfo import ZoneInfo as _Z
+    from datetime import datetime as _dt
+    london = _dt.now(_Z("Europe/London")).date().isoformat()
+    eq(copilot._collection_target("I_Need_To_Book_A_Collection"), london,
+       "and today means today where the parcels are")
+    eq(copilot._dispatch_today(), london, "which is what the panel asks for too")
+    # A Friday booking for Monday does not suppress Monday.
+    cfg = {"collection_by_carrier": {"DHL": "I_Need_To_Book_A_Collection"}}
+    plan = copilot._collection_plan(cfg, "DHL", {"DHL": {"date": "2026-08-28"}}, "31/08/2026")
+    eq(plan["arrangement"], "I_Need_To_Book_A_Collection",
+       "Friday's van does not cover Monday's parcel")
+    plan2 = copilot._collection_plan(cfg, "DHL", {"DHL": {"date": "2026-08-31"}}, "31/08/2026")
+    eq(plan2["arrangement"], "I_Already_Have_Collection_Scheduled",
+       "while a second parcel for the same day rides the one already booked")
+    # And the record keeps the ready date so the day can be worked out later.
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    eq(src.count('"ready_date": _ready_dmy'), 2,
+       "both booking paths store the day the courier was asked to come")
+
+
+@test
 def t_the_courier_reference_is_never_printed_as_markup():
     """World Options glues three things together with literal tags:
     28/08/2026<br/>12:00:00<br/>PRG260828150481. Printed straight it puts

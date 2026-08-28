@@ -1420,12 +1420,15 @@ def _collections_from_dispatch(day: str) -> dict:
         for oid, e in (_load_dispatch() or {}).items():
             if not isinstance(e, dict) or not e.get("collection_date"):
                 continue
-            when = str(e.get("dispatched_at") or "")[:10]
+            when = _dmy_to_iso(e.get("ready_date")) or str(e.get("dispatched_at") or "")[:10]
             if when != day:
                 continue
             code = str(e.get("carrier_name") or "").strip().upper()
-            if not code or code in out:
+            if not code:
                 continue
+            at = str(e.get("dispatched_at") or "")
+            if code in out and at <= str(out[code].get("at") or ""):
+                continue                      # keep the most recent of the day
             # Their reference arrives as date, time and number glued together
             # with literal <br/>. Parsed here so nothing downstream prints it.
             _c = (worldoptions.parse_collection(e.get("collection_date"))
@@ -1440,6 +1443,22 @@ def _collections_from_dispatch(day: str) -> dict:
     return out
 
 
+def _collections_for(day: str) -> dict:
+    """Every collection known for a day: the courier's confirmations off the
+    dispatch record, minus any the desk has said has already been and gone.
+
+    The suppression has to live here rather than in the ledger alone, because
+    the dispatch record is the stronger source and would simply re-assert a
+    cleared collection on the next read."""
+    ledger = _load_collections()
+    out = dict(ledger)
+    out.update(_collections_from_dispatch(day))
+    for code, v in (ledger or {}).items():
+        if isinstance(v, dict) and v.get("cleared") and str(v.get("date") or "") == day:
+            out.pop(code, None)
+    return out
+
+
 def _collection_row(v) -> dict:
     """One ledger entry, whichever shape it was written in. The first version of
     this stored a bare date; anything read here may still be one."""
@@ -1449,9 +1468,31 @@ def _collection_row(v) -> dict:
     return {"date": str(v or ""), "at": "", "order": "", "service": ""}
 
 
-def _collection_target(arrangement: str) -> str:
-    """The DAY the collection being asked for is for."""
-    day = datetime.now(timezone.utc).date()
+def _dispatch_today() -> str:
+    """Today, where the parcels are. Every other dispatch date in this app is
+    reckoned in Europe/London - the ready window, the next working day - and a
+    collection ledger kept in UTC disagrees with all of them for the hour after
+    midnight through the summer."""
+    return datetime.now(ZoneInfo("Europe/London")).date().isoformat()
+
+
+def _dmy_to_iso(dmy: str) -> str:
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", str(dmy or "").strip())
+    return "%s-%02d-%02d" % (m.group(3), int(m.group(2)), int(m.group(1))) if m else ""
+
+
+def _collection_target(arrangement: str, ready_dmy: str = "") -> str:
+    """The DAY the collection being asked for is actually for.
+
+    The ready date the courier was given, when there is one. That matters: book
+    after the close on a Friday and _collection_ready says Monday, so the van
+    comes Monday. Recording it against Friday would leave Monday looking
+    uncollected, and the first parcel that morning would book - and pay for - a
+    second pickup."""
+    iso = _dmy_to_iso(ready_dmy)
+    if iso:
+        return iso
+    day = datetime.now(ZoneInfo("Europe/London")).date()
     if arrangement == "I_Need_To_Book_A_Collection_For_Next_Day":
         day = day + timedelta(days=1)
     return day.isoformat()
@@ -5827,6 +5868,10 @@ async def _custom_book_locked(registry: dict, key: str, option: dict, dest: dict
         "has_label": bool(shipment.get("labels")),
         "label_report": shipment.get("label_report") or [],
         "collection_date": shipment.get("collection_date") or "",
+        # The day the courier was asked to come. A collection belongs to THIS
+        # date, not to the moment the booking happened: book after the close on
+        # a Friday and the van comes Monday.
+        "ready_date": _ready_dmy,
         "insured": insurance or "",
         "international": international,
         "dropoff": (dropoff_shop or {}).get("name") or "",
@@ -6071,7 +6116,8 @@ def _collection_for(cfg: dict, carrier: str) -> str:
     return str(by.get(key) or "").strip() or str(cfg.get("collection_option") or "")
 
 
-def _collection_plan(cfg: dict, carrier: str, booked: Optional[dict] = None) -> dict:
+def _collection_plan(cfg: dict, carrier: str, booked: Optional[dict] = None,
+                     ready_dmy: str = "") -> dict:
     """What to ask this courier for, given what has already been asked today.
 
     Once a collection is booked with DHL, every other DHL parcel that day rides
@@ -6083,10 +6129,9 @@ def _collection_plan(cfg: dict, carrier: str, booked: Optional[dict] = None) -> 
     if not arrangement.startswith("I_Need_To_Book_A_Collection"):
         return {"arrangement": arrangement, "already": False,
                 "message": COLLECTION_MESSAGES.get(arrangement, "")}
+    target = _collection_target(arrangement, ready_dmy)
     if not isinstance(booked, dict):
-        booked = dict(_load_collections())
-        booked.update(_collections_from_dispatch(_collection_target(arrangement)))
-    target = _collection_target(arrangement)
+        booked = _collections_for(target)
     if key and _collection_row(booked.get(key)).get("date") == target:
         when = "tomorrow" if arrangement.endswith("For_Next_Day") else "today"
         return {"arrangement": "I_Already_Have_Collection_Scheduled", "already": True,
@@ -6244,7 +6289,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
     # What this courier is asked for. A one-off choice at the desk wins;
     # otherwise the courier's own arrangement, softened to "already scheduled"
     # when today has already booked one with them.
-    _plan = _collection_plan(cfg, option.get("carrier_name"))
+    _plan = _collection_plan(cfg, option.get("carrier_name"), None, _ready_dmy)
     _asked_collection = str(collection_option or _plan["arrangement"])
     try:
         shipment = await _book_with_one_retry(option, origin, dest, boxes, currency=currency, reference=reference,
@@ -6304,7 +6349,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
             _ck = str(option.get("carrier_name") or "").strip().upper()
             if _ck:
                 _cbook = _load_collections()
-                _cbook[_ck] = {"date": _collection_target(_asked_collection),
+                _cbook[_ck] = {"date": _collection_target(_asked_collection, _ready_dmy),
                                "at": datetime.now(timezone.utc).isoformat(),
                                "order": str(reference or order_id or "")[:24],
                                "service": str(option.get("service_name")
@@ -6359,6 +6404,10 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
         "has_label": bool(shipment.get("labels")),
         "label_report": shipment.get("label_report") or [],
         "collection_date": shipment.get("collection_date") or "",
+        # The day the courier was asked to come. A collection belongs to THIS
+        # date, not to the moment the booking happened: book after the close on
+        # a Friday and the van comes Monday.
+        "ready_date": _ready_dmy,
         "insured": insurance or "",
         "international": international,
         "dropoff": (dropoff_shop or {}).get("name") or "",
@@ -16763,11 +16812,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
-        day = str(body.get("date") or "")[:10] or datetime.now(timezone.utc).date().isoformat()
+        day = str(body.get("date") or "")[:10] or _dispatch_today()
         cfg = _load_shipping()
-        # The courier's own confirmations for the day, over this app's ledger.
-        booked = dict(_load_collections())
-        booked.update(_collections_from_dispatch(day))
+        # The courier's own confirmations for the day, less anything cleared.
+        booked = _collections_for(day)
         by_carrier = cfg.get("collection_by_carrier")
         by_carrier = by_carrier if isinstance(by_carrier, dict) else {}
         rows = []
@@ -16797,10 +16845,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if _team_level(who) < ROLE_LEVELS["admin"]:
                 return _json({"error": "Only an admin can clear a collection."}, 403)
             if code:
+                # A marker, not a deletion: the booking that secured this
+                # collection is still on the dispatch record and would simply
+                # re-assert it on the next read.
                 d = _load_collections()
-                d.pop(code, None)
+                d[code] = {"date": day, "cleared": True,
+                           "at": datetime.now(timezone.utc).isoformat()}
                 _write_collections(d)
-                _track(who, "dispatch", "cleared a collection", code)
+                _track(who, "dispatch", "cleared a collection", code + " for " + day)
                 return _json({"ok": True, "cleared": code})
         return _json({"date": day, "rows": rows,
                       "note": "Collections World Options confirmed on the booking, by their own "
