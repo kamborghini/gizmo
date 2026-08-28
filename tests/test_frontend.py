@@ -1165,6 +1165,26 @@ def t_paying_a_customers_duty_warns_that_it_makes_us_liable():
 
 
 @test
+def t_a_dialog_can_be_handed_a_panel_not_only_a_sentence():
+    """el() sets textContent, so handing uiConfirm a built node printed the
+    literal string "[object HTMLDivElement]" into the dialog. That is what the
+    Collections panel showed: the code ran, the dialog opened, and the content
+    was a stringified object. Neither a syntax check nor a text search over the
+    source can see that - only opening it can."""
+    i = SCRIPT.index("function uiConfirm(message, opts)")
+    seg = SCRIPT[i:i + 1400]
+    ok("message instanceof Node" in seg,
+       "a node message is appended rather than stringified")
+    ok("body.append(message)" in seg, "and appended as itself")
+    ok("el('p', 'confirm-msg', message)" in seg,
+       "while a plain sentence still gets its paragraph")
+    # The panel that hit it passes a node.
+    j = SCRIPT.index("async function openBookCollection()")
+    ok("uiConfirm(body," in SCRIPT[j:j + 1200],
+       "and Collections still hands it a built panel, which is the case that broke")
+
+
+@test
 def t_what_a_booking_asked_for_outlives_the_click_that_asked():
     """Shipped broken: askedCollection was declared with const INSIDE the book
     click handler and read by renderResult, which is its SIBLING, not its child.

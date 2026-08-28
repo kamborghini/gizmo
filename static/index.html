@@ -4146,7 +4146,13 @@
                 const overlay = el('div', 'modal-overlay show confirm-overlay');
                 const modal = el('div', 'modal confirm-modal' + (danger ? ' confirm-danger' : ''));
                 const head = el('div', 'modal-head'); head.append(el('h3', null, opts.title || 'Please confirm'));
-                const body = el('div', 'modal-body'); body.append(el('p', 'confirm-msg', message));
+                const body = el('div', 'modal-body');
+                /* A message may be a built panel rather than a sentence. el()
+                   sets textContent, so handing it a node printed the string
+                   "[object HTMLDivElement]" into the dialog - which is what the
+                   Collections panel showed. */
+                if (message instanceof Node) body.append(message);
+                else body.append(el('p', 'confirm-msg', message));
                 const foot = el('div', 'modal-foot');
                 const no = el('button', 'btn'); no.textContent = opts.cancelText || 'Cancel';
                 const yes = el('button', 'btn ' + (danger ? 'btn-danger' : 'btn-primary'));
