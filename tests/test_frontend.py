@@ -1892,6 +1892,64 @@ def t_a_tab_left_open_is_told_it_is_out_of_date():
     ok(z < modal, "the notice sits under any open modal (%d < %d)" % (z, modal))
 
 
+@test
+def t_a_table_sits_in_its_own_box_inside_the_card():
+    """Measured off the reference's rendered page, not judged by eye: its table
+    lives in a second frame at the base 10px radius inside a 14px card, and that
+    inset edge is most of what makes its lists read the way they do. This used to
+    be stripped flat on the reasoning that a card is already a box."""
+    rule = CSS.split(".card .ktable-wrap, .card-bleed .ktable-wrap {")[1].split("}")[0]
+    ok("border-radius: var(--r-md)" in rule, "the table keeps its own radius inside a card")
+    ok("border: 0" not in rule, "and its own border")
+    ok("--r-md: 10px" in CSS, "at the base radius the reference builds everything from")
+    # A table that deliberately touches the card edge still can.
+    bleed = CSS.split("\n        .card-bleed .ktable-wrap {")[1].split("}")[0]
+    ok("border: 0" in bleed, "a bleed table is still flat to the edge")
+
+
+@test
+def t_the_table_is_built_to_the_reference_measurements():
+    """Every number here was read off the reference with getComputedStyle. They
+    are asserted because the last pass at this drifted by eye: 16px cell padding
+    against its 12px, and body text a shade grey against its foreground."""
+    th = CSS.split(".ktable th {")[1].split("}")[0]
+    td = CSS.split(".ktable td {")[1].split("}")[0]
+    ok("padding: var(--sp-3)" in th and "padding: var(--sp-3)" in td,
+       "cells are padded 12px square, header and body alike")
+    ok("height: 44px" in th, "the header row is 44px")
+    ok("line-height: 20px" in th and "line-height: 20px" in td, "20px line box in both")
+    ok("color: var(--ink)" in td and "var(--ink-2)" not in td,
+       "body cells are foreground, not a muted grey")
+    hover = CSS.split(".ktable tbody tr:hover td {")[1].split("}")[0]
+    ok("var(--bg-2)" in hover,
+       "the hover is half-strength muted; a full one reads as selected")
+
+
+@test
+def t_the_table_toolbar_and_pager_match_the_reference():
+    """The chrome around a table: a 28px search 320px wide with the icon inset
+    32px, 28px filter and action buttons, and 32px square pager steps at the base
+    radius. All four numbers are the reference's own."""
+    srch = CSS.split(".tbl-search input {")[1].split("}")[0]
+    ok("height: 28px" in srch and "width: 320px" in srch, "the search field is 28 by 320")
+    ok("padding: 4px 10px 4px 32px" in srch, "with room for the icon on the left")
+    btn = CSS.split(".btn-sm {")[1].split("}")[0]
+    ok("min-height: 28px" in btn and "padding: 0 10px" in btn, "small buttons are 28px tall")
+    step = CSS.split(".tbl-step {")[1].split("}")[0]
+    ok("width: 32px" in step and "height: 32px" in step, "pager steps are 32px square")
+    ok("border-radius: var(--r-md)" in step, "at the base radius, not the control radius")
+    # The pager must never claim to be paging through more than it is.
+    fn = SCRIPT.split("function tablePager(o) {")[1][:1600]
+    ok("Math.ceil(total / size)" in fn, "the page count comes from the total it was given")
+    ok("o.total" in fn, "and the line above it counts the same rows")
+    ok("crmContactsPage = 1" in SCRIPT.split("function tableSearch")[0] or
+       "crmContactsPage = 1" in SCRIPT, "a search resets to the first page")
+    # It is fed the FILTERED list, not the whole store: "1 to 25 of 4" while a
+    # search is on is how a filter gets mistaken for lost data.
+    call = SCRIPT.split("list.append(tablePager({")[1][:200]
+    ok("total: items.length" in call, "the CRM pager counts what the search left")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

@@ -69,7 +69,7 @@
 
             /* Radii. The reference works from one --radius of 10px: a card is
                that plus 4, a control is that minus 2. */
-            --r: 14px; --r-sm: 8px; --r-xs: 6px; --r-pill: 999px;
+            --r: 14px; --r-md: 10px; --r-sm: 8px; --r-xs: 6px; --r-pill: 999px;
 
             /* Elevation. A card has NO shadow here - it is a hairline and
                nothing else. Only things that genuinely float get depth. */
@@ -519,8 +519,11 @@
            the right that drops under on a narrow card. */
         .card-head { display: grid; grid-template-columns: 1fr auto; align-items: start;
             gap: var(--sp-1) var(--sp-4); }
+        /* leading-none, as the reference sets it: the title's line box is its
+           own size, so the header is exactly title + 4 + description and every
+           card head in the app lines up at the same height. */
         .card-title { font-size: var(--t-lg); font-weight: var(--w-medium);
-            line-height: 22px; margin: 0; }
+            line-height: 16px; margin: 0; }
         .card-desc { grid-column: 1; font-size: var(--t-md); color: var(--ink-3);
             line-height: 20px; margin: 0; }
         .card-act { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center;
@@ -1501,22 +1504,65 @@
            border rather than floating inside a second inset box. */
         .ktable-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r);
             box-shadow: var(--sh-1); background: var(--surface); margin-bottom: var(--sp-6); }
-        /* Inside a card it is already in a bordered box: no second frame, no
-           second radius, and no bottom margin fighting the card padding. */
-        .card .ktable-wrap, .card-bleed .ktable-wrap { border: 0; border-radius: 0;
-            box-shadow: none; margin-bottom: 0; background: transparent; }
+        /* Inside a card the table gets its OWN box, inset by the card's padding.
+           This used to be stripped flat on the reasoning that a card is already a
+           box; measuring the reference says otherwise - its table sits in a
+           second frame at the base 10px radius inside a 14px card, and that inset
+           edge is most of what makes its tables read the way they do. */
+        .card .ktable-wrap, .card-bleed .ktable-wrap { border-radius: var(--r-md);
+            box-shadow: none; margin-bottom: 0; }
+        .card-bleed .ktable-wrap { border: 0; border-radius: 0; background: transparent; }
         .card-bleed .ktable th:first-child, .card-bleed .ktable td:first-child { padding-left: var(--sp-4); }
         .card-bleed .ktable th:last-child, .card-bleed .ktable td:last-child { padding-right: var(--sp-4); }
         .ktable-wrap .ktable tr:last-child td { border-bottom: 0; }
-        .ktable th:first-child, .ktable td:first-child { padding-left: var(--sp-4); }
-        .ktable th:last-child, .ktable td:last-child { padding-right: var(--sp-4); }
         .ktable { width: 100%; border-collapse: collapse; font-size: var(--t-md); background: var(--surface); min-width: 460px; }
-        .ktable th { text-align: left; font-size: var(--t-md); text-transform: none; letter-spacing: normal; color: var(--ink); font-weight: var(--w-medium); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); white-space: nowrap; height: 44px; }
-        .ktable td { padding: var(--sp-4); border-bottom: 1px solid var(--border); color: var(--ink-2); font-size: var(--t-md); }
+        /* 12px on every side, header and body alike: the reference pads its cells
+           square, and the row height comes from the content rather than the cell. */
+        .ktable th { text-align: left; font-size: var(--t-md); text-transform: none; letter-spacing: normal; color: var(--ink); font-weight: var(--w-medium); padding: var(--sp-3); line-height: 20px; border-bottom: 1px solid var(--border); white-space: nowrap; height: 44px; }
+        .ktable td { padding: var(--sp-3); border-bottom: 1px solid var(--border); color: var(--ink); font-size: var(--t-md); line-height: 20px; vertical-align: middle; }
         .ktable tr:last-child td { border-bottom: 0; }
-        .ktable tbody tr:hover td { background: var(--surface-2); }
+        /* Half-strength muted, not muted: a full #f5f5f5 hover reads as selected. */
+        .ktable tbody tr:hover td { background: var(--bg-2); }
         .ktable td.kw { color: var(--ink); font-weight: var(--w-medium); }
         .ktable .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        /* ---------- the table card, to the reference's own measurements ----------
+           A toolbar above the table box and a pager below it, both sitting in
+           the card's 16px padding with the card's own 16px gap between them.
+           Every number here was read off the reference's rendered page. */
+        .tbl-tools { display: flex; align-items: center; justify-content: space-between;
+            gap: var(--sp-3); flex-wrap: wrap; }
+        .tbl-tools-l, .tbl-tools-r { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .tbl-search { position: relative; display: flex; }
+        .tbl-search input { height: 28px; width: 320px; max-width: 100%;
+            padding: 4px 10px 4px 32px; border-radius: var(--r-sm);
+            font-size: var(--t-md); line-height: 20px; }
+        .tbl-search .ic { position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+            color: var(--ink-3); pointer-events: none; }
+        .tbl-search .ic svg { width: 16px; height: 16px; }
+        /* The small button. The reference builds its card actions, its table
+           filters and its pager from this one size, which is why they line up. */
+        .btn-sm { min-height: 28px; padding: 0 10px; font-size: var(--t-xs); gap: var(--sp-1); }
+        .btn-sm svg { width: 14px; height: 14px; }
+        .tbl-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
+        .tbl-count { flex: 1 1 auto; font-size: var(--t-md); color: var(--ink-3); }
+        .tbl-pager { display: flex; align-items: center; gap: var(--sp-7); }
+        .tbl-rows { display: flex; align-items: center; gap: var(--sp-2);
+            font-size: var(--t-md); font-weight: var(--w-medium); white-space: nowrap; }
+        .tbl-rows select { height: 28px; width: 80px; padding: 0 8px 0 10px;
+            border-radius: var(--r-sm); font-size: var(--t-md); line-height: 20px;
+            background-position: right 6px center; }
+        .tbl-page { font-size: var(--t-md); font-weight: var(--w-medium); white-space: nowrap; }
+        .tbl-steps { display: flex; align-items: center; gap: var(--sp-2); }
+        /* Square, and at the base radius rather than the control radius: the
+           reference's pager steps are 32px boxes, not small buttons. */
+        .tbl-step { width: 32px; height: 32px; min-height: 32px; padding: 0; border-radius: var(--r-md); }
+        .tbl-step svg { width: 16px; height: 16px; }
+        @media (max-width: 900px) {
+            .tbl-foot { flex-wrap: wrap; }
+            .tbl-count { flex: 1 1 100%; order: 2; }
+            .tbl-pager { gap: var(--sp-4); margin-left: auto; }
+            .tbl-rows { display: none; }
+        }
         .kbadge { display: inline-block; font-size: var(--t-xs); font-weight: var(--w-medium); text-transform: none; letter-spacing: normal; padding: 2px 8px; border-radius: var(--r-pill); margin-left: 8px; background: var(--warn-bg); color: var(--warn); vertical-align: middle; flex: none; }
         .kbadge.win { background: var(--win-bg); color: var(--win); }
         .scan-card { padding: 16px 16px; margin-bottom: 12px; }
@@ -2113,6 +2159,8 @@
             box: SV('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line>'),
             truck: SV('<rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle>'),
             chevLeft: SV('<polyline points="15 18 9 12 15 6"></polyline>'),
+            chevFirst: SV('<polyline points="11 17 6 12 11 7"></polyline><polyline points="18 17 13 12 18 7"></polyline>'),
+            chevLast: SV('<polyline points="13 17 18 12 13 7"></polyline><polyline points="6 17 11 12 6 7"></polyline>'),
             settings: SV('<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>'),
             x: SV('<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>'),
             maximize: SV('<polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line>'),
@@ -2509,6 +2557,74 @@
            A heading that introduces a ROW OF CARDS is left alone. The reference
            has those too - a group of cards under a label - and wrapping cards
            in a card is how you get a double border. */
+        /* ---------- the reference's table card, in three pieces ----------
+           A search field, a toolbar to hang it and the filters on, and a pager.
+           Pieces rather than one component on purpose: the tables in this app
+           differ in what they can even offer, and half of them are already
+           built. What they all share is the chrome, and this is the chrome. */
+        function tableSearch(placeholder, value, oninput) {
+            const wrap = el('div', 'tbl-search');
+            wrap.append(ico(I.search));
+            const inp = document.createElement('input');
+            inp.type = 'search';
+            inp.placeholder = placeholder || 'Search\u2026';
+            if (value) inp.value = value;
+            if (oninput) inp.oninput = () => oninput(inp.value.trim());
+            wrap.append(inp);
+            wrap.input = inp;
+            return wrap;
+        }
+        function tableTools(left, right) {
+            const bar = el('div', 'tbl-tools');
+            const l = el('div', 'tbl-tools-l'), r = el('div', 'tbl-tools-r');
+            (left || []).filter(Boolean).forEach(n => l.append(n));
+            (right || []).filter(Boolean).forEach(n => r.append(n));
+            bar.append(l, r);
+            return bar;
+        }
+        /* o.total is the count AFTER filtering, so the line reads as what the
+           pager is actually paging through rather than what the store holds.
+           Saying "1 to 25 of 4" while a search is on is how a filter gets
+           mistaken for a data loss. */
+        function tablePager(o) {
+            const size = o.pageSize || 10;
+            const total = o.total || 0;
+            const pages = Math.max(1, Math.ceil(total / size));
+            const page = Math.min(Math.max(1, o.page || 1), pages);
+            const foot = el('div', 'tbl-foot');
+            const noun = o.noun ? ' ' + o.noun : '';
+            foot.append(el('div', 'tbl-count', o.count != null ? o.count
+                : (total ? ((page - 1) * size + 1) + ' to ' + Math.min(page * size, total)
+                           + ' of ' + total + noun
+                         : 'Nothing to show')));
+            const pag = el('div', 'tbl-pager');
+            if (o.onSize) {
+                const rows = el('div', 'tbl-rows');
+                rows.append(el('span', null, 'Rows per page'));
+                const sel = document.createElement('select');
+                (o.sizes || [10, 25, 50, 100]).forEach(n => {
+                    const op = document.createElement('option');
+                    op.value = String(n); op.textContent = String(n);
+                    if (n === size) op.selected = true;
+                    sel.append(op);
+                });
+                sel.onchange = () => o.onSize(parseInt(sel.value, 10));
+                rows.append(sel); pag.append(rows);
+            }
+            pag.append(el('div', 'tbl-page', 'Page ' + page + ' of ' + pages));
+            const steps = el('div', 'tbl-steps');
+            [[I.chevFirst, 'First page', 1, page <= 1],
+             [I.chevLeft, 'Previous page', page - 1, page <= 1],
+             [I.chev, 'Next page', page + 1, page >= pages],
+             [I.chevLast, 'Last page', pages, page >= pages]].forEach(([icon, title, to, off]) => {
+                const b = el('button', 'btn tbl-step');
+                b.append(ico(icon)); b.title = title; b.setAttribute('aria-label', title);
+                if (off) b.disabled = true; else b.onclick = () => o.onPage(to);
+                steps.append(b);
+            });
+            pag.append(steps); foot.append(pag);
+            return foot;
+        }
         function cardifySections(root) {
             if (!root) return;
             [].slice.call(root.children).forEach(function (node) {
@@ -9589,7 +9705,7 @@
         let crmCache = null, crmSeg = 'deals', crmDealsMode = 'board';
         let crmQ = '', crmStatus = 'open', crmLeadsMode = 'active', crmContactsMode = 'people';
         let crmActPeriod = 'upcoming', crmActTypesOff = {}, crmActMine = false;
-        let crmLabelF = '', crmOwnerF = '', crmContactsQ = '', crmContactsCap = 60;
+        let crmLabelF = '', crmOwnerF = '', crmContactsQ = '', crmContactsPage = 1, crmContactsSize = 25;
         const crmContactSel = new Set();   /* bulk-delete ticks, master only */
         let crmLoadedAt = 0, crmPdOpen = false;
         const CRM_TYPES = [['call', 'Call'], ['meeting', 'Meeting'], ['task', 'Task'],
@@ -11008,15 +11124,21 @@
 
         /* ---------------- contacts ---------------- */
         function renderCRMContacts(host) {
-            const bar = el('div', 'lbl-toolbar');
-            const add = el('button', 'btn btn-primary');
+            /* A holding rail, not a bar: its children are moved into the
+               toolbar's right side once the search and filter are built. */
+            const bar = el('div');
+            const add = el('button', 'btn btn-sm btn-primary');
             add.append(ico(I.plus), document.createTextNode(crmContactsMode === 'people' ? 'Person' : 'Organisation'));
             add.onclick = () => crmContactForm(crmContactsMode === 'people' ? 'person' : 'org');
-            bar.append(add);
+            /* Exports what the search left, not the whole store: the handler is
+               attached inside paint, where the filtered list actually exists. */
+            const expBtn = el('button', 'btn btn-sm');
+            expBtn.append(ico(I.download), document.createTextNode('Export CSV'));
+            bar.append(expBtn, add);
             if ((!teamMe || teamMe.role === 'master') && crmContactsMode === 'people') {
                 /* Bulk email-matching of contacts to Shopify customers. Runs
                    nightly by itself; the button is for not waiting overnight. */
-                const link = el('button', 'btn');
+                const link = el('button', 'btn btn-sm');
                 link.append(ico(I.refresh), document.createTextNode('Link Shopify'));
                 link.title = 'Match every unlinked contact to a Shopify customer by email';
                 link.onclick = async () => {
@@ -11042,21 +11164,38 @@
             const seg = el('div', 'lbl-seg');
             [['people', 'People'], ['orgs', 'Organisations']].forEach(([k, lab]) => {
                 const b = el('button', 'lbl-segbtn' + (crmContactsMode === k ? ' on' : ''), lab);
-                b.onclick = () => { crmContactsMode = k; crmContactsCap = 60; renderCRM(); };
+                b.onclick = () => { crmContactsMode = k; crmContactsPage = 1; renderCRM(); };
                 seg.append(b);
             });
-            bar.append(seg);
             /* Finding a person while they are ON THE PHONE is the single most
                common contact operation: name, email, phone and company all
                match, because whichever fragment is to hand must work. */
-            const q = document.createElement('input');
-            q.type = 'search'; q.placeholder = 'Search name, email, phone, company…';
-            q.className = 'lbl-size lbl-find'; q.value = crmContactsQ;
-            q.oninput = () => { crmContactsQ = q.value.trim(); crmContactsCap = 60; paint(); };
-            bar.append(q);
-            host.append(bar);
-            const list = el('div'); host.append(list);
+            const q = tableSearch('Search name, email, phone, company…', crmContactsQ, (v) => {
+                crmContactsQ = v; crmContactsPage = 1; paint();
+            });
             const people = crmContactsMode === 'people';
+            /* One card holding the lot, the way the reference builds a list
+               page: a counted title and a line saying what it is, the actions
+               on the right of the header, the search and filter on a toolbar
+               under it, then the table in its own box, then the pager. */
+            const card = el('div', 'card');
+            const head = el('div', 'card-head');
+            const total = Object.keys(people ? crmCache.persons : crmCache.orgs).length;
+            head.append(el('h3', 'card-title',
+                total.toLocaleString() + (people ? ' People' : ' Organisations')));
+            head.append(el('p', 'card-desc', people
+                ? 'Everyone the desk deals with: their organisation, how to reach them, and how much is open.'
+                : 'The companies behind the people, with where they are and how much is open.'));
+            const act = el('div', 'card-act');
+            [...bar.children].forEach(n => act.append(n));
+            head.append(act);
+            card.append(head);
+            /* Search, then the filter: the reference's order, and the one that
+               reads left to right as "what am I looking at" before "what can I
+               do to it". */
+            card.append(tableTools([q, seg], []));
+            const list = el('div'); card.append(list);
+            host.append(card);
             function paint() {
                 list.innerHTML = '';
                 const ql = crmContactsQ.toLowerCase();
@@ -11118,7 +11257,10 @@
                 cols.push('<th class="num">Deals</th>', '<th>Label</th>');
                 tb.innerHTML = '<thead><tr>' + cols.join('') + '</tr></thead>';
                 const tbody = el('tbody');
-                items.slice(0, crmContactsCap).forEach(c => {
+                const pageCount = Math.max(1, Math.ceil(items.length / crmContactsSize));
+                if (crmContactsPage > pageCount) crmContactsPage = pageCount;
+                const from = (crmContactsPage - 1) * crmContactsSize;
+                items.slice(from, from + crmContactsSize).forEach(c => {
                     const tr = el('tr', 'crm-list-row');
                     tr.setAttribute('role', 'button'); tr.tabIndex = 0;
                     if (master) {
@@ -11154,16 +11296,16 @@
                     tbody.append(tr);
                 });
                 tb.append(tbody); wrapT.append(tb); list.append(wrapT);
-                const foot = el('div', 'crm-listfoot');
-                if (items.length > crmContactsCap) {
-                    const more = el('button', 'btn');
-                    more.textContent = 'Show more (' + (items.length - crmContactsCap) + ' remaining)';
-                    more.onclick = () => { crmContactsCap += 120; paint(); };
-                    foot.append(more);
-                }
-                const exp = el('button', 'btn');
-                exp.append(ico(I.download), document.createTextNode('Export CSV'));
-                exp.onclick = () => {
+                /* A pager rather than "show more": at four thousand contacts
+                   the old button had to be pressed thirty times, and the count
+                   it printed was the only clue how many that would be. */
+                list.append(tablePager({
+                    total: items.length, page: crmContactsPage, pageSize: crmContactsSize,
+                    noun: people ? 'people' : 'organisations',
+                    onPage: (n) => { crmContactsPage = n; paint(); },
+                    onSize: (n) => { crmContactsSize = n; crmContactsPage = 1; paint(); },
+                }));
+                expBtn.onclick = () => {
                     if (people) crmCSV('people.csv',
                         ['Name', 'Emails', 'Phones', 'Job title', 'Organisation', 'Label'],
                         items.map(c => [c.name, (c.emails || []).join('; '), (c.phones || []).join('; '),
@@ -11172,7 +11314,6 @@
                         ['Name', 'Address', 'Website', 'Label'],
                         items.map(c => [c.name, c.address || '', c.website || '', c.label || '']));
                 };
-                foot.append(exp); list.append(foot);
             }
             paint();
         }
