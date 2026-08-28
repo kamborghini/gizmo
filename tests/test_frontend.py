@@ -447,7 +447,8 @@ def t_inbox_reads_as_a_list_with_bulk_triage():
 def t_inbox_unread_filters_and_claude_reply():
     """Three things the merchant asked for after living with it: unread as a
     real thing, standing filters, and a Claude-drafted reply."""
-    ok("value: 'unread'" in SCRIPT and "mailFilter === 'unread' && !t.unread" in SCRIPT,
+    ok("['unread', lab('Unread', counts.unread)]" in SCRIPT
+       and "mailFilter === 'unread' && !t.unread" in SCRIPT,
        "unread is a filter with its own count, not just bold text")
     ok("'/api/mail/rules'" in SCRIPT, "filters are managed in the app")
     ok("Apply to existing mail" in SCRIPT, "and can be run over the pile already there")
@@ -463,7 +464,7 @@ def t_inbox_unread_filters_and_claude_reply():
        "the panel explains why the draft has blanks in it")
     ok("rows.sort((a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0))" in SCRIPT,
        "unread rises to the top of the list")
-    ok(".mrow.unread { background:" in HTML and "inset 3px 0 0 var(--accent)" in HTML,
+    ok(".mrow.unread { background:" in HTML and "inset 2px 0 0 var(--accent)" in HTML,
        "and is unmistakable: its own tint and edge, not a 100-weight difference")
     ok("'munread', 'New'" in SCRIPT, "with a word, for anyone who cannot see the tint")
     ok("if (mailFilter === 'unread') {" in SCRIPT and "if (!t.unread) return false;" in SCRIPT,
@@ -2105,6 +2106,60 @@ def t_a_panel_is_measured_after_it_is_filled():
     ok(fn.index("build(body, closeDMenu)") < fn.index("panel.offsetHeight"),
        "it re-measures after the form is in it")
     ok("window.innerHeight - 8" in fn, "and flips above when there is no room below")
+
+
+@test
+def t_a_failing_mail_sync_is_not_a_footnote():
+    """It used to be a small grey span wedged between a search box and a view
+    toggle, in a row of six controls. A mailbox that is not syncing means the
+    list below is missing mail that has arrived, which is the one thing on that
+    page nobody may miss."""
+    fn = SCRIPT.split("function renderMail() {")[1]
+    fn = fn[:fn.index("\n        function ")]
+    i = fn.index("if (d.sync_error) {")
+    ok("'msg error'" in fn[i:i + 400], "it is an error row in its own right")
+    ok("may be missing mail" in fn[i:i + 400],
+       "and says what that means for the list underneath")
+    ok(fn.index("const mCard = el('div', 'card')") > i,
+       "above the board, not inside its toolbar")
+    ok("el('span', 'mail-sync'" not in fn, "the grey span in the toolbar is gone")
+
+
+@test
+def t_the_inbox_is_composed_like_the_reference():
+    """Six controls and a status line in one row. The reference gives a list
+    page a counted title, a line under it, the two things you press on the
+    right, and the search and the states on a toolbar of their own."""
+    fn = SCRIPT.split("function renderMail() {")[1]
+    fn = fn[:fn.index("\n        function ")]
+    ok("lab('Shared inbox', counts.open)" in fn, "the title carries the open count")
+    ok("d.address || 'The mailbox the team answers'" in fn,
+       "the mailbox and its last sweep are the line under it")
+    ok("mCard.append(tableTools([sWrap, states], [viewSeg]))" in fn,
+       "search and states left, the view switch right")
+    ok("filterTabs([['open'" in fn, "the states are counted tabs")
+    ok("el('div', 'lbl-toolbar')" not in fn, "the old jammed row is gone")
+    # Who is on today became a card of its own rather than a bare strip.
+    ok("el('h3', 'card-title', 'Who is on today')" in fn, "the team strip is a card")
+    ok("if ((d.team || []).length) {" in fn, "which does not appear when there is no team")
+    # Nothing was dropped.
+    for handler, what in [("openMailRules", "filters"), ("refreshMailQuiet(true)", "refresh"),
+                          ("'/api/mail/search'", "whole-mailbox search"),
+                          ("mailView = v", "the list and board switch"),
+                          ("mailFilter = v", "the state filter"),
+                          ("mailQ = search.value", "the live search")]:
+        ok(handler in fn, "the " + what + " survived the sort")
+
+
+@test
+def t_the_mail_row_is_the_reference_measurement():
+    """12px on every side and a full hairline. It was 12 by 16, which doubles up
+    with the card's own padding, and a 0.5px rule, which lands on a device pixel
+    on some screens and disappears on others."""
+    row = CSS.split(".mrow {")[1].split("}")[0]
+    ok("padding: var(--sp-3)" in row, "12px on every side")
+    ok("border-top: 1px solid var(--border)" in row, "a full hairline in the border ink")
+    ok("0.5px" not in row, "and not a half-pixel one")
 
 
 if __name__ == "__main__":

@@ -986,7 +986,11 @@
            ------------------------------------------------------------------ */
         .mail-sync { font-size: var(--t-xs); color: var(--ink-3); }
         .mail-sync.err { color: var(--danger); }
+        /* Inside .tbl-search it takes that field's shape; on its own (the
+           reconciliation exception search used to use this class) it still
+           needs a width of its own. */
         .mail-search { flex: 1 1 160px; max-width: 260px; }
+        .tbl-search .mail-search { flex: none; max-width: none; }
         .mail-who { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 10px; }
         .mail-who-card { flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
             background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r);
@@ -1032,8 +1036,11 @@
         .mail-labelerr { font-size: var(--t-xs); color: var(--warn); }
         /* ---- the list: an inbox reads as rows, not columns ---- */
         .mlist { border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); overflow: hidden; }
-        .mrow { display: flex; align-items: center; gap: 10px; padding: 12px 16px;
-            border-top: 0.5px solid var(--line); font-size: var(--t-md); cursor: pointer; }
+        /* The reference's mail row: 12px on every side, a full hairline rather
+           than the half-pixel one (which lands on a device pixel on some
+           screens and vanishes on others), and the row's own text at 14px. */
+        .mrow { display: flex; align-items: center; gap: 10px; padding: var(--sp-3);
+            border-top: 1px solid var(--border); font-size: var(--t-md); cursor: pointer; }
         .mrow:first-child { border-top: 0; }
         .mrow:hover { background: var(--bg-2); }
         .mrow.selected { background: var(--accent-soft); }
@@ -1060,7 +1067,9 @@
         /* Unread has to be obvious at a glance, not a 100-weight difference
            nobody can see. Read rows sit back (400, muted); unread comes
            forward: full-strength ink, 600, its own tint and a blue edge. */
-        .mrow.unread { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+        /* 2px, as the reference draws its marker bar. At 3px it read as a
+           border the row had grown rather than a mark against it. */
+        .mrow.unread { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
         .mrow.unread:hover { background: var(--accent-soft); }
         .mrow.unread .mfrom { color: var(--ink); font-weight: var(--w-medium); }
         .mrow.unread .msubj { color: var(--ink-2); }
@@ -12532,9 +12541,21 @@
                     m.uid === d.me ? load : (PRESENCE_LABEL[m.presence] || 'Presence unknown') + ' · ' + load));
                 who.append(c);
             });
-            box.append(who);
-            /* ---- toolbar ---- */
-            const top = el('div', 'lbl-toolbar');
+            /* In a card with a title. Bare on the background this row read as
+               decoration rather than as "here is who can take one". */
+            if ((d.team || []).length) {
+                const wcard = el('div', 'card'); wcard.style.marginBottom = '16px';
+                const whead = el('div', 'card-head');
+                whead.append(el('h3', 'card-title', 'Who is on today'));
+                whead.append(el('p', 'card-desc', 'Where each person is working, and how much they are carrying.'));
+                wcard.append(whead, who);
+                box.append(wcard);
+            }
+            /* ---- the board, composed the way the reference composes a list
+               page: a counted title, the mailbox and its last sweep as the line
+               under it, the two things you press on the right, then the search
+               and the states on a toolbar. It was six controls and a status
+               line jammed into one row. ---- */
             const counts = { open: 0, mine: 0, unassigned: 0, unread: 0, done: 0 };
             (d.threads || []).forEach(t => {
                 if (t.unread) counts.unread++;       // whatever state it is in
@@ -12543,16 +12564,40 @@
                 if (t.owner === d.me) counts.mine++;
                 if (t.state === 'unassigned') counts.unassigned++;
             });
+            /* A sync that is failing is not a footnote. It stays a row of its
+               own, above everything, in the colour that means stop. */
+            if (d.sync_error) {
+                box.append(el('div', 'msg error', 'Sync problem: ' + d.sync_error
+                    + ' The list below may be missing mail that has arrived since.'));
+            }
+            const mCard = el('div', 'card');
+            const mHead = el('div', 'card-head');
             const lab = (text, n) => text + (n ? ' (' + n + ')' : '');
-            top.append(segControl([{ value: 'open', label: lab('Open', counts.open) },
-                                   { value: 'unread', label: lab('Unread', counts.unread) },
-                                   { value: 'mine', label: lab('Mine', counts.mine) },
-                                   { value: 'unassigned', label: lab('Unassigned', counts.unassigned) },
-                                   { value: 'done', label: 'Done' }],
-                mailFilter, v => { mailFilter = v; mailSel.clear(); mailListCap = 400; renderMail(); }));
+            mHead.append(el('h3', 'card-title', lab('Shared inbox', counts.open)));
+            mHead.append(el('p', 'card-desc', (d.address || 'The mailbox the team answers')
+                + (d.synced_at ? ' \u00b7 synced ' + mailAgoLong(d.synced_at) : ' \u00b7 never synced')));
+            const mAct = el('div', 'card-act');
+            const filt = el('button', 'btn btn-sm', 'Filters' + (d.rules ? ' (' + d.rules + ')' : ''));
+            filt.title = 'Rules that sort mail as it arrives';
+            filt.onclick = () => openMailRules();
+            const rf = el('button', 'btn btn-sm');
+            rf.append(ico(I.refresh), document.createTextNode('Refresh'));
+            rf.onclick = async () => {
+                rf.disabled = true;
+                const ok = await refreshMailQuiet(true);
+                /* Success repaints the toolbar with a fresh button; failure
+                   must hand this one back or Refresh dies exactly when the
+                   person is trying to recover from a bad patch. */
+                rf.disabled = false;
+                if (!ok) toastError('Could not refresh the inbox. Try again in a moment.');
+            };
+            mAct.append(filt, rf);
+            mHead.append(mAct);
+            mCard.append(mHead);
+
             const search = document.createElement('input');
-            search.type = 'search'; search.className = 'disp-text mail-search';
-            search.placeholder = 'Search sender or subject'; search.value = mailQ;
+            search.type = 'search'; search.className = 'mail-search';
+            search.value = mailQ;
             search.oninput = () => { mailQ = search.value; mailFound = null; paintMailBody(); };
             search.onkeydown = async (e) => {
                 if (e.key !== 'Enter') return;
@@ -12568,33 +12613,22 @@
                 search.focus();
             };
             search.placeholder = 'Search, then Enter for the whole mailbox';
-            top.append(search);
-            const sync = el('span', 'mail-sync' + (d.sync_error ? ' err' : ''),
-                d.sync_error ? 'Sync problem: ' + d.sync_error
-                             : (d.address || '') + (d.synced_at ? ' · synced ' + mailAgoLong(d.synced_at) : ''));
-            top.append(sync);
-            top.append(segControl([{ value: 'list', label: 'List' }, { value: 'board', label: 'Board' }],
-                mailView, v => { mailView = v; mailSel.clear(); renderMail(); }));
-            const filt = el('button', 'btn', 'Filters' + (d.rules ? ' (' + d.rules + ')' : ''));
-            filt.onclick = () => openMailRules();
-            top.append(filt);
-            const rf = el('button', 'btn');
-            rf.append(ico(I.refresh), document.createTextNode('Refresh'));
-            rf.onclick = async () => {
-                rf.disabled = true;
-                const ok = await refreshMailQuiet(true);
-                /* Success repaints the toolbar with a fresh button; failure
-                   must hand this one back or Refresh dies exactly when the
-                   person is trying to recover from a bad patch. */
-                rf.disabled = false;
-                if (!ok) toastError('Could not refresh the inbox. Try again in a moment.');
-            };
-            top.append(rf);
-            box.append(top);
+            const sWrap = el('div', 'tbl-search');
+            sWrap.append(ico(I.search), search);
+            const states = filterTabs([['open', lab('Open', counts.open)],
+                                       ['unread', lab('Unread', counts.unread)],
+                                       ['mine', lab('Mine', counts.mine)],
+                                       ['unassigned', lab('Unassigned', counts.unassigned)],
+                                       ['done', 'Done']],
+                mailFilter, v => { mailFilter = v; mailSel.clear(); mailListCap = 400; renderMail(); });
+            const viewSeg = segControl([{ value: 'list', label: 'List' }, { value: 'board', label: 'Board' }],
+                mailView, v => { mailView = v; mailSel.clear(); renderMail(); });
+            mCard.append(tableTools([sWrap, states], [viewSeg]));
+            box.append(mCard);
             const bulkHost = el('div'); bulkHost.id = 'mail-bulk-host';
-            box.append(bulkHost);
+            mCard.append(bulkHost);
             const bodyHost = el('div'); bodyHost.id = 'mail-board-host';
-            box.append(bodyHost);
+            mCard.append(bodyHost);
             paintMailBody();
         }
         /* ---- bulk actions: the only realistic way through a first import ---- */
