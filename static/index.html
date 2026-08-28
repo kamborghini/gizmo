@@ -7476,6 +7476,12 @@
             modal.append(head, body); overlay.append(modal); document.body.append(overlay);
             const prev = document.activeElement;
             let booking = false;    // set while money is being spent
+            /* What THIS booking asked the courier to do about collection. It
+               lives out here because renderResult reads it and is a sibling of
+               the handler that sets it, not a child - declaring it inside the
+               click was a scope error that only showed up AFTER a booking had
+               charged, which is the worst possible moment for one. */
+            let askedCollection = '';
             const close = () => {
                 if (booking) { addToast('The courier booking is still going through. Please wait.'); return; }
                 overlay.remove(); document.removeEventListener('keydown', esc);
@@ -8039,7 +8045,7 @@
                     book.textContent = 'Booking with ' + (carrierLabel(chosen.carrier_name || '') || optionName(chosen))
                         + '… do not close this window';
                     x.disabled = true;
-                    const askedCollection = collectionForRun || '';
+                    askedCollection = collectionForRun || '';
                     const doBook = (force) => api('/api/dispatch/book', {
                         order_id: o.id, name: orderNo(o), option: chosen, boxes: lastBoxes, notify: nb.checked, force: !!force,
                         insurance: lastInsurance, signature: sigSel ? sigSel.value : '',

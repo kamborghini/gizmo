@@ -1165,6 +1165,29 @@ def t_paying_a_customers_duty_warns_that_it_makes_us_liable():
 
 
 @test
+def t_what_a_booking_asked_for_outlives_the_click_that_asked():
+    """Shipped broken: askedCollection was declared with const INSIDE the book
+    click handler and read by renderResult, which is its SIBLING, not its child.
+    Syntax-checking passes on that - it is a scope error, not a parse error - so
+    it only surfaced at runtime, right after a booking had charged the account.
+    The worst possible moment to throw.
+
+    node --check cannot see this and there is no JS linter in this repo, so this
+    guard is narrow on purpose: it pins the declaration to the scope both
+    functions can reach."""
+    i = SCRIPT.index("let booking = false;    // set while money is being spent")
+    seg = SCRIPT[i:i + 700]
+    ok("let askedCollection" in seg,
+       "it is declared beside `booking`, in the scope the whole panel shares")
+    # And NOT re-declared inside the handler, which is what broke it.
+    ok("const askedCollection" not in SCRIPT and "let askedCollection = collectionForRun" not in SCRIPT,
+       "and never re-declared inside the click, which would shadow it again")
+    j = SCRIPT.index("function renderResult(res)")
+    ok("askedCollection" in SCRIPT[j:j + 900],
+       "renderResult still reads it, which is the whole reason it must live out there")
+
+
+@test
 def t_the_charts_are_drawn_to_the_reference_spec():
     """Measured off the reference's own rendered SVG, not eyeballed: five
     horizontal rules in #ccc at half opacity spanning the FULL width, no
