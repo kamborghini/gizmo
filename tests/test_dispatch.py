@@ -11932,6 +11932,30 @@ def t_a_booking_can_carry_its_own_collection_arrangement():
 
 
 @test
+def t_collections_shows_what_this_app_booked_and_says_so():
+    """World Options cannot be asked what is scheduled: their service exposes
+    exactly three operations - DoShipment, GetAllServicesAndRates and
+    VoidShipment. So this is gizmo's own record, and the panel says that rather
+    than implying it read the courier's diary."""
+    def go():
+        r = post("/api/dispatch/collections", {})
+        eq(r.status_code, 200, r.text[:160])
+        d = r.json()
+        ok(d.get("date"), "it answers for a day")
+        ok(isinstance(d.get("rows"), list) and d["rows"], "with a row per courier")
+        ok("no way to be asked" in (d.get("note") or "").lower()
+           or "portal" in (d.get("note") or "").lower(),
+           "and says where the record comes from: " + str(d.get("note"))[:90])
+        row = d["rows"][0]
+        for k in ("carrier", "label", "arrangement", "scheduled", "standing"):
+            ok(k in row, "each row carries %s" % k)
+        # Clearing is a charge-bearing act: the next parcel books a new pickup.
+        rr = post("/api/dispatch/collections", {"op": "clear", "carrier": "DHL"})
+        eq(rr.status_code, 200, "an admin may clear one")
+    with_accounts(go)
+
+
+@test
 def t_one_collection_a_day_per_courier_not_one_per_parcel():
     """Book a collection with DHL for one shipment and every other DHL parcel
     that day rides the same van. Asking again books - and is charged for - a
@@ -11987,7 +12011,7 @@ def t_a_booked_collection_is_written_down_before_anything_can_fail():
     i = src.index("if _asked_collection.startswith(\"I_Need_To_Book_A_Collection\")")
     charged = src.index("From here the courier is BOOKED and the account is charged")
     ok(charged < i, "it is recorded after the booking is known to have succeeded")
-    seg = src[i:i + 700]
+    seg = src[i:i + 1000]
     ok("_write_collections" in seg, "and written to the ledger")
     ok("except Exception" in seg,
        "and cannot itself throw: nothing after a charge may raise")

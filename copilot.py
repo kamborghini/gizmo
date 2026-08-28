@@ -1407,6 +1407,15 @@ def _write_collections(d: dict) -> None:
     _write_private_json(COLLECTIONS_PATH, "collections", d)
 
 
+def _collection_row(v) -> dict:
+    """One ledger entry, whichever shape it was written in. The first version of
+    this stored a bare date; anything read here may still be one."""
+    if isinstance(v, dict):
+        return {"date": str(v.get("date") or ""), "at": str(v.get("at") or ""),
+                "order": str(v.get("order") or ""), "service": str(v.get("service") or "")}
+    return {"date": str(v or ""), "at": "", "order": "", "service": ""}
+
+
 def _collection_target(arrangement: str) -> str:
     """The DAY the collection being asked for is for."""
     day = datetime.now(timezone.utc).date()
@@ -6043,7 +6052,7 @@ def _collection_plan(cfg: dict, carrier: str, booked: Optional[dict] = None) -> 
                 "message": COLLECTION_MESSAGES.get(arrangement, "")}
     booked = booked if isinstance(booked, dict) else _load_collections()
     target = _collection_target(arrangement)
-    if key and str(booked.get(key) or "") == target:
+    if key and _collection_row(booked.get(key)).get("date") == target:
         when = "tomorrow" if arrangement.endswith("For_Next_Day") else "today"
         return {"arrangement": "I_Already_Have_Collection_Scheduled", "already": True,
                 "message": "Collection already booked for " + when}
@@ -6260,7 +6269,11 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
             _ck = str(option.get("carrier_name") or "").strip().upper()
             if _ck:
                 _cbook = _load_collections()
-                _cbook[_ck] = _collection_target(_asked_collection)
+                _cbook[_ck] = {"date": _collection_target(_asked_collection),
+                               "at": datetime.now(timezone.utc).isoformat(),
+                               "order": str(reference or order_id or "")[:24],
+                               "service": str(option.get("service_name")
+                                              or option.get("carrier_label") or "")[:60]}
                 _write_collections(_cbook)
         except Exception:
             logger.exception("could not record the collection for %s", option.get("carrier_name"))
@@ -16696,6 +16709,62 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         for r in rows:
             r["has_label"] = bool(_load_dispatch_labels(r.get("id")))
         return _json({"shipments": rows})
+
+    @mcp.custom_route("/api/dispatch/collections", methods=["POST"])
+    async def dispatch_collections_route(request: Request):
+        """What is coming, and from whom, on a given day.
+
+        World Options cannot be asked this. Their service exposes exactly three
+        operations - DoShipment, GetAllServicesAndRates and VoidShipment - so
+        there is nothing to query. This is gizmo's own record of the collections
+        IT booked, which is why the panel says so rather than implying it read
+        the courier's diary."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok_a, who = _authorize(request)
+        if not ok_a:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        day = str(body.get("date") or "")[:10] or datetime.now(timezone.utc).date().isoformat()
+        cfg = _load_shipping()
+        booked = _load_collections()
+        by_carrier = cfg.get("collection_by_carrier")
+        by_carrier = by_carrier if isinstance(by_carrier, dict) else {}
+        rows = []
+        for c in (worldoptions.carrier_choices() if worldoptions else []):
+            code = c["code"]
+            arrangement = str(by_carrier.get(code) or "").strip() or str(cfg.get("collection_option") or "")
+            row = _collection_row(booked.get(code))
+            scheduled = row.get("date") == day
+            rows.append({
+                "carrier": code, "label": c["label"], "arrangement": arrangement,
+                "arrangement_label": COLLECTION_MESSAGES.get(arrangement, arrangement),
+                "configured": code in by_carrier,
+                "scheduled": scheduled,
+                "booked_at": row.get("at") if scheduled else "",
+                "order": row.get("order") if scheduled else "",
+                "service": row.get("service") if scheduled else "",
+                # Nothing is coming and nothing needs to: they call anyway.
+                "standing": arrangement in ("I_Have_Daily_Collection",
+                                            "I_Already_Have_Collection_Scheduled"),
+            })
+        if body.get("op") == "clear":
+            code = str(body.get("carrier") or "").strip().upper()
+            if _team_level(who) < ROLE_LEVELS["admin"]:
+                return _json({"error": "Only an admin can clear a collection."}, 403)
+            if code:
+                d = _load_collections()
+                d.pop(code, None)
+                _write_collections(d)
+                _track(who, "dispatch", "cleared a collection", code)
+                return _json({"ok": True, "cleared": code})
+        return _json({"date": day, "rows": rows,
+                      "note": "These are the collections this app booked. World Options has no way "
+                              "to be asked what is scheduled, so anything booked in their portal "
+                              "directly will not appear here."})
 
     @mcp.custom_route("/api/dispatch/quote", methods=["POST"])
     async def dispatch_quote_route(request: Request):

@@ -4151,7 +4151,9 @@
                 const no = el('button', 'btn'); no.textContent = opts.cancelText || 'Cancel';
                 const yes = el('button', 'btn ' + (danger ? 'btn-danger' : 'btn-primary'));
                 yes.textContent = opts.okText || 'Confirm';
-                foot.append(no, yes);
+                /* A panel that only tells you something has one way out, not a
+                   choice between two buttons that do the same thing. */
+                if (opts.hideCancel) foot.append(yes); else foot.append(no, yes);
                 modal.append(head, body, foot); overlay.append(modal); document.body.append(overlay);
                 const prev = document.activeElement;
                 const done = (v) => {
@@ -8244,37 +8246,79 @@
             return collectionForRun ? (COLLECTION_LABELS[collectionForRun] || collectionForRun) : '';
         }
         async function openBookCollection() {
-            const cfg = await ensureShippingCfg().catch(() => null);
-            const opts = (cfg && cfg.collection_options && cfg.collection_options.length)
-                ? cfg.collection_options : Object.keys(COLLECTION_LABELS);
-            const standing = (cfg && cfg.collection_option) || '';
             const body = el('div');
             body.append(el('p', 'field-help',
-                'A courier collection is arranged with the parcel, not on its own, so this '
-                + 'applies to the NEXT shipment you book. The courier is whichever service you '
-                + 'pick when you book it, so a different job can go out with a different carrier.'));
-            const sel = el('select', 'psel');
-            opts.forEach(v => {
-                const o = el('option', null, COLLECTION_LABELS[v] || v.replace(/_/g, ' '));
-                o.value = v;
-                if (v === (collectionForRun || standing)) o.selected = true;
-                sel.append(o);
-            });
-            const f = el('label', 'disp-fld');
-            f.append(el('span', 'disp-fld-lab', 'For the next booking'), sel);
-            body.append(f);
-            if (standing) {
-                body.append(el('p', 'field-help',
-                    'Your standing setting is "' + (COLLECTION_LABELS[standing] || standing)
-                    + '". Anything chosen here is used once and then goes back to it, so a '
-                    + 'morning of parcels cannot quietly book a morning of pickups.'));
-            }
-            if (!await uiConfirm(body, { title: 'Book collection', okText: 'Use for next booking' })) return;
-            collectionForRun = sel.value;
-            renderLabels();
-            addToast(sel.value === standing
-                ? 'The next booking uses your standing arrangement.'
-                : 'The next booking will ask for: ' + (COLLECTION_LABELS[sel.value] || sel.value));
+                'What is coming today, and from whom. These are the collections this app booked: '
+                + 'World Options has no way of being asked what is scheduled, so anything booked '
+                + 'in their portal directly will not show here.'));
+            const host = el('div'); body.append(host);
+            host.append(el('div', 'empty', 'Loading\u2026'));
+            const dlg = uiConfirm(body, { title: 'Collections', okText: 'Done', hideCancel: true });
+            let data = null;
+            try { data = await api('/api/dispatch/collections', {}); }
+            catch (e) { host.innerHTML = ''; host.append(errBubble(e.message || 'Could not read collections')); await dlg; return; }
+            const paint = () => {
+                host.innerHTML = '';
+                const coming = (data.rows || []).filter(r => r.scheduled);
+                const standing = (data.rows || []).filter(r => !r.scheduled && r.standing);
+                const willBook = (data.rows || []).filter(r => !r.scheduled && !r.standing && r.configured);
+                const section = (title, rows, render) => {
+                    if (!rows.length) return;
+                    host.append(el('div', 'section-title', title));
+                    const list = el('div', 'disp-opts');
+                    rows.forEach(r => list.append(render(r)));
+                    host.append(list);
+                };
+                section('Booked for today', coming, r => {
+                    const row = el('div', 'disp-opt on');
+                    const top = el('div', 'disp-opt-top');
+                    top.append(el('span', 'disp-opt-prov', r.label));
+                    if (r.service) top.append(el('span', 'disp-opt-carrier', r.service));
+                    top.append(el('span', 'lbl-chip made', 'Collection booked'));
+                    row.append(top);
+                    const sub = [];
+                    if (r.order) sub.push('Secured by ' + r.order);
+                    if (r.booked_at) sub.push('at ' + fmtDate(r.booked_at));
+                    if (sub.length) row.append(el('div', 'sub', sub.join(' \u00b7 ')));
+                    /* The van has been and gone and another parcel needs one:
+                       clearing lets the next booking ask again. */
+                    const clr = el('button', 'linkish', 'The van has been, book another');
+                    clr.onclick = async () => {
+                        if (!await uiConfirm('Clear the record of ' + r.label + '\u2019s collection today? '
+                            + 'The next parcel booked with them will ask for a new one, which is a '
+                            + 'second pickup charge.', { title: 'Clear collection', okText: 'Clear it' })) return;
+                        try { await api('/api/dispatch/collections', { op: 'clear', carrier: r.carrier });
+                              data = await api('/api/dispatch/collections', {}); paint(); toastOk('Cleared.'); }
+                        catch (e) { toastError(e.message); }
+                    };
+                    row.append(clr);
+                    return row;
+                });
+                section('They collect anyway', standing, r => {
+                    const row = el('div', 'disp-opt');
+                    const top = el('div', 'disp-opt-top');
+                    top.append(el('span', 'disp-opt-prov', r.label));
+                    top.append(el('span', 'lbl-chip note', r.arrangement_label));
+                    row.append(top);
+                    return row;
+                });
+                section('Will be booked with the next parcel', willBook, r => {
+                    const row = el('div', 'disp-opt');
+                    const top = el('div', 'disp-opt-top');
+                    top.append(el('span', 'disp-opt-prov', r.label));
+                    top.append(el('span', 'lbl-chip warn', r.arrangement_label));
+                    row.append(top);
+                    return row;
+                });
+                if (!coming.length && !standing.length && !willBook.length) {
+                    host.append(el('div', 'empty',
+                        'No courier has a collection rule yet. Set them under Settings, Shipping, '
+                        + 'Collections by courier, and this shows what is coming each day.'));
+                }
+                host.append(el('p', 'field-help', data.note || ''));
+            };
+            paint();
+            await dlg;
         }
         async function openCustomShip() {
             const overlay = el('div', 'modal-overlay show');
