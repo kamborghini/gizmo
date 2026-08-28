@@ -5463,12 +5463,7 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
             _record_wo_failure(tech)
         return out
     show_shop = bool(cfg.get("show_parcelshop", False))
-    _booked_today = _load_collections()
-    for _o in options:
-        _p = _collection_plan(cfg, _o.get("carrier_name"), _booked_today)
-        _o["collection_option"] = _p["arrangement"]
-        _o["collection_message"] = _p["message"]
-        _o["collection_already"] = _p["already"]
+    _collection_plans(cfg, options)
     return {
         "options": options,
         "currency": quoted or currency,
@@ -5553,12 +5548,7 @@ async def run_custom_quote(registry: dict, dest: dict, boxes: list,
             _record_wo_failure(tech)
         return out
     international = str(dest.get("country") or "").upper() not in ("GB", "")
-    _booked_today = _load_collections()
-    for _o in options:
-        _p = _collection_plan(cfg, _o.get("carrier_name"), _booked_today)
-        _o["collection_option"] = _p["arrangement"]
-        _o["collection_message"] = _p["message"]
-        _o["collection_already"] = _p["already"]
+    _collection_plans(cfg, options)
     return {
         "options": options,
         "currency": quoted or currency,
@@ -5779,12 +5769,17 @@ async def _custom_book_locked(registry: dict, key: str, option: dict, dest: dict
                              "return a shop for this address. Pick a to-the-door service instead."}
 
     _ready_dmy, _ready_hm = _collection_ready(cfg)
+    # The same per-carrier arrangement an order booking gets. This used to send
+    # the standing setting whatever the courier was, so a DHL custom shipment
+    # asked for whatever UPS is set to.
+    _asked_collection = _collection_plan(cfg, option.get("carrier_name"), None,
+                                         _ready_dmy)["arrangement"]
     try:
         shipment = await _book_with_one_retry(
             option, origin, dest, boxes, currency=currency, reference=reference,
             ready_time=_ready_hm, ready_date=_ready_dmy,
             close_time=str(cfg.get("close_time") or ""),
-            collection_option=str(cfg.get("collection_option") or ""),
+            collection_option=_asked_collection,
             insurance=insurance,
             signature=(option.get("signature_type") or signature),
             quoted_signature=(option.get("signature_type") or ""),
@@ -5883,6 +5878,9 @@ async def _custom_book_locked(registry: dict, key: str, option: dict, dest: dict
                     ("name", "company", "street", "street2", "city", "state",
                      "postcode", "country", "phone", "email")},
     }
+    _record_collection(shipment.get("carrier_name") or option.get("carrier_name"),
+                       _asked_collection, _ready_dmy, reference,
+                       shipment.get("service_name") or option.get("carrier_label") or "")
     book_note = ""
     try:
         _record_dispatch(key, entry)
@@ -6140,6 +6138,56 @@ def _collection_plan(cfg: dict, carrier: str, booked: Optional[dict] = None,
             "message": COLLECTION_MESSAGES.get(arrangement, "")}
 
 
+def _collection_plans(cfg: dict, options: list) -> None:
+    """Stamp every quoted courier with how it collects, and whether a van is
+    already coming.
+
+    Two things this has to get right, and the first version got both wrong.
+
+    It asks about the day the BOOKING will use - the ready date the courier is
+    given, which after the close is tomorrow - not "today". Comparing against
+    today meant a collection booked at half five was recorded for tomorrow and
+    then not found, so the next parcel was told to book all over again.
+
+    And it reads the courier's own confirmations off the dispatch record, not
+    just this app's ledger. A custom shipment never wrote that ledger, so a
+    collection booked from the Shipping tab was invisible here."""
+    ready_dmy = _collection_ready(cfg)[0] if cfg else ""
+    days: dict = {}
+    for o in options or []:
+        if not isinstance(o, dict):
+            continue
+        day = _collection_target(_collection_for(cfg, o.get("carrier_name")), ready_dmy)
+        if day not in days:          # read the two stores once per distinct day
+            days[day] = _collections_for(day)
+        p = _collection_plan(cfg, o.get("carrier_name"), days[day], ready_dmy)
+        o["collection_option"] = p["arrangement"]
+        o["collection_message"] = p["message"]
+        o["collection_already"] = p["already"]
+
+
+def _record_collection(carrier: str, arrangement: str, ready_dmy: str,
+                       order: str = "", service: str = "") -> None:
+    """A van is now coming from this carrier. Every other parcel going out with
+    them that day rides it, so nothing else asks - and nothing else is charged
+    for a second pickup. Called from both booking paths; the custom one used to
+    skip it, which is how a booked DHL collection went unnoticed."""
+    if not str(arrangement or "").startswith("I_Need_To_Book_A_Collection"):
+        return
+    code = str(carrier or "").strip().upper()
+    if not code:
+        return
+    try:
+        book = _load_collections()
+        book[code] = {"date": _collection_target(arrangement, ready_dmy),
+                      "at": datetime.now(timezone.utc).isoformat(),
+                      "order": str(order or "")[:24],
+                      "service": str(service or "")[:60]}
+        _write_collections(book)
+    except Exception:
+        logger.exception("could not record the collection for %s", carrier)
+
+
 async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: list,
                                 notify, force: bool, insurance: str, signature: str,
                                 customs_body: Optional[dict], by: str = "",
@@ -6341,22 +6389,9 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
     # From here the courier is BOOKED and the account is charged. Nothing below
     # may raise: an exception now would be reported as "the booking failed" and
     # the operator would book (and pay for) a second label.
-    if _asked_collection.startswith("I_Need_To_Book_A_Collection"):
-        # A van is now coming from this carrier. Every other parcel going out
-        # with them that day rides it, so nothing else asks - and nothing else
-        # is charged for a second pickup.
-        try:
-            _ck = str(option.get("carrier_name") or "").strip().upper()
-            if _ck:
-                _cbook = _load_collections()
-                _cbook[_ck] = {"date": _collection_target(_asked_collection, _ready_dmy),
-                               "at": datetime.now(timezone.utc).isoformat(),
-                               "order": str(reference or order_id or "")[:24],
-                               "service": str(option.get("service_name")
-                                              or option.get("carrier_label") or "")[:60]}
-                _write_collections(_cbook)
-        except Exception:
-            logger.exception("could not record the collection for %s", option.get("carrier_name"))
+    _record_collection(option.get("carrier_name"), _asked_collection, _ready_dmy,
+                       str(reference or order_id or ""),
+                       option.get("service_name") or option.get("carrier_label") or "")
     try:
         shipment["labels"] = await _resolve_label_links(shipment.get("labels") or [])
     except Exception:

@@ -12012,6 +12012,79 @@ def t_a_collection_belongs_to_the_day_the_van_comes():
 
 
 @test
+def t_the_quote_asks_about_the_day_the_van_is_coming():
+    """Reported live: "still getting book a collection on a DHL parcel even
+    though I have a DHL booked". Two separate reasons, both here.
+
+    The rates list asked whether a van was coming TODAY, while the booking
+    records it against the READY date - which after the close is tomorrow. So a
+    collection booked at half five was filed for tomorrow and then not found,
+    and the next parcel was told to book, and be charged for, a second one.
+
+    And it read only this app's ledger, never the courier's own confirmation on
+    the dispatch record - so a collection booked on a custom shipment, which
+    never wrote that ledger, was invisible."""
+    real_ready = copilot._collection_ready
+    copilot._collection_ready = lambda cfg, now=None: ("31/08/2026", "09:00")
+    try:
+        cfg = {"collection_by_carrier": {"DHL": "I_Need_To_Book_A_Collection"}}
+        opts = lambda: [{"carrier_name": "DHL"}, {"carrier_name": "UPS"}]
+
+        # Booked late today, so the courier comes on the 31st. Filed there, found there.
+        copilot._write_dispatch({})
+        copilot._write_collections({"DHL": {"date": "2026-08-31", "at": "2026-08-28T17:31:00+00:00"}})
+        o = opts(); copilot._collection_plans(cfg, o)
+        ok(o[0]["collection_already"], "the second parcel rides the van already booked")
+        eq(o[0]["collection_message"], "Collection already booked for today",
+           "and is told so rather than asked to book again")
+
+        # The courier's own confirmation, with no ledger entry at all.
+        copilot._write_collections({})
+        copilot._write_dispatch({"C1": {"carrier_name": "DHL", "collection_date": "REF-1",
+                                        "ready_date": "31/08/2026", "order_name": "custom",
+                                        "dispatched_at": "2026-08-28T17:31:00+00:00"}})
+        o = opts(); copilot._collection_plans(cfg, o)
+        ok(o[0]["collection_already"],
+           "a collection booked on a custom shipment counts just the same")
+
+        # Cleared: the van has been, so the next parcel books a fresh one.
+        copilot._write_collections({"DHL": {"date": "2026-08-31", "cleared": True}})
+        o = opts(); copilot._collection_plans(cfg, o)
+        ok(not o[0]["collection_already"], "and once cleared it asks again")
+        eq(o[0]["collection_option"], "I_Need_To_Book_A_Collection", "with the courier's own arrangement")
+
+        # A courier nobody configured still answers, and is not confused with DHL.
+        eq(o[1]["collection_option"], "", "an unconfigured courier falls back to the standing setting")
+    finally:
+        copilot._collection_ready = real_ready
+        copilot._write_collections({}); copilot._write_dispatch({})
+
+
+@test
+def t_a_custom_shipment_books_the_collection_its_courier_needs():
+    """It sent the standing setting whatever the courier was, so a DHL custom
+    shipment asked for whatever UPS is set to - and it never recorded the van it
+    had just booked, so nothing after it knew."""
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    eq(src.count("collection_option=str(cfg.get(\"collection_option\") or \"\")"), 0,
+       "no booking path sends the standing setting regardless of courier")
+    eq(src.count("_record_collection("), 3,
+       "one writer, called from both booking paths")
+    ok("_record_collection(shipment.get(\"carrier_name\") or option.get(\"carrier_name\")" in src,
+       "including the custom one")
+    # The writer only files a van when one was actually asked for.
+    copilot._write_collections({})
+    copilot._record_collection("DHL", "I_Have_Daily_Collection", "31/08/2026")
+    eq(copilot._load_collections(), {}, "a standing daily collection is not a booking")
+    copilot._record_collection("", "I_Need_To_Book_A_Collection", "31/08/2026")
+    eq(copilot._load_collections(), {}, "and a courier with no name is not filed under one")
+    copilot._record_collection("dhl", "I_Need_To_Book_A_Collection", "31/08/2026", "#1", "Express")
+    eq(copilot._load_collections()["DHL"]["date"], "2026-08-31",
+       "a real booking is filed against the day the van comes")
+    copilot._write_collections({})
+
+
+@test
 def t_the_courier_reference_is_never_printed_as_markup():
     """World Options glues three things together with literal tags:
     28/08/2026<br/>12:00:00<br/>PRG260828150481. Printed straight it puts
@@ -12152,13 +12225,20 @@ def t_a_booked_collection_is_written_down_before_anything_can_fail():
     the stretch that must not raise. If it were not, a crash between booking and
     recording would let the next parcel book a second pickup."""
     src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
-    i = src.index("if _asked_collection.startswith(\"I_Need_To_Book_A_Collection\")")
+    i = src.index("_record_collection(option.get(\"carrier_name\"), _asked_collection")
     charged = src.index("From here the courier is BOOKED and the account is charged")
     ok(charged < i, "it is recorded after the booking is known to have succeeded")
-    seg = src[i:i + 1000]
+    seg = src[src.index("def _record_collection("):][:1200]
     ok("_write_collections" in seg, "and written to the ledger")
     ok("except Exception" in seg,
        "and cannot itself throw: nothing after a charge may raise")
+    # Proved, not just read: a store that will not take a write is swallowed.
+    real = copilot._write_collections
+    copilot._write_collections = lambda d: (_ for _ in ()).throw(OSError("disk full"))
+    try:
+        copilot._record_collection("DHL", "I_Need_To_Book_A_Collection", "31/08/2026")
+    finally:
+        copilot._write_collections = real
 
 
 @test
@@ -12186,7 +12266,11 @@ def t_each_courier_carries_its_own_collection_arrangement():
     ok("valid_a" in seg and "COLLECTION_OPTIONS" in seg,
        "and the arrangement one the courier actually offers")
     # Every quoted option carries its own answer, so it can be shown per row.
-    ok('_o["collection_message"]' in src, "each option says how its courier collects")
+    eq(src.count("_collection_plans(cfg, options)"), 2,
+       "both quote paths stamp every option with how its courier collects")
+    seg = src[src.index("def _collection_plans("):][:1600]
+    ok('o["collection_message"]' in seg and 'o["collection_already"]' in seg,
+       "each option says how its courier collects, and whether one is already coming")
     html = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
     ok(html.count("if (op.collection_message)") == 2,
        "and BOTH option lists show it - the order panel and the pasted address one")
