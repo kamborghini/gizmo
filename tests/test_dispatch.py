@@ -45,6 +45,7 @@ os.environ.update({
     "RECON_CACHE_PATH": SCRATCH + "/recon_cache.json",
     "RECON_DOCS_PATH": SCRATCH + "/recon_docs.json",
     "XERO_TOKEN_PATH": SCRATCH + "/xero_oauth.json",
+    "COLLECTIONS_PATH": SCRATCH + "/collections.json",
 })
 for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
     os.environ.pop(v, None)
@@ -11906,10 +11907,10 @@ def t_a_booking_can_carry_its_own_collection_arrangement():
     different job may go out with a different carrier."""
     src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
     ok("collection_option: str = \"\"" in src, "the booking takes one")
-    i = src.index("collection_option=str(collection_option")
+    i = src.index("_asked_collection = str(collection_option")
     seg = ' '.join(src[i:i + 160].split())
-    ok("_collection_for(cfg, option.get(\"carrier_name\"))" in seg,
-       "and otherwise asks how THIS courier collects: " + seg[:90])
+    ok('_plan["arrangement"]' in seg,
+       "and otherwise asks for what the plan says for THIS courier: " + seg[:90])
     # Per carrier first, the standing setting for anyone unconfigured.
     eq(copilot._collection_for({"collection_by_carrier": {"UPS": "I_Have_Daily_Collection"},
                                 "collection_option": "I_Need_To_Book_A_Collection"}, "UPS"),
@@ -11928,6 +11929,68 @@ def t_a_booking_can_carry_its_own_collection_arrangement():
     for v in ("I_Need_To_Book_A_Collection", "I_Have_Daily_Collection",
               "I_Already_Have_Collection_Scheduled"):
         ok(v in worldoptions.COLLECTION_OPTIONS, "%s is a real arrangement" % v)
+
+
+@test
+def t_one_collection_a_day_per_courier_not_one_per_parcel():
+    """Book a collection with DHL for one shipment and every other DHL parcel
+    that day rides the same van. Asking again books - and is charged for - a
+    second pickup. So "book a collection" becomes "already scheduled" for the
+    rest of that day on its own, per courier, without anyone remembering."""
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    today = _dt.now(_tz.utc).date().isoformat()
+    tomorrow = (_dt.now(_tz.utc).date() + _td(days=1)).isoformat()
+    cfg = {"collection_by_carrier": {"DHL": "I_Need_To_Book_A_Collection",
+                                     "UPS": "I_Have_Daily_Collection"},
+           "collection_option": "I_Need_To_Book_A_Collection"}
+
+    first = copilot._collection_plan(cfg, "DHL", {})
+    eq(first["arrangement"], "I_Need_To_Book_A_Collection", "the first DHL parcel asks")
+    eq(first["message"], "Book a collection for this shipment", "and says so")
+    ok(not first["already"], "nothing is booked yet")
+
+    second = copilot._collection_plan(cfg, "DHL", {"DHL": today})
+    eq(second["arrangement"], "I_Already_Have_Collection_Scheduled",
+       "the second DHL parcel of the day does NOT ask again")
+    ok(second["already"], "and knows why")
+    eq(second["message"], "Collection already booked for today", "and says which day")
+
+    # It is per courier: DHL's van does not collect the UPS parcels.
+    eq(copilot._collection_plan(cfg, "UPS", {"DHL": today})["message"],
+       "Daily collection scheduled", "UPS is unaffected by DHL's booking")
+    other = copilot._collection_plan({"collection_option": "I_Need_To_Book_A_Collection"},
+                                     "FEDEX", {"DHL": today})
+    eq(other["arrangement"], "I_Need_To_Book_A_Collection",
+       "and a courier with nothing booked still asks")
+
+    # Yesterday's van is no help today.
+    stale = copilot._collection_plan(cfg, "DHL", {"DHL": "2020-01-01"})
+    eq(stale["arrangement"], "I_Need_To_Book_A_Collection", "a stale date does not suppress today")
+
+    # A next-day request is held against the day it is FOR.
+    nd = dict(cfg, collection_by_carrier={"DHL": "I_Need_To_Book_A_Collection_For_Next_Day"})
+    eq(copilot._collection_target("I_Need_To_Book_A_Collection_For_Next_Day"), tomorrow,
+       "a next-day collection is for tomorrow")
+    eq(copilot._collection_plan(nd, "DHL", {"DHL": tomorrow})["arrangement"],
+       "I_Already_Have_Collection_Scheduled", "and a second one for the same day does not ask")
+    eq(copilot._collection_plan(nd, "DHL", {"DHL": today})["arrangement"],
+       "I_Need_To_Book_A_Collection_For_Next_Day",
+       "while today's van does not cover tomorrow's parcel")
+
+
+@test
+def t_a_booked_collection_is_written_down_before_anything_can_fail():
+    """It is recorded straight after the courier is booked and charged, inside
+    the stretch that must not raise. If it were not, a crash between booking and
+    recording would let the next parcel book a second pickup."""
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    i = src.index("if _asked_collection.startswith(\"I_Need_To_Book_A_Collection\")")
+    charged = src.index("From here the courier is BOOKED and the account is charged")
+    ok(charged < i, "it is recorded after the booking is known to have succeeded")
+    seg = src[i:i + 700]
+    ok("_write_collections" in seg, "and written to the ledger")
+    ok("except Exception" in seg,
+       "and cannot itself throw: nothing after a charge may raise")
 
 
 @test
