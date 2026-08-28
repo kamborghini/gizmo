@@ -11932,6 +11932,35 @@ def t_a_booking_can_carry_its_own_collection_arrangement():
 
 
 @test
+def t_the_courier_reference_is_never_printed_as_markup():
+    """World Options glues three things together with literal tags:
+    28/08/2026<br/>12:00:00<br/>PRG260828150481. Printed straight it puts
+    "<br/>" on a dispatch screen, which is exactly what it did - on the
+    Collections panel, on the booking result and in the manifest column."""
+    got = worldoptions.parse_collection("28/08/2026<br/>12:00:00<br/>PRG260828150481")
+    eq(got["ref"], "PRG260828150481", "the reference comes out on its own")
+    eq(got["date"], "28/08/2026", "and the date")
+    eq(got["time"], "12:00:00", "and the time")
+    # Whatever shape it arrives in, no markup leaves this function.
+    for raw in ("28/08/2026<br/>12:00:00<br/>PRG1", "<b>odd</b>", "A<br>B", "PRG9",
+                "", None, "  ", "29/08/2026<BR />09:30<BR />X1"):
+        out = worldoptions.parse_collection(raw)
+        for k in ("ref", "date", "time"):
+            ok("<" not in out[k] and ">" not in out[k],
+               "%r left markup in %s: %r" % (raw, k, out[k]))
+    eq(worldoptions.parse_collection("PRG9")["ref"], "PRG9",
+       "a bare reference is still a reference")
+    eq(worldoptions.parse_collection(None)["ref"], "", "and nothing is nothing")
+    # Every place it is shown reads it through the parser.
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    eq(src.count("parse_collection("), 2,
+       "both the collections view and the manifest column parse it")
+    html = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    ok("collRefText(s.collection_date)" in html,
+       "and the booking result does too, for records stored before this")
+
+
+@test
 def t_a_collection_is_read_from_the_couriers_own_reference():
     """World Options returns a collection reference on the booking reply -
     CollectionDateNumber - and it has been kept on every dispatch record since

@@ -1195,6 +1195,36 @@ def _sender_block(o: dict) -> str:
             + "</wo:SendersDetails>")
 
 
+def parse_collection(raw) -> dict:
+    """Their CollectionDateNumber, taken apart.
+
+    It arrives as three things glued together with literal markup:
+        28/08/2026<br/>12:00:00<br/>PRG260828150481
+    which is a date, a time and the collection reference. Printed as-is it puts
+    "<br/>" on a dispatch screen, which is what it was doing."""
+    txt = ("" if raw is None else str(raw)).strip()
+    if not txt:
+        return {"ref": "", "date": "", "time": "", "raw": ""}
+    # Any tag at all is stripped, not just <br/>: whatever they send, a dispatch
+    # screen must never be handed markup to print.
+    parts = [re.sub(r"<[^>]*>", " ", p).strip()
+             for p in re.split(r"<\s*br\s*/?\s*>|[\r\n]+", txt)]
+    parts = [p for p in parts if p]
+    date = time = ref = ""
+    for p in parts:
+        if not date and re.fullmatch(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", p):
+            date = p
+        elif not time and re.fullmatch(r"\d{1,2}:\d{2}(:\d{2})?", p):
+            time = p
+        elif not ref:
+            ref = p
+    # Nothing recognisable: treat the whole thing as the reference rather than
+    # dropping it, but never hand markup on.
+    if not (date or time or ref):
+        ref = re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", txt)).strip()
+    return {"ref": ref, "date": date, "time": time, "raw": txt}
+
+
 def _label_from_bytes(raw: bytes, source_url: str = "") -> dict:
     """An inline label from downloaded bytes, typed by what the bytes actually are.
     An HTML page is refused: saving their error page as the label would be worse

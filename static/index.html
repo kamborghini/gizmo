@@ -139,6 +139,18 @@
         /* One courier per row, two across where there is room: fourteen
            carriers in a single column is a scroll, and in four columns the
            labels stop lining up with their selects. */
+        /* One collection, per row: courier and chip on the first line, the
+           courier's reference under it, and the action at the end. Its own
+           layout because .disp-opt is a two-column grid built for a courier and
+           a price, and a third child there lands in the wrong cell. */
+        .coll-row { display: flex; flex-direction: column; gap: var(--sp-1);
+            padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border);
+            border-radius: var(--r-sm); background: var(--surface); }
+        .coll-row + .coll-row { margin-top: var(--sp-2); }
+        .coll-row-top { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .coll-row-name { font-weight: var(--w-medium); }
+        .coll-row-sub { color: var(--ink-3); font-size: var(--t-xs); }
+        .coll-row .linkish { align-self: flex-start; }
         .coll-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: var(--sp-2) var(--sp-4); margin-top: var(--sp-2); }
         @media (max-width: 720px) { .coll-grid { grid-template-columns: 1fr; } }
@@ -8124,7 +8136,8 @@
                         + '. Your World Options invoice shows the final charge.'));
                 }
                 if (res.warning) body.append(el('div', 'disp-warn', res.warning));
-                if (s.collection_date) body.append(el('div', 'sub', 'Collection reference: ' + s.collection_date));
+                if (s.collection_date) body.append(el('div', 'sub',
+                    'Collection reference: ' + collRefText(s.collection_date)));
                 if (res.insured) body.append(el('div', 'sub', 'Insured for ' + fmtPrice(parseFloat(res.insured), s.currency) + '.'));
                 if (res.delivery_shop) body.append(el('div', 'disp-warn', 'The customer collects this from ' + res.delivery_shop + '. It is not delivered to their address.'));
                 if (res.dropoff_shop) body.append(el('div', 'disp-warn', 'Drop the parcel at: ' + [res.dropoff_shop.name, res.dropoff_shop.street, res.dropoff_shop.city, res.dropoff_shop.postcode].filter(Boolean).join(', ') + '. The courier will NOT collect from you.'));
@@ -8227,6 +8240,23 @@
         /* What each arrangement is CALLED where you choose it, and what it SAYS
            at the dispatch desk once a courier is picked. Two different jobs:
            one is a menu entry, the other is a statement of what will happen. */
+        /* World Options hands back a collection reference as a date, a time and
+           a number glued together with literal markup:
+             28/08/2026<br/>12:00:00<br/>PRG260828150481
+           Printed straight it puts "<br/>" on a dispatch screen, which is what
+           it was doing. The server parses it now; this is the fallback for a
+           record stored before that, and for anything unexpected. */
+        function collRefText(raw) {
+            const parts = String(raw == null ? '' : raw)
+                .split(/<\s*br\s*\/?\s*>|[\r\n]+/)
+                .map(p => p.replace(/<[^>]*>/g, ' ').trim())
+                .filter(Boolean);
+            if (!parts.length) return '';
+            const ref = parts.find(p => !/^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(p)
+                                     && !/^\d{1,2}:\d{2}(:\d{2})?$/.test(p)) || parts[parts.length - 1];
+            const when = parts.filter(p => p !== ref).join(' ');
+            return when ? (ref + ' (' + when + ')') : ref;
+        }
         const COLL_MSG = {
             'I_Have_Daily_Collection': 'Daily collection scheduled',
             'I_Already_Have_Collection_Scheduled': 'A collection is already booked',
@@ -8271,25 +8301,25 @@
                 const section = (title, rows, render) => {
                     if (!rows.length) return;
                     host.append(el('div', 'section-title', title));
-                    const list = el('div', 'disp-opts');
+                    const list = el('div');
                     rows.forEach(r => list.append(render(r)));
                     host.append(list);
                 };
                 section('Booked for today', coming, r => {
-                    const row = el('div', 'disp-opt on');
-                    const top = el('div', 'disp-opt-top');
-                    top.append(el('span', 'disp-opt-prov', r.label));
-                    if (r.service) top.append(el('span', 'disp-opt-carrier', r.service));
+                    const row = el('div', 'coll-row');
+                    const top = el('div', 'coll-row-top');
+                    top.append(el('span', 'coll-row-name', r.label));
+                    if (r.service && r.service !== r.label) top.append(el('span', 'coll-row-sub', r.service));
                     top.append(el('span', 'lbl-chip made', 'Collection booked'));
                     row.append(top);
                     const sub = [];
-                    /* World Options' own collection reference, off the booking
-                       reply. It is the courier's answer rather than this app's
-                       inference, and it is what to quote them on the phone. */
+                    /* World Options' own reference, off the booking reply. It is
+                       the courier's answer rather than this app's inference, and
+                       it is what to quote them on the phone. */
                     if (r.ref) sub.push('Collection ' + r.ref);
+                    if (r.ref_date || r.ref_time) sub.push([r.ref_date, r.ref_time].filter(Boolean).join(' '));
                     if (r.order) sub.push('booked with ' + r.order);
-                    if (r.booked_at) sub.push('at ' + fmtDate(r.booked_at));
-                    if (sub.length) row.append(el('div', 'sub', sub.join(' \u00b7 ')));
+                    if (sub.length) row.append(el('div', 'coll-row-sub', sub.join(' \u00b7 ')));
                     /* The van has been and gone and another parcel needs one:
                        clearing lets the next booking ask again. */
                     const clr = el('button', 'linkish', 'The van has been, book another');
@@ -8305,17 +8335,17 @@
                     return row;
                 });
                 section('They collect anyway', standing, r => {
-                    const row = el('div', 'disp-opt');
-                    const top = el('div', 'disp-opt-top');
-                    top.append(el('span', 'disp-opt-prov', r.label));
+                    const row = el('div', 'coll-row');
+                    const top = el('div', 'coll-row-top');
+                    top.append(el('span', 'coll-row-name', r.label));
                     top.append(el('span', 'lbl-chip note', r.arrangement_label));
                     row.append(top);
                     return row;
                 });
                 section('Will be booked with the next parcel', willBook, r => {
-                    const row = el('div', 'disp-opt');
-                    const top = el('div', 'disp-opt-top');
-                    top.append(el('span', 'disp-opt-prov', r.label));
+                    const row = el('div', 'coll-row');
+                    const top = el('div', 'coll-row-top');
+                    top.append(el('span', 'coll-row-name', r.label));
                     top.append(el('span', 'lbl-chip warn', r.arrangement_label));
                     row.append(top);
                     return row;

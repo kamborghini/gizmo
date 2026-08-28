@@ -1426,10 +1426,15 @@ def _collections_from_dispatch(day: str) -> dict:
             code = str(e.get("carrier_name") or "").strip().upper()
             if not code or code in out:
                 continue
+            # Their reference arrives as date, time and number glued together
+            # with literal <br/>. Parsed here so nothing downstream prints it.
+            _c = (worldoptions.parse_collection(e.get("collection_date"))
+                  if worldoptions else {"ref": str(e.get("collection_date") or ""),
+                                        "date": "", "time": ""})
             out[code] = {"date": day, "at": str(e.get("dispatched_at") or ""),
                          "order": str(e.get("order_name") or oid or ""),
                          "service": str(e.get("carrier_label") or e.get("service_name") or ""),
-                         "ref": str(e.get("collection_date") or "")}
+                         "ref": _c["ref"], "ref_date": _c["date"], "ref_time": _c["time"]}
     except Exception:
         logger.exception("could not read collections off the dispatch record")
     return out
@@ -16781,6 +16786,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 "service": row.get("service") if scheduled else "",
                 # World Options' own collection reference, off the booking reply.
                 "ref": (booked.get(code) or {}).get("ref", "") if scheduled else "",
+                "ref_date": (booked.get(code) or {}).get("ref_date", "") if scheduled else "",
+                "ref_time": (booked.get(code) or {}).get("ref_time", "") if scheduled else "",
                 # Nothing is coming and nothing needs to: they call anyway.
                 "standing": arrangement in ("I_Have_Daily_Collection",
                                             "I_Already_Have_Collection_Scheduled"),
@@ -17008,7 +17015,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                 if worldoptions else "") or ""),
                 "service": e.get("service_name") or "",
                 "tracking": e.get("tracking_number") or "",
-                "collection_ref": e.get("collection_date") or "",
+                "collection_ref": (worldoptions.parse_collection(e.get("collection_date"))["ref"]
+                                   if worldoptions else (e.get("collection_date") or "")),
                 "amount": e.get("amount"),
                 "amount_ex_vat": e.get("amount_ex_vat"),
                 "shipping_paid": e.get("shipping_paid") or "",
