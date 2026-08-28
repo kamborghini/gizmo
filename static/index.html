@@ -136,6 +136,12 @@
             flex-wrap: wrap; margin-bottom: var(--sp-5); }
         .page-tabs .spacer { flex: 1 1 auto; }
         .page-tabs .updated { font-size: var(--t-xs); color: var(--ink-3); }
+        /* One courier per row, two across where there is room: fourteen
+           carriers in a single column is a scroll, and in four columns the
+           labels stop lining up with their selects. */
+        .coll-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: var(--sp-2) var(--sp-4); margin-top: var(--sp-2); }
+        @media (max-width: 720px) { .coll-grid { grid-template-columns: 1fr; } }
         .nav-group { font-size: var(--t-xs); font-weight: var(--w-medium); color: var(--ink-3);
             height: 32px; display: flex; align-items: center; padding: 0 var(--sp-2);
             margin-top: var(--sp-2); }
@@ -6030,8 +6036,8 @@
                remember what the next booking is going to ask for. */
             const coll = el('button', 'btn' + (collectionForRun ? ' on' : ''));
             coll.append(ico(I.truck), document.createTextNode(
-                collectionForRun ? ('Collection: ' + collectionSummary()) : 'Book collection'));
-            coll.title = 'Choose how the courier collects the next parcel you book';
+                collectionForRun ? ('Collection: ' + collectionSummary()) : 'Collections'));
+            coll.title = 'How each courier collects, and a one-off change for the next booking';
             coll.onclick = openBookCollection;
             bar.append(coll);
             if (unprinted.length && unprinted.length < printable.length) {
@@ -7821,6 +7827,21 @@
                     if (op.product_code) rowl.title = (known ? op.carrier_label + ' ' : '')
                         + (op.service_name || '') + ' (World Options service ' + op.product_code + ')';
                     if (Number(op.amount) === cheapest) top.append(el('span', 'lbl-chip made', 'Cheapest'));
+                    /* How THIS courier collects, from the per-courier setting.
+                       A daily UPS collection is a different fact from DHL
+                       having to be asked each time, and the desk should not
+                       have to remember which is which. */
+                    if (op.collection_message) {
+                        const needsBooking = String(op.collection_option || '').indexOf('Need_To_Book') >= 0;
+                        const cc = el('span', 'lbl-chip ' + (needsBooking ? 'warn' : 'note'),
+                                      op.collection_message);
+                        cc.title = needsBooking
+                            ? 'Booking this also asks ' + (op.carrier_label || 'the courier')
+                              + ' to collect. Set it under Settings, Shipping, Collections by courier.'
+                            : (op.carrier_label || 'This courier') + ' already collects, so no pickup is '
+                              + 'requested. Set it under Settings, Shipping, Collections by courier.';
+                        top.append(cc);
+                    }
                     if (drop) top.append(el('span', 'lbl-chip note', 'DROP-OFF'));
                     if (op.no_signature) {
                         const ns = el('span', 'lbl-chip note', 'NO SIGNATURE');
@@ -8189,6 +8210,23 @@
            that costs money here is asking five times in a morning and being
            charged for five pickups. */
         let collectionForRun = null;
+        /* What each arrangement is CALLED where you choose it, and what it SAYS
+           at the dispatch desk once a courier is picked. Two different jobs:
+           one is a menu entry, the other is a statement of what will happen. */
+        const COLL_MSG = {
+            'I_Have_Daily_Collection': 'Daily collection scheduled',
+            'I_Already_Have_Collection_Scheduled': 'A collection is already booked',
+            'I_Need_To_Book_A_Collection': 'Book a collection for this shipment',
+            'I_Need_To_Book_A_Collection_For_Next_Day': 'Book a collection for tomorrow',
+            'I_Am_Going_To_Drop_Off_My_Packages': 'You are dropping this one off',
+        };
+        const DP_COLL_LABELS = {
+            'I_Need_To_Book_A_Collection': 'Book a collection each time',
+            'I_Need_To_Book_A_Collection_For_Next_Day': 'Book a collection for the next day',
+            'I_Have_Daily_Collection': 'They collect daily',
+            'I_Already_Have_Collection_Scheduled': 'A collection is already scheduled',
+            'I_Am_Going_To_Drop_Off_My_Packages': 'We drop off with them',
+        };
         const COLLECTION_LABELS = {
             'I_Need_To_Book_A_Collection': 'Book a collection today',
             'I_Need_To_Book_A_Collection_For_Next_Day': 'Book a collection for tomorrow',
@@ -8456,6 +8494,21 @@
                         known ? op.carrier_label : 'Carrier not named'));
                     top.append(el('span', 'disp-opt-carrier', op.service_name || (known ? '' : 'Courier service')));
                     if (Number(op.amount) === cheapest) top.append(el('span', 'lbl-chip made', 'Cheapest'));
+                    /* How THIS courier collects, from the per-courier setting.
+                       A daily UPS collection is a different fact from DHL
+                       having to be asked each time, and the desk should not
+                       have to remember which is which. */
+                    if (op.collection_message) {
+                        const needsBooking = String(op.collection_option || '').indexOf('Need_To_Book') >= 0;
+                        const cc = el('span', 'lbl-chip ' + (needsBooking ? 'warn' : 'note'),
+                                      op.collection_message);
+                        cc.title = needsBooking
+                            ? 'Booking this also asks ' + (op.carrier_label || 'the courier')
+                              + ' to collect. Set it under Settings, Shipping, Collections by courier.'
+                            : (op.carrier_label || 'This courier') + ' already collects, so no pickup is '
+                              + 'requested. Set it under Settings, Shipping, Collections by courier.';
+                        top.append(cc);
+                    }
                     if (op.shops && op.shops.length) top.append(el('span', 'lbl-chip note', 'DROP-OFF'));
                     if (op.no_signature) top.append(el('span', 'lbl-chip note', 'NO SIGNATURE'));
                     if (op.delivery_dropoff) top.append(el('span', 'lbl-chip warn', 'COLLECT FROM SHOP'));
@@ -8806,6 +8859,53 @@
                 dpSel.value === 'Duties_To_Be_Paid_By_Receiver' ? 'none' : ''; };
             dpSel.onchange = dpShow; dpShow();
 
+            /* How each courier collects, because it genuinely differs: a daily
+               UPS collection already calls, while DHL has to be asked each
+               time. Whatever is set here decides what the dispatch panel says
+               when that courier is picked, and what the booking asks the
+               courier for. Anything left on "Use the setting above" falls back
+               to it, so a courier you rarely use needs no rule. */
+            body.append(el('div', 'section-title', 'Collections by courier'));
+            body.append(el('p', 'field-help',
+                'A collection is arranged with the parcel, so this is what each courier is asked '
+                + 'for when you book with them. Set the ones you have an arrangement with; the '
+                + 'rest use the setting above.'));
+            const collByCarrier = Object.assign({}, cfg.collection_by_carrier || {});
+            const carriers = (cfg.carriers && cfg.carriers.length) ? cfg.carriers
+                : [{ code: 'UPS', label: 'UPS' }, { code: 'DHL', label: 'DHL' },
+                   { code: 'FEDEX', label: 'FedEx' }, { code: 'DPD', label: 'DPD' }];
+            const collGrid = el('div', 'coll-grid');
+            carriers.forEach(c => {
+                const row = el('label', 'disp-fld');
+                row.append(el('span', 'disp-fld-lab', c.label));
+                const sc = el('select', 'psel');
+                const none = el('option', null, 'Use the setting above'); none.value = '';
+                if (!collByCarrier[c.code]) none.selected = true;
+                sc.append(none);
+                (cfg.collection_options || Object.keys(DP_COLL_LABELS)).forEach(v => {
+                    const o = el('option', null, DP_COLL_LABELS[v] || v.replace(/_/g, ' '));
+                    o.value = v;
+                    if (collByCarrier[c.code] === v) o.selected = true;
+                    sc.append(o);
+                });
+                sc.onchange = () => {
+                    if (sc.value) collByCarrier[c.code] = sc.value; else delete collByCarrier[c.code];
+                    collNote.textContent = collSummary();
+                };
+                row.append(sc); collGrid.append(row);
+            });
+            body.append(collGrid);
+            const collSummary = () => {
+                const set = Object.keys(collByCarrier);
+                if (!set.length) return 'No courier has its own rule yet, so every booking uses the setting above.';
+                return set.map(k => {
+                    const lab = (carriers.find(c => c.code === k) || {}).label || k;
+                    return lab + ': ' + (COLL_MSG[collByCarrier[k]] || collByCarrier[k]);
+                }).join('  \u00b7  ');
+            };
+            const collNote = el('p', 'field-help', collSummary());
+            body.append(collNote);
+
             // Box presets
             body.append(el('div', 'section-title', 'Box presets'));
             body.append(el('p', 'field-help', 'The parcel sizes you offer when dispatching. Dimensions in cm, '
@@ -8864,6 +8964,7 @@
                         plugin_code: pluginIn.value.trim() || 'Web_Service',
                         ready_time: readyIn.value || '', close_time: closeIn.value || '',
                         collection_option: coSel.value, show_parcelshop: psCb.checked,
+                        collection_by_carrier: collByCarrier,
                         eori: intlIn.eori.value.trim(), vat_number: intlIn.vat_number.value.trim(),
                         default_hs_code: intlIn.default_hs_code.value.trim(), trade_term: intlIn.trade_term.value.trim(),
                         export_reason: erSel.value, duties_payor: dpSel.value };

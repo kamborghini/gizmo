@@ -871,6 +871,11 @@ _SHIPPING_DEFAULT = {
     # Collection arrangement: explicit, because omitting it makes WO assume a NEW
     # collection is wanted on every booking (wrong for daily-collection accounts).
     "collection_option": "I_Need_To_Book_A_Collection",
+    # How each courier collects, because it differs by courier: UPS may call
+    # daily while DHL has to be asked each time. Keyed by the carrier code the
+    # quote comes back with. The single setting above answers for any carrier
+    # not named here.
+    "collection_by_carrier": {},
     # Shop-based services (customer collects, or we drop off) are hidden by
     # default: this merchant ships to the door and has never used parcel shops.
     "show_parcelshop": False,
@@ -5352,6 +5357,10 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
             _record_wo_failure(tech)
         return out
     show_shop = bool(cfg.get("show_parcelshop", False))
+    for _o in options:
+        _arr = _collection_for(cfg, _o.get("carrier_name"))
+        _o["collection_option"] = _arr
+        _o["collection_message"] = COLLECTION_MESSAGES.get(_arr, "")
     return {
         "options": options,
         "currency": quoted or currency,
@@ -5436,6 +5445,10 @@ async def run_custom_quote(registry: dict, dest: dict, boxes: list,
             _record_wo_failure(tech)
         return out
     international = str(dest.get("country") or "").upper() not in ("GB", "")
+    for _o in options:
+        _arr = _collection_for(cfg, _o.get("carrier_name"))
+        _o["collection_option"] = _arr
+        _o["collection_message"] = COLLECTION_MESSAGES.get(_arr, "")
     return {
         "options": options,
         "currency": quoted or currency,
@@ -5970,6 +5983,25 @@ def _collection_ready(cfg: dict, now=None):
     return candidate.strftime("%d/%m/%Y"), candidate.strftime("%H:%M")
 
 
+# How a given courier collects. Configured per carrier because it genuinely
+# differs: a daily UPS collection already calls, while DHL has to be asked each
+# time. The single setting answers for any carrier nobody has configured.
+COLLECTION_MESSAGES = {
+    "I_Have_Daily_Collection": "Daily collection scheduled",
+    "I_Already_Have_Collection_Scheduled": "A collection is already booked",
+    "I_Need_To_Book_A_Collection": "Book a collection for this shipment",
+    "I_Need_To_Book_A_Collection_For_Next_Day": "Book a collection for tomorrow",
+    "I_Am_Going_To_Drop_Off_My_Packages": "You are dropping this one off",
+}
+
+
+def _collection_for(cfg: dict, carrier: str) -> str:
+    by = cfg.get("collection_by_carrier")
+    by = by if isinstance(by, dict) else {}
+    key = str(carrier or "").strip().upper()
+    return str(by.get(key) or "").strip() or str(cfg.get("collection_option") or "")
+
+
 async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: list,
                                 notify, force: bool, insurance: str, signature: str,
                                 customs_body: Optional[dict], by: str = "",
@@ -6127,7 +6159,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
                                            # for booking one on its own - so "book a collection"
                                            # means asking for one alongside this parcel.
                                            collection_option=str(collection_option
-                                                                 or cfg.get("collection_option") or ""),
+                                                                 or _collection_for(cfg, option.get("carrier_name"))),
                                            insurance=insurance,
                                            # The option's own signature wins: it is what the
                                            # displayed price was quoted under.
@@ -16272,6 +16304,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             "collection_option": cfg.get("collection_option") or "I_Need_To_Book_A_Collection",
             "show_parcelshop": bool(cfg.get("show_parcelshop", False)),
             "collection_options": (worldoptions.COLLECTION_OPTIONS if worldoptions else []),
+            "collection_by_carrier": (cfg.get("collection_by_carrier")
+                                      if isinstance(cfg.get("collection_by_carrier"), dict) else {}),
+            "collection_messages": COLLECTION_MESSAGES,
+            "carriers": (worldoptions.carrier_choices() if worldoptions else []),
             "eori": cfg.get("eori") or "",
             "vat_number": cfg.get("vat_number") or "",
             "default_hs_code": cfg.get("default_hs_code") or "",
@@ -16390,6 +16426,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if worldoptions and dp not in worldoptions.DUTIES_PAYORS:
                 return _json({"error": "Unknown duties choice."}, 400)
             cfg["duties_payor"] = dp
+        if isinstance(body.get("collection_by_carrier"), dict):
+            # Only carriers we recognise, only arrangements the courier offers.
+            # An empty value means "no rule for this one", which falls back to
+            # the standing setting rather than being stored as a blank.
+            valid_c = {c["code"] for c in (worldoptions.carrier_choices() if worldoptions else [])}
+            valid_a = set(worldoptions.COLLECTION_OPTIONS if worldoptions else [])
+            clean = {}
+            for k, v in body["collection_by_carrier"].items():
+                code, arr = str(k).strip().upper(), str(v or "").strip()
+                if code in valid_c and arr in valid_a:
+                    clean[code] = arr
+            cfg["collection_by_carrier"] = clean
         if body.get("currency"):
             cfg["currency"] = str(body.get("currency"))[:3].upper()
         if body.get("plugin_code"):

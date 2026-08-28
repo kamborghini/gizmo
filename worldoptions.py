@@ -860,6 +860,22 @@ def _reply_status(reply, context: str):
 _CARRIERS_BY_LENGTH = sorted(_CARRIERS, key=len, reverse=True)
 
 
+# The couriers a merchant actually picks between, with the label the app shows.
+# Narrower than _CARRIERS on purpose: that list exists to RECOGNISE a carrier in
+# whatever field World Options happened to name it in, and includes prefixes and
+# spellings nobody would set up a collection against.
+CARRIER_CHOICES = [
+    ("UPS", "UPS"), ("DHL", "DHL"), ("DHLPARCEL", "DHL Parcel"), ("FEDEX", "FedEx"),
+    ("TNT", "TNT"), ("DPD", "DPD"), ("EVRISEND", "Evri"), ("ROYALMAIL", "Royal Mail"),
+    ("YODEL", "Yodel"), ("DXEXPRESS", "DX"), ("TUFFNELLS", "Tuffnells"),
+    ("PALLETWAYS", "Palletways"), ("CITYSPRINT", "CitySprint"), ("DSV", "DSV"),
+]
+
+
+def carrier_choices() -> list:
+    return [{"code": c, "label": l} for c, l in CARRIER_CHOICES]
+
+
 def _prefix_carrier(code: str) -> str:
     """The carrier a code starts with. Separators are removed first: World Options
     writes the same carrier as DHL_Parcel, DHL-Parcel and DHLParcel across fields,

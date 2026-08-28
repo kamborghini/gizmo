@@ -11908,14 +11908,57 @@ def t_a_booking_can_carry_its_own_collection_arrangement():
     ok("collection_option: str = \"\"" in src, "the booking takes one")
     i = src.index("collection_option=str(collection_option")
     seg = ' '.join(src[i:i + 160].split())
-    ok("or cfg.get(\"collection_option\")" in seg,
-       "and falls back to the standing setting when none was chosen: " + seg[:90])
+    ok("_collection_for(cfg, option.get(\"carrier_name\"))" in seg,
+       "and otherwise asks how THIS courier collects: " + seg[:90])
+    # Per carrier first, the standing setting for anyone unconfigured.
+    eq(copilot._collection_for({"collection_by_carrier": {"UPS": "I_Have_Daily_Collection"},
+                                "collection_option": "I_Need_To_Book_A_Collection"}, "UPS"),
+       "I_Have_Daily_Collection", "a configured courier uses its own arrangement")
+    eq(copilot._collection_for({"collection_by_carrier": {"UPS": "I_Have_Daily_Collection"},
+                                "collection_option": "I_Need_To_Book_A_Collection"}, "DHL"),
+       "I_Need_To_Book_A_Collection", "an unconfigured one falls back to the standing setting")
+    eq(copilot._collection_for({"collection_option": "I_Have_Daily_Collection"}, "ups"),
+       "I_Have_Daily_Collection", "the carrier code is matched however it is cased")
+    eq(copilot._collection_for({"collection_by_carrier": "not a dict",
+                                "collection_option": "I_Have_Daily_Collection"}, "UPS"),
+       "I_Have_Daily_Collection", "and a corrupt map does not take the booking down")
     # It must not accept anything the courier does not offer.
     ok("not in worldoptions.COLLECTION_OPTIONS" in src,
        "the route validates it against the courier's own list")
     for v in ("I_Need_To_Book_A_Collection", "I_Have_Daily_Collection",
               "I_Already_Have_Collection_Scheduled"):
         ok(v in worldoptions.COLLECTION_OPTIONS, "%s is a real arrangement" % v)
+
+
+@test
+def t_each_courier_carries_its_own_collection_arrangement():
+    """It genuinely differs by courier: a daily UPS collection already calls,
+    while DHL has to be asked each time. One global setting made the desk
+    remember which was which, and got it wrong in exactly the direction that
+    costs money - asking a courier that already collects."""
+    cfg = {"collection_option": "I_Need_To_Book_A_Collection",
+           "collection_by_carrier": {"UPS": "I_Have_Daily_Collection"}}
+    eq(copilot._collection_for(cfg, "UPS"), "I_Have_Daily_Collection",
+       "UPS is not asked to collect, because it already does")
+    eq(copilot._collection_for(cfg, "DHL"), "I_Need_To_Book_A_Collection",
+       "DHL is asked, because nothing is standing")
+    eq(copilot.COLLECTION_MESSAGES["I_Have_Daily_Collection"], "Daily collection scheduled",
+       "and the desk is told which, in those words")
+    ok("Book a collection for this shipment"
+       == copilot.COLLECTION_MESSAGES["I_Need_To_Book_A_Collection"],
+       "and which, for the other")
+    # Only real carriers and real arrangements survive a save.
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    i = src.index('if isinstance(body.get("collection_by_carrier"), dict):')
+    seg = src[i:i + 800]
+    ok("valid_c" in seg and "carrier_choices()" in seg, "the carrier must be one we know")
+    ok("valid_a" in seg and "COLLECTION_OPTIONS" in seg,
+       "and the arrangement one the courier actually offers")
+    # Every quoted option carries its own answer, so it can be shown per row.
+    ok('_o["collection_message"]' in src, "each option says how its courier collects")
+    html = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    ok(html.count("if (op.collection_message)") == 2,
+       "and BOTH option lists show it - the order panel and the pasted address one")
 
 
 @test
