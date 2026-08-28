@@ -1868,9 +1868,16 @@
         .files-crumb.here { color: var(--ink); font-weight: var(--w-medium); cursor: default; background: transparent; }
         .files-crumb.dropok { background: var(--accent-soft); color: var(--accent-ink); }
         .files-crumbs svg { width: 13px; height: 13px; }
-        .files-list { border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); overflow: hidden; }
+        /* The base radius, as the reference boxes a list: the control radius
+           read as a large button rather than as a frame around rows. */
+        .files-list { border: 1px solid var(--border); border-radius: var(--r-md);
+            background: var(--surface); overflow: hidden; }
         .files-list.drag { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--accent-soft); }
-        .files-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-top: 0.5px solid var(--line); font-size: var(--t-md); }
+        /* 12px on every side and a full hairline, like every other list in the
+           app now. The 0.5px rule lands on a device pixel on some screens and
+           disappears on others. */
+        .files-row { display: flex; align-items: center; gap: 10px; padding: var(--sp-3);
+            border-top: 1px solid var(--border); font-size: var(--t-md); }
         .files-row:first-child { border-top: 0; }
         .files-row:hover { background: var(--bg-2); }
         .files-row.dropok { background: var(--accent-soft); }
@@ -14040,8 +14047,16 @@
             // A folder that vanished (another machine deleted it) must not
             // strand the view on an empty nowhere.
             if (filesFolder && !filesCache.folders[filesFolder]) filesFolder = '';
-            const bar = el('div', 'lbl-toolbar');
-            const up = el('button', 'btn btn-primary'); up.append(ico(I.upload), document.createTextNode('Upload'));
+            /* Composed the way the reference composes its file manager: New
+               folder and Upload live on the right of the header, and the
+               toolbar under it carries only the search and the sort. */
+            const fCard = el('div', 'card');
+            const fHead = el('div', 'card-head');
+            const fTitleEl = el('h3', 'card-title', 'Files');
+            const fDescEl = el('p', 'card-desc', '');
+            fHead.append(fTitleEl, fDescEl);
+            const fAct = el('div', 'card-act');
+            const up = el('button', 'btn btn-sm btn-primary'); up.append(ico(I.upload), document.createTextNode('Upload'));
             const fi = document.createElement('input');
             fi.type = 'file'; fi.multiple = true; fi.style.display = 'none';
             fi.onchange = () => { filesEnqueue(fi.files); fi.value = ''; };
@@ -14049,12 +14064,13 @@
                 if (filesQ) { toastError('Clear the search first, so the upload has a folder to land in.'); return; }
                 fi.click();
             };
-            bar.append(up, fi);
-            const nf = el('button', 'btn'); nf.append(ico(I.folderPlus), document.createTextNode('New folder'));
+            const nf = el('button', 'btn btn-sm'); nf.append(ico(I.folderPlus), document.createTextNode('New folder'));
             nf.onclick = () => { filesNewFolder = true; paintList(); };
-            bar.append(nf);
-            const q = document.createElement('input');
-            q.type = 'search'; q.placeholder = 'Search files…'; q.className = 'lbl-size'; q.value = filesQ;
+            fAct.append(nf, up, fi);
+            fHead.append(fAct);
+            fCard.append(fHead);
+            const qWrap = tableSearch('Search files…', filesQ, null);
+            const q = qWrap.input;
             filesHitCap = FILES_HIT_STEP;
             /* Debounced, like the labels Find box. Measured against 8,000 files:
                a broad term that matches everything cost 1,912 ms of blocked JS
@@ -14065,20 +14081,16 @@
                 clearTimeout(q._t);
                 q._t = setTimeout(() => { filesHitCap = FILES_HIT_STEP; paintCrumbs(); paintList(); }, 180);
             };
-            bar.append(q);
-            const srt = el('select', 'lbl-size');
-            srt.setAttribute('aria-label', 'Sort files');
-            [['name', 'Name'], ['newest', 'Newest first'], ['largest', 'Largest first']]
-                .forEach(([v, lab]) => { const o = el('option', null, lab); o.value = v;
-                    if (filesSort === v) o.selected = true; srt.append(o); });
-            srt.onchange = () => { filesSort = srt.value; paintList(); };
-            bar.append(srt);
-            host.append(bar);
+            const srt = filterChip('Sort', [['name', 'Name'], ['newest', 'Newest first'],
+                                            ['largest', 'Largest first']],
+                filesSort, (v) => { filesSort = v; renderFiles(); });
+            fCard.append(tableTools([qWrap], [srt]));
+            host.append(fCard);
 
-            const crumbsHost = el('div'); host.append(crumbsHost);
-            const upHost = el('div'); host.append(upHost);
-            const listHost = el('div'); host.append(listHost);
-            host.append(el('div', 'files-hint',
+            const crumbsHost = el('div'); fCard.append(crumbsHost);
+            const upHost = el('div'); fCard.append(upHost);
+            const listHost = el('div'); fCard.append(listHost);
+            fCard.append(el('div', 'files-hint',
                 'Drag files, or whole folders, anywhere on the list to upload them here. Drag a '
                 + 'file onto a folder, or onto a step of the path above, to move it.'));
 
@@ -14104,7 +14116,11 @@
                     chain.unshift([cur, filesCache.folders[cur].name]);
                     cur = filesCache.folders[cur].parent_id || '';
                 }
-                crumbs.append(crumbBtn('All files', '', !chain.length));
+                /* At the root there is nowhere to go back to, and the card
+                   title above already says "All files". A crumb trail of one
+                   step is the same word printed twice. */
+                if (!chain.length) return;
+                crumbs.append(crumbBtn('All files', '', false));
                 chain.forEach(([fid, name], i) => {
                     crumbs.append(ico(I.chev), crumbBtn(name, fid, i === chain.length - 1));
                 });
@@ -14232,6 +14248,26 @@
             }
             function paintList() {
                 listHost.innerHTML = '';
+                /* The card's own title, kept honest on every repaint: a search
+                   counts what it found, a folder counts what is in it. */
+                const here = Object.values(filesCache.files)
+                    .filter(f => (f.folder_id || '') === filesFolder).length;
+                const subs = Object.values(filesCache.folders)
+                    .filter(f => (f.parent_id || '') === filesFolder).length;
+                if (filesQ) {
+                    const ql = filesQ.toLowerCase();
+                    const n = Object.values(filesCache.files).filter(f => f.name.toLowerCase().includes(ql)).length;
+                    fTitleEl.textContent = n + (n === 1 ? ' file matches' : ' files match');
+                    fDescEl.textContent = 'Searching every folder for \u201c' + filesQ + '\u201d. '
+                        + 'Clear the search to go back to browsing.';
+                } else {
+                    const name = filesFolder && filesCache.folders[filesFolder]
+                        ? filesCache.folders[filesFolder].name : 'All files';
+                    fTitleEl.textContent = name;
+                    fDescEl.textContent = (here === 1 ? '1 file' : here + ' files')
+                        + (subs ? ' and ' + (subs === 1 ? '1 folder' : subs + ' folders') : '')
+                        + ' here. Drag files in to store them, or onto a folder to move them.';
+                }
                 dragFileId = null;   // a repaint may remove the row being dragged; its dragend never fires
                 // Selection can only reference what is on screen.
                 const live = new Set(Object.keys(filesCache.files));

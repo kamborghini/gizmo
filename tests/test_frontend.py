@@ -2162,6 +2162,55 @@ def t_the_mail_row_is_the_reference_measurement():
     ok("0.5px" not in row, "and not a half-pixel one")
 
 
+@test
+def t_the_files_browser_is_composed_like_the_reference():
+    """Upload, New folder, the search and the sort were one row of four. The
+    reference puts the two things that CHANGE the folder on the right of the
+    header, and leaves the toolbar to the two that only change the view."""
+    fn = SCRIPT.split("function renderFilesBrowser(host) {")[1]
+    fn = fn[:fn.index("\n        function ")]
+    ok("const fCard = el('div', 'card')" in fn, "the browser is a card")
+    ok("fAct.append(nf, up, fi)" in fn, "New folder and Upload are header actions")
+    ok("fCard.append(tableTools([qWrap], [srt]))" in fn, "search left, sort right")
+    ok("filterChip('Sort'" in fn, "the sort is a chip that says what it is set to")
+    ok("el('div', 'lbl-toolbar')" not in fn, "the old four-control row is gone")
+    # Everything still works: upload, new folder, search, sort, drag-to-upload.
+    for handler, what in [("filesEnqueue(fi.files)", "upload"), ("filesNewFolder = true", "new folder"),
+                          ("filesQ = q.value.trim()", "search"), ("filesSort = v", "sort"),
+                          ("filesIngestDrop", "drag to upload")]:
+        ok(handler in fn, "the " + what + " survived the sort")
+
+
+@test
+def t_the_files_card_counts_what_is_actually_there():
+    """A title that says "All files" over a filtered list is a lie by omission.
+    It counts the folder you are in, and a search says what it searched for."""
+    fn = SCRIPT.split("function renderFilesBrowser(host) {")[1]
+    fn = fn[:fn.index("\n        function ")]
+    i = fn.index("function paintList() {")
+    seg = fn[i:i + 1500]
+    ok("(f.folder_id || '') === filesFolder" in seg, "it counts the files in this folder")
+    ok("(f.parent_id || '') === filesFolder" in seg, "and the folders inside it")
+    ok("' files match'" in seg, "a search counts its matches instead")
+    ok("Searching every folder" in seg, "and says that is what it is doing")
+    # A crumb trail of one step is the same word the title already carries.
+    cr = fn[fn.index("function paintCrumbs() {"):][:1200]
+    ok("if (!chain.length) return;" in cr, "no crumb trail at the root")
+
+
+@test
+def t_the_files_list_is_the_reference_measurement():
+    """The control radius read as a large button rather than a frame around
+    rows, and a 0.5px rule lands on a device pixel on some screens only."""
+    lst = CSS.split(".files-list {")[1].split("}")[0]
+    ok("border-radius: var(--r-md)" in lst, "the list box is at the base radius")
+    ok("1px solid var(--border)" in lst, "in the border ink")
+    row = CSS.split(".files-row {")[1].split("}")[0]
+    ok("padding: var(--sp-3)" in row, "rows are padded 12px square")
+    ok("border-top: 1px solid var(--border)" in row and "0.5px" not in row,
+       "with a full hairline, not a half-pixel one")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
