@@ -1582,6 +1582,27 @@
         .dmenu-item .ic { color: var(--ink-3); }
         .dmenu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
         .dmenu-label { padding: 6px 6px 2px; font-size: var(--t-xs); color: var(--ink-3); }
+        .dmenu-tick { margin-left: auto; margin-right: -26px; color: var(--ink-3);
+            display: inline-flex; }
+        .dmenu-tick svg { width: 14px; height: 14px; }
+        /* A panel hung off a button rather than a list of items: the same box
+           and the same way out, holding a small form instead. */
+        .dpanel { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3);
+            min-width: 240px; }
+        .dpanel-row { display: flex; align-items: center; gap: var(--sp-2); }
+        .dpanel-row > label { flex: 1 1 auto; font-size: var(--t-xs); color: var(--ink-3); }
+        .dpanel input, .dpanel select { height: 28px; padding: 4px 8px; border-radius: var(--r-sm);
+            font-size: var(--t-md); line-height: 20px; }
+        /* The page-level tab strip. The reference marks the live page by ink
+           alone: no track behind the row, no pill under the tab. 14px here,
+           against the 12px of a filter tab inside a card. */
+        .ptabs { display: inline-flex; align-items: center; gap: var(--sp-1); padding: 3px; }
+        .ptab { height: 25px; padding: 2px 6px; border: 0; background: none;
+            border-radius: var(--r-sm); font: inherit; font-size: var(--t-md);
+            font-weight: var(--w-medium); color: var(--ink-3); cursor: pointer;
+            white-space: nowrap; }
+        .ptab:hover { background: var(--surface-2); }
+        .ptab.on { color: var(--ink); }
         /* Filter tabs: counts in the label, no filled pill. The reference marks
            the live one by ink alone; its inactive tabs are the foreground at
            60%, which over white is this palette's muted ink to within a shade. */
@@ -2622,6 +2643,9 @@
                 b.setAttribute('role', 'menuitem');
                 if (it.icon) b.append(ico(it.icon));
                 b.append(el('span', null, it.label));
+                /* The tick sits in the 32px the reference reserves on the right,
+                   so a list of choices does not jump sideways when one is made. */
+                if (it.checked) { const t = el('span', 'dmenu-tick'); t.append(ico(I.check)); b.append(t); }
                 if (it.title) b.title = it.title;
                 if (it.disabled) b.disabled = true;
                 else b.onclick = () => { closeDMenu(); it.onClick(); };
@@ -2660,6 +2684,43 @@
             anchor.setAttribute('aria-expanded', 'true');
             dmenuOpen = { panel, onKey, onDown, anchor };
             const first = buttons()[0]; if (first) first.focus();
+        }
+        /* The same box and the same way out, holding a small form rather than a
+           list. Dates and a minimum do not fit a menu of choices, and putting
+           them on the toolbar is how that bar grew to eleven controls. */
+        function dropPanel(anchor, build) {
+            if (dmenuOpen && dmenuOpen.anchor === anchor) { closeDMenu(); return; }
+            dropMenu(anchor, []);                 // the machinery: position, keys, closing
+            const panel = dmenuOpen.panel;
+            panel.setAttribute('role', 'dialog');
+            const body = el('div', 'dpanel');
+            build(body, closeDMenu);
+            panel.append(body);
+            /* Re-measure: the panel was positioned while it was empty, so a form
+               taller than nothing would hang off the bottom of the window. */
+            const r = anchor.getBoundingClientRect();
+            const pw = panel.offsetWidth, ph = panel.offsetHeight;
+            let left = r.left;
+            if (left + pw > window.innerWidth - 8) left = Math.max(8, r.right - pw);
+            let top = r.bottom + 4;
+            if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 4);
+            panel.style.left = Math.round(left) + 'px';
+            panel.style.top = Math.round(top) + 'px';
+            const first = panel.querySelector('input, select, button');
+            if (first) first.focus();
+        }
+        /* A filter as the reference writes one: a small button that says what it
+           is, and what it is set to when that is not "everything". */
+        function filterChip(label, options, current, onPick) {
+            const chosen = options.find(o => o[0] === current);
+            const isAll = !chosen || current === options[0][0];
+            const b = el('button', 'btn btn-sm' + (isAll ? '' : ' on'));
+            b.append(ico(I.chev), document.createTextNode(
+                isAll ? label : label + ': ' + chosen[1]));
+            b.onclick = () => dropMenu(b, options.map(([v, l]) => ({
+                label: l, checked: v === current, onClick: () => onPick(v),
+            })));
+            return b;
         }
         /* A row of filter tabs with their counts in the label, the way the
            reference writes them: "All (156)", and the live one marked by ink. */
@@ -4760,9 +4821,13 @@
            permission. */
         function financeTabs(active, updated) {
             const row = el('div', 'page-tabs');
-            const seg = el('div', 'lbl-seg');
+            /* The reference's page strip: ink alone marks where you are. The
+               filled pill this used to wear read as a control you press rather
+               than a place you are. */
+            const seg = el('div', 'ptabs');
             const tab = (key, label) => {
-                const b = el('button', 'lbl-segbtn' + (key === active ? ' on' : ''), label);
+                const b = el('button', 'ptab' + (key === active ? ' on' : ''), label);
+                b.setAttribute('aria-current', key === active ? 'page' : 'false');
                 if (key !== active) b.onclick = () => showView(key);
                 seg.append(b);
             };
@@ -4787,13 +4852,18 @@
             box.append(financeTabs('liability', freshLabel(liabilityCache.at)));
 
             // Summary cards.
+            /* A figure the server did not send is not zero. liaMoney reads a
+               missing number as 0, which on this page says the book is clear;
+               the two count cards said "undefined" and "undefined days"
+               instead. Neither is an answer, so both now say so. */
+            const liaNum = (v, fmt) => (typeof v === 'number' && isFinite(v)) ? fmt(v) : 'not reported';
             const grid = el('div', 'lia-grid');
-            [['Total outstanding', liaMoney(d.total, cur, 0), ''],
-             ['Within terms', liaMoney(d.within, cur, 0), 'ok'],
-             ['Due soon', liaMoney(d.due_soon, cur, 0), 'warn'],
-             ['Overdue', liaMoney(d.overdue, cur, 0), d.overdue > 0 ? 'bad' : 'ok'],
-             ['Overdue orders', String(d.overdue_orders), d.overdue_orders > 0 ? 'bad' : 'ok'],
-             ['Oldest debt', d.oldest_days + ' days', '']].forEach(([k, v, tone]) => {
+            [['Total outstanding', liaNum(d.total, v => liaMoney(v, cur, 0)), ''],
+             ['Within terms', liaNum(d.within, v => liaMoney(v, cur, 0)), 'ok'],
+             ['Due soon', liaNum(d.due_soon, v => liaMoney(v, cur, 0)), 'warn'],
+             ['Overdue', liaNum(d.overdue, v => liaMoney(v, cur, 0)), d.overdue > 0 ? 'bad' : 'ok'],
+             ['Overdue orders', liaNum(d.overdue_orders, v => String(v)), d.overdue_orders > 0 ? 'bad' : 'ok'],
+             ['Oldest debt', liaNum(d.oldest_days, v => v + ' days'), '']].forEach(([k, v, tone]) => {
                 const c = el('div', 'lia-card' + (tone ? ' ' + tone : ''));
                 c.append(el('div', 'lia-k', k), el('div', 'lia-v', v));
                 grid.append(c);
@@ -4820,7 +4890,16 @@
                     li.append(el('span', 'lia-dot ' + cls), document.createTextNode(lab + ' ' + liaMoney(amt, cur, 0)));
                     leg.append(li);
                 });
-                box.append(bar, leg);
+                /* In a card with a title, like every other block the reference
+                   puts on a finance page. Bare on the background it read as a
+                   loading state rather than the answer to "is the book sound". */
+                const bcard = el('div', 'card'); bcard.style.marginBottom = '16px';
+                const bhead = el('div', 'card-head');
+                bhead.append(el('h3', 'card-title', 'Aged debt'));
+                bhead.append(el('p', 'card-desc', 'Every unpaid order by how late it is, as a share of '
+                    + liaMoney(d.total, cur, 0) + ' outstanding.'));
+                bcard.append(bhead, bar, leg);
+                box.append(bcard);
             }
 
             if ((d.stale_tagged || []).length) {
@@ -4837,69 +4916,93 @@
                 box.append(s);
             }
 
-            // Filters.
-            const bar2 = el('div', 'lbl-toolbar');
-            const q = document.createElement('input');
-            q.type = 'search'; q.placeholder = 'Search customer or order\u2026'; q.className = 'lbl-size'; q.value = liaF.q;
-            q.oninput = () => { liaF.q = q.value.trim(); paint(); };
-            bar2.append(q);
-            const st = el('select', 'lbl-size');
-            [['all', 'All statuses'], ['within', 'Within terms'], ['due_soon', 'Due soon'], ['overdue', 'All overdue'],
-             ['1-7', '1-7d overdue'], ['8-30', '8-30d overdue'], ['31-60', '31-60d overdue'], ['60+', '60d+ overdue']]
-                .forEach(([v2, l2]) => { const o2 = el('option', null, l2); o2.value = v2; if (liaF.status === v2) o2.selected = true; st.append(o2); });
-            st.onchange = () => { liaF.status = st.value; paint(); };
-            bar2.append(st);
+            /* The filters, sorted the way the reference sorts them: the search
+               and the few that get changed daily on the bar, the date range and
+               the minimum behind a panel. It was eleven controls in one row,
+               which nobody reads as eleven separate questions. */
+            const STATUS_OPTS = [['all', 'All statuses'], ['within', 'Within terms'],
+                ['due_soon', 'Due soon'], ['overdue', 'All overdue'], ['1-7', '1-7d overdue'],
+                ['8-30', '8-30d overdue'], ['31-60', '31-60d overdue'], ['60+', '60d+ overdue']];
+            const SORT_OPTS = [['overdue', 'Most overdue'], ['total', 'Total owed'],
+                ['oldest', 'Oldest debt'], ['name', 'Name']];
             const tset = {};
             d.customers.forEach(c => c.orders.forEach(r => { tset[r.terms] = 1; }));
             if (liaF.terms !== 'all' && liaF.terms !== 'assumed' && !tset[liaF.terms]) liaF.terms = 'all';
-            const tsel = el('select', 'lbl-size');
-            const topts = [['all', 'All terms']].concat(Object.keys(tset).sort().map(t2 => [t2, t2])).concat([['assumed', 'Assumed terms only']]);
-            topts.forEach(([v2, l2]) => { const o2 = el('option', null, l2); o2.value = v2; if (liaF.terms === v2) o2.selected = true; tsel.append(o2); });
-            tsel.onchange = () => { liaF.terms = tsel.value; paint(); };
-            bar2.append(tsel);
+            const TERM_OPTS = [['all', 'All terms']]
+                .concat(Object.keys(tset).sort().map(t2 => [t2, t2]))
+                .concat([['assumed', 'Assumed terms only']]);
             const chans = Object.keys(d.channels || {}).sort();
             // A stale selection whose option no longer exists would filter invisibly.
             if (liaF.channel !== 'all' && chans.indexOf(liaF.channel) < 0) liaF.channel = 'all';
-            if (chans.length > 1) {
-                const csel = el('select', 'lbl-size');
-                [['all', 'All channels']].concat(chans.map(c2 => [c2, c2])).forEach(([v2, l2]) => {
-                    const o2 = el('option', null, l2); o2.value = v2; if (liaF.channel === v2) o2.selected = true; csel.append(o2);
-                });
-                csel.title = 'Payment channel, from the unpaid tag';
-                csel.onchange = () => { liaF.channel = csel.value; paint(); };
-                bar2.append(csel);
-            }
-            const dfield = el('select', 'lbl-size');
-            [['created_at', 'Ordered'], ['due', 'Due']].forEach(([v2, l2]) => {
-                const o2 = el('option', null, l2); o2.value = v2; if (liaF.dateField === v2) o2.selected = true; dfield.append(o2);
-            });
-            dfield.title = 'Which date the range below filters';
-            dfield.onchange = () => { liaF.dateField = dfield.value; paint(); };
-            const df = document.createElement('input'); df.type = 'date'; df.className = 'lbl-size';
-            df.title = 'On or after'; df.value = liaF.from || '';
-            df.onchange = () => { liaF.from = df.value; paint(); };
-            const dt2 = document.createElement('input'); dt2.type = 'date'; dt2.className = 'lbl-size';
-            dt2.title = 'On or before'; dt2.value = liaF.to || '';
-            dt2.onchange = () => { liaF.to = dt2.value; paint(); };
-            bar2.append(dfield, df, el('span', 'cov-line', 'to'), dt2);
-            const minIn = document.createElement('input');
-            minIn.type = 'number'; minIn.min = '0'; minIn.step = '50'; minIn.placeholder = 'Min owed';
-            minIn.className = 'lbl-size'; minIn.style.width = '96px'; minIn.value = liaF.min;
-            minIn.title = 'Only show orders owing at least this much';
-            minIn.oninput = () => { liaF.min = minIn.value; paint(); };
-            bar2.append(minIn);
-            const ssel = el('select', 'lbl-size');
-            [['overdue', 'Sort: most overdue'], ['total', 'Sort: total owed'], ['oldest', 'Sort: oldest debt'], ['name', 'Sort: name']]
-                .forEach(([v2, l2]) => { const o2 = el('option', null, l2); o2.value = v2; if (liaF.sort === v2) o2.selected = true; ssel.append(o2); });
-            ssel.onchange = () => { liaF.sort = ssel.value; paint(); };
-            bar2.append(ssel);
-            const clr = el('button', 'btn'); clr.append(document.createTextNode('Clear'));
-            clr.title = 'Reset every filter';
-            clr.onclick = () => { Object.assign(liaF, { q: '', status: 'all', terms: 'all', channel: 'all', from: '', to: '', min: '' }); renderLiability(); };
-            bar2.append(clr);
-            box.append(bar2);
+            const CHAN_OPTS = [['all', 'All channels']].concat(chans.map(c2 => [c2, c2]));
 
-            const host = el('div'); box.append(host);
+            const qWrap = tableSearch('Search customer or order…', liaF.q, (v) => { liaF.q = v; paint(); });
+            const left = [qWrap,
+                filterChip('Status', STATUS_OPTS, liaF.status, (v) => { liaF.status = v; renderLiability(); }),
+                filterChip('Terms', TERM_OPTS, liaF.terms, (v) => { liaF.terms = v; renderLiability(); })];
+            if (chans.length > 1) left.push(filterChip('Channel', CHAN_OPTS, liaF.channel,
+                (v) => { liaF.channel = v; renderLiability(); }));
+
+            const rangeSet = !!(liaF.from || liaF.to || liaF.min);
+            const rangeBtn = el('button', 'btn btn-sm' + (rangeSet ? ' on' : ''));
+            rangeBtn.append(ico(I.cal), document.createTextNode(rangeSet ? 'Dates and amount: set' : 'Dates and amount'));
+            rangeBtn.onclick = () => dropPanel(rangeBtn, (body, close) => {
+                const fieldRow = el('div', 'dpanel-row');
+                fieldRow.append(el('label', null, 'Filter by'));
+                const dfield = document.createElement('select');
+                [['created_at', 'Ordered'], ['due', 'Due']].forEach(([v2, l2]) => {
+                    const o2 = el('option', null, l2); o2.value = v2;
+                    if (liaF.dateField === v2) o2.selected = true; dfield.append(o2);
+                });
+                dfield.onchange = () => { liaF.dateField = dfield.value; paint(); };
+                fieldRow.append(dfield);
+                const fromRow = el('div', 'dpanel-row');
+                fromRow.append(el('label', null, 'On or after'));
+                const df = document.createElement('input'); df.type = 'date'; df.value = liaF.from || '';
+                df.onchange = () => { liaF.from = df.value; paint(); };
+                fromRow.append(df);
+                const toRow = el('div', 'dpanel-row');
+                toRow.append(el('label', null, 'On or before'));
+                const dt2 = document.createElement('input'); dt2.type = 'date'; dt2.value = liaF.to || '';
+                dt2.onchange = () => { liaF.to = dt2.value; paint(); };
+                toRow.append(dt2);
+                const minRow = el('div', 'dpanel-row');
+                minRow.append(el('label', null, 'Owing at least'));
+                const minIn = document.createElement('input');
+                minIn.type = 'number'; minIn.min = '0'; minIn.step = '50'; minIn.style.width = '96px';
+                minIn.value = liaF.min;
+                minIn.oninput = () => { liaF.min = minIn.value; paint(); };
+                minRow.append(minIn);
+                const done = el('button', 'btn btn-sm', 'Done');
+                done.onclick = () => { close(); renderLiability(); };
+                body.append(fieldRow, fromRow, toRow, minRow, done);
+            });
+            const right = [filterChip('Sort', SORT_OPTS, liaF.sort, (v) => { liaF.sort = v; renderLiability(); }),
+                           rangeBtn];
+            const anyFilter = liaF.q || liaF.status !== 'all' || liaF.terms !== 'all'
+                || liaF.channel !== 'all' || liaF.from || liaF.to || liaF.min;
+            if (anyFilter) {
+                const clr = el('button', 'btn btn-sm');
+                clr.append(ico(I.x), document.createTextNode('Clear'));
+                clr.title = 'Reset every filter';
+                clr.onclick = () => {
+                    Object.assign(liaF, { q: '', status: 'all', terms: 'all', channel: 'all',
+                                          from: '', to: '', min: '' });
+                    renderLiability();
+                };
+                right.push(clr);
+            }
+            /* The ledger in a card, the way the reference builds a list page. */
+            const lCard = el('div', 'card');
+            const lHead = el('div', 'card-head');
+            lHead.append(el('h3', 'card-title', d.customers.length
+                + (d.customers.length === 1 ? ' customer owing' : ' customers owing')));
+            lHead.append(el('p', 'card-desc', 'Open one to see the orders behind the figure, '
+                + 'when each is due, and what has been paid against it.'));
+            lCard.append(lHead);
+            lCard.append(tableTools(left, right));
+            box.append(lCard);
+            const host = el('div'); lCard.append(host);
             function paint() {
                 host.innerHTML = '';
                 let custs = d.customers
@@ -5461,28 +5564,36 @@
                 mets.append(stat);
             });
             box.append(mets);
-            /* Filters */
-            const bar = el('div', 'lbl-toolbar'); bar.style.flexWrap = 'wrap';
-            bar.append(segControl([{ value: '', label: 'Open' }, { value: 'investigating', label: 'Investigating' },
-                { value: 'explained', label: 'Explained' }, { value: 'confirmed_error', label: 'Errors' },
-                { value: 'ignored', label: 'Ignored' }], reconFilter.status,
-                v => { reconFilter.status = v; refreshReconList(); }));
-            const search = el('input', 'mail-search'); search.placeholder = 'Search discrepancies';
-            search.value = reconFilter.q;
-            search.onchange = () => { reconFilter.q = search.value; refreshReconList(); };
-            bar.append(search);
-            const exp = el('button', 'btn'); exp.append(ico(I.download), document.createTextNode('Export CSV'));
-            exp.onclick = reconCSV; bar.append(exp);
-            box.append(bar);
-            /* Exception list */
+            /* The discrepancies, in one card composed like the reference's list
+               pages: a counted title, a line saying what it is, the export on
+               the right of the header, and the search and status on a toolbar.
+               The filters render even when the list is empty, or a filter that
+               hides everything also hides the way to undo it. */
             const ex = (reconCache.ex || {}).exceptions || [];
+            const list = el('div', 'card');
+            const rHead = el('div', 'card-head');
+            rHead.append(el('h3', 'card-title', ex.length
+                + (ex.length === 1 ? ' discrepancy' : ' discrepancies')));
+            rHead.append(el('p', 'card-desc', 'Where Shopify, Xero and the inbox disagree. '
+                + 'Open one to see both sides and say what it was.'));
+            const rAct = el('div', 'card-act');
+            const exp = el('button', 'btn btn-sm'); exp.append(ico(I.download), document.createTextNode('Export CSV'));
+            exp.onclick = reconCSV; rAct.append(exp);
+            rHead.append(rAct);
+            list.append(rHead);
+            const searchWrap = tableSearch('Search discrepancies', reconFilter.q, null);
+            searchWrap.input.onchange = () => { reconFilter.q = searchWrap.input.value; refreshReconList(); };
+            const statusTabs = filterTabs([['', 'Open'], ['investigating', 'Investigating'],
+                ['explained', 'Explained'], ['confirmed_error', 'Errors'], ['ignored', 'Ignored']],
+                reconFilter.status, v => { reconFilter.status = v; refreshReconList(); });
+            list.append(tableTools([searchWrap, statusTabs], []));
+            box.append(list);
             if (!ex.length) {
-                box.append(el('div', 'empty', xs.connected
+                list.append(el('div', 'empty', xs.connected
                     ? 'Nothing needs attention with these filters. That is the goal state.'
                     : 'Connect Xero above, then run the first sweep.'));
                 return;
             }
-            const list = el('div', 'card'); list.style.padding = '4px 0';
             ex.forEach(e => {
                 const r = el('div', 'lbl-row');
                 r.setAttribute('role', 'button'); r.tabIndex = 0;
@@ -5502,7 +5613,6 @@
                 r.onclick = () => openReconExc(e.id);
                 list.append(r);
             });
-            box.append(list);
             if (reconOpen) paintReconDetail(box);
         }
         function reconPrivateLink(card, absUrl) {

@@ -2030,6 +2030,83 @@ def t_the_menu_and_tabs_are_the_reference_measurements():
        "the live tab is marked by ink alone, the way the reference marks it")
 
 
+@test
+def t_a_missing_figure_is_not_reported_as_zero():
+    """liaMoney reads a missing number as 0, and on the page whose whole job is
+    "how much is owed" that says the book is clear. The two count cards were
+    worse: they printed the word "undefined". Neither is an answer."""
+    fn = SCRIPT.split("function renderLiability() {")[1]
+    fn = fn[:fn.index("\n        function ")]
+    ok("const liaNum = (v, fmt) =>" in fn, "there is one guard for all six figures")
+    ok("typeof v === 'number' && isFinite(v)" in fn, "and it asks whether a number arrived")
+    ok("'not reported'" in fn, "saying so plainly when one did not")
+    for field in ("d.total", "d.within", "d.due_soon", "d.overdue",
+                  "d.overdue_orders", "d.oldest_days"):
+        ok("liaNum(" + field + "," in fn, field + " goes through it")
+    ok("String(d.overdue_orders)" not in fn and "d.oldest_days + ' days'" not in fn,
+       "and nothing prints a raw undefined any more")
+
+
+@test
+def t_the_finance_pages_share_the_reference_tab_strip():
+    """Liability and Reconciliation are one area with two pages, which is how
+    they were asked for. The strip that binds them wore a filled pill, which
+    reads as a control you press rather than a place you are."""
+    ok("const seg = el('div', 'ptabs')" in SCRIPT, "the strip is the page-level one")
+    ok("el('button', 'ptab'" in SCRIPT, "and its tabs are page tabs")
+    fn = SCRIPT.split("function financeTabs(active, updated) {")[1][:900]
+    ok("lbl-segbtn" not in fn, "the segmented control is gone from it")
+    ok("aria-current" in fn, "and the live one says it is the current page")
+    tab = CSS.split(".ptab {")[1].split("}")[0]
+    ok("height: 25px" in tab and "padding: 2px 6px" in tab, "25px tall, as the reference draws it")
+    ok("font-size: var(--t-md)" in tab, "at 14px, bigger than a filter tab inside a card")
+    ok("background: none" in tab, "with no pill")
+    on = CSS.split(".ptab.on {")[1].split("}")[0]
+    ok("color: var(--ink)" in on and "background" not in on, "the live page is marked by ink alone")
+
+
+@test
+def t_the_liability_filters_are_sorted_not_shortened():
+    """Eleven controls in one row is not eleven questions anyone reads. The
+    search and the three that change daily are on the bar; the date range and
+    the minimum are behind a panel, because a date is not a menu of choices."""
+    fn = SCRIPT.split("function renderLiability() {")[1]
+    fn = fn[:fn.index("\n        function ")]
+    ok("tableTools(left, right)" in fn, "the toolbar is the shared one")
+    ok("filterChip('Status'" in fn and "filterChip('Terms'" in fn and "filterChip('Sort'" in fn,
+       "status, terms and sort are chips that say what they are set to")
+    ok("dropPanel(rangeBtn" in fn, "the dates and the minimum are in a panel")
+    ok("el('div', 'lbl-toolbar')" not in fn, "the old eleven-control bar is gone")
+    # Nothing was dropped: every filter still exists.
+    for f in ("liaF.status", "liaF.terms", "liaF.channel", "liaF.dateField",
+              "liaF.from", "liaF.to", "liaF.min", "liaF.sort", "liaF.q"):
+        ok(f in fn, f + " survived the sort")
+    # Clear only appears when there is something to clear.
+    ok("if (anyFilter) {" in fn, "the reset button appears only when a filter is on")
+
+
+@test
+def t_a_filter_that_hides_everything_does_not_hide_itself():
+    """The reconciliation list returned before the filters were built, so a
+    filter matching nothing took the way to undo it off the screen with it."""
+    fn = SCRIPT.split("function renderRecon() {")[1]
+    fn = fn[:fn.index("\n        function ")]
+    tools = fn.index("list.append(tableTools([searchWrap, statusTabs]")
+    empty = fn.index("if (!ex.length) {")
+    ok(tools < empty, "the search and the status tabs are built before the empty check")
+    ok(fn.index("box.append(list)") < empty, "and the card is on the page before it returns")
+
+
+@test
+def t_a_panel_is_measured_after_it_is_filled():
+    """It borrows the menu's positioning, which runs while the panel is still
+    empty. A form taller than nothing would hang off the bottom of the window."""
+    fn = SCRIPT.split("function dropPanel(anchor, build) {")[1][:1600]
+    ok(fn.index("build(body, closeDMenu)") < fn.index("panel.offsetHeight"),
+       "it re-measures after the form is in it")
+    ok("window.innerHeight - 8" in fn, "and flips above when there is no room below")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
