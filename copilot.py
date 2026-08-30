@@ -17365,7 +17365,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if origin in _PRINT_ORIGINS or (own_shop and origin == own_shop):
             return {**base, "Access-Control-Allow-Origin": origin,
                     "Access-Control-Allow-Credentials": "true", "Vary": "Origin"}
-        return {**base, "Access-Control-Allow-Origin": "*"}
+        # Vary on both branches: a shared cache that stored this wildcard reply
+        # must not serve it back to an allowlisted origin (fails closed, but
+        # breaks the credentialed print action until the cache expires).
+        return {**base, "Access-Control-Allow-Origin": "*", "Vary": "Origin"}
 
     @mcp.custom_route("/print/production-labels/sign", methods=["POST", "OPTIONS"])
     async def sign_label_doc(request: Request):

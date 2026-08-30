@@ -170,13 +170,13 @@
         .convo-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 16px 4px; }
         .convo-head span { font-size: var(--t-xs); font-weight: var(--w-medium); text-transform: none; letter-spacing: normal; color: var(--ink-3); }
         .icon-btn { border: 0; background: transparent; color: var(--ink-3); padding: 4px; border-radius: var(--r-xs);
-            min-width: 28px; min-height: 28px; display: grid; place-items: center; transition: all .14s; }
+            min-width: 28px; min-height: 28px; display: grid; place-items: center; transition: background .14s, color .14s, border-color .14s; }
         .icon-btn:hover { background: var(--surface-2); color: var(--ink); }
         .icon-btn:disabled { background: transparent; color: var(--border-3); cursor: not-allowed; }
         .icon-btn svg { width: 16px; height: 16px; }
         .convos { flex: 1; overflow-y: auto; padding: 0px 12px 8px; display: flex; flex-direction: column; gap: 0px; }
         .convo { display: flex; align-items: center; gap: 8px; padding: 8px 8px; border-radius: var(--r-sm); color: var(--ink-2);
-            font-size: var(--t-md); cursor: pointer; border: 0; background: transparent; width: 100%; text-align: left; transition: all .14s; }
+            font-size: var(--t-md); cursor: pointer; border: 0; background: transparent; width: 100%; text-align: left; transition: background .14s, color .14s, border-color .14s, opacity .14s; }
         .convo:hover { background: var(--surface-2); color: var(--ink); }
         .convo.active { background: var(--surface-2); color: var(--ink); font-weight: var(--w-medium); box-shadow: inset 0 0 0 1px var(--border-2); }
         .convo .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -184,7 +184,7 @@
             /* The padding is the hit area the whole-row button used to give;
                the negative margin cancels its effect on the row height. */
             padding: 8px; margin: -8px 0 -8px -8px; }
-        .convo .del { opacity: 0; color: var(--ink-3); padding: 4px; border-radius: var(--r-xs); display: grid; place-items: center; transition: all .14s;
+        .convo .del { opacity: 0; color: var(--ink-3); padding: 4px; border-radius: var(--r-xs); display: grid; place-items: center; transition: background .14s, color .14s, border-color .14s, opacity .14s;
             border: 0; background: transparent; min-width: 24px; min-height: 24px; }
         .convo .del svg { width: 14px; height: 14px; }
         .convo:hover .del, .convo:focus-within .del { opacity: .65; }
@@ -214,6 +214,13 @@
         /* Icon wrapper: the svg becomes a block inside a shrink-wrapped flex
            span, so flex parents centre it truly and inline contexts sit it on
            the text's middle instead of its baseline. */
+        /* No double-tap zoom delay on things you press, and no grey tap flash:
+           every control here paints its own pressed state. */
+        button, [role="button"], select, input, .toggle, .lbl-row, .mrow, .files-row {
+            touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+        /* A modal or menu that bottoms out must not hand the scroll to the
+           page behind it. */
+        .modal-body, .dmenu, .scroll { overscroll-behavior: contain; }
         .ic { display: inline-flex; align-items: center; vertical-align: middle; }
         .ic svg { display: block; }
         .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -410,7 +417,7 @@
         .mem-tag.preference { background: var(--info-bg); color: var(--info); }
         .mem-tag.insight { background: var(--accent-soft); color: var(--accent-ink); }
         .mem-acts { display: flex; gap: 4px; flex-shrink: 0; }
-        .mem-btn { border: 0; background: transparent; color: var(--ink-3); padding: 4px; border-radius: var(--r-xs); display: grid; place-items: center; transition: all .14s; }
+        .mem-btn { border: 0; background: transparent; color: var(--ink-3); padding: 4px; border-radius: var(--r-xs); display: grid; place-items: center; transition: background .14s, color .14s, border-color .14s, opacity .14s; }
         .mem-btn svg { width: 15px; height: 15px; }
         .mem-btn:hover { background: var(--surface-2); color: var(--ink); }
         .mem-btn.ok:hover { color: var(--win); background: var(--win-bg); }
@@ -436,7 +443,7 @@
         .prod-search { width: 100%; border: 1px solid var(--border); border-radius: var(--r-sm); padding: 8px 12px; font: inherit; font-size: var(--t-md); outline: none; margin-bottom: 12px; background: var(--surface-3); color: var(--ink); }
         .prod-search:focus { border-color: var(--accent); box-shadow: var(--focus); }
         .prod-row { display: flex; align-items: center; gap: 12px; padding: 12px 12px; border: 1px solid var(--border); border-radius: var(--r-sm);
-            background: var(--surface); box-shadow: var(--sh-1); margin-bottom: 8px; cursor: pointer; text-align: left; width: 100%; font: inherit; color: var(--ink); transition: all .14s; }
+            background: var(--surface); box-shadow: var(--sh-1); margin-bottom: 8px; cursor: pointer; text-align: left; width: 100%; font: inherit; color: var(--ink); transition: background .14s, color .14s, border-color .14s, opacity .14s; }
         .prod-row:hover { border-color: var(--accent-line); background: var(--surface-2); }
         .prod-thumb { width: 42px; height: 42px; border-radius: var(--r-sm); object-fit: cover; background: var(--surface-3); flex-shrink: 0; }
         .prod-main { flex: 1; min-width: 0; }
@@ -572,7 +579,7 @@
         .action + .action { border-top: 1px solid var(--border); }
         .action:hover { background: var(--surface-2); }
         .action .check { width: 20px; height: 20px; border-radius: var(--r-xs); border: 1.8px solid var(--border-3); flex-shrink: 0; margin-top: 0px;
-            display: grid; place-items: center; cursor: pointer; transition: all .15s; }
+            display: grid; place-items: center; cursor: pointer; transition: background .15s, color .15s, border-color .15s, opacity .15s; }
         .action .check svg { width: 12px; height: 12px; opacity: 0; color: #fff; }
         .action.done .check { background: var(--win); border-color: var(--win); }
         .action.done .check svg { opacity: 1; }
@@ -584,7 +591,7 @@
 
         .followups { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
         .chip { border: 1px solid var(--border-2); background: var(--surface-2); border-radius: var(--r); padding: 8px 12px; font-size: var(--t-xs);
-            color: var(--ink); display: inline-flex; align-items: center; gap: 8px; transition: all .14s; cursor: pointer; }
+            color: var(--ink); display: inline-flex; align-items: center; gap: 8px; transition: background .14s, color .14s, border-color .14s, opacity .14s; cursor: pointer; }
         .chip:hover { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); }
         .chip > span { display: grid; place-items: center; flex: none; }
         .chip svg { width: 13px; height: 13px; opacity: .6; display: block; }
@@ -801,7 +808,7 @@
            it read as a squashed "thin" control when it had its own padding. */
         .lbl-size { background: var(--surface); border: 1px solid var(--border-2); border-radius: var(--r-sm);
             color: var(--ink); font: inherit; font-size: var(--t-md); font-weight: var(--w-medium); padding: 6px 12px;
-            line-height: 20px; cursor: pointer; transition: all .14s; min-height: 34px; }
+            line-height: 20px; cursor: pointer; transition: background .14s, color .14s, border-color .14s, opacity .14s; min-height: 34px; }
         .lbl-size:hover { background: var(--surface-3); border-color: var(--border-3); }
         .lbl-find { min-width: 190px; font-weight: var(--w-normal); }
         .lbl-nameline { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
@@ -1636,6 +1643,10 @@
             white-space: nowrap; }
         .ftab:hover { background: var(--surface-2); }
         .ftab.on { color: var(--ink); }
+        /* A 14px box inside a 14px box with 16px of padding reads blocky at
+           the inner corner. The tables already step down to the base radius
+           inside a card; these were the three shapes that had not. */
+        .card .insight, .card .empty, .chart-card .empty { border-radius: var(--r-md); }
         .kbadge { display: inline-block; font-size: var(--t-xs); font-weight: var(--w-medium); text-transform: none; letter-spacing: normal; padding: 2px 8px; border-radius: var(--r-pill); margin-left: 8px; background: var(--warn-bg); color: var(--warn); vertical-align: middle; flex: none; }
         .kbadge.win { background: var(--win-bg); color: var(--win); }
         .scan-card { padding: 16px 16px; margin-bottom: 12px; }
@@ -1646,7 +1657,7 @@
         .kchip b { color: var(--ink); font-weight: var(--w-medium); }
         .kmeta { font-size: var(--t-xs); color: var(--ink-2); margin: 4px 0 2px; word-break: break-all; } .kmeta b { color: var(--ink); }
         /* ---------- Impact tracking ---------- */
-        .track-btn { border: 1px solid var(--border-2); background: var(--surface-2); color: var(--ink-2); font: inherit; font-size: var(--t-xs); font-weight: var(--w-medium); padding: 4px 8px; border-radius: var(--r-xs); display: inline-flex; align-items: center; gap: 4px; flex: none; cursor: pointer; transition: all .14s; }
+        .track-btn { border: 1px solid var(--border-2); background: var(--surface-2); color: var(--ink-2); font: inherit; font-size: var(--t-xs); font-weight: var(--w-medium); padding: 4px 8px; border-radius: var(--r-xs); display: inline-flex; align-items: center; gap: 4px; flex: none; cursor: pointer; transition: background .14s, color .14s, border-color .14s, opacity .14s; }
         .track-btn:hover { color: var(--ink); border-color: var(--border-3); }
         .track-btn.on { background: var(--win-bg); color: var(--win); border-color: transparent; cursor: default; }
         .track-btn > span { display: grid; place-items: center; } .track-btn svg { width: 12px; height: 12px; display: block; }
@@ -1723,7 +1734,7 @@
         .chart-end-dot { stroke: var(--surface); stroke-width: 2; }
         .chart-note { font-size: var(--t-xs); color: var(--ink-3); margin-top: 8px; line-height: 1.45; }
         .chart-card .chart-head { padding-right: 32px; }
-        .chart-expand { position: absolute; top: 13px; right: 13px; z-index: 2; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--ink-3); width: 28px; height: 28px; border-radius: var(--r-sm); display: grid; place-items: center; cursor: pointer; transition: all .14s; opacity: .75; }
+        .chart-expand { position: absolute; top: 13px; right: 13px; z-index: 2; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--ink-3); width: 28px; height: 28px; border-radius: var(--r-sm); display: grid; place-items: center; cursor: pointer; transition: background .14s, color .14s, border-color .14s, opacity .14s; opacity: .75; }
         .chart-expand:hover { color: var(--ink); border-color: var(--border-3); opacity: 1; }
         .chart-expand svg { width: 14px; height: 14px; display: block; }
         .cmodal { max-width: 980px; }
@@ -1738,7 +1749,7 @@
         .spark { display: block; width: 100%; height: 32px; overflow: visible; }
         /* segmented range control */
         .seg { display: inline-flex; background: var(--surface-2); border: 0; border-radius: var(--r-sm); padding: 4px; gap: 0px; }
-        .seg button { border: 0; background: transparent; color: var(--ink-2); font: inherit; font-size: var(--t-xs); font-weight: var(--w-medium); padding: 4px 12px; border-radius: var(--r-xs); transition: all .14s; }
+        .seg button { border: 0; background: transparent; color: var(--ink-2); font: inherit; font-size: var(--t-xs); font-weight: var(--w-medium); padding: 4px 12px; border-radius: var(--r-xs); transition: background .14s, color .14s, border-color .14s, opacity .14s; }
         .seg button:hover { color: var(--ink); } .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
         .seg button.on { background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 1px var(--border); font-weight: var(--w-medium); }
 
@@ -1981,6 +1992,19 @@
         .confirm-modal { max-width: 460px; width: 92vw; }
         .confirm-msg { font-size: var(--t-md); line-height: 1.5; color: var(--ink); margin: 0; }
         @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+        /* The blanket rule the two targeted ones above should always have been:
+           reduce means reduce EVERYTHING, including the fadeUps, the loader and
+           the spinning refresh icon, and including inline animation styles
+           (the important wins over those). Durations become a tick rather than
+           zero so animationend still fires for anything listening. */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: .01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: .01ms !important;
+                scroll-behavior: auto !important;
+            }
+        }
         .field-label { font-size: var(--t-md); font-weight: var(--w-medium); display: block; margin-top: 8px; }
         .field-help { font-size: var(--t-xs); color: var(--ink-2); margin: 5px 0 12px; line-height: 1.55; }
         .pf-input { width: 100%; resize: vertical; border: 1px solid var(--border); border-radius: var(--r-sm);
@@ -2789,7 +2813,13 @@
             /* A placeholder is only a name until someone types. */
             inp.setAttribute('aria-label', (placeholder || 'Search').replace(/\u2026$/, ''));
             if (value) inp.value = value;
-            if (oninput) inp.oninput = () => oninput(inp.value.trim());
+            /* Debounced 150ms: these callbacks repaint whole lists, and the
+               file browser measured 1,912ms of blocked JS per keystroke on a
+               broad term before its own debounce went in. */
+            if (oninput) inp.oninput = () => {
+                clearTimeout(inp._t);
+                inp._t = setTimeout(() => oninput(inp.value.trim()), 150);
+            };
             wrap.append(inp);
             wrap.input = inp;
             return wrap;
@@ -8223,10 +8253,10 @@
                     const dIn = document.createElement('input'); dIn.type = 'text'; dIn.className = 'disp-num'; dIn.placeholder = 'Description'; dIn.style.flex = '2 1 auto';
                     const qIn = document.createElement('input'); qIn.type = 'number'; qIn.min = '1'; qIn.step = '1'; qIn.className = 'disp-num disp-boxdim'; qIn.placeholder = 'Qty';
                     const pIn = document.createElement('input'); pIn.type = 'number'; pIn.min = '0'; pIn.step = '0.01'; pIn.className = 'disp-num disp-boxdim'; pIn.placeholder = 'Unit £';
-                    const hIn = document.createElement('input'); hIn.type = 'text'; hIn.className = 'disp-num disp-boxdim'; hIn.placeholder = 'HS code'; hIn.style.width = '90px';
+                    const hIn = document.createElement('input'); hIn.type = 'text'; hIn.spellcheck = false; hIn.setAttribute('aria-label', 'HS code'); hIn.className = 'disp-num disp-boxdim'; hIn.placeholder = 'HS code'; hIn.style.width = '90px';
                     // Origin is ON the card: the commercial invoice needs it, and an
                     // invisible wrong value is worse than a visible editable one.
-                    const oIn = document.createElement('input'); oIn.type = 'text'; oIn.className = 'disp-num disp-boxdim'; oIn.placeholder = 'Origin'; oIn.maxLength = 2; oIn.style.width = '58px';
+                    const oIn = document.createElement('input'); oIn.type = 'text'; oIn.spellcheck = false; oIn.setAttribute('aria-label', 'Country of origin'); oIn.className = 'disp-num disp-boxdim'; oIn.placeholder = 'Origin'; oIn.maxLength = 2; oIn.style.width = '58px';
                     oIn.title = 'Country of origin (2 letters), where the item was MADE, for the commercial invoice';
                     if (pre) { dIn.value = pre.description || ''; qIn.value = pre.quantity || 1; pIn.value = pre.unit_price || ''; hIn.value = pre.hs || ''; oIn.value = pre.origin || 'GB'; }
                     else { oIn.value = 'GB'; }
@@ -8964,7 +8994,11 @@
                 const wrap = el('label', 'disp-addr-f');
                 wrap.append(el('span', 'disp-addr-lab', label));
                 const inp = document.createElement('input');
-                inp.type = 'text'; inp.className = 'disp-text'; inp.placeholder = help || '';
+                /* The right keyboard on touch and the right autofill: email and
+                   phone are not plain text, and postcodes are not words. */
+                inp.type = key === 'email' ? 'email' : key === 'phone' ? 'tel' : 'text';
+                if (key === 'postcode' || key === 'country') inp.spellcheck = false;
+                inp.className = 'disp-text'; inp.placeholder = help || '';
                 inp.oninput = staleQuote;
                 addr[key] = inp; wrap.append(inp); addrGrid.append(wrap);
             });
@@ -9516,7 +9550,7 @@
              ['default_hs_code', 'Default HS / commodity code (optional, e.g. 70200080)'], ['trade_term', 'Trade term (optional, e.g. DAP)']].forEach(([k, lab]) => {
                 const w = el('label', 'disp-fld'); w.style.marginTop = '6px';
                 w.append(el('span', 'disp-fld-lab', lab));
-                const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'disp-num'; inp.value = cfg[k] || '';
+                const inp = document.createElement('input'); inp.type = 'text'; inp.spellcheck = false; inp.className = 'disp-num'; inp.value = cfg[k] || '';
                 w.append(inp); intlIn[k] = inp; body.append(w);
             });
             const erF = el('label', 'disp-fld'); erF.style.marginTop = '6px';
@@ -10518,7 +10552,10 @@
             bar.append(add);
             const q = document.createElement('input');
             q.type = 'search'; q.placeholder = 'Search deals…'; q.setAttribute('aria-label', 'Search deals'); q.className = 'lbl-size lbl-find'; q.value = crmQ;
-            q.oninput = () => { crmQ = q.value.trim(); paint(); };
+            q.oninput = () => {
+                crmQ = q.value.trim();
+                clearTimeout(q._t); q._t = setTimeout(paint, 150);
+            };
             bar.append(q);
             const st = el('select', 'lbl-size');
             st.setAttribute('aria-label', 'Deal status');
@@ -12060,7 +12097,7 @@
             }
             [personIn, orgIn].forEach(i => { i.addEventListener('input', lAutofill); i.addEventListener('picked', lAutofill); });
             crmField(grid, 'Title', titleIn);
-            const valIn = crmText('', '0'); valIn.type = 'number'; valIn.min = '0';
+            const valIn = crmText('', '0'); valIn.type = 'number'; valIn.min = '0'; valIn.step = '0.01';
             crmField(grid, 'Value (£)', valIn);
             const labSel = el('select', 'disp-text');
             labSel.append(new Option('No label', ''));
@@ -12134,7 +12171,7 @@
                     m.body.innerHTML = '';
                     const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
                     const tIn = crmText(l.title, ''); crmField(grid, 'Title', tIn);
-                    const vIn = crmText(String(l.value || ''), '0'); vIn.type = 'number'; vIn.min = '0';
+                    const vIn = crmText(String(l.value || ''), '0'); vIn.type = 'number'; vIn.min = '0'; vIn.step = '0.01';
                     crmField(grid, 'Value (£)', vIn);
                     const lSel = el('select', 'disp-text');
                     lSel.append(new Option('No label', ''));
@@ -12686,7 +12723,10 @@
             const search = document.createElement('input');
             search.type = 'search'; search.className = 'mail-search'; search.setAttribute('aria-label', 'Search the inbox');
             search.value = mailQ;
-            search.oninput = () => { mailQ = search.value; mailFound = null; paintMailBody(); };
+            search.oninput = () => {
+                mailQ = search.value; mailFound = null;
+                clearTimeout(search._t); search._t = setTimeout(paintMailBody, 150);
+            };
             search.onkeydown = async (e) => {
                 if (e.key !== 'Enter') return;
                 const q = search.value.trim();
@@ -13486,9 +13526,11 @@
                 const stage = o.tracking ? 'shipped' : o.made_at ? 'made'
                     : o.printed_at ? 'in production' : 'not started';
                 top.append(el('span', 'mail-order-stage ' + stage.replace(/ /g, '-'), stage));
+                /* Formatted like everywhere else: this printed a raw ISO date
+                   and, for a non-GBP order, a bare number with no currency. */
                 if (o.total) top.append(el('span', 'mail-order-meta',
-                    (o.currency === 'GBP' ? '£' : '') + o.total));
-                top.append(el('span', 'mail-order-meta', (o.at || '').slice(0, 10)));
+                    o.currency === 'GBP' ? '£' + o.total : o.total + ' ' + (o.currency || '')));
+                if (o.at) top.append(el('span', 'mail-order-meta', fmtDate(o.at)));
                 row.append(top);
                 if (o.tracking) {
                     const tr = el('div', 'mail-order-track');
@@ -13669,7 +13711,7 @@
                             const where = prompt('Save "' + f.name + '" into which folder?\n'
                                 + 'Use a slash for folders inside folders.', 'Artwork');
                             if (where === null) return;
-                            save.disabled = true; save.textContent = 'Saving...';
+                            save.disabled = true; save.textContent = 'Saving\u2026';
                             try {
                                 const r = await api('/api/mail/attachment',
                                     { id: t.id, msg: f.msg, att: f.id, name: f.name, folder: where });
@@ -13913,10 +13955,12 @@
         }
         function fmtBytes(n) {
             n = Number(n) || 0;
-            if (n < 1024) return n + ' B';
+            if (n < 1024) return n + '\u00a0B';
             const u = ['KB', 'MB', 'GB', 'TB']; let i = -1;
             do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
-            return (n >= 10 ? Math.round(n) : n.toFixed(1)) + ' ' + u[i];
+            /* A no-break space: "12.4" on one line and "MB" on the next is
+               how a size gets misread in a wrapping flex row. */
+            return (n >= 10 ? Math.round(n) : n.toFixed(1)) + '\u00a0' + u[i];
         }
         const FILE_EXT_ICON = [
             [['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'tif', 'tiff', 'bmp'], 'fileImg'],

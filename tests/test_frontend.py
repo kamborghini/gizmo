@@ -2211,7 +2211,7 @@ def t_the_files_list_is_the_reference_measurement():
     lst = CSS.split(".files-list {")[1].split("}")[0]
     ok("border-radius: var(--r-md)" in lst, "the list box is at the base radius")
     ok("1px solid var(--border)" in lst, "in the border ink")
-    row = CSS.split(".files-row {")[1].split("}")[0]
+    row = CSS.split(".files-row { display: flex")[1].split("}")[0]
     ok("padding: var(--sp-3)" in row, "rows are padded 12px square")
     ok("border-top: 1px solid var(--border)" in row and "0.5px" not in row,
        "with a full hairline, not a half-pixel one")
@@ -2391,6 +2391,74 @@ def t_truncated_text_is_recoverable():
     ok("subj.title = t.subject || ''" in SCRIPT, "mail subject")
     ok("pn.title = p.title || ''" in SCRIPT, "product title")
     ok("name.title = f.name;" in SCRIPT, "file name")
+
+
+@test
+def t_reduced_motion_means_all_of_it():
+    """Reduce was honoured at two of ten animation sites; the fadeUps, the
+    loader and the spinning refresh icon all kept moving. One blanket rule now,
+    with durations at a tick rather than zero so animationend still fires."""
+    blk = CSS.split("@media (prefers-reduced-motion: reduce) {\n            *, *::before, *::after {")[1].split("}")[0]
+    ok("animation-duration: .01ms !important" in blk, "animations reduce")
+    ok("transition-duration: .01ms !important" in blk, "transitions too")
+    ok("animation-iteration-count: 1 !important" in blk, "and nothing loops forever")
+    ok("transition: all" not in CSS, "and no transition animates 'all' any more")
+
+
+@test
+def t_forms_ask_for_the_right_keyboard_and_accept_pence():
+    """Two lead-value fields rejected 1500.50 (step defaults to 1), and the
+    address builder typed email and phone as plain text, which on touch is the
+    wrong keyboard and for autofill is no hint at all."""
+    ok(SCRIPT.count("valIn.step = '0.01'") >= 1 and "vIn.step = '0.01'" in SCRIPT,
+       "both lead-value fields accept pence")
+    ok("key === 'email' ? 'email' : key === 'phone' ? 'tel' : 'text'" in SCRIPT,
+       "the address builder types its fields")
+    ok("if (key === 'postcode' || key === 'country') inp.spellcheck = false" in SCRIPT,
+       "and codes are not spellchecked as words")
+
+
+@test
+def t_the_mail_order_panel_formats_like_the_rest_of_the_app():
+    """It printed a raw ISO date to the screen and, for any non-GBP order,
+    a bare number with no currency at all."""
+    ok("fmtDate(o.at)" in SCRIPT, "the date goes through the shared formatter")
+    ok("o.total + ' ' + (o.currency || '')" in SCRIPT,
+       "and a non-GBP total keeps its currency")
+    ok("(o.at || '').slice(0, 10)" not in SCRIPT.split("mail-order-stage")[1][:600],
+       "no raw ISO reaches the panel")
+
+
+@test
+def t_search_repaints_are_debounced_everywhere():
+    """The file browser measured 1,912ms of blocked JS per keystroke before its
+    debounce went in, and seven other searches still repainted synchronously.
+    The shared factory debounces for everyone now, and the two hand-rolled
+    repainting searches got their own."""
+    fn = SCRIPT.split("function tableSearch(")[1][:900]
+    ok("setTimeout(() => oninput(inp.value.trim()), 150)" in fn,
+       "the factory debounces its callers")
+    ok("search._t = setTimeout(paintMailBody, 150)" in SCRIPT, "the mail search too")
+    ok("q._t = setTimeout(paint, 150)" in SCRIPT, "and the deals search")
+
+
+@test
+def t_touch_and_scroll_behave_like_an_app():
+    """Every control carried the double-tap zoom delay, tapped with a grey
+    flash, and a modal that bottomed out handed its scroll to the page behind."""
+    rule = CSS.split('button, [role="button"], select, input, .toggle, .lbl-row, .mrow, .files-row {')[1].split("}")[0]
+    ok("touch-action: manipulation" in rule, "no double-tap delay on controls")
+    ok("-webkit-tap-highlight-color: transparent" in rule, "no grey tap flash")
+    ok(".modal-body, .dmenu, .scroll { overscroll-behavior: contain; }" in CSS,
+       "and scroll does not chain out of modals or menus")
+
+
+@test
+def t_nested_boxes_step_their_radius_down():
+    """A 14px box inside a 14px box with 16px padding reads blocky at the inner
+    corner. The tables already stepped down; these three shapes had not."""
+    ok(".card .insight, .card .empty, .chart-card .empty { border-radius: var(--r-md); }" in CSS,
+       "insight and empty boxes step down inside cards")
 
 
 if __name__ == "__main__":
