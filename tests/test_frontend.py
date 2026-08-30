@@ -2611,18 +2611,23 @@ def t_a_chip_is_exactly_twenty_pixels():
 
 
 @test
-def t_the_kpi_card_reads_label_first():
-    """gizmo had the reference's hierarchy inverted - a small muted label over a
-    bolded number. The reference does the opposite: a full-size, full-strength
-    label naming the thing, then the number at normal weight underneath."""
+def t_the_kpi_card_keeps_the_hierarchy_the_reference_measures():
+    """Written after getting this exactly backwards. A first pass read a
+    CardTitle off a non-KPI card, concluded the label should be 16px
+    foreground, and inverted a card that was already right. Re-measured across
+    all four KPI cards on the reference's Default dashboard AND its CRM one:
+    both agree the label is 14px muted, and Default - the page this one maps to
+    - puts the value at 30px/500. Pinned here so it is not "corrected" again."""
     lab = CSS.split(".stat .label {")[1].split("}")[0]
-    ok("font-size: var(--t-lg)" in lab, "the label is 16px, not the 14px muted caption")
-    ok("color: var(--ink)" in lab, "at full-strength ink")
+    ok("font-size: var(--t-md)" in lab, "the label is the 14px one")
+    ok("color: var(--ink-3)" in lab, "and muted, not full-strength")
     val = CSS.split(".stat .value {")[1].split("}")[0]
-    ok("font-weight: var(--w-normal)" in val,
-       "and the number carries its weight by size alone")
-    note = CSS.split(".stat-note {")[1].split("}")[0]
-    ok("font-size: var(--t-xs)" in note, "the sub-line is the 12px one")
+    ok("font-size: var(--t-2xl)" in val, "the number is 30px")
+    ok("font-weight: var(--w-medium)" in val, "at 500, as the Default card draws it")
+    # Anchored on the line start: ".stat .stat-note {" also contains the
+    # shorter string, and matching that one reads the wrong rule.
+    note = re.search(r"^\s*\.stat-note \{([^}]*)\}", CSS, re.M).group(1)
+    ok("font-size: var(--t-md)" in note, "and the sub-line matches the label at 14px")
 
 
 @test
@@ -2633,6 +2638,38 @@ def t_sparklines_stay_on_the_ramp():
     ok("CH_UP" not in SCRIPT and "CH_DOWN" not in SCRIPT,
        "the semantic spark pair is gone rather than left dead in the file")
     ok("sparkline(m.spark, CH[2])" in SCRIPT, "the line is drawn from the neutral ramp")
+
+
+@test
+def t_the_card_elevation_token_actually_paints():
+    """The companion to the dead-token lesson above: asserting that fifteen card
+    rules carry var(--sh-1) means nothing while the token itself resolves to
+    `none`. The reference measures rgba(0,0,0,.05) 0 1px 2px 0 on every card."""
+    m = re.search(r"--sh-1:\s*([^;]+);", CSS)
+    ok(m, "the token is still declared")
+    val = m.group(1).strip()
+    ok(val != "none", "and it paints rather than silently voiding every shadow list")
+    ok("rgba(0,0,0,.05)" in val.replace(" ", ""),
+       "at the reference's 5%% alpha, not a heavier invented lift")
+
+
+@test
+def t_a_rising_number_is_not_congratulated_in_green():
+    """Measured off the reference's KPI cards: the positive delta badge is a
+    solid --accent pill with near-white text, and only the negative one carries
+    a tint. gizmo paints metrics where a rise is bad news - unfulfilled orders,
+    at-risk customers - so a green "up" was reading as approval of a number the
+    merchant needs to worry about."""
+    for sel in (r"\.delta\.up", r"\.prod-chip \.cmp\.up"):
+        rule = re.search(sel + r" \{[^}]*\}", CSS)
+        ok(rule, "the %s rule is still there" % sel)
+        body = rule.group(0)
+        ok("var(--accent)" in body, "%s sits on the accent pill" % sel)
+        ok("var(--win)" not in body, "and spends no green on direction alone")
+    # The tinted half of the pair stays, because red IS the reference's one tint.
+    down = re.search(r"\.delta\.down \{[^}]*\}", CSS)
+    ok(down and "var(--danger)" in down.group(0),
+       "while a falling number keeps the reference's red")
 
 
 if __name__ == "__main__":
