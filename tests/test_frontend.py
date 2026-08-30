@@ -2556,6 +2556,53 @@ def t_the_connector_watch_cannot_outlive_its_view():
     ok("if (connWatch) return;" in watch, "and never doubles up")
 
 
+@test
+def t_every_control_is_the_same_height_as_every_other():
+    """Measured off the reference: its default control is 32px and its small one
+    28px. This app had buttons at 34 and inputs at 36 - which did not match the
+    reference and, worse, did not match EACH OTHER, so a button beside an input
+    in a toolbar sat two pixels proud of it."""
+    for sel, why in [(".btn {", "buttons"), ("input[type=text], input[type=number]", "the shared field recipe"),
+                     (".lbl-size {", "toolbar selects"), (".psel {", "product selects"),
+                     (".disp-text {", "dispatch text fields"), (".disp-num {", "dispatch number fields"),
+                     (".tm-field {", "team fields")]:
+        block = CSS.split(sel)[1].split("}")[0]
+        ok("min-height: 32px" in block or "32px" in block, why + " are 32px")
+    ok("input[type=date], input[type=time] { height: 32px; }" in CSS,
+       "and a native date control is pinned, since it carries its own height")
+    sm = CSS.split(".btn-sm {")[1].split("}")[0]
+    ok("min-height: 28px" in sm, "the small button stays 28")
+
+
+@test
+def t_the_sidebar_does_not_dim_where_you_are_not():
+    """The reference marks position with a pill and a weight, and leaves every
+    other label at full strength. This one greyed the inactive items to --ink-2,
+    which is what made the whole sidebar read washed out beside it."""
+    item = CSS.split(".nav-item {")[1].split("}")[0]
+    ok("height: 32px" in item, "nav items are 32px, as the reference draws them")
+    ok("color: var(--ink)" in item, "an inactive item is full-strength ink")
+    ok("font-weight: var(--w-normal)" in item, "at normal weight")
+    act = CSS.split(".nav-item.active {")[1].split("}")[0]
+    ok("font-weight: var(--w-medium)" in act, "and the active one carries the weight")
+    ok("background: var(--surface-2)" in act, "on the muted pill")
+    side = CSS.split(".sidebar {")[1].split("}")[0]
+    ok("border-right" not in side,
+       "the sidebar separates by background alone, with no second edge")
+    grp = CSS.split(".nav-group {")[1].split("}")[0]
+    ok("color: var(--ink-2)" in grp, "group labels sit at the reference's 70% foreground")
+
+
+@test
+def t_a_chip_is_exactly_twenty_pixels():
+    """It inherited its height from a line box plus padding, which gave 21.5 -
+    a hair taller than the reference's badge everywhere one appeared."""
+    chip = CSS.split(".lbl-chip {")[1].split("}")[0]
+    ok("height: 20px" in chip, "set, not inherited")
+    ok("display: inline-flex" in chip and "align-items: center" in chip,
+       "so its content is optically centred rather than sitting on a baseline")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
