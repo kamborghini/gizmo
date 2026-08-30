@@ -281,7 +281,10 @@
            panels still read it. */
         :root { --wrap: none; --wrap-pad: 24px; }
         .ov-wrap { max-width: var(--wrap); margin: 0; width: 100%;
-            padding: var(--sp-4) var(--wrap-pad) var(--sp-8); }
+            /* 24px, the reference's content inset, on the two edges you
+               see on load. The bottom keeps 40 so a long scroll does not
+               end flush against the viewport. */
+            padding: var(--sp-6) var(--wrap-pad) var(--sp-8); }
         /* Body copy inside any tab: measured, never the full wrap.
            The cap is written in ch HERE rather than held in a custom property,
            because ch resolves against the font size of whatever element uses
@@ -337,7 +340,7 @@
            takes its own line instead, and the text gets the width. */
         @media (max-width: 640px) {
             /* 32px gutters spend 64px of a 390px screen on nothing. */
-            .ov-wrap { padding: var(--sp-5) var(--sp-4) 56px; }
+            .ov-wrap { padding: var(--sp-4) var(--sp-4) 56px; }
             .ov-hero { flex-wrap: wrap; gap: 12px; }
             .ov-hero > div:not(.badge) { flex: 1 1 200px; min-width: 0; }
             .ov-updated { margin-left: 56px; padding-top: 0; flex-basis: 100%; }
