@@ -9,3 +9,12 @@ __pycache__/
 .shopify/
 extensions/
 tests/
+# Not code: docs, the icon source set, the sample env and the captured debug
+# dumps. None of it runs, so none of it belongs in a production image.
+docs/
+feather/
+README.md
+env.example
+*.txt
+!requirements.txt
+.github/

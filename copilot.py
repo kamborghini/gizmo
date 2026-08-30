@@ -7839,12 +7839,24 @@ def _frame_headers(request: Request) -> dict:
     )
     # Full CSP: lock down sources while allowing exactly what the page needs —
     # App Bridge (cdn.shopify.com), Google Fonts, same-origin API calls, and the
-    # store/admin for the embed. 'unsafe-inline' is scoped to the app's own inline
-    # script/style; there is no untrusted-data→HTML sink (verified), so this is a
-    # sound risk tradeoff vs. the nonce machinery App Bridge can be finicky about.
+    # store/admin for the embed.
+    #
+    # script-src carries NO 'unsafe-inline'. It used to, from when the page was
+    # one file with its script inline; splitting the JS into /assets/app.js made
+    # that allowance dead weight, and dead weight in a CSP is the difference
+    # between an injected string being inert and being executed. Verified before
+    # removing it: the served shell has zero inline <script>, zero inline
+    # <style> and zero on*= attributes, and App Bridge itself never builds a
+    # script element, evals, or calls new Function. The session token lives in
+    # localStorage, so this is the layer that keeps a future HTML sink from
+    # becoming an account takeover.
+    #
+    # style-src keeps 'unsafe-inline': the page still sets element.style
+    # throughout and the shell carries style= attributes. Narrowing that needs
+    # its own pass and buys far less.
     csp = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.shopify.com https://*.shopify.com; "
+        "script-src 'self' https://cdn.shopify.com https://*.shopify.com; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         "img-src 'self' data: https:"

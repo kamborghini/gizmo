@@ -11977,6 +11977,51 @@ def t_the_latest_booking_of_the_day_is_the_one_that_counts():
 
 
 @test
+def t_the_page_csp_does_not_allow_inline_script():
+    """The allowance was left over from when the page was one file with its
+    script inline. Splitting the JS into /assets/app.js made it dead weight,
+    and dead weight in a CSP is the difference between an injected string
+    being inert and being executed - which matters here because the session
+    token lives in localStorage, readable by any script that runs."""
+    import copilot as _c
+    class _Req:
+        headers = {}
+        query_params = {}
+        url = type("U", (), {"path": "/"})()
+    csp = _c._frame_headers(_Req())["Content-Security-Policy"]
+    script = [d for d in csp.split(";") if d.strip().startswith("script-src")][0]
+    ok("'unsafe-inline'" not in script, "script-src forbids inline: " + script.strip())
+    ok("'unsafe-eval'" not in script, "and eval")
+    ok("https://cdn.shopify.com" in script, "App Bridge still loads")
+    # style-src deliberately keeps it: the page sets element.style throughout.
+    style = [d for d in csp.split(";") if d.strip().startswith("style-src")][0]
+    ok("'unsafe-inline'" in style, "style-src keeps it, deliberately")
+    # And the served page must actually have nothing inline to run.
+    shell, _assets = _c._page_parts()
+    import re as _re
+    inline = _re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", shell, _re.S)
+    ok(not [b for b in inline if b.strip()], "the shell carries no inline script block")
+    ok(not _re.search(r"\son[a-z]+\s*=\s*[\"']", shell), "and no inline event handler attribute")
+
+
+@test
+def t_every_oauth_token_file_is_written_private():
+    """Five files hold third-party refresh tokens that outlive any session.
+    Four were created 0600; google_data.py wrote its one at the default 0644."""
+    import google_data as _gd, tempfile, stat
+    d = tempfile.mkdtemp()
+    real = _gd.OAUTH_TOKEN_PATH
+    _gd.OAUTH_TOKEN_PATH = os.path.join(d, "google_oauth.json")
+    try:
+        _gd.save_refresh_token("test-refresh-token")
+        mode = stat.S_IMODE(os.stat(_gd.OAUTH_TOKEN_PATH).st_mode)
+        eq(oct(mode), oct(0o600), "the Google refresh token file is owner-only")
+        ok("test-refresh-token" in open(_gd.OAUTH_TOKEN_PATH).read(), "and it did write")
+    finally:
+        _gd.OAUTH_TOKEN_PATH = real
+
+
+@test
 def t_the_connector_tab_is_a_guarded_proxy():
     """The Shopify->Xero connector writes to the accounting ledger, so gizmo
     only ever proxies it: its token never reaches a browser, the tab is opt-in

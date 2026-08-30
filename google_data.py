@@ -72,9 +72,19 @@ def _load_refresh_token() -> str:
 def save_refresh_token(token: str) -> None:
     os.makedirs(os.path.dirname(OAUTH_TOKEN_PATH) or ".", exist_ok=True)
     tmp = OAUTH_TOKEN_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
+    # 0600 from the moment it exists, like every other token file here: this
+    # holds a Google refresh token, which outlives any session. It was the one
+    # of five written at the default 0644 - harmless while the container runs
+    # as a single root user, and exactly the kind of thing that stops being
+    # harmless the day it does not.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(json.dumps({"refresh_token": token, "connected_at": datetime.now(timezone.utc).isoformat()}))
     os.replace(tmp, OAUTH_TOKEN_PATH)
+    try:
+        os.chmod(OAUTH_TOKEN_PATH, 0o600)
+    except OSError:
+        pass
     _access["token"], _access["exp"] = "", 0.0  # invalidate cache
 
 

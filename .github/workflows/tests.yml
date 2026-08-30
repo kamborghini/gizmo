@@ -9,6 +9,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# The default GITHUB_TOKEN scope is whatever the org happens to set. These jobs
+# only ever read the repo, so they say so: a compromised step in a third-party
+# action cannot then write code, releases or packages with the job's own token.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -28,6 +34,14 @@ jobs:
           if grep -q '—\|–' static/index.html; then
             echo "UI copy contains an em or en dash"; exit 1
           fi
+      # Dependency scanning belongs on the PR, not only on Monday. The weekly
+      # audit workflow still runs - that one catches advisories published after
+      # a merge, which no per-PR scan can. This one stops a known-vulnerable
+      # pin reaching main in the first place, where it auto-deploys.
+      - name: Dependency audit (blocking)
+        run: |
+          pip install pip-audit
+          pip-audit --progress-spinner off
       - name: The AI tool registry stays read-only
         run: |
           python - <<'PY'
