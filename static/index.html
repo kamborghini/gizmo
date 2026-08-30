@@ -354,20 +354,25 @@
             padding: var(--sp-4); box-shadow: var(--sh-1); animation: fadeUp .4s ease backwards;
             display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-1);
             min-height: 154px; justify-content: flex-start; }
-        .stat .stat-note { margin-top: var(--sp-1); }
         /* The sparkline sinks to the bottom so every card's NUMBER lines up
            with its neighbours, whatever length of label or note sits above. */
         .stat .stat-spark { margin-top: auto; padding-top: var(--sp-2); height: 34px; }
         /* No corner glow: on a light card it reads as a stain behind the number. */
-        .stat .label { font-size: var(--t-md); color: var(--ink-3); font-weight: var(--w-normal); text-transform: none; letter-spacing: normal; margin-bottom: 8px; position: relative; }
+        /* 16px in full ink, over a 400-weight number. The reference builds its
+           KPI cards that way round; this had the hierarchy inverted - a small
+           muted label under a heavy figure - which is why the numbers shouted
+           and the cards read cheaper than the reference's. */
+        .stat .label { font-size: var(--t-lg); color: var(--ink); font-weight: var(--w-normal); text-transform: none; letter-spacing: normal; line-height: 22px; margin-bottom: var(--sp-1); position: relative; }
         /* Number and change sit on ONE line in the reference, aligned, rather
            than the change dropping to a row of its own beneath. */
         .stat-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
-        .stat .value { font-size: var(--t-2xl); font-weight: var(--w-medium); letter-spacing: -.025em; line-height: 30px; position: relative; }
+        .stat .value { font-size: var(--t-2xl); font-weight: var(--w-normal); letter-spacing: -.025em; line-height: 30px; position: relative; }
         .stat .delta { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); font-weight: var(--w-medium); margin-top: 0; padding: 2px 8px; border-radius: var(--r-pill); position: relative; flex: none; line-height: 16px; }
         /* The line of context the reference gives every KPI: what the number is
            OF, in the same muted ink as the label above it. */
-        .stat-note { margin: var(--sp-2) 0 0; font-size: var(--t-md); line-height: 20px; color: var(--ink-3); }
+        /* 12/16, as the reference sets the line under a KPI - it is metadata,
+           not body copy, and at 14 it competed with the label above. */
+        .stat-note { margin: var(--sp-1) 0 0; font-size: var(--t-xs); line-height: 16px; color: var(--ink-3); }
         .stat .delta svg { width: 12px; height: 12px; }
         .delta.up { color: var(--win); background: var(--win-bg); } .delta.down { color: var(--danger); background: var(--danger-bg); } .delta.flat { color: var(--ink-3); background: var(--surface-3); }
         .stat.warn .value { color: var(--warn); }
@@ -2627,8 +2632,12 @@
             if (m.note) c.append(el('p', 'stat-note', m.note));
             if (Array.isArray(m.spark) && m.spark.length > 1) {
                 const sw = el('div', 'stat-spark');
-                const col = m.trend === 'up' ? CH_UP : m.trend === 'down' ? CH_DOWN : CH[0];
-                sw.append(sparkline(m.spark, col));
+                /* Off the ramp, not the semantic pair. The delta badge beside the
+                   number already carries the colour and the sign; a green or red
+                   line under it says the same thing a second time, louder, and
+                   left saturated strokes as the only strong colour on a page the
+                   reference keeps monochrome apart from that one badge. */
+                sw.append(sparkline(m.spark, CH[2]));
                 c.append(sw);
             }
             return c;
@@ -3293,7 +3302,6 @@
            app went monochrome, so a page of grey lines had three coloured ones
            in it for no reason a reader could work out. */
         const CH = ['#171717', '#525252', '#737373', '#a1a1a1', '#d4d4d4'];
-        const CH_UP = '#15803d', CH_DOWN = '#b91c1c';
 
         function sparkline(values, color) {
             const W = 120, H = 32, p = 3; const vals = (values || []).map(Number);

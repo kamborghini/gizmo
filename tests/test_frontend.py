@@ -788,7 +788,14 @@ def t_muted_text_is_readable_on_every_ground_the_app_paints():
     which clears 4.5:1 on pure white and on nothing else - and those labels sit
     on the page ground, on sunken fills and inside all four tinted chips, where
     it measured 3.90 to 4.35. Checked against the real tokens so a palette
-    tweak cannot quietly put it back."""
+    tweak cannot quietly put it back.
+
+    Deliberate divergence from the reference, re-confirmed by measurement: the
+    reference's muted-foreground is exactly #737373, and moving --ink-3 onto it
+    reads as the truer match. But the reference only ever paints muted text on
+    white and on #fafafa; gizmo paints it on tinted chips and sunken fills too,
+    where #737373 measures 3.98 to 4.35. The reference is the model for the
+    palette, not for the contrast floor."""
     ink3 = _token("ink-3")
     grounds = ["surface", "surface-2", "surface-3", "bg", "bg-2",
                "danger-bg", "warn-bg", "win-bg", "accent-soft"]
@@ -2601,6 +2608,31 @@ def t_a_chip_is_exactly_twenty_pixels():
     ok("height: 20px" in chip, "set, not inherited")
     ok("display: inline-flex" in chip and "align-items: center" in chip,
        "so its content is optically centred rather than sitting on a baseline")
+
+
+@test
+def t_the_kpi_card_reads_label_first():
+    """gizmo had the reference's hierarchy inverted - a small muted label over a
+    bolded number. The reference does the opposite: a full-size, full-strength
+    label naming the thing, then the number at normal weight underneath."""
+    lab = CSS.split(".stat .label {")[1].split("}")[0]
+    ok("font-size: var(--t-lg)" in lab, "the label is 16px, not the 14px muted caption")
+    ok("color: var(--ink)" in lab, "at full-strength ink")
+    val = CSS.split(".stat .value {")[1].split("}")[0]
+    ok("font-weight: var(--w-normal)" in val,
+       "and the number carries its weight by size alone")
+    note = CSS.split(".stat-note {")[1].split("}")[0]
+    ok("font-size: var(--t-xs)" in note, "the sub-line is the 12px one")
+
+
+@test
+def t_sparklines_stay_on_the_ramp():
+    """Saturated green and red strokes were the only strong colour on a page the
+    reference keeps monochrome apart from the delta badge - and they said the
+    same thing that badge already says, twice."""
+    ok("CH_UP" not in SCRIPT and "CH_DOWN" not in SCRIPT,
+       "the semantic spark pair is gone rather than left dead in the file")
+    ok("sparkline(m.spark, CH[2])" in SCRIPT, "the line is drawn from the neutral ramp")
 
 
 if __name__ == "__main__":
