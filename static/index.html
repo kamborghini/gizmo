@@ -1592,7 +1592,13 @@
             height: 28px; padding: 4px 32px 4px 6px; border: 0; background: none;
             border-radius: var(--r-sm); font: inherit; font-size: var(--t-md);
             color: var(--ink); text-align: left; cursor: pointer; white-space: nowrap; }
-        .dmenu-item:hover, .dmenu-item:focus-visible { background: var(--surface-2); outline: none; }
+        .dmenu-item:hover { background: var(--surface-2); }
+        /* NOT grouped with hover: a grouped rule's outline:none outranks the
+           global :focus-visible baseline on specificity, which left keyboard
+           focus a 1.1:1 background tint nobody can see. Inset, so the ring is
+           not clipped by the panel's overflow. */
+        .dmenu-item:focus-visible { background: var(--surface-2);
+            outline: 2px solid var(--accent); outline-offset: -2px; }
         .dmenu-item[disabled] { color: var(--ink-3); cursor: not-allowed; background: none; }
         .dmenu-item svg { width: 15px; height: 15px; flex: none; }
         .dmenu-item .ic { color: var(--ink-3); }
@@ -1995,7 +2001,7 @@
     <div id="app">
         <aside class="sidebar" id="sidebar">
             <div class="brand"><span class="logo" id="ic-logo"></span> Store Copilot</div>
-            <div class="nav">
+            <div class="nav" role="navigation" aria-label="Sections">
                 <!-- Grouped, like the reference's sidebar: a 12px medium label
                      over each set. It also settles where Reconciliation lives -
                      next to Liability under Finance, rather than as its own
@@ -5657,6 +5663,7 @@
             ex.forEach(e => {
                 const r = el('div', 'lbl-row');
                 r.setAttribute('role', 'button'); r.tabIndex = 0;
+                r.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); r.click(); } });
                 const [lab, cls] = RECON_SEV[e.severity] || ['?', 'note'];
                 r.append(el('span', 'lbl-chip ' + cls, lab));
                 const mid = el('div', 'lbl-who');
@@ -11594,6 +11601,7 @@
                 items.slice(from, from + crmContactsSize).forEach(c => {
                     const tr = el('tr', 'crm-list-row');
                     tr.setAttribute('role', 'button'); tr.tabIndex = 0;
+                    tr.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); tr.click(); } });
                     if (master) {
                         const cell = el('td', 'tick');
                         const cb = document.createElement('input');
@@ -11990,6 +11998,7 @@
             leads.forEach(l => {
                 const row = el('div', 'lbl-row');
                 row.setAttribute('role', 'button'); row.tabIndex = 0;
+                row.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); row.click(); } });
                 const left = el('div', 'lia-name');
                 if (!l.seen && !l.archived) left.append(el('span', 'crm-new-dot'));
                 const t = el('span', null, ' ' + l.title);
@@ -14716,7 +14725,11 @@
                     } catch (e) { err.textContent = e.message; go.disabled = false; }
                 };
                 go.onclick = submit;
-                inPw.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+                /* Both fields, not just the password: focus lands on Username
+                   first, so that is where the first Enter is pressed. The setup
+                   and change cards already did this; login was the one that
+                   missed it. */
+                [inUser, inPw].forEach(i => i.onkeydown = (e) => { if (e.key === 'Enter') submit(); });
                 card.append(fu, fp, err, go);
             }
             ov.append(card);
@@ -14846,6 +14859,7 @@
                         loadTeam();
                     } catch (e) { go.disabled = false; toastError(e.message); }
                 };
+                [inName, inUser].forEach(i => i.onkeydown = (e) => { if (e.key === 'Enter') go.click(); });
                 row.append(inName, inUser, roleSel, go);
                 list.append(row);
             }
@@ -15196,8 +15210,45 @@
             // Batched: whole tabs repaint at once, and a sync per mutation would
             // run hundreds of times for one render.
             if (togglePass) return;
-            togglePass = requestAnimationFrame(() => { togglePass = 0; syncToggles(); });
+            togglePass = requestAnimationFrame(() => { togglePass = 0; syncToggles(); syncDialogs(); });
         }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+        /* Modals are built in thirteen places; the dialog semantics are stamped
+           in one, the same way the switches get theirs above. The label comes
+           from the modal's own heading. */
+        function syncDialogs() {
+            document.querySelectorAll('.modal-overlay .modal').forEach(m => {
+                if (m.getAttribute('role') === 'dialog') return;
+                m.setAttribute('role', 'dialog');
+                m.setAttribute('aria-modal', 'true');
+                const h = m.querySelector('.modal-head h3');
+                if (h) m.setAttribute('aria-label', h.textContent);
+            });
+        }
+        syncDialogs();
+        /* The observer above is rAF-batched, and rAF can lag in a throttled
+           tab. A screen reader asks what it landed in the moment focus enters,
+           so the stamp also runs synchronously right then. */
+        document.addEventListener('focusin', (e) => {
+            if (e.target && e.target.closest && e.target.closest('.modal-overlay')) syncDialogs();
+        });
+        /* One Tab fence for whichever modal is on top. Without it, Tab walked
+           out of the overlay into the live page behind - which mattered twice
+           over here, because Escape is deliberately not a way out. */
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Tab') return;
+            const tops = [...document.querySelectorAll('.modal-overlay.show, .auth-overlay')]
+                .filter(o => o.getClientRects().length);
+            const top = tops[tops.length - 1];
+            if (!top) return;
+            const focusables = [...top.querySelectorAll(
+                'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+                .filter(f => !f.disabled && f.getClientRects().length);
+            if (!focusables.length) return;
+            const first = focusables[0], last = focusables[focusables.length - 1];
+            if (!top.contains(document.activeElement)) { e.preventDefault(); first.focus(); return; }
+            if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+            else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        });
         document.addEventListener('keydown', (e) => {
             const t = e.target;
             if (t && t.classList && t.classList.contains('toggle') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); t.click(); }
@@ -15498,8 +15549,9 @@
         $('sched-freq').onchange = function () {
             api('/api/schedule', { config: { every_hours: parseInt(this.value, 10) || 168 } }).catch(() => {});
         };
-        $('settings-modal').onclick = (e) => { if (e.target.id === 'settings-modal') closeSettings(); };
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('settings-modal').classList.contains('show')) closeSettings(); });
+        /* The X is the only way out, like every other modal here (user rule:
+           a misclick must not wipe a filled form, and Settings IS a form).
+           This was the one modal that still closed on backdrop and Escape. */
 
         /* ---------- wire up ---------- */
         document.querySelectorAll('.nav-item').forEach(n => n.onclick = () => setView(n.dataset.view));

@@ -2259,6 +2259,79 @@ def t_the_chart_legend_belongs_to_the_plot():
     ok("color: var(--ink)" in item, "and the name in full ink, as the reference sets it")
 
 
+@test
+def t_the_first_enter_on_the_login_screen_signs_you_in():
+    """Focus lands on the Username field, and that is where the first Enter is
+    pressed. Login bound Enter only on the password field, so the reflex
+    keypress did nothing - on the first screen anyone meets."""
+    fn = SCRIPT.split("card.append(el('h2', null, 'Sign in')")[1][:1400]
+    ok("[inUser, inPw].forEach(i => i.onkeydown" in fn,
+       "both login fields submit on Enter")
+    # And the new-account row, which had no Enter path at all.
+    tm = SCRIPT.split("inUser.className = 'tm-field'")[1][:1200]
+    ok("[inName, inUser].forEach(i => i.onkeydown" in tm,
+       "the create-account fields submit on Enter too")
+
+
+@test
+def t_everything_that_says_it_is_a_button_works_like_one():
+    """Three rows announced as buttons, took focus, and did nothing on Enter or
+    Space: the reconciliation exception row and the CRM contact and lead rows.
+    Every role=button in the file now has a keyboard path."""
+    import re as _re2
+    sites = [m.start() for m in _re2.finditer(_re2.escape("setAttribute('role', 'button')"), SCRIPT)]
+    ok(len(sites) >= 10, "the role=button sites are all still here (%d)" % len(sites))
+    for i, at in enumerate(sites):
+        seg = SCRIPT[at:at + 400]
+        ok("keydown" in seg, "role=button site %d has a keydown handler beside it" % (i + 1))
+
+
+@test
+def t_keyboard_focus_in_a_menu_does_not_look_like_a_hover():
+    """.dmenu-item grouped hover with focus-visible and set outline:none - a
+    grouped rule outranks the global :focus-visible baseline on specificity, so
+    keyboard focus was a 1.1:1 background tint. The two states are separate
+    rules now, and focus draws a real ring."""
+    fv = CSS.split(".dmenu-item:focus-visible {")[1].split("}")[0]
+    ok("outline: 2px solid var(--accent)" in fv, "focus draws the house ring")
+    ok("outline-offset: -2px" in fv, "inset, so the panel's overflow cannot clip it")
+    hov = CSS.split(".dmenu-item:hover {")[1].split("}")[0]
+    ok("outline" not in hov, "and hover no longer says anything about outlines")
+
+
+@test
+def t_every_modal_is_a_dialog_and_tab_stays_inside_it():
+    """Thirteen builders, one stamp: an observer gives every .modal role=dialog,
+    aria-modal and a label from its own heading - the same pattern the switches
+    already used. And one Tab fence keeps focus inside the top overlay, which
+    matters twice over here because Escape is deliberately not a way out."""
+    ok("function syncDialogs()" in SCRIPT, "the stamp exists")
+    ok("syncToggles(); syncDialogs();" in SCRIPT, "and rides the existing observer")
+    ok("m.setAttribute('aria-modal', 'true')" in SCRIPT, "modals say they are modal")
+    fence = SCRIPT.split("if (e.key !== 'Tab') return;")[1][:1200]
+    ok(".modal-overlay.show, .auth-overlay" in SCRIPT, "the fence covers app modals and the login card")
+    ok("e.shiftKey && document.activeElement === first" in fence, "and wraps both directions")
+
+
+@test
+def t_settings_obeys_the_one_way_out_rule():
+    """Every modal in the app closes by X only - a misclick must not wipe a
+    filled form (user rule). Settings, which IS a form, was the one modal that
+    still closed on backdrop click and Escape."""
+    ok("if (e.target.id === 'settings-modal') closeSettings()" not in SCRIPT,
+       "no backdrop close")
+    ok("e.key === 'Escape' && $('settings-modal')" not in SCRIPT, "no Escape close")
+    ok("$('settings-close').onclick = closeSettings;" in SCRIPT, "the X still works")
+
+
+@test
+def t_the_sidebar_nav_is_a_navigation_landmark():
+    """Sixteen view buttons lived in a bare div inside an aside, so assistive
+    tech filed the app's whole navigation under complementary content."""
+    ok('class="nav" role="navigation" aria-label="Sections"' in HTML,
+       "the nav names itself")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
