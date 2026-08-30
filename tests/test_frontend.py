@@ -2672,6 +2672,27 @@ def t_a_rising_number_is_not_congratulated_in_green():
        "while a falling number keeps the reference's red")
 
 
+@test
+def t_one_timing_for_every_colour_change():
+    """The app had drifted to six transition durations - .12, .14, .15, .18, .2
+    and .32 - all on the browser default `ease`. The reference uses exactly one
+    timing for a colour change: 150ms on cubic-bezier(.4,0,.2,1). Transform and
+    the toast's exit keep their own, because those are motion, not state."""
+    ok(re.search(r"--dur:\s*\.15s", CSS), "the duration token is the reference's 150ms")
+    ok(re.search(r"--ease:\s*cubic-bezier\(\.4,0,\.2,1\)", CSS), "on its curve")
+    strays = []
+    for decl in re.findall(r"transition:\s*([^;}]+)", CSS):
+        d = decl.strip()
+        if "var(--dur)" in d or d in ("none", "initial", "inherit"):
+            continue
+        # What is left must be motion, not a colour-family property.
+        head = d.split(",")[0].split()[0]
+        if head in ("transform", "margin-left") or "opacity .32s" in d:
+            continue
+        strays.append(d)
+    ok(not strays, "no colour transition sets its own timing: %r" % (strays[:3],))
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
