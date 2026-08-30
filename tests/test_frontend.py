@@ -2693,6 +2693,26 @@ def t_one_timing_for_every_colour_change():
     ok(not strays, "no colour transition sets its own timing: %r" % (strays[:3],))
 
 
+@test
+def t_a_dashed_edge_only_ever_means_a_target():
+    """Scanned the reference end to end: zero dashed or dotted borders. gizmo
+    drew its empty states and its CRM onboarding panel with one - the
+    convention for somewhere to DRAG something to - on panels that were only
+    reporting that a list is empty. The four that keep it are the ones where
+    the convention is the meaning: two live drop zones, the drag-to-reorder
+    state, and the dotted help underline that <abbr> renders natively."""
+    allowed = ("crm-zone",        # the won/lost drop targets
+               "files-list.drag", # drop-hover on the file list
+               "stat-edit",       # a KPI card while it is draggable
+               "has-help")        # abbr-style dotted underline on a help label
+    for rule in re.findall(r"([^{}]+)\{([^}]*)\}", CSS):
+        sel, body = rule
+        if "dashed" not in body and "dotted" not in body:
+            continue
+        ok(any(a in sel for a in allowed),
+           "dashed edge on %r, which is not a drop target" % sel.strip()[:60])
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

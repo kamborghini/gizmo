@@ -647,7 +647,11 @@
         .chip:hover { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); }
         .chip > span { display: grid; place-items: center; flex: none; }
         .chip svg { width: 13px; height: 13px; opacity: .6; display: block; }
-        .empty { background: var(--surface); border: 1px dashed var(--border-2); border-radius: var(--r); padding: 20px; color: var(--ink-2); font-size: var(--t-md); text-align: center; }
+        /* Solid, on the card edge. A dashed rule is the convention for a
+           DROP TARGET - somewhere to put something - and the reference uses
+           none anywhere. These panels are just saying there is nothing here
+           yet, which is an ordinary panel, not an invitation to drag. */
+        .empty { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 20px; color: var(--ink-2); font-size: var(--t-md); text-align: center; }
         /* skills */
         .skill-form { padding: 16px 16px 12px; margin-bottom: 20px; }
         .sk-form-title { font-size: var(--t-md); font-weight: var(--w-medium); margin: 0 0 13px; display: flex; align-items: center; gap: 8px; }
@@ -1031,7 +1035,7 @@
         .crm-col-sum { font-size: var(--t-xs); color: var(--ink-3); padding: 0 4px 8px; }
         .crm-col-note { font-size: var(--t-xs); color: var(--ink-3); padding: var(--sp-2) 4px 0;
             line-height: 1.4; }
-        .crm-col-add { width: 100%; border: 1px dashed var(--border-2); background: none;
+        .crm-col-add { width: 100%; border: 1px solid var(--border); background: none;
             border-radius: var(--r-sm); color: var(--ink-3); font: inherit; font-size: var(--t-xs);
             padding: var(--sp-1) 0; cursor: pointer; }
         .crm-col-add:hover { color: var(--accent); border-color: var(--accent); }
@@ -1303,7 +1307,7 @@
         .crm-cf { display: grid; grid-template-columns: minmax(90px, 150px) 1fr; gap: var(--sp-1) 10px;
             font-size: var(--t-md); }
         .crm-cf-k { color: var(--ink-3); font-size: var(--t-xs); padding-top: 2px; }
-        .crm-onboard { border: 1px dashed var(--border-2); border-radius: var(--r); padding: 20px;
+        .crm-onboard { border: 1px solid var(--border); border-radius: var(--r); padding: 20px;
             margin: var(--sp-2) 0; text-align: left; max-width: 560px; }
         .crm-onboard h3 { margin: 0 0 6px; font-size: var(--t-lg); }
         .crm-onboard p { margin: 0 0 10px; font-size: var(--t-md); color: var(--ink-2); }
