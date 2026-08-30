@@ -658,7 +658,7 @@
         .sk-form-title svg { width: 15px; height: 15px; color: var(--accent-ink); }
         .sk-field { margin-bottom: 12px; }
         .sk-field label { display: block; font-size: var(--t-xs); font-weight: var(--w-medium); text-transform: none; letter-spacing: normal; color: var(--ink-3); margin-bottom: 4px; }
-        .sk-input, .sk-textarea { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--ink); font: inherit; font-size: var(--t-md); padding: 8px 12px; transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+        .sk-input, .sk-textarea { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--ink); font: inherit; font-size: var(--t-md); padding: 5px 12px; min-height: 32px; line-height: 20px; transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
         .sk-input:focus, .sk-textarea:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus); }
         .sk-textarea { resize: vertical; min-height: 104px; line-height: 1.55; }
         .sk-form-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
@@ -682,9 +682,9 @@
            heights. line-height is explicit here so neither can drift again;
            only the margins differ, because only their positions do. */
         .nav-refresh, .nav-ask { display: flex; align-items: center; gap: 8px;
-            padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-sm);
+            padding: 5px 12px; min-height: 32px; border: 1px solid var(--border); border-radius: var(--r-sm);
             background: transparent; color: var(--ink-2); font-family: inherit;
-            font-size: var(--t-xs); font-weight: var(--w-medium); line-height: 16px; text-align: left;
+            font-size: var(--t-xs); font-weight: var(--w-medium); line-height: 20px; text-align: left;
             cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
         .nav-refresh { margin: 9px 12px 0; }
         .nav-ask { margin: 6px 12px 0; }
@@ -1579,7 +1579,11 @@
         .run-gate .rg-ic svg { width: 26px; height: 26px; }
         .run-gate h2 { font-size: var(--t-xl); font-weight: var(--w-medium); letter-spacing: -.025em; margin: 0 0 8px; }
         .run-gate p { color: var(--ink-2); font-size: var(--t-md); line-height: 1.6; margin: 0 0 22px; max-width: 42ch; }
-        .run-gate .rg-btn { font-size: var(--t-md); padding: 12px 20px; }
+        /* Wider, not taller. This overrode the vertical padding to 12px and
+           came out 46px against a control system that is 32 everywhere and a
+           reference whose largest button is also 32. The reference makes a
+           primary action loud by filling it, never by growing it. */
+        .run-gate .rg-btn { font-size: var(--t-md); padding: 5px 20px; }
         .run-gate .rg-btn svg { width: 15px; height: 15px; }
         .run-gate .rg-note { margin-top: 12px; font-size: var(--t-xs); color: var(--ink-3); }
         /* ---------- Keywords tab ---------- */
@@ -1944,7 +1948,8 @@
         .auth-field { margin-bottom: 12px; }
         .auth-field label { display: block; font-size: var(--t-xs); color: var(--ink-2); margin-bottom: 4px; }
         .auth-field input { width: 100%; box-sizing: border-box; font: inherit; font-size: var(--t-md);
-            padding: 8px 10px; border: 1px solid var(--border-2); border-radius: var(--r-sm);
+            padding: 5px 10px; min-height: 32px; line-height: 20px;
+            border: 1px solid var(--border-2); border-radius: var(--r-sm);
             background: var(--surface); color: var(--ink); }
         .auth-field input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
         .auth-error { color: var(--danger); font-size: var(--t-xs); min-height: 16px; margin: 2px 0 8px; }

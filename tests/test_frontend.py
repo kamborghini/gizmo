@@ -2713,6 +2713,21 @@ def t_a_dashed_edge_only_ever_means_a_target():
            "dashed edge on %r, which is not a drop target" % sel.strip()[:60])
 
 
+@test
+def t_no_control_grows_its_way_out_of_the_scale():
+    """Every button in the app is 32px, and so is the largest one anywhere in
+    the reference - it makes a primary action loud by filling it, not by
+    growing it. Three recipes had overridden their way off that scale by
+    setting their own vertical padding: the sidebar's two footer buttons at 34,
+    the skills input at 39, and the run-gate CTA at 46."""
+    for sel in (r"\.run-gate \.rg-btn", r"\.nav-refresh, \.nav-ask", r"\.sk-input, \.sk-textarea"):
+        rule = re.search(sel + r" \{[^}]*\}", CSS)
+        ok(rule, "the %s rule is still there" % sel)
+        pad = re.search(r"padding:\s*([\d]+)px", rule.group(0))
+        ok(pad and int(pad.group(1)) <= 5,
+           "%s keeps the house 5px vertical padding, not its own" % sel)
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
