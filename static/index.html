@@ -2040,6 +2040,7 @@
                 <div class="nav-group">Finance</div>
                 <button class="nav-item" data-view="liability" id="nav-liability"></button>
                 <button class="nav-item" data-view="recon" id="nav-recon"></button>
+                <button class="nav-item" data-view="connector" id="nav-connector"></button>
                 <div class="nav-group">Operations</div>
                 <button class="nav-item" data-view="labels" id="nav-labels"></button>
                 <button class="nav-item" data-view="crm" id="nav-crm"></button>
@@ -2105,6 +2106,9 @@
             </section>
             <section class="view" id="view-recon">
                 <div class="scroll"><div class="ov-wrap" id="recon-content"></div></div>
+            </section>
+            <section class="view" id="view-connector">
+                <div class="scroll"><div class="ov-wrap" id="connector-content"></div></div>
             </section>
 
             <!-- Production labels -->
@@ -2328,6 +2332,8 @@
         $('nav-customers').append(ico(I.users), document.createTextNode('Customers'));
         $('nav-liability').append(ico(I.card), document.createTextNode('Liability'));
         $('nav-recon').append(ico(I.check), document.createTextNode('Reconciliation'),
+            el('span', 'beta-tag', 'Beta'));
+        $('nav-connector').append(ico(I.send), document.createTextNode('Xero sync'),
             el('span', 'beta-tag', 'Beta'));
         $('nav-crm').append(ico(I.briefcase), document.createTextNode('CRM'),
             el('span', 'beta-tag', 'Beta'));
@@ -4949,6 +4955,7 @@
             };
             tab('liability', 'Liability');
             if (tabAllowed('recon')) tab('recon', 'Reconciliation');
+            if (tabAllowed('connector')) tab('connector', 'Xero sync');
             row.append(seg, el('div', 'spacer'));
             if (updated) row.append(el('div', 'updated', updated));
             return row;
@@ -5362,6 +5369,295 @@
            survives an audit.
            ================================================================== */
         let reconCache = null, reconFilter = { severity: '', status: '', q: '' }, reconOpen = null;
+        /* ---------------- Shopify -> Xero connector ----------------
+           A separate, audited service turns orders into Xero invoices and
+           refunds into credit notes; this tab drives it through the server.
+           The shape of the flow is the one Cameron chose: bulk send, with a
+           review first - a review is the service's dry run, which maps
+           everything and writes nothing, so the numbers on screen are exactly
+           what Send will do. */
+        let connCache = null;     // last status payload from the service
+        let connRuns = null;      // recent run records
+        let connReview = null;    // the completed dry run awaiting a Send
+        let connBusy = '';        // 'review' | 'send' | 'retry' while one is in flight
+        let connWatch = 0;
+
+        async function connOp(body) { return api('/api/connector', body); }
+
+        async function showConnectorView() {
+            if (connCache) { renderConnector(); }
+            await refreshConnector();
+        }
+        async function refreshConnector() {
+            try {
+                const st = await connOp({ op: 'status' });
+                connCache = st;
+                if (st.available && !st.error) {
+                    try { connRuns = (await connOp({ op: 'runs' })).data || []; } catch (e) { /* runs are a nicety */ }
+                }
+            } catch (e) { connCache = { available: true, error: e.message }; }
+            if (document.querySelector('#view-connector.active')) renderConnector();
+        }
+        /* While the service reports running, watch it; when it stops, the run
+           that just finished is the news, so refresh and repaint once. */
+        function connStartWatch() {
+            if (connWatch) return;
+            connWatch = setInterval(async () => {
+                if (!document.querySelector('#view-connector.active')) { clearInterval(connWatch); connWatch = 0; return; }
+                let st = null;
+                try { st = await connOp({ op: 'status' }); } catch (e) { return; }
+                connCache = st;
+                const running = st.data && st.data.running;
+                if (!running) {
+                    clearInterval(connWatch); connWatch = 0;
+                    try { connRuns = (await connOp({ op: 'runs' })).data || []; } catch (e) {}
+                    const last = (connRuns || [])[0];
+                    if (connBusy === 'review' && last && last.dryRun) connReview = last;
+                    if (connBusy === 'send') connReview = null;   // spent: the next send needs a fresh review
+                    connBusy = '';
+                }
+                renderConnector();
+            }, 2500);
+        }
+
+        function connCounts(res, kind) {
+            const c = (res || {})[kind] || {};
+            const skipped = Object.keys(c).filter(k => k.indexOf('skipped') === 0)
+                .reduce((n, k) => n + (c[k] || 0), 0);
+            return { created: c.created || 0, failed: c.failed || 0,
+                     quarantined: c.quarantined || 0, skipped: skipped };
+        }
+        function connIsAdmin() {
+            return !teamMe || ({ master: 3, admin: 2 }[teamMe.role] || 0) >= 2;
+        }
+
+        function renderConnector() {
+            const box = $('connector-content'); box.innerHTML = '';
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.send;
+            const ht = el('div');
+            const hTitle = el('h2', null, 'Finance');
+            hTitle.append(el('span', 'beta-tag', 'Beta'));
+            ht.append(hTitle, el('p', null,
+                'Sends Shopify orders into Xero as invoices, refunds as credit notes, and new '
+                + 'customers as contacts. Nothing is written until a review has shown you '
+                + 'exactly what will be sent.'));
+            hero.append(badge, ht); box.append(hero);
+            const lastRun = (connRuns || [])[0];
+            box.append(financeTabs('connector',
+                lastRun ? ('Last run ' + fmtDate(lastRun.finishedAt)) : ''));
+            if (!connCache) { box.append(el('div', 'empty', 'Loading\u2026')); return; }
+            if (connCache.available === false) {
+                const card = el('div', 'card');
+                card.append(el('div', 'setting-title', 'Link the connector service'));
+                card.append(el('div', 'setting-sub', connCache.note
+                    || 'Set CONNECTOR_URL and CONNECTOR_TOKEN in Railway.'));
+                card.append(el('p', 'field-help',
+                    'The connector runs as its own service (shopify-xero-connector) with its own '
+                    + 'ledger and failsafes. gizmo only drives it: credentials stay on that '
+                    + 'service, and its token stays on this server.'));
+                box.append(card); return;
+            }
+            if (connCache.error) {
+                box.append(loadFailure('The connector could not be reached. ' + connCache.error, refreshConnector));
+                return;
+            }
+            const st = connCache.data || {};
+            const cfg = st.config || {};
+            const running = !!st.running;
+            if (running) connStartWatch();
+
+            /* ---- status ---- */
+            const sCard = el('div', 'card'); sCard.style.marginBottom = '16px';
+            const sHead = el('div', 'card-head');
+            sHead.append(el('h3', 'card-title', 'Connections'));
+            sHead.append(el('p', 'card-desc', 'What the service is linked to, and the state of its ledger.'));
+            const sAct = el('div', 'card-act');
+            const rf = el('button', 'btn btn-sm'); rf.append(ico(I.refresh), document.createTextNode('Refresh'));
+            rf.onclick = () => { rf.disabled = true; refreshConnector().finally(() => { rf.disabled = false; }); };
+            sAct.append(rf); sHead.append(sAct); sCard.append(sHead);
+            const chipRow = el('div'); chipRow.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+            chipRow.append(el('span', 'lbl-chip ' + (cfg.shop ? 'made' : 'warn'),
+                cfg.shop ? ('Shopify \u00b7 ' + cfg.shop) : 'Shopify not configured'));
+            chipRow.append(el('span', 'lbl-chip ' + (cfg.dryOnly ? 'warn' : 'made'),
+                cfg.dryOnly ? 'Credentials incomplete \u00b7 reviews only' : 'Xero linked'));
+            if (cfg.reconcileMode) chipRow.append(el('span', 'lbl-chip note', 'Totals check: ' + cfg.reconcileMode));
+            if (st.quarantineCount) chipRow.append(el('span', 'lbl-chip warn', st.quarantineCount + ' in quarantine'));
+            if (running) chipRow.append(el('span', 'lbl-chip note', 'A run is in progress\u2026'));
+            if (st.lastError) chipRow.append(el('span', 'lbl-chip bad', 'Last run failed'));
+            sCard.append(chipRow);
+            const led = st.ledger || {};
+            const ledBits = Object.keys(led).map(k => led[k] + ' ' + k).join(' \u00b7 ');
+            if (ledBits) sCard.append(el('div', 'sub', 'Ledger: ' + ledBits + '.'));
+            sCard.append(el('p', 'field-help',
+                'Credentials and mapping rules live on the connector service itself, '
+                + 'not in gizmo, and are set there.'));
+            box.append(sCard);
+
+            /* ---- review and send ---- */
+            const rCard = el('div', 'card'); rCard.style.marginBottom = '16px';
+            const rHead = el('div', 'card-head');
+            rHead.append(el('h3', 'card-title', 'Review and send'));
+            rHead.append(el('p', 'card-desc',
+                'A review is a dry run: the service maps every eligible order and writes '
+                + 'nothing. Send does exactly what the review showed.'));
+            const rAct = el('div', 'card-act');
+            const rev = el('button', 'btn btn-sm');
+            rev.append(ico(I.eye), document.createTextNode('Run review'));
+            rev.disabled = running;
+            rev.onclick = async () => {
+                rev.disabled = true; connBusy = 'review'; connReview = null;
+                try { await connOp({ op: 'review' }); connStartWatch(); renderConnector(); }
+                catch (e) { connBusy = ''; toastError(e.message); rev.disabled = false; }
+            };
+            rAct.append(rev);
+            if (connIsAdmin()) {
+                const send = el('button', 'btn btn-sm btn-primary');
+                send.append(ico(I.send), document.createTextNode('Send to Xero'));
+                /* Review-before-send, enforced: the button only arms once a
+                   completed review is on screen, and a Send spends it. */
+                send.disabled = running || !connReview;
+                send.title = connReview ? 'Write the reviewed documents into Xero'
+                    : 'Run a review first: Send does what the review showed';
+                send.onclick = async () => {
+                    const r = (connReview || {}).result || {};
+                    const inv = connCounts(r, 'invoices'), cn = connCounts(r, 'creditNotes'), ct = connCounts(r, 'contacts');
+                    if (!await uiConfirm('Send to Xero now? Based on the review: '
+                        + inv.created + (inv.created === 1 ? ' invoice' : ' invoices') + ', '
+                        + cn.created + (cn.created === 1 ? ' credit note' : ' credit notes') + ' and '
+                        + ct.created + (ct.created === 1 ? ' new contact' : ' new contacts')
+                        + ' will be written into your accounts.',
+                        { title: 'Send to Xero', okText: 'Send to Xero' })) return;
+                    send.disabled = true; connBusy = 'send';
+                    try { await connOp({ op: 'send' }); connStartWatch(); renderConnector(); }
+                    catch (e) { connBusy = ''; toastError(e.message); renderConnector(); }
+                };
+                rAct.append(send);
+            }
+            rHead.append(rAct); rCard.append(rHead);
+            if (running) {
+                const t = el('div', 'thinking'); t.append(loader(),
+                    el('span', null, connBusy === 'send' ? 'Sending to Xero\u2026'
+                        : connBusy === 'retry' ? 'Retrying failed documents\u2026'
+                        : 'Reviewing\u2026 this reads every eligible order and writes nothing.'));
+                rCard.append(t);
+            } else if (connReview && connReview.result) {
+                const r = connReview.result;
+                rCard.append(el('div', 'disp-ok-line', 'Reviewed ' + (r.ordersFetched || 0)
+                    + (r.ordersFetched === 1 ? ' order' : ' orders') + ' \u00b7 nothing was written. '
+                    + 'This is what Send will do:'));
+                const wrapT = el('div', 'ktable-wrap');
+                const tb = el('table', 'ktable');
+                tb.innerHTML = '<thead><tr><th></th><th class="num">Will create</th>'
+                    + '<th class="num">Quarantined</th><th class="num">Failed</th>'
+                    + '<th class="num">Skipped</th></tr></thead>';
+                const tbody = el('tbody');
+                [['Invoices', 'invoices'], ['Credit notes', 'creditNotes'], ['Contacts', 'contacts']].forEach(([lab2, k]) => {
+                    const c = connCounts(r, k);
+                    const tr = el('tr');
+                    tr.append(el('td', 'kw', lab2), el('td', 'num', String(c.created)),
+                        el('td', 'num', String(c.quarantined)), el('td', 'num', String(c.failed)),
+                        el('td', 'num', String(c.skipped)));
+                    tbody.append(tr);
+                });
+                tb.append(tbody); wrapT.append(tb); rCard.append(wrapT);
+                if (r.aborted) rCard.append(el('div', 'msg error',
+                    'The review stopped itself: ' + r.aborted + ' Nothing should be sent until that is resolved.'));
+                (r.warnings || []).slice(0, 8).forEach(w => rCard.append(el('div', 'disp-warn', w)));
+                if ((r.warnings || []).length > 8) rCard.append(el('div', 'sub',
+                    (r.warnings.length - 8) + ' more warnings in the run record below.'));
+            } else if (lastRun && !lastRun.dryRun) {
+                const r = lastRun.result || {};
+                const inv = connCounts(r, 'invoices'), cn = connCounts(r, 'creditNotes');
+                rCard.append(el('div', lastRun.ok ? 'disp-ok-line' : 'msg error',
+                    (lastRun.ok ? 'Last send: ' : 'Last send had failures: ')
+                    + inv.created + (inv.created === 1 ? ' invoice' : ' invoices')
+                    + ' and ' + cn.created + (cn.created === 1 ? ' credit note' : ' credit notes')
+                    + ' written \u00b7 ' + fmtDate(lastRun.finishedAt) + '.'));
+                rCard.append(el('div', 'sub', 'Run a review to see what a new send would do.'));
+            } else {
+                rCard.append(el('div', 'sub', 'Run a review to see what would be sent.'));
+            }
+            box.append(rCard);
+
+            /* ---- recent runs ---- */
+            if ((connRuns || []).length) {
+                const hCard = el('div', 'card'); hCard.style.marginBottom = '16px';
+                const hHead = el('div', 'card-head');
+                hHead.append(el('h3', 'card-title', connRuns.length
+                    + (connRuns.length === 1 ? ' run kept' : ' runs kept')));
+                hHead.append(el('p', 'card-desc', 'Reviews and sends alike, newest first.'));
+                hCard.append(hHead);
+                const wrapT = el('div', 'ktable-wrap');
+                const tb = el('table', 'ktable');
+                tb.innerHTML = '<thead><tr><th>When</th><th>Mode</th><th>Outcome</th>'
+                    + '<th class="num">Invoices</th><th class="num">Credits</th><th class="num">Contacts</th></tr></thead>';
+                const tbody = el('tbody');
+                connRuns.slice(0, 12).forEach(run => {
+                    const r = run.result || {};
+                    const tr = el('tr');
+                    tr.append(el('td', 'kw', fmtDate(run.finishedAt)));
+                    const md = el('td'); md.append(el('span', 'lbl-chip ' + (run.dryRun ? 'note' : 'made'),
+                        run.dryRun ? 'Review' : 'Send'));
+                    tr.append(md);
+                    const oc = el('td'); oc.append(el('span', 'lbl-chip ' + (run.ok ? 'made' : 'bad'),
+                        run.ok ? 'Clean' : (run.error ? 'Error' : 'Had failures')));
+                    tr.append(oc);
+                    tr.append(el('td', 'num', String(connCounts(r, 'invoices').created)),
+                        el('td', 'num', String(connCounts(r, 'creditNotes').created)),
+                        el('td', 'num', String(connCounts(r, 'contacts').created)));
+                    tbody.append(tr);
+                });
+                tb.append(tbody); wrapT.append(tb); hCard.append(wrapT);
+                box.append(hCard);
+            }
+
+            /* ---- quarantine ---- */
+            if (st.quarantineCount) {
+                const qCard = el('div', 'card');
+                const qHead = el('div', 'card-head');
+                qHead.append(el('h3', 'card-title', st.quarantineCount
+                    + (st.quarantineCount === 1 ? ' document quarantined' : ' documents quarantined')));
+                qHead.append(el('p', 'card-desc',
+                    'Held back rather than pushed with bad data. Fix the cause, then retry.'));
+                if (connIsAdmin()) {
+                    const qAct = el('div', 'card-act');
+                    const rt = el('button', 'btn btn-sm');
+                    rt.append(ico(I.refresh), document.createTextNode('Retry failed'));
+                    rt.disabled = running;
+                    rt.onclick = async () => {
+                        if (!await uiConfirm('Re-import every failed and quarantined document? '
+                            + 'Anything that now maps cleanly is written into Xero.',
+                            { title: 'Retry failed', okText: 'Retry' })) return;
+                        rt.disabled = true; connBusy = 'retry';
+                        try { await connOp({ op: 'retry' }); connStartWatch(); renderConnector(); }
+                        catch (e) { connBusy = ''; toastError(e.message); rt.disabled = false; }
+                    };
+                    qAct.append(rt); qHead.append(qAct);
+                }
+                qCard.append(qHead);
+                const qHost = el('div'); qCard.append(qHost);
+                (async () => {
+                    try {
+                        const rows = (await connOp({ op: 'quarantine' })).data || [];
+                        const wrapT = el('div', 'ktable-wrap');
+                        const tb = el('table', 'ktable');
+                        tb.innerHTML = '<thead><tr><th>Kind</th><th>Document</th><th>Why it was held</th></tr></thead>';
+                        const tbody = el('tbody');
+                        rows.slice(0, 30).forEach(q2 => {
+                            const tr = el('tr');
+                            tr.append(el('td', null, q2.kind || ''), el('td', 'kw', q2.key || q2.order || ''),
+                                el('td', null, String(q2.reason || q2.message || (q2.errors || []).join('; ') || '').slice(0, 140)));
+                            tbody.append(tr);
+                        });
+                        tb.append(tbody); wrapT.append(tb); qHost.append(wrapT);
+                        if (rows.length > 30) qHost.append(el('div', 'sub', (rows.length - 30) + ' more held.'));
+                    } catch (e) { qHost.append(el('div', 'sub', 'The quarantine list could not be read.')); }
+                })();
+                box.append(qCard);
+            }
+            cardifySections(box);
+        }
+
         async function showReconView() { renderRecon(); refreshRecon(); }
         async function refreshRecon() {
             /* Two independent reads, fired together rather than one after the
@@ -14691,7 +14987,8 @@
             return data;
         }
         const TAB_KEYS = ['overview', 'seo', 'keywords', 'products', 'customers', 'liability',
-                          'crm', 'mail', 'files', 'labels', 'memory', 'skills', 'chat', 'recon'];
+                          'crm', 'mail', 'files', 'labels', 'memory', 'skills', 'chat', 'recon',
+                          'connector'];
         /* Reconciliation is not part of the default grant: it holds the books,
            the bank line and the accounts mailbox, so it is handed over on
            purpose rather than inherited by having an account. Mirrors
@@ -15248,16 +15545,16 @@
             const n = document.querySelector('.nav-item.active');
             return (n && n.dataset.view) || '';
         }
-        const BETA_TABS = ['recon', 'crm'];
+        const BETA_TABS = ['recon', 'crm', 'connector'];
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
-            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'crm', 'mail', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', crm: 'CRM', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
+            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'connector', 'crm', 'mail', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', connector: 'Xero sync', crm: 'CRM', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
             /* Beta rides the topbar title as well: it is the only label still
                on screen once the page is scrolled. */
             if (BETA_TABS.indexOf(v) >= 0) $('view-title').append(el('span', 'beta-tag', 'Beta'));
-            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide' || v === 'crm' || v === 'mail' || v === 'files' || v === 'team' || v === 'recon') ? 'none' : '';
+            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide' || v === 'crm' || v === 'mail' || v === 'files' || v === 'team' || v === 'recon' || v === 'connector') ? 'none' : '';
             if (v === 'guide') renderGuide();
             // Only offer the PDF when there is actually a report to print: the print
             // stylesheet hides the Run gate, so printing an un-run tab yields a blank page.
@@ -15286,6 +15583,7 @@
             if (v === 'memory') loadMemory();
             if (v === 'skills') loadSkills();
             if (v === 'recon') showReconView();
+            if (v === 'connector') showConnectorView();
         }
 
         /* ---------- responsive sidebar ---------- */

@@ -11977,6 +11977,111 @@ def t_the_latest_booking_of_the_day_is_the_one_that_counts():
 
 
 @test
+def t_the_connector_tab_is_a_guarded_proxy():
+    """The Shopify->Xero connector writes to the accounting ledger, so gizmo
+    only ever proxies it: its token never reaches a browser, the tab is opt-in
+    like the books, and anything that writes is admin-only."""
+    import copilot as _c
+    # Opt-in, never inherited with an account.
+    ok("connector" in _c.TAB_KEYS and "connector" in _c.OPT_IN_TABS,
+       "the tab exists and is handed over deliberately")
+    ok(any(p == "/api/connector" for p, _t in _c._TAB_ROUTES),
+       "and the route is behind the tab gate")
+
+    # Unconfigured: says so, calls nothing.
+    called = []
+    real = _c._connector_call
+    async def fake(method, path, params=None):
+        called.append((method, path, dict(params or {})))
+        return 200, {"ok": True, "running": False}
+    _c._connector_call = fake
+    old_url = os.environ.pop("CONNECTOR_URL", None)
+    try:
+        r = post("/api/connector", {"op": "status"}).json()
+        eq(r.get("available"), False, "no CONNECTOR_URL means a plain 'not linked yet'")
+        eq(called, [], "and the service is never called")
+
+        os.environ["CONNECTOR_URL"] = "http://connector.internal:8899"
+        # Reads proxy through.
+        r = post("/api/connector", {"op": "status"}).json()
+        eq(r.get("available"), True, "configured, the status proxies")
+        eq(called[-1][:2], ("GET", "/api/status"), "to the service's own endpoint")
+        # A review is the dry run, open to any tab holder.
+        r = post("/api/connector", {"op": "review"}).json()
+        eq(called[-1], ("POST", "/api/sync", {"dryRun": "1"}),
+           "review is the service's dry run, which writes nothing")
+        # The master may send; the wire call is the real sync.
+        r = post("/api/connector", {"op": "send"}).json()
+        eq(called[-1][:2], ("POST", "/api/sync"), "send is the real sync")
+        eq(called[-1][2], {}, "with no dryRun flag")
+        # Reimport requires naming the order.
+        r = post("/api/connector", {"op": "reimport"})
+        eq(r.status_code, 400, "a reimport with no order is refused")
+        r = post("/api/connector", {"op": "reimport", "order": "#104300"}).json()
+        eq(called[-1][2].get("order"), "#104300", "and with one, it passes it through")
+        # Unknown op refused.
+        eq(post("/api/connector", {"op": "explode"}).status_code, 400, "unknown ops are refused")
+        # The service's token never appears in any reply.
+        os.environ["CONNECTOR_TOKEN"] = "super-secret-token"
+        raw = post("/api/connector", {"op": "status"}).text
+        ok("super-secret-token" not in raw, "the token never leaves the server")
+    finally:
+        _c._connector_call = real
+        os.environ.pop("CONNECTOR_TOKEN", None)
+        if old_url is None:
+            os.environ.pop("CONNECTOR_URL", None)
+        else:
+            os.environ["CONNECTOR_URL"] = old_url
+
+
+@test
+def t_only_an_admin_can_write_to_xero():
+    """Send, retry and reimport create documents in the accounting system.
+    A member with the tab may look and review; writing is a different act."""
+    import copilot as _c
+    called = []
+    real = _c._connector_call
+    async def fake(method, path, params=None):
+        called.append((method, path))
+        return 200, {"ok": True}
+    _c._connector_call = fake
+    os.environ["CONNECTOR_URL"] = "http://connector.internal:8899"
+    try:
+        # A member account holding the connector tab.
+        r = post("/api/team/user", {"op": "create", "name": "Clerk", "username": "clerk-conn",
+                                    "role": "member"}).json()
+        uid, pw = r["id"], r["starter_password"]
+        post("/api/team/user", {"op": "tabs", "id": uid,
+                                "tabs": ["overview", "connector"]})
+        lr = client.post("/api/auth/login", json={"username": "clerk-conn", "password": pw},
+                         headers={"Authorization": "Bearer " + tok()}).json()
+        sess = lr["session"]
+        post_s(sess, "/api/auth/password", {"current": pw, "new": "a-much-longer-password-9"})
+        sess = client.post("/api/auth/login",
+                           json={"username": "clerk-conn", "password": "a-much-longer-password-9"},
+                           headers={"Authorization": "Bearer " + tok()}).json()["session"]
+        eq(post_s(sess, "/api/connector", {"op": "status"}).status_code, 200,
+           "the clerk can look")
+        eq(post_s(sess, "/api/connector", {"op": "review"}).status_code, 200,
+           "and review, which writes nothing")
+        for op in ("send", "retry", "reimport"):
+            rr = post_s(sess, "/api/connector", {"op": op, "order": "#1"})
+            eq(rr.status_code, 403, op + " is refused for a member")
+        wrote = [c for c in called if c[0] == "POST" and c[1] in ("/api/sync",) ]
+        # the clerk's review was a POST /api/sync (dry) - allowed; no other writes
+        ok(all(c[1] != "/api/retry" and c[1] != "/api/reimport" for c in called),
+           "no write ever reached the service from the member")
+        # And an account WITHOUT the tab cannot even look.
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["overview"]})
+        eq(post_s(sess, "/api/connector", {"op": "status"}).status_code, 403,
+           "without the tab, the door is shut")
+        post("/api/team/user", {"op": "delete", "id": uid})
+    finally:
+        _c._connector_call = real
+        os.environ.pop("CONNECTOR_URL", None)
+
+
+@test
 def t_every_reply_says_which_build_answered_it():
     """Shopify admin holds an embedded app open for days, so a tab can outlive
     several deploys and keep running the old page. From the desk that is

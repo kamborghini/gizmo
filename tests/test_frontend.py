@@ -1741,13 +1741,14 @@ def t_the_beta_tabs_say_so_everywhere_they_are_named():
     """CRM and Reconciliation are the two newest, least-proven tabs. A person
     should know that from the sidebar, from the page heading, and from the
     topbar title that survives scrolling - not just from one of the three."""
-    ok("BETA_TABS = ['recon', 'crm']" in SCRIPT, "the two beta tabs are declared once")
-    for nav in ("$('nav-recon')", "$('nav-crm')"):
+    ok("BETA_TABS = ['recon', 'crm', 'connector']" in SCRIPT, "the beta tabs are declared once")
+    for nav in ("$('nav-recon')", "$('nav-crm')", "$('nav-connector')"):
         block = SCRIPT.split(nav)[1][:180]
         ok("beta-tag" in block, nav + " carries the badge in the sidebar")
     ok("rTitle.append(el('span', 'beta-tag'" in SCRIPT
-       and "cTitle.append(el('span', 'beta-tag'" in SCRIPT,
-       "and both page headings carry it")
+       and "cTitle.append(el('span', 'beta-tag'" in SCRIPT
+       and "hTitle.append(el('span', 'beta-tag'" in SCRIPT,
+       "and all three page headings carry it")
     ok("BETA_TABS.indexOf(v) >= 0" in SCRIPT, "and the topbar title does too")
     ok(".beta-tag {" in CSS, "the badge is styled")
 
@@ -2508,6 +2509,51 @@ def t_the_live_region_predates_the_first_toast():
     boot = SCRIPT.split("$('menu-btn').onclick = openSidebar")[0][-700:]
     ok("host.setAttribute('aria-live', 'polite')" in boot,
        "the region exists before anything can toast")
+
+
+@test
+def t_the_connector_tab_is_fully_plumbed():
+    """A tab is not a page: it is a nav entry, a view, a title, a beta flag, a
+    grant key and a place in the Finance strip, and forgetting any one of them
+    leaves a door painted on a wall."""
+    ok('data-view="connector" id="nav-connector"' in HTML, "the nav button exists")
+    ok('id="view-connector"' in HTML and 'id="connector-content"' in HTML, "and the view")
+    ok("'connector'];" in SCRIPT.split("const TAB_KEYS = [")[1][:220], "the grant key is known")
+    ok("'connector']" in SCRIPT.split("const BETA_TABS = [")[1][:60], "it wears Beta")
+    ok("connector: 'Xero sync'" in SCRIPT, "the topbar can name it")
+    ok("if (v === 'connector') showConnectorView();" in SCRIPT, "and setView opens it")
+    ok("if (tabAllowed('connector')) tab('connector', 'Xero sync');" in SCRIPT,
+       "it sits in the Finance strip, gated like Reconciliation")
+
+
+@test
+def t_send_requires_a_review_and_spends_it():
+    """The chosen flow is bulk send WITH review. Enforced, not advisory: the
+    Send button only arms once a completed dry run is on screen, its confirm
+    dialog quotes that run's numbers, and a send consumes the review so the
+    next one needs a fresh look."""
+    fn = SCRIPT.split("function renderConnector() {")[1]
+    fn = fn[:fn.index("\n        async function showReconView")]
+    ok("send.disabled = running || !connReview;" in fn, "no review, no Send")
+    ok("Based on the review:" in fn, "the confirm dialog quotes the reviewed numbers")
+    ok("will be written into your accounts" in fn, "and says what it means")
+    watch = SCRIPT.split("function connStartWatch() {")[1][:1600]
+    ok("if (connBusy === 'send') connReview = null;" in watch,
+       "a send spends the review it was based on")
+    ok("if (connBusy === 'review' && last && last.dryRun) connReview = last;" in watch,
+       "and only a completed DRY run ever arms one")
+    # Writes are admin-gated in the UI too (the server is the real gate).
+    ok("if (connIsAdmin()) {" in fn, "send and retry render only for admins")
+
+
+@test
+def t_the_connector_watch_cannot_outlive_its_view():
+    """A poll that keeps running after the tab is closed is a leak that fires
+    a request every 2.5 seconds forever."""
+    watch = SCRIPT.split("function connStartWatch() {")[1][:900]
+    ok("if (!document.querySelector('#view-connector.active')) { clearInterval(connWatch); connWatch = 0; return; }" in watch,
+       "the watch clears itself the moment the view is gone")
+    ok("if (connWatch) return;" in watch, "and never doubles up")
 
 
 if __name__ == "__main__":

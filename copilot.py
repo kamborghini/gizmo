@@ -7898,6 +7898,34 @@ def _build_id() -> str:
         return ""
 
 
+def _connector_url() -> str:
+    """Where the shopify-xero-connector service lives (Railway private network).
+    Read per request so tests and redeploys never need a restart dance."""
+    return (os.environ.get("CONNECTOR_URL") or "").rstrip("/")
+
+
+async def _connector_call(method: str, path: str, params: Optional[dict] = None):
+    """One call to the connector service. The service's own token rides in the
+    Authorization header and NEVER leaves this process; X-Connector is its CSRF
+    header for anything mutating. Transport failure raises, so the route can
+    say plainly that the service is unreachable, as opposed to the service
+    answering with an error of its own (returned as-is)."""
+    headers = {}
+    token = os.environ.get("CONNECTOR_TOKEN") or ""
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    if method == "POST":
+        headers["X-Connector"] = "1"
+    async with httpx.AsyncClient(timeout=25.0) as cx:
+        r = await cx.request(method, _connector_url() + path, params=params, headers=headers)
+    try:
+        body = r.json()
+    except Exception:
+        body = {"error": ("The connector answered with something that is not JSON "
+                          "(status " + str(r.status_code) + ").")}
+    return r.status_code, body
+
+
 def _json(data: dict, status: int = 200) -> JSONResponse:
     return JSONResponse(data, status_code=status,
                         headers={**_API_HEADERS, "X-App-Build": _build_id()})
@@ -10916,10 +10944,12 @@ def _master_reset_check(d: dict) -> None:
 # The master is never restricted. Enforcement is central (in _pre_checks) via
 # this path map, so hiding a tab in the page is never the only lock.
 TAB_KEYS = ("overview", "seo", "keywords", "products", "customers", "liability",
-            "crm", "mail", "files", "labels", "memory", "skills", "chat", "recon")
+            "crm", "mail", "files", "labels", "memory", "skills", "chat", "recon",
+            "connector")
 _TAB_ROUTES = (
     ("/api/overview", "overview"), ("/api/seo", "seo"), ("/api/keyword", "keywords"),
     ("/api/recon", "recon"),
+    ("/api/connector", "connector"),
     ("/api/products", "products"), ("/api/product", "products"),
     # customer-history also serves the CRM's deal modal (the Shopify card on a
     # linked person), so either tab opens it.
@@ -10942,7 +10972,9 @@ _TAB_ROUTES = (
 # company's accounting records, its bank line and the finance mailbox, so a new
 # stock or dispatch login must not arrive already holding the books: an admin
 # hands it over deliberately, or not at all.
-OPT_IN_TABS = ("recon",)
+# The connector WRITES to the accounting ledger, so like the books it is
+# handed over deliberately, never inherited with an account.
+OPT_IN_TABS = ("recon", "connector")
 DEFAULT_TABS = tuple(k for k in TAB_KEYS if k not in OPT_IN_TABS)
 
 
@@ -17869,6 +17901,78 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         return _oauth_page("Connected to Xero",
                            "The reconciliation engine can now read your accounts (read-only). "
                            "Close this tab and return to Store Copilot.")
+
+    # ------------------------------------------------------------------
+    # Shopify -> Xero connector: a separate, audited Node service that turns
+    # orders into Xero invoices (and refunds into credit notes). It writes to
+    # the accounting ledger, so gizmo only ever PROXIES it: the browser talks
+    # to this route, this route talks to the service on the private network,
+    # and the service's token never leaves the server. Reviews are dry runs
+    # (the service persists nothing on them); anything that writes is admin.
+    _CONNECTOR_READS = {
+        "status": ("GET", "/api/status"),
+        "runs": ("GET", "/api/runs"),
+        "quarantine": ("GET", "/api/quarantine"),
+        "ledger": ("GET", "/api/ledger"),
+    }
+
+    @mcp.custom_route("/api/connector", methods=["POST"])
+    async def connector_route(request: Request):
+        """The Xero connector tab's whole API. op says what; the service does it."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok_a, who = _authorize(request)
+        if not ok_a:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        op = str(body.get("op") or "status")
+        if not _connector_url():
+            return _json({"available": False,
+                          "note": "The connector service is not linked yet. Set CONNECTOR_URL "
+                                  "(and CONNECTOR_TOKEN) in Railway to the private address of "
+                                  "the shopify-xero-connector service."})
+        try:
+            if op in _CONNECTOR_READS:
+                method, path = _CONNECTOR_READS[op]
+                params = None
+                if op == "ledger":
+                    params = {k: str(body[k]) for k in ("status", "kind") if body.get(k)}
+                code, data = await _connector_call(method, path, params)
+                out = {"available": True, "data": data} if code < 400 else {"available": True, "error": (data or {}).get("error") or ("Connector error " + str(code))}
+                return _json(out, 200 if code < 400 else code)
+            if op == "review":
+                # A dry run: the service maps everything and writes NOTHING,
+                # by its own documented promise. Any tab holder may look.
+                code, data = await _connector_call("POST", "/api/sync", {"dryRun": "1"})
+                return _json({"available": True, "data": data}, code if code >= 400 else 200)
+            if op in ("send", "retry", "reimport"):
+                # These write invoices and credit notes into Xero.
+                if _team_level(who) < ROLE_LEVELS["admin"]:
+                    return _json({"error": "Only an admin can send documents to Xero."}, 403)
+                if op == "send":
+                    code, data = await _connector_call("POST", "/api/sync")
+                elif op == "retry":
+                    code, data = await _connector_call("POST", "/api/retry")
+                else:
+                    order = str(body.get("order") or "").strip()
+                    if not order:
+                        return _json({"error": "Say which order to re-import (e.g. #104300)."}, 400)
+                    code, data = await _connector_call("POST", "/api/reimport",
+                                                       {"order": order,
+                                                        **({"force": "1"} if body.get("force") else {})})
+                _track(who, "connector", "connector " + op,
+                       (str(body.get("order")) if op == "reimport" else ""))
+                return _json({"available": True, "data": data}, code if code >= 400 else 200)
+            return _json({"error": "Unknown op."}, 400)
+        except httpx.HTTPError as e:
+            logger.warning("connector unreachable: %r", e)
+            return _json({"available": True,
+                          "error": "The connector service did not answer. If it was just "
+                                   "deployed, give it a moment; otherwise check the service "
+                                   "in Railway."}, 502)
 
     @mcp.custom_route("/api/recon/status", methods=["POST"])
     async def recon_status_route(request: Request):
