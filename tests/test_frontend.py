@@ -2332,6 +2332,67 @@ def t_the_sidebar_nav_is_a_navigation_landmark():
        "the nav names itself")
 
 
+@test
+def t_every_control_has_a_name_that_survives_typing():
+    """A placeholder is only a name until someone types. The shared search
+    factory names its input now, the field factories became real labels (the
+    wrapper IS the label, so the caption focuses the control), and every bare
+    select carries an aria-label. Verified as a sweep, not a sample: no select
+    in the file may be created without a name arriving within a few lines."""
+    import re as _re2
+    ok("inp.setAttribute('aria-label', (placeholder || 'Search').replace(" in SCRIPT,
+       "tableSearch names its input from its placeholder")
+    for factory in ("mkSel", "selField", "numField", "dateField"):
+        seg = SCRIPT.split("const " + factory + " = ")[1][:220]
+        ok("el('label', 'pfield')" in seg, factory + " wraps in a real label")
+        ok("el('span', null, label)" in seg, "with the caption as a span, not a nested label")
+    # The sweep: every select creation must be followed by a name source.
+    nameless = []
+    for m in _re2.finditer(r"(?:el\('select'|document\.createElement\('select'\))", SCRIPT):
+        ctx = SCRIPT[m.start():m.start() + 900]
+        before = SCRIPT[max(0, m.start() - 300):m.start()]
+        named = ("aria-label" in ctx or ".title = " in ctx
+                 or "crmField(" in ctx or "authField" in before
+                 or "el('label'" in before[-200:] or "dpanel-row" in before[-200:])
+        if not named:
+            nameless.append(SCRIPT[:m.start()].count("\n") + 1)
+    ok(not nameless, "selects with no accessible name near script lines: " + str(nameless))
+
+
+@test
+def t_async_outcomes_are_announced():
+    """Both toast hosts (addToast and the undo-print bar) are polite live
+    regions now. Before this, every success and failure in the app was silent
+    to a screen reader."""
+    ok(SCRIPT.count("host.setAttribute('role', 'status')") == 2,
+       "both toast hosts announce")
+    ok(SCRIPT.count("host.setAttribute('aria-live', 'polite')") == 2,
+       "politely, so they queue rather than interrupt")
+
+
+@test
+def t_the_setup_card_offers_the_right_autofill():
+    """The Your-name field was getting autocomplete=username because the
+    ternary keyed off the input type - two username tokens in one card, and the
+    browser fills the wrong one."""
+    fn = SCRIPT.split("function authField(labelText, type, id) {")[1][:800]
+    ok("id === 'au-name' ? 'name' : 'username'" in fn, "name field asks for a name")
+    ok("inp.name = inp.autocomplete" in fn, "and every auth input carries a name attribute")
+    ok("if (inp.autocomplete === 'username') inp.spellcheck = false" in fn,
+       "usernames do not get squiggles")
+
+
+@test
+def t_truncated_text_is_recoverable():
+    """Five places truncate with ellipsis and gave no way back to the full
+    value. The mail sender and subject, the product title and the file name all
+    carry title now, so hover recovers what the ellipsis ate."""
+    ok("mfrom.title = t.from_name || t.from_email || ''" in SCRIPT, "mail sender")
+    ok("subj.title = t.subject || ''" in SCRIPT, "mail subject")
+    ok("pn.title = p.title || ''" in SCRIPT, "product title")
+    ok("name.title = f.name;" in SCRIPT, "file name")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

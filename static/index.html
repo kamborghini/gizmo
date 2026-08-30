@@ -476,7 +476,8 @@
         .pfilters { display: none; flex-wrap: wrap; gap: 12px 12px; padding: 16px 16px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); box-shadow: var(--sh-1); }
         .pfilters.show { display: flex; }
         .pfield { display: flex; flex-direction: column; gap: 4px; }
-        .pfield label { font-size: var(--t-xs); font-weight: var(--w-medium); text-transform: none; letter-spacing: normal; color: var(--ink-3); }
+        /* The wrapper IS the label now (implicit association); caption is a span. */
+        .pfield label, .pfield > span { font-size: var(--t-xs); font-weight: var(--w-medium); text-transform: none; letter-spacing: normal; color: var(--ink-3); }
         .fchips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
         .fchip { display: inline-flex; align-items: center; gap: 4px; background: var(--accent-soft); border: 1px solid var(--accent-line); color: var(--accent-ink); border-radius: var(--r-pill); padding: 4px 8px 4px 12px; font-size: var(--t-xs); font-weight: var(--w-medium); }
         /* The 12px glyph was the whole target; the box grows around it and the
@@ -1612,7 +1613,7 @@
         .dpanel { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3);
             min-width: 240px; }
         .dpanel-row { display: flex; align-items: center; gap: var(--sp-2); }
-        .dpanel-row > label { flex: 1 1 auto; font-size: var(--t-xs); color: var(--ink-3); }
+        .dpanel-row > span { flex: 1 1 auto; font-size: var(--t-xs); color: var(--ink-3); }
         .dpanel input, .dpanel select { height: 28px; padding: 4px 8px; border-radius: var(--r-sm);
             font-size: var(--t-md); line-height: 20px; }
         /* The page-level tab strip. The reference marks the live page by ink
@@ -2785,6 +2786,8 @@
             const inp = document.createElement('input');
             inp.type = 'search';
             inp.placeholder = placeholder || 'Search\u2026';
+            /* A placeholder is only a name until someone types. */
+            inp.setAttribute('aria-label', (placeholder || 'Search').replace(/\u2026$/, ''));
             if (value) inp.value = value;
             if (oninput) inp.oninput = () => oninput(inp.value.trim());
             wrap.append(inp);
@@ -2819,6 +2822,7 @@
                 const rows = el('div', 'tbl-rows');
                 rows.append(el('span', null, 'Rows per page'));
                 const sel = document.createElement('select');
+                sel.setAttribute('aria-label', 'Rows per page');
                 (o.sizes || [10, 25, 50, 100]).forEach(n => {
                     const op = document.createElement('option');
                     op.value = String(n); op.textContent = String(n);
@@ -4331,11 +4335,11 @@
 
             const tools = el('div', 'ptools');
             const row1 = el('div', 'row1');
-            const search = el('input', 'psel grow'); search.placeholder = 'Search products…'; search.value = pState.q;
+            const search = el('input', 'psel grow'); search.placeholder = 'Search products…'; search.setAttribute('aria-label', 'Search products'); search.value = pState.q;
             search.addEventListener('input', () => { pState.q = search.value; drawList(); });
             row1.append(search);
             row1.append(segControl([{ label: '1M', value: 1 }, { label: '3M', value: 3 }, { label: '6M', value: 6 }, { label: '12M', value: 12 }, { label: 'All', value: 'all' }, { label: 'Custom', value: 'custom' }], pState.period, v => { pState.period = v; rerender(); }));
-            const sort = el('select', 'psel');
+            const sort = el('select', 'psel'); sort.setAttribute('aria-label', 'Sort products');
             [['revenue_desc', 'Revenue: high to low'], ['revenue_asc', 'Revenue: low to high'], ['units_desc', 'Units: high to low'], ['units_asc', 'Units: low to high'], ['newest', 'Newest first'], ['oldest', 'Oldest first'], ['updated', 'Recently updated'], ['price_desc', 'Price: high to low'], ['price_asc', 'Price: low to high'], ['title', 'Title A to Z']].forEach(([v, l]) => { const o = el('option', null, l); o.value = v; if (v === pState.sort) o.selected = true; sort.append(o); });
             sort.onchange = () => { pState.sort = sort.value; drawList(); };
             row1.append(sort);
@@ -4350,15 +4354,15 @@
                 if (pState.customFrom == null) pState.customFrom = Math.max(0, months.length - 6);
                 if (pState.customTo == null) pState.customTo = months.length - 1;
                 const cr = el('div', 'row1');
-                const mkSel = (val, on, label) => { const f = el('div', 'pfield'); f.append(el('label', null, label)); const s = el('select', 'psel'); months.forEach((mk, idx) => { const o = el('option', null, monthLabel(mk)); o.value = idx; if (idx === val) o.selected = true; s.append(o); }); s.onchange = () => { on(+s.value); drawList(); }; f.append(s); return f; };
+                const mkSel = (val, on, label) => { const f = el('label', 'pfield'); f.append(el('span', null, label)); const s = el('select', 'psel'); months.forEach((mk, idx) => { const o = el('option', null, monthLabel(mk)); o.value = idx; if (idx === val) o.selected = true; s.append(o); }); s.onchange = () => { on(+s.value); drawList(); }; f.append(s); return f; };
                 cr.append(mkSel(pState.customFrom, v => pState.customFrom = v, 'From'), mkSel(pState.customTo, v => pState.customTo = v, 'To'));
                 tools.append(cr);
             }
 
             const fp = el('div', 'pfilters' + (pState.showFilters ? ' show' : ''));
-            const selField = (label, value, opts, on) => { const f = el('div', 'pfield'); f.append(el('label', null, label)); const s = el('select', 'psel'); const a = el('option', null, 'Any'); a.value = ''; s.append(a); opts.forEach(o => { const op = el('option', null, o); op.value = o; if (o === value) op.selected = true; s.append(op); }); s.onchange = () => { on(s.value); drawList(); pchips(); }; f.append(s); return f; };
-            const numField = (label, value, on) => { const f = el('div', 'pfield'); f.append(el('label', null, label)); const i = el('input', 'psel pnum'); i.type = 'number'; i.min = '0'; if (value != null) i.value = value; i.oninput = () => { on(i.value === '' ? null : Number(i.value)); drawList(); pchips(); }; f.append(i); return f; };
-            const dateField = (label, value, on) => { const f = el('div', 'pfield'); f.append(el('label', null, label)); const i = el('input', 'psel'); i.type = 'date'; if (value) i.value = value; i.onchange = () => { on(i.value); drawList(); pchips(); }; f.append(i); return f; };
+            const selField = (label, value, opts, on) => { const f = el('label', 'pfield'); f.append(el('span', null, label)); const s = el('select', 'psel'); const a = el('option', null, 'Any'); a.value = ''; s.append(a); opts.forEach(o => { const op = el('option', null, o); op.value = o; if (o === value) op.selected = true; s.append(op); }); s.onchange = () => { on(s.value); drawList(); pchips(); }; f.append(s); return f; };
+            const numField = (label, value, on) => { const f = el('label', 'pfield'); f.append(el('span', null, label)); const i = el('input', 'psel pnum'); i.type = 'number'; i.min = '0'; if (value != null) i.value = value; i.oninput = () => { on(i.value === '' ? null : Number(i.value)); drawList(); pchips(); }; f.append(i); return f; };
+            const dateField = (label, value, on) => { const f = el('label', 'pfield'); f.append(el('span', null, label)); const i = el('input', 'psel'); i.type = 'date'; if (value) i.value = value; i.onchange = () => { on(i.value); drawList(); pchips(); }; f.append(i); return f; };
             fp.append(selField('Status', pState.status, ['active', 'draft', 'archived'], v => pState.status = v));
             fp.append(selField('Stock', pState.stock, ['in', 'low', 'out', 'untracked'], v => pState.stock = v));
             if ((productList.vendors || []).length) fp.append(selField('Vendor', pState.vendor, productList.vendors, v => pState.vendor = v));
@@ -4401,8 +4405,11 @@
                 rows.forEach(r => {
                     const p = r.p, row = el('button', 'prod-row');
                     const safeImg = (p.image && /^https:\/\//i.test(p.image)) ? p.image : null;
-                    const th = document.createElement(safeImg ? 'img' : 'div'); th.className = 'prod-thumb'; if (safeImg) th.src = safeImg;
-                    const main = el('div', 'prod-main'); main.append(el('div', 'prod-name', p.title || 'Untitled'));
+                    const th = document.createElement(safeImg ? 'img' : 'div'); th.className = 'prod-thumb';
+                    if (safeImg) { th.src = safeImg; th.alt = ''; th.loading = 'lazy'; }
+                    const main = el('div', 'prod-main');
+                    const pn = el('div', 'prod-name', p.title || 'Untitled'); pn.title = p.title || '';
+                    main.append(pn);
                     const bits = [p.status]; if (p.price) bits.push(fmtMoney(p.price, cur)); if (p.product_type) bits.push(p.product_type); if (p.vendor) bits.push(p.vendor);
                     main.append(el('div', 'prod-sub', bits.filter(Boolean).join(' · ')));
                     const chips = el('div', 'prod-chips');
@@ -4529,7 +4536,13 @@
             const text = String(msg == null ? '' : msg).trim();
             if (!text) return;
             let host = document.getElementById('toast-host');
-            if (!host) { host = el('div'); host.id = 'toast-host'; document.body.append(host); }
+            if (!host) {
+                host = el('div'); host.id = 'toast-host';
+                /* Every async outcome lands here and none of it was announced:
+                   a live region, polite so it queues rather than interrupts. */
+                host.setAttribute('role', 'status'); host.setAttribute('aria-live', 'polite');
+                document.body.append(host);
+            }
             const t = el('div', 'toast' + (kind ? ' ' + kind : ''));
             t.append(el('div', 'toast-msg', text));
             const x = el('button', 'toast-x'); x.innerHTML = I.x; x.title = 'Dismiss';
@@ -5013,8 +5026,8 @@
             const rangeBtn = el('button', 'btn btn-sm' + (rangeSet ? ' on' : ''));
             rangeBtn.append(ico(I.cal), document.createTextNode(rangeSet ? 'Dates and amount: set' : 'Dates and amount'));
             rangeBtn.onclick = () => dropPanel(rangeBtn, (body, close) => {
-                const fieldRow = el('div', 'dpanel-row');
-                fieldRow.append(el('label', null, 'Filter by'));
+                const fieldRow = el('label', 'dpanel-row');
+                fieldRow.append(el('span', null, 'Filter by'));
                 const dfield = document.createElement('select');
                 [['created_at', 'Ordered'], ['due', 'Due']].forEach(([v2, l2]) => {
                     const o2 = el('option', null, l2); o2.value = v2;
@@ -5022,18 +5035,18 @@
                 });
                 dfield.onchange = () => { liaF.dateField = dfield.value; paint(); };
                 fieldRow.append(dfield);
-                const fromRow = el('div', 'dpanel-row');
-                fromRow.append(el('label', null, 'On or after'));
+                const fromRow = el('label', 'dpanel-row');
+                fromRow.append(el('span', null, 'On or after'));
                 const df = document.createElement('input'); df.type = 'date'; df.value = liaF.from || '';
                 df.onchange = () => { liaF.from = df.value; paint(); };
                 fromRow.append(df);
-                const toRow = el('div', 'dpanel-row');
-                toRow.append(el('label', null, 'On or before'));
+                const toRow = el('label', 'dpanel-row');
+                toRow.append(el('span', null, 'On or before'));
                 const dt2 = document.createElement('input'); dt2.type = 'date'; dt2.value = liaF.to || '';
                 dt2.onchange = () => { liaF.to = dt2.value; paint(); };
                 toRow.append(dt2);
-                const minRow = el('div', 'dpanel-row');
-                minRow.append(el('label', null, 'Owing at least'));
+                const minRow = el('label', 'dpanel-row');
+                minRow.append(el('span', null, 'Owing at least'));
                 const minIn = document.createElement('input');
                 minIn.type = 'number'; minIn.min = '0'; minIn.step = '50'; minIn.style.width = '96px';
                 minIn.value = liaF.min;
@@ -5480,7 +5493,7 @@
                        into, and the callback can check it got what was asked
                        for rather than accepting whatever turns up. */
                     const who = el('input', 'mail-search');
-                    who.placeholder = 'accounts@yourdomain.com';
+                    who.placeholder = 'accounts@yourdomain.com'; who.type = 'email'; who.setAttribute('aria-label', 'Accounts mailbox address'); who.spellcheck = false;
                     who.style.cssText = 'max-width:320px;display:block;margin-top:10px';
                     who.value = mb.last_try || '';
                     mc.append(who);
@@ -5865,7 +5878,7 @@
             const reasonRow = el('div'); reasonRow.style.cssText = 'display:none;margin-top:8px;gap:8px';
             reasonRow.style.display = 'none';
             const reasonIn = el('input', 'mail-search');
-            reasonIn.placeholder = 'Why is this being ignored? (required)';
+            reasonIn.placeholder = 'Why is this being ignored? (required)'; reasonIn.setAttribute('aria-label', 'Reason for ignoring');
             reasonIn.style.maxWidth = '420px';
             const reasonGo = el('button', 'btn', 'Ignore with this reason');
             reasonGo.onclick = async () => {
@@ -5998,7 +6011,13 @@
         // print dialog was confirmed or cancelled), so every stamp gets an undo.
         function undoPrintBar(ids) {
             let host = document.getElementById('toast-host');
-            if (!host) { host = el('div'); host.id = 'toast-host'; document.body.append(host); }
+            if (!host) {
+                host = el('div'); host.id = 'toast-host';
+                /* Every async outcome lands here and none of it was announced:
+                   a live region, polite so it queues rather than interrupts. */
+                host.setAttribute('role', 'status'); host.setAttribute('aria-live', 'polite');
+                document.body.append(host);
+            }
             const t = el('div', 'toast');
             t.append(el('div', 'toast-msg', 'Marked ' + ids.length + (ids.length === 1 ? ' order' : ' orders') + ' as printed.'));
             const u = el('button', 'btn'); u.textContent = 'Undo';
@@ -6353,6 +6372,7 @@
             const find = document.createElement('input');
             find.type = 'search'; find.className = 'lbl-size lbl-find';
             find.placeholder = 'Search reference, name or tracking';
+            find.setAttribute('aria-label', 'Search reference, name or tracking');
             find.value = customQ;
             bar.append(find);
             box.append(bar);
@@ -6979,7 +6999,7 @@
             const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
             const body = el('div', 'modal-body');
             const bar = el('div', 'lbl-toolbar');
-            const sel = document.createElement('select'); sel.className = 'lbl-size';
+            const sel = document.createElement('select'); sel.className = 'lbl-size'; sel.setAttribute('aria-label', 'Orders booked on');
             [[30, 'Last 30 days'], [60, 'Last 60 days'], [90, 'Last 90 days'], [365, 'Last year']]
                 .forEach(([v, t]) => { const o = el('option', null, t); o.value = v; sel.append(o); });
             bar.append(el('span', 'cov-line', 'Orders booked on'), sel);
@@ -7262,10 +7282,10 @@
                             tbody.append(tr);
                         });
                         const addTr = el('tr');
-                        const famSel = el('select', 'lbl-size');
+                        const famSel = el('select', 'lbl-size'); famSel.setAttribute('aria-label', 'Glass family');
                         ['Mono', 'HM', 'Colour', 'Ring'].forEach(f => { const o = el('option', null, f); o.value = f; famSel.append(o); });
                         const szIn = document.createElement('input');
-                        szIn.className = 'tm-field'; szIn.placeholder = 'Size mm';
+                        szIn.className = 'tm-field'; szIn.placeholder = 'Size mm'; szIn.setAttribute('aria-label', 'Size in millimetres');
                         szIn.style.cssText = 'width:82px;flex:none;padding:4px 8px';
                         const qIn = document.createElement('input');
                         qIn.type = 'number'; qIn.min = '1'; qIn.max = '10000'; qIn.placeholder = 'Qty';
@@ -8059,7 +8079,7 @@
             const boxRows = [];
             function addBoxRow(preset) {
                 const rowb = el('div', 'disp-boxedit');
-                const sel = el('select', 'psel'); sel.style.maxWidth = '170px';
+                const sel = el('select', 'psel'); sel.style.maxWidth = '170px'; sel.setAttribute('aria-label', 'Box preset');
                 presets.forEach(b => { const opt = el('option', null, b.name); opt.value = b.id; sel.append(opt); });
                 const cust = el('option', null, 'Custom'); cust.value = '__custom'; sel.append(cust);
                 const ins = {};
@@ -9003,7 +9023,7 @@
             const boxRows = [];
             function addBoxRow() {
                 const rowb = el('div', 'disp-boxrow');
-                const sel = document.createElement('select'); sel.className = 'disp-sel';
+                const sel = document.createElement('select'); sel.className = 'disp-sel'; sel.setAttribute('aria-label', 'Box preset');
                 sel.append(new Option('Custom size', ''));
                 presets.forEach(b => sel.append(new Option(b.name || 'Box', b.id)));
                 const ins = {};
@@ -9408,7 +9428,7 @@
             });
             const pluginRow = el('label', 'disp-fld'); pluginRow.style.marginTop = '8px';
             pluginRow.append(el('span', 'disp-fld-lab', 'Plugin code (leave as Web_Service unless told otherwise)'));
-            const pluginIn = el('select', 'psel');
+            const pluginIn = el('select', 'psel'); pluginIn.setAttribute('aria-label', 'Plugin code');
             (cfg.plugin_codes || ['Web_Service']).forEach(v => {
                 const op = el('option', null, v); op.value = v;
                 if (v === (cfg.plugin_code || 'Web_Service')) op.selected = true;
@@ -9950,6 +9970,7 @@
                 h.append(el('span', 'lbl-chip' + tone, cap(r.state || 'open')));
                 if (u.can_triage) {
                     const sel = el('select', 'lbl-size');
+                    sel.setAttribute('aria-label', 'Request state');
                     ['open', 'planned', 'shipped', 'declined'].forEach(st => {
                         const o = el('option', null, st); o.value = st;
                         if (r.state === st) o.selected = true; sel.append(o);
@@ -10496,10 +10517,11 @@
             add.onclick = () => crmDealForm();
             bar.append(add);
             const q = document.createElement('input');
-            q.type = 'search'; q.placeholder = 'Search deals…'; q.className = 'lbl-size lbl-find'; q.value = crmQ;
+            q.type = 'search'; q.placeholder = 'Search deals…'; q.setAttribute('aria-label', 'Search deals'); q.className = 'lbl-size lbl-find'; q.value = crmQ;
             q.oninput = () => { crmQ = q.value.trim(); paint(); };
             bar.append(q);
             const st = el('select', 'lbl-size');
+            st.setAttribute('aria-label', 'Deal status');
             [['open', 'Open deals'], ['won', 'Won deals'], ['lost', 'Lost deals'],
              ['all', 'Everything'], ['archived', 'Archived'],
              ['bin', 'Bin' + (d.trash ? ' (' + d.trash + ')' : '')]]
@@ -10508,6 +10530,7 @@
             bar.append(st);
             if ((d.labels || []).length) {
                 const lf = el('select', 'lbl-size');
+                lf.setAttribute('aria-label', 'Filter by label');
                 lf.append(new Option('Any label', ''));
                 d.labels.forEach(l => lf.append(new Option(l, l)));
                 lf.value = crmLabelF;
@@ -10516,6 +10539,7 @@
             }
             if (crmMulti()) {
                 const of = el('select', 'lbl-size');
+                of.setAttribute('aria-label', 'Filter by owner');
                 of.append(new Option('Everyone', ''));
                 d.team.forEach(u => of.append(new Option(u.name || u.uid, u.uid)));
                 of.value = crmOwnerF;
@@ -10871,7 +10895,10 @@
                 d.stages.forEach(s => {
                     const seg = el('div', 'crm-chev-s' + (s.id === stageSel ? ' on' : reached ? ' done' : ''), s.name);
                     if (s.id === stageSel) reached = false;
+                    seg.setAttribute('role', 'button'); seg.tabIndex = 0;
+                    seg.setAttribute('aria-pressed', s.id === stageSel ? 'true' : 'false');
                     seg.onclick = () => { stageSel = s.id; paintChev(); };
+                    seg.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); seg.click(); } });
                     chev.append(seg);
                 });
             }
@@ -12201,6 +12228,7 @@
                     dot.style.cssText = 'align-self:center;background:' + (CRM_COLOR_CSS[l.color] || 'var(--ink-3)');
                     const name = crmText(l.name, 'Label'); name.oninput = () => { l.name = name.value; };
                     const col = el('select', 'disp-text');
+                    col.setAttribute('aria-label', 'Label colour');
                     col.style.maxWidth = '110px';
                     COLOR_OPTS.forEach(c => col.append(new Option(c, c)));
                     col.value = COLOR_OPTS.includes(l.color) ? l.color : 'gray';
@@ -12656,7 +12684,7 @@
             mCard.append(mHead);
 
             const search = document.createElement('input');
-            search.type = 'search'; search.className = 'mail-search';
+            search.type = 'search'; search.className = 'mail-search'; search.setAttribute('aria-label', 'Search the inbox');
             search.value = mailQ;
             search.oninput = () => { mailQ = search.value; mailFound = null; paintMailBody(); };
             search.onkeydown = async (e) => {
@@ -12778,8 +12806,9 @@
             if (mailCache.lead) {
                 const pick = document.createElement('select');
                 pick.className = 'mail-presence-pick';
+                pick.setAttribute('aria-label', 'Assign to');
                 const none = document.createElement('option');
-                none.value = ''; none.textContent = 'Assign to...';
+                none.value = ''; none.textContent = 'Assign to\u2026';
                 pick.append(none);
                 (mailCache.team || []).filter(u => u.can_own !== false).forEach(u => {
                     const o = document.createElement('option');
@@ -12944,8 +12973,11 @@
                 u.title = 'Nobody has opened this yet';
                 row.append(u);
             }
-            row.append(el('span', 'mfrom', t.from_name || t.from_email || ''));
+            const mfrom = el('span', 'mfrom', t.from_name || t.from_email || '');
+            mfrom.title = t.from_name || t.from_email || '';
+            row.append(mfrom);
             const subj = el('span', 'msubj');
+            subj.title = t.subject || '';
             subj.append(el('b', null, t.subject));
             if (t.snippet) subj.append(document.createTextNode(' · ' + t.snippet));
             row.append(subj);
@@ -13229,6 +13261,7 @@
             modeRow.append(document.createTextNode('Match '));
             const mode = document.createElement('select');
             mode.className = 'mail-presence-pick';
+            mode.setAttribute('aria-label', 'Match mode');
             [['all', 'all of these'], ['any', 'any of these']].forEach(([v, t]) => {
                 const o = document.createElement('option');
                 o.value = v; o.textContent = t; if (r.mode === v) o.selected = true;
@@ -13241,14 +13274,14 @@
                 conds.innerHTML = '';
                 r.conditions.forEach((c, i) => {
                     const row = el('div', 'mrule-cond');
-                    const f = document.createElement('select'); f.className = 'mail-presence-pick';
+                    const f = document.createElement('select'); f.className = 'mail-presence-pick'; f.setAttribute('aria-label', 'Condition field');
                     MAIL_FIELDS.forEach(([v, t]) => {
                         const o = document.createElement('option');
                         o.value = v; o.textContent = t; if (c.field === v) o.selected = true;
                         f.append(o);
                     });
                     f.onchange = () => { c.field = f.value; };
-                    const o2 = document.createElement('select'); o2.className = 'mail-presence-pick';
+                    const o2 = document.createElement('select'); o2.className = 'mail-presence-pick'; o2.setAttribute('aria-label', 'Condition comparison');
                     MAIL_OPS.forEach(([v, t]) => {
                         const o = document.createElement('option');
                         o.value = v; o.textContent = t; if (c.op === v) o.selected = true;
@@ -13279,6 +13312,7 @@
             m.body.append(el('div', 'setting-title', 'Then'));
             const who = document.createElement('select');
             who.className = 'mail-presence-pick';
+            who.setAttribute('aria-label', 'Assign matches to');
             [['', 'leave it for the room'], ['_round', 'share out between people']].forEach(([v, t]) => {
                 const o = document.createElement('option'); o.value = v; o.textContent = t;
                 if (r.assign === v) o.selected = true; who.append(o);
@@ -13715,6 +13749,7 @@
                 const row = el('div', 'mail-statebar');
                 const pick = document.createElement('select');
                 pick.className = 'mail-presence-pick';
+                pick.setAttribute('aria-label', 'Assign to');
                 const none = document.createElement('option');
                 none.value = ''; none.textContent = 'Nobody (release)';
                 pick.append(none);
@@ -14204,7 +14239,7 @@
             function folderRow(fid, f) {
                 const row = el('div', 'files-row is-folder');
                 row.append(ico(I.folder));
-                const name = el('button', 'files-name', f.name);
+                const name = el('button', 'files-name', f.name); name.title = f.name;
                 name.onclick = () => { filesFolder = fid; paintCrumbs(); paintList(); };
                 row.append(name);
                 const subs = Object.values(filesCache.folders).filter(x => (x.parent_id || '') === fid).length;
@@ -14642,7 +14677,14 @@
             const w = el('div', 'auth-field');
             const lab = el('label', null, labelText); lab.htmlFor = id;
             const inp = document.createElement('input');
-            inp.type = type; inp.id = id; inp.autocomplete = type === 'password' ? 'current-password' : 'username';
+            inp.type = type; inp.id = id;
+            /* Keyed off the FIELD, not the type: the setup card's "Your name"
+               was getting autocomplete=username, so the browser offered to
+               fill a username into it - two username tokens in one card. */
+            inp.autocomplete = type === 'password' ? 'current-password'
+                : id === 'au-name' ? 'name' : 'username';
+            inp.name = inp.autocomplete;
+            if (inp.autocomplete === 'username') inp.spellcheck = false;
             w.append(lab, inp);
             return [w, inp];
         }
@@ -14842,10 +14884,10 @@
             if (teamNewOpen) {
                 const row = el('div', 'files-row tm-row');
                 const inName = document.createElement('input');
-                inName.className = 'tm-field'; inName.placeholder = 'Name';
+                inName.className = 'tm-field'; inName.placeholder = 'Name'; inName.setAttribute('aria-label', 'Name');
                 const inUser = document.createElement('input');
-                inUser.className = 'tm-field'; inUser.placeholder = 'Username';
-                const roleSel = el('select', 'lbl-size');
+                inUser.className = 'tm-field'; inUser.placeholder = 'Username'; inUser.setAttribute('aria-label', 'Username'); inUser.spellcheck = false;
+                const roleSel = el('select', 'lbl-size'); roleSel.setAttribute('aria-label', 'Role for the new account');
                 [['member', 'Member'], ['parttime', 'Part-time']].concat(myLevel >= 3 ? [['admin', 'Admin']] : [])
                     .forEach(([v, lab]) => { const o = el('option', null, lab); o.value = v; roleSel.append(o); });
                 const go = el('button', 'btn btn-primary', 'Create');
@@ -14901,7 +14943,7 @@
                 if (u.role === 'master') {
                     acts.append(el('span', 'files-meta', 'Master admin'));
                 } else {
-                    const role = el('select', 'lbl-size');
+                    const role = el('select', 'lbl-size'); role.setAttribute('aria-label', 'Role for ' + (u.name || u.username));
                     [['admin', 'Admin'], ['member', 'Member'], ['parttime', 'Part-time']].forEach(([v, lab]) => {
                         const o = el('option', null, lab); o.value = v;
                         if (u.role === v) o.selected = true; role.append(o);
@@ -15098,7 +15140,7 @@
         function renderTeamFeed(host) {
             const d = teamCache;
             const bar = el('div', 'lbl-toolbar');
-            const whoSel = el('select', 'lbl-size');
+            const whoSel = el('select', 'lbl-size'); whoSel.setAttribute('aria-label', 'Filter by person');
             const optAll = el('option', null, 'Everyone'); optAll.value = ''; whoSel.append(optAll);
             d.users.forEach(u => {
                 const o = el('option', null, u.name || 'Not named yet'); o.value = u.sub;
@@ -15106,7 +15148,7 @@
                 whoSel.append(o);
             });
             whoSel.onchange = () => { teamFilterWho = whoSel.value; renderTeam(); };
-            const areaSel = el('select', 'lbl-size');
+            const areaSel = el('select', 'lbl-size'); areaSel.setAttribute('aria-label', 'Filter by area');
             const aAll = el('option', null, 'Everything'); aAll.value = ''; areaSel.append(aAll);
             TEAM_AREAS.forEach(([v, lab]) => {
                 const o = el('option', null, lab); o.value = v;
