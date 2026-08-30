@@ -177,7 +177,9 @@ _SCREEN = "".join(ch for ch in _re.split(r"(?<=\})", _CSS) if not _PRINT.search(
 @test
 def t_the_type_scale_is_closed():
     sizes = {float(v) for v in _re.findall(r"font-size: *([0-9.]+)px", _SCREEN)}
-    allowed = {11, 12, 13, 14, 16, 20, 28, 32}
+    # 18 is the reference's text-lg, the size it labels a GROUP of cards with:
+    # a rank between a card's own title at 16 and a page heading at 20.
+    allowed = {11, 12, 13, 14, 16, 18, 20, 28, 32}
     ok(sizes <= allowed, "font sizes outside the scale: " + str(sorted(sizes - allowed)))
 
 
@@ -186,7 +188,11 @@ def t_weights_radii_and_elevation_are_closed():
     weights = {int(v) for v in _re.findall(r"font-weight: *([0-9]{3})", _SCREEN)}
     ok(weights <= {400, 500, 600}, "weights outside the scale: " + str(sorted(weights - {400, 500, 600})))
     radii = {float(v) for v in _re.findall(r"border-radius: *([0-9.]+)px", _SCREEN)}
-    ok(radii <= {6, 8, 12}, "radii outside the scale: " + str(sorted(radii - {6, 8, 12})))
+    # 2 is the chart legend's key. The reference escapes its own scale there too
+    # (rounded-[2px]); on an 8px square the next step up, 6, is a blob rather
+    # than a square, and the difference is plainly visible.
+    allowed = {2, 6, 8, 12}
+    ok(radii <= allowed, "radii outside the scale: " + str(sorted(radii - allowed)))
 
 
 @test
@@ -2209,6 +2215,48 @@ def t_the_files_list_is_the_reference_measurement():
     ok("padding: var(--sp-3)" in row, "rows are padded 12px square")
     ok("border-top: 1px solid var(--border)" in row and "0.5px" not in row,
        "with a full hairline, not a half-pixel one")
+
+
+@test
+def t_every_chart_line_comes_off_the_ramp():
+    """This app went monochrome months ago, and three charts never got the memo:
+    a purple bar set, a blue line and two green ones, on pages where everything
+    else was grey. A reader cannot tell what a colour means when only three of
+    fifteen charts have one."""
+    ok(not _re.search(r"color: '#[0-9a-fA-F]{3,6}'", SCRIPT),
+       "no chart is given a colour literal")
+    ramp = SCRIPT.split("const CH = [")[1].split("]")[0]
+    for c in ("'#171717'", "'#525252'", "'#737373'", "'#a1a1a1'", "'#d4d4d4'"):
+        ok(c in ramp, "the ramp still holds " + c)
+    # Every series names a ramp slot.
+    for m in _re.finditer(r"color: (CH\[\d\]|[A-Za-z_$][\w.$]*)", SCRIPT):
+        ok(m.group(1).startswith("CH[") or not m.group(1).startswith("#"),
+           "series colours come from the ramp, not from a literal")
+
+
+@test
+def t_the_chart_legend_belongs_to_the_plot():
+    """It was drawn in the card header while the chart reserved 48 units at the
+    top of its own plot for it, so a multi-series chart carried a band of
+    nothing across the top and named its lines somewhere else."""
+    ok("function chartLegend(series) {" in SCRIPT, "the legend is its own piece")
+    ok("if (multi && series.length > 1) card.append(chartLegend(series));" in SCRIPT,
+       "drawn between the header and the plot, and only when there are lines to tell apart")
+    ok("chart-legend" not in SCRIPT.split("function chartHead(")[1][:1400],
+       "and no longer inside the card header")
+    ok("const padL = 0, padR = 0, padT = 14, padB = 30;" in SCRIPT,
+       "so the plot stops reserving space for something drawn elsewhere")
+    lg = CSS.split(".chart-legend {")[1].split("}")[0]
+    ok("justify-content: flex-end" in lg, "right-aligned, as the reference aligns it")
+    ok("gap: var(--sp-4)" in lg, "16px between keys")
+    ok("padding-bottom: var(--sp-3)" in lg and "margin-bottom: var(--sp-5)" in lg,
+       "12 then 20 before the first gridline")
+    sw = CSS.split(".chart-legend .sw {")[1].split("}")[0]
+    ok("width: 8px" in sw and "height: 8px" in sw, "the key is an 8px square")
+    ok("border-radius: 2px" in sw, "with a 2px corner, not the app's own radius")
+    item = CSS.split(".chart-legend .lg {")[1].split("}")[0]
+    ok("gap: 6px" in item, "6px between a key and its name")
+    ok("color: var(--ink)" in item, "and the name in full ink, as the reference sets it")
 
 
 if __name__ == "__main__":

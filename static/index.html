@@ -81,7 +81,10 @@
                page titles are LARGE and LIGHT with tight tracking rather than
                small and bold. That contrast is most of the look. */
             --t-xs: 12px; --t-sm: 12px; --t-body: 14px; --t-md: 14px;
-            --t-lg: 16px; --t-xl: 20px; --t-2xl: 30px;
+            --t-lg: 16px; --t-head: 18px; --t-xl: 20px; --t-2xl: 30px;
+            /* --t-head is the reference's text-lg: the step between a card's own
+               title at 16 and a page heading at 20. It labels a GROUP of cards,
+               which is a rank the scale had no size for. */
 
             /* Weights: 3 */
             --w-normal: 400; --w-medium: 500; --w-bold: 600;
@@ -342,7 +345,7 @@
         .stat-spark { margin-top: 12px; position: relative; opacity: .92; }
         .stat-spark .spark { height: 30px; }
         .ov-customize { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 12px; }
-        .ov-cust-hint { font-size: var(--t-xs); color: var(--ink-3); margin-right: auto; }
+        .ov-cust-hint { font-size: var(--t-xs); color: var(--ink-3); font-weight: var(--w-normal); }
         .stat-edit { cursor: grab; outline: 1px dashed var(--border-3); outline-offset: -1px; }
         .stat-edit.dragging { opacity: .45; }
         .stat-hidden { opacity: .4; }
@@ -374,6 +377,10 @@
         /* No rule across the page. The reference separates sections with the
            gap between cards and nothing else. */
         .section-title::after { content: ""; flex: 1; }
+        /* A heading that gets folded into a card becomes that card's title, at
+           the card-title size. One that stays put is labelling a GROUP of
+           cards, and the reference draws those a step larger. */
+        .section-title[data-carded="group"] { font-size: var(--t-head); line-height: 28px; }
         /* ::after is always the last flex item, so a control inside the heading has
            to be ordered past it to leave the hairline in between. The heading
            tracking would otherwise inherit and stretch the button labels. */
@@ -1670,9 +1677,18 @@
         .chart-head .cd { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); font-weight: var(--w-medium); padding: 2px 8px; border-radius: var(--r-pill); margin-left: 9px; flex: none; line-height: 16px; }
         .chart-head .cd > span { display: grid; place-items: center; } .chart-head .cd svg { width: 12px; height: 12px; display: block; }
         .cd.up { color: var(--win); background: var(--win-bg); } .cd.down { color: var(--danger); background: var(--danger-bg); } .cd.flat { color: var(--ink-3); background: var(--surface-3); }
-        .chart-legend { margin-left: auto; display: flex; gap: 12px; align-items: center; padding-top: 3px; }
-        .chart-legend .lg { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); color: var(--ink-2); }
-        .chart-legend .sw { width: 9px; height: 9px; border-radius: var(--r-xs); }
+        /* The legend belongs to the PLOT, not to the card header: the reference
+           puts it at the top of the chart area, right-aligned, and leaves 12
+           then 20 below it before the first gridline. The chart already
+           reserved that space and drew nothing in it. */
+        .chart-legend { display: flex; gap: var(--sp-4); align-items: center;
+            justify-content: flex-end; flex-wrap: wrap;
+            padding-bottom: var(--sp-3); margin-bottom: var(--sp-5); }
+        .chart-legend .lg { display: inline-flex; align-items: center; gap: 6px;
+            font-size: var(--t-xs); color: var(--ink); }
+        /* An 8px square with a 2px corner, not a 9px lozenge: at the app's small
+           radius a 9px chip reads as a rounded blob rather than a key. */
+        .chart-legend .sw { width: 8px; height: 8px; border-radius: 2px; flex: none; }
         .chart-wrap { position: relative; }
         .chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
         /* #ccc at half opacity, spanning the full width: the reference draws
@@ -2985,9 +3001,22 @@
                 htxt.append(v);
             }
             head.append(htxt);
-            if (series && series.length > 1) { const lg = el('div', 'chart-legend'); series.forEach(s => { const it = el('span', 'lg'); const sw = el('span', 'sw'); sw.style.background = s.color || 'var(--accent)'; it.append(sw, document.createTextNode(s.name || '')); lg.append(it); }); head.append(lg); }
             if (kind && !opts.noExpand) { const ex = el('button', 'chart-expand'); ex.title = 'Expand'; ex.innerHTML = I.maximize; ex.onclick = () => openChartModal(kind, opts); head.append(ex); }
             return head;
+        }
+        /* One key per series, above the plot and right-aligned. Only drawn when
+           there is more than one line: a legend for a single series names
+           something nothing else on the card contradicts. */
+        function chartLegend(series) {
+            const lg = el('div', 'chart-legend');
+            series.forEach(sr => {
+                const it = el('span', 'lg');
+                const sw = el('span', 'sw');
+                sw.style.background = sr.color || 'var(--accent)';
+                it.append(sw, document.createTextNode(sr.name || ''));
+                lg.append(it);
+            });
+            return lg;
         }
         // Draws gridlines, y-tick labels, x-tick labels, and rotated axis titles. Returns {X, Y}.
         function drawFrame(svg, c) {
@@ -3052,14 +3081,18 @@
             const W = narrow ? 340 : 760, H = opts.height || 220;
             const multi = (opts.series || []).filter(function (x) { return x && x.values && x.values.length; }).length > 1;
             /* Edge to edge, exactly as the reference: nothing reserved at the
-               sides because there are no y-axis numbers, 48 at the top when a
-               legend sits there, and 30 at the foot for the dates. */
-            const padL = 0, padR = 0, padT = multi ? 48 : 14, padB = 30;
+               sides because there are no y-axis numbers, 14 at the top for the
+               topmost point's stroke, and 30 at the foot for the dates. This
+               used to reserve 48 for a legend that was drawn in the card header
+               instead, so a multi-series chart carried a band of nothing across
+               the top of its own plot. */
+            const padL = 0, padR = 0, padT = 14, padB = 30;
             const labels = opts.labels || [];
             const series = (opts.series || []).filter(s => s && Array.isArray(s.values) && s.values.length);
             const fmt = opts.format || fmtCompact;
             const card = el('div', 'chart-card' + (REDUCE_MOTION ? '' : ' chart-anim'));
             card.append(chartHead(opts, series, 'trend'));
+            if (multi && series.length > 1) card.append(chartLegend(series));
             const wrap = el('div', 'chart-wrap'); card.append(wrap);
             if (!series.length || labels.length < 2) { wrap.append(el('div', 'empty', 'Not enough data in this range to chart yet.')); return card; }
             const n = labels.length;
@@ -3168,6 +3201,10 @@
            deliberate and match the reference's own KPI deltas: a rise is green
            and a fall is red, because that is a JUDGEMENT about the number
            rather than a way of telling two series apart. */
+        /* The chart ramp, and the ONLY colours a chart may use. Three charts
+           were still painting in a purple, a blue and a green from before this
+           app went monochrome, so a page of grey lines had three coloured ones
+           in it for no reason a reader could work out. */
         const CH = ['#171717', '#525252', '#737373', '#a1a1a1', '#d4d4d4'];
         const CH_UP = '#15803d', CH_DOWN = '#b91c1c';
 
@@ -3211,24 +3248,24 @@
             // --- Shopify: revenue, orders, AOV ---
             if (has('revenue')) { const a = S('revenue'); box.append(trendChart({ title: 'Revenue', source: 'Shopify orders', yUnit: cur, value: money(sumv(a)), labels: L(a), series: [{ name: 'Revenue', color: CH[0], values: V(a) }], format: money, tickFormat: fmtCompact, height: 220 })); }
             const g1 = el('div', 'charts-grid');
-            if (has('orders')) { const a = S('orders'); g1.append(barChart({ title: 'Orders', source: 'Shopify orders', yUnit: 'Orders', value: fmtCompact(sumv(a)), labels: L(a), values: V(a), color: '#7c5cd6', format: fmtCompact, height: 230 })); }
+            if (has('orders')) { const a = S('orders'); g1.append(barChart({ title: 'Orders', source: 'Shopify orders', yUnit: 'Orders', value: fmtCompact(sumv(a)), labels: L(a), values: V(a), color: CH[2], format: fmtCompact, height: 230 })); }
             if (has('aov')) { const a = S('aov'); g1.append(trendChart({ title: 'Average order value', source: 'Shopify orders', yUnit: cur, value: money(_avg(V(a))), labels: L(a), series: [{ name: 'AOV', color: CH[1], values: V(a) }], format: money, tickFormat: fmtCompact, height: 230 })); }
             if (g1.children.length) box.append(g1);
 
             // --- Google Analytics 4: sessions, pageviews, channels ---
             const g2 = el('div', 'charts-grid');
             if (has('sessions')) { const a = S('sessions'); g2.append(trendChart({ title: 'Sessions', source: 'Google Analytics 4', yUnit: 'Sessions', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Sessions', color: CH[1], values: V(a) }], format: fmtCompact, height: 230 })); }
-            if (has('pageviews')) { const a = S('pageviews'); g2.append(trendChart({ title: 'Pageviews', source: 'Google Analytics 4', yUnit: 'Views', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Views', color: '#1f5199', values: V(a) }], format: fmtCompact, height: 230 })); }
+            if (has('pageviews')) { const a = S('pageviews'); g2.append(trendChart({ title: 'Pageviews', source: 'Google Analytics 4', yUnit: 'Views', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Views', color: CH[3], values: V(a) }], format: fmtCompact, height: 230 })); }
             if (g2.children.length) box.append(g2);
             if (has('channels')) box.append(catBars({ title: 'Traffic by channel', source: 'Google Analytics 4 (range total)', color: CH[0], items: trends.channels, format: fmtCompact }));
 
             // --- Search Console: clicks, impressions, CTR, position ---
             const g3 = el('div', 'charts-grid');
-            if (has('clicks')) { const a = S('clicks'); g3.append(trendChart({ title: 'Search clicks', source: 'Google Search Console', yUnit: 'Clicks', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Clicks', color: '#0e7c5a', values: V(a) }], format: fmtCompact, height: 230 })); }
+            if (has('clicks')) { const a = S('clicks'); g3.append(trendChart({ title: 'Search clicks', source: 'Google Search Console', yUnit: 'Clicks', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Clicks', color: CH[2], values: V(a) }], format: fmtCompact, height: 230 })); }
             if (has('impressions')) { const a = S('impressions'); g3.append(trendChart({ title: 'Impressions', source: 'Google Search Console', yUnit: 'Impressions', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Impressions', color: CH[0], values: V(a) }], format: fmtCompact, height: 230 })); }
             if (g3.children.length) box.append(g3);
             const g4 = el('div', 'charts-grid');
-            if (has('ctr')) { const a = S('ctr'); g4.append(trendChart({ title: 'Search click-through rate', source: 'Google Search Console', yUnit: 'CTR %', value: pct(_avg(V(a))), labels: L(a), series: [{ name: 'CTR', color: '#8a5a00', values: V(a) }], format: pct, height: 230, annotate: false })); }
+            if (has('ctr')) { const a = S('ctr'); g4.append(trendChart({ title: 'Search click-through rate', source: 'Google Search Console', yUnit: 'CTR %', value: pct(_avg(V(a))), labels: L(a), series: [{ name: 'CTR', color: CH[1], values: V(a) }], format: pct, height: 230, annotate: false })); }
             if (has('position')) { const a = S('position'); g4.append(trendChart({ title: 'Average Google position', source: 'Google Search Console', yUnit: 'Position', value: num1(_avg(V(a))), labels: L(a), series: [{ name: 'Position', color: CH[2], values: V(a) }], format: num1, height: 230, area: false, annotate: false, note: 'Lower is better. Position 1 is the top of search results.' })); }
             if (g4.children.length) box.append(g4);
         }
@@ -3241,11 +3278,11 @@
             const pct = (n) => (Math.round((+n || 0) * 10) / 10) + '%', num1 = (n) => String(Math.round((+n || 0) * 10) / 10);
             const S = (k) => tail(trends[k], range), L = (a) => a.map(p => monthLabel(p.label)), V = (a) => a.map(p => +p.value || 0);
             const g1 = el('div', 'charts-grid');
-            if (has('clicks')) { const a = S('clicks'); g1.append(trendChart({ title: 'Clicks', source: 'Google Search Console', yUnit: 'Clicks', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Clicks', color: '#0e7c5a', values: V(a) }], format: fmtCompact, height: 230 })); }
+            if (has('clicks')) { const a = S('clicks'); g1.append(trendChart({ title: 'Clicks', source: 'Google Search Console', yUnit: 'Clicks', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Clicks', color: CH[2], values: V(a) }], format: fmtCompact, height: 230 })); }
             if (has('impressions')) { const a = S('impressions'); g1.append(trendChart({ title: 'Impressions', source: 'Google Search Console', yUnit: 'Impressions', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Impressions', color: CH[0], values: V(a) }], format: fmtCompact, height: 230 })); }
             box.append(g1);
             const g2 = el('div', 'charts-grid');
-            if (has('ctr')) { const a = S('ctr'); g2.append(trendChart({ title: 'Click-through rate', source: 'Google Search Console', yUnit: 'CTR %', value: pct(_avg(V(a))), labels: L(a), series: [{ name: 'CTR', color: '#8a5a00', values: V(a) }], format: pct, height: 230, annotate: false })); }
+            if (has('ctr')) { const a = S('ctr'); g2.append(trendChart({ title: 'Click-through rate', source: 'Google Search Console', yUnit: 'CTR %', value: pct(_avg(V(a))), labels: L(a), series: [{ name: 'CTR', color: CH[1], values: V(a) }], format: pct, height: 230, annotate: false })); }
             if (has('position')) { const a = S('position'); g2.append(trendChart({ title: 'Average position', source: 'Google Search Console', yUnit: 'Position', value: num1(_avg(V(a))), labels: L(a), series: [{ name: 'Position', color: CH[2], values: V(a) }], format: num1, height: 230, area: false, annotate: false, note: 'Lower is better. Position 1 is the top of search results.' })); }
             if (g2.children.length) box.append(g2);
         }
@@ -3687,14 +3724,21 @@
                 box.append(card);
             }
             if (Array.isArray(data.metrics) && data.metrics.length) {
-                const ctrl = el('div', 'ov-customize');
-                const cust = el('button', 'btn' + (ovEdit ? ' on' : '')); cust.append(ico(I.settings), document.createTextNode(ovEdit ? 'Done' : 'Customize'));
+                /* On a heading rather than floating above the grid on its own.
+                   A control with nothing to its left reads as belonging to
+                   whatever happens to be underneath it, which here was the
+                   first number on the page. */
+                const ctrl = el('div', 'section-title');
+                ctrl.append(el('span', null, 'Key numbers'));
+                if (ovEdit) ctrl.append(el('span', 'ov-cust-hint', 'Use the arrows to reorder, the x to hide.'));
+                const cust = el('button', 'btn btn-sm' + (ovEdit ? ' on' : '')); cust.append(ico(I.settings), document.createTextNode(ovEdit ? 'Done' : 'Customize'));
                 cust.onclick = () => { ovEdit = !ovEdit; renderOverview(overviewCache); };
-                ctrl.append(cust);
                 if (ovEdit) {
-                    const hint = el('span', 'ov-cust-hint', 'Use the arrows to reorder, the x to hide.'); ctrl.insertBefore(hint, cust);
-                    const rst = el('button', 'btn'); rst.textContent = 'Reset'; rst.onclick = () => { ovLayout = { order: [], hidden: [] }; saveOvLayout(); renderOverview(overviewCache); }; ctrl.append(rst);
+                    const rst = el('button', 'btn btn-sm'); rst.textContent = 'Reset';
+                    rst.onclick = () => { ovLayout = { order: [], hidden: [] }; saveOvLayout(); renderOverview(overviewCache); };
+                    ctrl.append(rst);
                 }
+                ctrl.append(cust);
                 box.append(ctrl);
                 box.append(metricsGridCustom(withSparks(data.metrics, data.trends)));
             }
