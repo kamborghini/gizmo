@@ -1017,8 +1017,10 @@ def t_the_inbox_list_can_be_worked_without_a_mouse():
     for name in ("row", "card"):
         ok(name + ".setAttribute('role', 'button'); " + name + ".tabIndex = 0;" in SCRIPT,
            "the mail %s announces itself and can be tabbed to" % name)
-    ok(SCRIPT.count("if (e.target !== row) return;") == 1
-       and SCRIPT.count("if (e.target !== card) return;") == 1,
+    # The mail rows pioneered this guard; the audit pass spread it to every
+    # row in the app, so the count is now "at least", not "exactly one".
+    ok(SCRIPT.count("if (e.target !== row) return;") >= 1
+       and SCRIPT.count("if (e.target !== card) return;") >= 1,
        "the key handler is guarded on target so the row's own checkbox and "
        "Claim keep their Space and Enter")
     ok("e.stopPropagation(); row.click();" in SCRIPT,
@@ -2308,7 +2310,7 @@ def t_every_modal_is_a_dialog_and_tab_stays_inside_it():
     ok("function syncDialogs()" in SCRIPT, "the stamp exists")
     ok("syncToggles(); syncDialogs();" in SCRIPT, "and rides the existing observer")
     ok("m.setAttribute('aria-modal', 'true')" in SCRIPT, "modals say they are modal")
-    fence = SCRIPT.split("if (e.key !== 'Tab') return;")[1][:1200]
+    fence = SCRIPT.split("if (e.key !== 'Tab') return;")[1][:2200]
     ok(".modal-overlay.show, .auth-overlay" in SCRIPT, "the fence covers app modals and the login card")
     ok("e.shiftKey && document.activeElement === first" in fence, "and wraps both directions")
 
@@ -2350,6 +2352,10 @@ def t_every_control_has_a_name_that_survives_typing():
     nameless = []
     for m in _re2.finditer(r"(?:el\('select'|document\.createElement\('select'\))", SCRIPT):
         ctx = SCRIPT[m.start():m.start() + 900]
+        # A name must belong to THIS select: cut the window at the next
+        # select creation, or a neighbour's aria-label vouches for it.
+        nxt = _re2.search(r"(?:el\('select'|document\.createElement\('select'\))", ctx[10:])
+        if nxt: ctx = ctx[:nxt.start() + 10]
         before = SCRIPT[max(0, m.start() - 300):m.start()]
         named = ("aria-label" in ctx or ".title = " in ctx
                  or "crmField(" in ctx or "authField" in before
@@ -2364,9 +2370,9 @@ def t_async_outcomes_are_announced():
     """Both toast hosts (addToast and the undo-print bar) are polite live
     regions now. Before this, every success and failure in the app was silent
     to a screen reader."""
-    ok(SCRIPT.count("host.setAttribute('role', 'status')") == 2,
-       "both toast hosts announce")
-    ok(SCRIPT.count("host.setAttribute('aria-live', 'polite')") == 2,
+    ok(SCRIPT.count("host.setAttribute('role', 'status')") == 3,
+       "the boot-time host and both lazy fallbacks announce")
+    ok(SCRIPT.count("host.setAttribute('aria-live', 'polite')") == 3,
        "politely, so they queue rather than interrupt")
 
 
@@ -2440,6 +2446,10 @@ def t_search_repaints_are_debounced_everywhere():
        "the factory debounces its callers")
     ok("search._t = setTimeout(paintMailBody, 150)" in SCRIPT, "the mail search too")
     ok("q._t = setTimeout(paint, 150)" in SCRIPT, "and the deals search")
+    ok("search._t = setTimeout(drawList, 150)" in SCRIPT, "and the products search")
+    ok("find._t = setTimeout(paint, 150)" in SCRIPT, "and the booked-shipments search")
+    ok("inp.onchange = () => {" in SCRIPT.split("function tableSearch(")[1][:1300],
+       "and a blur or Enter flushes the pending run, so chips cannot act on a stale query")
 
 
 @test
@@ -2459,6 +2469,45 @@ def t_nested_boxes_step_their_radius_down():
     corner. The tables already stepped down; these three shapes had not."""
     ok(".card .insight, .card .empty, .chart-card .empty { border-radius: var(--r-md); }" in CSS,
        "insight and empty boxes step down inside cards")
+
+
+@test
+def t_a_rows_keydown_never_steals_an_inner_controls_keypress():
+    """Found by the adversarial verify pass: Space on the checkbox inside a CRM
+    contact row bubbled to the row, whose preventDefault cancelled the tick and
+    opened the modal instead. Every row-level Enter/Space handler now acts only
+    when the ROW itself is the focused thing."""
+    import re as _re2
+    handlers = _re2.findall(r"addEventListener\('keydown', \((e|ev)\) => \{[^\n]*(?:Enter)[^\n]*\}\);", SCRIPT)
+    hits = _re2.findall(r"addEventListener\('keydown', \((?:e|ev)\) => \{ if \((?:e|ev)\.target !== \w+\) return;", SCRIPT)
+    rowish = _re2.findall(r"(row|tr|r|card)\.(?:addEventListener\('keydown'|onkeydown)", SCRIPT)
+    ok(len(hits) >= 5, "the container handlers carry the target guard (%d)" % len(hits))
+    ok("if (e.target !== card) return;" in SCRIPT, "the deal card too")
+    # The two leaf handlers (the follow-up ticks) have no children to steal from
+    # and legitimately omit the guard.
+
+
+@test
+def t_the_fence_respects_stacking_and_open_menus():
+    """Also from the verify pass: the fence picked its overlay by DOM order, so
+    a session expiring while a modal was open trapped Tab in the invisible
+    modal BEHIND the opaque login screen. And an open dropdown manages its own
+    keys, so the fence stands down for it."""
+    fence = SCRIPT.split("if (e.key !== 'Tab') return;")[1][:1600]
+    ok("tops.find(o => o.classList.contains('auth-overlay'))" in fence,
+       "the login screen wins whenever it is up")
+    ok("if (document.querySelector('.dmenu')) return;" in fence,
+       "and an open menu is left to its own keys")
+
+
+@test
+def t_the_live_region_predates_the_first_toast():
+    """Content that arrives together with a brand-new live region is
+    unreliably announced. The host is created at boot now, empty, so the first
+    toast mutates an established region."""
+    boot = SCRIPT.split("$('menu-btn').onclick = openSidebar")[0][-700:]
+    ok("host.setAttribute('aria-live', 'polite')" in boot,
+       "the region exists before anything can toast")
 
 
 if __name__ == "__main__":

@@ -2816,10 +2816,17 @@
             /* Debounced 150ms: these callbacks repaint whole lists, and the
                file browser measured 1,912ms of blocked JS per keystroke on a
                broad term before its own debounce went in. */
-            if (oninput) inp.oninput = () => {
-                clearTimeout(inp._t);
-                inp._t = setTimeout(() => oninput(inp.value.trim()), 150);
-            };
+            if (oninput) {
+                inp.oninput = () => {
+                    clearTimeout(inp._t);
+                    inp._t = setTimeout(() => oninput(inp.value.trim()), 150);
+                };
+                /* Blur or Enter flushes the pending run, so clicking a filter
+                   chip right after typing cannot act on a stale query. */
+                inp.onchange = () => {
+                    if (inp._t) { clearTimeout(inp._t); inp._t = null; oninput(inp.value.trim()); }
+                };
+            }
             wrap.append(inp);
             wrap.input = inp;
             return wrap;
@@ -4366,7 +4373,7 @@
             const tools = el('div', 'ptools');
             const row1 = el('div', 'row1');
             const search = el('input', 'psel grow'); search.placeholder = 'Search products…'; search.setAttribute('aria-label', 'Search products'); search.value = pState.q;
-            search.addEventListener('input', () => { pState.q = search.value; drawList(); });
+            search.addEventListener('input', () => { pState.q = search.value; clearTimeout(search._t); search._t = setTimeout(drawList, 150); });
             row1.append(search);
             row1.append(segControl([{ label: '1M', value: 1 }, { label: '3M', value: 3 }, { label: '6M', value: 6 }, { label: '12M', value: 12 }, { label: 'All', value: 'all' }, { label: 'Custom', value: 'custom' }], pState.period, v => { pState.period = v; rerender(); }));
             const sort = el('select', 'psel'); sort.setAttribute('aria-label', 'Sort products');
@@ -4403,7 +4410,7 @@
             fp.append(numField('Min units', pState.minUnits, v => pState.minUnits = v));
             fp.append(dateField('Created after', pState.createdAfter, v => pState.createdAfter = v));
             fp.append(dateField('Created before', pState.createdBefore, v => pState.createdBefore = v));
-            const tf = el('div', 'pfield'); tf.append(el('label', null, 'Tag')); const tagIn = el('input', 'psel'); tagIn.placeholder = 'exact tag'; if (pState.tag) tagIn.value = pState.tag; tagIn.oninput = () => { pState.tag = tagIn.value; drawList(); pchips(); }; tf.append(tagIn); fp.append(tf);
+            const tf = el('label', 'pfield'); tf.append(el('span', null, 'Tag')); const tagIn = el('input', 'psel'); tagIn.placeholder = 'exact tag'; if (pState.tag) tagIn.value = pState.tag; tagIn.oninput = () => { pState.tag = tagIn.value; drawList(); pchips(); }; tf.append(tagIn); fp.append(tf);
             tools.append(fp);
             box.append(tools);
 
@@ -5142,7 +5149,7 @@
                     const key = c.name;
                     const row = el('div', 'lbl-row' + (liaOpen === key ? ' on' : ''));
                     row.setAttribute('role', 'button'); row.tabIndex = 0;
-                    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
+                    row.addEventListener('keydown', (e) => { if (e.target !== row) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
                     row.append(el('div', 'lia-name', c.name));
                     const mid = el('div', 'lbl-who');
                     const line = el('span', 'lbl-nameline');
@@ -5706,7 +5713,7 @@
             ex.forEach(e => {
                 const r = el('div', 'lbl-row');
                 r.setAttribute('role', 'button'); r.tabIndex = 0;
-                r.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); r.click(); } });
+                r.addEventListener('keydown', (ev) => { if (ev.target !== r) return; if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); r.click(); } });
                 const [lab, cls] = RECON_SEV[e.severity] || ['?', 'note'];
                 r.append(el('span', 'lbl-chip ' + cls, lab));
                 const mid = el('div', 'lbl-who');
@@ -6469,7 +6476,7 @@
                 });
                 host.append(list);
             };
-            find.oninput = () => { customQ = find.value; paint(); };
+            find.oninput = () => { customQ = find.value; clearTimeout(find._t); find._t = setTimeout(paint, 150); };
             host.append((() => { const t = el('div', 'thinking');
                 t.append(loader(), el('span', null, 'Reading booked shipments…')); return t; })());
             try {
@@ -6750,7 +6757,7 @@
                 const staleStatus = dispatched && o.status === 'fulfilled' ? '' : o.status;
                 const row = el('div', 'lbl-row lbl-qrow' + (labelSel === o.id ? ' on' : '') + (staleStatus || (st.made_at && !dispatched) ? ' stale' : ''));
                 row.setAttribute('role', 'button'); row.tabIndex = 0;
-                row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
+                row.addEventListener('keydown', (e) => { if (e.target !== row) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
                 row.append(orderA(orderNo(o), o.admin_url, 'lbl-num lbl-num-link'));
                 const who = el('div', 'lbl-who');
                 const nameLine = el('span', 'lbl-nameline');
@@ -10714,6 +10721,7 @@
                 + (x.activity_state === 'none' ? ', no next activity scheduled'
                    : x.activity_state === 'overdue' ? ', next activity overdue' : ''));
             card.onkeydown = (e) => {
+                if (e.target !== card) return;
                 if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); crmDealModal(x.id); }
             };
             return card;
@@ -11665,7 +11673,10 @@
                 items.slice(from, from + crmContactsSize).forEach(c => {
                     const tr = el('tr', 'crm-list-row');
                     tr.setAttribute('role', 'button'); tr.tabIndex = 0;
-                    tr.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); tr.click(); } });
+                    /* Only when the ROW itself is focused: a bubbled Space from the
+                       selection checkbox inside this row is the checkbox's keypress,
+                       and swallowing it opened the modal instead of ticking the box. */
+                    tr.addEventListener('keydown', (ev) => { if (ev.target !== tr) return; if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); tr.click(); } });
                     if (master) {
                         const cell = el('td', 'tick');
                         const cb = document.createElement('input');
@@ -12062,7 +12073,7 @@
             leads.forEach(l => {
                 const row = el('div', 'lbl-row');
                 row.setAttribute('role', 'button'); row.tabIndex = 0;
-                row.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); row.click(); } });
+                row.addEventListener('keydown', (ev) => { if (ev.target !== row) return; if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); row.click(); } });
                 const left = el('div', 'lia-name');
                 if (!l.seen && !l.archived) left.append(el('span', 'crm-new-dot'));
                 const t = el('span', null, ' ' + l.title);
@@ -14760,7 +14771,7 @@
                 const [fn, inName] = authField('Your name', 'text', 'au-name');
                 const [fu, inUser] = authField('Username', 'text', 'au-user');
                 const [fp, inPw] = authField('Password (8 characters or more)', 'password', 'au-pw');
-                inPw.autocomplete = 'new-password';
+                inPw.autocomplete = 'new-password'; inPw.name = 'new-password';
                 const go = el('button', 'btn btn-primary auth-go', 'Create the master account');
                 [inName, inUser, inPw].forEach(i => i.onkeydown = e => { if (e.key === 'Enter') go.click(); });
                 go.onclick = async () => {
@@ -14777,7 +14788,7 @@
                         + 'own before carrying on; nobody else ever sees it.'));
                 const [fc, inCur] = authField('Current password', 'password', 'au-cur');
                 const [fp, inNew] = authField('New password (8 characters or more)', 'password', 'au-new');
-                inNew.autocomplete = 'new-password';
+                inNew.autocomplete = 'new-password'; inNew.name = 'new-password';
                 const go = el('button', 'btn btn-primary auth-go', 'Save my password');
                 [inCur, inNew].forEach(i => i.onkeydown = e => { if (e.key === 'Enter') go.click(); });
                 go.onclick = async () => {
@@ -15322,9 +15333,16 @@
            over here, because Escape is deliberately not a way out. */
         document.addEventListener('keydown', (e) => {
             if (e.key !== 'Tab') return;
+            /* An open menu manages its own keys and closes on any outside
+               press; the fence stands down rather than yanking Tab out of it. */
+            if (document.querySelector('.dmenu')) return;
             const tops = [...document.querySelectorAll('.modal-overlay.show, .auth-overlay')]
                 .filter(o => o.getClientRects().length);
-            const top = tops[tops.length - 1];
+            /* Stacking order, not DOM order: the login screen sits at z-200
+               over everything, so when it is up - a session expiring with a
+               modal open - it is the one Tab must serve, not the modal
+               behind it. */
+            const top = tops.find(o => o.classList.contains('auth-overlay')) || tops[tops.length - 1];
             if (!top) return;
             const focusables = [...top.querySelectorAll(
                 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
@@ -15339,6 +15357,13 @@
             const t = e.target;
             if (t && t.classList && t.classList.contains('toggle') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); t.click(); }
         });
+        /* The live region must exist BEFORE the first toast: content that
+           arrives together with a brand-new region is unreliably announced. */
+        (function () {
+            const host = el('div'); host.id = 'toast-host';
+            host.setAttribute('role', 'status'); host.setAttribute('aria-live', 'polite');
+            document.body.append(host);
+        })();
         $('menu-btn').onclick = openSidebar; $('backdrop').onclick = closeSidebar;
         // A drop that misses its target must never let the browser navigate to
         // the dropped file: that would replace the whole app mid-task.
