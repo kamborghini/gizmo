@@ -2964,6 +2964,95 @@ def t_no_borderless_strip_is_sliced_by_someone_elses_border():
        "it wraps, so every person is whole and nothing meets an edge it should not")
 
 
+# --- Web Interface Guidelines pass ------------------------------------------
+
+@test
+def t_decorative_icons_are_hidden_from_assistive_tech():
+    """Every icon in the app comes out of one factory, so the attribute belongs
+    there rather than at hundreds of call sites. The control around an icon
+    carries the name; an icon that announced itself would read it twice."""
+    sv = re.search(r"const SV = \(inner\) => '(<svg[^']*)'", SCRIPT)
+    ok(sv, "the icon factory is still there")
+    ok('aria-hidden="true"' in sv.group(1), "icons are hidden from assistive tech")
+    ok('focusable="false"' in sv.group(1),
+       "and kept out of the tab order, which some engines still put them in")
+
+
+@test
+def t_every_mail_row_checkbox_says_which_email_it_is():
+    """Nineteen of these sit on the board and every one announced as a bare
+    "checkbox", which makes bulk claiming unusable without sight of the screen."""
+    seg = SCRIPT.split("cb.type = 'checkbox'; cb.className = 'mail-check';")[1][:400]
+    ok("setAttribute('aria-label'" in seg, "the row checkbox is named")
+    ok("t.subject" in seg and "t.from_name" in seg,
+       "by the email it belongs to, not a generic string")
+
+
+@test
+def t_money_is_formatted_by_intl_and_survives_a_bad_currency_code():
+    """There were two money formatters and they disagreed: one printed
+    "12,480 GBP", the other "£18,620" from a hand-written symbol map that knew
+    three currencies - so a yen order read as "JPY 1,234.00". One formatter now,
+    and Intl knows every code and where the symbol goes.
+
+    The constructor THROWS on a malformed code, and a bad code off an order must
+    not take the page down with it."""
+    ok("new Intl.NumberFormat" in SCRIPT, "currency goes through Intl")
+    seg = SCRIPT.split("function moneyFmt(")[1][:700]
+    ok("try {" in seg and "catch" in seg, "a malformed code is caught")
+    ok("/^[A-Z]{3}$/" in seg, "and only a real 3-letter code asks for currency style")
+    ok("const fmtMoney = (n, cur) => money(n, cur, 0);" in SCRIPT,
+       "and both old formatters now share the one implementation")
+    ok("{ GBP: '\\u00a3', USD: '$', EUR: '\\u20ac' }" not in SCRIPT,
+       "the hand-written symbol map is gone")
+
+
+@test
+def t_the_skills_captions_are_real_labels():
+    """They were sibling <label>s with no `for`: visible text that named nothing,
+    so both fields announced as bare inputs."""
+    ok(SCRIPT.count("el('label', 'sk-field')") == 4,
+       "both skills forms wrap each of their two fields in the label")
+    ok("el('div', 'sk-field')" not in SCRIPT, "and no orphan caption is left")
+
+
+@test
+def t_there_is_a_way_past_the_sidebar():
+    """Sixteen nav items sit between the top of the page and the content on
+    every view."""
+    ok('class="skip-link" href="#main"' in HTML, "a skip link is the first thing in the tab order")
+    ok('id="main"' in HTML and 'tabindex="-1"' in HTML, "and it has somewhere to land")
+    rule = CSS.split(".skip-link {")[1].split("}")[0]
+    ok("translateY(-200%)" in rule, "hidden until focused")
+    ok(".skip-link:focus" in CSS, "and shown when it is")
+
+
+@test
+def t_what_is_pinned_to_an_edge_clears_the_notch():
+    """A bar at bottom: 0 lands under the home indicator. env() is 0 on hardware
+    with neither, so this costs nothing on a desktop."""
+    for sel in (r"\.crm-dropbar", r"\.build-bar", r"#toast-host"):
+        # Anchored at a line start: #toast-host also appears in a print rule
+        # that switches it off, and that one has no edge to clear.
+        rule = re.search(r"^\s*" + sel + r" \{([^}]*)\}", CSS, re.M)
+        ok(rule and "safe-area-inset" in rule.group(1),
+           "%s clears the safe area" % sel)
+    ok('name="theme-color"' in HTML, "and the browser chrome matches the page")
+
+
+@test
+def t_a_half_written_skill_is_not_lost_on_close():
+    """The one thing here worth minutes of typing, and it lives only in the field
+    until Save. Dirty is computed from the DOM against what each field was
+    RENDERED with, so there is no flag to go stale and opening a skill to read
+    it does not prompt."""
+    ok("beforeunload" in SCRIPT, "closing with unsaved work asks first")
+    seg = SCRIPT.split("beforeunload")[1][:520]
+    ok("dataset.initial" in seg, "measured against the rendered value, not emptiness")
+    ok(SCRIPT.count("dataset.initial =") == 4,
+       "and all four skills fields stamp what they started as")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

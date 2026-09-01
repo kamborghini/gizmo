@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#ffffff" />
     <!--APPBRIDGE-->
     <title>Store Copilot</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -686,8 +687,8 @@
         .skill-form { padding: 16px 16px 12px; margin-bottom: 20px; }
         .sk-form-title { font-size: var(--t-md); font-weight: var(--w-medium); margin: 0 0 13px; display: flex; align-items: center; gap: 8px; }
         .sk-form-title svg { width: 15px; height: 15px; color: var(--accent-ink); }
-        .sk-field { margin-bottom: 12px; }
-        .sk-field label { display: block; font-size: var(--t-xs); font-weight: var(--w-medium); text-transform: none; letter-spacing: normal; color: var(--ink-3); margin-bottom: 4px; }
+        .sk-field { display: block; margin-bottom: 12px; }
+        .sk-field > span { display: block; font-size: var(--t-xs); font-weight: var(--w-medium); text-transform: none; letter-spacing: normal; color: var(--ink-3); margin-bottom: 4px; }
         .sk-input, .sk-textarea { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--ink); font: inherit; font-size: var(--t-md); padding: 5px 12px; min-height: 32px; line-height: 20px; transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
         .sk-input:focus, .sk-textarea:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus); }
         .sk-textarea { resize: vertical; min-height: 104px; line-height: 1.55; }
@@ -1019,6 +1020,14 @@
             overflow-y: auto; margin: var(--sp-2) 0; }
         .sr-hit { justify-content: flex-start; text-align: left; width: 100%; }
         .sr-hit.on { border-color: var(--accent); background: var(--surface-2); }
+        /* Off-screen until it takes focus, which is the only time it is for. */
+        .skip-link { position: fixed; top: 8px; left: 8px; z-index: 300;
+            transform: translateY(-200%); transition: transform var(--dur) var(--ease);
+            background: var(--surface); color: var(--ink); border: 1px solid var(--border);
+            border-radius: var(--r-sm); padding: 8px 12px; font-size: var(--t-md);
+            font-weight: var(--w-medium); text-decoration: none; box-shadow: var(--sh-2); }
+        .skip-link:focus { transform: translateY(0); }
+        #main:focus { outline: none; }
         .beta-tag { margin-left: auto; flex: none; font-size: var(--t-xs); font-weight: var(--w-medium);
             letter-spacing: normal; text-transform: none; color: var(--ink-3);
             background: var(--surface-3); border: 1px solid var(--border);
@@ -1269,8 +1278,13 @@
             .mail-owner, .mcount { display: none; }
         }
         .crm-ai.future { color: var(--ink-3); }
+        /* Anything pinned to a viewport edge clears the notch and the home
+           indicator. env() is 0 on hardware that has neither, so this costs
+           nothing on a desktop. */
         .crm-dropbar { position: fixed; left: 0; right: 0; bottom: 0; display: none; gap: var(--sp-2);
-            padding: var(--sp-3) var(--sp-4); background: var(--surface); border-top: 1px solid var(--border);
+            padding: var(--sp-3) var(--sp-4);
+            padding-bottom: calc(var(--sp-3) + env(safe-area-inset-bottom, 0px));
+            background: var(--surface); border-top: 1px solid var(--border);
             box-shadow: var(--sh-2); z-index: 60; }
         .crm-dropbar.show { display: flex; }
         .crm-zone { flex: 1; text-align: center; padding: var(--sp-4) 0; border-radius: var(--r-sm);
@@ -1933,7 +1947,9 @@
         /* ---------- Responsive ---------- */
         .backdrop { display: none; }
         @media (max-width: 760px) {
-            .sidebar { position: fixed; z-index: 30; height: 100%; box-shadow: var(--sh-2); margin-left: -272px; }
+            .sidebar { position: fixed; z-index: 30; height: 100%; box-shadow: var(--sh-2); margin-left: -272px;
+                padding-top: env(safe-area-inset-top, 0px);
+                padding-bottom: env(safe-area-inset-bottom, 0px); }
             .sidebar.open { margin-left: 0; }
             .backdrop.show { display: block; position: fixed; inset: 0; background: rgba(26,26,26,.32); z-index: 20; }
             .menu-btn { display: inline-grid; }
@@ -1950,7 +1966,9 @@
         .modal-head { display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border); }
         .modal-head h3 { margin: 0; font-size: var(--t-lg); font-weight: var(--w-bold); flex: 1; letter-spacing: -.02em; }
         .modal-body { padding: 20px; overflow-y: auto; }
-        #toast-host { position: fixed; top: 14px; right: 14px; z-index: 100; display: flex;
+        #toast-host { position: fixed; z-index: 100; display: flex;
+            top: calc(14px + env(safe-area-inset-top, 0px));
+            right: calc(14px + env(safe-area-inset-right, 0px));
             flex-direction: column; gap: 8px; max-width: min(430px, 92vw); }
         /* Files: preview + selection */
         .fprev-body { text-align: center; }
@@ -2095,7 +2113,9 @@
         /* Says the tab is out of date. Deliberately a bar and not a dialog, and
            BELOW the modal layer (50) on purpose: a booking window must never be
            covered by a notice about versions. It never reloads on its own. */
-        .build-bar { position: fixed; left: 16px; bottom: 16px; z-index: 40; max-width: 460px;
+        .build-bar { position: fixed; z-index: 40; max-width: 460px;
+            left: calc(16px + env(safe-area-inset-left, 0px));
+            bottom: calc(16px + env(safe-area-inset-bottom, 0px));
             display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap;
             background: var(--surface); border: 1px solid var(--border-2); border-left: 3px solid var(--accent);
             border-radius: var(--r-sm); padding: 12px 14px; box-shadow: var(--sh-2);
@@ -2138,6 +2158,9 @@
     </style>
 </head>
 <body>
+    <!-- First thing in the tab order: sixteen nav items sit between the
+         top of the page and the content on every single view. -->
+    <a class="skip-link" href="#main">Skip to content</a>
     <div id="app">
         <aside class="sidebar" id="sidebar">
             <div class="brand"><span class="logo" id="ic-logo"></span> Store Copilot</div>
@@ -2171,21 +2194,21 @@
             <button class="nav-refresh" id="refresh-all" title="Refresh all reports"></button>
             <button class="nav-ask" id="ask-feature" title="Ask for something the app cannot do yet"></button>
             <div class="convo-head"><span>Conversations</span>
-                <button class="icon-btn" id="new-convo" title="New chat"></button></div>
+                <button class="icon-btn" id="new-convo" title="New chat" aria-label="New chat"></button></div>
             <div class="convos" id="convos"></div>
             <div class="side-foot"><span class="dot"></span><span class="auth-account" id="auth-account"></span>
                 <button class="btn" id="clock-btn" style="display:none;margin-left:auto"></button>
-                <button class="icon-btn" id="logout-btn" title="Log out"></button>
-                <button class="icon-btn" id="settings-btn" title="Settings"></button></div>
+                <button class="icon-btn" id="logout-btn" title="Log out" aria-label="Log out"></button>
+                <button class="icon-btn" id="settings-btn" title="Settings" aria-label="Settings"></button></div>
         </aside>
         <div class="backdrop" id="backdrop"></div>
 
-        <main class="main">
+        <main class="main" id="main" tabindex="-1">
             <div class="topbar">
-                <button class="icon-btn menu-btn" id="menu-btn" title="Menu"></button>
+                <button class="icon-btn menu-btn" id="menu-btn" title="Menu" aria-label="Menu"></button>
                 <h1 id="view-title">Overview</h1>
                 <div class="spacer"></div>
-                <button class="icon-btn" id="print-btn" title="Download as PDF"></button>
+                <button class="icon-btn" id="print-btn" title="Download as PDF" aria-label="Download as PDF"></button>
                 <button class="btn" id="topbar-action"></button>
             </div>
             <div class="print-head" id="print-head"><span class="ph-brand">Store Copilot</span><span class="ph-meta" id="print-meta"></span></div>
@@ -2270,7 +2293,7 @@
                     <div class="composer">
                         <div class="box">
                             <textarea id="input" rows="1" placeholder="Ask about your store…"></textarea>
-                            <button class="send" id="send" title="Send"></button>
+                            <button class="send" id="send" title="Send" aria-label="Send"></button>
                         </div>
                         <div class="row">
                             <div class="toggle" id="deep-toggle"><span class="sw"></span> Deep analysis</div>
@@ -2289,7 +2312,7 @@
         <div class="modal">
             <div class="modal-head">
                 <h3>Settings</h3>
-                <button class="icon-btn" id="settings-close" title="Close"></button>
+                <button class="icon-btn" id="settings-close" title="Close" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <div class="section-title" style="margin: 0 0 var(--sp-2);">Store profile</div>
@@ -2355,7 +2378,12 @@
     (function () {
         /* ---------- icons (constant SVG; safe to inject) ---------- */
         // Feather Icons (https://feathericons.com), inlined so there are no extra requests.
-        const SV = (inner) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+        /* aria-hidden on the factory, so it holds for every icon in the app
+           rather than at hundreds of call sites. These are all decorative: the
+           control around them carries the name, and an icon that announced
+           itself would just read the name twice. focusable="false" keeps them
+           out of the tab order, which some engines still put them in. */
+        const SV = (inner) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + inner + '</svg>';
         const I = {
             mail: SV('<rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>'),
             clip: SV('<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>'),
@@ -4445,7 +4473,41 @@
         /* ---------- products ---------- */
         let productList = null;   // full /api/products payload (or demo)
         let productListAt = null; // when it was fetched, for the freshness stamp
-        const fmtMoney = (n, cur) => Math.round(n || 0).toLocaleString() + (cur ? (' ' + cur) : '');
+        /* One currency formatter for the whole app. There were two, and they
+           disagreed: this one printed "12,480 GBP" while the Liability page
+           printed "£18,620" from a hand-written symbol map that knew GBP, USD
+           and EUR and nothing else - so a yen or krona order read as
+           "JPY 1,234.00". Intl knows every code, and where the symbol goes.
+
+           Cached per code+precision because a NumberFormat is expensive to
+           build and these run per row. An unknown or malformed code makes the
+           constructor THROW, so that is caught once and remembered as null:
+           a bad code from an order must not take the page down, it just falls
+           back to the plain number and the code beside it. */
+        const _moneyFmts = {};
+        function moneyFmt(cur, dp) {
+            const code = String(cur || '').trim().toUpperCase();
+            const key = code + '|' + dp;
+            if (!(key in _moneyFmts)) {
+                let f = null;
+                try {
+                    f = new Intl.NumberFormat(undefined, Object.assign(
+                        { minimumFractionDigits: dp, maximumFractionDigits: dp },
+                        /^[A-Z]{3}$/.test(code) ? { style: 'currency', currency: code } : {}));
+                } catch (e) { f = null; }
+                _moneyFmts[key] = f;
+            }
+            return _moneyFmts[key];
+        }
+        function money(n, cur, dp) {
+            const v = Number(n) || 0;
+            dp = dp === 0 ? 0 : (dp == null ? 0 : dp);
+            const f = moneyFmt(cur, dp);
+            if (f) return f.format(v);
+            return v.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })
+                + (cur ? (' ' + cur) : '');
+        }
+        const fmtMoney = (n, cur) => money(n, cur, 0);
         const pState = { q: '', status: '', stock: '', vendor: '', type: '', tag: '', priceMin: null, priceMax: null, minRev: null, minUnits: null, createdAfter: '', createdBefore: '', sort: 'revenue_desc', period: 12, customFrom: null, customTo: null, compare: false, showFilters: false };
         async function loadProducts(force) {
             const box = $('products-content');
@@ -4605,7 +4667,7 @@
             fp.append(numField('Min units', pState.minUnits, v => pState.minUnits = v));
             fp.append(dateField('Created after', pState.createdAfter, v => pState.createdAfter = v));
             fp.append(dateField('Created before', pState.createdBefore, v => pState.createdBefore = v));
-            const tf = el('label', 'pfield'); tf.append(el('span', null, 'Tag')); const tagIn = el('input', 'psel'); tagIn.placeholder = 'exact tag'; if (pState.tag) tagIn.value = pState.tag; tagIn.oninput = () => { pState.tag = tagIn.value; drawList(); pchips(); }; tf.append(tagIn); fp.append(tf);
+            const tf = el('label', 'pfield'); tf.append(el('span', null, 'Tag')); const tagIn = el('input', 'psel'); tagIn.placeholder = 'e.g. trade'; if (pState.tag) tagIn.value = pState.tag; tagIn.oninput = () => { pState.tag = tagIn.value; drawList(); pchips(); }; tf.append(tagIn); fp.append(tf);
             tools.append(fp);
             box.append(tools);
 
@@ -4977,11 +5039,11 @@
         function skillForm() {
             const card = el('div', 'card skill-form');
             const t = el('div', 'sk-form-title'); t.append(ico(I.plus), document.createTextNode('Add a skill')); card.append(t);
-            const f1 = el('div', 'sk-field'); f1.append(el('label', null, 'Skill title'));
-            const ti = el('input', 'sk-input'); ti.maxLength = SKILL_TITLE_MAX; ti.placeholder = 'e.g. Black Friday promo playbook';
+            const f1 = el('label', 'sk-field'); f1.append(el('span', null, 'Skill title'));
+            const ti = el('input', 'sk-input'); ti.maxLength = SKILL_TITLE_MAX; ti.placeholder = 'e.g. Black Friday promo playbook'; ti.dataset.initial = '';
             f1.append(ti); card.append(f1);
-            const f2 = el('div', 'sk-field'); f2.append(el('label', null, 'Skill details'));
-            const bo = el('textarea', 'sk-textarea'); bo.maxLength = SKILL_BODY_MAX; bo.placeholder = 'Paste or type the instructions, rules, or reference text the copilot should follow. Plain text works best.';
+            const f2 = el('label', 'sk-field'); f2.append(el('span', null, 'Skill details'));
+            const bo = el('textarea', 'sk-textarea'); bo.maxLength = SKILL_BODY_MAX; bo.placeholder = 'Paste or type the instructions, rules, or reference text the copilot should follow. Plain text works best.'; bo.dataset.initial = '';
             f2.append(bo); card.append(f2);
             const row = el('div', 'sk-form-row');
             const fileBtn = el('button', 'btn ghost'); fileBtn.type = 'button'; fileBtn.textContent = 'Load from file';
@@ -5033,11 +5095,11 @@
         function skillEditor(s) {
             const card = el('div', 'card skill-form');
             const t = el('div', 'sk-form-title'); t.append(ico(I.edit), document.createTextNode('Edit skill')); card.append(t);
-            const f1 = el('div', 'sk-field'); f1.append(el('label', null, 'Skill title'));
-            const ti = el('input', 'sk-input'); ti.maxLength = SKILL_TITLE_MAX; ti.value = s.title || '';
+            const f1 = el('label', 'sk-field'); f1.append(el('span', null, 'Skill title'));
+            const ti = el('input', 'sk-input'); ti.maxLength = SKILL_TITLE_MAX; ti.value = s.title || ''; ti.dataset.initial = ti.value;
             f1.append(ti); card.append(f1);
-            const f2 = el('div', 'sk-field'); f2.append(el('label', null, 'Skill details'));
-            const bo = el('textarea', 'sk-textarea'); bo.maxLength = SKILL_BODY_MAX; bo.value = s.content || '';
+            const f2 = el('label', 'sk-field'); f2.append(el('span', null, 'Skill details'));
+            const bo = el('textarea', 'sk-textarea'); bo.maxLength = SKILL_BODY_MAX; bo.value = s.content || ''; bo.dataset.initial = bo.value;
             f2.append(bo); card.append(f2);
             const row = el('div', 'sk-form-row');
             const cancel = el('button', 'btn'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.onclick = () => { skillEditId = null; renderSkills(); };
@@ -5058,11 +5120,10 @@
         let liabilityCache = null;   // { data, at }
         let liaOpen = null;          // expanded customer key
         const liaF = { q: '', status: 'all', terms: 'all', channel: 'all', from: '', to: '', dateField: 'created_at', min: '', sort: 'overdue' };
-        function liaMoney(n, cur, dp) {
-            const sym = { GBP: '\u00a3', USD: '$', EUR: '\u20ac' }[cur] || (cur + ' ');
-            return sym + Number(n || 0).toLocaleString('en-GB',
-                { minimumFractionDigits: dp === 0 ? 0 : 2, maximumFractionDigits: dp === 0 ? 0 : 2 });
-        }
+        /* Was a three-entry symbol map and a hardcoded en-GB grouping. Now the
+           same shared formatter as everywhere else, so a non-GBP order reads
+           the way that currency is actually written. */
+        function liaMoney(n, cur, dp) { return money(n, cur, dp === 0 ? 0 : 2); }
         function showLiabilityView() {
             if (liabilityCache) { renderLiability(); return; }
             loadLiability(true);
@@ -6893,7 +6954,7 @@
             bar.append(newShip);
             const find = document.createElement('input');
             find.type = 'search'; find.className = 'lbl-size lbl-find';
-            find.placeholder = 'Search reference, name or tracking';
+            find.placeholder = 'Search reference, name or tracking…';
             find.setAttribute('aria-label', 'Search reference, name or tracking');
             find.value = customQ;
             bar.append(find);
@@ -7108,7 +7169,7 @@
             oldf.title = 'Flip the queue order';
             oldf.onclick = () => { labelsOldest = !labelsOldest; renderLabels(); };
             bar.append(oldf);
-            const sizeSel = el('select', 'lbl-size'); sizeSel.title = 'Label stock size';
+            const sizeSel = el('select', 'lbl-size'); sizeSel.title = 'Label stock size'; sizeSel.setAttribute('aria-label', 'Label stock size');
             Object.keys(LABEL_SIZES).forEach(k => {
                 const opt = el('option', null, LABEL_SIZES[k].label); opt.value = k;
                 if (k === labelSize) opt.selected = true;
@@ -7491,7 +7552,7 @@
                 const f = el('label', 'pfield');
                 f.append(el('span', null, 'Search the size list'));
                 const q = el('input', 'psel'); q.type = 'text';
-                q.placeholder = 'start typing a model on the list';
+                q.placeholder = 'Start typing a model on the list…';
                 f.append(q); pane.append(f);
                 const hits = el('div', 'sr-hits'); pane.append(hits);
                 targetLine = el('div', 'field-help'); pane.append(targetLine);
@@ -13314,7 +13375,7 @@
                 const c = el('div', 'mail-who-card');
                 if (m.uid === d.me) {
                     const pick = document.createElement('select');
-                    pick.className = 'mail-presence-pick'; pick.title = 'Where are you working today?';
+                    pick.className = 'mail-presence-pick'; pick.title = 'Where are you working today?'; pick.setAttribute('aria-label', 'Where are you working today?');
                     [['office', 'In office'], ['home', 'At home'], ['out', 'Out']].forEach(([v, lab]) => {
                         const o = document.createElement('option');
                         o.value = v; o.textContent = lab; if ((m.presence || 'office') === v) o.selected = true;
@@ -13444,6 +13505,7 @@
             all.type = 'checkbox'; all.className = 'mail-check';
             all.checked = rows.length > 0 && rows.every(t => mailSel.has(t.id));
             all.title = 'Select everything shown';
+            all.setAttribute('aria-label', 'Select everything shown');
             all.onchange = () => {
                 rows.forEach(t => all.checked ? mailSel.add(t.id) : mailSel.delete(t.id));
                 paintMailBody();
@@ -13666,6 +13728,11 @@
                 + (mailSel.has(t.id) ? ' selected' : ''));
             const cb = document.createElement('input');
             cb.type = 'checkbox'; cb.className = 'mail-check';
+            /* Names the row it belongs to. Nineteen of these sit on the board and
+               every one of them announced as a bare "checkbox", which makes the
+               whole bulk-claim flow unusable without sight of the screen. */
+            cb.setAttribute('aria-label', 'Select: ' + (t.subject || '(no subject)')
+                + (t.from_name ? ' from ' + t.from_name : ''));
             cb.checked = mailSel.has(t.id);
             if (t.archive) { cb.disabled = true; cb.title = 'Older than the board keeps'; }
             cb.onclick = (e) => e.stopPropagation();
@@ -16398,6 +16465,18 @@
         loadAlerts();         // any change alerts from scheduled refreshes
 
         // Demo hook for visual testing (no data exposed).
+        /* A skill body is the one thing here worth minutes of typing, and it
+           lives only in the field until Save. Dirty is computed from the DOM
+           against what each field was RENDERED with, so there is no flag to go
+           stale and opening a skill to read it does not prompt. The browser
+           only honours this after the person has interacted with the page. */
+        window.addEventListener('beforeunload', (e) => {
+            const dirty = [...document.querySelectorAll('.sk-input, .sk-textarea')]
+                .some(f => f.getClientRects().length && f.value !== (f.dataset.initial || ''));
+            if (!dirty) return;
+            e.preventDefault();
+            e.returnValue = '';       // Chrome still wants this set
+        });
         window.__demo = function (sample, ov) {
             setView('chat'); newConvo(false);
             active().turns.push({ role: 'user', text: 'How did my store do this week?' });
