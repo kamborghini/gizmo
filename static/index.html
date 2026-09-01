@@ -290,6 +290,20 @@
                see on load. The bottom keeps 40 so a long scroll does not
                end flush against the viewport. */
             padding: var(--sp-6) var(--wrap-pad) var(--sp-8); }
+        /* ONE RHYTHM DOWN THE PAGE. The reference stacks its content in a single
+           flex column at gap-6, so every block on a page is separated by exactly
+           24px. gizmo's blocks each carried their own bottom margin and arrived
+           at 4, 12, 14, 16, 20 and 24 - six values doing one job, which is what
+           makes a page look unconsidered even when nothing is obviously wrong.
+
+           :not(.run-gate) lifts this above the single-class component rules so
+           it actually wins, and spares the centred empty state its 7vh.
+           A .section-title keeps its asymmetry deliberately: 24 above from the
+           block before it, 12 below, because a label belongs to the thing under
+           it rather than sitting midway between two. */
+        .ov-wrap > *:not(.run-gate) { margin-top: 0; margin-bottom: var(--sp-6); }
+        .ov-wrap > .section-title { margin-bottom: var(--sp-3); }
+        .ov-wrap > *:last-child { margin-bottom: 0; }
         /* Body copy inside any tab: measured, never the full wrap.
            The cap is written in ch HERE rather than held in a custom property,
            because ch resolves against the font size of whatever element uses
@@ -346,6 +360,7 @@
         @media (max-width: 640px) {
             /* 32px gutters spend 64px of a 390px screen on nothing. */
             .ov-wrap { padding: var(--sp-4) var(--sp-4) 56px; }
+            .ov-wrap > *:not(.run-gate) { margin-bottom: var(--sp-4); }
             .ov-hero { flex-wrap: wrap; gap: 12px; }
             .ov-hero > div:not(.badge) { flex: 1 1 200px; min-width: 0; }
             .ov-updated { margin-left: 56px; padding-top: 0; flex-basis: 100%; }
@@ -4862,7 +4877,7 @@
                     box.append(loadFailure('Your notes could not be read, so this list is not empty, it is unknown. ' + memoryLoadErr, loadMemory));
                     return;
                 }
-                const e = el('div', 'empty'); e.style.margin = '4px 0 0';
+                const e = el('div', 'empty');
                 e.append(el('div', null, "No notes yet. As you chat, the copilot captures key facts, decisions, your preferences, and proven learnings here."));
                 box.append(e); return;
             }
@@ -4912,7 +4927,7 @@
                         + skillsLoadErr + ' Do not add one until it loads, or you may end up with a duplicate.', loadSkills));
                     return;
                 }
-                const e = el('div', 'empty'); e.style.margin = '4px 0 0';
+                const e = el('div', 'empty');
                 e.textContent = 'No skills yet. Add your first above. Ideas: a brand voice guide, a discounting policy, an SEO checklist, or a product launch playbook.';
                 box.append(e); return;
             }
@@ -5159,7 +5174,7 @@
                 /* In a card with a title, like every other block the reference
                    puts on a finance page. Bare on the background it read as a
                    loading state rather than the answer to "is the book sound". */
-                const bcard = el('div', 'card'); bcard.style.marginBottom = '16px';
+                const bcard = el('div', 'card');
                 const bhead = el('div', 'card-head');
                 bhead.append(el('h3', 'card-title', 'Aged debt'));
                 bhead.append(el('p', 'card-desc', 'Every unpaid order by how late it is, as a share of '
@@ -5610,7 +5625,7 @@
             if (running) connStartWatch();
 
             /* ---- status ---- */
-            const sCard = el('div', 'card'); sCard.style.marginBottom = '16px';
+            const sCard = el('div', 'card');
             const sHead = el('div', 'card-head');
             sHead.append(el('h3', 'card-title', 'Connections'));
             sHead.append(el('p', 'card-desc', 'What the service is linked to, and the state of its ledger.'));
@@ -5637,7 +5652,7 @@
             box.append(sCard);
 
             /* ---- review and send ---- */
-            const rCard = el('div', 'card'); rCard.style.marginBottom = '16px';
+            const rCard = el('div', 'card');
             const rHead = el('div', 'card-head');
             rHead.append(el('h3', 'card-title', 'Review and send'));
             rHead.append(el('p', 'card-desc',
@@ -5724,7 +5739,7 @@
 
             /* ---- recent runs ---- */
             if ((connRuns || []).length) {
-                const hCard = el('div', 'card'); hCard.style.marginBottom = '16px';
+                const hCard = el('div', 'card');
                 const hHead = el('div', 'card-head');
                 hHead.append(el('h3', 'card-title', connRuns.length
                     + (connRuns.length === 1 ? ' run kept' : ' runs kept')));
@@ -5845,7 +5860,7 @@
             if (reconCache.error) { box.append(loadFailure('The reconciliation state could not be read. ' + reconCache.error, refreshRecon)); return; }
             const st = reconCache.st || {};
             /* Connection + sweep card */
-            const card = el('div', 'card'); card.style.marginBottom = '16px';
+            const card = el('div', 'card');
             const row = el('div'); row.style.cssText = 'display:flex;gap:16px;align-items:center;flex-wrap:wrap';
             const xs = st.xero || {};
             row.append(el('span', 'lbl-chip ' + (xs.connected ? 'made' : 'bad'),
@@ -5917,7 +5932,7 @@
             /* The accounts mailbox: a SEPARATE Google account from the Inbox
                tab's, so the card names both to make a wrong consent obvious. */
             if (!mb.connected) {
-                const mc = el('div', 'card'); mc.style.marginBottom = '16px';
+                const mc = el('div', 'card');
                 mc.append(el('div', 'know-title', 'Connect the accounts mailbox'));
                 mc.append(el('div', 'field-help',
                     'Reconciliation reads remittances, supplier invoices and statements from '
@@ -6030,7 +6045,7 @@
             }
             /* Setup, master only, until Xero is connected */
             if (!xs.connected && st.setup && st.setup.env_needed) {
-                const su = el('div', 'card'); su.style.marginBottom = '16px';
+                const su = el('div', 'card');
                 su.append(el('div', 'know-title', 'Connect Xero (one-time, about five minutes)'));
                 /* Built as nodes, not innerHTML: the redirect URI is server
                    data and goes in as TEXT, whatever it contains. */
@@ -7361,7 +7376,7 @@
             return eligible.length;
         };
         function coverageCard() {
-            const card = el('div', 'card'); card.style.marginBottom = '16px';
+            const card = el('div', 'card');
             if (labelsCoverage === 'busy') {
                 const t = el('div', 'thinking');
                 t.append(loader(), el('span', null, 'Checking the last 200 orders against the size list…'));
@@ -10366,7 +10381,7 @@
                 seg.append(b);
             });
             box.append(seg);
-            const host = el('div'); host.style.marginTop = '12px'; box.append(host);
+            const host = el('div'); box.append(host);
             if (guideSeg === 'guide') {
                 GUIDE.forEach(sec => {
                     const card = el('div', 'card'); card.style.marginTop = '14px';
@@ -13119,7 +13134,7 @@
             /* In a card with a title. Bare on the background this row read as
                decoration rather than as "here is who can take one". */
             if ((d.team || []).length) {
-                const wcard = el('div', 'card'); wcard.style.marginBottom = '16px';
+                const wcard = el('div', 'card');
                 const whead = el('div', 'card-head');
                 whead.append(el('h3', 'card-title', 'Who is on today'));
                 whead.append(el('p', 'card-desc', 'Where each person is working, and how much they are carrying.'));
@@ -14478,7 +14493,7 @@
                 seg.append(b);
             });
             box.append(seg);
-            const host = el('div'); host.style.marginTop = '12px'; box.append(host);
+            const host = el('div'); box.append(host);
             if (filesSeg === 'trash') renderFilesTrash(host);
             else renderFilesBrowser(host);
         }
@@ -15336,7 +15351,7 @@
                 seg.append(b);
             });
             box.append(seg);
-            const host = el('div'); host.style.marginTop = '12px'; box.append(host);
+            const host = el('div'); box.append(host);
             if (teamSeg === 'activity') renderTeamFeed(host);
             else if (teamSeg === 'work') renderTeamWork(host);
             else renderTeamPeople(host);

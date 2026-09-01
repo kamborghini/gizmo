@@ -2857,6 +2857,39 @@ def t_a_block_with_its_own_heading_is_not_swallowed_by_the_one_above():
        "collection stops at a block that carries its own heading")
 
 
+@test
+def t_one_rhythm_down_the_page():
+    """Measured on the reference at 1600: its content is a single flex column at
+    gap-6, so every block on a page is separated by exactly 24px. gizmo's blocks
+    each carried their own bottom margin and arrived at 4, 12, 14, 16, 20 and 24
+    - six values doing one job, which is most of what makes a page look
+    unconsidered even when no single element is wrong."""
+    rule = re.search(r"\.ov-wrap > \*:not\(\.run-gate\) \{([^}]*)\}", CSS)
+    ok(rule, "the page rhythm rule is still there")
+    ok("margin-bottom: var(--sp-6)" in rule.group(1), "and it is the reference's 24px")
+    ok("margin-top: 0" in rule.group(1),
+       "with stray top margins zeroed, or the two stack up")
+    head = re.search(r"\.ov-wrap > \.section-title \{([^}]*)\}", CSS)
+    ok(head and "margin-bottom: var(--sp-3)" in head.group(1),
+       "a heading still binds to the block under it at 12, not midway between two")
+    ok(re.search(r"\.ov-wrap > \*:last-child \{[^}]*margin-bottom: 0", CSS),
+       "and the last block does not add to the wrap's own bottom padding")
+
+
+@test
+def t_no_top_level_block_hand_places_its_own_spacing():
+    """An inline style beats every rule in the sheet, so a page block that sets
+    its own margin silently opts out of the rhythm. Nine cards, three hosts and
+    two empty states were doing exactly that."""
+    ok("= el('div', 'card'); " not in SCRIPT.replace("= el('div', 'card'); const", "X")
+       or "style.marginBottom = '16px'" not in SCRIPT,
+       "no card is created and immediately given a hand-set bottom margin")
+    ok("host.style.marginTop = '12px'" not in SCRIPT,
+       "and no section host nudges itself down past the gap it already has")
+    ok("const e = el('div', 'empty'); e.style.margin" not in SCRIPT,
+       "and an empty state takes the page's spacing like every other block")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
