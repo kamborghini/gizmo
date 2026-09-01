@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlencode
 
 import httpx
+import tokenvault
 
 logger = logging.getLogger("shopify_mcp.google")
 
@@ -64,7 +65,7 @@ def oauth_client_configured() -> bool:
 def _load_refresh_token() -> str:
     try:
         with open(OAUTH_TOKEN_PATH, "r", encoding="utf-8") as fh:
-            return json.load(fh).get("refresh_token", "")
+            return tokenvault.unseal(json.load(fh).get("refresh_token", ""))
     except Exception:
         return ""
 
@@ -79,7 +80,8 @@ def save_refresh_token(token: str) -> None:
     # harmless the day it does not.
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"refresh_token": token, "connected_at": datetime.now(timezone.utc).isoformat()}))
+        fh.write(json.dumps({"refresh_token": tokenvault.seal(token),
+                             "connected_at": datetime.now(timezone.utc).isoformat()}))
     os.replace(tmp, OAUTH_TOKEN_PATH)
     try:
         os.chmod(OAUTH_TOKEN_PATH, 0o600)

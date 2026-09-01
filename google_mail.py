@@ -29,6 +29,7 @@ from email.utils import parseaddr, parsedate_to_datetime
 from urllib.parse import urlencode
 
 import httpx
+import tokenvault
 
 logger = logging.getLogger("shopify_mcp.gmail")
 
@@ -102,7 +103,11 @@ def _load_token_file(acct: Account = SALES) -> dict:
     try:
         with open(acct.token_path, "r", encoding="utf-8") as fh:
             d = json.load(fh)
-        return d if isinstance(d, dict) else {}
+        if not isinstance(d, dict):
+            return {}
+        if d.get("refresh_token"):
+            d["refresh_token"] = tokenvault.unseal(str(d["refresh_token"]))
+        return d
     except Exception:
         return {}
 
@@ -128,7 +133,7 @@ def save_connection(refresh_token: str, addr: str, acct: Account = SALES) -> Non
     # file is a mailbox anyone on the box can read.
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"refresh_token": refresh_token, "address": addr,
+        fh.write(json.dumps({"refresh_token": tokenvault.seal(refresh_token), "address": addr,
                              "connected_at": datetime.now(timezone.utc).isoformat()}))
     os.replace(tmp, acct.token_path)
     try:

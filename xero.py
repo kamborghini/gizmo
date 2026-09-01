@@ -40,6 +40,7 @@ import urllib.parse
 from typing import Any, Optional
 
 import httpx
+import tokenvault
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,13 @@ def _load_token() -> dict:
     try:
         with open(TOKEN_PATH, encoding="utf-8") as fh:
             d = json.load(fh)
-        return d if isinstance(d, dict) else {}
+        if not isinstance(d, dict):
+            return {}
+        if d.get("refresh_token"):
+            # Opens a bare token too, so a file written before the key existed
+            # keeps working and is re-sealed on the next write.
+            d["refresh_token"] = tokenvault.unseal(str(d["refresh_token"]))
+        return d
     except FileNotFoundError:
         return {}
     except Exception:
@@ -116,6 +123,12 @@ def _load_token() -> dict:
 
 
 def _write_token(d: dict) -> None:
+    # Sealed at the one place it is written. 0600 stops another user on the
+    # box; it does nothing about a volume snapshot or an escaped backup, which
+    # is the realistic way a file like this leaves.
+    d = dict(d)
+    if d.get("refresh_token"):
+        d["refresh_token"] = tokenvault.seal(str(d["refresh_token"]))
     os.makedirs(os.path.dirname(TOKEN_PATH) or ".", exist_ok=True)
     tmp = TOKEN_PATH + ".tmp"
     # 0600 before anything is written into it. Xero's own guidance is that a
