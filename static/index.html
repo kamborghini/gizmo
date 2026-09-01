@@ -7259,6 +7259,9 @@
                 { label: 'Stock usage', icon: I.box, title: su.title, onClick: openStockUsage },
                 { label: 'Margins', icon: I.spark, title: mg.title, onClick: openMargins },
                 '-',
+                { label: 'Size rules', icon: I.check,
+                  title: 'The sizes and names you have set by hand, and the way to undo one',
+                  onClick: openSizeRulesModal },
                 { label: 'Update size list', icon: I.plus, title: upBtn.title, onClick: () => fileIn.click() },
                 { label: 'Shipping settings', icon: I.settings, title: shipBtn.title, onClick: openShippingSettings },
             ]);
@@ -7489,6 +7492,94 @@
            the data volume, so "New model not matching the size list" was a
            notification with nowhere to go. Each choice writes one row to the same
            rule files the size lookup already reads. */
+        /* The rules the merchant has already made, and the way to undo one.
+           The server has had `remove` and the rules listing since the Resolve
+           dialog was built; without this the feature was one-way, so a mistyped
+           production size could be set from the app but only corrected by
+           editing a CSV on the volume - which is the exact thing Resolve was
+           added to stop. */
+        function openSizeRulesModal() {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, 'Size rules'));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
+            x.setAttribute('aria-label', 'Close');
+            x.onclick = () => overlay.remove();
+            head.append(x);
+            const body = el('div', 'modal-body');
+            modal.append(head, body);
+            overlay.append(modal); document.body.append(overlay);
+
+            const draw = async () => {
+                body.innerHTML = '';
+                const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Reading the rules…'));
+                body.append(t);
+                let res;
+                try { res = await api('/api/gobo-sizes/rules', {}); }
+                catch (e) {
+                    body.innerHTML = '';
+                    body.append(el('div', 'msg error', e.message || String(e)));
+                    return;
+                }
+                body.innerHTML = '';
+                const canEdit = !!res.can_edit;
+                const overrides = res.overrides || [], aliases = res.aliases || [];
+                if (!overrides.length && !aliases.length) {
+                    body.append(el('div', 'empty',
+                        'No rules yet. They are made from Resolve on a flagged model in the size check.'));
+                    return;
+                }
+                body.append(el('p', 'field-help',
+                    'These sit on top of the size list and survive replacing it. '
+                    + (canEdit ? 'Removing one puts the model back to whatever the sheet says.'
+                               : 'An admin can grant you access to change them on the Team tab.')));
+
+                const section = (title, rows, kind) => {
+                    if (!rows.length) return;
+                    body.append(el('div', 'section-title', title));
+                    const wrap = el('div', 'files-list');
+                    rows.forEach(r => {
+                        const mfr = r['Manufacturer'] || '';
+                        const model = kind === 'alias' ? (r['Store Model'] || '') : (r['Model'] || '');
+                        const rhs = kind === 'alias'
+                            ? 'reads as ' + (r['List Model'] || '')
+                            : ((r['Production Size (mm)'] || '') === 'exclude'
+                                ? 'not a gobo'
+                                : (r['Production Size (mm)'] || '') + ' mm'
+                                  + (r['Customer Email Domain'] ? ' for @' + r['Customer Email Domain'] : ''));
+                        const line = el('div', 'files-row');
+                        const left = el('div'); left.style.cssText = 'flex:1;min-width:0';
+                        left.append(el('div', 'files-name', (mfr ? mfr + ' · ' : '') + model));
+                        left.append(el('div', 'field-help', rhs));
+                        line.append(left);
+                        if (canEdit) {
+                            const del = el('button', 'btn btn-sm', 'Remove');
+                            del.onclick = async () => {
+                                if (!await uiConfirm('Remove the rule for "' + model + '"? It goes back to '
+                                    + 'whatever the size list says, which may be nothing.',
+                                    { title: 'Remove size rule', okText: 'Remove' })) return;
+                                del.disabled = true;
+                                try {
+                                    await api('/api/gobo-sizes/rule',
+                                              { op: 'remove', kind: kind, manufacturer: mfr, model: model,
+                                                domain: r['Customer Email Domain'] || '' });
+                                } catch (e) { toastError(e.message); del.disabled = false; return; }
+                                toastOk('Rule removed.');
+                                draw();
+                            };
+                            line.append(del);
+                        }
+                        wrap.append(line);
+                    });
+                    body.append(wrap);
+                };
+                section('Sizes set by hand', overrides, 'override');
+                section('Other names for a model on the list', aliases, 'alias');
+            };
+            draw();
+        }
+
         function openSizeRuleModal(row, onSaved) {
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal');

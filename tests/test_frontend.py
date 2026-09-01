@@ -3053,6 +3053,26 @@ def t_a_half_written_skill_is_not_lost_on_close():
        "and all four skills fields stamp what they started as")
 
 
+@test
+def t_a_size_rule_can_be_undone_from_the_app():
+    """The server has had `remove` and the rules listing since Resolve was
+    built, with no interface on either - so a mistyped production size could be
+    set from the app but only corrected by editing a CSV on the volume, which is
+    the exact thing Resolve was added to stop."""
+    ok("function openSizeRulesModal(" in SCRIPT, "there is a way to see the rules")
+    fn = SCRIPT[SCRIPT.index("function openSizeRulesModal("):]
+    fn = fn[:fn.index("\n        function ")]
+    ok("/api/gobo-sizes/rules" in fn, "it reads the real rules")
+    ok("op: 'remove'" in fn, "and can undo one")
+    ok("kind: kind" in fn,
+       "naming which file the rule lives in, since an alias and an override are "
+       "removed from different places")
+    ok("uiConfirm(" in fn, "removal asks first: it changes what the bench cuts")
+    ok("res.can_edit" in fn or "canEdit" in fn,
+       "and the Remove button is hidden from an account the server would refuse")
+    ok("{ label: 'Size rules'" in SCRIPT, "reachable from the size-check menu")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
