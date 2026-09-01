@@ -5,7 +5,7 @@ nothing catches a rule that quietly loses the cascade. Every assertion here
 corresponds to a bug that actually reached the merchant, in the shape that let it
 through, so a regression fails here instead of at the dispatch desk.
 """
-import os, re, subprocess, sys, tempfile
+import json, os, re, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
@@ -2726,6 +2726,93 @@ def t_no_control_grows_its_way_out_of_the_scale():
         pad = re.search(r"padding:\s*([\d]+)px", rule.group(0))
         ok(pad and int(pad.group(1)) <= 5,
            "%s keeps the house 5px vertical padding, not its own" % sel)
+
+
+_CURVE_HARNESS = r"""
+const html = require('fs').readFileSync(process.argv[2], 'utf8');
+const start = html.indexOf('        function smoothPath(pts) {');
+const end = html.indexOf('\n        }\n', html.indexOf('return out;', start)) + 11;
+if (start < 0 || end < 11) { console.log('EXTRACT_FAILED'); process.exit(0); }
+eval(html.slice(start, end));
+function segs(d) {
+  const nums = d.match(/-?[\d.]+/g).map(Number);
+  const out = []; let prev = {x: nums[0], y: nums[1]}, i = 2;
+  while (i + 5 <= nums.length) {
+    out.push({p0: prev, c1y: nums[i+1], c2y: nums[i+3], p1: {x: nums[i+4], y: nums[i+5]}});
+    prev = {x: nums[i+4], y: nums[i+5]}; i += 6;
+  }
+  return out;
+}
+const bez = (a,b,c,d,t) => { const u = 1-t; return u*u*u*a + 3*u*u*t*b + 3*u*t*t*c + t*t*t*d; };
+const cases = [[10,10,10,90,10,10,10],[0,100,0,100,0,100,0,100],[1,2,3,4,5,6,7,8],
+               [50,50,50,20,50,50],[80,80,5,80,80],[42,42,42,42],[1,1,1,1000,1,1],
+               [120,118,135,90,142,138,95,160,155,101,170,168]];
+let worstOver = 0, worstDrift = 0;
+for (const vals of cases) {
+  const pts = vals.map((v,i) => [i*30, 200 - v/1000*180]);
+  const S = segs(smoothPath(pts));
+  for (const s of S) {
+    const lo = Math.min(s.p0.y, s.p1.y), hi = Math.max(s.p0.y, s.p1.y);
+    for (let t = 0; t <= 1; t += 0.002) {
+      const y = bez(s.p0.y, s.c1y, s.c2y, s.p1.y, t);
+      if (y < lo) worstOver = Math.max(worstOver, lo - y);
+      if (y > hi) worstOver = Math.max(worstOver, y - hi);
+    }
+  }
+  pts.forEach((p, i) => {
+    const q = i === 0 ? S[0].p0 : S[i-1].p1;
+    worstDrift = Math.max(worstDrift, Math.abs(q.x - p[0]) + Math.abs(q.y - p[1]));
+  });
+}
+console.log(JSON.stringify({over: worstOver, drift: worstDrift}));
+"""
+
+
+@test
+def t_a_curved_chart_never_draws_a_number_that_did_not_happen():
+    """The reference rounds its lines with a NATURAL cubic spline. Measured on
+    its own dashboard, 157 of 179 segments put a control point outside the two
+    points they join, overshooting by up to 29px - so the drawn line leaves the
+    data. On a demo of invented numbers that is a look; on this app's revenue
+    and liability lines it would draw figures that never happened and could bow
+    a positive month below zero.
+
+    So gizmo curves with monotone cubic instead, and this asserts the property
+    that choice was made for, by running the SHIPPED function over adversarial
+    shapes - spikes, zigzags, plateaus, a 1000x jump - and sampling every
+    Bezier it emits. A string check could not tell the two curves apart."""
+    if not any(os.access(os.path.join(p, "node"), os.X_OK)
+               for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(_CURVE_HARNESS)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path, os.path.join(ROOT, "static", "index.html")],
+                           capture_output=True, text=True)
+        ok(r.returncode == 0, "the curve harness failed: " + (r.stderr or "")[:200])
+        out = (r.stdout or "").strip()
+        ok(out != "EXTRACT_FAILED",
+           "smoothPath could not be found - if it was renamed, fix this guard too")
+        got = json.loads(out)
+        ok(got["over"] < 0.001,
+           "the curve leaves its own data by %.3fpx" % got["over"])
+        ok(got["drift"] < 0.11,
+           "the curve no longer passes through its data points (%.3fpx off)" % got["drift"])
+    finally:
+        os.unlink(path)
+
+
+@test
+def t_both_charts_curve_through_one_function():
+    """A sparkline and a trend line drawn by two different bits of geometry is
+    how they drift apart. Both build their path from smoothPath."""
+    ok("function smoothPath(" in SCRIPT, "there is one curve builder")
+    ok(SCRIPT.count("smoothPath(") >= 3,
+       "and both the sparkline and the trend line go through it")
+    ok("(i ? 'L' : 'M')" not in SCRIPT,
+       "with no straight-segment path builder left behind")
 
 
 if __name__ == "__main__":

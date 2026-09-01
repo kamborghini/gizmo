@@ -3233,9 +3233,10 @@
             grad.append(svgEl('stop', { offset: '5%', 'stop-color': CH[4], 'stop-opacity': '0.36' }));
             grad.append(svgEl('stop', { offset: '95%', 'stop-color': CH[4], 'stop-opacity': '0.04' }));
             defs.append(grad); svg.append(defs);
-            const line = (vals) => vals.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join(' ');
+            const line = (vals) => smoothPath(vals.map((v, i) => [X(i), Y(v)]));
             if (opts.area !== false) { const a = line(series[0].values) + ' L ' + X(n - 1).toFixed(1) + ' ' + Y(0).toFixed(1) + ' L ' + X(0).toFixed(1) + ' ' + Y(0).toFixed(1) + ' Z'; svg.append(svgEl('path', { d: a, fill: 'url(#' + uid + ')' })); }
-            series.forEach((s, si) => { const p = svgEl('path', { class: 'chart-line' + (si > 0 ? ' compare' : ''), d: line(s.values), stroke: s.color || (si ? CH[3] : CH[0]) }); if (!REDUCE_MOTION && si === 0) { p.style.strokeDasharray = 1600; p.style.strokeDashoffset = 1600; p.style.animation = 'chartDraw .9s ease forwards'; } svg.append(p); });
+            let drawPath = null;
+            series.forEach((s, si) => { const p = svgEl('path', { class: 'chart-line' + (si > 0 ? ' compare' : ''), d: line(s.values), stroke: s.color || (si ? CH[3] : CH[0]) }); if (!REDUCE_MOTION && si === 0) drawPath = p; svg.append(p); });
             /* No average rule, no peak label, no dot at the end of the line.
                The reference chart has none of them: its <svg> contains zero
                circles at rest and every text node in it is an x-axis date. The
@@ -3258,6 +3259,16 @@
             svg.addEventListener('touchstart', e => { if (e.touches[0]) move(e.touches[0].clientX); }, { passive: true });
             svg.addEventListener('touchmove', e => { if (e.touches[0]) move(e.touches[0].clientX); }, { passive: true });
             wrap.append(svg);
+            /* The reveal length is MEASURED, not guessed. It was a hardcoded
+               1600 user units, and a curved line across a jagged 24-month
+               range runs longer than that - which starts the animation with
+               part of the line already painted and finishes it early. */
+            if (drawPath) {
+                const len = Math.ceil(drawPath.getTotalLength && drawPath.getTotalLength() || 0) || 1600;
+                drawPath.style.strokeDasharray = len;
+                drawPath.style.strokeDashoffset = len;
+                drawPath.style.animation = 'chartDraw .9s ease forwards';
+            }
             if (opts.note) card.append(el('div', 'chart-note', opts.note));
             return card;
         }
@@ -3332,13 +3343,53 @@
            in it for no reason a reader could work out. */
         const CH = ['#171717', '#525252', '#737373', '#a1a1a1', '#d4d4d4'];
 
+        /* Monotone cubic (Fritsch-Carlson), which is the rounded shape the
+           reference draws - with one deliberate difference. The reference uses a
+           NATURAL cubic spline: measured on its own dashboard, 157 of 179
+           segments put a control point outside the two data points they join,
+           overshooting by as much as 29px. On a demo full of invented numbers
+           that is only a look. On a revenue line it draws figures that never
+           happened, and between two positive months it can bow below zero.
+           Monotone rounds just as much and cannot leave the range of the values
+           it was handed: at every peak the tangent is forced flat, and the
+           Fritsch-Carlson clamp holds each segment inside its own endpoints. */
+        function smoothPath(pts) {
+            const n = pts.length;
+            if (n < 2) return '';
+            const P = (i) => pts[i][0].toFixed(1) + ' ' + pts[i][1].toFixed(1);
+            if (n === 2) return 'M' + P(0) + ' L' + P(1);
+            const dx = [], d = [];
+            for (let i = 0; i < n - 1; i++) {
+                dx[i] = pts[i + 1][0] - pts[i][0];
+                d[i] = dx[i] ? (pts[i + 1][1] - pts[i][1]) / dx[i] : 0;
+            }
+            // A sign change between neighbouring secants is a peak or a trough;
+            // a zero tangent there is what stops the curve sailing past it.
+            const m = [d[0]];
+            for (let i = 1; i < n - 1; i++) m[i] = (d[i - 1] * d[i] <= 0) ? 0 : (d[i - 1] + d[i]) / 2;
+            m[n - 1] = d[n - 2];
+            for (let i = 0; i < n - 1; i++) {
+                if (d[i] === 0) { m[i] = 0; m[i + 1] = 0; continue; }
+                const a = m[i] / d[i], b = m[i + 1] / d[i], q = a * a + b * b;
+                if (q > 9) { const t = 3 / Math.sqrt(q); m[i] = t * a * d[i]; m[i + 1] = t * b * d[i]; }
+            }
+            let out = 'M' + P(0);
+            for (let i = 0; i < n - 1; i++) {
+                const h = dx[i] / 3;
+                out += ' C' + (pts[i][0] + h).toFixed(1) + ' ' + (pts[i][1] + m[i] * h).toFixed(1)
+                     + ' ' + (pts[i + 1][0] - h).toFixed(1) + ' ' + (pts[i + 1][1] - m[i + 1] * h).toFixed(1)
+                     + ' ' + P(i + 1);
+            }
+            return out;
+        }
+
         function sparkline(values, color) {
             const W = 120, H = 32, p = 3; const vals = (values || []).map(Number);
             const svg = svgEl('svg', { class: 'spark', viewBox: '0 0 ' + W + ' ' + H });
             if (vals.length < 2) return svg;
             const mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals), rng = (mx - mn) || 1;
             const X = i => p + i / (vals.length - 1) * (W - 2 * p), Y = v => p + (1 - (v - mn) / rng) * (H - 2 * p);
-            const d = vals.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join(' ');
+            const d = smoothPath(vals.map((v, i) => [X(i), Y(v)]));
             svg.append(svgEl('path', { d, fill: 'none', stroke: color || CH[0], 'stroke-width': 2, 'vector-effect': 'non-scaling-stroke', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
             return svg;
         }
