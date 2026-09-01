@@ -598,8 +598,8 @@
            box - the child still spans the full width and its border lands
            exactly on the card's. Two borders meeting is a seam, not a frame.
            These take the inset as MARGIN and keep their own padding. */
-        .card > .lia-bar { padding-left: 0; padding-right: 0; }
-        .card > .lia-bar, .card > .lbl-row,
+        .card > .lia-bar, .card > .ktable-wrap { padding-left: 0; padding-right: 0; }
+        .card > .lia-bar, .card > .lbl-row, .card > .ktable-wrap,
         .card > .empty, .card-bleed > .empty {
             margin-left: var(--sp-4); margin-right: var(--sp-4); }
         /* .insights draws no edge itself, so here the gutter as padding is
@@ -1109,7 +1109,12 @@
            needs a width of its own. */
         .mail-search { flex: 1 1 160px; max-width: 260px; }
         .tbl-search .mail-search { flex: none; max-width: none; }
-        .mail-who { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 10px; }
+        /* Wraps rather than scrolls. As a full-bleed strip it ran to the
+           card's own border, so the person who did not fit was SLICED by
+           that line - a bordered card cut in half at the card edge, with a
+           scrollbar under it. A team is a handful of cards; wrapping shows
+           all of them and nothing meets an edge it should not. */
+        .mail-who { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
         .mail-who-card { flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
             background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r);
             padding: 6px 12px; font-size: var(--t-xs); }

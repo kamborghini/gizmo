@@ -2826,15 +2826,16 @@ def t_nothing_that_draws_an_edge_sits_on_the_cards_edge():
     with only its content inset. Padding sits INSIDE the border box, so a child
     with a border of its own still spans the full width and its border lands
     exactly on the card's. Those take the inset as MARGIN instead."""
-    rule = re.search(r"\.card > \.lia-bar, \.card > \.lbl-row,\s*\n\s*"
+    rule = re.search(r"\.card > \.lia-bar, \.card > \.lbl-row, \.card > \.ktable-wrap,\s*\n\s*"
                      r"\.card > \.empty, \.card-bleed > \.empty \{([^}]*)\}", CSS)
     ok(rule, "the gutter exception is still there")
     body = rule.group(1)
     ok("margin-left: var(--sp-4)" in body and "margin-right: var(--sp-4)" in body,
        "and it insets by margin, which is outside the border box")
-    bar = re.search(r"\.card > \.lia-bar \{([^}]*)\}", CSS)
+    bar = re.search(r"\.card > \.lia-bar, \.card > \.ktable-wrap \{([^}]*)\}", CSS)
     ok(bar and "padding-left: 0" in bar.group(1),
-       "the bar drops the padding it was given, or it insets twice")
+       "and the two with no padding of their own drop what they were given, "
+       "or they inset twice")
     ins = re.search(r"\.card-bleed > \.insights \{([^}]*)\}", CSS)
     ok(ins and "padding-left: var(--sp-4)" in ins.group(1),
        ".insights draws no edge of its own, so padding is right there - it is "
@@ -2929,6 +2930,38 @@ def t_the_resolve_button_is_hidden_when_the_server_would_refuse_it():
                                            SCRIPT.index("function coverageCard(") + 400],
        "asked whenever the card draws, not only when the check is run by hand - "
        "the weekly scan puts the card on screen without runCoverage being called")
+
+
+@test
+def t_a_table_in_a_card_is_inset_rather_than_welded_to_it():
+    """The rule's own comment says the table gets "its OWN box, inset by the
+    card's padding" - a 10px frame inside a 14px card. It was not inset: as a
+    direct card child it took the gutter as PADDING, which sits inside its own
+    border box, so its border landed on the card's and its text floated 30px in
+    while the line sat at 1px. Measured on Xero sync and the size check."""
+    rule = re.search(r"\.card > \.lia-bar, \.card > \.ktable-wrap \{([^}]*)\}", CSS)
+    ok(rule and "padding-left: 0" in rule.group(1),
+       "the wrap drops the padding it was handed")
+    ok(re.search(r"\.card > \.lia-bar, \.card > \.lbl-row, \.card > \.ktable-wrap,", CSS),
+       "and takes the inset as margin instead, like the other boxed children")
+
+
+@test
+def t_no_borderless_strip_is_sliced_by_someone_elses_border():
+    """The presence strip on the Inbox was a non-wrapping flex row with
+    overflow-x: auto, running full-bleed to the card's own border - so the third
+    person was cut in half by that line, a bordered mini-card sliced at the card
+    edge with a scrollbar under it.
+
+    A scroller that draws its OWN edge may clip at it: that is what the
+    full-bleed table does, and it reads as intentional because the line belongs
+    to the thing doing the clipping. One with no edge of its own borrows
+    whatever line happens to be there."""
+    who = CSS.split(".mail-who {")[1].split("}")[0]
+    ok("overflow-x" not in who,
+       "the strip no longer scrolls under the card's border")
+    ok("flex-wrap: wrap" in who,
+       "it wraps, so every person is whole and nothing meets an edge it should not")
 
 
 if __name__ == "__main__":
