@@ -58,6 +58,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 
+import logdrain
 logger = logging.getLogger("shopify_mcp.copilot")
 
 # ---------------------------------------------------------------------------
@@ -11454,6 +11455,13 @@ def _track(sub: Optional[str], area: str, action: str, detail: str = "") -> None
             if ws:
                 e["ws"] = ws.get("id")   # billable: on the clock
         rows.append(e)
+        # Also off the box. The ledger is a file on the volume it audits, so
+        # whatever loses the volume loses the evidence with it. Never allowed
+        # to raise: an audit trail must not be able to fail a booking.
+        try:
+            logdrain.audit(e)
+        except Exception:
+            pass
         if len(rows) > ACTIVITY_MAX:
             del rows[:len(rows) - ACTIVITY_MAX]
         _events_dirty = True

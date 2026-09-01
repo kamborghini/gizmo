@@ -40,6 +40,12 @@ TOKEN_REFRESH_BUFFER = int(os.environ.get("TOKEN_REFRESH_BUFFER", "1800"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("shopify_mcp")
 
+# Off-host log shipping, when LOG_DRAIN_URL is set. Returns False and changes
+# nothing when it is not, so a deployment without one behaves as before.
+import logdrain
+if logdrain.install():
+    logger.info("log drain installed")
+
 PORT          = int(os.environ.get("PORT", "8000"))
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "streamable-http")
 
