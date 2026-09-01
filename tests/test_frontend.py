@@ -3073,6 +3073,35 @@ def t_a_size_rule_can_be_undone_from_the_app():
     ok("{ label: 'Size rules'" in SCRIPT, "reachable from the size-check menu")
 
 
+@test
+def t_the_login_screen_knows_a_password_is_not_always_enough():
+    """The server stopped returning a session when a second factor is on. A
+    client that ignored that would store undefined and look signed in."""
+    fn = SCRIPT[SCRIPT.index("async function finish(p) {"):]
+    fn = fn[:fn.index("\n            if (mode ===")]
+    ok("p.mfa && p.ticket" in fn, "the half-login reply is recognised")
+    ok("authShowMfa(p.ticket); return;" in fn,
+       "and it asks for the code instead of storing a session that is not there")
+    ok("function authShowMfa(" in SCRIPT, "there is a step to show")
+    step = SCRIPT[SCRIPT.index("function authShowMfa("):]
+    step = step[:step.index("\n            async function finish")]
+    ok("/api/auth/mfa-verify" in step, "which finishes against the verify route")
+    ok("one-time-code" in step, "with the autocomplete that lets a phone fill it")
+    ok("recovery codes" in step, "and says what to do with a lost phone")
+
+
+@test
+def t_two_step_sign_in_can_be_turned_on_from_settings():
+    ok("function openMfaSetup(" in SCRIPT, "there is a way to enrol")
+    fn = SCRIPT[SCRIPT.index("function openMfaSetup("):]
+    fn = fn[:fn.index("\n        function ")]
+    ok("op: 'start'" in fn and "op: 'confirm'" in fn,
+       "scan, then prove a code works: enrolling on trust locks people out")
+    ok("only time they are shown" in fn, "recovery codes are shown once, and say so")
+    ok("uiConfirm(" in SCRIPT[SCRIPT.index("async function refreshMfaRow("):][:1400],
+       "and turning it off asks first")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

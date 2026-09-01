@@ -2330,6 +2330,14 @@
                 <label class="field-label" for="pf-notes">Other notes</label>
                 <textarea id="pf-notes" class="pf-input" rows="2" placeholder="Anything else the copilot should always know: business model, constraints, audience."></textarea>
 
+                <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Sign-in</div>
+                <div class="settings-toggles">
+                    <div class="setting-row">
+                        <div><div class="setting-title">Two-step sign-in</div><div class="setting-sub" id="mfa-sub">A code from your phone as well as your password.</div></div>
+                        <button class="btn" id="mfa-btn" type="button">Set up</button>
+                    </div>
+                </div>
+
                 <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Preferences</div>
                 <div class="settings-toggles">
                     <div class="setting-row">
@@ -15576,7 +15584,39 @@
             card.append(brand);
             const err = el('div', 'auth-error');
             err.setAttribute('role', 'alert');
+            function authShowMfa(ticket) {
+                const card = ov.querySelector('.auth-card');
+                if (!card) return;
+                card.innerHTML = '';
+                card.append(el('h2', null, 'One more step'),
+                    el('p', 'auth-sub', 'Type the six-digit code from your authenticator app. '
+                        + 'If you have lost your phone, one of your recovery codes works here too.'));
+                const [fc, inCode] = authField('Code', 'text', 'au-mfa');
+                inCode.inputMode = 'numeric'; inCode.autocomplete = 'one-time-code';
+                const err2 = el('div', 'auth-err');
+                const go = el('button', 'btn btn-primary auth-go', 'Sign in');
+                const submit = async () => {
+                    go.disabled = true; err2.textContent = '';
+                    try {
+                        const r = await authApi('/api/auth/mfa-verify',
+                                                { ticket: ticket, code: inCode.value });
+                        finish(r);
+                    } catch (e) { err2.textContent = e.message; go.disabled = false; }
+                };
+                go.onclick = submit;
+                inCode.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+                const back = el('button', 'files-crumb', 'Start again');
+                back.style.marginTop = '10px';
+                back.onclick = () => { ov.dataset.mode = ''; authShow('login'); };
+                card.append(fc, err2, go, back);
+                setTimeout(() => inCode.focus(), 50);
+            }
+
             async function finish(p) {
+                /* A password that is only half the answer. The reply carries no
+                   session at all - just a ticket saying who is part-way in - so
+                   there is nothing to store until the code checks out. */
+                if (p && p.mfa && p.ticket) { authShowMfa(p.ticket); return; }
                 setAppSession(p.session);
                 teamMe = p.me;
                 if (p.me && p.me.must_change) { authShow('change'); return; }
@@ -16423,6 +16463,91 @@
                 host.append(rs, rsInput);
             }
         }
+        /* Two-step sign-in. Enrolment is deliberately two moves: scan, then
+           prove a code works. Turning it on because someone SAID they scanned
+           it is how an account locks its owner out. */
+        async function refreshMfaRow() {
+            const btn = $('mfa-btn'), sub = $('mfa-sub');
+            if (!btn) return;
+            let st;
+            try { st = await api('/api/auth/mfa', { op: 'status' }); }
+            catch (e) { return; }
+            if (st.enabled) {
+                sub.textContent = 'On. ' + (st.recovery_left || 0)
+                    + ' recovery code' + ((st.recovery_left === 1) ? '' : 's') + ' left.';
+                btn.textContent = 'Turn off';
+                btn.onclick = async () => {
+                    if (!await uiConfirm('Turn off two-step sign-in? Your password '
+                        + 'becomes the only thing protecting the dispatch desk and the books.',
+                        { title: 'Turn off two-step sign-in', okText: 'Turn it off' })) return;
+                    try { await api('/api/auth/mfa', { op: 'off' }); }
+                    catch (e) { toastError(e.message); return; }
+                    toastOk('Two-step sign-in is off.');
+                    refreshMfaRow();
+                };
+            } else {
+                sub.textContent = 'A code from your phone as well as your password.';
+                btn.textContent = 'Set up';
+                btn.onclick = openMfaSetup;
+            }
+        }
+
+        function openMfaSetup() {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, 'Two-step sign-in'));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x;
+            x.title = 'Close'; x.setAttribute('aria-label', 'Close');
+            x.onclick = () => overlay.remove();
+            head.append(x);
+            const body = el('div', 'modal-body');
+            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+
+            (async () => {
+                let st;
+                try { st = await api('/api/auth/mfa', { op: 'start' }); }
+                catch (e) { body.append(el('div', 'msg error', e.message)); return; }
+                body.append(el('p', 'field-help',
+                    'Add this to an authenticator app, then type the six-digit code it '
+                    + 'shows to prove it works. It is not on until you do.'));
+                const code = el('div', 'evidence'); code.textContent = st.secret;
+                code.style.cssText = 'font-family:ui-monospace,monospace;padding:10px 12px;'
+                    + 'background:var(--surface-2);border-radius:var(--r-sm);word-break:break-all';
+                body.append(code);
+                const f = el('label', 'pfield');
+                f.append(el('span', null, 'The code from your app'));
+                const inp = el('input', 'psel'); inp.type = 'text'; inp.inputMode = 'numeric';
+                inp.maxLength = 6; inp.placeholder = '000000';
+                f.append(inp); body.append(f);
+                const foot = el('div', 'modal-foot');
+                const cancel = el('button', 'btn', 'Cancel'); cancel.onclick = () => overlay.remove();
+                const go = el('button', 'btn btn-primary', 'Turn it on');
+                go.onclick = async () => {
+                    go.disabled = true;
+                    let r;
+                    try { r = await api('/api/auth/mfa', { op: 'confirm', code: inp.value }); }
+                    catch (e) { toastError(e.message); go.disabled = false; return; }
+                    body.innerHTML = '';
+                    body.append(el('p', 'field-help',
+                        'Two-step sign-in is on. Keep these recovery codes somewhere safe - '
+                        + 'each one gets you in once if you lose your phone, and this is the '
+                        + 'only time they are shown.'));
+                    const list = el('div', 'evidence');
+                    list.style.cssText = 'font-family:ui-monospace,monospace;line-height:1.9;'
+                        + 'padding:10px 12px;background:var(--surface-2);border-radius:var(--r-sm)';
+                    (r.recovery || []).forEach(c => list.append(el('div', null, c)));
+                    body.append(list);
+                    foot.innerHTML = '';
+                    const done = el('button', 'btn btn-primary', 'I have saved them');
+                    done.onclick = () => { overlay.remove(); refreshMfaRow(); };
+                    foot.append(done);
+                };
+                foot.append(cancel, go); modal.append(foot);
+                inp.focus();
+            })();
+        }
+
         function openSettings() {
             $('pf-voice').value = profile.brand_voice || '';
             $('pf-goals').value = profile.business_goals || '';
@@ -16457,7 +16582,7 @@
                 btn.textContent = 'Save failed, retry';
             } finally { btn.disabled = false; }
         }
-        $('settings-btn').onclick = openSettings;
+        $('settings-btn').onclick = () => { openSettings(); refreshMfaRow(); };
         $('settings-close').onclick = closeSettings;
         $('settings-cancel').onclick = closeSettings;
         $('settings-save').onclick = applySettings;

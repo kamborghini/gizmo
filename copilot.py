@@ -59,6 +59,8 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 
 import logdrain
+import tokenvault
+import totp
 logger = logging.getLogger("shopify_mcp.copilot")
 
 # ---------------------------------------------------------------------------
@@ -10947,6 +10949,44 @@ def _write_sessions(d: dict) -> None:
 SESSIONS_PER_USER = int(os.environ.get("SESSIONS_PER_USER", "12"))
 
 
+# Half-finished logins. In memory only and deliberately so: a ticket is worth
+# nothing after a restart, which is the safe direction, and it never belongs in
+# a file that gets backed up. Bounded, so a flood of password-only attempts
+# cannot grow it without limit.
+_mfa_tickets: dict = {}
+MFA_TICKET_SECONDS = 180
+
+
+def _mfa_ticket(uid: str) -> str:
+    now = time.time()
+    for k in [k for k, v in _mfa_tickets.items() if v[1] < now]:
+        _mfa_tickets.pop(k, None)
+    if len(_mfa_tickets) > 500:
+        _mfa_tickets.clear()
+    t = secrets.token_urlsafe(32)
+    _mfa_tickets[t] = (str(uid), now + MFA_TICKET_SECONDS)
+    return t
+
+
+def _mfa_ticket_uid(ticket: str):
+    """Who this half-login belongs to, or None. Expiry is checked here so a
+    ticket left lying around stops working on its own."""
+    v = _mfa_tickets.get(str(ticket or ""))
+    if not v:
+        return None
+    uid, until = v
+    if until < time.time():
+        _mfa_tickets.pop(str(ticket), None)
+        return None
+    return uid
+
+
+def _mfa_ticket_spend(ticket: str) -> None:
+    """One ticket, one session. Leaving it usable would turn a single password
+    entry into an unlimited supply of logins for as long as it lived."""
+    _mfa_tickets.pop(str(ticket or ""), None)
+
+
 def _new_session(uid: str) -> str:
     """Mint a session for a user. The raw token goes to the browser once;
     the store keeps only its hash, so the file can never impersonate anyone."""
@@ -16038,6 +16078,110 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             _write_users(d)
         except RuntimeError:
             pass
+        if u.get("mfa_secret"):
+            # The password was right and that is now only half of it. A ticket,
+            # not a session: short-lived, single-use, and it carries no
+            # authority of its own - it only names who is half way in.
+            ticket = _mfa_ticket(uid)
+            _track(uid, "auth", "password accepted, waiting on the second factor")
+            return _json({"ok": True, "mfa": True, "ticket": ticket})
+        token = _new_session(uid)
+        _track(uid, "auth", "logged in")
+        return _json({"ok": True, "session": token,
+                      "me": {"id": uid, "name": u.get("name"), "role": u.get("role"),
+                             "must_change": bool(u.get("must_change")),
+                             "tabs": _user_tabs(uid)}})
+
+    @mcp.custom_route("/api/auth/mfa", methods=["POST"])
+    async def auth_mfa_route(request: Request):
+        """Turn a second factor on, or ask whether it is on. Behind a session:
+        you enrol as yourself, from inside."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok_, who = _authorize(request)
+        if not ok_:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        op = str(body.get("op") or "status")
+        d = _load_users()
+        u = d["users"].get(str(who))
+        if not u:
+            return _json({"error": "That account does not exist."}, 400)
+        if op == "status":
+            return _json({"enabled": bool(u.get("mfa_secret")),
+                          "recovery_left": len(u.get("mfa_recovery") or [])})
+        if op == "start":
+            # Held UNCONFIRMED until a code proves the app really has it.
+            # Enrolling on "I scanned it" is how people lock themselves out.
+            secret = totp.new_secret()
+            u["mfa_pending"] = tokenvault.seal(secret)
+            _write_users(d)
+            return _json({"secret": secret,
+                          "uri": totp.provisioning_uri(secret, u.get("username") or "user")})
+        if op == "confirm":
+            pending = u.get("mfa_pending")
+            if not pending:
+                return _json({"error": "Start setting up the second factor first."}, 400)
+            secret = tokenvault.unseal(str(pending))
+            if not totp.verify(secret, body.get("code")):
+                return _json({"error": "That code did not match. Check the clock on "
+                              "your phone and try the current code."}, 400)
+            codes = totp.recovery_codes(8)
+            u["mfa_secret"] = tokenvault.seal(secret)
+            u["mfa_recovery"] = [totp.hash_recovery(c) for c in codes]
+            u["mfa_at"] = datetime.now(timezone.utc).isoformat()
+            u["mfa_counter"] = totp.used_counter()
+            u.pop("mfa_pending", None)
+            _write_users(d)
+            _track(who, "auth", "turned on a second factor")
+            # The only time these are readable. They are stored hashed.
+            return _json({"ok": True, "recovery": codes})
+        if op == "off":
+            u.pop("mfa_secret", None); u.pop("mfa_recovery", None)
+            u.pop("mfa_pending", None); u.pop("mfa_counter", None)
+            _write_users(d)
+            _track(who, "auth", "turned off their second factor")
+            return _json({"ok": True})
+        return _json({"error": "Unknown operation."}, 400)
+
+    @mcp.custom_route("/api/auth/mfa-verify", methods=["POST"])
+    async def auth_mfa_verify_route(request: Request):
+        """Finish a login. Anonymous by necessity - there is no session yet -
+        so it goes through the same door guard as login, and the ticket is what
+        proves the password step already happened."""
+        err, body = await _auth_guard(request)
+        if err:
+            return err
+        uid = _mfa_ticket_uid(str(body.get("ticket") or ""))
+        vague = _json({"error": "That code did not match."}, 401)
+        if not uid:
+            return _json({"error": "That sign-in has expired. Start again."}, 401)
+        d = _load_users()
+        u = d["users"].get(uid)
+        if not u or not u.get("mfa_secret"):
+            return vague
+        given = str(body.get("code") or "")
+        secret = tokenvault.unseal(str(u["mfa_secret"]))
+        if totp.verify(secret, given, last_counter=u.get("mfa_counter")):
+            u["mfa_counter"] = totp.used_counter()
+        else:
+            idx = totp.check_recovery(given, u.get("mfa_recovery") or [])
+            if idx < 0:
+                _track(uid, "auth", "a second-factor code was refused")
+                return vague
+            # Spent. A recovery code is one journey back in, not a password.
+            u["mfa_recovery"] = [h for i, h in enumerate(u["mfa_recovery"]) if i != idx]
+            _track(uid, "auth", "used a recovery code",
+                   f"{len(u['mfa_recovery'])} left")
+        u["last_login_at"] = datetime.now(timezone.utc).isoformat()
+        try:
+            _write_users(d)
+        except RuntimeError:
+            pass
+        _mfa_ticket_spend(str(body.get("ticket") or ""))
         token = _new_session(uid)
         _track(uid, "auth", "logged in")
         return _json({"ok": True, "session": token,
