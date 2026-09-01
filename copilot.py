@@ -8745,6 +8745,23 @@ _CRM_LABELS = ["Hot", "Warm", "Cold"]
 _CRM_LABEL_COLORS = {"Hot": "red", "Warm": "yellow", "Cold": "blue"}
 _CRM_COLOR_NAMES = ("red", "orange", "yellow", "green", "blue", "purple",
                     "pink", "brown", "gray", "dark-gray")
+# Who owns what, at a glance. The same names the CRM already uses, minus the two
+# greys: as a row tint on an app that is already grey they would read as no
+# colour at all.
+TEAM_COLOUR_NAMES = ("blue", "green", "purple", "orange", "pink", "red",
+                     "brown", "yellow")
+
+
+def _next_team_colour(users: dict) -> str:
+    """The first colour nobody is using. Two people sharing one defeats the
+    point of glancing at a row and knowing whose it is, so it only repeats once
+    the palette is genuinely exhausted - and then it repeats in a stable order
+    rather than at random."""
+    taken = {u.get("colour") for u in (users or {}).values() if not u.get("deleted")}
+    for c in TEAM_COLOUR_NAMES:
+        if c not in taken:
+            return c
+    return TEAM_COLOUR_NAMES[len(taken) % len(TEAM_COLOUR_NAMES)]
 
 
 def _crm_default() -> dict:
@@ -10363,6 +10380,7 @@ def _mail_team_shape() -> list:
             continue
         c = counts.get(uid, {})
         rows.append({"uid": uid, "name": u.get("name") or u.get("username") or "",
+                     "colour": u.get("colour") or "",
                      "lead": ROLE_LEVELS.get(u.get("role", "member"), 1) >= 2,
                      "can_own": _mail_can_own(uid),
                      "presence": u.get("presence") or "",
@@ -11416,6 +11434,7 @@ def _user_public(uid: str, u: dict) -> dict:
                      else u.get("tabs")),
             # Reported separately from the raw flag: an admin holds it by rank,
             # so the UI must not show a switch that looks revocable when it is not.
+            "colour": u.get("colour") or "",
             "can_sizes": bool(u.get("can_sizes")),
             "sizes_by_rank": ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"]}
 
@@ -16329,6 +16348,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 d["seq"] = int(d.get("seq") or 0) + 1
                 uid = f"u{d['seq']}"
                 d["users"][uid] = {"name": name, "username": username,
+                                   "colour": _next_team_colour(d["users"]),
                                    "pw": _hash_pw(starter), "role": role, "active": True,
                                    "deleted": False, "must_change": True, "fails": 0,
                                    "lock_until": "",
@@ -16427,6 +16447,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     _mail_release_owned(target, "account switched off")
                 _track(who, "team", "changed access",
                        f"{label}'s access was switched {'on' if on else 'off'}")
+            elif op == "colour":
+                if not may_manage():
+                    return _json({"error": "You cannot manage that account."}, 403)
+                colour = str(body.get("colour") or "").strip().lower()
+                # A NAME from the palette, never a colour value. The CRM learned
+                # this when a Pipedrive label coloured url(//evil.co/a) reached
+                # style.background and beaconed every render of the board.
+                if colour not in TEAM_COLOUR_NAMES:
+                    return _json({"error": "Pick one of the team colours."}, 400)
+                u["colour"] = colour
+                _write_users(d)
+                _track(who, "team", "changed a colour", f"{label} is now {colour}")
             elif op == "sizes":
                 # Who may change what the bench cuts. Admins hold it by rank and
                 # cannot be toggled: switching it off would read as a revocation

@@ -1175,7 +1175,7 @@
             border-top: 1px solid var(--border); font-size: var(--t-md); cursor: pointer; }
         .mrow:first-child { border-top: 0; }
         .mrow:hover { background: var(--bg-2); }
-        .mrow.selected { background: var(--accent-soft); }
+
         .mrow.cursor { box-shadow: inset 0 0 0 2px var(--accent); }
         /* .mlist clips its overflow and the rows fill it edge to edge, so the
            house ring has to be drawn inside the row or its left and right
@@ -1201,8 +1201,39 @@
            forward: full-strength ink, 600, its own tint and a blue edge. */
         /* 2px, as the reference draws its marker bar. At 3px it read as a
            border the row had grown rather than a mark against it. */
-        .mrow.unread { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
-        .mrow.unread:hover { background: var(--accent-soft); }
+        /* WHOSE the email is, at a glance down a long list. Each tint is the
+           team colour at 10% over white, precomputed rather than color-mix()
+           so the contrast guard can read the actual value: 12% was the first
+           strength that failed, on pink and red against the muted ink.
+           Class per name, never a value from data - the CRM learned that when
+           a Pipedrive label coloured url(//evil.co/a) beaconed every render. */
+        /* The dot is the key to the code, so it takes the SOLID colour: a 10%
+           wash is invisible at 8px. Same names, different strength. */
+        .who-dot { width: 8px; height: 8px; border-radius: 50%; flex: none;
+            display: inline-block; margin-right: 2px; background: var(--ink-3); }
+        .who-dot.own-red    { background: #b91c1c; }
+        .who-dot.own-orange { background: #c2410c; }
+        .who-dot.own-yellow { background: #b45309; }
+        .who-dot.own-green  { background: #15803d; }
+        .who-dot.own-blue   { background: #1d4ed8; }
+        .who-dot.own-purple { background: #7e22ce; }
+        .who-dot.own-pink   { background: #be185d; }
+        .who-dot.own-brown  { background: #78350f; }
+        .mrow.own-red    { background: #f8e8e8; }
+        .mrow.own-orange { background: #f9ece7; }
+        .mrow.own-yellow { background: #f8eee6; }
+        .mrow.own-green  { background: #e8f2ec; }
+        .mrow.own-blue   { background: #e8edfb; }
+        .mrow.own-purple { background: #f2e9fa; }
+        .mrow.own-pink   { background: #f8e8ef; }
+        .mrow.own-brown  { background: #f2ebe7; }
+        /* After the tints on purpose: you are about to act on these rows, so
+           what is selected matters more than whose it is. */
+        .mrow.selected, .mrow.selected:hover { background: var(--accent-soft); }
+        /* Unread gave up the background to the owner and keeps the other three
+           signals it always had: the bar, the bold sender, the accented age.
+           The bold sender is what Gmail leans on anyway. */
+        .mrow.unread { box-shadow: inset 2px 0 0 var(--accent); }
         .mrow.unread .mfrom { color: var(--ink); font-weight: var(--w-medium); }
         .mrow.unread .msubj { color: var(--ink-2); }
         .mrow.unread .msubj b { font-weight: var(--w-medium); color: var(--ink); }
@@ -7506,6 +7537,23 @@
            production size could be set from the app but only corrected by
            editing a CSV on the volume - which is the exact thing Resolve was
            added to stop. */
+        /* uid -> colour name, off the board the Inbox already loads. */
+        function mailColour(uid) {
+            const team = (mailCache && mailCache.team) || [];
+            const m = team.find(p => p.uid === uid);
+            return m ? m.colour : '';
+        }
+
+        const TEAM_TINTS = ['red', 'orange', 'yellow', 'green', 'blue',
+                            'purple', 'pink', 'brown'];
+        /* A colour NAME becomes a class name, and an unknown one becomes
+           nothing at all. No value from the server ever reaches a style
+           property - that is the whole defence. */
+        function ownClass(colour) {
+            const c = String(colour || '').toLowerCase();
+            return TEAM_TINTS.indexOf(c) >= 0 ? ' own-' + c : '';
+        }
+
         function openSizeRulesModal() {
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal');
@@ -13472,6 +13520,13 @@
             const PRESENCE_LABEL = { office: 'In office', home: 'At home', out: 'Out' };
             (d.team || []).forEach(m => {
                 const c = el('div', 'mail-who-card');
+                /* The key to the colour code, right above the list it explains.
+                   Without this a tinted row is a colour nobody can look up. */
+                if (m.colour) {
+                    const dot = el('span', 'who-dot' + ownClass(m.colour));
+                    dot.title = (m.name || 'This person') + "'s colour";
+                    c.append(dot);
+                }
                 if (m.uid === d.me) {
                     const pick = document.createElement('select');
                     pick.className = 'mail-presence-pick'; pick.title = 'Where are you working today?'; pick.setAttribute('aria-label', 'Where are you working today?');
@@ -13824,6 +13879,7 @@
             const d = mailCache;
             const row = el('div', 'mrow'
                 + (t.unread ? ' unread' : '')
+                + (t.owner ? ownClass(mailColour(t.owner)) : '')
                 + (mailSel.has(t.id) ? ' selected' : ''));
             const cb = document.createElement('input');
             cb.type = 'checkbox'; cb.className = 'mail-check';
@@ -15955,6 +16011,26 @@
                         sl.append(sizeBox, document.createTextNode('Can edit the size list'));
                         perm.append(sl);
                     }
+                    /* Where the colour is changed, next to the other things an
+                       admin grants. The master's own colour is editable too:
+                       they appear in the Inbox like everyone else. */
+                    const cw = el('div'); cw.style.cssText = 'flex:1 1 100%';
+                    const cl = el('label', 'pfield');
+                    cl.append(el('span', null, 'Colour in the Inbox'));
+                    const csel = el('select', 'psel');
+                    TEAM_TINTS.forEach(t => {
+                        const o = el('option', null, t.charAt(0).toUpperCase() + t.slice(1));
+                        o.value = t; if (t === u.colour) o.selected = true;
+                        csel.append(o);
+                    });
+                    csel.onchange = async () => {
+                        try { await api('/api/team/user',
+                                        { op: 'colour', id: u.id, colour: csel.value }); }
+                        catch (e) { toastError(e.message); return; }
+                        toastOk('Colour changed.');
+                        loadTeam();
+                    };
+                    cl.append(csel); cw.append(cl); panel.append(cw);
                     panel.append(perm);
                     const save = el('button', 'btn btn-primary', 'Save');
                     save.onclick = async () => {

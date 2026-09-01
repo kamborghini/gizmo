@@ -470,8 +470,17 @@ def t_inbox_unread_filters_and_claude_reply():
        "the panel explains why the draft has blanks in it")
     ok("rows.sort((a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0))" in SCRIPT,
        "unread rises to the top of the list")
-    ok(".mrow.unread { background:" in HTML and "inset 2px 0 0 var(--accent)" in HTML,
-       "and is unmistakable: its own tint and edge, not a 100-weight difference")
+    # The requirement is unchanged - unread must be unmistakable, not a
+    # 100-weight difference. What carries it changed: the row background now
+    # says WHOSE the email is, so unread keeps the edge, the bold sender, the
+    # accented age and the word "New" instead of the tint. Four signals, one of
+    # them a word, which is more than it had reason to need.
+    ok("inset 2px 0 0 var(--accent)" in HTML, "unread keeps the edge down its left")
+    unread_rule = CSS.split(".mrow.unread {")[1].split("}")[0]
+    ok("background:" not in unread_rule,
+       "and not the background, which now belongs to whoever claimed it")
+    ok("var(--w-medium)" in CSS.split(".mrow.unread .mfrom {")[1].split("}")[0],
+       "the sender stays bold")
     ok("'munread', 'New'" in SCRIPT, "with a word, for anyone who cannot see the tint")
     ok("if (mailFilter === 'unread') {" in SCRIPT and "if (!t.unread) return false;" in SCRIPT,
        "unread ignores state: a done email marked unread in Gmail is still findable")
@@ -3100,6 +3109,105 @@ def t_two_step_sign_in_can_be_turned_on_from_settings():
     ok("only time they are shown" in fn, "recovery codes are shown once, and say so")
     ok("uiConfirm(" in SCRIPT[SCRIPT.index("async function refreshMfaRow("):][:1400],
        "and turning it off asks first")
+
+
+# --- per-person colour -------------------------------------------------------
+
+TEAM_TINTS = ("red", "orange", "yellow", "green", "blue", "purple", "pink", "brown")
+
+
+@test
+def t_every_owner_tint_keeps_its_text_readable():
+    """A tinted row still has to be a readable row. Computed here rather than
+    eyeballed: 12% was the first strength that failed, on pink and red against
+    the muted ink, so the tints sit at 10%."""
+    def _rgb(h):
+        h = h.lstrip("#")
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+    def _lum(c):
+        def f(v):
+            v /= 255
+            return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+        r, g, b = map(f, c)
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    def _cr(a, b):
+        la, lb = _lum(a), _lum(b)
+        hi, lo = max(la, lb), min(la, lb)
+        return (hi + 0.05) / (lo + 0.05)
+
+    inks = {k: _token(k) for k in ("ink", "ink-2", "ink-3")}
+    for name in TEAM_TINTS:
+        # .mrow specifically: the same name also styles the 8px presence dot,
+        # which takes the SOLID colour and carries no text, so a contrast floor
+        # does not apply to it.
+        m = re.search(r"\.mrow\.own-" + name + r"\s*\{[^}]*background:\s*(#[0-9a-f]{6})",
+                      CSS, re.I)
+        ok(m, "there is a tint for " + name)
+        tint = _rgb(m.group(1))
+        for ink_name, ink in inks.items():
+            r = _cr(_rgb(ink), tint)
+            ok(r >= 4.5, "--%s on the %s row is %.2f:1, under the 4.5 needed"
+               % (ink_name, name, r))
+
+
+@test
+def t_the_owner_tint_did_not_quietly_take_unreads_signal():
+    """Handing the row background to the owner costs unread one of its four
+    signals. It has to keep the other three, or a claimed unread email stops
+    looking unread - which on a shared inbox means a customer waits."""
+    unread = CSS.split(".mrow.unread {")[1].split("}")[0]
+    ok("background:" not in unread,
+       "unread no longer claims the background: the owner has it")
+    ok("inset 2px 0 0" in unread, "but keeps the bar down its left")
+    ok(".mrow.unread .mfrom" in CSS and "var(--w-medium)" in
+       CSS.split(".mrow.unread .mfrom {")[1].split("}")[0],
+       "and the bold sender, which is what Gmail leans on anyway")
+
+
+@test
+def t_a_selected_row_still_reads_as_selected_over_a_tint():
+    """Selection is transient and deliberate - you are about to act on those
+    rows - so it wins over whose they are."""
+    idx_sel = CSS.index(".mrow.selected")
+    idx_own = CSS.index(".own-red")
+    ok(idx_own < idx_sel,
+       "the selected rule comes after the tints, so it overrides rather than "
+       "losing to whichever was written last")
+
+
+@test
+def t_a_colour_never_reaches_a_style_property_as_a_value():
+    """The CRM's lesson, applied before it can be relearned: a Pipedrive label
+    coloured url(//evil.co/a) once beaconed every render of the board."""
+    ok("ownClass" in SCRIPT, "the colour becomes a class")
+    fn = SCRIPT[SCRIPT.index("function ownClass("):]
+    fn = fn[:fn.index("\n        function ")]
+    ok("TEAM_TINTS" in fn or "indexOf" in fn or "includes(" in fn,
+       "checked against the known names")
+    ok(".style" not in fn and "background" not in fn,
+       "and never assigned as a value")
+
+
+@test
+def t_the_colour_code_has_a_key_above_the_list_it_explains():
+    """A tinted row is a colour nobody can look up unless the person it belongs
+    to is named somewhere in view."""
+    ok(".who-dot" in CSS, "the presence cards carry a dot")
+    ok("ownClass(m.colour)" in SCRIPT, "in that person's colour")
+    dot = CSS.split(".who-dot {")[1].split("}")[0]
+    ok("width: 8px" in dot, "small")
+    ok(".who-dot.own-red    { background: #b91c1c; }" in CSS,
+       "and SOLID, not the row tint: a 10% wash is invisible at 8px")
+
+
+@test
+def t_an_admin_can_change_someones_colour_from_the_team_tab():
+    ok("op: 'colour'" in SCRIPT, "the team panel can set it")
+    seg = SCRIPT[SCRIPT.index("Colour in the Inbox"):][:900]
+    ok("TEAM_TINTS.forEach" in seg, "offering only the known names")
+    ok("loadTeam()" in seg, "and the board redraws so the change is visible")
 
 
 if __name__ == "__main__":
