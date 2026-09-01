@@ -2890,6 +2890,47 @@ def t_no_top_level_block_hand_places_its_own_spacing():
        "and an empty state takes the page's spacing like every other block")
 
 
+@test
+def t_a_flagged_model_can_be_settled_without_leaving_the_app():
+    """The weekly scan raised "New model not matching the size list" and the only
+    controls on it were snooze and dismiss - the actual fix lived in a CSV on the
+    data volume, so the alert was a notification with nowhere to go, and
+    dismissing it resolved nothing: the model came back on the next scan."""
+    ok("function openSizeRuleModal(" in SCRIPT, "there is a way to resolve one")
+    fn = SCRIPT[SCRIPT.index("function openSizeRuleModal("):]
+    fn = fn[:fn.index("\n        function ")]
+    for op in ("'set'", "'alias'", "'exclude'"):
+        ok(op in fn, "it offers the %s ruling" % op)
+    ok("/api/gobo-sizes/rule" in fn, "and writes through the rule route")
+    ok("res.resolves" in fn,
+       "reporting what the LOOKUP says rather than that the save succeeded")
+    ok("req.manufacturer = target.manufacturer" not in fn,
+       "an alias keeps the manufacturer the ORDERS carry: that column is what "
+       "the store's spelling gets indexed under, so the target's would file the "
+       "rule under a maker the orders never say")
+
+
+@test
+def t_the_size_alert_leads_to_the_thing_that_fixes_it():
+    fn = SCRIPT[SCRIPT.index("function alertsBanner("):]
+    fn = fn[:fn.index("\n        function ")]
+    ok("size list" in fn and "runCoverage()" in fn,
+       "a size-list alert opens the size check instead of only offering dismiss")
+
+
+@test
+def t_the_resolve_button_is_hidden_when_the_server_would_refuse_it():
+    """A button that always errors is worse than no button."""
+    ok("if (sizeRulesCanEdit)" in SCRIPT, "the action is gated on the grant")
+    ok("let sizeRulesCanEdit = false" in SCRIPT,
+       "defaulting to hidden, so a failed permission read does not offer it")
+    ok("function loadSizeRulePerm(" in SCRIPT
+       and "loadSizeRulePerm();" in SCRIPT[SCRIPT.index("function coverageCard("):
+                                           SCRIPT.index("function coverageCard(") + 400],
+       "asked whenever the card draws, not only when the check is run by hand - "
+       "the weekly scan puts the card on screen without runCoverage being called")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

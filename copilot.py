@@ -3394,6 +3394,84 @@ GOBO_OVERRIDES_PATH = os.environ.get("GOBO_OVERRIDES_PATH",
                                      os.path.join(os.path.dirname(__file__), "data", "gobo-overrides.csv"))
 GOBO_SIZES_LIVE = os.environ.get("GOBO_SIZES_LIVE", "/data/gobo-sizes.csv")
 
+# The two rule files, and the columns their loaders read. A merchant's ruling on
+# a model lives here rather than in the sheet, so replacing the sheet never
+# throws the rulings away.
+GOBO_RULE_FILES = {
+    "override": (GOBO_OVERRIDES_PATH,
+                 ["Manufacturer", "Model", "Customer Email Domain", "Production Size (mm)"]),
+    "alias": (GOBO_ALIASES_PATH, ["Manufacturer", "Store Model", "List Model"]),
+}
+
+
+def _gobo_rule_rows(kind: str) -> list:
+    """Every row of one rule file, as plain dicts. A missing file is an empty
+    list; an unreadable one RAISES, because reporting "no rules" for a file that
+    exists would invite the merchant to add a duplicate of a rule already there."""
+    path, header = GOBO_RULE_FILES[kind]
+    import csv as _csv
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as fh:
+            return [{k: str(r.get(k) or "").strip() for k in header}
+                    for r in _csv.DictReader(fh)]
+    except FileNotFoundError:
+        return []
+
+
+def _write_gobo_rule_rows(kind: str, rows: list) -> None:
+    """Atomic, keeping the five most recent generations. These files decide the
+    glass a real order is cut from, so a half-written one must never be readable
+    and a bad edit must always have something to go back to."""
+    path, header = GOBO_RULE_FILES[kind]
+    import csv as _csv
+    import io as _io
+    import shutil
+    buf = _io.StringIO()
+    w = _csv.DictWriter(buf, fieldnames=header, lineterminator="\n")
+    w.writeheader()
+    for r in rows:
+        w.writerow({k: r.get(k, "") for k in header})
+    text = buf.getvalue()
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    if os.path.isfile(path):
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+        btmp = path + ".bak.tmp"
+        shutil.copyfile(path, btmp)
+        os.replace(btmp, f"{path}.{stamp}.bak")
+        base = os.path.basename(path)
+        d = os.path.dirname(path) or "."
+        baks = sorted(f for f in os.listdir(d)
+                      if f.startswith(base + ".") and f.endswith(".bak"))
+        for stale in baks[:-5]:
+            try:
+                os.remove(os.path.join(d, stale))
+            except OSError:
+                pass
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
+    # Force the next read to reload. The cache keys on mtime, and a write plus a
+    # lookup inside the same clock tick would otherwise answer from the state
+    # BEFORE the rule was saved - telling the merchant their ruling did nothing.
+    _gobo_cache["mtime"] = None
+
+
+def _clean_gobo_size(raw) -> Optional[str]:
+    """A production size, or None if it is not one. Free text is refused rather
+    than stored: whatever is here is what the bench reads off the label."""
+    txt = str(raw or "").strip().rstrip("m").rstrip("m").strip()
+    if not txt:
+        return None
+    try:
+        v = float(txt)
+    except (TypeError, ValueError):
+        return None
+    if not (v == v) or v <= 0 or v > 500:   # NaN, zero, and nonsense are all not a size
+        return None
+    out = f"{v:.2f}".rstrip("0").rstrip(".")
+    return out or None
+
 
 def _sizes_path() -> str:
     """The size sheet the app reads: an uploaded copy on the data volume wins;
@@ -3553,6 +3631,11 @@ def _gobo_sizes() -> dict:
                         "by_mm_loose": by_mm_loose, "by_model_loose": by_model_loose,
                         "by_mm_digit": by_mm_digit, "by_model_digit": by_model_digit,
                         "rows": rows, "domain_rules": domain_rules,
+                        # Kept, not just counted: a model ruled "not a gobo" has
+                        # to stop being reported as a miss, and until this was
+                        # here the ruling only skipped SHEET rows - so excluding
+                        # a model that was never on the sheet did nothing at all.
+                        "excludes": excludes,
                         "health": {"models": len(by_model), "dead_aliases": dead_aliases,
                                    "overrides": len(sets) + len(excludes) + len(domain_rules),
                                    "sheet_at": sheet_at}})
@@ -7161,7 +7244,7 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
         return {"error": "Couldn't read your orders from Shopify. Try again in a moment."}
     orders = (data.get("orders") or [])[:n]
     sheet = _gobo_sizes()   # one snapshot for the whole scan
-    items_seen = gobo_items = sized = no_model = 0
+    items_seen = gobo_items = sized = no_model = ruled_out = 0
     flagged: dict = {}
     for o in orders:
         oname = str(o.get("name") or "").strip() or ("#" + str(o.get("order_number") or ""))
@@ -7173,6 +7256,12 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
             if not model and not mfr:
                 # No gobo options at all: an accessory or plain product, not a miss.
                 no_model += 1
+                continue
+            if (_norm_key(mfr), _norm_key(model)) in (sheet.get("excludes") or set()):
+                # The merchant has ruled this is not a gobo. Counted apart from
+                # both the sized and the flagged: it is not being made, and it is
+                # not a gap in the list either.
+                ruled_out += 1
                 continue
             gobo_items += 1
             entry, reason = _gobo_lookup(mfr, model, cache=sheet)
@@ -7191,6 +7280,7 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
     return {"orders_scanned": len(orders), "items_seen": items_seen,
             "gobo_items": gobo_items, "sized": sized,
             "flagged_items": gobo_items - sized, "skipped_no_model": no_model,
+            "ruled_out": ruled_out,
             "pct": (round(sized * 100.0 / gobo_items, 1) if gobo_items else 100.0),
             "flagged": rows}
 
@@ -8425,7 +8515,10 @@ async def _watchdog_tick(registry: dict) -> bool:
                                  for k in fresh[:5]])
                     await _send_alert_email("Store Copilot: new models missing from the size list",
                                             [k.replace("|", " / ") for k in fresh]
-                                            + ["", "Open the Labels tab and run Size check for details."])
+                                            + ["", "Open Production Manager and run Size check: each "
+                                               "model there can be given a size, pointed at a model "
+                                               "already on the list, or ruled out, without editing "
+                                               "any file."])
         # Webhook subscriptions are a standing repair, not an install step:
         # Shopify silently deletes one after sustained delivery failure (an
         # outage on our side), so re-assert them every tick.
@@ -10901,6 +10994,21 @@ def _team_level(uid: Optional[str]) -> int:
     return ROLE_LEVELS.get(_team_role(uid), 0) if _team_user(uid) else 0
 
 
+def _may_edit_sizes(uid: Optional[str]) -> bool:
+    """Who may change what the bench actually cuts.
+
+    Seeing the Labels tab is not enough. A size rule decides the glass a real
+    order is made from, so it is a grant an admin makes deliberately per person,
+    the same way a tab is - not something inherited by having an account. Admins
+    hold it by rank; everyone else only if it was handed to them."""
+    u = _team_user(uid)
+    if not u:
+        return False
+    if ROLE_LEVELS.get(u.get("role"), 0) >= ROLE_LEVELS["admin"]:
+        return True
+    return bool(u.get("can_sizes"))
+
+
 def _team_name(uid: str) -> str:
     u = _load_users()["users"].get(str(uid))
     return (u or {}).get("name") or ""
@@ -11115,7 +11223,11 @@ def _user_public(uid: str, u: dict) -> dict:
             "deleted": bool(u.get("deleted")), "must_change": bool(u.get("must_change")),
             "created_at": u.get("created_at") or "", "last_login_at": u.get("last_login_at") or "",
             "tabs": (None if u.get("role") == "master" or not isinstance(u.get("tabs"), list)
-                     else u.get("tabs"))}
+                     else u.get("tabs")),
+            # Reported separately from the raw flag: an admin holds it by rank,
+            # so the UI must not show a switch that looks revocable when it is not.
+            "can_sizes": bool(u.get("can_sizes")),
+            "sizes_by_rank": ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"]}
 
 
 _events_mem: Optional[list] = None
@@ -12256,6 +12368,165 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         return _json({"ok": True, "rows": len(rows),
                       "models_before": before, "models_after": health.get("models"),
                       "dead_aliases": health.get("dead_aliases", 0)})
+
+    @mcp.custom_route("/api/gobo-sizes/rules", methods=["POST"])
+    async def gobo_rules_route(request: Request):
+        """The merchant's standing rulings on models, and whether this person may
+        change them. Read is open to anyone who can see the tab: knowing why a
+        model resolves the way it does is part of reading the size check."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        try:
+            return _json({"overrides": _gobo_rule_rows("override"),
+                          "aliases": _gobo_rule_rows("alias"),
+                          "can_edit": _may_edit_sizes(who)})
+        except Exception:
+            logger.exception("gobo rules read failed")
+            return _json({"error": "Couldn't read the size rules."}, 500)
+
+    @mcp.custom_route("/api/gobo-sizes/models", methods=["POST"])
+    async def gobo_models_route(request: Request):
+        """Models already on the sheet, for the picker behind 'this is another
+        name for'. Searching the real sheet is what stops an alias being written
+        onto a model that does not exist, which loads as a dead rule."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, _who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        q = str(body.get("q") or "").strip().lower()
+        if len(q) < 2:
+            return _json({"models": []})
+        seen, out = set(), []
+        for entry in (_gobo_sizes().get("rows") or []):
+            e = entry[2] if isinstance(entry, tuple) else entry
+            if not isinstance(e, dict):
+                continue
+            model, mfr = e.get("model") or "", e.get("manufacturer") or ""
+            if not model or q not in (mfr + " " + model).lower():
+                continue
+            key = (mfr, model)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"manufacturer": mfr, "model": model,
+                        "size": e.get("production_size") or ""})
+            if len(out) >= 25:
+                break
+        return _json({"models": out})
+
+    @mcp.custom_route("/api/gobo-sizes/rule", methods=["POST"])
+    async def gobo_rule_route(request: Request):
+        """Resolve one flagged model, from inside the app. Four ops: give it a
+        size, give it a size for one customer's domain only, point it at a model
+        already on the sheet, or say it is not a gobo at all. Each writes one row
+        to the rule files the size lookup already reads, so nothing here invents a
+        mechanism - it opens the one that existed only as a CSV on the volume."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        if not _may_edit_sizes(who):
+            return _json({"error": "You do not have access to edit the size list. "
+                          "An admin can grant it on the Team tab."}, 403)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        op = str(body.get("op") or "")
+        mfr = str(body.get("manufacturer") or "").strip()[:80]
+        model = str(body.get("model") or "").strip()[:120]
+        if not model:
+            return _json({"error": "Which model? A rule with no model would match nothing."}, 400)
+        domain = str(body.get("domain") or "").strip().lstrip("@").lower()[:120]
+        try:
+            if op in ("set", "exclude"):
+                if op == "exclude":
+                    if domain:
+                        return _json({"error": "Excluding is for a model outright, "
+                                      "not for one customer."}, 400)
+                    size = "exclude"
+                else:
+                    size = _clean_gobo_size(body.get("size"))
+                    if not size:
+                        return _json({"error": "That is not a production size. Give it in "
+                                      "millimetres, for example 37.5."}, 400)
+                rows = _gobo_rule_rows("override")
+                hit = None
+                for r in rows:
+                    if (_norm_key(r["Manufacturer"]) == _norm_key(mfr)
+                            and _norm_key(r["Model"]) == _norm_key(model)
+                            and r["Customer Email Domain"].lstrip("@").lower() == domain):
+                        hit = r
+                        break
+                was = hit["Production Size (mm)"] if hit else None
+                if hit:
+                    hit["Production Size (mm)"] = size
+                else:
+                    rows.append({"Manufacturer": mfr, "Model": model,
+                                 "Customer Email Domain": domain,
+                                 "Production Size (mm)": size})
+                _write_gobo_rule_rows("override", rows)
+                what = ("excluded" if size == "exclude"
+                        else f"set to {size} mm" + (f" for @{domain}" if domain else ""))
+                _track(who, "sizes", "changed a size rule",
+                       f"{mfr} {model} {what}" + (f" (was {was})" if was and was != size else ""))
+            elif op == "alias":
+                target = str(body.get("list_model") or "").strip()[:120]
+                if not target:
+                    return _json({"error": "Which model on the list is it another name for?"}, 400)
+                entry, reason = _gobo_lookup(mfr, target)
+                if reason:
+                    return _json({"error": f"\u201c{target}\u201d is not on the size list, so "
+                                  "pointing at it would leave the rule dead. Pick from the list, "
+                                  "or give this model a size instead."}, 400)
+                rows = _gobo_rule_rows("alias")
+                for r in rows:
+                    if (_norm_key(r["Manufacturer"]) == _norm_key(mfr)
+                            and _norm_key(r["Store Model"]) == _norm_key(model)):
+                        r["List Model"] = target
+                        break
+                else:
+                    rows.append({"Manufacturer": mfr, "Store Model": model, "List Model": target})
+                _write_gobo_rule_rows("alias", rows)
+                _track(who, "sizes", "changed a size rule",
+                       f"{mfr} {model} reads as {target}")
+            elif op == "remove":
+                kind = "alias" if str(body.get("kind") or "") == "alias" else "override"
+                rows = _gobo_rule_rows(kind)
+                mcol = "Store Model" if kind == "alias" else "Model"
+                keep = [r for r in rows
+                        if not (_norm_key(r["Manufacturer"]) == _norm_key(mfr)
+                                and _norm_key(r[mcol]) == _norm_key(model)
+                                and (kind == "alias"
+                                     or r["Customer Email Domain"].lstrip("@").lower() == domain))]
+                if len(keep) == len(rows):
+                    return _json({"error": "That rule is no longer there."}, 400)
+                _write_gobo_rule_rows(kind, keep)
+                _track(who, "sizes", "removed a size rule", f"{mfr} {model}")
+            else:
+                return _json({"error": "Unknown operation."}, 400)
+        except Exception:
+            logger.exception("gobo rule write failed")
+            return _json({"error": "Couldn't save that rule to the data volume."}, 500)
+        # Re-read through the same lookup the labels print with, so the answer
+        # says what the bench will actually see rather than what was intended.
+        entry, reason = _gobo_lookup(mfr, model)
+        health = _gobo_sizes().get("health") or {}
+        return _json({"ok": True, "resolves": not reason, "reason": reason or "",
+                      "size": (entry.get("production_size") if isinstance(entry, dict) else None),
+                      "dead_aliases": health.get("dead_aliases", 0),
+                      "overrides": _gobo_rule_rows("override"),
+                      "aliases": _gobo_rule_rows("alias")})
 
     @mcp.custom_route("/api/reorder-radar", methods=["POST"])
     async def reorder_radar_route(request: Request):
@@ -15785,6 +16056,21 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     _mail_release_owned(target, "account switched off")
                 _track(who, "team", "changed access",
                        f"{label}'s access was switched {'on' if on else 'off'}")
+            elif op == "sizes":
+                # Who may change what the bench cuts. Admins hold it by rank and
+                # cannot be toggled: switching it off would read as a revocation
+                # that the permission check would then ignore.
+                if not may_manage():
+                    return _json({"error": "You cannot manage that account."}, 403)
+                if ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"]:
+                    return _json({"error": "Admins can already edit the size list; "
+                                  "the grant is for members and part-timers."}, 400)
+                grant = bool(body.get("can_sizes"))
+                u["can_sizes"] = grant
+                _write_users(d)
+                detail = (f"{label} can edit the size list" if grant
+                          else f"{label} can no longer edit the size list")
+                _track(who, "team", "changed size-list access", detail)
             elif op == "tabs":
                 if not may_manage():
                     return _json({"error": "You cannot manage that account."}, 403)

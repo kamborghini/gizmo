@@ -1007,6 +1007,18 @@
             flex: none; margin-left: auto; }
         /* Beta: quieter than a warning, louder than nothing. It sits where the
            unread dot sits, so the nav keeps one right-hand column. */
+        /* Resolve-a-flagged-model dialog. One choice at a time: the three
+           rulings are mutually exclusive, and showing all three sets of fields
+           at once invites filling in the one you did not pick. */
+        .sr-opt { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-2) 0;
+            font-size: var(--t-md); cursor: pointer; }
+        .sr-opt input { margin-top: 3px; flex: none; width: 16px; height: 16px;
+            accent-color: var(--accent); cursor: pointer; }
+        .sr-pane { padding: 0 0 var(--sp-3) 26px; }
+        .sr-hits { display: flex; flex-direction: column; gap: var(--sp-1); max-height: 190px;
+            overflow-y: auto; margin: var(--sp-2) 0; }
+        .sr-hit { justify-content: flex-start; text-align: left; width: 100%; }
+        .sr-hit.on { border-color: var(--accent); background: var(--surface-2); }
         .beta-tag { margin-left: auto; flex: none; font-size: var(--t-xs); font-weight: var(--w-medium);
             letter-spacing: normal; text-transform: none; color: var(--ink-3);
             background: var(--surface-3); border: 1px solid var(--border);
@@ -3867,7 +3879,21 @@
                 const good = a.pct == null ? null : (lowerBetter ? a.pct < 0 : a.pct > 0);
                 const dir = good == null ? 'flat' : good ? 'up' : 'down';
                 const row = el('div', 'alert-row');
-                row.append(el('span', 'adot ' + dir), el('span', 'a-tab', a.tab_label || ''), el('span', 'a-metric', a.metric || ''),
+                /* A size-list alert had nowhere to go: the only controls were
+                   snooze and dismiss, while the actual fix lived in a CSV on the
+                   volume. Dismissing it did not resolve anything - the model came
+                   back on the next scan. Now the metric itself opens the size
+                   check that can settle it. */
+                let metric;
+                if (/size list/i.test(a.metric || '')) {
+                    metric = el('button', 'a-metric seclink');
+                    metric.textContent = a.metric || '';
+                    metric.title = 'Open the size check and resolve this';
+                    metric.onclick = () => { setView('labels'); runCoverage(); };
+                } else {
+                    metric = el('span', 'a-metric', a.metric || '');
+                }
+                row.append(el('span', 'adot ' + dir), el('span', 'a-tab', a.tab_label || ''), metric,
                     el('span', 'a-pct ' + dir, a.pct == null ? '~' : ((a.pct > 0 ? '+' : '') + a.pct + '%')));
                 const x = el('button', 'alert-x'); x.innerHTML = I.x; x.title = 'Dismiss'; x.onclick = () => alertOp({ op: 'dismiss', id: a.id });
                 row.append(x); wrap.append(row);
@@ -7349,6 +7375,23 @@
         /* Size-list coverage: run recent orders through the same lookup the labels
            print with, so a CSV update can be sanity-checked against real orders. */
         let labelsCoverage = null;   // 'busy' | { data, at } | { error, at }
+        /* Whether THIS account may settle a flagged model. Read from the server
+           rather than inferred from the role: the grant is per person, so an
+           admin's answer is not everyone's. Defaults to false, so a failed read
+           hides the button instead of offering one the server will refuse. */
+        let sizeRulesCanEdit = false, sizeRulesAsked = false;
+        /* Asked once, whenever a coverage card is drawn - NOT only when the
+           merchant runs the check by hand. The weekly scan raises the alert on
+           its own, so the card is often on screen without runCoverage ever
+           having been called in this session, and gating the answer on that
+           hid the Resolve button from people who hold the grant. */
+        async function loadSizeRulePerm() {
+            if (sizeRulesAsked) return;
+            sizeRulesAsked = true;
+            try { sizeRulesCanEdit = !!(await api('/api/gobo-sizes/rules', {})).can_edit; }
+            catch (e) { sizeRulesCanEdit = false; return; }
+            if (sizeRulesCanEdit && labelsCoverage && labelsCoverage !== 'busy' && labelsCache) renderLabels();
+        }
         async function runCoverage() {
             if (labelsCoverage === 'busy') return;
             labelsCoverage = 'busy';
@@ -7375,7 +7418,157 @@
             printShippingLabelsFor(eligible);
             return eligible.length;
         };
+        /* Resolving a flagged model, from inside the app. Until this existed the
+           weekly alert could only be dismissed: the actual fix lived in a CSV on
+           the data volume, so "New model not matching the size list" was a
+           notification with nowhere to go. Each choice writes one row to the same
+           rule files the size lookup already reads. */
+        function openSizeRuleModal(row, onSaved) {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, 'Resolve ' + (row.model || 'this model')));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
+            head.append(x);
+            const body = el('div', 'modal-body');
+            const close = () => overlay.remove();
+            x.onclick = close;
+            // X only: a misclick must not discard a half-filled ruling.
+
+            body.append(el('p', 'field-help',
+                (row.manufacturer ? row.manufacturer + ' · ' : '') + (row.model || '')
+                + (row.reason ? ' - ' + row.reason : '')));
+
+            let pick = 'set';
+            const panes = {};
+            const radios = [];
+            const choose = (k) => {
+                pick = k;
+                Object.keys(panes).forEach(n => { panes[n].style.display = (n === k ? '' : 'none'); });
+                radios.forEach(r => { r.checked = (r.value === k); });
+            };
+            const opt = (k, label, build) => {
+                const wrapL = el('label', 'sr-opt');
+                const r = document.createElement('input');
+                r.type = 'radio'; r.name = 'sizerule'; r.value = k; r.checked = (k === 'set');
+                r.onchange = () => choose(k);
+                radios.push(r);
+                wrapL.append(r, el('span', null, label));
+                body.append(wrapL);
+                const pane = el('div', 'sr-pane');
+                build(pane);
+                panes[k] = pane;
+                body.append(pane);
+            };
+
+            // 1. A size of its own.
+            let sizeIn, domIn;
+            opt('set', 'Give it a production size', (pane) => {
+                const f = el('label', 'pfield');
+                f.append(el('span', null, 'Production size (mm)'));
+                sizeIn = el('input', 'psel'); sizeIn.type = 'text';
+                sizeIn.placeholder = 'e.g. 37.5'; sizeIn.inputMode = 'decimal';
+                f.append(sizeIn); pane.append(f);
+                const f2 = el('label', 'pfield');
+                f2.append(el('span', null, 'Only for one customer (optional)'));
+                domIn = el('input', 'psel'); domIn.type = 'text';
+                domIn.placeholder = 'their email domain, e.g. acme.co.uk';
+                f2.append(domIn); pane.append(f2);
+                pane.append(el('div', 'field-help',
+                    'Leave the customer blank and this size applies to every order. '
+                    + 'Fill it in and it applies only to that customer, with the general '
+                    + 'size still used for everyone else.'));
+            });
+
+            // 2. Another name for something already on the sheet.
+            let target = null, targetLine;
+            opt('alias', 'It is another name for a model already on the list', (pane) => {
+                const f = el('label', 'pfield');
+                f.append(el('span', null, 'Search the size list'));
+                const q = el('input', 'psel'); q.type = 'text';
+                q.placeholder = 'start typing a model on the list';
+                f.append(q); pane.append(f);
+                const hits = el('div', 'sr-hits'); pane.append(hits);
+                targetLine = el('div', 'field-help'); pane.append(targetLine);
+                let seq = 0;
+                q.oninput = async () => {
+                    const mine = ++seq;
+                    const term = q.value.trim();
+                    if (term.length < 2) { hits.innerHTML = ''; return; }
+                    let res;
+                    try { res = await api('/api/gobo-sizes/models', { q: term }); }
+                    catch (e) { return; }
+                    if (mine !== seq) return;   // a slower earlier search must not win
+                    hits.innerHTML = '';
+                    (res.models || []).forEach(m => {
+                        const b = el('button', 'btn sr-hit');
+                        b.textContent = (m.manufacturer ? m.manufacturer + ' · ' : '') + m.model
+                            + (m.size ? '  (' + m.size + ' mm)' : '');
+                        b.onclick = () => {
+                            target = m;
+                            targetLine.textContent = 'Will read as: ' + m.model
+                                + (m.size ? ' - ' + m.size + ' mm' : '');
+                            [...hits.children].forEach(c => c.classList.remove('on'));
+                            b.classList.add('on');
+                        };
+                        hits.append(b);
+                    });
+                    if (!(res.models || []).length) hits.append(el('div', 'field-help', 'Nothing on the list matches that.'));
+                };
+            });
+
+            // 3. Not a gobo at all.
+            opt('exclude', 'It is not a gobo, stop reporting it', (pane) => {
+                pane.append(el('div', 'field-help',
+                    'Items on this model stop counting towards size-list coverage, so it '
+                    + 'will not be reported again. It does not change anything already printed.'));
+            });
+
+            choose('set');
+
+            const foot = el('div', 'modal-foot');
+            const save = el('button', 'btn btn-primary', 'Save rule');
+            const cancel = el('button', 'btn', 'Cancel'); cancel.onclick = close;
+            save.onclick = async () => {
+                const req = { manufacturer: row.manufacturer || '', model: row.model || '' };
+                if (pick === 'set') {
+                    req.op = 'set'; req.size = sizeIn.value;
+                    if (domIn.value.trim()) req.domain = domIn.value;
+                } else if (pick === 'alias') {
+                    if (!target) { toastError('Pick the model on the list it should read as.'); return; }
+                    /* The manufacturer stays the one the ORDERS carry. That
+                       column is what the store's spelling gets indexed under, so
+                       writing the target's here would file the alias under a
+                       maker the orders never say, and the rule would never match
+                       the items it was added to fix. The target is found by its
+                       model name regardless. */
+                    req.op = 'alias'; req.list_model = target.model;
+                } else {
+                    req.op = 'exclude';
+                }
+                save.disabled = true; cancel.disabled = true;
+                let res;
+                try { res = await api('/api/gobo-sizes/rule', req); }
+                catch (e) { toastError(e.message); save.disabled = false; cancel.disabled = false; return; }
+                /* Report what the LOOKUP says, not what was asked for. A rule can
+                   save cleanly and still leave the model unresolved - an alias onto
+                   a row that is itself ambiguous, for instance - and saying "done"
+                   there would send a wrong size to the bench. */
+                if (req.op === 'exclude') toastOk(row.model + ' will not be reported again.');
+                else if (res.resolves) toastOk(row.model + ' now resolves to ' + (res.size || 'a size') + ' mm.');
+                else toastError('Saved, but ' + row.model + ' still does not resolve: '
+                                + (res.reason || 'unknown reason'));
+                close();
+                if (onSaved) onSaved(res);
+            };
+            foot.append(cancel, save);
+            modal.append(head, body, foot);
+            overlay.append(modal); document.body.append(overlay);
+            (sizeIn || modal).focus();
+        }
+
         function coverageCard() {
+            loadSizeRulePerm();
             const card = el('div', 'card');
             if (labelsCoverage === 'busy') {
                 const t = el('div', 'thinking');
@@ -7402,7 +7595,7 @@
             } else {
                 const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = '10px';
                 const tb = el('table', 'ktable');
-                tb.innerHTML = '<thead><tr><th>Model as written on orders</th><th>Manufacturer</th><th>Why it flags</th><th class="num">Items</th><th>Seen on</th></tr></thead>';
+                tb.innerHTML = '<thead><tr><th>Model as written on orders</th><th>Manufacturer</th><th>Why it flags</th><th class="num">Items</th><th>Seen on</th><th></th></tr></thead>';
                 const tbody = el('tbody');
                 d.flagged.forEach(r => {
                     const tr = el('tr');
@@ -7417,6 +7610,18 @@
                                     : orderA(o2.name, o2.admin_url));
                     });
                     tr.append(seen);
+                    /* The whole point of the table: a flagged model can be
+                       settled here rather than in a CSV on the volume. Hidden
+                       for anyone without the grant, because the server refuses
+                       them anyway and a button that always errors is worse than
+                       no button. */
+                    const act = el('td');
+                    if (sizeRulesCanEdit) {
+                        const fix = el('button', 'btn btn-sm', 'Resolve');
+                        fix.onclick = () => openSizeRuleModal(r, () => runCoverage());
+                        act.append(fix);
+                    }
+                    tr.append(act);
                     tbody.append(tr);
                 });
                 tb.append(tbody); wrap.append(tb); card.append(wrap);
@@ -10290,7 +10495,7 @@
                 ['Stock usage', 'Glass used by everything marked made on a chosen day, totalled by size and glass family.'],
                 ['Dispatch manifest', 'Everything booked on a chosen day: courier, tracking, collection reference, cost and what the customer paid. Print it for the driver handover, or check it against the World Options invoice.'],
                 ['Margins', 'What each dispatched order actually made: revenue and delivery net of VAT and discounts, less the cost of the goods and the courier. Orders with a product that has no cost price in Shopify are listed as incomplete rather than counted, because a missing cost would read as pure profit. Labour is not included.'],
-                ['Size check', 'Runs recent orders through the size database and reports models that could not be resolved, so the list can be corrected before those orders reach the bench.'],
+                ['Size check', 'Runs recent orders through the size database and reports models that could not be resolved, so the list can be corrected before those orders reach the bench. Each flagged model has a Resolve button: give it a production size (optionally for one customer only), say it is another name for a model already on the list, or rule it out as not a gobo. Editing the size list is a permission an admin grants per person on the Team tab.'],
                 ['Update size list', 'Replaces the gobo size database from a CSV. The previous five versions are kept.'],
             ]},
             { h: 'What the app will not do', body: [
@@ -15531,6 +15736,23 @@
                         group.append(lab);
                     });
                     panel.append(group);
+                    /* A capability, not a tab: seeing Production Manager is not
+                       the same as being allowed to decide the glass an order is
+                       cut from. Admins hold it by rank, so they get a statement
+                       rather than a switch that would not actually revoke it. */
+                    const perm = el('div'); perm.style.cssText = 'flex:1 1 100%';
+                    let sizeBox = null;
+                    if (u.sizes_by_rank) {
+                        perm.append(el('div', 'files-hint',
+                            'Can edit the size list (every admin can).'));
+                    } else {
+                        const sl = el('label', 'tm-tabpick');
+                        sizeBox = document.createElement('input');
+                        sizeBox.type = 'checkbox'; sizeBox.checked = !!u.can_sizes;
+                        sl.append(sizeBox, document.createTextNode('Can edit the size list'));
+                        perm.append(sl);
+                    }
+                    panel.append(perm);
                     const save = el('button', 'btn btn-primary', 'Save');
                     save.onclick = async () => {
                         save.disabled = true;
@@ -15544,6 +15766,13 @@
                                withheld the one tab the admin had just ticked,
                                and the activity ledger recorded the opposite. */
                             await api('/api/team/user', { op: 'tabs', id: u.id, tabs: picked });
+                            /* Only when it actually changed. Sending it every
+                               time would write a grant into the activity ledger
+                               that nobody made. */
+                            if (sizeBox && sizeBox.checked !== !!u.can_sizes) {
+                                await api('/api/team/user',
+                                    { op: 'sizes', id: u.id, can_sizes: sizeBox.checked });
+                            }
                             teamTabsOpen = '';
                         } catch (e) { toastError(e.message); save.disabled = false; return; }
                         loadTeam();
