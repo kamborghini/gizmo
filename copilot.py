@@ -10074,12 +10074,29 @@ async def _mail_sync_now(force: bool = False) -> None:
             # inferring it from our own cached copy is where staleness hides.
             try:
                 seen_all = []
-                unread_ids = await google_mail.list_thread_ids("in:inbox is:unread",
-                                                               out_complete=seen_all)
+                # Over the whole tracked window, not just the inbox. Scoped to
+                # "in:inbox" this could only ever speak for threads that were
+                # BOTH still in the inbox AND inside a listing capped at
+                # MAIL_LIST_MAX, which left two ways to be wrong: an unread
+                # thread past the cap stayed "read", and a thread archived while
+                # unread and read afterwards stayed "unread" for good - the one
+                # the board reports as "N unread emails are not in this view".
+                unread_ids = await google_mail.list_thread_ids(
+                    f"is:unread newer_than:{MAIL_TRACK_DAYS}d", out_complete=seen_all)
                 if seen_all and seen_all[0]:
+                    # A complete walk can speak for every thread INSIDE the
+                    # window it covered, inbox or archive. It says nothing
+                    # about one that outlived it: prune only drops DONE
+                    # threads, so a live thread can be older than the query,
+                    # and silence from a search that never looked at it is not
+                    # evidence it was read.
+                    seen_from = (datetime.now(timezone.utc)
+                                 - timedelta(days=MAIL_TRACK_DAYS - 1)).isoformat()
                     for tid, t in threads.items():
-                        if tid in inbox_ids:
-                            t["unread"] = tid in unread_ids
+                        if tid in unread_ids:
+                            t["unread"] = True
+                        elif (t.get("last_at") or "") >= seen_from:
+                            t["unread"] = False
                 else:
                     # A truncated walk cannot prove a thread is READ, only that
                     # it is unread. Promote the ones we saw and leave the rest

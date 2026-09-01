@@ -8169,6 +8169,107 @@ def t_mail_unread_comes_from_gmail_not_from_our_own_stale_copy():
     with_mail(go)
 
 @test
+def t_a_truncated_inbox_listing_does_not_hide_unread_mail():
+    """The unread sweep only wrote to threads it had just seen in the inbox
+    LISTING. That listing is capped at MAIL_LIST_MAX and says so - a shared
+    mailbox past the cap truncates. A thread that Gmail reports as unread, but
+    which fell off the end of that listing, was skipped: the board went on
+    showing a customer email as read while Gmail had it bold.
+
+    The incomplete-walk branch below it already promoted every id it saw,
+    regardless of the listing, so the SAFE path was more thorough than the
+    confident one."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("keep", subject="In the listing")
+        _seed_thread("fell", subject="Fell off the end")
+        m = copilot._load_mail()["threads"]
+        m["keep"]["history_id"] = "h1"; m["keep"]["unread"] = False
+        m["fell"]["history_id"] = "h1"; m["fell"]["unread"] = False
+        async def listing(q, n):
+            # Truncated: "fell" is genuinely in the Gmail inbox, but past the cap.
+            return {"threads": [{"id": "keep", "snippet": "s", "historyId": "h1"}],
+                    "complete": False}
+        async def ids(q, max_results=500, pages=8, out_complete=None):
+            if out_complete is not None:
+                out_complete.append(True)      # the unread walk DID see everything
+            return {"keep", "fell"}
+        saved = (_gm.list_threads, _gm.list_thread_ids)
+        _gm.list_threads, _gm.list_thread_ids = listing, ids
+        try:
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            t = copilot._load_mail()["threads"]
+            eq(t["keep"]["unread"], True, "the thread inside the listing is right")
+            eq(t["fell"]["unread"], True,
+               "and so is the one Gmail reported unread from outside it")
+        finally:
+            _gm.list_threads, _gm.list_thread_ids = saved
+    with_mail(go)
+
+@test
+def t_a_thread_read_in_gmail_after_archiving_stops_showing_unread():
+    """The authoritative query was scoped "in:inbox is:unread", so an ARCHIVED
+    thread appeared in neither the listing nor the unread set and kept whatever
+    flag it last had. Archive an unread email, then read it in Gmail, and the
+    board went on calling it unread forever - and the Inbox tells the merchant
+    "N unread emails are not in this view", so it is a standing false alarm."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("arch", subject="Archived then read")
+        m = copilot._load_mail()["threads"]
+        m["arch"]["history_id"] = "h1"; m["arch"]["unread"] = True
+        m["arch"]["in_inbox"] = False; m["arch"]["state"] = "done"
+        async def listing(q, n):
+            return {"threads": [], "complete": True}      # archived: not in the inbox
+        async def ids(q, max_results=500, pages=8, out_complete=None):
+            if out_complete is not None:
+                out_complete.append(True)
+            return set()                                   # Gmail: nothing is unread
+        saved = (_gm.list_threads, _gm.list_thread_ids)
+        _gm.list_threads, _gm.list_thread_ids = listing, ids
+        try:
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            eq(copilot._load_mail()["threads"]["arch"]["unread"], False,
+               "Gmail says nothing is unread, so the board must not still claim it is")
+        finally:
+            _gm.list_threads, _gm.list_thread_ids = saved
+    with_mail(go)
+
+@test
+def t_a_thread_older_than_the_window_is_never_demoted_on_silence():
+    """The authoritative query is windowed (newer_than:MAIL_TRACK_DAYS). Prune
+    only drops DONE threads, so a live one can outlive that window - and the
+    query never looked at it. Absence from a search that did not cover it is
+    not evidence it was read."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("ancient", subject="Older than the window")
+        t = copilot._load_mail()["threads"]["ancient"]
+        t["history_id"] = "h1"; t["unread"] = True; t["in_inbox"] = False
+        t["last_at"] = "2019-01-01T00:00:00+00:00"      # far outside the window
+        async def listing(q, n):
+            return {"threads": [], "complete": True}
+        async def ids(q, max_results=500, pages=8, out_complete=None):
+            if out_complete is not None:
+                out_complete.append(True)
+            return set()          # the windowed query simply never saw it
+        saved = (_gm.list_threads, _gm.list_thread_ids)
+        _gm.list_threads, _gm.list_thread_ids = listing, ids
+        try:
+            copilot._load_mail()["synced_at"] = ""
+            post("/api/mail/board", {"force": True})
+            eq(copilot._load_mail()["threads"]["ancient"]["unread"], True,
+               "silence from a query that did not cover it is not proof it was read")
+        finally:
+            _gm.list_threads, _gm.list_thread_ids = saved
+    with_mail(go)
+
+@test
 def t_mail_bulk_can_be_undone():
     """One mis-click moves 150 emails. That has to be recoverable."""
     def go():
