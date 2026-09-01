@@ -191,7 +191,12 @@ def t_weights_radii_and_elevation_are_closed():
     # 2 is the chart legend's key. The reference escapes its own scale there too
     # (rounded-[2px]); on an 8px square the next step up, 6, is a blob rather
     # than a square, and the difference is plainly visible.
-    allowed = {2, 6, 8, 12}
+    # 4 is the checkbox, for the same reason one step up the scale: the radius
+    # ladder bottoms out at --r-xs 6, which on a 16px box is 37% of the side and
+    # reads as a radio button - checked, it was a black disc with a tick in it.
+    # Both escapes are single small squares; the closed scale still governs
+    # every box big enough for it to be about the corner and not the shape.
+    allowed = {2, 4, 6, 8, 12}
     ok(radii <= allowed, "radii outside the scale: " + str(sorted(radii - allowed)))
 
 
@@ -1235,27 +1240,44 @@ def t_what_a_booking_asked_for_outlives_the_click_that_asked():
 @test
 def t_the_charts_are_drawn_to_the_reference_spec():
     """Measured off the reference's own rendered SVG, not eyeballed: five
-    horizontal rules in #ccc at half opacity spanning the FULL width, no
-    verticals, no axis line, no tick marks, NO y-axis labels at all, dates at
-    12px in #666, lines at 1.4, and an area wash from the light end of the ramp.
-    Its chart carries no average rule, no peak label and no resting dot - every
-    text node in it is an x-axis date."""
+    horizontal rules at HALF the weight of the card's own edge, reaching the
+    card's right edge, no verticals, no axis line, no tick marks, five labelled
+    y ticks and the dates both 12px in muted grey, lines at 1.4, and an area wash from
+    the light end of the ramp. Its chart carries no average rule, no peak label
+    and no resting dot - every text node in it is an axis number or a date.
+
+    The rules used to be a #ccc literal, which resolved to the same #e5e5e5 as
+    the card border around them, and the y axis carried no numbers at all - so
+    a reader could not tell whether the Clicks line sat at 8k or 18k. The
+    reference labels its own y axis at x=18 in a mid grey."""
     css = CSS
     grid = re.search(r"\.chart-wrap \.gridline \{[^}]*\}", css).group(0)
-    ok("stroke: #ccc" in grid and "stroke-opacity: .5" in grid,
-       "the grid is #ccc at half opacity: " + grid)
+    ok("stroke: var(--border)" in grid and "stroke-opacity: .5" in grid,
+       "the grid is the border colour at half opacity, one step lighter than "
+       "the card's own edge: " + grid)
+    ok(re.search(r"--border:\s*#e5e5e5", css), "and that token still resolves to #e5e5e5")
     ok("dasharray" not in grid, "and solid, not dashed")
     line = re.search(r"\.chart-line \{[^}]*\}", css).group(0)
     ok("stroke-width: 1.4" in line, "lines are 1.4, not a marker pen: " + line)
     axis = re.search(r"\.chart-wrap \.axis-x text[^{]*\{[^}]*\}", css).group(0)
-    ok("#666666" in axis, "dates are #666: " + axis)
-    # The frame draws the rules edge to edge and only labels the y axis on ask.
+    # Same requirement, re-anchored: the dates are the app's muted grey rather
+    # than the near-black body ink. It used to be the #666666 literal measured
+    # off the reference, which was the only string in the app painted from a
+    # hex instead of a token and sat three units off --ink-3.
+    ok("fill: var(--ink-3)" in axis and "#" not in axis, "dates are muted grey from the token: " + axis)
+    ok(re.search(r"--ink-3:\s*#696969", css), "and that token still resolves to a grey (#696969)")
+    ok(".axis-y text" in axis and "var(--t-xs)" in axis,
+       "and the y numbers are painted by the same 12px rule: " + axis)
+    # The frame draws the rules from the axis to the card edge and labels both axes.
     frame = SCRIPT[SCRIPT.index("function drawFrame"):]
     frame = frame[:frame.index("\n        function ", 10)]
-    ok("x1: 0, y1: yy, x2: W" in frame, "rules span the full width, not just the plot box")
-    ok("if (c.yTicks)" in frame, "y-axis numbers are opt-in, and nothing opts in")
+    ok("x1: padL, y1: yy, x2: W" in frame,
+       "rules reach the card's right edge, and start at the axis rather than "
+       "running under their own numbers")
+    ok("if (c.yTicks)" in frame, "y-axis numbers are opt-in")
     ok("rotate(-90" not in frame, "no rotated axis title down the side")
-    ok("yTicks: false" in SCRIPT, "both chart types ask for no y numbers")
+    ok("yTicks: false" not in SCRIPT and SCRIPT.count("yTicks: true") == 2,
+       "and both chart types opt in, as the reference labels its own y axis")
     # Nothing decorates the plot at rest.
     ok("chart-end-dot" not in SCRIPT, "no dot at the end of the line")
     ok("annotate(svg" not in SCRIPT.replace("function annotate(svg", ""),
@@ -1589,7 +1611,11 @@ def t_contacts_is_a_table_not_a_run_together_line():
     """Company, email, deal count and the Shopify link were joined with dots
     into one nowrap line, so a long company name truncated the rest away."""
     ok("crm-contact-table" in SCRIPT, "contacts renders the house table")
-    fn = SCRIPT.split("crm-contact-table")[1][:1800]
+    # The window is the table block itself - from the table's class to the pager
+    # that follows it - rather than a byte count that a comment above the row
+    # can push the tick handler out of.
+    fn = SCRIPT.split("crm-contact-table")[1]
+    fn = fn[:fn.index("list.append(tablePager({")]
     for col in ("Organisation", "Email", "Phone", "Deals", "Label"):
         ok(col in fn, "there is a " + col + " column")
     ok("e.stopPropagation()" in fn,
@@ -2038,7 +2064,11 @@ def t_a_dropdown_menu_can_always_be_got_out_of():
 def t_the_menu_and_tabs_are_the_reference_measurements():
     """Read off the reference: a 10px panel whose edge is a ring rather than a
     border, 4px of padding, 28px items at the control radius; and filter tabs
-    that are 24px, 12px, and marked by ink alone with no filled pill."""
+    that are 24px, 12px, with no filled pill, marked by ink AND the 2px rule
+    the reference draws under its live trigger. Ink alone was the old reading
+    of the reference and it was short by that rule: re-measured, the active
+    trigger carries a ::after of height 2px in the near-black, the width of the
+    trigger itself. The pill is still the thing that must never come back."""
     panel = CSS.split(".dmenu {")[1].split("}")[0]
     ok("border-radius: var(--r-md)" in panel, "the panel is at the base radius")
     ok("padding: 4px" in panel, "padded 4px")
@@ -2053,7 +2083,13 @@ def t_the_menu_and_tabs_are_the_reference_measurements():
     ok("background: none" in tab, "with no filled pill")
     on = CSS.split(".ftab.on {")[1].split("}")[0]
     ok("color: var(--ink)" in on and "background" not in on,
-       "the live tab is marked by ink alone, the way the reference marks it")
+       "the live tab takes full ink and still no fill behind it")
+    rule = CSS.split(".ftab.on::after {")[1].split("}")[0]
+    ok("height: 2px" in rule, "and a 2px rule under it")
+    ok("var(--accent)" in rule, "painted in the near-black, not a tint that may resolve to nothing")
+    ok("left: 0" in rule and "right: 0" in rule, "the width of the tab itself, as the reference draws it")
+    ok(any("position: relative" in b for b in re.findall(r"\.ftab \{([^}]*)\}", CSS)),
+       "with the tab as the box it is positioned against, or it hangs off the page")
 
 
 @test
@@ -2077,7 +2113,9 @@ def t_a_missing_figure_is_not_reported_as_zero():
 def t_the_finance_pages_share_the_reference_tab_strip():
     """Liability and Reconciliation are one area with two pages, which is how
     they were asked for. The strip that binds them wore a filled pill, which
-    reads as a control you press rather than a place you are."""
+    reads as a control you press rather than a place you are. A pill is still
+    wrong; what the reference actually draws instead is a 2px rule under the
+    live trigger, and colour on its own left three near-identical links."""
     ok("const seg = el('div', 'ptabs')" in SCRIPT, "the strip is the page-level one")
     ok("el('button', 'ptab'" in SCRIPT, "and its tabs are page tabs")
     fn = SCRIPT.split("function financeTabs(active, updated) {")[1][:900]
@@ -2088,7 +2126,13 @@ def t_the_finance_pages_share_the_reference_tab_strip():
     ok("font-size: var(--t-md)" in tab, "at 14px, bigger than a filter tab inside a card")
     ok("background: none" in tab, "with no pill")
     on = CSS.split(".ptab.on {")[1].split("}")[0]
-    ok("color: var(--ink)" in on and "background" not in on, "the live page is marked by ink alone")
+    ok("color: var(--ink)" in on and "background" not in on, "the live page takes full ink, with no pill")
+    rule = CSS.split(".ptab.on::after {")[1].split("}")[0]
+    ok("height: 2px" in rule, "and carries the reference's 2px rule under it")
+    ok("var(--accent)" in rule, "in the near-black, which is a colour that actually paints")
+    ok("left: 0" in rule and "right: 0" in rule, "spanning the trigger's own width")
+    ok(any("position: relative" in b for b in re.findall(r"\.ptab \{([^}]*)\}", CSS)),
+       "positioned against the tab, so the strip's metrics do not move")
 
 
 @test
@@ -2107,8 +2151,14 @@ def t_the_liability_filters_are_sorted_not_shortened():
     for f in ("liaF.status", "liaF.terms", "liaF.channel", "liaF.dateField",
               "liaF.from", "liaF.to", "liaF.min", "liaF.sort", "liaF.q"):
         ok(f in fn, f + " survived the sort")
-    # Clear only appears when there is something to clear.
-    ok("if (anyFilter) {" in fn, "the reset button appears only when a filter is on")
+    # Clear only appears when there is something to clear. It used to be BUILT
+    # only then, which the search could not reach: typing repaints the rows
+    # alone, so a search-only filter left no way to clear it on the bar at all.
+    # Built always, shown from the same expression the coverage line uses.
+    ok("clr.style.display = active ? '' : 'none';" in fn,
+       "the reset button appears only when a filter is on")
+    ok("const active = liaF.q ||" in fn,
+       "and a search counts as one, because paint() is what the search runs")
 
 
 @test
@@ -2117,9 +2167,12 @@ def t_a_filter_that_hides_everything_does_not_hide_itself():
     filter matching nothing took the way to undo it off the screen with it."""
     fn = SCRIPT.split("function renderRecon() {")[1]
     fn = fn[:fn.index("\n        function ")]
-    tools = fn.index("list.append(tableTools([searchWrap, statusTabs]")
+    # The status filter is the shared chip now, not a flat tab strip, so the
+    # name changed with it. The requirement did not: it is built, and on the
+    # page, before the list can return empty.
+    tools = fn.index("list.append(tableTools([searchWrap, statusChip]")
     empty = fn.index("if (!ex.length) {")
-    ok(tools < empty, "the search and the status tabs are built before the empty check")
+    ok(tools < empty, "the search and the status filter are built before the empty check")
     ok(fn.index("box.append(list)") < empty, "and the card is on the page before it returns")
 
 
@@ -2231,9 +2284,14 @@ def t_the_files_list_is_the_reference_measurement():
     ok("border-radius: var(--r-md)" in lst, "the list box is at the base radius")
     ok("1px solid var(--border)" in lst, "in the border ink")
     row = CSS.split(".files-row { display: flex")[1].split("}")[0]
-    ok("padding: var(--sp-3)" in row, "rows are padded 12px square")
+    ok("padding: var(--sp-3)" in row, "the shared row shell is padded 12px square")
     ok("border-top: 1px solid var(--border)" in row and "0.5px" not in row,
        "with a full hairline, not a half-pixel one")
+    # The Files list itself is denser than the shell it borrows: 8 + a 28px
+    # action button + 8 + the hairline is the reference's 45px row. The Team
+    # and Work rows keep the 12px square, so the density is scoped to the tab.
+    ok(re.search(r"#files-content \.files-row \{ padding: var\(--sp-2\) var\(--sp-3\); \}", CSS),
+       "and the Files rows sit at the reference's own density")
 
 
 @test
@@ -2263,8 +2321,10 @@ def t_the_chart_legend_belongs_to_the_plot():
        "drawn between the header and the plot, and only when there are lines to tell apart")
     ok("chart-legend" not in SCRIPT.split("function chartHead(")[1][:1400],
        "and no longer inside the card header")
-    ok("const padL = 0, padR = 0, padT = 14, padB = 30;" in SCRIPT,
-       "so the plot stops reserving space for something drawn elsewhere")
+    ok("const padL = 40, padR = 0, padT = 14, padB = 30;" in SCRIPT,
+       "so the plot reserves 14 at the top for the topmost stroke and nothing "
+       "for a legend drawn elsewhere; the 40 on the left is the y-axis numbers, "
+       "which ARE inside the plot")
     lg = CSS.split(".chart-legend {")[1].split("}")[0]
     ok("justify-content: flex-end" in lg, "right-aligned, as the reference aligns it")
     ok("gap: var(--sp-4)" in lg, "16px between keys")
@@ -2462,7 +2522,10 @@ def t_search_repaints_are_debounced_everywhere():
     ok("setTimeout(() => oninput(inp.value.trim()), 150)" in fn,
        "the factory debounces its callers")
     ok("search._t = setTimeout(paintMailBody, 150)" in SCRIPT, "the mail search too")
-    ok("q._t = setTimeout(paint, 150)" in SCRIPT, "and the deals search")
+    # The deals search was the second hand-rolled one; it is the factory's now,
+    # so the guard follows it there rather than pinning the retired timer.
+    ok("tableSearch('Search deals" in SCRIPT,
+       "and the deals search is built by the factory, which debounces it")
     ok("search._t = setTimeout(drawList, 150)" in SCRIPT, "and the products search")
     ok("find._t = setTimeout(paint, 150)" in SCRIPT, "and the booked-shipments search")
     ok("inp.onchange = () => {" in SCRIPT.split("function tableSearch(")[1][:1300],
@@ -2664,17 +2727,28 @@ def t_the_card_elevation_token_actually_paints():
 
 @test
 def t_a_rising_number_is_not_congratulated_in_green():
-    """Measured off the reference's KPI cards: the positive delta badge is a
-    solid --accent pill with near-white text, and only the negative one carries
-    a tint. gizmo paints metrics where a rise is bad news - unfulfilled orders,
-    at-risk customers - so a green "up" was reading as approval of a number the
-    merchant needs to worry about."""
+    """gizmo paints metrics where a rise is bad news - unfulfilled orders,
+    at-risk customers - so a green "up" reads as approval of a number the
+    merchant needs to worry about. Nothing here spends colour on direction.
+
+    The KPI chip has since been demoted a second time: a solid near-black pill
+    made the CHANGE the loudest mark on a card whose subject is the figure, so
+    the up chip is a neutral tint under the value's own weight. The rule that
+    matters is unchanged - no green, and the tinted down chip is the only mark
+    in the row that pulls the eye."""
+    up = re.search(r"\.delta\.up \{[^}]*\}", CSS)
+    ok(up, "the .delta.up rule is still there")
+    ok("var(--surface-3)" in up.group(0) and "var(--ink)" in up.group(0),
+       "the up chip is a neutral tint carrying full ink, not a fill: " + up.group(0)[:70])
+    ok("var(--accent)" not in up.group(0),
+       "and no longer outweighs the 30px figure it annotates")
     for sel in (r"\.delta\.up", r"\.prod-chip \.cmp\.up"):
         rule = re.search(sel + r" \{[^}]*\}", CSS)
         ok(rule, "the %s rule is still there" % sel)
-        body = rule.group(0)
-        ok("var(--accent)" in body, "%s sits on the accent pill" % sel)
-        ok("var(--win)" not in body, "and spends no green on direction alone")
+        ok("var(--win)" not in rule.group(0), "and %s spends no green on direction alone" % sel)
+    # The product chip's own comparison badge is untouched and stays pinned.
+    cmp_up = re.search(r"\.prod-chip \.cmp\.up \{[^}]*\}", CSS)
+    ok("var(--accent)" in cmp_up.group(0), "the product comparison chip keeps the accent pill")
     # The tinted half of the pair stays, because red IS the reference's one tint.
     down = re.search(r"\.delta\.down \{[^}]*\}", CSS)
     ok(down and "var(--danger)" in down.group(0),
@@ -2845,10 +2919,23 @@ def t_nothing_that_draws_an_edge_sits_on_the_cards_edge():
     ok(bar and "padding-left: 0" in bar.group(1),
        "and the two with no padding of their own drop what they were given, "
        "or they inset twice")
-    ins = re.search(r"\.card-bleed > \.insights \{([^}]*)\}", CSS)
-    ok(ins and "padding-left: var(--sp-4)" in ins.group(1),
-       ".insights draws no edge of its own, so padding is right there - it is "
-       "what insets the bordered cards inside it")
+    # The insight rows used to be bordered cards, and .insights held the gutter
+    # as padding to inset them. They are hairline ROWS on the card now, so the
+    # same requirement - a bleed child is inset by 16, and never by a mechanism
+    # that puts two borders on one line - is met a step lower down: the row
+    # sheds its frame and carries the gutter in its own padding, the way an
+    # .action row already does. The rule between two rows has to reach the
+    # card's edge, so the wrapper hands out nothing.
+    rows = re.search(r"\.card-bleed > \.insights > \.insight,[\s\S]{0,220}?\{([^}]*)\}", CSS)
+    ok(rows and "border: 0" in rows.group(1),
+       "a list already inside a card draws no second frame of its own")
+    ok(re.search(r"\.card-bleed > \.insights > \.insight \+ \.insight,[\s\S]{0,120}?"
+                 r"\{[^}]*border-top: 1px solid var\(--border\)", CSS),
+       "the rows are separated by one hairline instead")
+    ins = re.search(r"^\s*\.insight \{([^}]*)\}", CSS, re.M)
+    ok(ins and "padding: 12px 16px" in ins.group(1),
+       "and the 16px gutter comes from the row's own padding, so the hairline "
+       "between two rows reaches the card's edge")
     # The bleed wrapper must still do its actual job for tables.
     ok(".card-bleed .ktable-wrap { border: 0" in CSS,
        "and a table still runs to the card edge with no second frame")
