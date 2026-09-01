@@ -46,6 +46,7 @@ os.environ.update({
     "RECON_DOCS_PATH": SCRATCH + "/recon_docs.json",
     "XERO_TOKEN_PATH": SCRATCH + "/xero_oauth.json",
     "COLLECTIONS_PATH": SCRATCH + "/collections.json",
+    "PRIVACY_LOG_PATH": SCRATCH + "/privacy_log.json",
 })
 for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
     os.environ.pop(v, None)
@@ -3960,6 +3961,132 @@ def t_an_unsigned_or_missigned_event_is_refused():
     other = wh_headers(raw, delivery="ev3", shop="someone-else.myshopify.com")
     r3 = client.post("/webhooks/orders", content=raw, headers=other)
     eq(r3.status_code, 401, "signed but for another store is refused")
+
+# ---- Shopify privacy webhooks ----------------------------------------------
+
+def _seed_person_and_shipment(email):
+    """A customer who exists in BOTH halves of the split: the CRM, which is
+    relationship data and must go, and a dispatch record, which HMRC can ask
+    for and must not."""
+    d = copilot._load_crm()
+    d["persons"]["p9001"] = {"id": "p9001", "name": "Jo Redact",
+                             "emails": [email], "phone": "0161 000 0000"}
+    copilot._write_crm(d)
+    disp = copilot._load_dispatch()
+    disp["104999"] = {"order_id": "104999", "email": email,
+                      "name": "Jo Redact", "address1": "1 Glass Works",
+                      "postcode": "M1 1AA", "tracking": "TRK1"}
+    copilot._write_dispatch(disp)
+
+
+@test
+def t_a_redact_request_erases_the_crm_person():
+    """Relationship data goes. This is the half of the split with no legal
+    obligation to keep it."""
+    copilot._webhook_seen.clear()
+    email = "jo.redact@example.com"
+    _seed_person_and_shipment(email)
+    raw = json.dumps({"customer": {"id": 555, "email": email},
+                      "shop_domain": "test-store.myshopify.com"}).encode()
+    r = client.post("/webhooks/privacy", content=raw,
+                    headers=wh_headers(raw, topic="customers/redact", delivery="pr1"))
+    eq(r.status_code, 200, r.text)
+    eq("p9001" in copilot._load_crm()["persons"], False,
+       "the CRM person is gone")
+
+
+@test
+def t_a_redact_request_keeps_the_dispatch_record_and_notes_it():
+    """The other half. A customs and export record is retained under a legal
+    obligation, so erasing it would trade one exposure for another - but it has
+    to carry evidence the request was honoured."""
+    copilot._webhook_seen.clear()
+    email = "jo.keep@example.com"
+    _seed_person_and_shipment(email)
+    raw = json.dumps({"customer": {"id": 556, "email": email},
+                      "shop_domain": "test-store.myshopify.com"}).encode()
+    r = client.post("/webhooks/privacy", content=raw,
+                    headers=wh_headers(raw, topic="customers/redact", delivery="pr2"))
+    eq(r.status_code, 200, r.text)
+    rec = copilot._load_dispatch().get("104999") or {}
+    ok(rec, "the shipment record survives")
+    eq(rec.get("address1"), "1 Glass Works", "with the address HMRC can ask for")
+    ok(rec.get("redacted_request_at"), "and a note that erasure was requested")
+
+
+@test
+def t_a_redact_request_erases_only_that_persons_email_threads():
+    """The mailbox is relationship data too. And the blast radius matters more
+    than the erasure: wiping one person must not touch anyone else's thread."""
+    copilot._webhook_seen.clear()
+    store = copilot._load_mail()
+    store.setdefault("threads", {})
+    store["threads"]["tgone"] = {"id": "tgone", "from_email": "Gone@Example.com",
+                                 "subject": "Please delete me", "state": "open"}
+    store["threads"]["tstay"] = {"id": "tstay", "from_email": "other@example.com",
+                                 "subject": "Unrelated", "state": "open"}
+    copilot._write_mail(store)
+    raw = json.dumps({"customer": {"id": 558, "email": "gone@example.com"},
+                      "shop_domain": "test-store.myshopify.com"}).encode()
+    r = client.post("/webhooks/privacy", content=raw,
+                    headers=wh_headers(raw, topic="customers/redact", delivery="pr6"))
+    eq(r.status_code, 200, r.text)
+    threads = copilot._load_mail()["threads"]
+    eq("tgone" in threads, False, "their thread is gone, matched case-insensitively")
+    eq("tstay" in threads, True, "and nobody else's was touched")
+
+
+@test
+def t_shop_redact_takes_a_backup_before_it_erases_anything():
+    """Shopify fires this 48 hours after an uninstall and expects the shop's
+    data erased. For a single-merchant app that is the merchant's own dispatch
+    and customs history, so an uninstall during testing would destroy it. The
+    erasure is real; the backup is what makes a misfire survivable."""
+    copilot._webhook_seen.clear()
+    calls = []
+    real = copilot._build_backup_zip
+    copilot._build_backup_zip = lambda *a, **k: (calls.append(1), real(*a, **k))[1]
+    raw = json.dumps({"shop_domain": "test-store.myshopify.com"}).encode()
+    try:
+        r = client.post("/webhooks/privacy", content=raw,
+                        headers=wh_headers(raw, topic="shop/redact", delivery="pr7"))
+        eq(r.status_code, 200, r.text)
+        ok(calls, "a backup was taken before anything was erased")
+    finally:
+        copilot._build_backup_zip = real
+
+
+@test
+def t_a_privacy_webhook_without_a_valid_signature_is_refused():
+    raw = json.dumps({"customer": {"id": 1, "email": "x@y.com"}}).encode()
+    r = client.post("/webhooks/privacy", content=raw,
+                    headers={"Content-Type": "application/json"})
+    eq(r.status_code, 401, "no signature, no entry")
+    bad = wh_headers(raw, secret="wrong-secret-entirely-1234567890ab",
+                     topic="customers/redact", delivery="pr3")
+    eq(client.post("/webhooks/privacy", content=raw, headers=bad).status_code, 401,
+       "a wrong signature is refused")
+    other = wh_headers(raw, topic="customers/redact", delivery="pr4",
+                       shop="someone-else.myshopify.com")
+    eq(client.post("/webhooks/privacy", content=raw, headers=other).status_code, 401,
+       "signed but for another store is refused")
+
+
+@test
+def t_a_data_request_is_recorded_rather_than_answered_automatically():
+    """Supplying the data is a human step with a 30-day clock. The app's job is
+    to receive the request and make sure it is not lost."""
+    copilot._webhook_seen.clear()
+    raw = json.dumps({"customer": {"id": 777, "email": "asks@example.com"},
+                      "shop_domain": "test-store.myshopify.com"}).encode()
+    r = client.post("/webhooks/privacy", content=raw,
+                    headers=wh_headers(raw, topic="customers/data_request", delivery="pr5"))
+    eq(r.status_code, 200, r.text)
+    log = copilot._load_privacy_log()
+    ok(any(e.get("topic") == "customers/data_request"
+           and e.get("email") == "asks@example.com" for e in log.get("events", [])),
+       "the request is on the ledger with who asked")
+
 
 @test
 def t_an_oversized_chunked_body_is_cut_off_not_buffered():

@@ -10718,6 +10718,138 @@ FEEDBACK_STATES = ("open", "planned", "shipped", "declined")
 
 
 ACTIVITY_PATH = os.environ.get("ACTIVITY_PATH", "/data/activity.json")
+PRIVACY_LOG_PATH = os.environ.get("PRIVACY_LOG_PATH", "/data/privacy_log.json")
+
+
+def _load_privacy_log() -> dict:
+    """Every privacy request Shopify has sent, and what was done about it.
+
+    Kept because the two halves of a redaction leave different evidence: the
+    erased half leaves none by definition, and the retained half is retained on
+    purpose. Without this there is no way to show a request was honoured."""
+    d = _load_json_store(PRIVACY_LOG_PATH, None, {"events": []})
+    if not isinstance(d, dict) or not isinstance(d.get("events"), list):
+        d = {"events": []}
+    return d
+
+
+def _privacy_note(topic: str, email: str, customer_id, detail: str) -> None:
+    """Append one entry. Single-writer: load, mutate, write, no await between."""
+    try:
+        d = _load_privacy_log()
+        d["events"].append({"at": datetime.now(timezone.utc).isoformat(),
+                            "topic": topic, "email": (email or "").lower(),
+                            "customer_id": str(customer_id or ""), "detail": detail})
+        d["events"] = d["events"][-2000:]
+        if _store_writable(PRIVACY_LOG_PATH):
+            os.makedirs(os.path.dirname(PRIVACY_LOG_PATH) or ".", exist_ok=True)
+            tmp = PRIVACY_LOG_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(d))
+            os.replace(tmp, PRIVACY_LOG_PATH)
+    except Exception:
+        logger.exception("privacy log write failed")
+
+
+def _redact_shop() -> dict:
+    """Erase the shop's data, 48 hours after an uninstall, as Shopify requires.
+
+    A full backup is written to the volume FIRST. For a single-merchant app the
+    "shop" is the merchant's own store, so this fires when they uninstall - and
+    an uninstall during testing, or a reinstall, would otherwise take the
+    dispatch and customs history with it. The erasure is real either way; the
+    archive is what makes a misfire survivable rather than final.
+
+    Credentials are not in the archive (the backup builder excludes them) and
+    are cleared here too: an uninstalled app must not keep holding tokens."""
+    kept = ""
+    try:
+        buf, added = _build_backup_zip()
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        data_dir = os.path.dirname(SCHEDULE_PATH) or "/data"
+        kept = os.path.join(data_dir, f"pre-redact-backup-{stamp}.zip")
+        os.makedirs(data_dir, exist_ok=True)
+        with open(kept, "wb") as fh:
+            fh.write(buf.getvalue())
+        logger.warning("shop/redact: archived %d files to %s before erasing", added, kept)
+    except Exception:
+        # A backup that cannot be written must NOT cancel the erasure - the
+        # obligation is Shopify's, not conditional on our disk. It is logged
+        # loudly instead, because that is the case where a misfire is final.
+        logger.exception("shop/redact: could not archive before erasing")
+    wiped = 0
+    for path in (CRM_PATH, MAILBOX_PATH, DISPATCH_STATE_PATH, CHASE_LOG_PATH,
+                 COLLECTIONS_PATH, CUSTOMS_MEMORY_PATH, PRODUCTION_STATE_PATH,
+                 PRODUCTION_ARCHIVE_PATH, FILES_PATH):
+        try:
+            if os.path.isfile(path):
+                os.remove(path)
+                wiped += 1
+        except Exception:
+            logger.exception("shop/redact: could not remove %s", path)
+    _privacy_note("shop/redact", "", "",
+                  f"erased {wiped} store(s); archive at {kept or '(none - see logs)'}")
+    return {"wiped": wiped, "archive": kept}
+
+
+def _redact_customer(email: str, customer_id="") -> dict:
+    """Erase what we hold about a person by choice; keep what we hold by law.
+
+    The split is the whole design. CRM records and email threads are
+    relationship data with no retention obligation behind them, so they go.
+    Dispatch bookings, customs declarations and the made-order archive are
+    records HMRC can ask for within six years - erasing those would trade one
+    exposure for another, so they stay and carry a note instead. UK GDPR
+    Art. 17(3)(b) is what makes the second half lawful, and the note is what
+    makes it evidenced."""
+    addr = str(email or "").strip().lower()
+    if not addr:
+        return {"erased": 0, "retained": 0}
+    erased = retained = 0
+
+    # --- erased: the CRM -----------------------------------------------------
+    try:
+        d = _load_crm()
+        for pid in [k for k, v in (d.get("persons") or {}).items()
+                    if addr in {str(e).strip().lower() for e in (v.get("emails") or [])}
+                    or str(v.get("email") or "").strip().lower() == addr]:
+            d["persons"].pop(pid, None); erased += 1
+        for lid in [k for k, v in (d.get("leads") or {}).items()
+                    if str(v.get("email") or "").strip().lower() == addr]:
+            d["leads"].pop(lid, None); erased += 1
+        _write_crm(d)
+    except Exception:
+        logger.exception("redact: CRM")
+
+    # --- erased: the mailbox -------------------------------------------------
+    try:
+        store = _load_mail()
+        threads = store.get("threads") or {}
+        for tid in [k for k, t in threads.items()
+                    if str(t.get("from_email") or "").strip().lower() == addr]:
+            threads.pop(tid, None); erased += 1
+        _write_mail(store)
+    except Exception:
+        logger.exception("redact: mailbox")
+
+    # --- retained, and noted -------------------------------------------------
+    stamp = datetime.now(timezone.utc).isoformat()
+    try:
+        orders = _load_dispatch()
+        for rec in orders.values():
+            if str(rec.get("email") or "").strip().lower() == addr:
+                rec["redacted_request_at"] = stamp
+                retained += 1
+        _write_dispatch(orders)
+    except Exception:
+        logger.exception("redact: dispatch")
+
+    _privacy_note("customers/redact", addr, customer_id,
+                  f"erased {erased} relationship record(s); "
+                  f"retained {retained} record(s) held under a legal obligation")
+    return {"erased": erased, "retained": retained}
+
+
 ACTIVITY_MAX = int(os.environ.get("ACTIVITY_MAX", "8000"))
 SESSION_HOURS = float(os.environ.get("SESSION_HOURS", "24"))
 LOGIN_FAIL_LIMIT = 8
@@ -11721,6 +11853,76 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             _crm_link_order_soon(raw.decode("utf-8", "replace"))
         except Exception:
             pass   # the webhook's ack must never hinge on enrichment
+        return PlainTextResponse("ok", status_code=200)
+
+    async def _webhook_body(request: Request):
+        """(raw_bytes, error_response). The whole authentication for any Shopify
+        webhook, in one place rather than copied per topic - the checks here are
+        the only thing standing between a POST and a redaction.
+
+        Streamed with a hard cap rather than request.body(): the signature can
+        only be checked after the body is read, so this read happens for anyone,
+        and a chunked upload with no Content-Length would otherwise buffer
+        without limit on an endpoint that deliberately has no rate limiter."""
+        if not SHOPIFY_API_SECRET:
+            return None, PlainTextResponse("Unauthorized", status_code=401)
+        total, chunks = 0, []
+        try:
+            async for chunk in request.stream():
+                total += len(chunk)
+                if total > WEBHOOK_MAX_BYTES:
+                    return None, PlainTextResponse("Too large", status_code=413)
+                chunks.append(chunk)
+        except Exception:
+            return None, PlainTextResponse("Bad request", status_code=400)
+        raw = b"".join(chunks)
+        sent = request.headers.get("x-shopify-hmac-sha256", "")
+        want = base64.b64encode(hmac.new(SHOPIFY_API_SECRET.encode("utf-8"),
+                                         raw, hashlib.sha256).digest()).decode("ascii")
+        if not sent or not hmac.compare_digest(want, sent):
+            return None, PlainTextResponse("Unauthorized", status_code=401)
+        shop = str(request.headers.get("x-shopify-shop-domain") or "")
+        if SHOPIFY_STORE and not shop.lower().startswith(SHOPIFY_STORE.split(".")[0].lower() + "."):
+            return None, PlainTextResponse("Unauthorized", status_code=401)
+        return raw, None
+
+    @mcp.custom_route("/webhooks/privacy", methods=["POST"])
+    async def privacy_webhook(request: Request):
+        """Shopify's three mandatory compliance topics, on one receiver.
+
+        Answering 200 is the contract: repeated failures make Shopify retire the
+        subscription, and for these topics that is a compliance failure rather
+        than a missed refresh. So the work happens behind a try and the ack does
+        not depend on it - but it is logged, because an unrecorded redaction is
+        indistinguishable from one that never ran."""
+        raw, err = await _webhook_body(request)
+        if err is not None:
+            return err
+        topic = str(request.headers.get("x-shopify-topic") or "")
+        delivery = str(request.headers.get("x-shopify-webhook-id") or "")
+        if delivery and not _webhook_note_delivery(delivery):
+            return PlainTextResponse("ok", status_code=200)   # a redelivery
+        try:
+            body = json.loads(raw.decode("utf-8", "replace")) or {}
+        except Exception:
+            body = {}
+        cust = body.get("customer") or {}
+        email = str(cust.get("email") or "")
+        cid = cust.get("id") or ""
+        try:
+            if topic == "customers/redact":
+                _redact_customer(email, cid)
+            elif topic == "customers/data_request":
+                # Supplying the data is a human step on a 30-day clock. The
+                # app's job is to receive the request and not lose it.
+                _privacy_note(topic, email, cid,
+                              "customer asked for their data; supply it within 30 days")
+            elif topic == "shop/redact":
+                _redact_shop()
+            else:
+                _privacy_note(topic or "(none)", email, cid, "unrecognised privacy topic")
+        except Exception:
+            logger.exception("privacy webhook %s failed", topic)
         return PlainTextResponse("ok", status_code=200)
 
     @mcp.custom_route("/healthz", methods=["GET"])
