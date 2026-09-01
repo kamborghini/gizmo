@@ -2815,6 +2815,48 @@ def t_both_charts_curve_through_one_function():
        "with no straight-segment path builder left behind")
 
 
+@test
+def t_nothing_that_draws_an_edge_sits_on_the_cards_edge():
+    """Cameron photographed two of these: the aged-debt bar running into the
+    card's border, and the SEO insight cards - white, bordered - flush inside a
+    white bordered card.
+
+    One cause. `.card > *` hands every child the 16px inset as PADDING, which
+    is right for a table or a composer bar that should meet the card's edge
+    with only its content inset. Padding sits INSIDE the border box, so a child
+    with a border of its own still spans the full width and its border lands
+    exactly on the card's. Those take the inset as MARGIN instead."""
+    rule = re.search(r"\.card > \.lia-bar, \.card > \.lbl-row,\s*\n\s*"
+                     r"\.card > \.empty, \.card-bleed > \.empty \{([^}]*)\}", CSS)
+    ok(rule, "the gutter exception is still there")
+    body = rule.group(1)
+    ok("margin-left: var(--sp-4)" in body and "margin-right: var(--sp-4)" in body,
+       "and it insets by margin, which is outside the border box")
+    bar = re.search(r"\.card > \.lia-bar \{([^}]*)\}", CSS)
+    ok(bar and "padding-left: 0" in bar.group(1),
+       "the bar drops the padding it was given, or it insets twice")
+    ins = re.search(r"\.card-bleed > \.insights \{([^}]*)\}", CSS)
+    ok(ins and "padding-left: var(--sp-4)" in ins.group(1),
+       ".insights draws no edge of its own, so padding is right there - it is "
+       "what insets the bordered cards inside it")
+    # The bleed wrapper must still do its actual job for tables.
+    ok(".card-bleed .ktable-wrap { border: 0" in CSS,
+       "and a table still runs to the card edge with no second frame")
+
+
+@test
+def t_a_block_with_its_own_heading_is_not_swallowed_by_the_one_above():
+    """The page-chat panel is a section-title plus its own .card. cardifySections
+    collected everything after a heading until the next DIRECT-child heading, and
+    this panel carries its heading nested inside itself - so it was swept into
+    whatever section preceded it and wrapped a second time, putting a bordered
+    white card flush inside a bordered white card."""
+    fn = SCRIPT[SCRIPT.index("function cardifySections"):]
+    fn = fn[:fn.index("\n        function ")]
+    ok("n.querySelector('.section-title')" in fn,
+       "collection stops at a block that carries its own heading")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
