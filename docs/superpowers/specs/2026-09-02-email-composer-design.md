@@ -1,6 +1,6 @@
 # Email composer: formatting, attachments, images, replies
 
-Date: 2026-09-02. Status: approved in conversation; awaiting spec review.
+Date: 2026-09-02. Status: shipped (commit follows this line in git history).
 
 ## Goal
 

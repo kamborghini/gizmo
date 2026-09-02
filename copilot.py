@@ -46,6 +46,7 @@ import httpx
 import jwt
 import eori
 import google_data
+import mailmime
 import google_mail
 import recon as recon_engine
 import xero as xero_api
@@ -7853,6 +7854,22 @@ def _page_parts() -> tuple:
         if css and js:
             assets["css"] = ("text/css; charset=utf-8", css.encode("utf-8"))
             assets["js"] = ("text/javascript; charset=utf-8", js.encode("utf-8"))
+            # The composer is the one script that lives outside the page: the
+            # editor is big enough to deserve its own file and its own cache
+            # line. Same hash-in-the-URL contract as app.js, loaded after it
+            # because the page's mail code calls into it, never the reverse.
+            try:
+                with open(os.path.join(os.path.dirname(_PAGE_PATH), "composer.js"), "r",
+                          encoding="utf-8") as fh:
+                    composer = fh.read()
+            except OSError:
+                composer = ""
+            if composer.strip():
+                _asset_hashes["composer"] = hashlib.sha256(composer.encode("utf-8")).hexdigest()[:12]
+                assets["composer"] = ("text/javascript; charset=utf-8", composer.encode("utf-8"))
+                app_tag = '<script src="/assets/app.js?v=' + _asset_hashes["js"] + '"></script>'
+                shell = shell.replace(app_tag, app_tag + '<script src="/assets/composer.js?v='
+                                      + _asset_hashes["composer"] + '"></script>', 1)
             logger.info("page split: shell %d KB, css %d KB, js %d KB",
                         len(shell) // 1024, len(css) // 1024, len(js) // 1024)
         _page_cache, _page_assets = shell, assets
@@ -9422,6 +9439,10 @@ MAIL_PRESENCE = ("office", "home", "out")
 # "the buyer, their colleague and the venue"; past that it is a mailing list,
 # and this app has no unsubscribe, no list hygiene and no bounce handling.
 MAIL_SEND_MAX_TO = 5
+MAIL_SEND_MAX_CC = 10                # cc and bcc together: a reply, not a list
+MAIL_SEND_MAX_HTML = 200000          # formatted body; the plain cap is the twin's
+MAIL_ATTACH_COUNT = 20               # files on one message
+MAIL_QUOTE_CHARS = 20000             # how much of the original a reply quotes
 MAIL_SEND_MAX_CHARS = 20000
 
 _mail_mem: Optional[dict] = None
@@ -9442,6 +9463,11 @@ MAIL_TICKET_SECONDS = 300
 _mail_undo: dict = {}                # token -> what a bulk action changed, for putting back
 MAIL_UNDO_SECONDS = 600
 MAIL_ATTACH_CAP = 25 * 1024 * 1024   # what we will pull out of Gmail in one go
+# What we will put INTO a message: Gmail's own ceiling for the whole thing,
+# and a tighter one per inline image, which is decoration inside a body.
+MAIL_ATTACH_MAX = 25 * 1024 * 1024
+MAIL_INLINE_MAX = 5 * 1024 * 1024
+MAIL_ATTACH_DAYS = 30                # how long a working copy lives in mail/
 
 
 def _mail_default() -> dict:
@@ -9451,7 +9477,9 @@ def _mail_default() -> dict:
             # and belongs to the room; a person's sign-off is their own name
             # and lives on their account, not here. Saved replies are the
             # room's standard answers, written once by a lead.
-            "email": {"footer": "", "saved_replies": []},
+            "email": {"footer_slots": {"logo_key": "", "company": "", "address": "",
+                                       "phone": "", "website": "", "legal": ""},
+                      "saved_replies": []},
             # New conversations this app stamped as "about to send" and never
             # got to confirm. A reply's stamp lives on its own thread; a new
             # message has no thread yet, so it waits here until the send comes
@@ -9615,13 +9643,7 @@ def _load_mail() -> dict:
         # one written by a half-way build may have the key without its parts.
         # Every reader below indexes straight into these, so they are repaired
         # here rather than defended against in a dozen places.
-        em = _mail_mem.get("email")
-        if not isinstance(em, dict):
-            em = _mail_mem["email"] = {}
-        if not isinstance(em.get("footer"), str):
-            em["footer"] = ""
-        if not isinstance(em.get("saved_replies"), list):
-            em["saved_replies"] = []
+        _mail_email_repair(_mail_mem)
         # Gmail HTML-escapes snippets; the connector unescapes them now, but
         # snippets stored by earlier builds carry &#39; baked in, and a thread
         # whose historyId never changes again would show it forever.
@@ -9672,7 +9694,7 @@ def _mail_now() -> str:
 
 
 # Caps on the two settings that get stamped onto outgoing email.
-MAIL_FOOTER_MAX = 1000
+MAIL_LOGO_MAX = 1024 * 1024          # a footer logo, not a photograph
 MAIL_SIGNOFF_MAX = 200
 MAIL_SIGNOFF_LINES = 4
 MAIL_REPLY_TITLE_MAX = 80
@@ -9705,11 +9727,216 @@ def _mail_sign_off(uid) -> str:
     return str((u or {}).get("sign_off") or "")
 
 
+MAIL_FOOTER_SLOTS = ("logo_key", "company", "address", "phone", "website", "legal")
+MAIL_SLOT_MAX = 200
+
+
+def _mail_email_repair(store: dict) -> dict:
+    """The `email` block, brought up to today's shape IN PLACE.
+
+    Run on load and on every read of the block, because a store written by an
+    older build is still being read by this one. Idempotent, and it never
+    throws away what it does not recognise: the free-text footer was mostly a
+    legal line, so that is the slot it lands in rather than the bin."""
+    em = store.get("email")
+    if not isinstance(em, dict):
+        em = store["email"] = {}
+    if not isinstance(em.get("saved_replies"), list):
+        em["saved_replies"] = []
+    slots = em.get("footer_slots")
+    if not isinstance(slots, dict):
+        slots = em["footer_slots"] = {}
+    if "footer" in em:
+        slots.setdefault("legal", str(em.pop("footer") or "")[:MAIL_SLOT_MAX])
+    for k in MAIL_FOOTER_SLOTS:
+        if not isinstance(slots.get(k), str):
+            slots[k] = ""
+    return em
+
+
+def _mail_footer_text(store: dict) -> str:
+    """The shop's footer as plain text, for the plain-text path and the twin."""
+    em = _mail_email_repair(store)
+    return mailmime.render_footer(em.get("footer_slots") or {})[1]
+
+
+# ---------------------------------------------------------------------------
+# Attachments on the way OUT. They live in the bucket under mail/<uid>/ while
+# the message is being written, and the whole set is read back at the moment
+# of sending. All of it or none of it: a message that goes with a file
+# quietly missing looks sent, and is not what the person read before pressing
+# Send.
+# ---------------------------------------------------------------------------
+
+def _mail_attach_name(name: str) -> str:
+    """The file's own name with any path in front of it discarded.
+
+    The key is built out of this, so "../../q.pdf" has to come back as
+    "q.pdf" rather than as something merely unreadable: a cleaner that only
+    replaces the slashes leaves the dots, and the dots are the half that
+    matters when the string is going into a key."""
+    base = str(name or "").replace("\\", "/").rsplit("/", 1)[-1]
+    return _files_clean_name(re.sub(r"\.{2,}", ".", base))
+
+
+def _mail_attachment_ok(key: str, uid: str) -> bool:
+    """Whether this person may attach these bytes: their own mail upload, or a
+    live file in the shop's Files. Any other key in the bucket is refused,
+    because "attach this key" would otherwise read anything the app stores."""
+    k = str(key or "")
+    if not k or ".." in k:
+        return False
+    if k.startswith(f"mail/{uid}/"):
+        return True
+    return any(f.get("r2_key") == k and f.get("status") == "active"
+               for f in (_load_files().get("files") or {}).values())
+
+
+def _mail_part_name(key: str) -> str:
+    """The name a key was built from: <hex>-<name>, so everything after the
+    first dash. A key from Files has no dash of ours, so it is used whole."""
+    last = str(key or "").rsplit("/", 1)[-1]
+    return last.split("-", 1)[-1] if "-" in last else last
+
+
+async def _mail_fetch_parts(files: list, uid: str, inline_keys: list = None):
+    """Bytes for every part, or a ValueError naming the first part that cannot
+    be sent. All or nothing, and the total is checked as it grows so a set
+    that will not fit is refused before the last file is read."""
+    out_files, out_inline, total = [], [], 0
+
+    async def _read(key):
+        if not _mail_attachment_ok(key, uid):
+            raise ValueError(f"{_mail_part_name(key)} is not one of your uploads.")
+        try:
+            obj = await asyncio.to_thread(_files_s3().get_object, Bucket=R2_BUCKET, Key=key)
+            return await asyncio.to_thread(obj["Body"].read)
+        except Exception as e:
+            raise ValueError(f"{_mail_part_name(key)} is missing from storage.") from e
+
+    for f in (files or []):
+        key = str(f.get("key") or "")
+        data = await _read(key)
+        total += len(data)
+        if total > MAIL_ATTACH_MAX:
+            raise ValueError("Attachments come to more than 25MB in total.")
+        out_files.append({"name": _mail_attach_name(f.get("name") or _mail_part_name(key)),
+                          "type": str(f.get("type") or "application/octet-stream")[:100],
+                          "data": data})
+    for im in (inline_keys or []):
+        key = str(im.get("key") or "")
+        data = await _read(key)
+        if len(data) > MAIL_INLINE_MAX:
+            raise ValueError(f"{_mail_part_name(key)} is over 5MB, too large for an "
+                             "inline image.")
+        total += len(data)
+        if total > MAIL_ATTACH_MAX:
+            raise ValueError("Attachments come to more than 25MB in total.")
+        out_inline.append({"cid": re.sub(r"[^A-Za-z0-9._-]", "",
+                                         str(im.get("cid") or ""))[:64] or "img",
+                           "name": _mail_part_name(key),
+                           "type": str(im.get("type") or "image/png")[:100],
+                           "data": data})
+    return out_files, out_inline, total
+
+
+def _mail_compose_body(html: str, text: str, sign_off: str, footer_html: str,
+                       footer_text: str, quote: tuple = None) -> tuple:
+    """(html, text) of what leaves: the person's words, their sign-off, the
+    shop footer, then the quoted original. Same order in both twins.
+
+    The words are sanitised HERE, once, whatever the browser sent. A caller
+    that only has plain text (Claude's draft, an older client) gets it turned
+    into paragraphs rather than a second, unchecked path through the door."""
+    from html import escape as _esc
+    h = (mailmime.sanitize_html(html) if (html or "").strip()
+         else "".join(f"<p>{_esc(p)}</p>".replace("\n", "<br>")
+                      for p in (text or "").split("\n\n") if p.strip()))
+    t = mailmime.html_to_text(h)
+    so = (sign_off or "").strip()
+    if so:
+        h += "<p>" + "<br>".join(_esc(ln) for ln in so.splitlines()) + "</p>"
+        t += "\n\n" + so
+    if footer_html:
+        h += footer_html
+        t += "\n\n" + footer_text
+    if quote:
+        h += quote[0]
+        t += "\n\n" + quote[1]
+    return h, t
+
+
+async def _mail_logo_part(key: str):
+    """The footer logo as an inline part, or None.
+
+    Decoration, and treated as such: a logo that cannot be read drops the
+    message to the text footer with a warning in the log, because the footer
+    is decoration and the message is not."""
+    if not key or not _files_configured():
+        return None
+    try:
+        obj = await asyncio.to_thread(_files_s3().get_object, Bucket=R2_BUCKET, Key=key)
+        data = await asyncio.to_thread(obj["Body"].read)
+    except Exception as e:
+        logger.warning("mail: the footer logo could not be read (%s); "
+                       "the message goes with the text footer", e)
+        return None
+    if not data or len(data) > MAIL_LOGO_MAX:
+        logger.warning("mail: the footer logo is empty or oversized; text footer instead")
+        return None
+    name = key.rsplit("/", 1)[-1]
+    return {"cid": "logo", "name": name,
+            "type": _files_preview_mime(name) or "image/png", "data": data}
+
+
+_mail_sweep_last = {"t": 0.0}
+
+
+def _mail_sweep_attachments() -> None:
+    """Working copies of things people attached, swept after a month.
+
+    Once a message has gone, the copy in Gmail is the record; the bucket copy
+    is scaffolding. mail/footer/ is NEVER touched: the logo there is a
+    setting, and sweeping a setting would quietly undo a lead's decision."""
+    if not _files_configured():
+        return
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=MAIL_ATTACH_DAYS)).timestamp()
+    s3, token, doomed = _files_s3(), None, []
+    while True:
+        kw = {"Bucket": R2_BUCKET, "Prefix": "mail/", "MaxKeys": 1000}
+        if token:
+            kw["ContinuationToken"] = token
+        page = s3.list_objects_v2(**kw) or {}
+        for o in (page.get("Contents") or []):
+            key = str(o.get("Key") or "")
+            when = o.get("LastModified")
+            if key.startswith("mail/footer/") or not key or when is None:
+                continue
+            if when.timestamp() < cutoff:
+                doomed.append({"Key": key})
+        token = page.get("NextContinuationToken") if page.get("IsTruncated") else None
+        if not token:
+            break
+    for i in range(0, len(doomed), 1000):
+        s3.delete_objects(Bucket=R2_BUCKET,
+                          Delete={"Objects": doomed[i:i + 1000], "Quiet": True})
+    if doomed:
+        logger.info("mail: swept %d old attachment(s) from the bucket", len(doomed))
+
+
 def _mail_email_block(store: dict, uid) -> dict:
     """The footer/sign-off/saved-reply block, shaped once for both the board
-    and the settings route so the two can never disagree about it."""
-    em = store.get("email") or {}
-    return {"footer": str(em.get("footer") or ""),
+    and the settings route so the two can never disagree about it.
+
+    The rendered footer travels with the slots so the compose box can show
+    exactly what will be stamped on, logo included: the preview swaps the
+    cid for a signed URL of our own bucket, and nothing else in it came from
+    outside the shop."""
+    em = _mail_email_repair(store)
+    slots = em.get("footer_slots") or {}
+    html, text = mailmime.render_footer(slots, "logo" if slots.get("logo_key") else "")
+    return {"footer_slots": {k: slots.get(k, "") for k in MAIL_FOOTER_SLOTS},
+            "footer_html": html, "footer_text": text,
             "sign_off": _mail_sign_off(uid),
             "saved_replies": [{"id": str(r.get("id") or ""),
                                "title": str(r.get("title") or ""),
@@ -10551,6 +10778,26 @@ def _mail_board_shape(store: dict, window: bool = False) -> list:
     out.sort(key=lambda r: r.get("last_at") or "", reverse=True)
     return out[:MAIL_BOARD_MAX] if window else out
 
+
+
+def _mail_reply_all_cc(t: dict, mailbox: str) -> str:
+    """Everyone on the latest customer message except us and the person a
+    plain reply already goes to. From the messages the sync stored, so opening
+    a thread costs no Gmail call."""
+    from email.utils import getaddresses
+    own = (mailbox or "").strip().lower()
+    msgs = [m for m in (t.get("messages") or []) if (m.get("from_email") or "").lower() != own]
+    if not msgs:
+        return ""
+    m = msgs[-1]
+    target = (m.get("reply_to") or m.get("from_email") or "").strip().lower()
+    seen, out = set(), []
+    for _n, a in getaddresses([m.get("from_email") or "", m.get("to") or "", m.get("cc") or ""]):
+        a = a.strip().lower()
+        if not a or "@" not in a or a == own or a == target or a in seen:
+            continue
+        seen.add(a); out.append(a)
+    return ", ".join(out)
 
 def _mail_address_book(mail_store: dict, crm: dict, mailbox: str) -> list:
     """Everyone the shop could write to, from the two places it already knows
@@ -12025,6 +12272,14 @@ def _files_tick() -> None:
     if _files_configured() and d.get("doomed"):
         if _files_reap(d, _files_s3()) and _store_writable(FILES_PATH):
             _write_files(d)
+    # Once a day, on the same tick: outgoing attachments are bucket-only, so
+    # they have no record here to expire and need their own sweep.
+    if time.monotonic() - _mail_sweep_last["t"] > 86400:
+        _mail_sweep_last["t"] = time.monotonic()
+        try:
+            _mail_sweep_attachments()
+        except Exception:
+            logger.warning("mail: the attachment sweep did not finish; next tick retries")
 
 
 # ---------------------------------------------------------------------------
@@ -12131,6 +12386,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/assets/app.js", methods=["GET"])
     async def app_js(request: Request):
         return _asset_response("js", request.query_params.get("v", ""))
+
+    @mcp.custom_route("/assets/composer.js", methods=["GET"])
+    async def composer_js(request: Request):
+        return _asset_response("composer", request.query_params.get("v", ""))
 
     @mcp.custom_route("/webhooks/orders", methods=["POST"])
     async def order_webhook(request: Request):
@@ -13284,6 +13543,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                  "send_pending": _mail_pending_shape(t.get("send_pending")),
                                  "messages": t.get("messages", [])},
                       "viewers": viewers,
+                      "reply_all_cc": _mail_reply_all_cc(t, google_mail.address()),
                       # The CRM chip honours the CRM tab gate: an account
                       # locked out of the CRM does not learn membership,
                       # org names, or ids through the side door of an email.
@@ -13475,12 +13735,21 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
         if op == "save":
             text = str(body.get("text") or "").strip()
-            if not text:
+            html_in = str(body.get("html") or "").strip()
+            if not text and not html_in:
                 return _json({"error": "There is nothing to save."}, 400)
-            if len(text) > 20000:
+            if len(text) > 20000 or len(html_in) > MAIL_SEND_MAX_HTML:
                 return _json({"error": "That reply is too long to save."}, 400)
+            addr_self = (google_mail.address() or "").strip().lower()
+            cc_list, bcc_list, bad_extra = _mail_extra_addresses(body, addr_self)
+            if bad_extra:
+                return _json({"error": bad_extra}, 400)
+            att_files, att_inline, bad_part = _mail_parts_from(body, who)
+            if bad_part:
+                return _json({"error": bad_part}, 400)
             try:
-                convo = await google_mail.read_thread(t["id"], per_msg_chars=200)
+                convo = await google_mail.read_thread(t["id"],
+                                                      per_msg_chars=MAIL_QUOTE_CHARS)
             except Exception as e:
                 logger.warning("mail draft: could not re-read thread: %s", e)
                 return _json({"error": "Could not read the conversation from Gmail."}, 502)
@@ -13497,15 +13766,28 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # The draft is what the person will read and send from Gmail, so it
             # has to be the finished article. Stamping only on our own send
             # path would mean every draft finished in Gmail went out bare.
-            text = _mail_outgoing_text(text, _mail_sign_off(who),
-                                       (_load_mail().get("email") or {}).get("footer") or "")
+            html_body, text_body, logo = await _mail_outgoing(body, who, parent, True)
+            try:
+                files, inline, _total = await _mail_fetch_parts(att_files, who,
+                                                                inline_keys=att_inline)
+            except ValueError as e:
+                return _json({"error": str(e) + " Nothing was saved."}, 400)
+            if logo:
+                inline = [logo] + inline
+            subject_line = parent.get("subject") or t.get("subject") or ""
+            raw = mailmime.build_message(
+                frm=google_mail.address(), to=to_addr, cc=", ".join(cc_list),
+                bcc=", ".join(bcc_list), subject=subject_line,
+                html=html_body, text=text_body, inline=inline, files=files,
+                in_reply_to=parent.get("message_id") or "",
+                references=parent.get("references") or "", reply=True)
             replaces, kept = await _mail_leftover_draft(t)
             try:
                 out = await google_mail.create_draft(
-                    t["id"], to_addr, parent.get("subject") or t.get("subject") or "",
-                    text, in_reply_to=parent.get("message_id") or "",
+                    t["id"], to_addr, subject_line,
+                    text_body, in_reply_to=parent.get("message_id") or "",
                     references=parent.get("references") or "",
-                    replaces=replaces)
+                    cc=", ".join(cc_list), replaces=replaces, raw_bytes=raw)
             except google_mail.GmailError as e:
                 return _json({"error": str(e)}, 502)
             except Exception:
@@ -13515,7 +13797,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             t["draft_at"] = _mail_now()
             t["draft_id"] = out.get("id") or ""
             t["draft_to"] = to_addr
-            t["draft_text"] = text[:20000]
+            # The PLAIN twin, because that is what draft_body reads back out
+            # of Gmail when the next save asks "is this still ours?".
+            t["draft_text"] = text_body[:20000]
             try:
                 _write_mail(_load_mail())
             except Exception:
@@ -13660,6 +13944,89 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Couldn't read the address book."}, 500)
         return _json({"addresses": rows, "count": len(rows)})
 
+    _MAIL_NO_SEND = ("You are not set up to send email from here. "
+                     "Ask a lead to switch it on in Team.")
+
+    @mcp.custom_route("/api/mail/attach-url", methods=["POST"])
+    async def mail_attach_url_route(request: Request):
+        """A presigned PUT for a file about to be attached to an email.
+
+        Behind the SEND grant, and into this person's OWN prefix: the key is
+        built here, never taken from the browser, so an upload cannot be aimed
+        at somebody else's folder or at the shop's Files."""
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        if not _may_send_mail(who):
+            return _json({"error": _MAIL_NO_SEND}, 403)
+        if not _files_configured():
+            return _json({"error": "File storage is not set up, so nothing can be "
+                                   "attached. Check Settings, Connections."}, 400)
+        name = _mail_attach_name(body.get("name"))
+        ctype = str(body.get("type") or "").strip()[:100] or "application/octet-stream"
+        inline = bool(body.get("inline"))
+        try:
+            size = int(body.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        if size <= 0:
+            return _json({"error": "That file looks empty."}, 400)
+        if inline and not ctype.startswith("image/"):
+            return _json({"error": "Only an image can go inline in the message."}, 400)
+        if inline and size > MAIL_INLINE_MAX:
+            return _json({"error": "An inline image has to be under 5MB."}, 400)
+        if size > MAIL_ATTACH_MAX:
+            return _json({"error": "A message can carry 25MB in all, so a single file "
+                                   "cannot be bigger than that."}, 400)
+        key = f"mail/{who}/{secrets.token_hex(8)}-{name}"
+        try:
+            url = await asyncio.to_thread(_files_sign_put, key, ctype, size)
+        except Exception as e:
+            logger.warning("mail: attachment presign failed: %s", e)
+            return _json({"error": "Storage isn't reachable right now. Try again."}, 502)
+        return _json({"url": url, "key": key})
+
+    @mcp.custom_route("/api/mail/attach-done", methods=["POST"])
+    async def mail_attach_done_route(request: Request):
+        """What actually landed. The browser's claimed size opened the door;
+        this is the size the message will be built from, and a file that never
+        arrived is refused here rather than discovered at send time."""
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        if not _may_send_mail(who):
+            return _json({"error": _MAIL_NO_SEND}, 403)
+        key = str(body.get("key") or "")
+        if not key.startswith(f"mail/{who}/") or ".." in key \
+                or not re.match(r"^mail/[^/]+/[0-9a-f]{16}-", key):
+            return _json({"error": "That is not one of your uploads."}, 400)
+        try:
+            size = await asyncio.to_thread(_files_head, key)
+        except Exception:
+            return _json({"error": "Storage did not answer; try again."}, 502)
+        if not size:
+            return _json({"error": "The file never arrived in storage. Try the upload "
+                                   "again."}, 400)
+        if size > MAIL_ATTACH_MAX:
+            return _json({"error": "That file is over the 25MB a message can carry."}, 400)
+        name = _mail_part_name(key)
+        ctype = (str(body.get("type") or "").strip()[:100]
+                 or _files_preview_mime(name) or "application/octet-stream")
+        if bool(body.get("inline")):
+            if not ctype.startswith("image/"):
+                return _json({"error": "Only an image can go inline in the message."}, 400)
+            if size > MAIL_INLINE_MAX:
+                return _json({"error": "An inline image has to be under 5MB."}, 400)
+        out = {"ok": True, "key": key, "name": name, "size": size, "type": ctype, "url": ""}
+        if ctype.startswith("image/"):
+            # A short-lived look at our OWN bucket, so the editor can show the
+            # image it is about to send. It leaves as a content-id part.
+            try:
+                out["url"] = await asyncio.to_thread(_files_sign_get, key, name, True)
+            except Exception:
+                logger.warning("mail: could not sign the inline image for preview")
+        return _json(out)
+
     @mcp.custom_route("/api/mail/send", methods=["POST"])
     async def mail_send_route(request: Request):
         """Send an email FROM gizmo: a reply on a conversation, or a new one.
@@ -13687,15 +14054,22 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Reply on a conversation, or start a new one with an "
                                    "address. This asked for both, or for neither."}, 400)
         text = str(body.get("text") or "").strip()
-        if not text:
+        html_in = str(body.get("html") or "").strip()
+        if not text and not html_in:
             return _json({"error": "There is nothing to send."}, 400)
-        if len(text) > MAIL_SEND_MAX_CHARS:
+        if len(text) > MAIL_SEND_MAX_CHARS or len(html_in) > MAIL_SEND_MAX_HTML:
             return _json({"error": "That message is too long to send."}, 400)
         # A dry run makes every decision a real send makes and then stops, one
         # step short of the store and of Gmail. It is how the browser can show
         # the exact address this would go to before anybody commits to it.
         dry = bool(body.get("dry"))
         addr = (google_mail.address() or "").strip().lower()
+        cc_list, bcc_list, bad_extra = _mail_extra_addresses(body, addr)
+        if bad_extra:
+            return _json({"error": bad_extra}, 400)
+        att_files, att_inline, bad_part = _mail_parts_from(body, who)
+        if bad_part:
+            return _json({"error": bad_part}, 400)
 
         # ----- a reply on a conversation the board already has -------------
         if tid:
@@ -13706,7 +14080,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if not_yours:
                 return not_yours
             try:
-                convo = await google_mail.read_thread(t["id"], per_msg_chars=200)
+                # Enough of the original to QUOTE it, not just enough to
+                # address the reply: a quote cut off mid-sentence is worse
+                # than no quote at all.
+                convo = await google_mail.read_thread(t["id"],
+                                                      per_msg_chars=MAIL_QUOTE_CHARS)
             except Exception as e:
                 logger.warning("mail send: could not re-read the thread: %s", e)
                 return _json({"error": "Could not read the conversation from Gmail, so "
@@ -13722,20 +14100,29 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if refusal:
                 return refusal
             if dry:
-                return _json({"ok": True, "dry": True, "to": to_addr, "kind": "reply"})
+                _total, why = await _mail_parts_size(att_files, att_inline)
+                if why:
+                    return _json({"error": why}, 400)
+                return _json({"ok": True, "dry": True, "to": to_addr,
+                              "cc_count": len(cc_list), "bcc_count": len(bcc_list),
+                              "attachment_count": len(att_files), "kind": "reply"})
             # Past the dry run, and before anything durable: the stamp below is
             # the record of what the customer was sent, so it has to hold the
             # finished words, not the half the person typed.
-            text = _mail_outgoing_text(text, _mail_sign_off(who),
-                                       (_load_mail().get("email") or {}).get("footer") or "")
+            subject_line = parent.get("subject") or t.get("subject") or ""
+            html_body, text_body, logo = await _mail_outgoing(body, who, parent, True)
             sick = _mail_store_sick()
             if sick:
                 return sick
             # DURABLE FIRST. Everything above this line can be re-run for
             # nothing. Past it, a crash could leave a customer holding an
             # email the shop has no record of - so the record goes first.
-            t["send_pending"] = {"at": _mail_now(), "by": who, "to": to_addr,
-                                 "text": text[:MAIL_SEND_MAX_CHARS]}
+            t["send_pending"] = {
+                "at": _mail_now(), "by": who, "to": to_addr,
+                "text": text_body[:MAIL_SEND_MAX_CHARS],
+                "attachments": [{"name": _mail_attach_name(a["name"]
+                                                           or _mail_part_name(a["key"])),
+                                 "size": int(a.get("size") or 0)} for a in att_files]}
             try:
                 _write_mail(_load_mail())
             except Exception:
@@ -13744,10 +14131,33 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"error": "The inbox store cannot be written right now, so "
                                        "nothing was sent. Check Settings, Connections."}, 503)
             try:
+                files, inline, _total = await _mail_fetch_parts(att_files, who,
+                                                                inline_keys=att_inline)
+            except ValueError as e:
+                # A file that cannot be read refuses the WHOLE send. Nothing
+                # has gone, so the stamp comes off rather than sitting on the
+                # board claiming a message might be out there.
+                t.pop("send_pending", None)
+                _mail_log(t, who, "the send did not complete", str(e))
+                try:
+                    _write_mail(_load_mail())
+                except Exception:
+                    logger.exception("mail send: could not clear the send stamp")
+                return _json({"error": str(e) + " Nothing was sent."}, 400)
+            if logo:
+                inline = [logo] + inline
+            raw = mailmime.build_message(
+                frm=google_mail.address(), to=to_addr, cc=", ".join(cc_list),
+                bcc=", ".join(bcc_list), subject=subject_line,
+                html=html_body, text=text_body, inline=inline, files=files,
+                in_reply_to=parent.get("message_id") or "",
+                references=parent.get("references") or "", reply=True)
+            try:
                 out = await google_mail.send_message(
-                    t["id"], to_addr, parent.get("subject") or t.get("subject") or "",
-                    text, in_reply_to=parent.get("message_id") or "",
-                    references=parent.get("references") or "")
+                    t["id"], to_addr, subject_line,
+                    text_body, in_reply_to=parent.get("message_id") or "",
+                    references=parent.get("references") or "",
+                    cc=", ".join(cc_list), raw_bytes=raw)
             except Exception as e:
                 reason = (str(e) if isinstance(e, google_mail.GmailError)
                           else "Gmail would not send this reply.")
@@ -13771,6 +14181,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             now = _mail_now()
             t["sent_at"], t["sent_by"], t["sent_to"] = now, who, to_addr
             t["sent_msg_id"] = str(out.get("id") or "")
+            # The true sizes, off the bytes that actually went, so the thread
+            # says what the customer received rather than what was declared.
+            t["sent_attachments"] = [{"name": f["name"], "size": len(f["data"])}
+                                     for f in files]
             t.pop("send_pending", None)
             for k in ("draft_at", "draft_id", "draft_to", "draft_text"):
                 t.pop(k, None)
@@ -13804,9 +14218,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": bad}, 400)
         to_addr = ", ".join(addrs)
         if dry:
-            return _json({"ok": True, "dry": True, "to": to_addr, "kind": "new"})
-        text = _mail_outgoing_text(text, _mail_sign_off(who),
-                                   (_load_mail().get("email") or {}).get("footer") or "")
+            _total, why = await _mail_parts_size(att_files, att_inline)
+            if why:
+                return _json({"error": why}, 400)
+            return _json({"ok": True, "dry": True, "to": to_addr,
+                          "cc_count": len(cc_list), "bcc_count": len(bcc_list),
+                          "attachment_count": len(att_files), "kind": "new"})
+        # No conversation to quote: this one starts it.
+        html_body, text_body, logo = await _mail_outgoing(body, who, None, False)
         sick = _mail_store_sick()
         if sick:
             return sick
@@ -13814,7 +14233,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # There is no thread to hang the intention on yet, so it goes on the
         # store itself and comes off again when the send is settled.
         stamp = {"at": _mail_now(), "by": who, "to": to_addr, "subject": subject,
-                 "text": text[:MAIL_SEND_MAX_CHARS]}
+                 "text": text_body[:MAIL_SEND_MAX_CHARS],
+                 "attachments": [{"name": _mail_attach_name(a["name"]
+                                                            or _mail_part_name(a["key"])),
+                                  "size": int(a.get("size") or 0)} for a in att_files]}
         store.setdefault("outbound_pending", []).append(stamp)
         try:
             _write_mail(store)
@@ -13823,7 +14245,25 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "The inbox store cannot be written right now, so "
                                    "nothing was sent. Check Settings, Connections."}, 503)
         try:
-            out = await google_mail.send_message("", to_addr, subject, text, new=True)
+            files, inline, _total = await _mail_fetch_parts(att_files, who,
+                                                            inline_keys=att_inline)
+        except ValueError as e:
+            store = _load_mail()
+            _mail_outbound_drop(store, stamp)
+            try:
+                _write_mail(store)
+            except Exception:
+                logger.exception("mail send: could not clear the outbound stamp")
+            return _json({"error": str(e) + " Nothing was sent."}, 400)
+        if logo:
+            inline = [logo] + inline
+        raw = mailmime.build_message(
+            frm=google_mail.address(), to=to_addr, cc=", ".join(cc_list),
+            bcc=", ".join(bcc_list), subject=subject, html=html_body, text=text_body,
+            inline=inline, files=files, reply=False)
+        try:
+            out = await google_mail.send_message("", to_addr, subject, text_body, new=True,
+                                                 cc=", ".join(cc_list), raw_bytes=raw)
         except Exception as e:
             reason = (str(e) if isinstance(e, google_mail.GmailError)
                       else "Gmail would not send this message.")
@@ -13856,7 +14296,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         mine = {"id": new_tid, "historyId": "", "subject": subject,
                 "messages": [{"id": str(out.get("id") or ""), "from_name": "",
                               "from_email": addr, "at": _mail_now(), "labels": [],
-                              "files": [], "snippet": text[:200]}]}
+                              "files": [], "snippet": text_body[:200]}]}
         store = _load_mail()
         _mail_apply_thread(store, full or mine, addr)
         if new_tid not in store.get("threads", {}):
@@ -13872,6 +14312,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         t["started_to"] = to_addr
         t["sent_at"], t["sent_by"], t["sent_to"] = now, who, to_addr
         t["sent_msg_id"] = str(out.get("id") or "")
+        t["sent_attachments"] = [{"name": f["name"], "size": len(f["data"])} for f in files]
         t["unread"] = False
         # The sender was worked out before started_to existed, so it read as
         # our own mailbox. Re-derive it now the row can say who it went to.
@@ -13965,6 +14406,82 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         to = _pa(parent.get("reply_to") or parent.get("from_email") or "")[1].strip().lower()
         return {"msg": parent, "to": to,
                 "from_email": (parent.get("from_email") or "").strip().lower()}
+
+    def _mail_extra_addresses(body: dict, addr: str) -> tuple:
+        """(cc, bcc, refusal). The same anchored parsing the To field gets,
+        because these become headers on real outbound mail too, and the two
+        together are capped: a reply is not a mailing list."""
+        got = []
+        for field in ("cc", "bcc"):
+            raw = str(body.get(field) or "").strip()
+            if not raw:
+                got.append([])
+                continue
+            addrs, bad = _mail_clean_addresses(raw, addr)
+            if bad:
+                return [], [], field.upper() + ": " + bad
+            got.append(addrs)
+        if len(got[0]) + len(got[1]) > MAIL_SEND_MAX_CC:
+            return [], [], (f"That is {len(got[0]) + len(got[1])} addresses on cc and bcc. "
+                            f"Copy at most {MAIL_SEND_MAX_CC} people.")
+        return got[0], got[1], ""
+
+    def _mail_parts_from(body: dict, who: str) -> tuple:
+        """(files, inline, refusal): the two attachment lists as the browser
+        sent them, with every key checked against what this person may attach
+        BEFORE a byte is read. A key outside their own uploads and the shop's
+        Files is refused, or "attach this key" would read the whole bucket."""
+        files, inline = [], []
+        for a in (body.get("attachments") or [])[:MAIL_ATTACH_COUNT]:
+            if isinstance(a, dict):
+                files.append({"key": str(a.get("key") or ""),
+                              "name": str(a.get("name") or ""),
+                              "size": a.get("size") or 0,
+                              "type": str(a.get("type") or "")})
+        for a in (body.get("inline") or [])[:MAIL_ATTACH_COUNT]:
+            if isinstance(a, dict):
+                inline.append({"key": str(a.get("key") or ""),
+                               "cid": str(a.get("cid") or ""),
+                               "type": str(a.get("type") or "")})
+        for a in files + inline:
+            if not _mail_attachment_ok(a["key"], who):
+                return [], [], ((_mail_part_name(a["key"]) or "That file")
+                                + " is not one of your uploads.")
+        return files, inline, ""
+
+    async def _mail_parts_size(files: list, inline: list) -> tuple:
+        """(total, refusal) from HEAD alone: what a dry run can say about a set
+        of attachments without reading a single byte."""
+        total = 0
+        for a in list(files) + list(inline):
+            try:
+                size = await asyncio.to_thread(_files_head, a["key"])
+            except Exception:
+                return 0, "Storage did not answer, so the files could not be checked."
+            if not size:
+                return 0, _mail_part_name(a["key"]) + " is missing from storage."
+            total += int(size)
+        if total > MAIL_ATTACH_MAX:
+            return total, "Attachments come to more than 25MB in total."
+        return total, ""
+
+    async def _mail_outgoing(body: dict, who: str, parent: dict, quote_ok: bool) -> tuple:
+        """(html, text, inline_logo, footer_used) for one outgoing message.
+
+        One assembler behind the send and the draft: the person's words, their
+        sign-off, the shop footer and the quoted original, in that order in
+        both twins. Two copies of this would mean the draft somebody finishes
+        in Gmail says something different from the reply sent from here."""
+        block = _mail_email_block(_load_mail(), who)
+        slots = block["footer_slots"]
+        logo = await _mail_logo_part(slots.get("logo_key") or "")
+        footer_html, footer_text = mailmime.render_footer(slots, "logo" if logo else "")
+        quote = (mailmime.quote_original(parent)
+                 if (quote_ok and parent and bool(body.get("quote", True))) else None)
+        html_body, text_body = _mail_compose_body(
+            str(body.get("html") or ""), str(body.get("text") or ""),
+            block["sign_off"], footer_html, footer_text, quote)
+        return html_body, text_body, logo
 
     def _mail_order_sentence(o: dict) -> str:
         """One order, as a line a person could paste into a reply.
@@ -14295,26 +14812,110 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             _track(who, "mail", "changed their email sign-off", text[:60])
             return _json({"ok": True})
 
+        if op == "logo_view":
+            # A short-lived look at the shop's OWN logo, so the compose box can
+            # show the footer as it will go out. Not a lead decision: everyone
+            # who can send email already sees this on every message they send.
+            key = ((_mail_email_repair(store).get("footer_slots") or {}).get("logo_key") or "")
+            if not key:
+                return _json({"url": ""})
+            try:
+                url = await asyncio.to_thread(_files_sign_get, key, "logo.png", True)
+            except Exception:
+                logger.warning("mail: could not sign the footer logo")
+                return _json({"url": ""})
+            return _json({"url": url})
+
         if not _mail_lead(who):
             return _json({"error": "Only a lead can change the footer."}, 403)
         sick = _mail_store_sick()
         if sick:
             return sick
-        em = store.setdefault("email", {"footer": "", "saved_replies": []})
+        em = _mail_email_repair(store)
 
-        if op == "footer":
-            text = str(body.get("text") or "").strip()
-            if len(text) > MAIL_FOOTER_MAX:
-                return _json({"error": f"The footer can be at most {MAIL_FOOTER_MAX} "
-                                       "characters."}, 400)
-            em["footer"] = text
+        if op == "footer_slots":
+            raw = body.get("slots") or {}
+            if not isinstance(raw, dict):
+                return _json({"error": "Slots must be an object."}, 400)
+            # Validated in full BEFORE anything is applied: a refusal that had
+            # already written half the footer would leave the shop sending a
+            # footer nobody approved.
+            fresh = {}
+            for k in ("company", "address", "phone", "website", "legal"):
+                if k not in raw:
+                    continue
+                v = " ".join(str(raw.get(k) or "").split())
+                if len(v) > MAIL_SLOT_MAX:
+                    return _json({"error": f"The {k} line is over {MAIL_SLOT_MAX} "
+                                           "characters."}, 400)
+                if k == "website" and v and not (
+                        v.lower().startswith("https://")
+                        or re.match(r"^[a-z0-9.-]+\.[a-z]{2,}(/.*)?$", v.lower())):
+                    return _json({"error": "The website needs to be an https address "
+                                           "or a plain domain."}, 400)
+                fresh[k] = v
+            slots = em.setdefault("footer_slots", {})
+            slots.update(fresh)
             try:
                 _write_mail(store)
             except Exception:
                 logger.exception("mail: the footer could not be saved")
                 return _json({"error": "The inbox store cannot be written right now, so "
                                        "the footer was not saved."}, 503)
-            _track(who, "mail", "changed the email footer", text[:60])
+            _track(who, "mail", "changed the email footer",
+                   ", ".join(f"{k}: {v[:30]}" for k, v in fresh.items())[:120])
+            return _json({"ok": True, "footer_slots": {k: slots.get(k, "")
+                                                       for k in MAIL_FOOTER_SLOTS}})
+
+        if op == "logo_url":
+            name = str(body.get("name") or "logo").strip()
+            ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+            ctype = str(body.get("type") or "")
+            if ext not in ("png", "jpg", "jpeg", "gif", "webp") or not ctype.startswith("image/"):
+                return _json({"error": "The logo has to be a PNG, JPG, GIF or WebP image."}, 400)
+            try:
+                size = int(body.get("size") or 0)
+            except (TypeError, ValueError):
+                size = 0
+            if not 0 < size <= MAIL_LOGO_MAX:
+                return _json({"error": "The logo has to be under 1MB."}, 400)
+            key = f"mail/footer/logo-{secrets.token_hex(8)}.{ext}"
+            try:
+                url = await asyncio.to_thread(_files_sign_put, key, ctype[:100], size)
+            except Exception as e:
+                logger.warning("mail: logo presign failed: %s", e)
+                return _json({"error": "Storage isn't reachable right now. Try again."}, 502)
+            return _json({"url": url, "key": key})
+
+        if op == "logo_done":
+            key = str(body.get("key") or "")
+            if not re.match(r"^mail/footer/logo-[0-9a-f]{16}\.(png|jpe?g|gif|webp)$", key):
+                return _json({"error": "That is not a logo upload."}, 400)
+            try:
+                size = await asyncio.to_thread(_files_head, key)
+            except Exception:
+                return _json({"error": "Storage did not answer; try again."}, 502)
+            if not size or size > MAIL_LOGO_MAX:
+                return _json({"error": "The logo did not land, or is over 1MB."}, 400)
+            em.setdefault("footer_slots", {})["logo_key"] = key
+            try:
+                _write_mail(store)
+            except Exception:
+                logger.exception("mail: the logo could not be saved")
+                return _json({"error": "The inbox store cannot be written right now, so "
+                                       "the logo was not saved."}, 503)
+            _track(who, "mail", "changed the email footer logo", key)
+            return _json({"ok": True, "key": key})
+
+        if op == "logo_clear":
+            em.setdefault("footer_slots", {})["logo_key"] = ""
+            try:
+                _write_mail(store)
+            except Exception:
+                logger.exception("mail: the logo could not be cleared")
+                return _json({"error": "The inbox store cannot be written right now, so "
+                                       "nothing changed."}, 503)
+            _track(who, "mail", "removed the email footer logo", "")
             return _json({"ok": True})
 
         if op == "reply_save":

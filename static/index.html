@@ -1693,6 +1693,8 @@
             color: var(--ink-3); margin-bottom: 3px; }
         .mail-sig-text { white-space: pre-wrap; line-height: 1.5; margin-bottom: 4px; }
         .mail-sig-text:last-child { margin-bottom: 0; }
+        /* The shop logo, previewed at the width the footer renders it at. */
+        .mail-sig-logo { display: block; max-width: 160px; height: auto; margin-bottom: 4px; }
         .mail-insert { margin-top: var(--sp-2); max-width: 260px; }
         /* The subject is the only item in the row that can give way: every
            other span is flex: none and the sender is a hard 148. So under
@@ -15752,25 +15754,79 @@ Projected Image UK"></textarea>
             host.append(el('div', 'section-title', 'Email'));
             host.append(el('p', 'field-help',
                 'The footer goes on the end of every email sent from here, under the sender’s '
-                + 'own sign-off. Saved replies are the paragraphs this shop types over and over.'));
-            const ft = document.createElement('textarea');
-            ft.className = 'mail-draft-text'; ft.rows = 3; ft.value = d.footer || '';
-            ft.maxLength = 1000;
-            ft.readOnly = !lead;
-            ft.setAttribute('aria-label', 'Shop footer');
-            host.append(ft);
-            /* Said where it is typed. A cap discovered by being refused is a cap
-               nobody knew about. */
-            const count = el('div', 'field-help');
-            const recount = () => { count.textContent = ft.value.length + ' of 1000 characters'; };
-            ft.oninput = recount; recount();
-            host.append(count);
+                + 'own sign-off. Fill in the lines this shop wants on it and leave the rest '
+                + 'empty; each one takes up to 200 characters. Saved replies are the '
+                + 'paragraphs this shop types over and over.'));
+            /* Six named lines rather than one free-text box: the footer that
+               signs every email this business sends is a form, and a form can
+               be rendered into a table that Outlook draws the same way Gmail
+               does. */
+            const slots = d.footer_slots || {};
+            const inputs = {};
+            [['company', 'Company name'], ['address', 'Address'], ['phone', 'Phone'],
+             ['website', 'Website'], ['legal', 'Legal line']].forEach(pair => {
+                const f = el('label', 'pfield');
+                f.append(el('span', null, pair[1]));
+                const i = crmText(slots[pair[0]] || '', pair[1]);
+                i.maxLength = 200;
+                i.readOnly = !lead;
+                f.append(i);
+                inputs[pair[0]] = i;
+                host.append(f);
+            });
+            /* The logo goes up the same way an attachment does: signed for,
+               PUT straight into the bucket, then confirmed by key. It is shown
+               back through a signed link, because the bucket is not public. */
+            const logoRow = el('div', 'mail-statebar');
+            if (slots.logo_key) {
+                const img = el('img', 'mail-sig-logo');
+                img.alt = 'Shop logo';
+                logoRow.append(img);
+                api('/api/mail/settings', { op: 'logo_view' })
+                    .then(v => { if (v && v.url) img.src = v.url; }, () => {});
+            }
+            if (lead) {
+                const file = document.createElement('input');
+                file.type = 'file';
+                file.accept = 'image/png,image/jpeg,image/gif,image/webp';
+                file.style.display = 'none';
+                file.setAttribute('aria-label', 'Shop logo image');
+                const logo = el('button', 'btn', slots.logo_key ? 'Replace the logo' : 'Add a logo');
+                logo.onclick = () => file.click();
+                file.onchange = async () => {
+                    const f = (file.files || [])[0];
+                    if (!f) return;
+                    logo.disabled = true; logo.textContent = 'Uploading\u2026';
+                    try {
+                        const r = await api('/api/mail/settings',
+                            { op: 'logo_url', name: f.name, size: f.size, type: f.type });
+                        const put = await fetch(r.url, { method: 'PUT', body: f,
+                            headers: { 'Content-Type': f.type || 'application/octet-stream' } });
+                        if (!put.ok) {
+                            throw new Error('Storage refused the logo (status ' + put.status
+                                + '). Nothing was changed.');
+                        }
+                        await api('/api/mail/settings', { op: 'logo_done', key: r.key });
+                        toastOk('Logo saved.');
+                        refreshMailQuiet();
+                        paintMailEmailSettings(host);
+                    } catch (e) {
+                        toastError(e.message);
+                        logo.disabled = false;
+                        logo.textContent = slots.logo_key ? 'Replace the logo' : 'Add a logo';
+                    }
+                };
+                logoRow.append(logo, file);
+            }
+            host.append(logoRow);
             if (lead) {
                 const bar = el('div', 'mail-statebar');
                 const save = el('button', 'btn', 'Save footer');
                 save.onclick = async () => {
                     save.disabled = true;
-                    try { await api('/api/mail/settings', { op: 'footer', text: ft.value }); }
+                    const out = {};
+                    Object.keys(inputs).forEach(k => { out[k] = inputs[k].value.trim(); });
+                    try { await api('/api/mail/settings', { op: 'footer_slots', slots: out }); }
                     catch (e) { toastError(e.message); save.disabled = false; return; }
                     toastOk('Footer saved.');
                     save.disabled = false;
@@ -16025,8 +16081,17 @@ Projected Image UK"></textarea>
                 return;
             }
             const to = dry.to || '';
+            /* Counted by the SERVER on the dry run, never by this window. A
+               file that never landed in the bucket is not in the server's
+               count, so the number beside Send now is the number that will
+               actually go out. */
+            const ccN = dry.cc_count || 0, attN = dry.attachment_count || 0;
+            const line = 'Send to ' + to
+                + (ccN ? ', ' + ccN + ' cc' : '')
+                + (attN ? ', ' + attN + (attN === 1 ? ' attachment' : ' attachments') : '')
+                + '?';
             const row = el('div', 'mail-statebar');
-            row.append(el('div', 'setting-sub', 'Send to ' + to + '?'));
+            row.append(el('div', 'setting-sub', line));
             const go = el('button', 'btn btn-primary', 'Send now');
             const back = el('button', 'btn', 'Back');
             go.onclick = async () => {
@@ -16101,26 +16166,125 @@ Projected Image UK"></textarea>
            need the same guard. */
         function mailEmailBits() {
             const e = (mailCache && mailCache.email) || {};
-            return { footer: e.footer || '', sign_off: e.sign_off || '',
+            return { footer_slots: e.footer_slots || {}, sign_off: e.sign_off || '',
                      saved_replies: e.saved_replies || [] };
+        }
+        /* The composer is a second file, loaded beside app.js. If it did not
+           arrive, say so plainly: a window half built around a missing editor
+           is worse than not opening one. */
+        function mailComposerReady() {
+            if (typeof window.mountComposer === 'function') return true;
+            toastError('The message editor did not load. Refresh the page and try again.');
+            return false;
+        }
+        /* An attachment never passes through our own server. The browser asks
+           for a signed URL, PUTs the bytes straight into the bucket and only
+           then tells the server which key landed, so a 20MB artwork file is a
+           transfer between the person and storage rather than a request body
+           this app has to hold in memory and hand on. */
+        async function mailUpload(file, inline) {
+            const ctype = file.type || 'application/octet-stream';
+            const r = await api('/api/mail/attach-url',
+                { name: file.name, size: file.size, type: ctype, inline: !!inline });
+            const put = await fetch(r.url, { method: 'PUT', body: file,
+                                             headers: { 'Content-Type': ctype } });
+            if (!put.ok) {
+                throw new Error('Storage refused the upload (status ' + put.status + '). '
+                    + 'Nothing was attached.');
+            }
+            /* The server re-reads the size off the bucket here, so what the
+               meter counts is what actually landed rather than what the file
+               picker claimed. */
+            const d = await api('/api/mail/attach-done', { key: r.key });
+            return { key: d.key || r.key, name: d.name || file.name,
+                     size: d.size == null ? file.size : d.size,
+                     type: d.type || ctype, url: d.url || '' };
+        }
+        /* One shape for both windows: what the composer holds, split the way
+           the send route reads it. Inline images travel as keys and content
+           ids; the html already refers to them as cid: and nothing else. */
+        function mailComposerPayload(h) {
+            const all = h.attachments();
+            return {
+                html: h.getHtml(),
+                attachments: all.filter(a => !a.inline)
+                    .map(a => ({ key: a.key, name: a.name, type: a.type })),
+                inline: all.filter(a => a.inline)
+                    .map(a => ({ key: a.key, cid: a.cid, type: a.type })),
+            };
+        }
+        /* Cc and Bcc are empty on almost every reply, so they are folded away
+           behind one link rather than sitting there as two more boxes to skip
+           past on a phone. */
+        function mailCcFold(host) {
+            const wrap = el('div');
+            wrap.style.display = 'none';
+            const mk = (name, ph) => {
+                const l = el('label', 'pfield');
+                l.append(el('span', null, name));
+                const i = crmText('', ph);
+                i.inputMode = 'email'; i.spellcheck = false;
+                l.append(i); wrap.append(l);
+                return i;
+            };
+            const cc = mk('Cc', 'name@company.com');
+            const bcc = mk('Bcc', 'nobody sees this line');
+            const link = el('button', 'linkish', 'Cc / Bcc');
+            link.setAttribute('aria-expanded', 'false');
+            const toggle = () => {
+                const open = wrap.style.display === 'none';
+                wrap.style.display = open ? '' : 'none';
+                link.setAttribute('aria-expanded', open ? 'true' : 'false');
+                if (open) cc.focus();
+            };
+            link.onclick = toggle;
+            host.append(link, wrap);
+            /* Shown as soon as there is something in them, so a Reply all or a
+               reopened panel never hides an address that is going to be used. */
+            const reveal = () => {
+                if (wrap.style.display === 'none' && (cc.value || bcc.value)) toggle();
+            };
+            return { cc, bcc, reveal };
         }
         /* What the server will put on the end. A person writing a reply cannot
            otherwise see what it actually ends with, and the first time they
            find out should not be in the customer's inbox. */
         function mailAddedWhenSent(host) {
             const bits = mailEmailBits();
-            const sign = (bits.sign_off || '').trim(), foot = (bits.footer || '').trim();
+            const sign = (bits.sign_off || '').trim();
+            const slots = bits.footer_slots || {};
+            /* Drawn from the SLOTS, line by line, as text. The server renders
+               the real footer into a table and sanitises it; this is a preview,
+               and a preview has no business being the one place in the app that
+               injects markup. */
+            const lines = ['company', 'address', 'phone', 'website', 'legal']
+                .map(k => String(slots[k] || '').trim()).filter(Boolean);
+            const logo = String(slots.logo_key || '');
+            /* Either half is a footer: a shop that has set only a logo still
+               has something put on the end of its email. */
+            const foot = lines.join('\n') + logo;
             /* Nothing set, nothing drawn: a box labelled "Added when sent" with
                nothing in it says something is added when nothing is. */
             if (!sign && !foot) return;
             const box = el('div', 'mail-sig');
             box.append(el('div', 'mail-sig-lab', 'Added when sent'));
             if (sign) box.append(el('div', 'mail-sig-text', sign));
-            if (foot) box.append(el('div', 'mail-sig-text', foot));
+            if (logo) {
+                /* Our own logo, out of our own bucket, behind a signed link
+                   that the server hands over only to somebody with the Inbox.
+                   It is decoration: if the link never arrives the img stays
+                   sourceless and the lines below still say what goes out. */
+                const img = el('img', 'mail-sig-logo');
+                img.alt = String(slots.company || 'Shop logo');
+                box.append(img);
+                api('/api/mail/settings', { op: 'logo_view' })
+                    .then(d => { if (d && d.url) img.src = d.url; }, () => {});
+            }
+            lines.forEach(l => box.append(el('div', 'mail-sig-text', l)));
             host.append(box);
         }
-        /* The saved replies, into the box at the cursor. */
-        function mailReplyPicker(ta, host) {
+        /* The saved replies, into the composer at the cursor. */
+        function mailReplyPicker(cmp, host) {
             const reps = mailEmailBits().saved_replies;
             /* No saved replies, no select: an empty dropdown is a dead control
                that still costs a glance every time the window opens. */
@@ -16137,18 +16301,18 @@ Projected Image UK"></textarea>
                 /* At the cursor and over any selection, not appended: a saved
                    reply is dropped into a paragraph already being written, and
                    putting the artwork rules after the last line instead lands
-                   them below a half-finished sentence. */
-                const from = ta.selectionStart, to = ta.selectionEnd;
-                const text = r.text || '';
-                ta.value = ta.value.slice(0, from) + text + ta.value.slice(to);
-                ta.focus();
-                ta.setSelectionRange(from + text.length, from + text.length);
+                   them below a half-finished sentence. The composer inserts at
+                   the caret it kept when the focus moved to this dropdown, and
+                   leaves the caret after what it just put in. */
+                cmp.insertText(r.text || '');
+                cmp.focus();
             };
             host.append(sel);
         }
         /* A new conversation rather than a reply. Same modal idiom as Size
            rules, same two-step send as the reply panel. */
         function openMailCompose() {
+            if (!mailComposerReady()) return;
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal');
             const head = el('div', 'modal-head');
@@ -16188,6 +16352,7 @@ Projected Image UK"></textarea>
             };
             toL.append(crmTypeahead(to, mailAddressRows, { pick }));
             body.append(toL);
+            const folds = mailCcFold(body);
             /* Not awaited: the window opens now, and the book arrives while the
                subject is being typed. A failure leaves a plain text field. */
             mailAddressBook();
@@ -16196,19 +16361,24 @@ Projected Image UK"></textarea>
             const subject = crmText('', 'What it is about');
             subL.append(subject);
             body.append(subL);
-            const bodyL = el('label', 'pfield');
+            /* A div, not a label: the message box is a contenteditable, and a
+               label wrapping one hands every click on the caption back to the
+               browser to place a caret with. */
+            const bodyL = el('div', 'pfield');
             bodyL.append(el('span', null, 'Message'));
-            const ta = document.createElement('textarea');
-            ta.className = 'mail-draft-text';
-            ta.rows = 10;
-            bodyL.append(ta);
+            const box = el('div');
+            bodyL.append(box);
             body.append(bodyL);
-            mailReplyPicker(ta, body);
+            const cmp = mountComposer(box, { upload: mailUpload, label: 'Message',
+                                             placeholder: 'Write the message' });
+            mailReplyPicker(cmp, body);
             mailAddedWhenSent(body);
             const bar = el('div', 'mail-statebar');
             const send = el('button', 'btn btn-primary', 'Send');
             send.onclick = () => mailSendFlow(bar,
-                { to: to.value.trim(), subject: subject.value.trim(), text: ta.value },
+                Object.assign({ to: to.value.trim(), cc: folds.cc.value.trim(),
+                                bcc: folds.bcc.value.trim(), subject: subject.value.trim() },
+                              mailComposerPayload(cmp)),
                 [send],
                 () => { overlay.remove(); refreshMailQuiet(); });
             bar.append(send);
@@ -16216,8 +16386,9 @@ Projected Image UK"></textarea>
             /* Said where it is typed. A cap discovered by being refused is a
                cap nobody knew about. */
             body.append(el('div', 'setting-sub',
-                'Up to five addresses, separated by commas. Plain text only: no '
-                + 'formatting and no attachments, so write it as you would speak it.'));
+                'Up to five addresses, separated by commas. Formatting, files and '
+                + 'pictures go out as they look here, with your sign-off and the '
+                + 'shop footer under them.'));
         }
 
         /* Claude drafts, a person edits, and then it either goes to the
@@ -16251,6 +16422,7 @@ Projected Image UK"></textarea>
         /* One place that builds the draft panel, so the compose path and the
            rescue-after-repaint path can never drift apart. */
         function mailDraftPanel(m, t, btn, out) {
+            if (!mailComposerReady()) return;
             const prior = m.body.querySelector('.mail-draft');
             if (prior) prior.remove();
             const host = el('div', 'mail-draft');
@@ -16259,14 +16431,51 @@ Projected Image UK"></textarea>
             host.append(el('div', 'setting-sub',
                 'Read it before it goes anywhere. Claude leaves gaps like ____ where '
                 + 'it would have had to guess at a price or a date: fill those in.'));
-            const ta = document.createElement('textarea');
-            ta.className = 'mail-draft-text';
-            ta.rows = 10; ta.value = out.draft;
-            host.append(ta);
+            const box = el('div');
+            host.append(box);
+            const cmp = mountComposer(box, { upload: mailUpload, label: 'Reply',
+                                             placeholder: 'Write the reply' });
+            /* The panel keeps its own handle, so a repaint of the thread can
+               rescue what is half written and the order panel can drop a
+               tracking line into it. */
+            host._cmp = cmp;
+            (out.draft_files || []).forEach(a => cmp.addAttachment(a));
+            if (out.draft_html) cmp.setHtml(out.draft_html);
+            else if (out.draft) cmp.insertText(out.draft);
+            const folds = mailCcFold(host);
+            /* Reply all is a switch, not a second Send: it fills the Cc with
+               the list the SERVER worked out, which already has this mailbox
+               and the person being answered taken out of it. */
+            const rall = String(t.reply_all_cc || '');
+            if (rall) {
+                const rrow = el('label', 'tm-tabpick');
+                const ra = document.createElement('input');
+                ra.type = 'checkbox';
+                ra.onchange = () => {
+                    if (ra.checked) { folds.cc.value = rall; folds.reveal(); }
+                    else if (folds.cc.value === rall) folds.cc.value = '';
+                };
+                rrow.append(ra, el('span', null, 'Reply all (' + rall + ')'));
+                host.append(rrow);
+            }
+            /* The original is quoted by the server, under the reply, in the
+               shape every mail client draws. Nothing a customer sent is ever
+               rendered as html in this page, so this is a promise about the
+               message rather than a preview of it. */
+            const qrow = el('label', 'tm-tabpick');
+            const quote = document.createElement('input');
+            quote.type = 'checkbox'; quote.checked = true;
+            qrow.append(quote, el('span', null,
+                'The original message will be quoted below your reply'));
+            host.append(qrow);
             /* Claude is told to stop after its last sentence, so the sign-off
                and the footer under the box are the whole of what gets added. */
-            mailReplyPicker(ta, host);
+            mailReplyPicker(cmp, host);
             mailAddedWhenSent(host);
+            const payload = () => Object.assign(
+                { id: t.id, cc: folds.cc.value.trim(), bcc: folds.bcc.value.trim(),
+                  quote: quote.checked },
+                mailComposerPayload(cmp));
             const canSend = mailCanSend();
             const bar = el('div', 'mail-statebar');
             /* Save steps back to secondary only where Send has taken the lead.
@@ -16278,7 +16487,8 @@ Projected Image UK"></textarea>
                 save.disabled = true;
                 let res;
                 try {
-                    res = await api('/api/mail/draft', { id: t.id, op: 'save', text: ta.value });
+                    res = await api('/api/mail/draft',
+                        Object.assign({ op: 'save' }, payload()));
                 } catch (e) { toastError(e.message); save.disabled = false; return; }
                 toastOk(res && res.kept_previous
                     ? 'Saved. Your earlier draft had been edited in Gmail, so that one was '
@@ -16289,8 +16499,11 @@ Projected Image UK"></textarea>
             };
             const copy = el('button', 'btn', 'Copy');
             copy.onclick = async () => {
-                try { await navigator.clipboard.writeText(ta.value); toastOk('Copied'); }
-                catch (e) { ta.select(); toastError('Select all and copy with the keyboard.'); }
+                try { await navigator.clipboard.writeText(cmp.getText()); toastOk('Copied'); }
+                catch (e) {
+                    cmp.focus();
+                    toastError('Select all and copy with the keyboard.');
+                }
             };
             const drop = el('button', 'btn', 'Discard');
             drop.onclick = () => host.remove();
@@ -16299,7 +16512,7 @@ Projected Image UK"></textarea>
                 /* The text is read off the textarea HERE, once, so the confirm
                    step names the address for the words that were actually on
                    screen when it was pressed. */
-                send.onclick = () => mailSendFlow(bar, { id: t.id, text: ta.value },
+                send.onclick = () => mailSendFlow(bar, payload(),
                     [send, save, copy, drop],
                     () => { host.remove(); refreshMailQuiet(); });
                 bar.append(send);
@@ -16313,7 +16526,7 @@ Projected Image UK"></textarea>
             const note = crmText('', 'Not right? Say what to change, then Try again');
             note.style.flex = '1';
             const again = el('button', 'btn', 'Try again');
-            again.onclick = () => mailComposeDraft(m, t, btn, note.value.trim(), ta.value);
+            again.onclick = () => mailComposeDraft(m, t, btn, note.value.trim(), cmp.getText());
             steer.append(note, again);
             host.append(steer);
             host.append(el('div', 'setting-sub', canSend
@@ -16373,9 +16586,9 @@ Projected Image UK"></textarea>
                 }
                 const use = el('button', 'linkish', 'Put this in the reply');
                 use.onclick = () => {
-                    const ta = m.body.querySelector('.mail-draft textarea');
+                    const panel = m.body.querySelector('.mail-draft');
                     const line = o.sentence.charAt(0).toUpperCase() + o.sentence.slice(1) + '.';
-                    if (ta) { ta.value = (ta.value ? ta.value + '\n\n' : '') + line; ta.focus(); }
+                    if (panel && panel._cmp) { panel._cmp.appendText(line); }
                     else { navigator.clipboard.writeText(line).then(
                         () => toastOk('Copied. Press Compose reply with Claude to write around it.'),
                         () => toastError('Could not copy.')); }
@@ -16461,11 +16674,23 @@ Projected Image UK"></textarea>
         }
         function paintMailThread(m, r) {
             const t = r.thread;
+            /* Who else was on the customer's last message, worked out by the
+               server with this mailbox and the person being answered already
+               taken out. Carried on the thread so the reply panel, which is
+               handed the thread and not the whole answer, can offer Reply all. */
+            t.reply_all_cc = r.reply_all_cc || '';
             /* Rescue an unsaved draft before the rebuild: every other button in
                this modal repaints, and losing two minutes of edited reply to a
                stray click on 'Start work' is not acceptable. */
-            const live = m.body.querySelector('.mail-draft textarea');
-            const rescued = live && live.value.trim() ? live.value : '';
+            const live = m.body.querySelector('.mail-draft');
+            const cmpLive = live && live._cmp;
+            const rescued = cmpLive && cmpLive.getText() ? cmpLive.getHtml() : '';
+            /* The files come with it. They are already in the bucket, so this
+               is a list of keys, not a re-upload; an inline picture is the one
+               thing a repaint cannot carry, and the composer drops the content
+               id with it rather than sending a reference to nothing. */
+            const rescuedFiles = rescued && cmpLive
+                ? cmpLive.attachments().filter(a => !a.inline) : [];
             m.body.innerHTML = '';
             if (r.viewers && r.viewers.length) {
                 m.body.append(el('div', 'mail-viewwarn', r.viewers.join(' and ')
@@ -16517,7 +16742,8 @@ Projected Image UK"></textarea>
             if (rescued) {
                 /* The repaint would have thrown this away. Put it back with
                    its buttons, exactly where it was. */
-                setTimeout(() => mailDraftPanel(m, t, compose, { draft: rescued }), 0);
+                setTimeout(() => mailDraftPanel(m, t, compose,
+                    { draft_html: rescued, draft_files: rescuedFiles }), 0);
             }
             if (t.draft_at) {
                 draftBar.append(el('span', 'mail-bulk-hint',

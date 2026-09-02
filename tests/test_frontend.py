@@ -13,6 +13,9 @@ SCRIPT = max(re.findall(r"<script>(.*?)</script>", HTML, re.S), key=len)
 # The stylesheet is a separate block; layout rules are asserted against this,
 # not against SCRIPT, which is the JS.
 CSS = max(re.findall(r"<style>(.*?)</style>", HTML, re.S), key=len)
+# The composer is its own file, served like app.js rather than living inside the
+# page, so it is read the same way the page is and asserted against separately.
+COMPOSER = open(os.path.join(ROOT, "static", "composer.js"), encoding="utf-8").read()
 
 _passed, _failed = 0, []
 
@@ -3347,8 +3350,11 @@ def t_a_send_is_confirmed_against_the_address_the_server_resolved():
        "and nowhere else: nothing sends before it is confirmed")
     ok(after.index("api('/api/mail/send', payload)") < after.index("toastOk"),
        "the toast follows the send rather than announcing it in advance")
-    ok("'Send to ' + to + '?'" in fn, "the confirm names the address")
+    ok("'Send to ' + to" in fn, "the confirm names the address")
     ok("dry.to" in fn, "which is the server's answer, not what was typed")
+    ok("dry.cc_count" in fn and "dry.attachment_count" in fn,
+       "and the cc and attachment counts beside it are the server's too, so a "
+       "file that never landed is not counted in front of the person sending")
     ok("row.replaceWith(bar)" in fn, "Back puts the bar and the typed text back")
     ok("toastError(e.message)" in after and "go.disabled = false" in after,
        "a refusal is reported and hands the row back, never presenting as sent")
@@ -3374,8 +3380,10 @@ def t_the_reply_panel_offers_send_only_to_an_account_that_holds_it():
        "the bar is composed in two pieces")
     ok(panel.index("bar.append(send)") < panel.index("bar.append(save, copy, drop)"),
        "so Send is first in the bar")
-    ok("mailSendFlow(bar, { id: t.id, text: ta.value }" in panel,
+    ok("mailSendFlow(bar, payload()" in panel,
        "and goes through the shared two-step flow, not a second one of its own")
+    ok("mailComposerPayload(cmp)" in panel and "id: t.id" in panel,
+       "with the composer's html, files and inline images under the thread id")
     ok("Ask a lead to switch it on in Team." in panel,
        "an account without the grant is told where the switch lives")
     thread = SCRIPT.split("function paintMailThread(m, r) {")[1]
@@ -3415,11 +3423,14 @@ def t_the_compose_window_is_a_modal_of_the_house_kind():
     ok("e.target === overlay" not in fn and "Escape" not in fn,
        "and nothing else that closes it")
     ok("name@company.com, another@company.com" in fn, "To says the shape it takes")
-    ok("ta.rows = 10" in fn, "the body has room to write in")
-    ok("'mail-draft-text'" in fn, "in the app's own draft textarea")
+    # The body was a textarea until the composer landed. The requirement is
+    # unchanged - a box with room to write in, sized by the app's own styles -
+    # and what carries it is now mountComposer, which brings its own.
+    ok("mountComposer(box" in fn, "the body is the app's own composer")
     ok("mailSendFlow(bar" in fn, "and the same dry-run confirm as a reply")
-    ok("five addresses" in fn and "Plain text" in fn,
-       "the cap and the format are stated where they are typed, not after a refusal")
+    ok("five addresses" in fn and "sign-off and the" in fn,
+       "the cap and what gets added are stated where the message is typed, not "
+       "discovered after a refusal")
     done = fn[fn.index("mailSendFlow(bar"):][:400]
     ok("overlay.remove()" in done and "refreshMailQuiet()" in done,
        "success closes the window and repaints the board")
@@ -3726,9 +3737,12 @@ def t_the_filters_window_gates_the_email_section_on_the_servers_lead_flag():
        "gated on the flag the SERVER sent, not on the rules window's own idea "
        "of who is a lead")
     ok("readOnly = !lead" in fn, "a non-lead reads the footer and cannot type into it")
-    for op in ("op: 'footer'", "op: 'reply_save'", "op: 'reply_delete'"):
+    # The free-text footer became six named slots; the ops moved with it and
+    # the per-line cap came down from 1000 to 200.
+    for op in ("op: 'footer_slots'", "op: 'reply_save'", "op: 'reply_delete'"):
         ok(op in fn, "the lead-only " + op)
-    ok("of 1000" in fn, "the cap is on screen before it is hit, not discovered by refusal")
+    ok("200 characters" in fn,
+       "the cap is on screen before it is hit, not discovered by refusal")
     rules = fn_src("function paintMailRules(")
     ok("paintMailEmailSettings(" in rules, "the Filters window draws it")
     stop = rules.index("Only a lead can change these.")
@@ -3797,22 +3811,24 @@ def t_a_saved_reply_lands_where_the_cursor_is():
     fn = fn_src("function mailReplyPicker(")
     ok("if (!reps.length) return" in fn,
        "no saved replies, no select: an empty dropdown is a dead control")
-    ok("ta.selectionStart" in fn and "ta.selectionEnd" in fn,
-       "the text goes in at the cursor, over any selection")
-    ok("setSelectionRange" in fn, "the cursor lands after what was just inserted")
-    ok("ta.focus()" in fn, "back in the textarea, ready to carry on typing")
+    # The box became the composer, which keeps the caret when the focus moves
+    # to this dropdown and puts the cursor after what it inserted. Same
+    # requirement, one caller instead of four lines of selection arithmetic.
+    ok("cmp.insertText(" in fn, "the text goes in at the cursor, over any selection")
+    ok("cmp.focus()" in fn, "back in the box, ready to carry on typing")
     ok("sel.value = ''" in fn, "and the select resets, so the same reply can go in twice")
 
 
 @test
 def t_the_compose_and_reply_boxes_keep_the_class_that_sizes_them():
-    """Both windows grew a preview and a dropdown underneath. The textarea they
-    are underneath is still the one the stylesheet sizes."""
+    """Both windows grew a preview and a dropdown underneath, and then the box
+    itself became the composer. What they are underneath still has to be the
+    one box this app writes email in, with both of those under it."""
     for name in ("function openMailCompose()", "function mailDraftPanel("):
         fn = fn_src(name)
-        ok("ta.className = 'mail-draft-text'" in fn, name + " keeps its textarea class")
+        ok("mountComposer(box" in fn, name + " writes in the composer")
         ok("mailAddedWhenSent(" in fn, name + " shows what is appended on send")
-        ok("mailReplyPicker(ta" in fn, name + " offers the saved replies into that box")
+        ok("mailReplyPicker(cmp" in fn, name + " offers the saved replies into that box")
 
 
 @test
@@ -3829,6 +3845,139 @@ def t_an_admin_sets_someone_elses_sign_off_beside_their_other_switches():
        "and only where the size and send switches beside it are shown")
 
 
+# ---- the composer ------------------------------------------------------
+# A contenteditable editor of our own, in its own file. These read the source
+# the way the rest of this suite reads the page: the browser cleaner and the
+# server sanitiser have to keep the same allowlist, and a toolbar button that
+# quietly disappeared on a phone is a feature nobody can use.
+
+
+@test
+def t_the_composer_is_its_own_file_served_like_the_app_script():
+    """One more script, gated and cache-busted exactly like the app's own, so a
+    stale composer can never be handed to a browser."""
+    ok("function mountComposer(" in COMPOSER and "window.mountComposer = mountComposer" in COMPOSER,
+       "the file exports one mount function onto the window")
+    src = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    ok('"/assets/composer.js"' in src and '_asset_hashes["composer"]' in src,
+       "hashed and routed like app.js")
+    ok("composer.js?v=" in src, "the shell loads it by hash")
+    ok("\u2014" not in COMPOSER and "\u2013" not in COMPOSER, "no em or en dashes")
+
+
+@test
+def t_the_composer_toolbar_covers_the_agreed_set_and_nothing_hides_on_a_phone():
+    """The set the Inbox agreed on, and a bar that wraps to a second row rather
+    than hiding the half of it that did not fit."""
+    for cmd in ("bold", "italic", "underline", "fontName", "fontSize", "foreColor", "justifyLeft",
+                "justifyCenter", "justifyRight", "insertUnorderedList", "insertOrderedList",
+                "createLink", "removeFormat", "formatBlock"):
+        ok("'%s'" % cmd in COMPOSER, "toolbar command " + cmd)
+    ok("'image'" in COMPOSER and "'attach'" in COMPOSER, "image and attach buttons")
+    # Asserted against the BAR's own rule: the chip row wraps too, and a
+    # blanket search for the property was answered by that one while the
+    # toolbar quietly clipped.
+    bar = COMPOSER.split(".cmp-bar {")[1].split("}")[0]
+    ok("flex-wrap: wrap" in bar or "flex-wrap:wrap" in bar,
+       "the toolbar wraps rather than hiding")
+
+
+@test
+def t_pasted_markup_is_cleaned_to_the_same_allowlist_as_the_server():
+    """A paste out of Word or a web page arrives as somebody else's markup. It
+    is cleaned on the way in by the same allowlist the server enforces on the
+    way out, so what is on screen is what will actually be sent."""
+    ok("addEventListener('paste'" in COMPOSER and "clipboardData" in COMPOSER,
+       "a paste is intercepted rather than dropped in raw")
+    ok("function cleanHtml(" in COMPOSER, "one cleaner, applied on paste and on getHtml")
+    for tag in ("script", "iframe", "style", "svg"):
+        ok("'%s'" % tag in COMPOSER, tag + " is named in the drop list")
+    ok("'cid:'" in COMPOSER, "images leave as cids")
+
+
+@test
+def t_inline_images_become_cids_and_are_counted_against_the_meter():
+    """An inline image is an attachment that happens to be shown in the body:
+    it counts against the same 25MB ceiling as everything else."""
+    ok("data-key" in COMPOSER and "data-cid" in COMPOSER,
+       "an inline image carries its bucket key and its content-id")
+    ok("25 * 1024 * 1024" in COMPOSER, "the meter knows the ceiling")
+    ok("inline: true" in COMPOSER, "and is listed as an inline attachment")
+
+
+@test
+def t_compose_and_reply_mount_the_composer_and_nothing_else_does():
+    """Two windows write email and no others do. A third mount would be a third
+    place for the payload to drift out of shape."""
+    ok(SCRIPT.count("mountComposer(") == 2,
+       "Compose and the reply panel, exactly (%d)" % SCRIPT.count("mountComposer("))
+    ok("mailComposerPayload(" in SCRIPT, "one reader turns a composer into a payload")
+    pay = fn_src("function mailComposerPayload(")
+    ok("html:" in pay, "carrying the html")
+    ok("attachments:" in pay and "inline:" in pay,
+       "and the two lists the send route takes, kept apart")
+
+
+@test
+def t_the_dry_run_confirm_names_recipients_and_attachment_count():
+    """What is about to leave, counted by the server rather than by the window
+    that is asking: a file that failed to land is not on the server's count."""
+    fn = fn_src("async function mailSendFlow(")
+    ok("attachment_count" in fn and "cc_count" in fn,
+       "the confirm row reads the counts the dry run returned")
+
+
+@test
+def t_cc_bcc_fold_away_and_reply_all_fills_cc_minus_us():
+    """Most replies have no Cc, so the fields are folded until they are asked
+    for. Reply all is the one press that fills them, from the server's list."""
+    fold = fn_src("function mailCcFold(")
+    ok("'Cc'" in fold and "'Bcc'" in fold, "both lines exist")
+    ok("display = 'none'" in fold and "aria-expanded" in fold,
+       "folded away until they are asked for, and saying so")
+    ok("cc.value || bcc.value" in fold,
+       "and unfolded again the moment either of them has an address in it")
+    fn = fn_src("function mailDraftPanel(")
+    ok("mailCcFold(" in fn, "the reply panel carries them")
+    ok("reply_all_cc" in fn and "Reply all" in fn,
+       "and Reply all fills the Cc from the thread's own list, which already "
+       "has us and the person being answered taken out of it")
+
+
+@test
+def t_the_quoted_original_is_a_switch_not_a_rendering():
+    """The original is quoted by the SERVER, under the reply. The browser says
+    it will happen and never renders a line of what a customer sent as html."""
+    fn = fn_src("function mailDraftPanel(")
+    ok("quote:" in fn, "the payload carries the switch")
+    ok("will be quoted" in fn.lower() or "quoted below" in fn.lower(),
+       "and the panel says what it does")
+    ok(".innerHTML = t." not in fn and "innerHTML = msg." not in fn,
+       "no incoming html reaches the page")
+
+
+@test
+def t_uploads_go_through_presign_then_done_and_never_the_server_body():
+    """A 20MB attachment never touches our server: it is signed for, PUT
+    straight into the bucket, and only then confirmed by key."""
+    fn = fn_src("async function mailUpload(")
+    ok("/api/mail/attach-url" in fn and "/api/mail/attach-done" in fn,
+       "signed for, then confirmed")
+    ok("method: 'PUT'" in fn, "and the bytes go to the bucket directly")
+
+
+@test
+def t_footer_slots_are_edited_by_leads_with_a_logo_picker():
+    """The footer became six named lines and a logo, so a lead fills in fields
+    instead of hand-writing the shop's own address into a text box."""
+    fn = fn_src("async function paintMailEmailSettings(")
+    for k in ("company", "address", "phone", "website", "legal"):
+        ok("'%s'" % k in fn, "slot " + k)
+    ok("logo_url" in fn and "logo_done" in fn and "footer_slots" in fn,
+       "the logo goes up by the same presign flow, and the slots are saved as one")
+    ok("op: 'footer'" not in fn, "the free-text footer op is gone")
+
+
 @test
 def t_no_em_or_en_dash_reaches_the_page():
     """CI fails the build on one, and the house voice uses a colon or a full
@@ -3842,3 +3991,17 @@ if __name__ == "__main__":
     print()
     print(f"{_passed} passed, {len(_failed)} failed")
     sys.exit(1 if _failed else 0)
+
+
+@test
+def t_a_list_never_leaves_the_editor_inside_a_paragraph():
+    """Chromium's insertUnorderedList inside a <p> yields <p><ul>..</ul></p>
+    and an empty <p></p> either side. Clients disagree about that markup, so
+    the cleaner unwraps the paragraph and drops the empties; a <p><br></p> is
+    a deliberate blank line and must survive."""
+    fn = COMPOSER[COMPOSER.index("function tidyParagraph("):]
+    fn = fn[:fn.index("\n    }\n") + 7]
+    ok("unwrap(p)" in fn, "a paragraph holding a block is unwrapped")
+    ok("!p.childNodes.length" in fn and "p.remove()" in fn, "an empty paragraph goes")
+    ok("'ul'" in COMPOSER[COMPOSER.index("var BLOCKS"):COMPOSER.index("var BLOCKS") + 120])
+    ok("if (tag === 'p') tidyParagraph(n);" in COMPOSER, "and it runs from the walker, on every pass")

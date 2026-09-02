@@ -310,6 +310,40 @@ async def _call(method: str, path: str, *, params: dict = None, body: dict = Non
     return r.json() if r.content else {}
 
 
+async def _upload_post(url: str, headers: dict, body: bytes):
+    """The network leg of an upload, on its own so a test can stand in for it.
+    Returns (status, json)."""
+    async with httpx.AsyncClient(timeout=120.0) as c:
+        r = await c.post(url, headers=headers, content=body)
+    try:
+        data = r.json()
+    except Exception:
+        data = {"error": {"message": r.text[:300]}}
+    return r.status_code, data
+
+
+async def _upload_call(path: str, meta: dict, raw: bytes, acct: Account = SALES) -> dict:
+    """Gmail's upload door: a multipart/related body carrying the JSON metadata
+    (thread) and the raw RFC 822 message. It takes messages up to 35MB where
+    the JSON door stops well short of that."""
+    import json as _json
+    import secrets
+    token = await _token(acct)
+    boundary = "gizmo" + secrets.token_hex(12)
+    body = (f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"
+            f"{_json.dumps(meta)}\r\n--{boundary}\r\nContent-Type: message/rfc822\r\n\r\n"
+            ).encode() + raw + f"\r\n--{boundary}--".encode()
+    url = f"{API_BASE}/upload/gmail/v1/users/me/{path}?uploadType=multipart"
+    status, data = await _upload_post(
+        url, {"Authorization": f"Bearer {token}",
+              "Content-Type": f"multipart/related; boundary={boundary}"}, body)
+    if status >= 400:
+        detail = str(((data or {}).get("error") or {}).get("message") or f"HTTP {status}")
+        logger.warning("Gmail upload %s on %s (%s): %s", status, path, acct.label, detail)
+        raise GmailError(detail.strip()[:400] or f"HTTP {status}")
+    return data or {}
+
+
 # ---------------------------------------------------------------------------
 # Threads
 # ---------------------------------------------------------------------------
@@ -557,6 +591,9 @@ async def read_thread(thread_id: str, per_msg_chars: int = 4000) -> dict:
             "references": _header(m, "References"),
             "at": _msg_time(m),
             "text": (text or _htm.unescape(str(m.get("snippet") or "")))[:per_msg_chars],
+            # Kept for QUOTING, never for rendering: the server sanitises it
+            # into the reply, and the browser is handed nothing but text.
+            "html": (found.get("html") or "")[:200000],
         })
     return {"id": str(data.get("id") or thread_id), "messages": msgs}
 
@@ -626,14 +663,23 @@ def _build_raw(to_addr: str, subject: str, body_text: str,
 
 async def create_draft(thread_id: str, to_addr: str, subject: str, body_text: str,
                        in_reply_to: str = "", references: str = "",
-                       cc: str = "", replaces: str = "") -> dict:
+                       cc: str = "", replaces: str = "", raw_bytes: bytes = None) -> dict:
     """Put a reply in the mailbox as a DRAFT. A draft is inert: nothing is
     sent, nobody is notified, and the merchant reviews and sends it in Gmail.
     Sending outright is a separate, granted act (send_message); saving a
-    draft is never it."""
-    raw = _build_raw(to_addr, subject, body_text, in_reply_to=in_reply_to,
-                     references=references, cc=cc)
-    out = await _call("POST", "drafts", body={"message": {"raw": raw, "threadId": thread_id}})
+    draft is never it.
+
+    `raw_bytes` is a message the caller has already assembled (formatting,
+    files, inline images). It goes through the upload door instead of the
+    JSON one, which is the only door big enough for attachments."""
+    if raw_bytes is not None:
+        meta = {"message": ({"threadId": str(thread_id)} if thread_id else {})}
+        out = await _upload_call("drafts", meta, raw_bytes)
+    else:
+        raw = _build_raw(to_addr, subject, body_text, in_reply_to=in_reply_to,
+                         references=references, cc=cc)
+        out = await _call("POST", "drafts",
+                          body={"message": {"raw": raw, "threadId": thread_id}})
     landed = str(((out.get("message") or {}).get("threadId")) or "")
     if landed and landed != str(thread_id):
         # Documented threading rules were not met, so Gmail started a NEW
@@ -650,20 +696,29 @@ async def create_draft(thread_id: str, to_addr: str, subject: str, body_text: st
 
 async def send_message(thread_id: str, to_addr: str, subject: str, body_text: str,
                        in_reply_to: str = "", references: str = "",
-                       cc: str = "", new: bool = False) -> dict:
+                       cc: str = "", new: bool = False, raw_bytes: bytes = None) -> dict:
     """SEND an email as the shared mailbox: a reply onto `thread_id`, or a new
     conversation when new=True.
 
     The one call in this module that cannot be taken back. A draft can be
     deleted and a label can be flipped; the moment this returns, the customer
     has the email. That is why the caller writes down what it is about to do
-    before it gets here, and why nothing in this function retries."""
-    raw = _build_raw(to_addr, subject, body_text, in_reply_to=in_reply_to,
-                     references=references, cc=cc, new=new)
-    body = {"raw": raw}
-    if thread_id and not new:
-        body["threadId"] = str(thread_id)
-    out = await _call("POST", "messages/send", body=body)
+    before it gets here, and why nothing in this function retries.
+
+    `raw_bytes` is a message the caller has already assembled (formatting,
+    files, inline images); it goes through the upload door, which is the only
+    one that takes an attachment. The landed-thread check below is the same
+    either way, because the failure it catches is the same."""
+    if raw_bytes is not None:
+        meta = {} if new else ({"threadId": str(thread_id)} if thread_id else {})
+        out = await _upload_call("messages/send", meta, raw_bytes)
+    else:
+        raw = _build_raw(to_addr, subject, body_text, in_reply_to=in_reply_to,
+                         references=references, cc=cc, new=new)
+        body = {"raw": raw}
+        if thread_id and not new:
+            body["threadId"] = str(thread_id)
+        out = await _call("POST", "messages/send", body=body)
     landed = str(out.get("threadId") or "")
     if not new and thread_id and landed and landed != str(thread_id):
         # Documented threading rules were not met, so Gmail filed our reply as
