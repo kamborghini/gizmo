@@ -8477,6 +8477,473 @@ def t_mail_draft_refuses_a_reply_that_would_go_nowhere():
             _gm.read_thread = saved
     with_mail(go)
 
+# ---- Sending, not just drafting -------------------------------------------
+# A draft is inert and a state change is undoable; a sent email is gone the
+# second Gmail says yes. These drive the send route with a faked connector:
+# who is allowed to send at all, the durable stamp that has to be on disk
+# BEFORE the network call, and every way a send is refused before it happens.
+
+def _one_from_customer(subject="Where is my order?"):
+    """A conversation with one customer message on it, as read_thread hands
+    it over: the shape the reply headers are derived from."""
+    async def fake_read(tid, per_msg_chars=4000):
+        return {"id": tid, "messages": [
+            {"id": "m1", "from_name": "Jo", "from_email": "jo@customer.com",
+             "reply_to": "", "subject": subject, "message_id": "<abc@mail>",
+             "references": "", "at": "2026-08-19T01:00:00+00:00",
+             "text": "Any news on my gobos?"}]}
+    return fake_read
+
+@test
+def t_gmail_send_threads_a_reply_and_leaves_a_new_message_alone():
+    """One message builder behind the draft and the send. If they drift, the
+    path nobody proofreads is the one that goes out with the wrong headers."""
+    def go():
+        _gm.save_connection("rt-test", MBOX)
+        import base64
+        seen = {}
+        async def fake_call(method, path, params=None, body=None, **kw):
+            seen.update({"method": method, "path": path, "body": body})
+            return {"id": "sent1", "threadId": (body or {}).get("threadId") or "T-NEW"}
+        saved = _gm._call
+        _gm._call = fake_call
+        try:
+            out = run_async(_gm.send_message("t1", "jo@customer.com", "Gobo order",
+                                             "They ship Friday.",
+                                             in_reply_to="<abc@mail>", references="<old@mail>"))
+            eq(seen["path"], "messages/send", "the SEND endpoint, not drafts")
+            eq(seen["body"]["threadId"], "t1", "posted onto the conversation it answers")
+            raw = base64.urlsafe_b64decode(seen["body"]["raw"]).decode()
+            ok("Subject: Re: Gobo order" in raw, raw[:400])
+            ok("In-Reply-To: <abc@mail>" in raw, raw[:400])
+            ok("<old@mail> <abc@mail>" in raw, "the parent joins the References chain")
+            eq(out["id"], "sent1")
+            # A NEW conversation is pinned to nothing and prefixed with nothing.
+            out2 = run_async(_gm.send_message("", "jo@customer.com", "Your quote",
+                                              "Here it is.", new=True))
+            ok("threadId" not in seen["body"], "a new conversation is not attached to a thread")
+            raw2 = base64.urlsafe_b64decode(seen["body"]["raw"]).decode()
+            ok("Subject: Your quote" in raw2, raw2[:300])
+            ok("Re:" not in raw2.split("\n\n")[0], "nothing is being replied to")
+            eq(out2["thread_id"], "T-NEW")
+        finally:
+            _gm._call = saved
+    with_mail(go)
+
+@test
+def t_gmail_admits_the_reply_went_even_when_it_lands_on_the_wrong_thread():
+    """The draft version of this can honestly say nothing was sent. This one
+    cannot: the customer already has the email, so the sentence has to say so
+    rather than imply the send never happened."""
+    def go():
+        _gm.save_connection("rt-test", MBOX)
+        async def fake_call(method, path, params=None, body=None, **kw):
+            return {"id": "sent1", "threadId": "SOMEWHERE-ELSE"}
+        saved = _gm._call
+        _gm._call = fake_call
+        try:
+            try:
+                run_async(_gm.send_message("t1", "jo@customer.com", "S", "hello"))
+                ok(False, "a reply that missed its conversation is not a silent success")
+            except _gm.GmailError as e:
+                ok("was sent" in str(e), str(e))
+                ok("could not attach" in str(e), str(e))
+        finally:
+            _gm._call = saved
+    with_mail(go)
+
+@test
+def t_sending_email_from_gizmo_needs_the_grant():
+    """Seeing the Inbox is not the same as being able to write to a customer
+    over the shop's own address."""
+    def go():
+        ensure_auth()
+        uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        _seed_thread("t2")
+        calls = []
+        async def fake_send(thread_id, to_addr, subject, body_text, **kw):
+            calls.append(to_addr)
+            return {"id": "sent-1", "thread_id": thread_id}
+        saved = (_gm.read_thread, _gm.send_message)
+        _gm.read_thread, _gm.send_message = _one_from_customer(), fake_send
+        try:
+            r = post_s(sess, "/api/mail/send", {"id": "t1", "text": "Hello Jo."})
+            eq(r.status_code, 403, r.text)
+            ok("not set up to send" in r.json()["error"], r.text)
+            eq(calls, [], "a refused send never reaches Gmail")
+            eq(post("/api/team/user", {"op": "send", "id": uid, "can_send": True}
+                    ).status_code, 200)
+            eq(post_s(sess, "/api/mail/send", {"id": "t1", "text": "Hello Jo."}).status_code,
+               200, "granted, she can")
+            # The master holds it by rank, like the size list.
+            eq(post("/api/mail/send", {"id": "t2", "text": "Hello Jo."}).status_code, 200)
+            eq(len(calls), 2)
+        finally:
+            _gm.read_thread, _gm.send_message = saved
+    with_mail(go)
+
+@test
+def t_a_sent_reply_goes_to_the_customer_and_lands_waiting():
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1", subject="Where is my order?")
+        captured, gone = {}, []
+        async def fake_send(thread_id, to_addr, subject, body_text, **kw):
+            captured.update({"thread_id": thread_id, "to": to_addr, "subject": subject,
+                             "text": body_text, "irt": kw.get("in_reply_to"),
+                             "new": kw.get("new")})
+            return {"id": "sent-1", "thread_id": thread_id}
+        async def still_ours(draft_id):
+            return "Hello Jo, they ship Friday."
+        async def fake_delete(draft_id):
+            gone.append(draft_id)
+        saved = (_gm.read_thread, _gm.send_message, _gm.draft_body, _gm.delete_draft)
+        _gm.read_thread, _gm.send_message = _one_from_customer(), fake_send
+        _gm.draft_body, _gm.delete_draft = still_ours, fake_delete
+        try:
+            t = copilot._load_mail()["threads"]["t1"]
+            t.update({"draft_id": "d1", "draft_at": copilot._mail_now(),
+                      "draft_to": "jo@customer.com",
+                      "draft_text": "Hello Jo, they ship Friday."})
+            r = post("/api/mail/send", {"id": "t1", "text": "Hello Jo, they ship Friday."})
+            eq(r.status_code, 200, r.text)
+            j = r.json()
+            eq(j["to"], "jo@customer.com", "the reply goes to the CUSTOMER, not our mailbox")
+            eq(j["state"], "waiting")
+            eq(j["kind"], "reply")
+            eq(j["message_id"], "sent-1")
+            eq(captured["irt"], "<abc@mail>", "and threads onto their message")
+            eq(captured["thread_id"], "t1")
+            ok(not captured["new"], "a reply is not a new conversation")
+            t = copilot._load_mail()["threads"]["t1"]
+            eq(t["state"], "waiting", "the shop is now waiting on them")
+            eq(t["sent_to"], "jo@customer.com")
+            eq(t["sent_msg_id"], "sent-1")
+            eq(t["sent_by"], APP_AUTH["master"])
+            ok(t["sent_at"], "with a time on it")
+            eq(t.get("send_pending"), None, "the stamp comes off once it has gone")
+            eq(t.get("draft_id"), None, "and the draft it replaced is forgotten")
+            eq(t.get("draft_text"), None)
+            eq(gone, ["d1"], "the leftover Gmail draft is cleaned up")
+            eq(t["unread"], False)
+            ok(any(a["action"] == "sent a reply from gizmo" for a in t["activity"]),
+               str(t["activity"]))
+        finally:
+            _gm.read_thread, _gm.send_message, _gm.draft_body, _gm.delete_draft = saved
+    with_mail(go)
+
+@test
+def t_a_draft_rewritten_in_gmail_survives_the_send():
+    """Same rule the draft route already follows: only a draft we can prove is
+    still ours is deleted. Somebody's edited words are not ours to bin."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        gone = []
+        async def fake_send(thread_id, to_addr, subject, body_text, **kw):
+            return {"id": "sent-1", "thread_id": thread_id}
+        async def edited(draft_id):
+            return "I rewrote this myself in Gmail."
+        async def fake_delete(draft_id):
+            gone.append(draft_id)
+        saved = (_gm.read_thread, _gm.send_message, _gm.draft_body, _gm.delete_draft)
+        _gm.read_thread, _gm.send_message = _one_from_customer(), fake_send
+        _gm.draft_body, _gm.delete_draft = edited, fake_delete
+        try:
+            t = copilot._load_mail()["threads"]["t1"]
+            t.update({"draft_id": "d1", "draft_text": "Hello Jo, they ship Friday."})
+            eq(post("/api/mail/send", {"id": "t1", "text": "Different words."}
+                    ).status_code, 200)
+            eq(gone, [], "their version is left where they can find it")
+        finally:
+            _gm.read_thread, _gm.send_message, _gm.draft_body, _gm.delete_draft = saved
+    with_mail(go)
+
+@test
+def t_a_send_is_stamped_to_disk_before_gmail_is_asked():
+    """The crash-mid-send case. If the process dies inside the call, the board
+    has to be able to say a reply may already have gone out - so the stamp is
+    read back FROM DISK, by the fake sender, at the moment Gmail is asked."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        seen = {}
+        async def fake_send(thread_id, to_addr, subject, body_text, **kw):
+            disk = json.load(open(copilot.MAILBOX_PATH))["mailbox"]
+            seen["pending"] = disk["threads"]["t1"].get("send_pending") or {}
+            return {"id": "sent-1", "thread_id": thread_id}
+        saved = (_gm.read_thread, _gm.send_message)
+        _gm.read_thread, _gm.send_message = _one_from_customer(), fake_send
+        try:
+            eq(post("/api/mail/send", {"id": "t1", "text": "Hello Jo."}).status_code, 200)
+            eq(seen["pending"].get("to"), "jo@customer.com",
+               "the intention was durable before the message left")
+            eq(seen["pending"].get("by"), APP_AUTH["master"], "with a name against it")
+            ok(seen["pending"].get("at"), "and a time")
+        finally:
+            _gm.read_thread, _gm.send_message = saved
+    with_mail(go)
+
+@test
+def t_a_failed_send_marks_nothing_sent_and_leaves_no_stamp():
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        async def boom(thread_id, to_addr, subject, body_text, **kw):
+            raise _gm.GmailError("Gmail refused this message.")
+        saved = (_gm.read_thread, _gm.send_message)
+        _gm.read_thread, _gm.send_message = _one_from_customer(), boom
+        try:
+            r = post("/api/mail/send", {"id": "t1", "text": "Hello Jo."})
+            eq(r.status_code, 502, r.text)
+            ok("Gmail refused this message." in r.json()["error"], r.text)
+            t = copilot._load_mail()["threads"]["t1"]
+            eq(t.get("sent_at"), None, "nothing is marked sent")
+            eq(t.get("send_pending"), None, "and no stamp is left to haunt the board")
+            eq(t["state"], "unassigned", "the conversation did not move either")
+            disk = json.load(open(copilot.MAILBOX_PATH))["mailbox"]
+            eq(disk["threads"]["t1"].get("send_pending"), None, "cleared on DISK, not just here")
+            ok(any("did not complete" in a["action"] for a in t["activity"]),
+               "and the thread says a send was attempted: " + str(t["activity"]))
+        finally:
+            _gm.read_thread, _gm.send_message = saved
+    with_mail(go)
+
+@test
+def t_a_send_never_goes_in_a_circle():
+    """Both kinds: a conversation whose only address is ours, and a compose
+    typed straight at the mailbox. Either would look sent and reach nobody."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        calls = []
+        async def only_us(tid, per_msg_chars=4000):
+            return {"id": tid, "messages": [
+                {"id": "m1", "from_name": "Sales", "from_email": MBOX, "subject": "S",
+                 "message_id": "<a@b>", "references": "", "reply_to": "",
+                 "at": "2026-08-19T01:00:00+00:00", "text": "note to self"}]}
+        async def fake_send(*a, **k):
+            calls.append(a)
+            return {"id": "x", "thread_id": "t1"}
+        saved = (_gm.read_thread, _gm.send_message)
+        _gm.read_thread, _gm.send_message = only_us, fake_send
+        try:
+            r = post("/api/mail/send", {"id": "t1", "text": "hello"})
+            eq(r.status_code, 400, r.text)
+            ok("circle" in r.json()["error"], r.text)
+            r2 = post("/api/mail/send", {"to": MBOX.upper(), "subject": "Hi", "text": "hello"})
+            eq(r2.status_code, 400, r2.text)
+            r3 = post("/api/mail/send", {"to": "jo@customer.com, " + MBOX,
+                                        "subject": "Hi", "text": "hello"})
+            eq(r3.status_code, 400, "one of ours among five of theirs still counts")
+            eq(calls, [], "and Gmail was never asked, any of the three times")
+            eq(copilot._load_mail().get("outbound_pending") or [], [], "nothing was stamped")
+        finally:
+            _gm.read_thread, _gm.send_message = saved
+    with_mail(go)
+
+@test
+def t_a_new_message_refuses_anything_that_is_not_an_address():
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        calls = []
+        async def fake_send(*a, **k):
+            calls.append(a)
+            return {"id": "x", "thread_id": "T1"}
+        saved = _gm.send_message
+        _gm.send_message = fake_send
+        try:
+            for bad, why in [("", "neither a conversation nor an address"),
+                             ("not-an-address", "a word is not an address"),
+                             ("jo@customer", "a bare hostname is not a domain"),
+                             ("jo@customer.com\nBcc: sneak@evil.example",
+                              "a line break would forge a header of their choosing"),
+                             ("jo@customer.com, ", "a trailing comma is not a recipient"),
+                             (", ".join("a%d@x.com" % i for i in range(6)),
+                              "six is more than a compose will address")]:
+                r = post("/api/mail/send", {"to": bad, "subject": "Hi", "text": "hello"})
+                eq(r.status_code, 400, why + ": " + r.text)
+            # Both of id and to is as unanswerable as neither.
+            _seed_thread("t1")
+            eq(post("/api/mail/send", {"id": "t1", "to": "jo@x.com", "subject": "Hi",
+                                       "text": "hello"}).status_code, 400)
+            eq(calls, [], "not one of them reached Gmail")
+        finally:
+            _gm.send_message = saved
+    with_mail(go)
+
+@test
+def t_a_new_conversation_starts_owned_waiting_and_addressed_to_them():
+    def go():
+        ensure_auth()
+        uid, sess, _ = ready_user("Ann", "ann")
+        eq(post("/api/team/user", {"op": "send", "id": uid, "can_send": True}).status_code, 200)
+        _gm.save_connection("rt-test", MBOX)
+        captured = {}
+        async def fake_send(thread_id, to_addr, subject, body_text, **kw):
+            captured.update({"thread_id": thread_id, "to": to_addr, "subject": subject,
+                             "new": kw.get("new")})
+            return {"id": "sent-9", "thread_id": "T9"}
+        async def fake_get(tid, acct=None):
+            return {"id": "T9", "historyId": "h9", "subject": "Your quote",
+                    "messages": [{"id": "sent-9", "from_name": "Sales", "from_email": MBOX,
+                                  "at": "2026-09-02T10:00:00+00:00", "labels": [],
+                                  "files": [], "snippet": "Here is the quote"}]}
+        saved = (_gm.send_message, _gm.get_thread)
+        _gm.send_message, _gm.get_thread = fake_send, fake_get
+        try:
+            r = post_s(sess, "/api/mail/send",
+                       {"to": "Jo <jo@customer.com>, pat@customer.com",
+                        "subject": "Your quote", "text": "Here is the quote."})
+            eq(r.status_code, 200, r.text)
+            j = r.json()
+            eq(j["to"], "jo@customer.com, pat@customer.com", "display names are dropped")
+            eq(j["kind"], "new")
+            eq(j["thread_id"], "T9")
+            eq(j["state"], "waiting")
+            ok(captured["new"], "Gmail is told this starts a conversation")
+            eq(captured["thread_id"], "", "with nothing to attach it to")
+            eq(captured["subject"], "Your quote")
+            t = copilot._load_mail()["threads"]["T9"]
+            eq(t["owner"], uid, "whoever wrote it is holding it")
+            eq(t["state"], "waiting")
+            eq(t["started_to"], "jo@customer.com, pat@customer.com")
+            eq(t["sent_by"], uid)
+            ok(any("started this conversation" in a["action"] for a in t["activity"]),
+               str(t["activity"]))
+            row = [x for x in copilot._mail_board_shape(copilot._load_mail())
+                   if x["id"] == "T9"][0]
+            eq(row["from_email"], "jo@customer.com",
+               "the row shows who it WENT TO, never our own mailbox")
+            eq(row["sent_to"], "jo@customer.com, pat@customer.com")
+            eq(row["owner_name"], "Ann")
+            # The stamp came off; a leftover one from a crash is REPORTED.
+            store = copilot._load_mail()
+            eq(store.get("outbound_pending") or [], [])
+            store.setdefault("outbound_pending", []).append(
+                {"at": "2026-09-01T09:00:00+00:00", "by": uid, "to": "lost@customer.com",
+                 "subject": "Half sent", "text": "..."})
+            store["synced_at"] = copilot._mail_now()   # no Gmail trip for this read
+            copilot._write_mail(store)
+            board = post_s(sess, "/api/mail/board", {}).json()
+            eq(len(board["outbound_pending"]), 1, str(board.get("outbound_pending")))
+            eq(board["outbound_pending"][0]["to"], "lost@customer.com")
+            eq(board["outbound_pending"][0]["by_name"], "Ann")
+            eq(board["outbound_pending"][0]["subject"], "Half sent")
+        finally:
+            _gm.send_message, _gm.get_thread = saved
+    with_mail(go)
+
+@test
+def t_a_dry_send_says_where_it_would_go_and_sends_nothing():
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        calls = []
+        async def fake_send(*a, **k):
+            calls.append(a)
+            return {"id": "x", "thread_id": "T1"}
+        saved = (_gm.read_thread, _gm.send_message)
+        _gm.read_thread, _gm.send_message = _one_from_customer(), fake_send
+        try:
+            r = post("/api/mail/send", {"id": "t1", "text": "hello", "dry": True})
+            eq(r.status_code, 200, r.text)
+            eq(r.json()["dry"], True)
+            eq(r.json()["to"], "jo@customer.com", "resolved for real, sent for nobody")
+            eq(r.json()["kind"], "reply")
+            r2 = post("/api/mail/send", {"to": "Jo <jo@customer.com>", "subject": "Hi",
+                                         "text": "hello", "dry": True})
+            eq(r2.status_code, 200, r2.text)
+            eq(r2.json()["to"], "jo@customer.com")
+            eq(r2.json()["kind"], "new")
+            # Every refusal a real send makes, a dry run makes too.
+            for body, why in [({"to": "nonsense", "subject": "Hi", "text": "x"},
+                               "a bad address"),
+                              ({"to": "jo@x.com", "subject": "", "text": "x"},
+                               "a new message with no subject"),
+                              ({"to": "jo@x.com", "subject": "Hi", "text": "   "},
+                               "an empty message"),
+                              ({"to": "jo@x.com", "subject": "Hi", "text": "x" * 20001},
+                               "one longer than the store will hold")]:
+                body["dry"] = True
+                eq(post("/api/mail/send", body).status_code, 400, why + " is still refused")
+            eq(calls, [], "a dry run never sends")
+            t = copilot._load_mail()["threads"]["t1"]
+            eq(t.get("send_pending"), None, "and never stamps")
+            eq(t["state"], "unassigned", "and never moves the board")
+            eq(copilot._load_mail().get("outbound_pending") or [], [])
+        finally:
+            _gm.read_thread, _gm.send_message = saved
+    with_mail(go)
+
+@test
+def t_the_send_grant_is_handed_over_the_way_the_size_grant_is():
+    def go():
+        ensure_auth()
+        uid, sess, _ = ready_user("Ann", "ann")
+        uid_b, sess_b, _ = ready_user("Bob", "bob")
+        adm, _s, _ = ready_user("Al", "al", role="admin")
+        eq(copilot._may_send_mail(uid), False, "nobody holds it by having an account")
+        # A member cannot hand it to anyone, themselves included.
+        eq(post_s(sess_b, "/api/team/user", {"op": "send", "id": uid, "can_send": True}
+                  ).status_code, 403)
+        eq(post_s(sess_b, "/api/team/user", {"op": "send", "id": uid_b, "can_send": True}
+                  ).status_code, 403)
+        r = post("/api/team/user", {"op": "send", "id": uid, "can_send": True})
+        eq(r.status_code, 200, r.text)
+        ann = [u for u in r.json()["users"] if u["id"] == uid][0]
+        eq(ann["can_send"], True)
+        eq(ann["send_by_rank"], False, "a member holds it only because it was handed over")
+        al = [u for u in r.json()["users"] if u["id"] == adm][0]
+        eq(al["send_by_rank"], True, "an admin holds it by rank")
+        # The browser draws the compose button off the sign-in reply, long
+        # before it ever asks Team for a list of people.
+        me = login("ann", "chosen-pw-123456").json()["me"]
+        eq(me["can_send"], True, "the grant reaches the page at sign-in")
+        eq(me["send_by_rank"], False)
+        st = post_s(sess, "/api/auth/state", {}).json()["me"]
+        eq(st["can_send"], True, "and again on a reload")
+        ok(isinstance(st["tabs"], list), "and the tab list is still the resolved one")
+        # And is therefore not a switch: pretending to revoke it would lie.
+        r2 = post("/api/team/user", {"op": "send", "id": adm, "can_send": False})
+        eq(r2.status_code, 400, r2.text)
+        ok(copilot._may_send_mail(adm), "still theirs, whatever the switch said")
+        eq(post("/api/team/user", {"op": "send", "id": uid, "can_send": False}
+                ).status_code, 200)
+        eq(copilot._may_send_mail(uid), False, "and a member's really does come back off")
+    with_accounts(go)
+
+@test
+def t_sync_does_not_call_a_gizmo_send_a_reply_from_gmail():
+    """The send already logged itself, by name. Logging it again when Gmail
+    hands the message back would tell the room somebody used Gmail instead."""
+    def go():
+        ensure_auth()
+        store = copilot._load_mail()
+        _seed_thread("t1")
+        t = store["threads"]["t1"]
+        t["state"], t["sent_msg_id"] = "waiting", "our-reply"
+        copilot._mail_apply_thread(store, {"id": "t1", "historyId": "h2", "subject": "Gobo order",
+            "messages": [_mk_msg("t1-m1", "Jo Bloggs", "jo@customer.com", "2026-08-19T01:00:00+00:00"),
+                         _mk_msg("our-reply", "Sales", MBOX, "2026-08-19T03:00:00+00:00")]}, MBOX)
+        eq(any(a["action"] == "replied from Gmail" for a in t["activity"]), False,
+           str(t["activity"]))
+        eq(t["state"], "waiting")
+        # Somebody actually replying in Gmail is still reported.
+        copilot._mail_apply_thread(store, {"id": "t1", "historyId": "h3", "subject": "Gobo order",
+            "messages": [_mk_msg("t1-m9", "Sales", MBOX, "2026-08-19T04:00:00+00:00")]}, MBOX)
+        ok(any(a["action"] == "replied from Gmail" for a in t["activity"]), str(t["activity"]))
+    with_mail(go)
+
 @test
 def t_mail_own_unsent_drafts_are_not_part_of_the_conversation():
     """A draft sitting in Gmail must not read as a reply we already sent,

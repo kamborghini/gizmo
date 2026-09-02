@@ -7,9 +7,13 @@ is the merchant's own, the mailbox is the shared address (sales@...), so each
 keeps its own refresh token. Same OAuth client, different scope, different
 token file.
 
-Scope is gmail.modify: read threads, create labels, apply/remove labels
-(verified against the users.labels.create and threads.modify references).
-The app never sends mail; replies happen in Gmail itself.
+Scope is gmail.modify: read threads, create labels, apply/remove labels, save
+drafts and send (verified against the users.labels.create, threads.modify and
+messages.send references - send lives inside modify).
+The app DOES send mail now, from the Inbox tab, over this mailbox's address.
+It is the one irreversible thing here, so it is fenced accordingly: a per-person
+grant an admin hands over, and a durable note of the intention written to the
+board before the message is handed to Google.
 
 Env:
   GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET   shared with google_data
@@ -576,16 +580,20 @@ async def delete_draft(draft_id: str) -> None:
         logger.warning("Gmail: could not remove the previous draft %s: %s", draft_id, e)
 
 
-async def create_draft(thread_id: str, to_addr: str, subject: str, body_text: str,
-                       in_reply_to: str = "", references: str = "",
-                       cc: str = "", replaces: str = "") -> dict:
-    """Put a reply in the mailbox as a DRAFT. A draft is inert: nothing is
-    sent, nobody is notified, and the merchant reviews and sends it in Gmail.
-    This app never sends mail itself.
+def _build_raw(to_addr: str, subject: str, body_text: str,
+               in_reply_to: str = "", references: str = "",
+               cc: str = "", new: bool = False) -> str:
+    """The RFC message, base64url-encoded for the API.
 
-    Gmail only threads the draft when the Subject and the reply headers line
+    ONE builder behind both the draft and the send. They differ by which
+    endpoint the bytes are posted to and by nothing else, and two copies of
+    this would mean the path nobody proofreads - the one that actually
+    leaves the building - is the one with the wrong headers.
+
+    Gmail only threads a message when the Subject and the reply headers line
     up with the parent, so every header here is derived from the parent in
-    code. The model writes the body and nothing else."""
+    code. The model writes the body and nothing else. new=True starts a
+    conversation instead: nothing to reply to, so no "Re:" and no chain."""
     import base64
     from email.message import EmailMessage
     me = address()
@@ -602,15 +610,29 @@ async def create_draft(thread_id: str, to_addr: str, subject: str, body_text: st
     if cc:
         msg["Cc"] = cc
     s = (subject or "").strip()
-    msg["Subject"] = s if s[:3].lower() == "re:" else ("Re: " + s if s else "Re:")
-    if in_reply_to:
+    if new:
+        msg["Subject"] = s
+    else:
+        msg["Subject"] = s if s[:3].lower() == "re:" else ("Re: " + s if s else "Re:")
+    if in_reply_to and not new:
         msg["In-Reply-To"] = in_reply_to
         refs = (references or "").split()
         if in_reply_to not in refs:
             refs.append(in_reply_to)
         msg["References"] = " ".join(refs)
     msg.set_content(body_text or "")
-    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    return base64.urlsafe_b64encode(msg.as_bytes()).decode()
+
+
+async def create_draft(thread_id: str, to_addr: str, subject: str, body_text: str,
+                       in_reply_to: str = "", references: str = "",
+                       cc: str = "", replaces: str = "") -> dict:
+    """Put a reply in the mailbox as a DRAFT. A draft is inert: nothing is
+    sent, nobody is notified, and the merchant reviews and sends it in Gmail.
+    Sending outright is a separate, granted act (send_message); saving a
+    draft is never it."""
+    raw = _build_raw(to_addr, subject, body_text, in_reply_to=in_reply_to,
+                     references=references, cc=cc)
     out = await _call("POST", "drafts", body={"message": {"raw": raw, "threadId": thread_id}})
     landed = str(((out.get("message") or {}).get("threadId")) or "")
     if landed and landed != str(thread_id):
@@ -623,6 +645,35 @@ async def create_draft(thread_id: str, to_addr: str, subject: str, body_text: st
         # Saving twice must leave ONE draft on the conversation, not a pile of
         # near-identical ones that all look ready to send.
         await delete_draft(replaces)
+    return {"id": str(out.get("id") or ""), "thread_id": landed or str(thread_id)}
+
+
+async def send_message(thread_id: str, to_addr: str, subject: str, body_text: str,
+                       in_reply_to: str = "", references: str = "",
+                       cc: str = "", new: bool = False) -> dict:
+    """SEND an email as the shared mailbox: a reply onto `thread_id`, or a new
+    conversation when new=True.
+
+    The one call in this module that cannot be taken back. A draft can be
+    deleted and a label can be flipped; the moment this returns, the customer
+    has the email. That is why the caller writes down what it is about to do
+    before it gets here, and why nothing in this function retries."""
+    raw = _build_raw(to_addr, subject, body_text, in_reply_to=in_reply_to,
+                     references=references, cc=cc, new=new)
+    body = {"raw": raw}
+    if thread_id and not new:
+        body["threadId"] = str(thread_id)
+    out = await _call("POST", "messages/send", body=body)
+    landed = str(out.get("threadId") or "")
+    if not new and thread_id and landed and landed != str(thread_id):
+        # Documented threading rules were not met, so Gmail filed our reply as
+        # its own conversation. The draft version of this can honestly say
+        # nothing was sent; this one cannot - the customer has the email
+        # either way - so the sentence says what is true rather than what
+        # would be tidier to believe.
+        logger.warning("Gmail sent the reply onto thread %s, not %s", landed, thread_id)
+        raise GmailError("The reply was sent but Gmail could not attach it to this "
+                         "conversation. Check the mailbox before sending again.")
     return {"id": str(out.get("id") or ""), "thread_id": landed or str(thread_id)}
 
 

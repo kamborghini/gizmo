@@ -1465,6 +1465,12 @@
         .mail-age.hot { color: var(--danger); font-weight: var(--w-medium); }
         .mail-viewwarn { background: var(--warn-bg); border: 1px solid var(--border); color: var(--warn);
             border-radius: var(--r-sm); padding: var(--sp-2) var(--sp-3); font-size: var(--t-xs); margin-bottom: var(--sp-3); }
+        /* The same warning, under a class of its own. The viewing heartbeat
+           finds .mail-viewwarn BY CLASS and removes it the moment nobody else
+           is looking at the thread, which would have swept an unconfirmed send
+           off the screen ten seconds after it appeared. */
+        .mail-sendwarn { background: var(--warn-bg); border: 1px solid var(--border); color: var(--warn);
+            border-radius: var(--r-sm); padding: var(--sp-2) var(--sp-3); font-size: var(--t-xs); margin-bottom: var(--sp-3); }
         .mail-msg { border: 1px solid var(--line); border-radius: var(--r-sm); padding: 8px 10px; margin-bottom: 8px; }
         .mail-msg.ours { background: var(--surface-2); }
         .mail-msg-head { display: flex; gap: 8px; font-size: var(--t-xs); margin-bottom: 3px; }
@@ -14928,6 +14934,16 @@
                 rf.disabled = false;
                 if (!ok) toastError('Could not refresh the inbox. Try again in a moment.');
             };
+            /* First in the row: the one control on this card that makes
+               something happen outside the app. Hidden without the grant,
+               because the server refuses it anyway and a button that always
+               fails is a lie. */
+            if (mailCanSend()) {
+                const cmp = el('button', 'btn btn-sm btn-primary', 'Compose');
+                cmp.title = 'Start a new conversation from the shared mailbox';
+                cmp.onclick = () => openMailCompose();
+                mAct.append(cmp);
+            }
             mAct.append(filt, rf);
             mHead.append(mAct);
             mCard.append(mHead);
@@ -14967,6 +14983,14 @@
             const viewSeg = segControl([{ value: 'list', label: 'List' }, { value: 'board', label: 'Board' }],
                 mailView, v => { mailView = v; mailSel.clear(); mailCursor = -1; renderMail(); });
             mCard.append(tableTools([sWrap, states], [viewSeg]));
+            /* New conversations that were stamped and never confirmed. They
+               have no thread on the board to carry the warning, so it is said
+               here, one line each, above the list. */
+            (d.outbound_pending || []).forEach(p => {
+                mCard.append(el('div', 'mail-sendwarn',
+                    mailPendingLine(p.to, p.at)
+                    + (p.subject ? ' Subject: ' + p.subject : '')));
+            });
             box.append(mCard);
             const bulkHost = el('div'); bulkHost.id = 'mail-bulk-host';
             mCard.append(bulkHost);
@@ -15669,9 +15693,127 @@
             m.body.append(bar);
         }
 
-        /* Claude drafts, a person edits, Gmail holds it as a draft, a person
-           sends it. The app never sends mail, and nothing reaches a customer
-           without someone reading it first. */
+        /* ---- sending, which is the only thing this app does that cannot be
+           taken back ----------------------------------------------------- */
+        /* One place decides. The grant is a switch on the account, and admins
+           and the master hold it by rank and cannot be toggled, so both have to
+           be read: exactly how the size-list grant works. The server enforces
+           it either way; this only keeps a button that would always fail off
+           the screen. */
+        function mailCanSend() {
+            return !!(teamMe && (teamMe.can_send || teamMe.send_by_rank));
+        }
+        /* Report, never shred. The server stamps a send into the store BEFORE
+           it calls Gmail, so a crash in between leaves a maybe rather than a
+           lie in either direction. A maybe is worth saying out loud, in the
+           words that tell someone what to do about it. */
+        function mailPendingLine(to, at) {
+            return 'A message to ' + (to || 'someone') + ' may have gone out '
+                + (mailAgoLong(at) || 'recently') + ': check Gmail\'s Sent folder.';
+        }
+        /* Two steps, one function, shared by the reply panel and the compose
+           window so the confirm can never go missing from one of them.
+           Step one posts dry:true: the server runs every check it runs for
+           real - the grant, who owns the thread, whether the addresses parse,
+           the five-address cap, whether one of them is the mailbox itself -
+           writes nothing, sends nothing, and answers with the recipient it
+           actually resolved. Step two sends THAT payload, unchanged, so what
+           the person agreed to is what leaves. Nothing but Send now issues it,
+           and only a success calls done(). */
+        async function mailSendFlow(bar, payload, buttons, done) {
+            buttons.forEach(b => { b.disabled = true; });
+            let dry;
+            try { dry = await api('/api/mail/send', Object.assign({ dry: true }, payload)); }
+            catch (e) {
+                toastError(e.message);
+                buttons.forEach(b => { b.disabled = false; });
+                return;
+            }
+            const to = dry.to || '';
+            const row = el('div', 'mail-statebar');
+            row.append(el('div', 'setting-sub', 'Send to ' + to + '?'));
+            const go = el('button', 'btn btn-primary', 'Send now');
+            const back = el('button', 'btn', 'Back');
+            go.onclick = async () => {
+                go.disabled = true; back.disabled = true;
+                try { await api('/api/mail/send', payload); }
+                catch (e) {
+                    /* A refusal at the last step is still a refusal: hand the
+                       row back rather than closing over a message that never
+                       went, which would read as sent. */
+                    toastError(e.message);
+                    go.disabled = false; back.disabled = false;
+                    return;
+                }
+                toastOk('Sent to ' + to);
+                done(to);
+            };
+            back.onclick = () => {
+                /* The bar carries the buttons AND sits above the textarea the
+                   words are in. Putting it back is the whole of Back. */
+                row.replaceWith(bar);
+                buttons.forEach(b => { b.disabled = false; });
+            };
+            row.append(go, back);
+            bar.replaceWith(row);
+        }
+        /* A new conversation rather than a reply. Same modal idiom as Size
+           rules, same two-step send as the reply panel. */
+        function openMailCompose() {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, 'New email'));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
+            x.setAttribute('aria-label', 'Close');
+            x.onclick = () => overlay.remove();
+            head.append(x);
+            // X only: a half-written email to a customer is not thrown away by
+            // a stray click on the backdrop.
+            const body = el('div', 'modal-body');
+            modal.append(head, body);
+            overlay.append(modal); document.body.append(overlay);
+
+            body.append(el('div', 'setting-sub', 'It goes out from '
+                + ((mailCache && mailCache.address) || 'the shared mailbox')
+                + ', and replies come back to the board.'));
+            const toL = el('label', 'pfield');
+            toL.append(el('span', null, 'To'));
+            const to = crmText('', 'name@company.com, another@company.com');
+            to.type = 'email'; to.multiple = true;
+            toL.append(to);
+            body.append(toL);
+            const subL = el('label', 'pfield');
+            subL.append(el('span', null, 'Subject'));
+            const subject = crmText('', 'What it is about');
+            subL.append(subject);
+            body.append(subL);
+            const bodyL = el('label', 'pfield');
+            bodyL.append(el('span', null, 'Message'));
+            const ta = document.createElement('textarea');
+            ta.className = 'mail-draft-text';
+            ta.rows = 10;
+            bodyL.append(ta);
+            body.append(bodyL);
+            const bar = el('div', 'mail-statebar');
+            const send = el('button', 'btn btn-primary', 'Send');
+            send.onclick = () => mailSendFlow(bar,
+                { to: to.value.trim(), subject: subject.value.trim(), text: ta.value },
+                [send],
+                () => { overlay.remove(); refreshMailQuiet(); });
+            bar.append(send);
+            body.append(bar);
+            /* Said where it is typed. A cap discovered by being refused is a
+               cap nobody knew about. */
+            body.append(el('div', 'setting-sub',
+                'Up to five addresses, separated by commas. Plain text only: no '
+                + 'formatting and no attachments, so write it as you would speak it.'));
+        }
+
+        /* Claude drafts, a person edits, and then it either goes to the
+           customer from here or waits in Gmail as a draft. Either way a person
+           reads it first: nothing on this panel sends without a confirm step
+           naming the address it resolved. */
         async function mailComposeDraft(m, t, btn, guidance, previous) {
             const old = m.body.querySelector('.mail-draft');
             if (old) old.remove();
@@ -15711,8 +15853,13 @@
             ta.className = 'mail-draft-text';
             ta.rows = 10; ta.value = out.draft;
             host.append(ta);
+            const canSend = mailCanSend();
             const bar = el('div', 'mail-statebar');
-            const save = el('button', 'btn btn-primary', 'Save to Gmail as a draft');
+            /* Save steps back to secondary only where Send has taken the lead.
+               Where sending is not allowed, Save is still the action of the
+               panel and keeps the emphasis it always had. */
+            const save = el('button', canSend ? 'btn' : 'btn btn-primary',
+                            'Save to Gmail as a draft');
             save.onclick = async () => {
                 save.disabled = true;
                 let res;
@@ -15733,6 +15880,16 @@
             };
             const drop = el('button', 'btn', 'Discard');
             drop.onclick = () => host.remove();
+            if (canSend) {
+                const send = el('button', 'btn btn-primary', 'Send');
+                /* The text is read off the textarea HERE, once, so the confirm
+                   step names the address for the words that were actually on
+                   screen when it was pressed. */
+                send.onclick = () => mailSendFlow(bar, { id: t.id, text: ta.value },
+                    [send, save, copy, drop],
+                    () => { host.remove(); refreshMailQuiet(); });
+                bar.append(send);
+            }
             bar.append(save, copy, drop);
             host.append(bar);
             /* Steering: say what to change and it drafts again, rather than
@@ -15745,8 +15902,13 @@
             again.onclick = () => mailComposeDraft(m, t, btn, note.value.trim(), ta.value);
             steer.append(note, again);
             host.append(steer);
-            host.append(el('div', 'setting-sub',
-                'Saving puts it in Gmail as a draft. Nothing is sent: you send it yourself.'));
+            host.append(el('div', 'setting-sub', canSend
+                ? 'Send goes straight to the customer from '
+                  + ((mailCache && mailCache.address) || 'the shared mailbox')
+                  + '. Save keeps it as a Gmail draft instead.'
+                : 'Saving puts it in Gmail as a draft, and you send it from there. '
+                  + 'You are not set up to send email from here. '
+                  + 'Ask a lead to switch it on in Team.'));
         }
 
         async function mailLoadOrders(host, t, m) {
@@ -15919,11 +16081,25 @@
                 m.body.append(el('div', 'mail-crmchip', 'CRM: ' + r.crm.name
                     + (r.crm.org ? ' (' + r.crm.org + ')' : '')));
             }
-            /* ---- draft a reply with Claude ---- */
+            /* A send that was stamped and never confirmed. It belongs at the
+               top of the thread it may have left from, not in the activity
+               list twenty lines down. */
+            if (t.send_pending) {
+                m.body.append(el('div', 'mail-sendwarn',
+                    mailPendingLine(t.send_pending.to, t.send_pending.at)));
+            }
+            /* ---- draft a reply with Claude, or write one ---- */
             const draftBar = el('div', 'mail-statebar');
             const compose = el('button', 'btn', 'Compose reply with Claude');
             compose.onclick = () => mailComposeDraft(m, t, compose);
             draftBar.append(compose);
+            /* The same panel, opened empty. Most replies on this inbox are two
+               lines that nobody needs a model to write, and spending a credit
+               to delete a paragraph first is a poor trade. */
+            const blank = el('button', 'btn', 'Write a reply');
+            blank.title = 'Type it yourself, with no AI credits spent';
+            blank.onclick = () => mailDraftPanel(m, t, compose, { draft: '' });
+            draftBar.append(blank);
             if (rescued) {
                 /* The repaint would have thrown this away. Put it back with
                    its buttons, exactly where it was. */
@@ -17477,6 +17653,20 @@
                         sl.append(sizeBox, document.createTextNode('Can edit the size list'));
                         perm.append(sl);
                     }
+                    /* The other capability that reaches outside the app, and
+                       the heavier of the two: this one talks to customers in
+                       the company's name. Same rank rule as the size list. */
+                    let sendBox = null;
+                    if (u.send_by_rank) {
+                        perm.append(el('div', 'files-hint',
+                            'Can send email from the Inbox (every admin can).'));
+                    } else {
+                        const el2 = el('label', 'tm-tabpick');
+                        sendBox = document.createElement('input');
+                        sendBox.type = 'checkbox'; sendBox.checked = !!u.can_send;
+                        el2.append(sendBox, document.createTextNode('Can send email from the Inbox'));
+                        perm.append(el2);
+                    }
                     /* Where the colour is changed, next to the other things an
                        admin grants. The master's own colour is editable too:
                        they appear in the Inbox like everyone else. */
@@ -17517,6 +17707,10 @@
                             if (sizeBox && sizeBox.checked !== !!u.can_sizes) {
                                 await api('/api/team/user',
                                     { op: 'sizes', id: u.id, can_sizes: sizeBox.checked });
+                            }
+                            if (sendBox && sendBox.checked !== !!u.can_send) {
+                                await api('/api/team/user',
+                                    { op: 'send', id: u.id, can_send: sendBox.checked });
                             }
                             teamTabsOpen = '';
                         } catch (e) { toastError(e.message); save.disabled = false; return; }

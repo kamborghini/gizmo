@@ -9412,6 +9412,11 @@ MAIL_LIST_MAX = 5000           # most threads one sync will walk from Gmail
 MAIL_MSGS_PER_THREAD = 50      # newest messages kept per thread record
 MAIL_STATES = ("unassigned", "assigned", "progress", "waiting", "done")
 MAIL_PRESENCE = ("office", "home", "out")
+# A compose is a reply to one customer, not a mailshot. Five is generous for
+# "the buyer, their colleague and the venue"; past that it is a mailing list,
+# and this app has no unsubscribe, no list hygiene and no bounce handling.
+MAIL_SEND_MAX_TO = 5
+MAIL_SEND_MAX_CHARS = 20000
 
 _mail_mem: Optional[dict] = None
 _mail_lock = asyncio.Lock()     # one sync at a time; board reads never block
@@ -9435,7 +9440,13 @@ MAIL_ATTACH_CAP = 25 * 1024 * 1024   # what we will pull out of Gmail in one go
 
 def _mail_default() -> dict:
     return {"version": 1, "labels": {}, "threads": {}, "rules": [], "seq": 0,
-            "synced_at": "", "sync_error": ""}
+            "synced_at": "", "sync_error": "",
+            # New conversations this app stamped as "about to send" and never
+            # got to confirm. A reply's stamp lives on its own thread; a new
+            # message has no thread yet, so it waits here until the send comes
+            # back. Anything still sitting here is reported on the board
+            # rather than tidied away: it may well have gone out.
+            "outbound_pending": []}
 
 
 # ---------------------------------------------------------------------------
@@ -9648,11 +9659,18 @@ def _mail_log(t: dict, by: str, action: str, detail: str = "") -> None:
 
 def _mail_sender(t: dict, mailbox_addr: str) -> tuple:
     """(name, email) of the customer side: the first message not from our own
-    address. An outbound-started thread falls back to whoever we wrote to
-    first appearing in replies, else the mailbox itself."""
+    address."""
     for m in t.get("messages", []):
         if m.get("from_email") and m["from_email"] != mailbox_addr:
             return (m.get("from_name") or m["from_email"], m["from_email"])
+    # Nobody has answered yet, so every message is ours. A conversation the
+    # shop STARTED must show who it went to: falling back to the first sender
+    # here puts our own mailbox in the from column, and the board then reads
+    # as a pile of email from ourselves.
+    started = str(t.get("started_to") or (t.get("messages") or [{}])[0].get("to") or "")
+    first = started.split(",")[0].strip()
+    if first:
+        return (first, first)
     m = (t.get("messages") or [{}])[0]
     return (m.get("from_name") or m.get("from_email") or "", m.get("from_email") or "")
 
@@ -9696,6 +9714,11 @@ def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str) -> None:
     for m in fresh:
         ours = mailbox_addr and m.get("from_email") == mailbox_addr
         if ours:
+            # Unless it is the reply THIS APP sent, which logged itself by
+            # name when it went. Logging it again as it comes back round from
+            # Gmail would tell the room somebody answered in Gmail instead.
+            if m.get("id") and m.get("id") == t.get("sent_msg_id"):
+                continue
             _mail_log(t, "", "replied from Gmail")
             continue
         _mail_log(t, "", "customer replied")
@@ -10335,6 +10358,81 @@ MAIL_BOARD_DONE_DAYS = int(os.environ.get("MAIL_BOARD_DONE_DAYS", "90"))
 MAIL_BOARD_MAX = int(os.environ.get("MAIL_BOARD_MAX", "1500"))
 
 
+_MAIL_ADDR_RX = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?"
+                           r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?)*"
+                           r"\.[A-Za-z]{2,}$")
+
+
+def _mail_clean_addresses(raw, mailbox: str = "") -> tuple:
+    """(addresses, refusal) for a NEW message's recipients.
+
+    Anchored, not merely "there is an @ in it somewhere". Every value here
+    becomes a To header on real outbound mail, so a line break inside one
+    would start a header line of the sender's choosing - and parseaddr hands
+    back an empty string for exactly that shape, which is why the check is
+    "does the whole thing look like an address" rather than "is anything
+    left". Nothing is quietly dropped either: a silently shortened recipient
+    list is a message somebody believes went to a person it never reached."""
+    from email.utils import parseaddr
+    out: list = []
+    for part in str(raw or "").split(","):
+        # Collapse first: whitespace, including the line break that made this
+        # worth checking, must not survive into a header.
+        one = " ".join(part.split())
+        if not one:
+            return [], "That recipient list has an empty address in it."
+        addr = parseaddr(one)[1].strip().lower()
+        if not addr or not _MAIL_ADDR_RX.match(addr):
+            return [], f"{one[:80]!r} is not an email address."
+        if mailbox and addr == str(mailbox).strip().lower():
+            return [], ("One of those addresses is this mailbox itself, so the "
+                        "message would go in a circle.")
+        if addr not in out:
+            out.append(addr)
+    if not out:
+        return [], "There is nobody to send this to."
+    if len(out) > MAIL_SEND_MAX_TO:
+        return [], (f"That is {len(out)} addresses. Send to at most "
+                    f"{MAIL_SEND_MAX_TO} people at once.")
+    return out, ""
+
+
+def _mail_pending_shape(p) -> Optional[dict]:
+    """A stamped-but-unconfirmed send, as the board and the thread show it:
+    when, who, and where it was going. The text is deliberately left out - it
+    is the message itself, and a board row is not where a half-sent reply
+    gets read."""
+    if not isinstance(p, dict) or not p:
+        return None
+    return {"at": p.get("at") or "",
+            "by_name": _team_name(p.get("by") or "") or p.get("by_name") or "",
+            "to": p.get("to") or ""}
+
+
+def _mail_outbound_shape(store: dict) -> list:
+    """New conversations that were stamped and never confirmed. Reported, not
+    swept up: the send may well have gone out, and the only person who can
+    tell is somebody looking at the mailbox."""
+    rows = []
+    for p in (store.get("outbound_pending") or []):
+        shaped = _mail_pending_shape(p)
+        if shaped:
+            shaped["subject"] = str((p or {}).get("subject") or "")[:200]
+            rows.append(shaped)
+    return rows
+
+
+def _mail_outbound_drop(store: dict, stamp: dict) -> None:
+    """Take one stamp off the outbound list once its send is settled.
+    Identity first, then value: a store reload between the stamp and the
+    answer hands back a different dict for the same pending message."""
+    rows = store.get("outbound_pending") or []
+    for i, r in enumerate(rows):
+        if r is stamp or r == stamp:
+            del rows[i]
+            return
+
+
 def _mail_board_shape(store: dict, window: bool = False) -> list:
     """Compact rows for the board. With window=True, finished threads older
     than MAIL_BOARD_DONE_DAYS are left out and the result is capped: at the
@@ -10362,7 +10460,15 @@ def _mail_board_shape(store: dict, window: bool = False) -> list:
                     "rule": t.get("rule") or "",
                     "folder": t.get("folder") or "",
                     "files": len(t.get("files") or []),
-                    "label_error": bool(t.get("label_error"))})
+                    "label_error": bool(t.get("label_error")),
+                    # What gizmo itself has sent on this conversation, and
+                    # anything it started to send and never confirmed.
+                    "sent_at": t.get("sent_at") or "",
+                    "sent_by": t.get("sent_by") or "",
+                    "sent_by_name": _team_name(t["sent_by"]) if t.get("sent_by") else "",
+                    "sent_to": t.get("sent_to") or "",
+                    "started_to": t.get("started_to") or "",
+                    "send_pending": _mail_pending_shape(t.get("send_pending"))})
     out.sort(key=lambda r: r.get("last_at") or "", reverse=True)
     return out[:MAIL_BOARD_MAX] if window else out
 
@@ -11217,6 +11323,22 @@ def _may_edit_sizes(uid: Optional[str]) -> bool:
     return bool(u.get("can_sizes"))
 
 
+def _may_send_mail(uid: Optional[str]) -> bool:
+    """Who may send email OUT of the shared mailbox, as the shop.
+
+    The twin of _may_edit_sizes, and for the same reason. A draft is inert and
+    a state change is undoable; an email that has gone is neither, and it goes
+    over the shop's own address, so it is a grant an admin makes deliberately
+    per person rather than something inherited by having an Inbox tab. Admins
+    hold it by rank; everyone else only if it was handed to them."""
+    u = _team_user(uid)
+    if not u:
+        return False
+    if ROLE_LEVELS.get(u.get("role"), 0) >= ROLE_LEVELS["admin"]:
+        return True
+    return bool(u.get("can_send"))
+
+
 def _team_name(uid: str) -> str:
     u = _load_users()["users"].get(str(uid))
     return (u or {}).get("name") or ""
@@ -11436,7 +11558,12 @@ def _user_public(uid: str, u: dict) -> dict:
             # so the UI must not show a switch that looks revocable when it is not.
             "colour": u.get("colour") or "",
             "can_sizes": bool(u.get("can_sizes")),
-            "sizes_by_rank": ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"]}
+            "sizes_by_rank": ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"],
+            # Sending email out as the shop reads the same way: the raw grant
+            # and the by-rank one are reported apart, so the Team screen never
+            # shows an admin a switch that would not actually revoke anything.
+            "can_send": bool(u.get("can_send")),
+            "send_by_rank": ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"]}
 
 
 _events_mem: Optional[list] = None
@@ -12896,6 +13023,49 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     def _mail_lead(uid: str) -> bool:
         return _team_level(uid) >= 2
 
+    def _mail_not_yours(t: dict, who: str):
+        """The single-owner rule for WRITING into a conversation, shared by
+        the draft and the send. Putting words into somebody else's live
+        customer thread is a bigger act than moving its state, which is
+        already owner-or-lead."""
+        if not _mail_lead(who) and t.get("owner") and t.get("owner") != who:
+            return _json({"error": (_team_name(t["owner"]) or "Someone") + " is dealing with "
+                                   "this one. Ask them, or ask a lead to reassign it."}, 403)
+        return None
+
+    def _mail_reply_refusal(to_addr: str, addr: str):
+        """The two ways a reply address is unusable, refused in the same words
+        wherever a reply is written. Both look like success and neither
+        reaches the customer, which is exactly why they are refusals rather
+        than a best effort."""
+        if "@" not in (to_addr or ""):
+            return _json({"error": "There is no address to reply to on this "
+                                   "conversation. Reply in Gmail instead."}, 400)
+        if addr and to_addr.lower() == addr:
+            return _json({"error": "The only address on this conversation is the "
+                                   "mailbox itself, so a reply would go in a circle. "
+                                   "Reply in Gmail instead."}, 400)
+        return None
+
+    async def _mail_leftover_draft(t: dict) -> tuple:
+        """(draft we may delete, whether theirs was kept).
+
+        Only replace a draft we can prove is still ours. If somebody opened it
+        in Gmail and rewrote it, keeping both is the honest outcome; silently
+        deleting their work is not - and a Gmail hiccup that stops us reading
+        it counts as "cannot prove", never as permission."""
+        replaces = t.get("draft_id") or ""
+        if not replaces:
+            return "", False
+        try:
+            live = await google_mail.draft_body(replaces)
+            if live and live != (t.get("draft_text") or "").strip():
+                return "", True
+        except Exception as e:
+            logger.warning("mail: could not read the previous draft: %s", e)
+            return "", True
+        return replaces, False
+
     _mail_last_force = {"t": 0.0}
 
     @mcp.custom_route("/api/mail/board", methods=["POST"])
@@ -12929,6 +13099,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                           "rules": len(store.get("rules") or []),
                           "team": _mail_team_shape(),
                           "me": who, "lead": _mail_lead(who),
+                          "can_send": _may_send_mail(who),
+                          # Sends that were written down and never confirmed.
+                          # They belong on the board, not in a log file: only
+                          # somebody looking at the mailbox can settle them.
+                          "outbound_pending": _mail_outbound_shape(store),
                           "synced_at": store.get("synced_at") or "",
                           "sync_error": store.get("sync_error") or ""})
         except Exception:
@@ -12965,8 +13140,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                      "owner", "first_at", "last_at", "state_at", "done_at",
                                      "msg_count", "notes", "activity", "label_error", "draft_at",
                                      "files", "saved_files", "crm_deal_id",
-                                     "in_inbox")},
+                                     "in_inbox", "sent_at", "sent_by", "sent_to",
+                                     "started_to")},
                                  "owner_name": _team_name(t["owner"]) if t.get("owner") else "",
+                                 "sent_by_name": (_team_name(t["sent_by"])
+                                                  if t.get("sent_by") else ""),
+                                 "send_pending": _mail_pending_shape(t.get("send_pending")),
                                  "messages": t.get("messages", [])},
                       "viewers": viewers,
                       # The CRM chip honours the CRM tab gate: an account
@@ -13148,12 +13327,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return missing
         if not google_mail.connected():
             return _json({"error": "The mailbox is not connected."}, 400)
-        # Same single-owner rule as every other mutating mail route. Writing
-        # a reply into somebody else's live customer conversation is a bigger
-        # act than moving its state, which is already owner-or-lead.
-        if not _mail_lead(who) and t.get("owner") and t.get("owner") != who:
-            return _json({"error": (_team_name(t["owner"]) or "Someone") + " is dealing with "
-                                   "this one. Ask them, or ask a lead to reassign it."}, 403)
+        not_yours = _mail_not_yours(t, who)
+        if not_yours:
+            return not_yours
         op = str(body.get("op") or "compose")
 
         if op == "save":
@@ -13174,27 +13350,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if not parent:
                 return _json({"error": "That conversation has no message to reply to."}, 400)
             to_addr = tgt.get("to") or ""
-            # Refuse rather than quietly write a reply addressed to ourselves
-            # or to nobody: both look like success and neither reaches anyone.
-            if "@" not in to_addr:
-                return _json({"error": "There is no address to reply to on this "
-                                       "conversation. Reply in Gmail instead."}, 400)
-            if addr and to_addr.lower() == addr:
-                return _json({"error": "The only address on this conversation is the "
-                                       "mailbox itself, so a reply would go in a circle. "
-                                       "Reply in Gmail instead."}, 400)
-            # Only replace a draft we can prove is still ours. If somebody
-            # opened it in Gmail and rewrote it, keeping both is the honest
-            # outcome; silently deleting their work is not.
-            replaces, kept = t.get("draft_id") or "", False
-            if replaces:
-                try:
-                    live = await google_mail.draft_body(replaces)
-                    if live and live != (t.get("draft_text") or "").strip():
-                        replaces, kept = "", True
-                except Exception as e:
-                    logger.warning("mail: could not read the previous draft: %s", e)
-                    replaces, kept = "", True
+            refusal = _mail_reply_refusal(to_addr, addr)
+            if refusal:
+                return refusal
+            replaces, kept = await _mail_leftover_draft(t)
             try:
                 out = await google_mail.create_draft(
                     t["id"], to_addr, parent.get("subject") or t.get("subject") or "",
@@ -13333,6 +13492,232 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "The AI returned nothing. Try again."}, 502)
         _track(who, "mail", "drafted a reply with Claude", (t.get("subject") or "")[:60])
         return _json({"draft": draft})
+
+    @mcp.custom_route("/api/mail/send", methods=["POST"])
+    async def mail_send_route(request: Request):
+        """Send an email FROM gizmo: a reply on a conversation, or a new one.
+
+        The ORDER is the substance of this route. Every refusal happens before
+        anything is written; the intention is written to the store BEFORE
+        Gmail is asked; only a confirmed send marks the thread sent. A crash
+        in the middle therefore leaves a stamp on the board saying a message
+        may have gone out, which somebody can settle by looking at the
+        mailbox - rather than silence, or a thread that claims a reply the
+        customer never got."""
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        if not _may_send_mail(who):
+            return _json({"error": "You are not set up to send email from here. "
+                                   "Ask a lead to switch it on in Team."}, 403)
+        if not google_mail.connected():
+            return _json({"error": "The mailbox is not connected."}, 400)
+        tid = str(body.get("id") or "").strip()
+        to_raw = str(body.get("to") or "").strip()
+        # One or the other. Both would leave it ambiguous which conversation
+        # the words belong to, and this is not the place to guess.
+        if bool(tid) == bool(to_raw):
+            return _json({"error": "Reply on a conversation, or start a new one with an "
+                                   "address. This asked for both, or for neither."}, 400)
+        text = str(body.get("text") or "").strip()
+        if not text:
+            return _json({"error": "There is nothing to send."}, 400)
+        if len(text) > MAIL_SEND_MAX_CHARS:
+            return _json({"error": "That message is too long to send."}, 400)
+        # A dry run makes every decision a real send makes and then stops, one
+        # step short of the store and of Gmail. It is how the browser can show
+        # the exact address this would go to before anybody commits to it.
+        dry = bool(body.get("dry"))
+        addr = (google_mail.address() or "").strip().lower()
+
+        # ----- a reply on a conversation the board already has -------------
+        if tid:
+            t, missing = _mail_thread_or_404(body)
+            if missing:
+                return missing
+            not_yours = _mail_not_yours(t, who)
+            if not_yours:
+                return not_yours
+            try:
+                convo = await google_mail.read_thread(t["id"], per_msg_chars=200)
+            except Exception as e:
+                logger.warning("mail send: could not re-read the thread: %s", e)
+                return _json({"error": "Could not read the conversation from Gmail, so "
+                                       "nothing was sent."}, 502)
+            # The SAME target the draft route uses. Two ways of deciding who a
+            # reply goes to is how one customer's words reach another.
+            tgt = _mail_reply_target(convo.get("messages") or [], addr)
+            parent = tgt.get("msg")
+            if not parent:
+                return _json({"error": "That conversation has no message to reply to."}, 400)
+            to_addr = tgt.get("to") or ""
+            refusal = _mail_reply_refusal(to_addr, addr)
+            if refusal:
+                return refusal
+            if dry:
+                return _json({"ok": True, "dry": True, "to": to_addr, "kind": "reply"})
+            sick = _mail_store_sick()
+            if sick:
+                return sick
+            # DURABLE FIRST. Everything above this line can be re-run for
+            # nothing. Past it, a crash could leave a customer holding an
+            # email the shop has no record of - so the record goes first.
+            t["send_pending"] = {"at": _mail_now(), "by": who, "to": to_addr,
+                                 "text": text[:MAIL_SEND_MAX_CHARS]}
+            try:
+                _write_mail(_load_mail())
+            except Exception:
+                logger.exception("mail send: the send could not be recorded")
+                t.pop("send_pending", None)
+                return _json({"error": "The inbox store cannot be written right now, so "
+                                       "nothing was sent. Check Settings, Connections."}, 503)
+            try:
+                out = await google_mail.send_message(
+                    t["id"], to_addr, parent.get("subject") or t.get("subject") or "",
+                    text, in_reply_to=parent.get("message_id") or "",
+                    references=parent.get("references") or "")
+            except Exception as e:
+                reason = (str(e) if isinstance(e, google_mail.GmailError)
+                          else "Gmail would not send this reply.")
+                if not isinstance(e, google_mail.GmailError):
+                    logger.exception("mail send failed")
+                # The stamp is there to outlive a CRASH. This is not one: we
+                # know how it ended, so it comes off - and the thread keeps a
+                # line saying an attempt was made, because an attempted send
+                # is news whether or not the person is still at their desk.
+                t.pop("send_pending", None)
+                _mail_log(t, who, "the send did not complete", reason)
+                try:
+                    _write_mail(_load_mail())
+                except Exception:
+                    logger.exception("mail send: could not clear the send stamp")
+                _track(who, "mail", "a reply did not send", (t.get("subject") or "")[:60])
+                return _json({"error": reason}, 502)
+            # It has gone. Read the leftover draft BEFORE the thread's record
+            # of it is cleared: that record is what proves the draft is ours.
+            replaces, _kept = await _mail_leftover_draft(t)
+            now = _mail_now()
+            t["sent_at"], t["sent_by"], t["sent_to"] = now, who, to_addr
+            t["sent_msg_id"] = str(out.get("id") or "")
+            t.pop("send_pending", None)
+            for k in ("draft_at", "draft_id", "draft_to", "draft_text"):
+                t.pop(k, None)
+            t["state"], t["state_at"], t["done_at"] = "waiting", now, ""
+            t["unread"] = False        # answering an email is reading it
+            _mail_log(t, who, "sent a reply from gizmo", "to " + to_addr)
+            warn = ""
+            try:
+                _write_mail(_load_mail())
+            except Exception:
+                # The email cannot be unsent, so this is REPORTED rather than
+                # raised: the reply really did go, the board is behind.
+                logger.exception("mail send: the reply went but the board could not be saved")
+                warn = ("The reply was sent, but the board could not be saved. "
+                        "It may still show as unanswered.")
+            if replaces:
+                await google_mail.delete_draft(replaces)
+            _track(who, "mail", "sent a reply", (t.get("subject") or "")[:60])
+            out_body = {"ok": True, "thread_id": t["id"], "message_id": t.get("sent_msg_id"),
+                        "to": to_addr, "state": "waiting", "kind": "reply"}
+            if warn:
+                out_body["warning"] = warn
+            return _json(out_body)
+
+        # ----- a conversation the shop is starting -------------------------
+        subject = " ".join(str(body.get("subject") or "").split())[:300]
+        if not subject:
+            return _json({"error": "A new message needs a subject."}, 400)
+        addrs, bad = _mail_clean_addresses(to_raw, addr)
+        if bad:
+            return _json({"error": bad}, 400)
+        to_addr = ", ".join(addrs)
+        if dry:
+            return _json({"ok": True, "dry": True, "to": to_addr, "kind": "new"})
+        sick = _mail_store_sick()
+        if sick:
+            return sick
+        store = _load_mail()
+        # There is no thread to hang the intention on yet, so it goes on the
+        # store itself and comes off again when the send is settled.
+        stamp = {"at": _mail_now(), "by": who, "to": to_addr, "subject": subject,
+                 "text": text[:MAIL_SEND_MAX_CHARS]}
+        store.setdefault("outbound_pending", []).append(stamp)
+        try:
+            _write_mail(store)
+        except Exception:
+            logger.exception("mail send: the new message could not be recorded")
+            return _json({"error": "The inbox store cannot be written right now, so "
+                                   "nothing was sent. Check Settings, Connections."}, 503)
+        try:
+            out = await google_mail.send_message("", to_addr, subject, text, new=True)
+        except Exception as e:
+            reason = (str(e) if isinstance(e, google_mail.GmailError)
+                      else "Gmail would not send this message.")
+            if not isinstance(e, google_mail.GmailError):
+                logger.exception("mail send failed")
+            store = _load_mail()
+            _mail_outbound_drop(store, stamp)
+            try:
+                _write_mail(store)
+            except Exception:
+                logger.exception("mail send: could not clear the outbound stamp")
+            _track(who, "mail", "a new message did not send", subject[:60])
+            return _json({"error": reason}, 502)
+        new_tid = str(out.get("thread_id") or "")
+        if not new_tid:
+            # Sent, with nowhere to file it. The stamp deliberately STAYS: it
+            # is now the only record that this customer was written to, and
+            # the board reports it rather than quietly dropping it.
+            logger.warning("mail send: Gmail named no conversation for a new message")
+            return _json({"error": "The message was sent, but Gmail did not say which "
+                                   "conversation it started. Check the mailbox."}, 502)
+        full = None
+        try:
+            full = await google_mail.get_thread(new_tid)
+        except Exception as e:
+            logger.warning("mail send: could not read back the new conversation: %s", e)
+        # What we know for certain about what we just sent, for when Gmail
+        # will not hand the conversation back. Losing the fact that we wrote
+        # to this customer because a READ failed would be the worse trade.
+        mine = {"id": new_tid, "historyId": "", "subject": subject,
+                "messages": [{"id": str(out.get("id") or ""), "from_name": "",
+                              "from_email": addr, "at": _mail_now(), "labels": [],
+                              "files": [], "snippet": text[:200]}]}
+        store = _load_mail()
+        _mail_apply_thread(store, full or mine, addr)
+        if new_tid not in store.get("threads", {}):
+            _mail_apply_thread(store, mine, addr)
+        t = store.get("threads", {}).get(new_tid)
+        if t is None:
+            logger.warning("mail send: the new conversation could not be filed")
+            return _json({"error": "The message was sent, but it could not be put on the "
+                                   "board. Check the mailbox."}, 502)
+        now = _mail_now()
+        t["owner"], t["owner_since"] = who, now
+        t["state"], t["state_at"], t["done_at"] = "waiting", now, ""
+        t["started_to"] = to_addr
+        t["sent_at"], t["sent_by"], t["sent_to"] = now, who, to_addr
+        t["sent_msg_id"] = str(out.get("id") or "")
+        t["unread"] = False
+        # The sender was worked out before started_to existed, so it read as
+        # our own mailbox. Re-derive it now the row can say who it went to.
+        name, whom = _mail_sender(t, addr)
+        t["from_name"], t["from_email"] = str(name)[:120], str(whom)[:200]
+        _mail_log(t, who, "started this conversation from gizmo", "to " + to_addr)
+        _mail_outbound_drop(store, stamp)
+        warn = ""
+        try:
+            _write_mail(store)
+        except Exception:
+            logger.exception("mail send: the message went but the board could not be saved")
+            warn = ("The message was sent, but the board could not be saved. "
+                    "It may not appear in the inbox until the next sync.")
+        _track(who, "mail", "started a conversation", subject[:60])
+        out_body = {"ok": True, "thread_id": new_tid, "message_id": t.get("sent_msg_id"),
+                    "to": to_addr, "state": "waiting", "kind": "new"}
+        if warn:
+            out_body["warning"] = warn
+        return _json(out_body)
 
     async def _mail_orders_for(email: str) -> dict:
         """This sender's recent orders, with what THIS shop knows on top of
@@ -15982,6 +16367,22 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     def _starter_password() -> str:
         return secrets.token_urlsafe(9)
 
+    def _auth_me(uid: str, u: dict) -> dict:
+        """The account as the BROWSER needs it the moment somebody is in: who
+        they are, what they may open, and the grants the UI must not draw a
+        button for without. One shape, written once - three hand-copied
+        versions of it is exactly how the login reply and the state reply come
+        to disagree about what a person is allowed to do."""
+        return {"id": uid, "name": u.get("name"), "role": u.get("role"),
+                "must_change": bool(u.get("must_change")),
+                "tabs": _user_tabs(uid),
+                # Sending email out as the shop is a per-person grant, and an
+                # admin holds it by rank. Both, separately, because the page
+                # must not offer a switch that would revoke nothing.
+                "can_send": bool(u.get("can_send")),
+                "send_by_rank": (ROLE_LEVELS.get(u.get("role") or "member", 0)
+                                 >= ROLE_LEVELS["admin"])}
+
     @mcp.custom_route("/api/auth/state", methods=["POST"])
     async def auth_state_route(request: Request):
         err, _body = await _auth_guard(request)
@@ -15993,10 +16394,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         u = _team_user(uid)
         if not u or not u.get("active", True):
             return _json({"setup": False, "logged_in": False})
-        return _json({"setup": False, "logged_in": True,
-                      "me": {"id": uid, "name": u.get("name"), "role": u.get("role"),
-                             "must_change": bool(u.get("must_change")),
-                             "tabs": _user_tabs(uid)}})
+        return _json({"setup": False, "logged_in": True, "me": _auth_me(uid, u)})
 
     @mcp.custom_route("/api/auth/setup", methods=["POST"])
     async def auth_setup_route(request: Request):
@@ -16032,8 +16430,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 logger.exception("could not record that setup happened")
             token = _new_session(uid)
             _track(uid, "team", "set up the app", f"{name} is the master admin")
-            return _json({"ok": True, "session": token,
-                          "me": {"id": uid, "name": name, "role": "master", "must_change": False}})
+            return _json({"ok": True, "session": token, "me": _auth_me(uid, d["users"][uid])})
         except RuntimeError:
             return _json({"error": "The account could not be saved. The data volume may be "
                                    "unwritable; check the Railway service."}, 500)
@@ -16106,10 +16503,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"ok": True, "mfa": True, "ticket": ticket})
         token = _new_session(uid)
         _track(uid, "auth", "logged in")
-        return _json({"ok": True, "session": token,
-                      "me": {"id": uid, "name": u.get("name"), "role": u.get("role"),
-                             "must_change": bool(u.get("must_change")),
-                             "tabs": _user_tabs(uid)}})
+        return _json({"ok": True, "session": token, "me": _auth_me(uid, u)})
 
     @mcp.custom_route("/api/auth/mfa", methods=["POST"])
     async def auth_mfa_route(request: Request):
@@ -16203,10 +16597,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _mfa_ticket_spend(str(body.get("ticket") or ""))
         token = _new_session(uid)
         _track(uid, "auth", "logged in")
-        return _json({"ok": True, "session": token,
-                      "me": {"id": uid, "name": u.get("name"), "role": u.get("role"),
-                             "must_change": bool(u.get("must_change")),
-                             "tabs": _user_tabs(uid)}})
+        return _json({"ok": True, "session": token, "me": _auth_me(uid, u)})
 
     @mcp.custom_route("/api/auth/logout", methods=["POST"])
     async def auth_logout_route(request: Request):
@@ -16474,6 +16865,22 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 detail = (f"{label} can edit the size list" if grant
                           else f"{label} can no longer edit the size list")
                 _track(who, "team", "changed size-list access", detail)
+            elif op == "send":
+                # Who may send email out of the shared mailbox as the shop.
+                # Same shape as the size list, and admins hold it by rank for
+                # the same reason: a switch that reads as a revocation the
+                # permission check would then ignore is worse than no switch.
+                if not may_manage():
+                    return _json({"error": "You cannot manage that account."}, 403)
+                if ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"]:
+                    return _json({"error": "Admins can already send email from gizmo; "
+                                  "the grant is for members and part-timers."}, 400)
+                grant = bool(body.get("can_send"))
+                u["can_send"] = grant
+                _write_users(d)
+                detail = (f"{label} can send email from gizmo" if grant
+                          else f"{label} can no longer send email from gizmo")
+                _track(who, "team", "changed email-sending access", detail)
             elif op == "tabs":
                 if not may_manage():
                     return _json({"error": "You cannot manage that account."}, 403)

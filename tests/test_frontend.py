@@ -457,7 +457,12 @@ def t_inbox_reads_as_a_list_with_bulk_triage():
 @test
 def t_inbox_unread_filters_and_claude_reply():
     """Three things the merchant asked for after living with it: unread as a
-    real thing, standing filters, and a Claude-drafted reply."""
+    real thing, standing filters, and a Claude-drafted reply.
+
+    This used to assert that the app never sends. It does now, so the guarantee
+    moved rather than went: a person still reads the words and presses a button
+    naming the address they go to, and an account without the grant is told so
+    on the panel instead of being left to wonder where Send is."""
     ok("['unread', lab('Unread', counts.unread)]" in SCRIPT
        and "mailFilter === 'unread' && !t.unread" in SCRIPT,
        "unread is a filter with its own count, not just bold text")
@@ -469,8 +474,8 @@ def t_inbox_unread_filters_and_claude_reply():
     ok("Compose reply with Claude" in SCRIPT, "the reply button exists")
     ok("'/api/mail/draft'" in SCRIPT and "op: 'save'" in SCRIPT,
        "drafting and saving are separate steps, with a human in between")
-    ok("you send it yourself" in SCRIPT,
-       "and the app is explicit that it never sends the mail")
+    ok("Ask a lead to switch it on in Team." in SCRIPT,
+       "an account that cannot send is told so, and where the switch lives")
     ok("gaps like ____" in SCRIPT,
        "the panel explains why the draft has blanks in it")
     ok("rows.sort((a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0))" in SCRIPT,
@@ -3295,6 +3300,185 @@ def t_an_admin_can_change_someones_colour_from_the_team_tab():
     seg = SCRIPT[SCRIPT.index("Colour in the Inbox"):][:900]
     ok("TEAM_TINTS.forEach" in seg, "offering only the known names")
     ok("loadTeam()" in seg, "and the board redraws so the change is visible")
+
+
+# ---------------------------------------------------------------------------
+# Sending mail. Everything above this line was written while the app could only
+# save a draft into Gmail; a person always pressed the last button. It can send
+# now, which makes the confirm step, the grant and the honesty about a send that
+# was never confirmed the three things that must never regress.
+# ---------------------------------------------------------------------------
+
+
+@test
+def t_a_send_is_confirmed_against_the_address_the_server_resolved():
+    """The one action in this app that cannot be taken back. The first POST
+    carries dry:true - the server runs every check, writes nothing, sends
+    nothing, and hands back the recipient it actually resolved - and the real
+    send is issued by nothing but a person pressing Send now against THAT
+    address, not against whatever was typed into the To box."""
+    ok("async function mailSendFlow(" in SCRIPT,
+       "one send flow, shared by the reply panel and the compose window")
+    fn = SCRIPT[SCRIPT.index("async function mailSendFlow("):]
+    fn = fn[:fn.index("\n        function ")]
+    ok("Object.assign({ dry: true }, payload)" in fn,
+       "the first call is a dry run, on a COPY: the payload it confirms is the "
+       "one it later sends")
+    ok("go.onclick" in fn, "there is a Send now")
+    ok(fn.index("dry: true") < fn.index("go.onclick"),
+       "the dry run happens before there is a Send now to press")
+    after = fn[fn.index("go.onclick"):]
+    ok("api('/api/mail/send', payload)" in after,
+       "and the real send, with no dry flag on it, lives inside that handler")
+    ok("api('/api/mail/send', payload)" not in fn[:fn.index("go.onclick")],
+       "and nowhere else: nothing sends before it is confirmed")
+    ok(after.index("api('/api/mail/send', payload)") < after.index("toastOk"),
+       "the toast follows the send rather than announcing it in advance")
+    ok("'Send to ' + to + '?'" in fn, "the confirm names the address")
+    ok("dry.to" in fn, "which is the server's answer, not what was typed")
+    ok("row.replaceWith(bar)" in fn, "Back puts the bar and the typed text back")
+    ok("toastError(e.message)" in after and "go.disabled = false" in after,
+       "a refusal is reported and hands the row back, never presenting as sent")
+
+
+@test
+def t_the_reply_panel_offers_send_only_to_an_account_that_holds_it():
+    """The grant is a switch on the account, and admins hold it by rank, so
+    both have to be read. A button that always fails is a lie, so an account
+    without it keeps today's bar and is told once where the switch lives."""
+    ok("function mailCanSend()" in SCRIPT, "one place decides")
+    can = SCRIPT[SCRIPT.index("function mailCanSend()"):]
+    can = can[:can.index("\n        function ")]
+    ok("teamMe.can_send" in can and "teamMe.send_by_rank" in can,
+       "reading the switch AND the rank that carries it")
+    ok("function mailDraftPanel(m, t, btn, out) {" in SCRIPT, "the panel is still one builder")
+    panel = SCRIPT[SCRIPT.index("function mailDraftPanel(m, t, btn, out) {"):]
+    panel = panel[:panel.index("\n        async function ")]
+    ok("const canSend = mailCanSend();" in panel, "the panel asks once")
+    ok("canSend ? 'btn' : 'btn btn-primary'" in panel,
+       "Save steps back to secondary only where Send has taken the lead")
+    ok("bar.append(send)" in panel and "bar.append(save, copy, drop)" in panel,
+       "the bar is composed in two pieces")
+    ok(panel.index("bar.append(send)") < panel.index("bar.append(save, copy, drop)"),
+       "so Send is first in the bar")
+    ok("mailSendFlow(bar, { id: t.id, text: ta.value }" in panel,
+       "and goes through the shared two-step flow, not a second one of its own")
+    ok("Ask a lead to switch it on in Team." in panel,
+       "an account without the grant is told where the switch lives")
+    thread = SCRIPT.split("function paintMailThread(m, r) {")[1]
+    thread = thread[:thread.index("\n        function ")]
+    ok("'Write a reply'" in thread, "a reply can be written without spending AI credits")
+    ok("mailDraftPanel(m, t, compose, { draft: '' })" in thread,
+       "opening the same panel, empty")
+
+
+@test
+def t_compose_sits_in_the_inbox_header_behind_the_grant():
+    """A new conversation is not a reply to anything, so it belongs to the card
+    that owns the mailbox, first in the row of things you press."""
+    fn = SCRIPT.split("function renderMail() {")[1]
+    fn = fn[:fn.index("\n        function ")]
+    ok("const mAct = el('div', 'card-act')" in fn, "the header still has its action row")
+    seg = fn[fn.index("const mAct = el('div', 'card-act')"):][:1800]
+    ok("if (mailCanSend()) {" in seg, "hidden from an account the server would refuse")
+    ok("openMailCompose()" in seg, "and opens the compose window")
+    ok("mAct.append(cmp)" in seg and "mAct.append(filt, rf)" in seg,
+       "appended in two steps")
+    ok(seg.index("mAct.append(cmp)") < seg.index("mAct.append(filt, rf)"),
+       "so Compose is first, ahead of Filters and Refresh")
+
+
+@test
+def t_the_compose_window_is_a_modal_of_the_house_kind():
+    """Built like Size rules: an overlay, a head, an X, and no second way out.
+    A half-written email to a customer is exactly the thing a stray click on
+    the backdrop must not throw away."""
+    ok("function openMailCompose()" in SCRIPT, "the window exists")
+    fn = SCRIPT[SCRIPT.index("function openMailCompose()"):]
+    fn = fn[:fn.index("\n        async function ")]
+    ok("el('div', 'modal-overlay show')" in fn and "el('div', 'modal-head')" in fn,
+       "the house modal idiom")
+    ok("x.onclick = () => overlay.remove()" in fn, "with an X that closes it")
+    ok("e.target === overlay" not in fn and "Escape" not in fn,
+       "and nothing else that closes it")
+    ok("name@company.com, another@company.com" in fn, "To says the shape it takes")
+    ok("ta.rows = 10" in fn, "the body has room to write in")
+    ok("'mail-draft-text'" in fn, "in the app's own draft textarea")
+    ok("mailSendFlow(bar" in fn, "and the same dry-run confirm as a reply")
+    ok("five addresses" in fn and "Plain text" in fn,
+       "the cap and the format are stated where they are typed, not after a refusal")
+    done = fn[fn.index("mailSendFlow(bar"):][:400]
+    ok("overlay.remove()" in done and "refreshMailQuiet()" in done,
+       "success closes the window and repaints the board")
+
+
+@test
+def t_the_send_grant_is_switched_from_the_team_tab():
+    """A capability, not a tab, granted the way the size list is granted. An
+    admin holds it by rank, so they get a statement rather than a switch that
+    would not actually revoke anything."""
+    ok("if (u.sizes_by_rank) {" in SCRIPT, "the size grant is still the pattern")
+    seg = SCRIPT[SCRIPT.index("if (u.sizes_by_rank) {"):][:5200]
+    ok("if (u.send_by_rank) {" in seg, "rank is read before the switch is drawn")
+    ok("(every admin can)" in seg.split("if (u.send_by_rank) {")[1][:300],
+       "and an admin is told, not offered a switch that lies")
+    ok("sendBox.checked = !!u.can_send" in seg, "everyone else gets a checkbox")
+    ok("'tm-tabpick'" in seg.split("if (u.send_by_rank) {")[1][:600],
+       "in the same row style as the size one")
+    ok("op: 'send', id: u.id, can_send: sendBox.checked" in seg,
+       "posting the contract's own op")
+    ok("sendBox && sendBox.checked !== !!u.can_send" in seg,
+       "only when it actually changed, or the ledger records a grant nobody made")
+
+
+@test
+def t_a_send_that_was_never_confirmed_is_reported_rather_than_hidden():
+    """Report, do not shred. The server stamps the send before it calls Gmail,
+    so a crash in between leaves a maybe, and a maybe is told in the words that
+    say what to do about it."""
+    ok("function mailPendingLine(" in SCRIPT, "one sentence, in one place")
+    fn = SCRIPT[SCRIPT.index("function mailPendingLine("):]
+    fn = fn[:fn.index("\n        async function ")]
+    ok("may have gone out" in fn and "Sent folder" in fn,
+       "it says what may have happened and where to look")
+    board = SCRIPT.split("function renderMail() {")[1]
+    board = board[:board.index("\n        function ")]
+    ok("(d.outbound_pending || [])" in board,
+       "the board reports its own unconfirmed sends")
+    ok("mail-sendwarn" in board, "in a warning row")
+    ok(board.index("mail-sendwarn") < board.index("const bulkHost = el('div')"),
+       "above the list, not buried under it")
+    thread = SCRIPT.split("function paintMailThread(m, r) {")[1]
+    thread = thread[:thread.index("\n        function ")]
+    ok("if (t.send_pending)" in thread, "and so does the thread it belongs to")
+    ok("'mail-viewwarn'" not in thread.split("if (t.send_pending)")[1][:400],
+       "under a class of its own: the viewing heartbeat finds .mail-viewwarn by "
+       "class and removes it whenever nobody else is looking, which would have "
+       "swept an unconfirmed send off the screen ten seconds after it appeared")
+    ok(".mail-sendwarn {" in CSS, "which is styled as the warning it is")
+    ok("dashed" not in CSS.split(".mail-sendwarn {")[1].split("}")[0],
+       "with a solid edge: a dashed one means somewhere to drop something")
+
+
+@test
+def t_nothing_in_the_page_still_claims_the_app_never_sends():
+    """It sends now. A comment or a line of help that still says otherwise is
+    worse than none: it is the reason someone presses Send believing it saves a
+    draft."""
+    for gone in ("The app never sends mail", "never sends", "Nothing is sent"):
+        ok(gone not in HTML, "a stale claim is still in the page: " + gone)
+    ok("Send goes straight to the customer from" in SCRIPT,
+       "and the draft panel says what Send actually does")
+    ok("Save keeps it as a Gmail draft instead." in SCRIPT,
+       "naming the other button by what it does, in the same breath")
+
+
+@test
+def t_no_em_or_en_dash_reaches_the_page():
+    """CI fails the build on one, and the house voice uses a colon or a full
+    stop. Asserted here too so it fails in the suite the author actually runs."""
+    for ch, name in (("—", "em dash"), ("–", "en dash")):
+        ok(ch not in HTML, "an " + name + " is in static/index.html")
 
 
 if __name__ == "__main__":
