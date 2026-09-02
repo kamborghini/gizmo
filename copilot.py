@@ -10473,6 +10473,53 @@ def _mail_board_shape(store: dict, window: bool = False) -> list:
     return out[:MAIL_BOARD_MAX] if window else out
 
 
+def _mail_address_book(mail_store: dict, crm: dict, mailbox: str) -> list:
+    """Everyone the shop could write to, from the two places it already knows
+    people: the shared inbox and the CRM. Pure, so the merge can be argued
+    with in a unit test rather than through a route.
+
+    The CRM wins a collision. A thread carries whatever the sender's mail
+    client put in the From line that morning ("jo", "Sales Enquiries", the
+    address again); the CRM carries what somebody here typed on purpose, and
+    the firm they typed it under. Picking the thread's version would show a
+    rep two names for one customer and let them wonder which is real.
+
+    Anything that could not actually be sent to is left out rather than shown
+    greyed: this list exists to fill a To field, and an entry that produces a
+    bounce is worse than an entry that was never offered."""
+    own = str(mailbox or "").strip().lower()
+
+    def add(into: dict, email, name, sub) -> None:
+        e = str(email or "").strip()
+        # Not "has an @": half@ and bare words both look like addresses in a
+        # list and both fail at the mail server, where it is too late.
+        if not _EMAIL_RE.fullmatch(e) or e.lower() == own:
+            return
+        # First writer within a source wins, so the merge below is the only
+        # place precedence is decided.
+        into.setdefault(e.lower(), {"email": e, "name": str(name or "").strip(),
+                                    "sub": str(sub or "").strip()})
+
+    from_mail: dict = {}
+    for t in (mail_store or {}).get("threads", {}).values():
+        # from_email is already the thread's COUNTERPARTY, not "somebody who
+        # once appeared in it" - the same field the deal history matches on.
+        add(from_mail, t.get("from_email"), t.get("from_name"), "")
+    from_crm: dict = {}
+    orgs = (crm or {}).get("orgs") or {}
+    for p in ((crm or {}).get("persons") or {}).values():
+        firm = (orgs.get(str(p.get("org_id") or "")) or {}).get("name") or ""
+        for e in (p.get("emails") or []):
+            add(from_crm, e, p.get("name"), firm)
+
+    rows = list({**from_mail, **from_crm}.values())
+    rows.sort(key=lambda r: (r["name"].lower(), r["email"].lower()))
+    # No cap and no paging. The whole book is a few hundred short rows, it is
+    # filtered in the browser as you type, and a round trip per keystroke
+    # buys nothing but a To field that lags behind the typing.
+    return rows
+
+
 def _mail_team_shape() -> list:
     """Who's-doing-what: every active account with presence and open counts."""
     counts: dict = {}
@@ -13492,6 +13539,27 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "The AI returned nothing. Try again."}, 502)
         _track(who, "mail", "drafted a reply with Claude", (t.get("subject") or "")[:60])
         return _json({"draft": draft})
+
+    @mcp.custom_route("/api/mail/addresses", methods=["POST"])
+    async def mail_addresses_route(request: Request):
+        """The To field's address book: everyone in the inbox and the CRM.
+
+        Behind the SEND grant, not the Inbox tab. The list is only ever used
+        to address an email, so an account that cannot send has no reason to
+        be handed the shop's whole customer list in one download - and one
+        download is what this is, because the browser filters it locally."""
+        err, _body, who = await _mail_guard(request)
+        if err:
+            return err
+        if not _may_send_mail(who):
+            return _json({"error": "You are not set up to send email from here. "
+                                   "Ask a lead to switch it on in Team."}, 403)
+        try:
+            rows = _mail_address_book(_load_mail(), _load_crm(), google_mail.address())
+        except Exception:
+            logger.exception("mail address book failed")
+            return _json({"error": "Couldn't read the address book."}, 500)
+        return _json({"addresses": rows, "count": len(rows)})
 
     @mcp.custom_route("/api/mail/send", methods=["POST"])
     async def mail_send_route(request: Request):

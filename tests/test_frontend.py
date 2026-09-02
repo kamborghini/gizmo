@@ -3473,6 +3473,161 @@ def t_nothing_in_the_page_still_claims_the_app_never_sends():
        "naming the other button by what it does, in the same breath")
 
 
+def _typeahead_fn():
+    """The body of crmTypeahead, which several of the tests below read."""
+    fn = SCRIPT[SCRIPT.index("function crmTypeahead("):]
+    return fn[:fn.index("\n        function crmPersonRows(")]
+
+
+@test
+def t_the_typeahead_takes_an_optional_pick_and_leaves_the_crm_forms_alone():
+    """The mail To line holds addresses, several of them, comma separated: the
+    name that a CRM form writes is exactly the wrong thing there. So picking is
+    a parameter, and it defaults to what the four CRM callers already got. A
+    default that drifted would silently rewrite every deal form."""
+    fn = _typeahead_fn()
+    ok(re.search(r"function crmTypeahead\(input, getRows, opts\)", fn),
+       "the third argument exists")
+    ok(re.search(r"o\.pick \|\| \(\(r\) => \{ input\.value = r\.name; \}\)", fn),
+       "and defaults to writing the name, which is what the CRM forms rely on")
+    for caller in ("crmTypeahead(personIn, crmPersonRows)",
+                   "crmTypeahead(orgIn, crmOrgRows)",
+                   "crmTypeahead(perIn, crmPersonRows)",
+                   "crmTypeahead(dupIn, people ? crmPersonRows : crmOrgRows)"):
+        ok(caller in SCRIPT, "the CRM caller still passes two arguments: " + caller)
+
+
+@test
+def t_the_typeahead_is_announced_as_a_combobox():
+    """A dropdown a screen reader cannot see is a dropdown that is not there.
+    The roles are the cheap half of the keyboard support below."""
+    fn = _typeahead_fn()
+    ok("input.setAttribute('role', 'combobox')" in fn, "the input is a combobox")
+    ok("input.setAttribute('aria-autocomplete', 'list')" in fn, "with a list to autocomplete from")
+    ok("aria-expanded" in fn, "that says whether the list is open")
+    ok("drop.setAttribute('role', 'listbox')" in fn, "the drop is the listbox")
+    ok("b.setAttribute('role', 'option')" in fn, "and each row an option")
+    ok("aria-selected" in fn, "with the highlighted one marked as selected")
+
+
+@test
+def t_the_typeahead_answers_to_the_arrow_keys_and_enter():
+    """Reaching for the mouse mid address is the whole cost of a typeahead.
+    Enter must preventDefault: the input sits in a modal where Enter would
+    otherwise submit the half typed address behind the open dropdown."""
+    fn = _typeahead_fn()
+    ok("'keydown'" in fn, "there is a key handler")
+    key = fn[fn.index("'keydown'"):]
+    ok("e.key === 'ArrowDown'" in key and "e.key === 'ArrowUp'" in key,
+       "both arrows move the highlight")
+    ok("e.preventDefault()" in key.split("e.key === 'ArrowDown'")[1][:200],
+       "and the arrow does not also run the caret to the end of the line")
+    ok("e.key === 'Enter'" in key, "Enter picks")
+    ok("e.preventDefault()" in key.split("e.key === 'Enter'")[1][:200],
+       "and is swallowed, or the form behind it submits")
+    ok("hi >= 0" in key.split("e.key === 'Enter'")[1][:200],
+       "but only when a row is actually highlighted: an Enter on plain typing "
+       "must go where it always went")
+
+
+@test
+def t_escape_closes_the_dropdown_and_never_the_modal_behind_it():
+    """The one Escape in this app that does anything at all, and it is a
+    dropdown, not a way out. A compose window holding a half written email to a
+    customer must survive it, so the key is stopped before it can reach
+    anything that removes an overlay."""
+    fn = _typeahead_fn()
+    ok("e.key === 'Escape'" in fn, "Escape is handled")
+    esc = fn[fn.index("e.key === 'Escape'"):]
+    esc = esc[:esc.index("return;")]
+    ok("e.stopPropagation()" in esc, "and stopped where it is handled")
+    ok("hide()" in esc, "hiding the dropdown, which is the whole of what it does")
+    ok("overlay" not in fn and "remove()" not in fn,
+       "and nothing anywhere in the typeahead removes anything: the window this "
+       "sits in is closed by its X and by nothing else")
+
+
+@test
+def t_the_keyboard_highlight_looks_exactly_like_the_mouse_one():
+    """Two highlights that differ by a shade read as two different states."""
+    ok(re.search(r"\.crm-ta-drop button:hover[^{]*\.crm-ta-drop button\.on[^{]*\{", CSS),
+       "the keyboard highlight shares the hover rule rather than inventing a colour")
+
+
+@test
+def t_the_compose_to_line_is_a_typeahead_over_the_address_book():
+    """Typing a customer's address from memory is how a message goes to the
+    wrong person. The book comes from the threads and the CRM, and the field is
+    still a plain text box underneath, so it works when the fetch fails."""
+    fn = SCRIPT[SCRIPT.index("function openMailCompose()"):]
+    fn = fn[:fn.index("\n        async function ")]
+    ok("crmTypeahead(to, mailAddressRows, { pick })" in fn,
+       "the To field goes through the house typeahead with its own pick")
+    ok("name@company.com, another@company.com" in fn,
+       "and is still the same plain text field underneath")
+    ok("mailAddressBook()" in fn, "the book is asked for when the window opens")
+    ok("await mailAddressBook()" not in fn,
+       "in the background: the modal does not wait on a network call to open")
+    ok("to.inputMode = 'email'" in fn and "to.type = 'email'" not in fn,
+       "the field is a text box with an email keyboard, not an email input: a "
+       "multiple email input runs the HTML value sanitiser, which splits on the "
+       "commas and strips the spaces around them, so the ', ' a pick appends "
+       "came back as ',' and the line read as one run-on address")
+
+
+@test
+def t_picking_an_address_replaces_only_the_one_being_typed():
+    """Five addresses go in this box. A pick that wrote the whole value would
+    wipe the four already in it, which is a bug you find after pressing Send."""
+    ok("function mailAddressToken(" in SCRIPT, "the split is named and in one place")
+    fn = SCRIPT[SCRIPT.index("function mailAddressToken("):]
+    fn = fn[:fn.index("\n        function ")]
+    ok("lastIndexOf(',')" in fn, "everything before the last comma is settled")
+    compose = SCRIPT[SCRIPT.index("function openMailCompose()"):]
+    compose = compose[:compose.index("\n        async function ")]
+    ok("const pick = " in compose, "the compose window brings its own pick")
+    pick = compose[compose.index("const pick = "):][:520]
+    ok("mailAddressToken(to.value)" in pick, "the pick splits the same way")
+    ok("r.email + ', '" in pick,
+       "writes the address and the separator, so the next one can be typed")
+    ok("p.head" in pick, "keeping the addresses already entered")
+
+
+@test
+def t_the_address_rows_match_on_name_or_address_and_read_as_both():
+    """Half of these people are remembered by name and half by the address, and
+    a row that shows only one of the two is a row nobody can confirm."""
+    ok("function mailAddressRows(" in SCRIPT, "the rows have a source")
+    fn = SCRIPT[SCRIPT.index("function mailAddressRows("):]
+    fn = fn[:fn.index("\n        function ")]
+    ok("mailAddressToken(q).tail" in fn,
+       "it matches on the address being typed, not the whole line, and splits "
+       "it where the pick splits it: two copies of that rule would drift")
+    ok("if (!t) return []" in fn, "an empty token offers nothing")
+    ok("r.name + ' ' + r.email" in fn, "and matches a name or an address")
+    ok("id: r.email" in fn and "email: r.email" in fn,
+       "the address is the identity of the row")
+    ok("r.name || r.email" in fn,
+       "an address with no name shows as itself rather than as a blank line")
+
+
+@test
+def t_the_address_book_is_fetched_once_and_kept():
+    """1,951 people is one fetch, not one per keystroke. It is a cache with a
+    clock on it, like every other cache in this file, and a failure is silent:
+    the field is a text box that works without it."""
+    ok("let mailAddrCache = { at: 0, rows: [] }" in SCRIPT, "cache, with a timestamp")
+    ok("function mailAddressBook(" in SCRIPT, "one fetcher")
+    fn = SCRIPT[SCRIPT.index("async function mailAddressBook("):]
+    fn = fn[:fn.index("\n        function ")]
+    ok("'/api/mail/addresses'" in fn, "against the contract's route")
+    ok(re.search(r"Date\.now\(\) - mailAddrCache\.at < MAIL_ADDR_TTL", fn),
+       "and does nothing while the last answer is still fresh")
+    ok(re.search(r"MAIL_ADDR_TTL = 10 \* 60 \* 1000", SCRIPT), "which is ten minutes")
+    ok("catch" in fn and "toastError" not in fn,
+       "a failure is swallowed: nobody asked for an address book")
+
+
 @test
 def t_no_em_or_en_dash_reaches_the_page():
     """CI fails the build on one, and the house voice uses a colon or a full

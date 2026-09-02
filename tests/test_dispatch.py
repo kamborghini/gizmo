@@ -8923,6 +8923,106 @@ def t_the_send_grant_is_handed_over_the_way_the_size_grant_is():
     with_accounts(go)
 
 @test
+def t_the_address_book_is_behind_the_send_grant():
+    """The book exists ONLY to address an email. An account that cannot send
+    has no reason to be handed the shop's whole customer list, so it sits
+    behind the same grant the send does rather than behind the Inbox tab."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        r = post_s(sess, "/api/mail/addresses", {})
+        eq(r.status_code, 403, r.text)
+        ok("not set up to send" in r.json()["error"], r.text)
+        ok("addresses" not in r.json(), "and not one row leaks with the refusal")
+        eq(post("/api/team/user", {"op": "send", "id": uid, "can_send": True}
+                ).status_code, 200)
+        r2 = post_s(sess, "/api/mail/addresses", {})
+        eq(r2.status_code, 200, r2.text)
+        eq([a["email"] for a in r2.json()["addresses"]], ["jo@customer.com"])
+        eq(r2.json()["count"], 1)
+        # The master holds it by rank, exactly as it holds the send.
+        eq(post("/api/mail/addresses", {}).status_code, 200)
+    with_mail(go)
+
+@test
+def t_the_address_book_merges_the_inbox_and_the_crm():
+    """One row per person, and the CRM's version of who they are wins: a
+    thread carries whatever the sender's mail client put in the From line
+    that day, the CRM carries what somebody here typed on purpose."""
+    store = {"threads": {
+        "t1": {"id": "t1", "from_name": "jo b", "from_email": "jo@northlight.test"},
+        "t2": {"id": "t2", "from_name": "Sam Stage", "from_email": "sam@elsewhere.test"},
+        # The same person again, shouting. One row, not two.
+        "t3": {"id": "t3", "from_name": "JO", "from_email": "JO@northlight.test"},
+        # Us. Offering the shop its own address is offering a loop.
+        "t4": {"id": "t4", "from_name": "Sales", "from_email": MBOX},
+        "t5": {"id": "t5", "from_name": "Sales again", "from_email": MBOX.upper()},
+        # Nothing anybody could send to.
+        "t6": {"id": "t6", "from_name": "Nobody", "from_email": ""},
+        "t7": {"id": "t7", "from_name": "Broken", "from_email": "not-an-address"},
+        "t8": {"id": "t8", "from_name": "Halfway", "from_email": "half@"},
+        # A sender whose client sent no name at all.
+        "t9": {"id": "t9", "from_name": "", "from_email": "anon@anywhere.test"},
+        # These two cross: by name they are first and last, by address they
+        # are last and first. Ordering by the wrong field cannot hide here.
+        "t10": {"id": "t10", "from_name": "ada vance", "from_email": "zoe@vance.test"},
+        "t11": {"id": "t11", "from_name": "Zed Ash", "from_email": "ada@ash.test"},
+    }}
+    crm = {"persons": {
+        "p1": {"id": "p1", "name": "Jo Bloggs", "org_id": "o1",
+               "emails": ["jo@northlight.test", "jo.b@northlight.test"]},
+        "p2": {"id": "p2", "name": "Pat Price", "org_id": "", "emails": ["pat@nowhere.test"]},
+        "p3": {"id": "p3", "name": "Junk", "org_id": "o1", "emails": ["", "   ", "bad@"]},
+    }, "orgs": {"o1": {"id": "o1", "name": "Northlight Studios"}}}
+    rows = copilot._mail_address_book(store, crm, MBOX)
+    eq([r["email"] for r in rows],
+       ["anon@anywhere.test", "zoe@vance.test", "jo.b@northlight.test",
+        "jo@northlight.test", "pat@nowhere.test", "sam@elsewhere.test", "ada@ash.test"],
+       "sorted by name (case ignored) then email, nameless first, nothing unsendable")
+    by = {r["email"]: r for r in rows}
+    eq((by["jo@northlight.test"]["name"], by["jo@northlight.test"]["sub"]),
+       ("Jo Bloggs", "Northlight Studios"), "the CRM's name and firm win over the thread's")
+    eq((by["sam@elsewhere.test"]["name"], by["sam@elsewhere.test"]["sub"]),
+       ("Sam Stage", ""), "a thread-only sender keeps their From name, with no firm")
+    eq(by["pat@nowhere.test"]["sub"], "", "a person with no organisation has no sub-line")
+    eq(by["anon@anywhere.test"]["name"], "",
+       "a missing name stays missing; it never falls back to the address")
+    for r in rows:
+        eq(sorted(r), ["email", "name", "sub"], "the book carries nothing else")
+    eq(copilot._mail_address_book(store, crm, MBOX.upper()),
+       rows, "our own address is ours whatever case it is written in")
+    eq(copilot._mail_address_book({}, {}, MBOX), [], "two empty stores make an empty book")
+
+@test
+def t_the_address_book_route_serves_both_stores_and_nothing_else():
+    def go():
+        ensure_auth()
+        crm_wipe()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("m1", "Gobo order", frm=("Jo B", "jo@customer.com"))
+        _seed_thread("m2", "Stranger", frm=("Sam Stage", "sam@elsewhere.test"))
+        _seed_thread("m3", "Our own", frm=("Sales", MBOX))
+        org = post("/api/crm/contact", {"op": "org_add", "name": "Customer Co"}).json()["id"]
+        post("/api/crm/contact", {"op": "person_add", "name": "Jo Bloggs", "org_id": org,
+                                  "emails": ["jo@customer.com", "jo.b@customer.com"]})
+        r = post("/api/mail/addresses", {})
+        eq(r.status_code, 200, r.text)
+        body = r.json()
+        eq(sorted(body), ["addresses", "count"])
+        eq([a["email"] for a in body["addresses"]],
+           ["jo.b@customer.com", "jo@customer.com", "sam@elsewhere.test"],
+           "both stores, deduped, and never the mailbox itself")
+        eq(body["count"], len(body["addresses"]))
+        jo = [a for a in body["addresses"] if a["email"] == "jo@customer.com"][0]
+        eq((jo["name"], jo["sub"]), ("Jo Bloggs", "Customer Co"))
+        for a in body["addresses"]:
+            eq(sorted(a), ["email", "name", "sub"], "no order history rides along")
+    with_mail(go)
+
+@test
 def t_sync_does_not_call_a_gizmo_send_a_reply_from_gmail():
     """The send already logged itself, by name. Logging it again when Gmail
     hands the message back would tell the room somebody used Gmail instead."""

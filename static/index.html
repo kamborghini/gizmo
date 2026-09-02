@@ -1838,7 +1838,9 @@
             background: none; border: 0; border-bottom: 1px solid var(--line); cursor: pointer;
             font-size: var(--t-md); color: var(--ink); }
         .crm-ta-drop button:last-child { border-bottom: 0; }
-        .crm-ta-drop button:hover, .crm-ta-drop button.hot { background: var(--surface-2); }
+        /* .on is the keyboard's highlight and shares the mouse's exactly: two
+           shades would read as two different states. */
+        .crm-ta-drop button:hover, .crm-ta-drop button.hot, .crm-ta-drop button.on { background: var(--surface-2); }
         .crm-ta-sub { font-size: var(--t-xs); color: var(--ink-3); }
         .crm-cline { display: flex; align-items: center; gap: var(--sp-2); padding: 6px 0; font-size: var(--t-md); }
         .crm-cline svg { width: 15px; height: 15px; color: var(--ink-3); flex: none; }
@@ -12934,39 +12936,99 @@
             i.type = 'text'; i.className = 'disp-text'; i.value = val || ''; i.placeholder = ph || '';
             return i;
         }
-        function crmTypeahead(input, getRows) {
+        function crmTypeahead(input, getRows, opts) {
             /* A datalist with 1,951 people in it builds 1,951 nodes every time
                a form opens. This builds eight, as typed. getRows(q) returns
-               [{name, sub}] - picking one puts the name in the input. */
+               [{name, sub}] - picking one puts the name in the input.
+               opts.pick(r) overrides what picking writes, for a field whose
+               text is not a name: the mail To line holds addresses, and
+               several of them. The default is what the CRM forms have always
+               had, so they pass two arguments and are untouched. */
+            const o = opts || {};
+            const write = o.pick || ((r) => { input.value = r.name; });
             const wrap = el('div', 'crm-ta');
             input.autocomplete = 'off';
+            input.setAttribute('role', 'combobox');
+            input.setAttribute('aria-autocomplete', 'list');
+            input.setAttribute('aria-expanded', 'false');
             wrap.append(input);
             const drop = el('div', 'crm-ta-drop'); drop.style.display = 'none';
+            drop.setAttribute('role', 'listbox');
             wrap.append(drop);
-            function hide() { drop.style.display = 'none'; }
+            /* The row the arrow keys are sitting on. -1 means the keyboard has
+               not moved yet, so a plain Enter still means whatever Enter meant
+               before the dropdown appeared. */
+            let hi = -1, shown = [];
+            function open() { return drop.style.display !== 'none'; }
+            function hide() {
+                drop.style.display = 'none';
+                input.setAttribute('aria-expanded', 'false');
+                hi = -1;
+            }
+            function mark() {
+                [...drop.children].forEach((b, i) => {
+                    b.classList.toggle('on', i === hi);
+                    b.setAttribute('aria-selected', i === hi ? 'true' : 'false');
+                });
+                /* Eight rows in a 220px box: the eighth is below the fold. */
+                if (hi >= 0) drop.children[hi].scrollIntoView({ block: 'nearest' });
+            }
+            function take(r) {
+                write(r);
+                /* WHICH one, not just its name: two contacts can share
+                   a name, and a lookup by name later picks a namesake. */
+                input.dataset.pickedId = r.id || '';
+                hide();
+                input.dispatchEvent(new Event('picked'));
+            }
             input.addEventListener('input', () => {
                 const q = input.value.trim().toLowerCase();
-                drop.innerHTML = '';
+                drop.innerHTML = ''; hi = -1; shown = [];
                 if (!q) { hide(); return; }
                 const rows = getRows(q).slice(0, 8);
                 if (!rows.length) { hide(); return; }
+                shown = rows;
                 rows.forEach(r => {
                     const b = el('button');
                     b.type = 'button';
+                    b.setAttribute('role', 'option');
+                    b.setAttribute('aria-selected', 'false');
                     b.append(document.createTextNode(r.name));
                     if (r.sub) b.append(el('div', 'crm-ta-sub', r.sub));
                     b.onmousedown = (e) => {   /* before the input's blur */
                         e.preventDefault();
-                        input.value = r.name;
-                        /* WHICH one, not just its name: two contacts can share
-                           a name, and a lookup by name later picks a namesake. */
-                        input.dataset.pickedId = r.id || '';
-                        hide();
-                        input.dispatchEvent(new Event('picked'));
+                        take(r);
                     };
                     drop.append(b);
                 });
                 drop.style.display = 'block';
+                input.setAttribute('aria-expanded', 'true');
+            });
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    /* The dropdown, and only the dropdown. Escape is not a way
+                       out of anything in this app, and this input sits in a
+                       modal holding a half written email to a customer: the key
+                       is stopped here so nothing above can act on it. */
+                    if (open()) { e.stopPropagation(); hide(); }
+                    return;
+                }
+                if (!open() || !shown.length) return;
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();   /* not the caret to the end of the line */
+                    hi = (hi + 1) % shown.length; mark(); return;
+                }
+                if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    hi = (hi <= 0 ? shown.length - 1 : hi - 1); mark(); return;
+                }
+                /* Swallowed, or the modal behind it submits the half typed
+                   address the dropdown was offering to finish. Only with a row
+                   highlighted: a plain Enter still means what it always meant. */
+                if (e.key === 'Enter' && hi >= 0) {
+                    e.preventDefault();
+                    take(shown[hi]);
+                }
             });
             input.addEventListener('blur', () => setTimeout(hide, 150));
             return wrap;
@@ -15757,6 +15819,49 @@
             row.append(go, back);
             bar.replaceWith(row);
         }
+        /* ---- the address book behind the To line -------------------------
+           Typing a customer's address from memory is how a message goes to the
+           wrong person. The server merges every thread's counterparty with
+           every CRM email and sends the whole book down in one answer, because
+           1,951 people is one fetch, not one per keystroke. Only
+           mailAddressBook writes this. */
+        let mailAddrCache = { at: 0, rows: [] };
+        const MAIL_ADDR_TTL = 10 * 60 * 1000;   /* a book changes at the pace people do */
+        async function mailAddressBook() {
+            if (mailAddrCache.at && Date.now() - mailAddrCache.at < MAIL_ADDR_TTL) return;
+            try {
+                const d = await api('/api/mail/addresses', {});
+                mailAddrCache = { at: Date.now(), rows: (d && d.addresses) || [] };
+            } catch (e) {
+                /* Silent, and deliberately not cached: nobody asked for an
+                   address book, the To line is a text box that works without
+                   one, and a toast here would be an error about a convenience.
+                   Leaving at at 0 means the next Compose tries again. */
+            }
+        }
+        /* Everything before the last comma is an address the person has already
+           finished with. Only the tail is being typed, and only the tail is
+           what a pick is allowed to replace. */
+        function mailAddressToken(v) {
+            const i = String(v || '').lastIndexOf(',');
+            return { head: i < 0 ? '' : v.slice(0, i + 1), tail: i < 0 ? String(v || '') : v.slice(i + 1) };
+        }
+        function mailAddressRows(q) {
+            const t = mailAddressToken(q).tail.trim().toLowerCase();
+            if (!t) return [];
+            return (mailAddrCache.rows || [])
+                .filter(r => (r.name + ' ' + r.email).toLowerCase().includes(t))
+                .map(r => ({
+                    /* Half of these people are remembered by name and half by
+                       the address, so a row carries both: the name on top and
+                       the address beneath it, with the company where there is
+                       one. An address with no name shows as itself rather than
+                       as a blank line with a subtitle. */
+                    id: r.email, email: r.email,
+                    name: r.name || r.email,
+                    sub: r.name ? (r.email + (r.sub ? ' · ' + r.sub : '')) : (r.sub || ''),
+                }));
+        }
         /* A new conversation rather than a reply. Same modal idiom as Size
            rules, same two-step send as the reply panel. */
         function openMailCompose() {
@@ -15780,9 +15885,28 @@
             const toL = el('label', 'pfield');
             toL.append(el('span', null, 'To'));
             const to = crmText('', 'name@company.com, another@company.com');
-            to.type = 'email'; to.multiple = true;
-            toL.append(to);
+            /* inputMode, not type=email. A multiple email input runs the HTML
+               value sanitiser on every write: it splits on the commas and
+               strips the spaces around them, so the ", " a pick appends came
+               back as ",". Nothing here ever asked the browser to validate
+               (there is no form, and the server checks the addresses on the dry
+               run), so the type bought only the on-screen mangling. inputMode
+               keeps the @ keyboard on a phone, which was the real reason. */
+            to.inputMode = 'email'; to.spellcheck = false;
+            /* Picking writes the address, not the name, and only over the one
+               being typed: four already in the box are not wiped by a pick on
+               the fifth. The trailing separator saves a keystroke and tells the
+               dropdown the token is finished, so it closes rather than offering
+               to complete the address it just wrote. */
+            const pick = (r) => {
+                const p = mailAddressToken(to.value);
+                to.value = (p.head ? p.head + ' ' : '') + r.email + ', ';
+            };
+            toL.append(crmTypeahead(to, mailAddressRows, { pick }));
             body.append(toL);
+            /* Not awaited: the window opens now, and the book arrives while the
+               subject is being typed. A failure leaves a plain text field. */
+            mailAddressBook();
             const subL = el('label', 'pfield');
             subL.append(el('span', null, 'Subject'));
             const subject = crmText('', 'What it is about');
