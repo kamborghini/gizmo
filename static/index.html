@@ -1685,6 +1685,15 @@
             border: 1px solid var(--border); background: var(--surface); color: var(--ink);
             resize: vertical; }
         .mail-draft-text:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+        /* What the server appends on send. Muted and unfocusable on purpose:
+           it is a readout of what is coming, not another box to type in. */
+        .mail-sig { margin-top: var(--sp-2); padding-left: 10px; border-left: 2px solid var(--border-2);
+            font-size: var(--t-xs); color: var(--ink-2); }
+        .mail-sig-lab { font-size: var(--t-xs); font-weight: var(--w-medium);
+            color: var(--ink-3); margin-bottom: 3px; }
+        .mail-sig-text { white-space: pre-wrap; line-height: 1.5; margin-bottom: 4px; }
+        .mail-sig-text:last-child { margin-bottom: 0; }
+        .mail-insert { margin-top: var(--sp-2); max-width: 260px; }
         /* The subject is the only item in the row that can give way: every
            other span is flex: none and the sender is a hard 148. So under
            pressure it went to 0 - and the row still did not fit, which pushed
@@ -2024,6 +2033,16 @@
         .disp-warn { font-size: var(--t-xs); color: var(--warn); background: var(--warn-bg);
             border: 1px solid var(--border); border-radius: var(--r-sm); padding: 8px 8px; margin: 8px 0; }
         .disp-ok-line { font-size: var(--t-xs); color: var(--win); margin: 8px 0; }
+        /* One line, three tones. The tone is the answer: green only for a
+           number the EU database confirmed, and muted (never red) for one it
+           failed to answer about. */
+        .eori-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+        .eori-row .disp-num { flex: 1 1 auto; min-width: 0; }
+        .eori-line { font-size: var(--t-xs); margin: 8px 0 0; line-height: 1.55; }
+        .eori-line.ok { color: var(--win); }
+        .eori-line.bad { color: var(--danger); }
+        .eori-line.muted { color: var(--ink-2); }
+        .eori-line a { color: inherit; text-decoration: underline; }
         .disp-await { font-size: var(--t-xs); color: var(--ink-2); background: var(--bg-2);
             border: 1px solid var(--border-2); border-left: 3px solid var(--accent);
             border-radius: var(--r-sm); padding: 8px 12px; margin: 8px 0; }
@@ -3158,6 +3177,16 @@
                     <div class="setting-row">
                         <div><div class="setting-title">Two-step sign-in</div><div class="setting-sub" id="mfa-sub">A code from your phone as well as your password.</div></div>
                         <button class="btn" id="mfa-btn" type="button">Set up</button>
+                    </div>
+                </div>
+
+                <div id="signoff-row" style="display:none">
+                    <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Your sign-off</div>
+                    <p class="field-help" style="margin-top:0">Put on the end of email you send from the Inbox, above the shop footer. Up to four lines: your name, and whatever you want under it.</p>
+                    <textarea id="signoff-text" class="pf-input" rows="4" placeholder="e.g. Cameron
+Projected Image UK"></textarea>
+                    <div class="mail-statebar">
+                        <button class="btn" id="signoff-btn" type="button">Save sign-off</button>
                     </div>
                 </div>
 
@@ -11472,6 +11501,68 @@
             }
         }
 
+        /* The four answers the EU database can give about a customer's EORI,
+           drawn in one place so they cannot drift apart. The distinction that
+           matters is the last one: "unknown" means the service did not answer,
+           which is NOT the same as the number being bad. Drawing a timeout in
+           the red "not valid" line is how a good customer gets told their
+           number is wrong and an export booking is refused over nothing. */
+        function eoriPaint(out, r) {
+            out.innerHTML = '';
+            if (r.status === 'valid') {
+                out.className = 'eori-line ok';
+                const who = [r.name, r.address].filter(Boolean).join(', ');
+                out.textContent = 'Valid' + (who ? ': ' + who : '')
+                    + (r.cached ? ' (from an earlier check)' : ' (checked just now)');
+            } else if (r.status === 'invalid') {
+                out.className = 'eori-line bad';
+                out.textContent = 'Not valid according to the EU database.';
+            } else if (r.status === 'not_covered') {
+                /* A GB number is not held by the EU database at all, so this is
+                   a signpost rather than a verdict. */
+                out.className = 'eori-line muted';
+                out.append(document.createTextNode((r.reason || '') + ' '));
+                const a = el('a', null, 'Check GB numbers at gov.uk');
+                a.href = 'https://www.tax.service.gov.uk/check-eori-number';
+                a.target = '_blank';
+                /* The settings form behind this is usually half filled in, so
+                   the checker opens in its own tab, and noopener keeps that tab
+                   from reaching back into this one. */
+                a.rel = 'noopener';
+                out.append(a);
+            } else {
+                out.className = 'eori-line muted';
+                out.textContent = 'Could not check: ' + (r.reason || 'the EU service did not answer.')
+                    + ' Try again in a minute.';
+            }
+        }
+        async function eoriRun(inp, btn, out) {
+            const number = inp.value.trim();
+            if (!number) {
+                eoriPaint(out, { status: 'unknown', reason: 'no number was entered.' });
+                return;
+            }
+            btn.disabled = true;
+            out.className = 'eori-line muted';
+            out.textContent = 'Checking…';
+            try {
+                eoriPaint(out, await api('/api/eori/check', { number: number }));
+            } catch (e) {
+                /* Same muted line, same wording: from here a refused request and
+                   a silent service are the same event, and neither says the
+                   number is bad. The message is punctuated before it goes in,
+                   because the browser's own "Failed to fetch" has no full stop
+                   and ran straight into the sentence after it. */
+                const why = (e.message || 'the check could not be made').trim();
+                eoriPaint(out, { status: 'unknown',
+                                 reason: /[.!?]$/.test(why) ? why : why + '.' });
+            } finally {
+                /* In a finally, not after the try: a throw used to leave the
+                   button dead, so the checker worked exactly once. */
+                btn.disabled = false;
+            }
+        }
+
         async function openShippingSettings() {
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal disp-modal');
@@ -11632,6 +11723,29 @@
             const dpShow = () => { dpWarn.style.display =
                 dpSel.value === 'Duties_To_Be_Paid_By_Receiver' ? 'none' : ''; };
             dpSel.onchange = dpShow; dpShow();
+
+            /* Checking the number BEFORE the parcel goes, not after customs
+               holds it. It sits with the customs settings because that is where
+               someone already is when a business customer sends one over. */
+            body.append(el('div', 'section-title', 'Check a customer’s EORI'));
+            body.append(el('p', 'field-help',
+                'Ask the EU database whether a business customer’s EORI number is real before '
+                + 'you put it on an export. Nothing here is saved: it is a lookup.'));
+            const eoriRow = el('div', 'eori-row');
+            const eoriIn = document.createElement('input');
+            eoriIn.type = 'text'; eoriIn.spellcheck = false; eoriIn.className = 'disp-num';
+            eoriIn.placeholder = 'e.g. DE123456789';
+            eoriIn.setAttribute('aria-label', 'EORI number to check');
+            const eoriBtn = el('button', 'btn', 'Check');
+            const eoriOut = el('div', 'eori-line muted');
+            eoriBtn.onclick = () => eoriRun(eoriIn, eoriBtn, eoriOut);
+            /* Typed and confirmed without reaching for the mouse: this is a
+               field somebody uses several times in a row off an email. */
+            eoriIn.onkeydown = (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); eoriRun(eoriIn, eoriBtn, eoriOut); }
+            };
+            eoriRow.append(eoriIn, eoriBtn);
+            body.append(eoriRow, eoriOut);
 
             /* How each courier collects, because it genuinely differs: a daily
                UPS collection already calls, while DHL has to be asked each
@@ -15601,25 +15715,144 @@
             m.body.append(list);
             if (!lead) {
                 m.body.append(el('div', 'setting-sub', 'Only a lead can change these.'));
-                return;
+            } else {
+                const bar = el('div', 'mail-statebar');
+                const add = el('button', 'btn btn-primary', 'New filter');
+                add.onclick = () => mailRuleForm(m, data, null);
+                bar.append(add);
+                const run = el('button', 'btn', 'Apply to existing mail');
+                run.onclick = async () => {
+                    if (!(await uiConfirm('Run every filter over the email already here? '
+                        + 'Only unclaimed, unassigned email is touched, so nothing is taken '
+                        + 'off anyone who is working on it.'))) return;
+                    run.disabled = true;
+                    const r = await call({ op: 'run' });
+                    if (r) toastOk(r.changed + ' email' + (r.changed === 1 ? '' : 's') + ' sorted');
+                    run.disabled = false;
+                    reload(r);
+                };
+                bar.append(run);
+                m.body.append(bar);
             }
-            const bar = el('div', 'mail-statebar');
-            const add = el('button', 'btn btn-primary', 'New filter');
-            add.onclick = () => mailRuleForm(m, data, null);
-            bar.append(add);
-            const run = el('button', 'btn', 'Apply to existing mail');
-            run.onclick = async () => {
-                if (!(await uiConfirm('Run every filter over the email already here? '
-                    + 'Only unclaimed, unassigned email is touched, so nothing is taken '
-                    + 'off anyone who is working on it.'))) return;
-                run.disabled = true;
-                const r = await call({ op: 'run' });
-                if (r) toastOk(r.changed + ' email' + (r.changed === 1 ? '' : 's') + ' sorted');
-                run.disabled = false;
-                reload(r);
+            /* Below the filters, and reached by everyone: this used to be an
+               early return for a non-lead, who then could not see the footer
+               that goes out under their own name. Its own lead flag comes from
+               the settings route, which is the server's answer rather than this
+               window's. */
+            const emailHost = el('div');
+            m.body.append(emailHost);
+            paintMailEmailSettings(emailHost);
+        }
+        async function paintMailEmailSettings(host) {
+            host.innerHTML = '';
+            let d;
+            try { d = await api('/api/mail/settings', { op: 'get' }); }
+            catch (e) { return; }        /* the filters above still work without it */
+            const lead = !!d.lead;
+            host.append(el('div', 'section-title', 'Email'));
+            host.append(el('p', 'field-help',
+                'The footer goes on the end of every email sent from here, under the sender’s '
+                + 'own sign-off. Saved replies are the paragraphs this shop types over and over.'));
+            const ft = document.createElement('textarea');
+            ft.className = 'mail-draft-text'; ft.rows = 3; ft.value = d.footer || '';
+            ft.maxLength = 1000;
+            ft.readOnly = !lead;
+            ft.setAttribute('aria-label', 'Shop footer');
+            host.append(ft);
+            /* Said where it is typed. A cap discovered by being refused is a cap
+               nobody knew about. */
+            const count = el('div', 'field-help');
+            const recount = () => { count.textContent = ft.value.length + ' of 1000 characters'; };
+            ft.oninput = recount; recount();
+            host.append(count);
+            if (lead) {
+                const bar = el('div', 'mail-statebar');
+                const save = el('button', 'btn', 'Save footer');
+                save.onclick = async () => {
+                    save.disabled = true;
+                    try { await api('/api/mail/settings', { op: 'footer', text: ft.value }); }
+                    catch (e) { toastError(e.message); save.disabled = false; return; }
+                    toastOk('Footer saved.');
+                    save.disabled = false;
+                    refreshMailQuiet();
+                };
+                bar.append(save);
+                host.append(bar);
+            }
+            host.append(el('div', 'setting-title', 'Saved replies'));
+            const list = el('div');
+            host.append(list);
+            const reps = (d.saved_replies || []).slice();
+            const reload = async () => {
+                let r;
+                try { r = await api('/api/mail/settings', { op: 'get' }); }
+                catch (e) { toastError(e.message); return; }
+                paintMailEmailSettings(host);
+                refreshMailQuiet();
+                return r;
             };
-            bar.append(run);
-            m.body.append(bar);
+            const paintList = () => {
+                list.innerHTML = '';
+                if (!reps.length) {
+                    list.append(el('div', 'mail-empty', lead
+                        ? 'No saved replies yet. A first one might be the artwork rules, or the '
+                          + 'lead time on a custom gobo.'
+                        : 'No saved replies have been set up yet.'));
+                }
+                reps.forEach(r => {
+                    const row = el('div', 'mrule');
+                    row.append(el('div', 'mrule-name', r.title));
+                    row.append(el('div', 'mrule-do', r.text));
+                    if (!lead) { list.append(row); return; }
+                    const bar = el('div', 'mrule-bar');
+                    const ed = el('button', 'btn', 'Edit');
+                    ed.onclick = () => replyForm(row, r);
+                    const del = el('button', 'btn', 'Delete');
+                    del.onclick = async () => {
+                        if (!(await uiConfirm('Delete the saved reply "' + r.title + '"? '
+                            + 'Email it was already used in is not touched.'))) return;
+                        try { await api('/api/mail/settings', { op: 'reply_delete', id: r.id }); }
+                        catch (e) { toastError(e.message); return; }
+                        reload();
+                    };
+                    bar.append(ed, del);
+                    row.append(bar);
+                    list.append(row);
+                });
+                if (!lead) return;
+                const add = el('button', 'btn btn-primary', 'Add a saved reply');
+                add.onclick = () => replyForm(add, null);
+                list.append(add);
+            };
+            /* Edited in place, next to the other replies, so the list it is
+               being compared against stays on screen. */
+            function replyForm(anchor, r) {
+                const box = el('div', 'mrule');
+                const title = crmText(r ? r.title : '', 'What it is for, e.g. Artwork rules');
+                crmField(box, 'Title', title);
+                const text = document.createElement('textarea');
+                text.className = 'mail-draft-text'; text.rows = 4; text.value = r ? r.text : '';
+                text.setAttribute('aria-label', 'Saved reply text');
+                box.append(text);
+                const bar = el('div', 'mrule-bar');
+                const save = el('button', 'btn btn-primary', 'Save');
+                save.onclick = async () => {
+                    save.disabled = true;
+                    const payload = { op: 'reply_save', title: title.value.trim(), text: text.value };
+                    if (r) payload.id = r.id;
+                    try { await api('/api/mail/settings', payload); }
+                    catch (e) { toastError(e.message); save.disabled = false; return; }
+                    reload();
+                };
+                const cancel = el('button', 'btn', 'Cancel');
+                cancel.onclick = () => { box.remove(); anchor.style.display = ''; };
+                bar.append(save, cancel);
+                box.append(bar);
+                anchor.style.display = 'none';
+                anchor.after(box);
+                title.focus();
+            }
+            paintList();
         }
         function mailRuleForm(m, data, rule) {
             const r = rule ? JSON.parse(JSON.stringify(rule))
@@ -15862,6 +16095,57 @@
                     sub: r.name ? (r.email + (r.sub ? ' · ' + r.sub : '')) : (r.sub || ''),
                 }));
         }
+        /* The board carries the shop footer, the caller's own sign-off and the
+           saved replies. One reader, because a board fetched before this
+           existed has no email block at all and every caller would otherwise
+           need the same guard. */
+        function mailEmailBits() {
+            const e = (mailCache && mailCache.email) || {};
+            return { footer: e.footer || '', sign_off: e.sign_off || '',
+                     saved_replies: e.saved_replies || [] };
+        }
+        /* What the server will put on the end. A person writing a reply cannot
+           otherwise see what it actually ends with, and the first time they
+           find out should not be in the customer's inbox. */
+        function mailAddedWhenSent(host) {
+            const bits = mailEmailBits();
+            const sign = (bits.sign_off || '').trim(), foot = (bits.footer || '').trim();
+            /* Nothing set, nothing drawn: a box labelled "Added when sent" with
+               nothing in it says something is added when nothing is. */
+            if (!sign && !foot) return;
+            const box = el('div', 'mail-sig');
+            box.append(el('div', 'mail-sig-lab', 'Added when sent'));
+            if (sign) box.append(el('div', 'mail-sig-text', sign));
+            if (foot) box.append(el('div', 'mail-sig-text', foot));
+            host.append(box);
+        }
+        /* The saved replies, into the box at the cursor. */
+        function mailReplyPicker(ta, host) {
+            const reps = mailEmailBits().saved_replies;
+            /* No saved replies, no select: an empty dropdown is a dead control
+               that still costs a glance every time the window opens. */
+            if (!reps.length) return;
+            const sel = el('select', 'psel mail-insert');
+            sel.setAttribute('aria-label', 'Insert saved reply');
+            const head = el('option', null, 'Insert saved reply'); head.value = '';
+            sel.append(head);
+            reps.forEach(r => { const o = el('option', null, r.title); o.value = r.id; sel.append(o); });
+            sel.onchange = () => {
+                const r = reps.find(x => x.id === sel.value);
+                sel.value = '';                  /* so the same one can go in twice */
+                if (!r) return;
+                /* At the cursor and over any selection, not appended: a saved
+                   reply is dropped into a paragraph already being written, and
+                   putting the artwork rules after the last line instead lands
+                   them below a half-finished sentence. */
+                const from = ta.selectionStart, to = ta.selectionEnd;
+                const text = r.text || '';
+                ta.value = ta.value.slice(0, from) + text + ta.value.slice(to);
+                ta.focus();
+                ta.setSelectionRange(from + text.length, from + text.length);
+            };
+            host.append(sel);
+        }
         /* A new conversation rather than a reply. Same modal idiom as Size
            rules, same two-step send as the reply panel. */
         function openMailCompose() {
@@ -15919,6 +16203,8 @@
             ta.rows = 10;
             bodyL.append(ta);
             body.append(bodyL);
+            mailReplyPicker(ta, body);
+            mailAddedWhenSent(body);
             const bar = el('div', 'mail-statebar');
             const send = el('button', 'btn btn-primary', 'Send');
             send.onclick = () => mailSendFlow(bar,
@@ -15977,6 +16263,10 @@
             ta.className = 'mail-draft-text';
             ta.rows = 10; ta.value = out.draft;
             host.append(ta);
+            /* Claude is told to stop after its last sentence, so the sign-off
+               and the footer under the box are the whole of what gets added. */
+            mailReplyPicker(ta, host);
+            mailAddedWhenSent(host);
             const canSend = mailCanSend();
             const bar = el('div', 'mail-statebar');
             /* Save steps back to secondary only where Send has taken the lead.
@@ -17812,6 +18102,37 @@
                     };
                     cl.append(csel); cw.append(cl); panel.append(cw);
                     panel.append(perm);
+                    /* A new starter's replies go out unsigned until somebody
+                       sets this, and they cannot reach their own Settings until
+                       they have signed in. Same rank rule as the switches above
+                       it, and its own Save: the tabs Save below deliberately
+                       writes nothing when nothing changed, and folding a second
+                       field into it would break that. */
+                    if (manageable) {
+                        const sw = el('div'); sw.style.cssText = 'flex:1 1 100%';
+                        const sl2 = el('label', 'pfield');
+                        sl2.append(el('span', null, 'Sign-off on their email'));
+                        const sta = document.createElement('textarea');
+                        sta.className = 'mail-draft-text'; sta.rows = 3;
+                        sta.value = u.sign_off || '';
+                        sta.setAttribute('aria-label',
+                            'Sign-off for ' + (u.name || 'this account'));
+                        sl2.append(sta); sw.append(sl2);
+                        const ssave = el('button', 'btn', 'Save sign-off');
+                        ssave.style.marginTop = '6px';
+                        ssave.onclick = async () => {
+                            ssave.disabled = true;
+                            try {
+                                await api('/api/team/user',
+                                          { op: 'sign_off', id: u.id, text: sta.value });
+                            } catch (e) { toastError(e.message); ssave.disabled = false; return; }
+                            toastOk('Sign-off saved.');
+                            ssave.disabled = false;
+                            loadTeam();
+                        };
+                        sw.append(ssave);
+                        panel.append(sw);
+                    }
                     const save = el('button', 'btn btn-primary', 'Save');
                     save.onclick = async () => {
                         save.disabled = true;
@@ -18352,6 +18673,28 @@
             }
         }
 
+        /* Self-service, and the only thing on this modal that belongs to the
+           person rather than to the store. Hidden until the server has actually
+           answered: somebody with no Inbox has no sign-off to set, and an empty
+           box they cannot save is worse than no box. */
+        async function refreshSignOffRow() {
+            const row = $('signoff-row'), ta = $('signoff-text'), btn = $('signoff-btn');
+            if (!row) return;
+            let d;
+            try { d = await api('/api/mail/settings', { op: 'get' }); }
+            catch (e) { $('signoff-row').style.display = 'none'; return; }
+            ta.value = d.sign_off || '';
+            $('signoff-row').style.display = '';
+            btn.onclick = async () => {
+                btn.disabled = true;
+                try { await api('/api/mail/settings', { op: 'sign_off', text: ta.value }); }
+                catch (e) { toastError(e.message); btn.disabled = false; return; }
+                toastOk('Sign-off saved.');
+                btn.disabled = false;
+                refreshMailQuiet();
+            };
+        }
+
         function openMfaSetup() {
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal');
@@ -18442,7 +18785,7 @@
                 btn.textContent = 'Save failed, retry';
             } finally { btn.disabled = false; }
         }
-        $('settings-btn').onclick = () => { openSettings(); refreshMfaRow(); };
+        $('settings-btn').onclick = () => { openSettings(); refreshMfaRow(); refreshSignOffRow(); };
         $('settings-close').onclick = closeSettings;
         $('settings-cancel').onclick = closeSettings;
         $('settings-save').onclick = applySettings;

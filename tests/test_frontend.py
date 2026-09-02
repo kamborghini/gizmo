@@ -33,6 +33,19 @@ def ok(cond, why):
     assert cond, why
 
 
+def fn_src(name):
+    """The body of one top-level function in the SPA script: from its `function`
+    keyword to the next function declared at the same indentation. Everything
+    below reads a single function rather than the whole file, so an assertion
+    about the reply panel cannot be satisfied by an identical line in the
+    compose window."""
+    i = SCRIPT.index(name)
+    rest = SCRIPT[i + len(name):]
+    ends = [j for j in (rest.find("\n        function "),
+                        rest.find("\n        async function ")) if j >= 0]
+    return SCRIPT[i:i + len(name) + (min(ends) if ends else len(rest))]
+
+
 @test
 def t_the_script_parses():
     """A duplicate `const` in a 5,700-line file is invisible until the page dies."""
@@ -3417,8 +3430,12 @@ def t_the_send_grant_is_switched_from_the_team_tab():
     """A capability, not a tab, granted the way the size list is granted. An
     admin holds it by rank, so they get a statement rather than a switch that
     would not actually revoke anything."""
-    ok("if (u.sizes_by_rank) {" in SCRIPT, "the size grant is still the pattern")
-    seg = SCRIPT[SCRIPT.index("if (u.sizes_by_rank) {"):][:5200]
+    # Was a fixed 5,200-character window, which the sign-off field pushed the
+    # send op out of. Bounded by the function instead, so it neither expires
+    # the next time the panel grows nor reaches past it into another one.
+    people = fn_src("function renderTeamPeople(")
+    ok("if (u.sizes_by_rank) {" in people, "the size grant is still the pattern")
+    seg = people[people.index("if (u.sizes_by_rank) {"):]
     ok("if (u.send_by_rank) {" in seg, "rank is read before the switch is drawn")
     ok("(every admin can)" in seg.split("if (u.send_by_rank) {")[1][:300],
        "and an admin is told, not offered a switch that lies")
@@ -3626,6 +3643,190 @@ def t_the_address_book_is_fetched_once_and_kept():
     ok(re.search(r"MAIL_ADDR_TTL = 10 \* 60 \* 1000", SCRIPT), "which is ten minutes")
     ok("catch" in fn and "toastError" not in fn,
        "a failure is swallowed: nobody asked for an address book")
+
+
+@test
+def t_the_eori_line_has_one_branch_per_status():
+    """Four answers come back and they mean four different things. The one that
+    must never be drawn as "not valid" is unknown: a timeout is not a bad
+    number, and refusing an export booking over a number the EU service simply
+    failed to answer for is the cost of getting that wrong."""
+    ok("function eoriPaint(" in SCRIPT, "one place turns an answer into the line")
+    fn = fn_src("function eoriPaint(")
+    for st in ("'valid'", "'invalid'", "'not_covered'"):
+        ok(st in fn, "the " + st + " answer is tested by name")
+    ok("Not valid according to the EU database." in fn, "the invalid line, in those words")
+    ok(fn.count("=== 'invalid'") == 1,
+       "and it is reached by exactly one explicit test for that status")
+    ok(fn.count("'eori-line bad'") == 1, "exactly one branch paints the red tone")
+    red = fn.index("'eori-line bad'")
+    ok(0 < red - fn.index("=== 'invalid'") < 120,
+       "and it is the branch guarded by status === 'invalid', immediately above it")
+    unk = fn.index("Could not check:")
+    ok(unk > red, "the unknown line is a later branch than the invalid one")
+    ok(fn.rindex("'eori-line muted'", 0, unk) > red,
+       "and sets a muted tone of its own rather than falling into the red one: "
+       "a service that did not answer is not a number that is wrong")
+    ok("} else {" in fn, "the last branch is an else")
+    tail = fn[fn.rindex("} else {"):]
+    ok("Could not check:" in tail and "if (" not in tail,
+       "and it is unknown, with no condition of its own, so a status this file "
+       "has never heard of reads as unchecked rather than as invalid")
+    ok("Try again in a minute." in fn, "and says what to do about it")
+    ok("r.cached ?" in fn and "from an earlier check" in fn and "checked just now" in fn,
+       "a valid answer says whether it came off the wire or out of the cache")
+
+
+@test
+def t_the_gb_line_hands_over_to_hmrc_without_handing_over_the_tab():
+    """The EU database does not hold GB numbers, so a GB answer is a signpost,
+    not a verdict. It opens in its own tab because the settings form behind it
+    is usually half filled in."""
+    ok("function eoriPaint(" in SCRIPT, "one place turns an answer into the line")
+    fn = fn_src("function eoriPaint(")
+    ok("https://www.tax.service.gov.uk/check-eori-number" in fn, "the HMRC checker")
+    ok("Check GB numbers at gov.uk" in fn, "named as where it goes")
+    ok("target = '_blank'" in fn, "opens beside the half-filled form")
+    ok("rel = 'noopener'" in fn,
+       "and the page it opens cannot reach back into this one through opener")
+    ok("r.reason" in fn[fn.index("not_covered"):], "the server's sentence is shown too")
+
+
+@test
+def t_the_eori_check_button_comes_back_from_every_outcome():
+    """A button that stays dead after a failed check is a checker that works
+    once. Every path out of the request re-enables it, including the throw."""
+    ok("async function eoriRun(" in SCRIPT, "one runner behind the button")
+    fn = fn_src("async function eoriRun(")
+    ok("'/api/eori/check'" in fn, "against the contract's route")
+    ok("btn.disabled = true" in fn, "the button goes down while a check is in flight")
+    ok(re.search(r"finally\s*\{[^}]*btn\.disabled = false", fn),
+       "and comes back in a finally, not on the happy path only")
+    ok("catch" in fn and "eoriPaint" in fn,
+       "a transport failure is drawn on the same line, not swallowed")
+    ok(re.search(r"/\[\.!\?\]\$/\.test\(why\)", fn),
+       "and is punctuated first: the browser's own 'Failed to fetch' carries no "
+       "full stop and ran straight into the sentence after it")
+    blk = SCRIPT[SCRIPT.index("Check a customer’s EORI"):][:2600]
+    ok("'e.g. DE123456789'" in blk, "the placeholder the contract names")
+    ok("e.key === 'Enter'" in blk and "eoriRun(" in blk,
+       "Enter in the box checks, so the number can be typed and confirmed "
+       "without reaching for the mouse")
+
+
+@test
+def t_the_filters_window_gates_the_email_section_on_the_servers_lead_flag():
+    """The footer signs every email this business sends, so who may change it
+    is the server's answer, not this window's. A non-lead still sees what is
+    being appended to their replies."""
+    ok("async function paintMailEmailSettings(" in SCRIPT, "the section has a source")
+    fn = fn_src("async function paintMailEmailSettings(")
+    ok("'/api/mail/settings'" in fn and "op: 'get'" in fn, "read from the contract's route")
+    ok("const lead = !!d.lead" in fn,
+       "gated on the flag the SERVER sent, not on the rules window's own idea "
+       "of who is a lead")
+    ok("readOnly = !lead" in fn, "a non-lead reads the footer and cannot type into it")
+    for op in ("op: 'footer'", "op: 'reply_save'", "op: 'reply_delete'"):
+        ok(op in fn, "the lead-only " + op)
+    ok("of 1000" in fn, "the cap is on screen before it is hit, not discovered by refusal")
+    rules = fn_src("function paintMailRules(")
+    ok("paintMailEmailSettings(" in rules, "the Filters window draws it")
+    stop = rules.index("Only a lead can change these.")
+    ok(stop < rules.index("paintMailEmailSettings("),
+       "at the end, below the filters themselves")
+    ok("return" not in rules[stop:stop + 200].split("}")[0],
+       "and a non-lead reaches it: their branch says so and carries on, where "
+       "it used to return and end the window before the Email section for "
+       "exactly the people who cannot see the footer any other way")
+
+
+@test
+def t_the_settings_modal_carries_your_sign_off():
+    """Every person's own name on their own replies, set where they already go
+    to change their own password."""
+    ok('id="signoff-text"' in HTML, "the box is in the markup")
+    m = re.search(r'<textarea id="signoff-text"[^>]*rows="(\d+)"', HTML)
+    ok(m and m.group(1) == "4", "four rows, which is the cap the contract sets")
+    start = HTML.index('id="settings-modal"')
+    ok(start < HTML.index('id="signoff-text"') < HTML.index('id="settings-save"'),
+       "inside the Settings modal and above its footer, not loose on the page")
+    ok("async function refreshSignOffRow(" in SCRIPT, "it is filled from the server")
+    fn = fn_src("async function refreshSignOffRow(")
+    ok("'/api/mail/settings'" in fn, "on the mail settings route")
+    ok("op: 'sign_off'" in fn, "and saved with the contract's op")
+    ok('id="signoff-row" style="display:none"' in HTML,
+       "the row starts hidden, and is shown only once the server has answered")
+    ok("catch (e)" in fn, "the fetch has a failure path")
+    ok("display = 'none'" in fn[fn.index("catch (e)"):][:130],
+       "which puts the row back to hidden: somebody with no Inbox must not be "
+       "left an empty box that the mail guard will refuse to save")
+    open_btn = SCRIPT[SCRIPT.index("$('settings-btn').onclick"):][:200]
+    ok("refreshSignOffRow()" in open_btn, "refreshed when the modal opens, beside the two-step row")
+
+
+@test
+def t_what_gets_added_when_sent_is_shown_and_vanishes_when_there_is_none():
+    """The sign-off and the footer are appended by the server, so the only
+    place a person can see what their reply will actually end with is here. An
+    empty box labelled "Added when sent" claims something is added when
+    nothing is, so with neither set there is no box."""
+    ok("function mailEmailBits(" in SCRIPT, "one reader for the board's email block")
+    bits = fn_src("function mailEmailBits(")
+    ok("mailCache && mailCache.email" in bits,
+       "read off the board payload, so an older board with no email block is "
+       "empty rather than a thrown TypeError")
+    ok("saved_replies: e.saved_replies || []" in bits,
+       "and every field falls back to its own empty shape, so the picker can "
+       "iterate the replies without checking first")
+    ok("function mailAddedWhenSent(" in SCRIPT, "one preview block")
+    fn = fn_src("function mailAddedWhenSent(")
+    ok("mailEmailBits()" in fn, "through that one reader")
+    ok("'Added when sent'" in fn, "labelled as what it is")
+    ok(re.search(r"if \(!\w+ && !\w+\) return", fn),
+       "and with both empty it draws nothing at all")
+    ok(fn.index("sign_off") < fn.index("footer"),
+       "in send order: the sign-off, then the shop footer under it")
+
+
+@test
+def t_a_saved_reply_lands_where_the_cursor_is():
+    """A saved reply is dropped into a paragraph someone is already writing.
+    Appending it at the end instead puts the artwork rules after the sign-off
+    of a half-written sentence."""
+    ok("function mailReplyPicker(" in SCRIPT, "the picker has a source")
+    fn = fn_src("function mailReplyPicker(")
+    ok("if (!reps.length) return" in fn,
+       "no saved replies, no select: an empty dropdown is a dead control")
+    ok("ta.selectionStart" in fn and "ta.selectionEnd" in fn,
+       "the text goes in at the cursor, over any selection")
+    ok("setSelectionRange" in fn, "the cursor lands after what was just inserted")
+    ok("ta.focus()" in fn, "back in the textarea, ready to carry on typing")
+    ok("sel.value = ''" in fn, "and the select resets, so the same reply can go in twice")
+
+
+@test
+def t_the_compose_and_reply_boxes_keep_the_class_that_sizes_them():
+    """Both windows grew a preview and a dropdown underneath. The textarea they
+    are underneath is still the one the stylesheet sizes."""
+    for name in ("function openMailCompose()", "function mailDraftPanel("):
+        fn = fn_src(name)
+        ok("ta.className = 'mail-draft-text'" in fn, name + " keeps its textarea class")
+        ok("mailAddedWhenSent(" in fn, name + " shows what is appended on send")
+        ok("mailReplyPicker(ta" in fn, name + " offers the saved replies into that box")
+
+
+@test
+def t_an_admin_sets_someone_elses_sign_off_beside_their_other_switches():
+    """A new starter's replies go out unsigned until somebody sets it for them,
+    and that somebody is whoever already manages the account."""
+    fn = fn_src("function renderTeamPeople(")
+    ok("op: 'sign_off'" in fn, "the team panel posts the contract's op")
+    i = fn.index("op: 'sign_off'")
+    ok("'/api/team/user'" in fn[:i], "to the team route")
+    ok("id: u.id" in fn[i:i + 140], "for the account whose panel it is")
+    panel = fn.index("teamTabsOpen === u.id")
+    ok("if (manageable)" in fn[panel:i],
+       "and only where the size and send switches beside it are shown")
 
 
 @test

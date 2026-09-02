@@ -44,6 +44,7 @@ from urllib.parse import urlparse, urljoin, quote
 import anthropic
 import httpx
 import jwt
+import eori
 import google_data
 import google_mail
 import recon as recon_engine
@@ -8045,6 +8046,11 @@ def _json(data: dict, status: int = 200) -> JSONResponse:
 _rl_hits: dict[str, list[float]] = {}
 _rl_global: list[float] = []
 _oauth_states: dict[str, float] = {}   # state nonce -> expiry (Google OAuth connect flow)
+# EORI checks, app-wide rather than per-client: the limit being respected is
+# the EU service's, and it counts requests from this deployment, not from
+# whichever member of staff happens to be typing.
+_eori_hits: list[float] = []
+EORI_MAX_PER_MIN = 20
 
 
 # ---------------------------------------------------------------------------
@@ -9441,6 +9447,11 @@ MAIL_ATTACH_CAP = 25 * 1024 * 1024   # what we will pull out of Gmail in one go
 def _mail_default() -> dict:
     return {"version": 1, "labels": {}, "threads": {}, "rules": [], "seq": 0,
             "synced_at": "", "sync_error": "",
+            # What gets stamped onto outgoing email. The footer is the shop's
+            # and belongs to the room; a person's sign-off is their own name
+            # and lives on their account, not here. Saved replies are the
+            # room's standard answers, written once by a lead.
+            "email": {"footer": "", "saved_replies": []},
             # New conversations this app stamped as "about to send" and never
             # got to confirm. A reply's stamp lives on its own thread; a new
             # message has no thread yet, so it waits here until the send comes
@@ -9600,6 +9611,17 @@ def _load_mail() -> dict:
         _mail_mem = d if isinstance(d, dict) and "threads" in d else _mail_default()
         for k, v in _mail_default().items():
             _mail_mem.setdefault(k, v)
+        # A store written before the footer existed has no "email" block, and
+        # one written by a half-way build may have the key without its parts.
+        # Every reader below indexes straight into these, so they are repaired
+        # here rather than defended against in a dozen places.
+        em = _mail_mem.get("email")
+        if not isinstance(em, dict):
+            em = _mail_mem["email"] = {}
+        if not isinstance(em.get("footer"), str):
+            em["footer"] = ""
+        if not isinstance(em.get("saved_replies"), list):
+            em["saved_replies"] = []
         # Gmail HTML-escapes snippets; the connector unescapes them now, but
         # snippets stored by earlier builds carry &#39; baked in, and a thread
         # whose historyId never changes again would show it forever.
@@ -9647,6 +9669,63 @@ def _write_mail(d: dict) -> None:
 
 def _mail_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# Caps on the two settings that get stamped onto outgoing email.
+MAIL_FOOTER_MAX = 1000
+MAIL_SIGNOFF_MAX = 200
+MAIL_SIGNOFF_LINES = 4
+MAIL_REPLY_TITLE_MAX = 80
+MAIL_REPLY_TEXT_MAX = 5000
+MAIL_REPLIES_MAX = 50
+
+
+def _mail_outgoing_text(body: str, sign_off: str, footer: str) -> str:
+    """The words that actually leave: the reply, the sender's sign-off, the
+    shop's footer, in that order, one blank line apart.
+
+    Pure, and applied at the moment of sending rather than baked into the
+    draft. That ordering matters twice over: a draft written last week goes out
+    under this week's footer, and a person editing their words in the compose
+    box is never editing around a footer they cannot change anyway.
+
+    Whitespace-only settings count as unset - otherwise a stray space left in a
+    settings box would append a blank block to every email the shop sends."""
+    out = (body or "").rstrip()
+    for extra in ((sign_off or "").strip(), (footer or "").strip()):
+        if extra:
+            out += "\n\n" + extra
+    return out
+
+
+def _mail_sign_off(uid) -> str:
+    """One person's sign-off. Lives on the account, not the mail store: it is
+    their name, and it has to survive the mailbox being reconnected."""
+    u = _team_user(uid)
+    return str((u or {}).get("sign_off") or "")
+
+
+def _mail_email_block(store: dict, uid) -> dict:
+    """The footer/sign-off/saved-reply block, shaped once for both the board
+    and the settings route so the two can never disagree about it."""
+    em = store.get("email") or {}
+    return {"footer": str(em.get("footer") or ""),
+            "sign_off": _mail_sign_off(uid),
+            "saved_replies": [{"id": str(r.get("id") or ""),
+                               "title": str(r.get("title") or ""),
+                               "text": str(r.get("text") or "")}
+                              for r in (em.get("saved_replies") or [])]}
+
+
+def _mail_clean_sign_off(raw):
+    """(text, error). The caps are the same wherever a sign-off is set, so the
+    self-service route and the admin one cannot drift apart."""
+    text = str(raw or "").strip()
+    if len(text) > MAIL_SIGNOFF_MAX:
+        return None, f"A sign-off can be at most {MAIL_SIGNOFF_MAX} characters."
+    if len(text.splitlines()) > MAIL_SIGNOFF_LINES:
+        return None, f"A sign-off can be at most {MAIL_SIGNOFF_LINES} lines."
+    return text, ""
 
 
 def _mail_log(t: dict, by: str, action: str, detail: str = "") -> None:
@@ -11458,6 +11537,9 @@ _TAB_ROUTES = (
     ("/api/order/", "labels"),
     ("/api/dispatch/", "labels"), ("/api/custom/", "labels"),
     ("/api/stock-usage", "labels"), ("/api/margin", "labels"), ("/api/gobo-sizes", "labels"),
+    # The EORI checker is part of preparing a customs invoice, so it lives
+    # behind the same tab as the dispatch panel that prints one.
+    ("/api/eori", "labels"),
     ("/api/memory", "memory"), ("/api/learn", "memory"), ("/api/impact", "memory"),
     ("/api/skills", "skills"), ("/api/chat", "chat"),
     ("/api/shipping", "labels"),
@@ -11610,7 +11692,10 @@ def _user_public(uid: str, u: dict) -> dict:
             # and the by-rank one are reported apart, so the Team screen never
             # shows an admin a switch that would not actually revoke anything.
             "can_send": bool(u.get("can_send")),
-            "send_by_rank": ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"]}
+            "send_by_rank": ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"],
+            # The current value travels with the list so an admin editing it
+            # sees what they are overwriting rather than setting it blind.
+            "sign_off": str(u.get("sign_off") or "")}
 
 
 _events_mem: Optional[list] = None
@@ -13147,6 +13232,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                           "team": _mail_team_shape(),
                           "me": who, "lead": _mail_lead(who),
                           "can_send": _may_send_mail(who),
+                          # The compose box needs all three to show the person
+                          # what their email will actually look like when it
+                          # goes, rather than just the half they typed.
+                          "email": _mail_email_block(store, who),
                           # Sends that were written down and never confirmed.
                           # They belong on the board, not in a log file: only
                           # somebody looking at the mailbox can settle them.
@@ -13346,7 +13435,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         "- Match the customer's register. Warm and direct, never salesy, never "
         "apologetic to the point of grovelling. British spelling.\n"
         "- Keep it short. Most good replies are three or four sentences.\n"
-        "- Sign off with the staff member's first name only.\n"
+        # The sign-off and footer are stamped on by the send, so the model must
+        # not write one too. It used to be told to sign off with the staff
+        # member's first name, which would now put two sign-offs on every email.
+        "- End after your last sentence, with no sign-off, name or signature. A "
+        "sign-off and the shop footer are appended automatically when the reply "
+        "is sent, so anything you add there would be said twice.\n"
         "- Never promise a discount, a refund, a credit or a free replacement: that "
         "is the merchant's decision to make, not yours.\n\n"
         "Facts given to you under 'Known facts you MAY use' come from this shop's "
@@ -13400,6 +13494,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             refusal = _mail_reply_refusal(to_addr, addr)
             if refusal:
                 return refusal
+            # The draft is what the person will read and send from Gmail, so it
+            # has to be the finished article. Stamping only on our own send
+            # path would mean every draft finished in Gmail went out bare.
+            text = _mail_outgoing_text(text, _mail_sign_off(who),
+                                       (_load_mail().get("email") or {}).get("footer") or "")
             replaces, kept = await _mail_leftover_draft(t)
             try:
                 out = await google_mail.create_draft(
@@ -13624,6 +13723,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return refusal
             if dry:
                 return _json({"ok": True, "dry": True, "to": to_addr, "kind": "reply"})
+            # Past the dry run, and before anything durable: the stamp below is
+            # the record of what the customer was sent, so it has to hold the
+            # finished words, not the half the person typed.
+            text = _mail_outgoing_text(text, _mail_sign_off(who),
+                                       (_load_mail().get("email") or {}).get("footer") or "")
             sick = _mail_store_sick()
             if sick:
                 return sick
@@ -13701,6 +13805,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         to_addr = ", ".join(addrs)
         if dry:
             return _json({"ok": True, "dry": True, "to": to_addr, "kind": "new"})
+        text = _mail_outgoing_text(text, _mail_sign_off(who),
+                                   (_load_mail().get("email") or {}).get("footer") or "")
         sick = _mail_store_sick()
         if sick:
             return sick
@@ -14151,6 +14257,112 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if out["failed"] and not out["changed"]:
             return _json({"error": "Gmail would not accept that change. Try again in a moment."}, 502)
         return _json({"ok": True, **out})
+
+    @mcp.custom_route("/api/mail/settings", methods=["POST"])
+    async def mail_settings_route(request: Request):
+        """The footer, the saved replies and your own sign-off.
+
+        The split down the middle is the point: the footer and the saved
+        replies go out over the whole room's email, so a lead owns them; a
+        sign-off is a person's own name, so they own it and need nobody's
+        permission. An admin can still set someone else's through the team
+        route, by rank, for the person who has left or never filled it in."""
+        err, body, who = await _mail_guard(request)
+        if err:
+            return err
+        store = _load_mail()
+        op = str(body.get("op") or "get")
+        if op == "get":
+            return _json({**_mail_email_block(store, who), "lead": _mail_lead(who)})
+
+        if op == "sign_off":
+            # Self-service: no lead check. This is the one setting here that is
+            # not a decision about anybody else's email.
+            text, why = _mail_clean_sign_off(body.get("text"))
+            if why:
+                return _json({"error": why}, 400)
+            d = _load_users()
+            u = d["users"].get(str(who))
+            if not u:
+                return _json({"error": "That account does not exist."}, 400)
+            u["sign_off"] = text
+            try:
+                _write_users(d)
+            except Exception:
+                logger.exception("mail: the sign-off could not be saved")
+                return _json({"error": "The accounts register cannot be written right "
+                                       "now, so the sign-off was not saved."}, 503)
+            _track(who, "mail", "changed their email sign-off", text[:60])
+            return _json({"ok": True})
+
+        if not _mail_lead(who):
+            return _json({"error": "Only a lead can change the footer."}, 403)
+        sick = _mail_store_sick()
+        if sick:
+            return sick
+        em = store.setdefault("email", {"footer": "", "saved_replies": []})
+
+        if op == "footer":
+            text = str(body.get("text") or "").strip()
+            if len(text) > MAIL_FOOTER_MAX:
+                return _json({"error": f"The footer can be at most {MAIL_FOOTER_MAX} "
+                                       "characters."}, 400)
+            em["footer"] = text
+            try:
+                _write_mail(store)
+            except Exception:
+                logger.exception("mail: the footer could not be saved")
+                return _json({"error": "The inbox store cannot be written right now, so "
+                                       "the footer was not saved."}, 503)
+            _track(who, "mail", "changed the email footer", text[:60])
+            return _json({"ok": True})
+
+        if op == "reply_save":
+            title = " ".join(str(body.get("title") or "").split())
+            text = str(body.get("text") or "").strip()
+            if not title or len(title) > MAIL_REPLY_TITLE_MAX:
+                return _json({"error": "A saved reply needs a title, at most "
+                                       f"{MAIL_REPLY_TITLE_MAX} characters."}, 400)
+            if not text or len(text) > MAIL_REPLY_TEXT_MAX:
+                return _json({"error": "A saved reply needs something to say, at most "
+                                       f"{MAIL_REPLY_TEXT_MAX} characters."}, 400)
+            rows = em.setdefault("saved_replies", [])
+            rid = str(body.get("id") or "")
+            row = next((r for r in rows if str(r.get("id") or "") == rid), None) if rid else None
+            if row is None:
+                if len(rows) >= MAIL_REPLIES_MAX:
+                    return _json({"error": f"That is the {MAIL_REPLIES_MAX}-reply limit. "
+                                           "Delete one you no longer use first."}, 400)
+                row = {"id": secrets.token_hex(6), "title": "", "text": ""}
+                rows.append(row)
+            row["title"], row["text"] = title, text
+            try:
+                _write_mail(store)
+            except Exception:
+                logger.exception("mail: the saved reply could not be stored")
+                return _json({"error": "The inbox store cannot be written right now, so "
+                                       "the reply was not saved."}, 503)
+            _track(who, "mail", "saved a standard reply", title[:60])
+            return _json({"ok": True, "id": row["id"]})
+
+        if op == "reply_delete":
+            rid = str(body.get("id") or "")
+            rows = em.setdefault("saved_replies", [])
+            keep = [r for r in rows if str(r.get("id") or "") != rid]
+            if len(keep) == len(rows):
+                return _json({"error": "That saved reply is not there. Refresh and "
+                                       "try again."}, 404)
+            em["saved_replies"] = keep
+            try:
+                _write_mail(store)
+            except Exception:
+                logger.exception("mail: the saved reply could not be removed")
+                return _json({"error": "The inbox store cannot be written right now, so "
+                                       "nothing was deleted."}, 503)
+            _track(who, "mail", "deleted a standard reply", rid)
+            return _json({"ok": True})
+
+        return _json({"error": "Unknown operation."}, 400)
 
     @mcp.custom_route("/api/mail/rules", methods=["POST"])
     async def mail_rules_route(request: Request):
@@ -16918,6 +17130,19 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 u["colour"] = colour
                 _write_users(d)
                 _track(who, "team", "changed a colour", f"{label} is now {colour}")
+            elif op == "sign_off":
+                # Somebody who has left, or who never filled it in, still needs
+                # a name on outgoing email. Same rank rule as every other
+                # account change; the person's own door is /api/mail/settings.
+                if not may_manage():
+                    return _json({"error": "You cannot manage that account."}, 403)
+                text, why = _mail_clean_sign_off(body.get("text"))
+                if why:
+                    return _json({"error": why}, 400)
+                u["sign_off"] = text
+                _write_users(d)
+                _track(who, "team", "changed an email sign-off",
+                       f"{label}: " + (text[:60] if text else "cleared"))
             elif op == "sizes":
                 # Who may change what the bench cuts. Admins hold it by rank and
                 # cannot be toggled: switching it off would read as a revocation
@@ -17926,6 +18151,50 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except Exception:
             logger.exception("shipping validate failed")
             return _json({"ok": False, "error": "Couldn't reach World Options."}, 200)
+
+    @mcp.custom_route("/api/eori/check", methods=["POST"])
+    async def eori_check_route(request: Request):
+        """Check a customer's EORI number against the EU's validation service.
+
+        Gated like the shipping settings, because it is the same job: getting
+        the customs paperwork right before a parcel leaves. The answer is only
+        ever advisory - see eori.py for why an unreachable service must read as
+        "unknown" here and never as "invalid"."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok, who = _authorize(request)
+        if not ok:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        raw = body.get("number")
+        kind = eori.classify(raw)
+        if kind == "bad":
+            return _json({"error": "That is not an EORI number. They start with a "
+                                   "two-letter country code, for example "
+                                   "DE123456789012345."}, 400)
+        # Our own ceiling, separate from the per-client one in _pre_checks. The
+        # EU service publishes a request limit and answers a flood with nothing
+        # at all, so the thing being protected here is not this app: it is our
+        # ability to get an answer out of Brussels for the next hour.
+        if not _window_ok(_eori_hits, EORI_MAX_PER_MIN, time.monotonic()):
+            return _json({"error": "Slow down: too many checks in a minute."}, 429)
+        try:
+            res = await eori.check(raw)
+        except Exception:
+            # eori.check answers rather than raises for every service problem,
+            # so reaching here means a bug on our side. It still must not read
+            # as a verdict on the customer's number.
+            logger.exception("EORI check failed")
+            return _json({"error": "The EORI check could not be run."}, 502)
+        # Worth a ledger line: it names a third party we asked about a customer,
+        # and "we checked and it came back invalid" is a claim someone may later
+        # have to stand behind.
+        _track(who, "settings", "checked an EORI number",
+               res["number"] + " - " + res["status"])
+        return _json(res)
 
     @mcp.custom_route("/api/dispatch/parse-address", methods=["POST"])
     async def parse_address_route(request: Request):
