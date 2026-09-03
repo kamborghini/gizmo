@@ -672,8 +672,15 @@ def t_printing_cannot_waste_stock_or_print_invisible_text():
     barcode that will not scan; a label whose rows do not fit is cut off in
     silence; and the label typeface is font-display:block, so printing before
     it loads prints nothing at all."""
-    ok("const CARRIER_LABEL" in SCRIPT and "const dims = CARRIER_LABEL;" in SCRIPT,
-       "courier labels print at the carrier's own 4x6, not the chosen gobo stock")
+    # The courier stock became a setting of its own when the bench got a second
+    # printer. The requirement did not move: the courier sheet must read the
+    # COURIER printer's size and never the production selection.
+    carrier = fn_src("function carrierDims(")
+    ok("label_size_shipping" in carrier and "'4x6'" in carrier,
+       "courier labels print at the courier printer's own stock, defaulting to 4x6")
+    ok("labelDims" not in carrier and "prodSize" not in carrier,
+       "and never at the chosen gobo stock")
+    ok("const dims = carrierDims();" in SCRIPT, "the courier sheet asks for it")
     ok("const dims = labelDims()" not in
        re.search(r"function printLabelImages.*?\n        \}", SCRIPT, re.S).group(0),
        "printLabelImages no longer reads the production stock size")
@@ -3986,13 +3993,6 @@ def t_no_em_or_en_dash_reaches_the_page():
         ok(ch not in HTML, "an " + name + " is in static/index.html")
 
 
-if __name__ == "__main__":
-    print("frontend regressions")
-    print()
-    print(f"{_passed} passed, {len(_failed)} failed")
-    sys.exit(1 if _failed else 0)
-
-
 @test
 def t_a_list_never_leaves_the_editor_inside_a_paragraph():
     """Chromium's insertUnorderedList inside a <p> yields <p><ul>..</ul></p>
@@ -4003,5 +4003,75 @@ def t_a_list_never_leaves_the_editor_inside_a_paragraph():
     fn = fn[:fn.index("\n    }\n") + 7]
     ok("unwrap(p)" in fn, "a paragraph holding a block is unwrapped")
     ok("!p.childNodes.length" in fn and "p.remove()" in fn, "an empty paragraph goes")
-    ok("'ul'" in COMPOSER[COMPOSER.index("var BLOCKS"):COMPOSER.index("var BLOCKS") + 120])
+    ok("'ul'" in COMPOSER[COMPOSER.index("var BLOCKS"):COMPOSER.index("var BLOCKS") + 120],
+       "a list counts as a block")
     ok("if (tag === 'p') tidyParagraph(n);" in COMPOSER, "and it runs from the walker, on every pass")
+
+
+@test
+def t_the_four_inch_square_stock_exists_and_the_two_sides_agree():
+    """The production printer is loaded with 4x4 and it was not on the list at
+    all, which is why the size had to be chosen by hand every time. The server
+    validates saves against its own list, so the two must name the same sizes
+    or a size the page offers is refused on save."""
+    sizes = SCRIPT[SCRIPT.index("const LABEL_SIZES = {"):]
+    sizes = sizes[:sizes.index("};")]
+    ok("'4x4'" in sizes, "4 x 4 is on the list")
+    ok("101.6" in sizes.split("'4x4'")[1].split("}")[0], "and it is square, in millimetres")
+    client = set(re.findall(r"'([0-9a-z]+)': \{ w:", sizes))
+    src = open("copilot.py", encoding="utf-8").read()
+    block = src[src.index("LABEL_STOCK = ("):]
+    server = set(re.findall(r'"([0-9a-z]+)"', block[:block.index(")")]))
+    ok(client == server,
+       "the sizes the page offers are exactly the ones the server accepts "
+       "(page %s, server %s)" % (sorted(client), sorted(server)))
+
+
+@test
+def t_each_printer_reads_its_own_saved_default():
+    """Production and courier stock are separate settings. A change at the
+    print button is for that print only: it must never write the config, or
+    one person's test print re-points the whole bench's stock."""
+    ok("label_size_production" in fn_src("function prodSize("),
+       "the production size comes from the saved setting")
+    carrier = fn_src("function carrierDims(")
+    ok("label_size_shipping" in carrier and "'4x6'" in carrier,
+       "the courier sheet reads its own setting, falling back to 4 x 6")
+    ok("labelDims" not in carrier, "and never the production selection")
+    bar = SCRIPT[SCRIPT.index("const sizeSel = el('select', 'lbl-size')"):]
+    bar = bar[:bar.index("bar.append(sizeSel)")]
+    ok("/api/shipping/config" not in bar, "changing it at the print button saves nothing")
+    ok("localStorage" not in bar, "and no longer hides in one browser's storage")
+    ok("(default)" in bar, "the saved default is marked, so being off it is visible")
+
+
+@test
+def t_the_settings_screen_sets_both_printers_and_warns_about_the_barcode():
+    """Courier artwork is 4 x 6. On other stock it is scaled to fit, and a
+    shrunk barcode is one a scanner will not read - the screen has to say so
+    where the choice is made."""
+    fn = fn_src("async function openShippingSettings(")
+    ok("Label printers" in fn, "the section exists")
+    ok("label_size_production" in fn and "label_size_shipping" in fn, "both dropdowns save")
+    ok("scan" in fn.lower() and "4 x 6" in fn, "and the barcode warning names the artwork size")
+
+
+
+@test
+def t_no_guard_is_stranded_below_the_runner():
+    """The runner ends in sys.exit, so a test appended below it is DEFINED and
+    never RUN - and the suite still reports green. One had been sitting there
+    with a broken call for a day. New tests go above this block."""
+    src = open(__file__, encoding="utf-8").read()
+    # Anchored to the line start: this guard quotes the marker itself, and an
+    # unanchored search would find its own text and always pass.
+    tail = src[src.index("\nif __name__ ==") :]
+    ok("@" + "test" not in tail,
+       "a test is defined below the runner and will never execute")
+
+
+if __name__ == "__main__":
+    print("frontend regressions")
+    print()
+    print(f"{_passed} passed, {len(_failed)} failed")
+    sys.exit(1 if _failed else 0)

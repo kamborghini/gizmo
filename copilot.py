@@ -864,8 +864,18 @@ _DEFAULT_BOXES = [
     {"id": "medium", "name": "Medium box",     "width": 30, "length": 22, "depth": 15, "weight": 1.0},
     {"id": "large",  "name": "Large box",      "width": 45, "length": 35, "depth": 25, "weight": 3.0},
 ]
+# The label stock each printer is loaded with. Two printers at the bench: gobo
+# production labels come off one, courier labels off the other, and the stock
+# does not change from day to day - so this is a shop setting, not something
+# chosen at the print button. Kept here and offered by the config route so the
+# page and the server cannot drift about which sizes exist.
+LABEL_STOCK = ("4x2", "4x3", "4x4", "4x6", "2x4", "a4")
+
 _SHIPPING_DEFAULT = {
     "origin": {},
+    # 4x4 for production, 4x6 for the courier: the sizes actually loaded.
+    "label_size_production": "4x4",
+    "label_size_shipping": "4x6",
     "boxes": _DEFAULT_BOXES,
     "default_box_id": "small",
     "notify_customer": True,
@@ -18762,6 +18772,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                       if isinstance(cfg.get("collection_by_carrier"), dict) else {}),
             "collection_messages": COLLECTION_MESSAGES,
             "carriers": (worldoptions.carrier_choices() if worldoptions else []),
+            "label_size_production": cfg.get("label_size_production") or "4x4",
+            "label_size_shipping": cfg.get("label_size_shipping") or "4x6",
+            "label_stock": list(LABEL_STOCK),
             "eori": cfg.get("eori") or "",
             "vat_number": cfg.get("vat_number") or "",
             "default_hs_code": cfg.get("default_hs_code") or "",
@@ -18867,6 +18880,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if worldoptions and co not in worldoptions.COLLECTION_OPTIONS:
                 return _json({"error": "Unknown collection arrangement."}, 400)
             cfg["collection_option"] = co
+        for lkey in ("label_size_production", "label_size_shipping"):
+            if lkey in body:
+                want = str(body.get(lkey) or "").strip()
+                if want not in LABEL_STOCK:
+                    # Refused rather than coerced: a silent fallback would print
+                    # a run on the wrong stock and nobody would know why.
+                    return _json({"error": "That is not a label size this app can print."}, 400)
+                cfg[lkey] = want
         for skey, cap in (("eori", 30), ("vat_number", 30), ("default_hs_code", 20), ("trade_term", 20)):
             if skey in body:
                 cfg[skey] = str(body.get(skey) or "").strip()[:cap]

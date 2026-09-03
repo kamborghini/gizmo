@@ -15846,6 +15846,32 @@ def t_five_wrong_codes_end_the_sign_in():
     ok(r.status_code == 401 and "expired" in r.json()["error"], "the ticket is dead even for the right code")
 
 
+
+
+@test
+def t_each_label_printer_keeps_its_own_stock_size():
+    """Two printers, two stocks: production labels are cut on one, courier
+    labels on the other. The sizes live on the server, not in one browser's
+    local storage, or every machine at the bench starts on the wrong stock."""
+    ensure_auth()
+    cfg = post("/api/shipping/config", {"op": "get"}).json()["config"]
+    eq(cfg["label_size_production"], "4x4", "the production printer's stock")
+    eq(cfg["label_size_shipping"], "4x6", "the courier printer's stock")
+    ok("4x4" in cfg["label_stock"] and "4x6" in cfg["label_stock"],
+       "and the server publishes the sizes it will accept")
+    r = post("/api/shipping/config", {"op": "set", "label_size_production": "4x3",
+                                      "label_size_shipping": "4x6"})
+    eq(r.status_code, 200, r.text)
+    eq(post("/api/shipping/config", {"op": "get"}).json()["config"]["label_size_production"], "4x3")
+    r = post("/api/shipping/config", {"op": "set", "label_size_production": "5x5"})
+    eq(r.status_code, 400, "a stock size the app cannot print is refused, not stored")
+    eq(post("/api/shipping/config", {"op": "get"}).json()["config"]["label_size_production"], "4x3",
+       "and the refusal leaves the working size alone")
+    _uid, sess, _ = ready_user("Lee", "lee-labels")
+    eq(post_s(sess, "/api/shipping/config", {"op": "set", "label_size_shipping": "4x4"}).status_code, 403,
+       "changing what the bench prints on is an admin act")
+
+
 for fn in TESTS:
     try:
         fn(); passed += 1; print(f"  PASS  {fn.__name__}")
