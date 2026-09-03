@@ -9251,6 +9251,84 @@ def _files_name_taken(d: dict, folder_id: str, name: str, skip_id: str = "") -> 
                for k, v in d.get("files", {}).items())
 
 
+# What a file IS is read from its first bytes, never from its name or the type
+# the browser claimed. Uploads go straight to the bucket, so this is the one
+# look the app gets, and it is taken before a record turns active.
+_DANGEROUS_EXT = {
+    "ade", "adp", "apk", "appx", "bat", "cab", "chm", "cmd", "com", "cpl", "dll", "dmg", "exe",
+    "hta", "ins", "isp", "iso", "jar", "js", "jse", "lib", "lnk", "mde", "msc", "msi", "msix",
+    "msp", "mst", "nsh", "pif", "ps1", "scr", "sct", "shb", "sys", "vb", "vbe", "vbs", "vxd",
+    "wsc", "wsf", "wsh", "reg", "gadget", "application"}
+_IMAGE_EXT = {"png": "png", "jpg": "jpeg", "jpeg": "jpeg", "gif": "gif", "webp": "webp"}
+_KIND_MIME = {"png": "image/png", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp",
+              "pdf": "application/pdf"}
+_CLAIM_KIND = {"image/png": "png", "image/jpeg": "jpeg", "image/jpg": "jpeg", "image/gif": "gif",
+               "image/webp": "webp", "application/pdf": "pdf"}
+
+
+def _file_ext(name: str) -> str:
+    n = str(name or "")
+    return n.rsplit(".", 1)[-1].lower() if "." in n else ""
+
+
+def _sniff_kind(head: bytes) -> str:
+    """The format the first bytes announce, or "" for anything unrecognised."""
+    h = bytes(head or b"")
+    if h.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if h.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if h[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if h[:4] == b"RIFF" and h[8:12] == b"WEBP":
+        return "webp"
+    if h.startswith(b"%PDF"):
+        return "pdf"
+    if h.startswith(b"PK\x03\x04"):
+        return "zip"
+    if h.startswith(b"MZ"):
+        return "exe"
+    if h.startswith(b"\x7fELF"):
+        return "elf"
+    if h[:4] in (b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe",
+                 b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe"):
+        return "macho"
+    if h.startswith(b"#!"):
+        return "script"
+    t = h.lstrip(b"\xef\xbb\xbf \t\r\n").lower()
+    if t.startswith((b"<!doctype html", b"<html", b"<script", b"<svg", b"<?xml")):
+        return "html"
+    return ""
+
+
+def _file_verdict(name: str, claimed: str, head: bytes) -> tuple:
+    """(ok, reason, safe_type). Programs are refused whatever they are called;
+    a name or claim that says image or PDF must be backed by matching bytes;
+    markup dressed as a picture is refused; and the type the app records is
+    the one the bytes justify, so a served preview can never say "image" about
+    something that is not one."""
+    n = str(name or "")
+    ext, kind, cl = _file_ext(n), _sniff_kind(head), str(claimed or "").lower().split(";")[0].strip()
+    if ext in _DANGEROUS_EXT:
+        return False, f"{n} is a program, not a document.", ""
+    if kind in ("exe", "elf", "macho", "script"):
+        return False, f"{n} is a program, whatever it is called.", ""
+    want = _IMAGE_EXT.get(ext) or ("pdf" if ext == "pdf" else "") or _CLAIM_KIND.get(cl, "")
+    if want and kind != want:
+        return False, f"{n} does not contain what its name or type says it is.", ""
+    if kind == "html" and cl.startswith("image/"):
+        return False, f"{n} is markup dressed as a picture.", ""
+    safe = _KIND_MIME.get(kind) or ("text/plain" if cl in ("text/html", "application/xhtml+xml",
+                                                          "image/svg+xml") else (cl or "application/octet-stream"))
+    return True, "", safe
+
+
+def _files_head_bytes(key: str, n: int = 64) -> bytes:
+    """The first n bytes of an object. Blocking; call off the event loop."""
+    obj = _files_s3().get_object(Bucket=R2_BUCKET, Key=key, Range=f"bytes=0-{n - 1}")
+    return obj["Body"].read(n)
+
+
 def _files_clean_name(name: str) -> str:
     """A display name that cannot climb paths or break the UI. The R2 key never
     contains it, so this is about honesty on screen, not storage safety."""
@@ -9444,6 +9522,30 @@ MAIL_SEND_MAX_HTML = 200000          # formatted body; the plain cap is the twin
 MAIL_ATTACH_COUNT = 20               # files on one message
 MAIL_QUOTE_CHARS = 20000             # how much of the original a reply quotes
 MAIL_SEND_MAX_CHARS = 20000
+# Ceilings on outbound mail. A compromised account with the send grant is a
+# spam cannon pointed at the customer list; these make it a slow one and put
+# the day's figure in the ledger. The windows live in memory: a restart resets
+# them, which errs towards letting a person work.
+MAIL_SEND_MAX_PER_HOUR = 40      # one person
+MAIL_SEND_MAX_PER_DAY = 400      # the whole shop
+_send_hits_user: dict = {}
+_send_hits_shop: list = []
+
+
+def _mail_send_allowed(uid: str) -> str:
+    """An empty string when this send may go, otherwise the sentence to show."""
+    now = time.monotonic()
+    mine = _send_hits_user.setdefault(str(uid), [])
+    mine[:] = [t for t in mine if now - t < 3600]
+    if len(mine) >= MAIL_SEND_MAX_PER_HOUR:
+        return (f"You have sent {MAIL_SEND_MAX_PER_HOUR} emails from here in the last hour. "
+                "Wait a while, or send this one from Gmail.")
+    _send_hits_shop[:] = [t for t in _send_hits_shop if now - t < 86400]
+    if len(_send_hits_shop) >= MAIL_SEND_MAX_PER_DAY:
+        return f"The shop has sent {MAIL_SEND_MAX_PER_DAY} emails from here today, which is the ceiling."
+    mine.append(now)
+    _send_hits_shop.append(now)
+    return ""
 
 _mail_mem: Optional[dict] = None
 _mail_lock = asyncio.Lock()     # one sync at a time; board reads never block
@@ -11451,7 +11553,9 @@ SESSIONS_PER_USER = int(os.environ.get("SESSIONS_PER_USER", "12"))
 # a file that gets backed up. Bounded, so a flood of password-only attempts
 # cannot grow it without limit.
 _mfa_tickets: dict = {}
+_mfa_tries: dict = {}            # ticket -> wrong codes so far
 MFA_TICKET_SECONDS = 180
+MFA_MAX_TRIES = 5                # a six-digit code, guessed five times, is not being guessed
 
 
 def _mfa_ticket(uid: str) -> str:
@@ -13979,6 +14083,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "File storage is not set up, so nothing can be "
                                    "attached. Check Settings, Connections."}, 400)
         name = _mail_attach_name(body.get("name"))
+        if _file_ext(name) in _DANGEROUS_EXT:
+            return _json({"error": f"{name} is a program; Gmail would refuse it and so does this."}, 400)
         ctype = str(body.get("type") or "").strip()[:100] or "application/octet-stream"
         inline = bool(body.get("inline"))
         try:
@@ -14025,6 +14131,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                    "again."}, 400)
         if size > MAIL_ATTACH_MAX:
             return _json({"error": "That file is over the 25MB a message can carry."}, 400)
+        try:
+            head = await asyncio.to_thread(_files_head_bytes, key)
+        except Exception:
+            return _json({"error": "Storage did not answer; try again."}, 502)
         name = _mail_part_name(key)
         ctype = (str(body.get("type") or "").strip()[:100]
                  or _files_preview_mime(name) or "application/octet-stream")
@@ -14033,6 +14143,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"error": "Only an image can go inline in the message."}, 400)
             if size > MAIL_INLINE_MAX:
                 return _json({"error": "An inline image has to be under 5MB."}, 400)
+        okv, why, safe = _file_verdict(name, ctype, head)
+        if okv and bool(body.get("inline")) and _sniff_kind(head) not in _IMAGE_EXT.values():
+            okv, why = False, f"{name} is not an image, so it cannot go inline."
+        if not okv:
+            try:
+                await asyncio.to_thread(_files_s3().delete_object, Bucket=R2_BUCKET, Key=key)
+            except Exception:
+                logger.warning("mail: refused attachment %s could not be removed", key)
+            _track(who, "mail", "refused an attachment", why[:200])
+            return _json({"error": "Refused: " + why}, 400)
+        ctype = safe
         out = {"ok": True, "key": key, "name": name, "size": size, "type": ctype, "url": ""}
         if ctype.startswith("image/"):
             # A short-lived look at our OWN bucket, so the editor can show the
@@ -14127,6 +14248,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # finished words, not the half the person typed.
             subject_line = parent.get("subject") or t.get("subject") or ""
             html_body, text_body, logo = await _mail_outgoing(body, who, parent, True)
+            why = _mail_send_allowed(who)
+            if why:
+                return _json({"error": why}, 429)
             sick = _mail_store_sick()
             if sick:
                 return sick
@@ -14242,6 +14366,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                           "attachment_count": len(att_files), "kind": "new"})
         # No conversation to quote: this one starts it.
         html_body, text_body, logo = await _mail_outgoing(body, who, None, False)
+        why = _mail_send_allowed(who)
+        if why:
+            return _json({"error": why}, 429)
         sick = _mail_store_sick()
         if sick:
             return sick
@@ -14592,6 +14719,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             logger.exception("mail: attachment fetch failed")
             return _json({"error": "Could not fetch that attachment from Gmail."}, 502)
         import io as _io
+        okv, why, safe_type = _file_verdict(name, "", raw[:64])
+        if not okv:
+            _track(who, "mail", "refused an email attachment", why[:200])
+            return _json({"error": "Refused: " + why}, 400)
         async with _files_lock:
             d = _load_files()
             used = sum(int(f.get("size") or 0) for f in d["files"].values()
@@ -14610,7 +14741,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             fid = _files_id(d, "f")
             key = f"{fid}/{name}"
             d["files"][fid] = {"name": name, "folder_id": parent, "size": len(raw),
-                               "type": "application/octet-stream", "r2_key": key,
+                               "type": safe_type, "sniffed": _sniff_kind(raw[:64]), "r2_key": key,
                                "status": "pending", "by": who, "replaces": dup,
                                "created_at": datetime.now(timezone.utc).isoformat()}
             _write_files(d)
@@ -14913,6 +15044,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"error": "Storage did not answer; try again."}, 502)
             if not size or size > MAIL_LOGO_MAX:
                 return _json({"error": "The logo did not land, or is over 1MB."}, 400)
+            try:
+                head = await asyncio.to_thread(_files_head_bytes, key)
+            except Exception:
+                return _json({"error": "Storage did not answer; try again."}, 502)
+            if _sniff_kind(head) not in _IMAGE_EXT.values():
+                try:
+                    await asyncio.to_thread(_files_s3().delete_object, Bucket=R2_BUCKET, Key=key)
+                except Exception:
+                    pass
+                return _json({"error": "That file is not a PNG, JPG, GIF or WebP image."}, 400)
             em.setdefault("footer_slots", {})["logo_key"] = key
             try:
                 _write_mail(store)
@@ -17003,6 +17144,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "File storage isn't connected yet. Add the Cloudflare R2 "
                                    "keys in Railway to switch it on."}, 400)
         name = _files_clean_name(body.get("name"))
+        if _file_ext(name) in _DANGEROUS_EXT:
+            return _json({"error": f"{name} is a program, not a document."}, 400)
         try:
             size = int(body.get("size") or 0)
         except (TypeError, ValueError):
@@ -17077,6 +17220,24 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # The browser's claimed size opened the door; what actually
                 # landed is what counts against the space.
                 f["size"] = true_size
+                try:
+                    head = await asyncio.to_thread(_files_head_bytes, f["r2_key"])
+                except Exception:
+                    logger.exception("files: could not read the head of %s", f["r2_key"])
+                    return _json({"error": "Storage did not answer; try again."}, 502)
+                okv, why, safe = _file_verdict(f.get("name"), f.get("type"), head)
+                if not okv:
+                    # Refused whole: the bytes go, the record goes, and the
+                    # person is told why rather than left with a phantom file.
+                    d["files"].pop(fid, None)
+                    _write_files(d)
+                    try:
+                        await asyncio.to_thread(_files_s3().delete_object, Bucket=R2_BUCKET, Key=f["r2_key"])
+                    except Exception:
+                        logger.warning("files: refused upload %s could not be removed", f["r2_key"])
+                    _track(_who, "files", "refused an upload", why[:200])
+                    return _json({"error": "Refused: " + why + " The upload was removed."}, 400)
+                f["type"], f["sniffed"] = safe, _sniff_kind(head)
                 if true_size > FILES_MAX_UPLOAD \
                         or _files_usage(d) > int(FILES_QUOTA_GB * 1024 * 1024 * 1024):
                     _write_files(d)   # keep the honest size; the sweep clears it
@@ -17175,6 +17336,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         return _json({"error": "Restore the file from the trash first."}, 400)
                     old_name = f.get("name") or ""
                     new_name = _files_clean_name(body.get("name"))
+                    if _file_ext(new_name) in _DANGEROUS_EXT:
+                        return _json({"error": f"{new_name} is a program, not a document."}, 400)
                     if _files_name_taken(d, f.get("folder_id"), new_name, fid):
                         return _json({"error": "There is already a file called that in this "
                                                "folder. Rename the other one first."}, 409)
@@ -17481,6 +17644,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             idx = totp.check_recovery(given, u.get("mfa_recovery") or [])
             if idx < 0:
                 _track(uid, "auth", "a second-factor code was refused")
+                # Wrong codes spend the ticket. Five misses inside one
+                # three-minute window is not a person mistyping.
+                ticket = str(body.get("ticket") or "")
+                _mfa_tries[ticket] = _mfa_tries.get(ticket, 0) + 1
+                if _mfa_tries[ticket] >= MFA_MAX_TRIES:
+                    _mfa_tickets.pop(ticket, None)
+                    _mfa_tries.pop(ticket, None)
+                    _track(uid, "auth", "too many wrong codes", "the sign-in was ended")
+                    return _json({"error": "Too many wrong codes. Sign in again."}, 401)
                 return vague
             # Spent. A recovery code is one journey back in, not a password.
             u["mfa_recovery"] = [h for i, h in enumerate(u["mfa_recovery"]) if i != idx]
@@ -17992,6 +18164,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     if total > FILES_MAX_UPLOAD:
                         return Response(status_code=413, headers=hdrs)
                     spool.write(chunk)
+                spool.seek(0)
+                okv, why, safe_type = _file_verdict(name, "", spool.read(64))
+                spool.seek(0)
+                if not okv:
+                    _track(uid, "files", "refused a WebDAV save", why[:200])
+                    return Response(status_code=415, headers=hdrs)
                 # Reserve under the lock, upload OUTSIDE it, commit under it
                 # again: the lock is held for milliseconds, so several saves
                 # upload side by side instead of queueing.

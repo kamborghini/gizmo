@@ -6161,13 +6161,25 @@ class FakeS3:
         if Key not in self.objects:
             raise RuntimeError("404 no object")
         return {"ContentLength": self._size(Key)}
-    def get_object(self, Bucket, Key):
+    def get_object(self, Bucket, Key, Range=None):
         self._guard("get_object")
-        import io
+        import io, re
         if Key not in self.objects:
             raise KeyError(Key)
         v = self.objects[Key]
-        data = bytes(v) if isinstance(v, (bytes, bytearray)) else b"x" * int(v)
+        if isinstance(v, (bytes, bytearray)):
+            data = bytes(v)
+        else:
+            # A size-only object stands for a real upload of that name, so it
+            # opens the way the real one would: the intake reads the first
+            # bytes, and a .pdf that is all x's would be refused as a fake.
+            ext = Key.rsplit(".", 1)[-1].lower() if "." in Key else ""
+            magic = {"pdf": b"%PDF-1.4\n", "png": b"\x89PNG\r\n\x1a\n", "jpg": b"\xff\xd8\xff\xe0",
+                     "jpeg": b"\xff\xd8\xff\xe0", "gif": b"GIF89a", "webp": b"RIFF\x00\x00\x00\x00WEBP"}.get(ext, b"")
+            data = (magic + b"x" * int(v))[:max(int(v), len(magic))]
+        if Range:
+            a, b = re.match(r"bytes=(\d+)-(\d+)", Range).groups()
+            data = data[int(a):int(b) + 1]
         return {"Body": io.BytesIO(data), "ContentLength": len(data)}
     def delete_object(self, Bucket, Key):
         self._guard("delete_object")
@@ -7000,7 +7012,8 @@ def t_dav_speaks_finder_with_the_apps_own_accounts():
             r2 = client.request("PROPFIND", "/dav/", headers={**auth, "Depth": "1"})
             eq(r2.status_code, 207, r2.text[:200])
             eq(client.request("MKCOL", "/dav/Proofs", headers=auth).status_code, 201)
-            r3 = client.put("/dav/Proofs/0538 proof.pdf", headers=auth, content=b"x" * 500)
+            # A real Finder save of a PDF carries PDF bytes; the intake now reads them.
+            r3 = client.put("/dav/Proofs/0538 proof.pdf", headers=auth, content=b"%PDF-1.4\n" + b"x" * 491)
             eq(r3.status_code, 201, "a save from Finder lands")
             st = copilot._load_files()
             rec = next(v for v in st["files"].values() if v["name"] == "0538 proof.pdf")
@@ -9976,7 +9989,7 @@ def t_mail_attachment_supersedes_the_same_name():
             copilot._load_mail()["threads"]["t1"]["files"] = [
                 {"name": "proof.pdf", "size": 9, "id": "att1", "msg": "m1"}]
             async def bytes_for(msg_id, att_id, cap=None):
-                return b"PDF-BYTES"
+                return b"%PDF-1.4 PDF-BYTES"
             saved = _gm.attachment_bytes
             _gm.attachment_bytes = bytes_for
             try:
@@ -15523,7 +15536,7 @@ def t_the_logo_lands_in_its_own_prefix_and_only_as_an_image():
         r = post("/api/mail/settings", {"op": "logo_url", "name": "logo.png", "size": 40000, "type": "image/png"})
         eq(r.status_code, 200, r.text); key = r.json()["key"]
         ok(key.startswith("mail/footer/logo-") and key.endswith(".png"))
-        s3.objects[key] = b"x" * 40000
+        s3.objects[key] = b"\x89PNG\r\n\x1a\n" + b"x" * 39992
         eq(post("/api/mail/settings", {"op": "logo_done", "key": key}).status_code, 200)
         eq(copilot._load_mail()["email"]["footer_slots"]["logo_key"], key)
         eq(post("/api/mail/settings", {"op": "logo_done", "key": "files/other.png"}).status_code, 400, "keys outside the footer prefix are refused")
@@ -15724,6 +15737,115 @@ def t_an_xml_answer_with_a_doctype_is_refused_before_it_is_parsed():
 
 
 passed = failed = 0
+
+
+@test
+def t_the_first_bytes_name_the_file_not_the_extension():
+    eq(copilot._sniff_kind(b"\x89PNG\r\n\x1a\n...."), "png")
+    eq(copilot._sniff_kind(b"%PDF-1.7 ..."), "pdf")
+    eq(copilot._sniff_kind(b"MZ\x90\x00"), "exe")
+    eq(copilot._sniff_kind(b"\x7fELF"), "elf")
+    eq(copilot._sniff_kind(b"  <!DOCTYPE html><script>"), "html")
+    eq(copilot._sniff_kind(b"#!/bin/sh\n"), "script")
+    eq(copilot._sniff_kind(b"hello"), "")
+    ok(not copilot._file_verdict("report.pdf", "application/pdf", b"MZ\x90")[0], "a program named .pdf")
+    ok(not copilot._file_verdict("invoice.pdf.exe", "application/pdf", b"%PDF-1.4")[0], "the LAST extension is what runs")
+    ok(not copilot._file_verdict("photo.png", "image/png", b"<html><script>")[0], "markup dressed as a picture")
+    ok(not copilot._file_verdict("photo.png", "image/png", b"\xff\xd8\xff")[0], "a JPEG named .png is a lie too")
+    okv, _w, safe = copilot._file_verdict("photo.png", "image/png", b"\x89PNG\r\n\x1a\n")
+    ok(okv and safe == "image/png")
+    okv, _w, safe = copilot._file_verdict("page.htm", "text/html", b"<html>")
+    ok(okv and safe == "text/plain", "html is stored, but never served as html")
+    okv, _w, safe = copilot._file_verdict("cut-list.csv", "text/csv", b"a,b,c")
+    ok(okv and safe == "text/csv")
+
+
+@test
+def t_an_upload_that_is_not_what_it_says_is_refused_and_removed():
+    def go():
+        ensure_auth()
+        r = post("/api/files/upload-url", {"name": "quote.pdf", "size": 100, "type": "application/pdf", "folder": ""})
+        eq(r.status_code, 200, r.text)
+        d = copilot._load_files()
+        fid, f = next((k, v) for k, v in d["files"].items() if v.get("name") == "quote.pdf")
+        s3.objects[f["r2_key"]] = b"MZ\x90\x00" + b"x" * 96
+        r = post("/api/files/complete", {"id": fid})
+        eq(r.status_code, 400, r.text); ok("program" in r.json()["error"])
+        ok(fid not in copilot._load_files()["files"], "no phantom record")
+        ok(f["r2_key"] not in s3.objects, "and the bytes are gone from the bucket")
+        eq(post("/api/files/upload-url", {"name": "setup.exe", "size": 10, "type": "application/octet-stream", "folder": ""}).status_code, 400,
+           "a program by name never gets a presigned door")
+        r = post("/api/files/upload-url", {"name": "proof.png", "size": 20, "type": "image/png", "folder": ""})
+        d = copilot._load_files(); fid2, f2 = next((k, v) for k, v in d["files"].items() if v.get("name") == "proof.png")
+        s3.objects[f2["r2_key"]] = b"\x89PNG\r\n\x1a\n" + b"x" * 12
+        eq(post("/api/files/complete", {"id": fid2}).status_code, 200)
+        eq(copilot._load_files()["files"][fid2]["sniffed"], "png", "what it is, recorded from its bytes")
+    s3 = FakeS3(); s3.bucket_exists = True
+    with_files(lambda _fake: go(), s3=s3)
+
+
+@test
+def t_an_email_attachment_is_judged_by_its_bytes_before_it_can_be_sent():
+    def go():
+        ensure_auth(); _gm.save_connection("rt-test", MBOX)
+        uid, sess, _ = ready_user("Ann", "ann"); post("/api/team/user", {"op": "send", "id": uid, "can_send": True})
+        eq(post_s(sess, "/api/mail/attach-url", {"name": "run.bat", "size": 10, "type": "text/plain"}).status_code, 400)
+        r = post_s(sess, "/api/mail/attach-url", {"name": "quote.pdf", "size": 100, "type": "application/pdf"})
+        key = r.json()["key"]; s3.objects[key] = b"<html><script>alert(1)</script>" + b"x" * 70
+        r = post_s(sess, "/api/mail/attach-done", {"key": key})
+        eq(r.status_code, 400, r.text); ok(key not in s3.objects, "refused bytes are removed")
+        r = post_s(sess, "/api/mail/attach-url", {"name": "logo.png", "size": 20, "type": "image/png", "inline": True})
+        key = r.json()["key"]; s3.objects[key] = b"%PDF-1.4" + b"x" * 12
+        eq(post_s(sess, "/api/mail/attach-done", {"key": key, "inline": True}).status_code, 400, "inline must be a real image")
+        r = post_s(sess, "/api/mail/attach-url", {"name": "logo.png", "size": 20, "type": "image/png", "inline": True})
+        key = r.json()["key"]; s3.objects[key] = b"\x89PNG\r\n\x1a\n" + b"x" * 12
+        eq(post_s(sess, "/api/mail/attach-done", {"key": key, "inline": True}).status_code, 200)
+    s3 = FakeS3(); s3.bucket_exists = True
+    with_files(lambda _fake: with_mail(go), s3=s3)
+
+
+@test
+def t_sends_are_capped_per_person_and_per_shop():
+    def go():
+        ensure_auth(); _gm.save_connection("rt-test", MBOX)
+        async def fake_send(*a, **k):
+            return {"id": "m", "thread_id": "t9"}
+        async def fake_get(tid, acct=None):
+            return {"id": tid, "messages": []}
+        saved = (_gm.send_message, _gm.get_thread, copilot.MAIL_SEND_MAX_PER_HOUR)
+        _gm.send_message, _gm.get_thread, copilot.MAIL_SEND_MAX_PER_HOUR = fake_send, fake_get, 2
+        copilot._send_hits_user.clear(); copilot._send_hits_shop.clear()
+        try:
+            body = {"to": "jo@c.test", "subject": "x", "html": "<p>hi</p>"}
+            eq(post("/api/mail/send", body).status_code, 200)
+            eq(post("/api/mail/send", body).status_code, 200)
+            r = post("/api/mail/send", body)
+            eq(r.status_code, 429, r.text); ok("last hour" in r.json()["error"])
+            eq(post("/api/mail/send", dict(body, dry=True)).status_code, 200, "a dry run is not a send")
+        finally:
+            _gm.send_message, _gm.get_thread, copilot.MAIL_SEND_MAX_PER_HOUR = saved
+            copilot._send_hits_user.clear(); copilot._send_hits_shop.clear()
+    with_mail(go)
+
+
+@test
+def t_five_wrong_codes_end_the_sign_in():
+    ensure_auth()
+    uid, sess, pw = ready_user("Ann", "ann")
+    import totp as _totp
+    secret = _totp.new_secret()
+    d = copilot._load_users(); d["users"][uid]["mfa_secret"] = secret; copilot._write_users(d)
+    r = post("/api/auth/login", {"username": "ann", "password": pw})
+    ticket = r.json().get("ticket"); ok(ticket, r.text)
+    for _ in range(4):
+        eq(post("/api/auth/mfa-verify", {"ticket": ticket, "code": "000000"}).status_code, 401)
+    r = post("/api/auth/mfa-verify", {"ticket": ticket, "code": "000000"})
+    eq(r.status_code, 401); ok("Too many" in r.json()["error"], r.text)
+    good = _totp.code(secret)
+    r = post("/api/auth/mfa-verify", {"ticket": ticket, "code": good})
+    ok(r.status_code == 401 and "expired" in r.json()["error"], "the ticket is dead even for the right code")
+
+
 for fn in TESTS:
     try:
         fn(); passed += 1; print(f"  PASS  {fn.__name__}")

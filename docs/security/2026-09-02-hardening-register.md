@@ -74,3 +74,29 @@ PCI DSS: not in scope (no cardholder data touches gizmo; Shopify Payments).
 HIPAA and FedRAMP: not applicable. UK GDPR: aligned (lawful basis is the
 merchant's; data subject requests via the Shopify privacy webhooks; retention
 sweeps; redaction). ISO 27001 / SOC 2: not claimed.
+
+## Ingress and file-path review (same day, second pass)
+
+What each stage trusts, after this pass:
+
+| Stage | Trusted | Not trusted (and what checks it) |
+|---|---|---|
+| Edge to app | Railway's rightmost X-Forwarded-For | The client's own address claims; per-client window on every route |
+| Sign-in | Password hash, TOTP with counter, recovery hashes | Codes: five misses end the ticket (new); per-account lock after repeated failures; anonymous noise coalesced |
+| Session | 32-byte random header token, sliding expiry, per-user cap | Cookies: none, so nothing rides a cross-site request |
+| Webhooks | Shopify HMAC over the streamed, capped body; delivery id dedupe | Topic, shop and payload fields until the HMAC passes |
+| Presigned upload | Size and content type bound into the signature; key minted by the app | The browser's name (cleaned; programs refused by extension, new) and type |
+| Upload complete | Bytes: first 64 read from the bucket and judged (new) | The claimed type and extension: programs refused whatever they are called, image and PDF claims must match bytes, markup dressed as a picture refused; the recorded type comes from the bytes |
+| Mail attachments, inline images, logo | Same byte verdict at attach-done and logo-done (new); inline must be a real image | Claimed type; keys outside the caller's own prefix or live Files |
+| Attachment from Gmail into Files | Bytes in hand, judged before storage (new) | Gmail's declared type (already ignored) |
+| WebDAV save | Spool judged before commit (new); size cap streamed | Finder's name beyond cleaning |
+| Serving | Previews only for extensions whose bytes were verified at intake; SVG never inline; served from the bucket's origin, not the app's | The stored name as a type |
+| Outbound mail | Server sanitiser, plain twin, send grant, dry-run confirm | Recipient counts and a new ceiling: 40 an hour per person, 400 a day per shop (new) |
+
+Still open here: malware scanning of accepted files (O12, Medium): a byte
+verdict stops disguises, not a genuine document carrying an exploit. Options
+are a ClamAV sidecar (Railway service, cost and upkeep) or a scanning API,
+which means sending customer files to a third party. Decision needed.
+Courier label PDFs are parsed with pypdfium2 (O13, Low): a business partner's
+bytes, size-capped, no sandbox; revisit if labels ever come from anywhere
+else.
