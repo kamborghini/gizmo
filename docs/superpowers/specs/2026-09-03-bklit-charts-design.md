@@ -62,7 +62,7 @@ Tokens (names as Bklit): `--chart-1` to `--chart-5`, `--chart-background`,
 | SEO CTR and position | LineChart with YAxis and a floated domain |
 | Stat-card sparklines | LineChart with no Grid, no XAxis, no tooltip |
 | SEO score band | Gauge, linear |
-| Aged-debt share | RingChart with RingCenter and Legend |
+| Aged-debt share | PieChart as a donut, centre total, Legend (see Behaviour details) |
 | Range switches 3M/6M/12M/24M | y-domain tween; Brush available |
 | Loading and gated cards | status "loading" pulse |
 | Tables and row lists | shadcn Table pattern (unchanged); lists aligned |
@@ -142,12 +142,12 @@ tag goes before `app.js`.
 - Legend: clicking an entry toggles that series; the y-domain tweens.
 - Gauge (linear) for the SEO score: 40 notches, 25% spacing, active in
   `--chart-1`, inactive at `--border`.
-- Ring for aged debt: six rings? No: one ring per bucket is Bklit's multi-ring
-  idiom, but six concentric rings of one total read badly at card widths, so
-  the aged-debt share uses ONE ring whose segments are the buckets (Bklit's
-  Ring supports `value`/`maxValue` per entry; segments of one ring is the
-  PieChart pattern). Decision: PieChart with innerRadius (a donut), centre
-  total, Legend beside it. Recorded here so it is not re-litigated.
+- Aged-debt share: Bklit's RingChart draws one ring per entry, and six
+  concentric rings of one total read badly at card widths, so the share of
+  outstanding uses Bklit's PieChart pattern as a donut (inner radius, one
+  segment per bucket, centre total, Legend beside it). The mapping table's
+  RingChart entry is superseded by this line. Recorded here so it is not
+  re-litigated.
 - Reduced motion: no reveal, no stagger, no tween.
 
 ## Testing
