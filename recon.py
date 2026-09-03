@@ -310,7 +310,7 @@ def _exc_id(kind: str, refs: list) -> str:
     """Stable across sweeps: the same underlying facts keep the same id, so a
     status set on Monday survives Tuesday's sweep."""
     return "x" + hashlib.sha1((kind + "|" + "|".join(sorted(str(r) for r in refs)))
-                              .encode()).hexdigest()[:12]
+                              .encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 def make_exc(kind: str, severity: str, title: str, refs: list, *,
@@ -1232,7 +1232,7 @@ async def extract_doc(candidate: dict) -> Optional[dict]:
         return None
     # The same PDF forwarded twice is one document, not two discrepancies:
     # content-hash it, and a repeat records where else it arrived.
-    digest = hashlib.sha1(data).hexdigest()
+    digest = hashlib.sha1(data, usedforsecurity=False).hexdigest()
     if _load_docs is not None:
         for k, other in _load_docs().items():
             if other.get("sha1") == digest and k != candidate.get("source_key"):

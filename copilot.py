@@ -9232,10 +9232,10 @@ def _files_id(d: dict, prefix: str) -> str:
 # DISPLAYS as "artwork.pdf" on the Finder drive. Names used to come only
 # from staff uploads; attachments changed that.
 _FILENAME_BAD = re.compile(
-    r"[\\/\x00-\x1f\x7f-\x9f؜‎‏‪-‮⁦-⁩  "
+    r"[\\/\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029"
     # Zero-width and soft hyphen: invisible, and NOT stripped as whitespace, so
     # "proof<ZWSP>.pdf" renders in Finder as exactly "proof.pdf".
-    r"­​‌‍⁠﻿]")
+    r"­\u200b\u200c\u200d⁠\ufeff]")
 
 
 def _files_name_taken(d: dict, folder_id: str, name: str, skip_id: str = "") -> bool:
@@ -11769,9 +11769,18 @@ def _master_reset_check(d: dict) -> None:
 TAB_KEYS = ("overview", "seo", "keywords", "products", "customers", "liability",
             "crm", "mail", "files", "labels", "memory", "skills", "chat", "recon",
             "connector")
+# API routes that belong to no tab and are open to every signed-in account:
+# the sign-in flow, a person's own clock and profile, and the admin routes,
+# which refuse non-admins themselves. Anything else under /api/ that is not in
+# _TAB_ROUTES is refused (see _tab_denied).
+_OPEN_API = ("/api/auth/", "/api/team/", "/api/work/", "/api/google/status", "/api/alerts",
+             "/api/usage", "/api/cache", "/api/profile", "/api/status", "/api/updates",
+             "/api/schedule", "/api/backup", "/api/restore")
+
 _TAB_ROUTES = (
     ("/api/overview", "overview"), ("/api/seo", "seo"), ("/api/keyword", "keywords"),
     ("/api/recon", "recon"),
+    ("/api/eori/", "labels"),
     ("/api/connector", "connector"),
     ("/api/products", "products"), ("/api/product", "products"),
     # customer-history also serves the CRM's deal modal (the Shopify card on a
@@ -11826,11 +11835,18 @@ def _tab_denied(request: Request) -> Optional[JSONResponse]:
     for p, t in _TAB_ROUTES:
         if path.startswith(p) and len(p) > best:
             tab, best = t, len(p)
-    if not tab:
-        return None
     uid = _session_uid(request.headers.get("x-app-session"))
     if not uid:
         return None            # not our concern here; _authorize answers 401
+    if not tab:
+        # Deny by default. A route under /api/ that no tab claims is either on
+        # the short list below (self-service and admin routes that carry their
+        # own role checks) or it is a route somebody added without deciding who
+        # may call it, and the honest answer to that is no, loudly, in testing.
+        if path.startswith("/api/") and not any(path.startswith(p) for p in _OPEN_API):
+            logger.warning("route %s has no tab mapping and is not on _OPEN_API; refused", path)
+            return _json({"error": "That part of the app is not open to your account."}, 403)
+        return None
     tabs = _user_tabs(uid)
     allowed = (tab,) if isinstance(tab, str) else tab
     if tabs is None or any(t in tabs for t in allowed):
@@ -13126,7 +13142,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         import csv as _csv
         import io as _io
         try:
-            rows = list(_csv.DictReader(_io.StringIO(text.lstrip("﻿"))))
+            rows = list(_csv.DictReader(_io.StringIO(text.lstrip("\ufeff"))))
         except Exception:
             return _json({"error": "That file does not parse as a CSV."}, 400)
         headers = set(rows[0].keys()) if rows else set()

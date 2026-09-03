@@ -150,6 +150,11 @@ def _parse_detail(xml_text: str):
     if head.startswith("<!doctype html") or head.startswith("<html"):
         return _blank(reason="The EU EORI database returned a web page instead of "
                              "an answer."), "html"
+    # Entity expansion is the classic way to make a parser eat memory. A SOAP
+    # answer never needs a DOCTYPE, so one is refused before the parser sees it.
+    if re.search(r"<!\s*(DOCTYPE|ENTITY)", raw[:4000], re.I):
+        return _blank(reason="The EU EORI database sent something that could not be "
+                             "read as an answer."), "unreadable"
     try:
         root = ET.fromstring(raw)
     except Exception:

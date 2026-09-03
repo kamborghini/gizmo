@@ -12400,7 +12400,7 @@ Projected Image UK"></textarea>
             };
             const txt = [header].concat(rows).map(r => r.map(esc).join(',')).join('\r\n');
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(new Blob(['﻿' + txt], { type: 'text/csv' }));
+            a.href = URL.createObjectURL(new Blob(['\uFEFF' + txt], { type: 'text/csv' }));
             a.download = name; a.click();
             setTimeout(() => URL.revokeObjectURL(a.href), 5000);
         }

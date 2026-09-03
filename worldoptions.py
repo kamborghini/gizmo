@@ -821,6 +821,11 @@ def _parse(resp: httpx.Response, url: str = "") -> ET.Element:
         raise WorldOptionsError(
             f"World Options returned {len(body) // (1024 * 1024)}MB, which is far larger than "
             "any shipping reply. Nothing was processed.")
+    if re.search(rb"<!\s*(DOCTYPE|ENTITY)", body[:4000], re.I) if isinstance(body, bytes) \
+            else re.search(r"<!\s*(DOCTYPE|ENTITY)", str(body)[:4000], re.I):
+        # A courier reply never carries a DOCTYPE; one that does is not worth
+        # handing to a parser that would expand whatever it declares.
+        raise WorldOptionsError("World Options returned a response this app will not parse.")
     try:
         root = ET.fromstring(body)
     except Exception:

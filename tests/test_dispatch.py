@@ -15659,16 +15659,6 @@ def t_a_new_rich_message_and_a_draft_share_the_same_assembly():
 
 # =========================== run ===========================================
 
-passed = failed = 0
-for fn in TESTS:
-    try:
-        fn(); passed += 1; print(f"  PASS  {fn.__name__}")
-    except Exception as e:
-        failed += 1; print(f"  FAIL  {fn.__name__}: {e}")
-print(f"\n{passed} passed, {failed} failed")
-sys.exit(1 if failed else 0)
-
-
 @test
 def t_reply_all_offers_everyone_but_us_and_the_person_we_answer():
     def go():
@@ -15693,6 +15683,51 @@ def t_the_composer_script_is_served_by_hash_like_the_app_script():
     h = copilot._asset_hashes["composer"]
     ok(f'<script src="/assets/composer.js?v={h}"></script>' in shell, "and the shell loads it")
     ok(shell.index("/assets/app.js?v=") < shell.index("/assets/composer.js?v="), "after app.js")
-    r = get(f"/assets/composer.js?v={h}")
+    r = client.get(f"/assets/composer.js?v={h}")
     eq(r.status_code, 200); ok(b"mountComposer" in r.content)
-    eq(get("/assets/composer.js?v=wrong").status_code, 404, "a stale or guessed hash gets nothing")
+    eq(client.get("/assets/composer.js?v=wrong").status_code, 404, "a stale or guessed hash gets nothing")
+
+
+@test
+def t_an_api_route_nobody_mapped_is_refused_not_allowed():
+    """Deny by default. _TAB_ROUTES says who may open what; a route under /api/
+    that is on neither that map nor the short open list is refused for
+    everyone, so a forgotten mapping fails loudly in testing instead of
+    quietly opening a new surface to every account."""
+    class Req:
+        def __init__(self, path, sess):
+            self.url = type("U", (), {"path": path})(); self.headers = {"x-app-session": sess}
+    def go():
+        ensure_auth()
+        uid, sess, _ = ready_user("Ann", "ann")
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["mail"]})
+        r = copilot._tab_denied(Req("/api/never-mapped/thing", sess))
+        ok(r is not None and r.status_code == 403, "unmapped: refused for a member")
+        r = copilot._tab_denied(Req("/api/never-mapped/thing", APP_AUTH["session"]))
+        ok(r is not None and r.status_code == 403, "unmapped: refused for the master too, so it is noticed")
+        ok(copilot._tab_denied(Req("/api/team/me", sess)) is None, "the open list stays open")
+        r = copilot._tab_denied(Req("/api/eori/check", sess))
+        ok(r is not None and r.status_code == 403, "the EORI checker belongs to the labels tab")
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["mail", "labels"]})
+        ok(copilot._tab_denied(Req("/api/eori/check", sess)) is None)
+    with_mail(go)
+
+
+@test
+def t_an_xml_answer_with_a_doctype_is_refused_before_it_is_parsed():
+    import eori
+    bomb = ('<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;">]>'
+            '<S:Envelope xmlns:S="http://schemas.xmlsoap.org/soap/envelope/"><S:Body>&b;</S:Body></S:Envelope>')
+    r = eori.parse(bomb)
+    eq(r["status"], "unknown", "never a verdict")
+    ok("could not be read" in r["reason"])
+
+
+passed = failed = 0
+for fn in TESTS:
+    try:
+        fn(); passed += 1; print(f"  PASS  {fn.__name__}")
+    except Exception as e:
+        failed += 1; print(f"  FAIL  {fn.__name__}: {e}")
+print(f"\n{passed} passed, {failed} failed")
+sys.exit(1 if failed else 0)
