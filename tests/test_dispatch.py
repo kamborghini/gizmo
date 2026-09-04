@@ -16444,6 +16444,53 @@ def t_a_reseal_never_destroys_a_secret_it_cannot_handle():
 
 
 @test
+def t_the_app_can_say_whether_its_secrets_are_encrypted():
+    """Every connection behaves identically whether or not its token is
+    encrypted, so this is the one thing about the volume nobody can infer from
+    something else working. Read from the FILES: a key that is set while a
+    token still sits in plaintext looks fine from the environment alone, and
+    that is exactly the failure worth catching."""
+    import tokenvault as _tv
+    d = tempfile.mkdtemp()
+    tok = os.path.join(d, "xero_oauth.json")
+    old_key = os.environ.get("TOKEN_ENCRYPTION_KEY")
+    old_path = copilot.xero_api.TOKEN_PATH
+    try:
+        copilot.xero_api.TOKEN_PATH = tok
+        with open(tok, "w", encoding="utf-8") as fh:
+            json.dump({"refresh_token": "plain-abc"}, fh)
+
+        os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
+        _tv._key.cache_clear()
+        st = copilot.token_vault_state()
+        eq(st["enabled"], False)
+        ok("Xero" in st["plaintext"], "it names what is exposed, not just a count")
+
+        # A key set is NOT the same as the files being encrypted.
+        os.environ["TOKEN_ENCRYPTION_KEY"] = "a-long-random-key-for-the-test"
+        _tv._key.cache_clear()
+        st = copilot.token_vault_state()
+        eq(st["enabled"], True, "the key is set")
+        ok("Xero" in st["plaintext"],
+           "but the file is still plaintext, and saying otherwise would be the lie")
+
+        eq(_tv.reseal_file(tok, ("refresh_token",)), 1)
+        st = copilot.token_vault_state()
+        # Scoped to the store this test owns: the suite's scratch volume holds
+        # other stores from other tests, and asserting the whole list is empty
+        # would be asserting something this test never arranged.
+        ok("Xero" not in st["plaintext"], "the sealed one drops off the exposed list")
+        ok(st["sealed"] >= 1, "and counts as sealed")
+    finally:
+        copilot.xero_api.TOKEN_PATH = old_path
+        if old_key is None:
+            os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
+        else:
+            os.environ["TOKEN_ENCRYPTION_KEY"] = old_key
+        _tv._key.cache_clear()
+
+
+@test
 def t_the_register_finds_a_projector_in_the_shop():
     """Adding a unit should not mean retyping what the shop already knows.
     Variants are listed separately, because the SKU is what tells two

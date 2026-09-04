@@ -11562,6 +11562,9 @@ def reseal_secrets_at_rest() -> dict:
     global _users_mem
     out = {"enabled": tokenvault.enabled(), "sealed": 0, "stores": {}}
     if not tokenvault.enabled():
+        logger.warning("token vault: encryption at rest is OFF. The refresh tokens and "
+                       "MFA secrets on the volume are in plaintext. Set "
+                       "TOKEN_ENCRYPTION_KEY to encrypt them.")
         return out
     files = [
         ("gmail_sales", google_mail.TOKEN_PATH, ("refresh_token",)),
@@ -11587,9 +11590,53 @@ def reseal_secrets_at_rest() -> dict:
             _users_mem = None
     except Exception:
         logger.exception("token vault: could not re-seal the MFA secrets")
-    if out["sealed"]:
-        logger.info("token vault: encrypted %d secret(s) already on the volume", out["sealed"])
+    # Said on every boot, whether or not anything changed. Logging only when a
+    # secret was sealed leaves silence meaning two different things - "all
+    # already encrypted" and "no key set" - and the deploy log is where someone
+    # looks to find out which.
+    logger.info("token vault: encryption at rest is ON; %d secret(s) sealed this boot, "
+                "%s", out["sealed"],
+                "everything else was already sealed" if not out["sealed"] else "")
     return out
+
+
+def token_vault_state() -> dict:
+    """Whether the secrets on the volume are encrypted, and whether any are not.
+
+    Reads the files rather than trusting that the key is set: a key present but
+    a re-seal that never ran would look identical from the environment alone,
+    and that is exactly the failure worth catching.
+    """
+    stores = [
+        ("Gmail, sales", google_mail.TOKEN_PATH, "refresh_token"),
+        ("Gmail, finance", google_mail.FINANCE_TOKEN_PATH, "refresh_token"),
+        ("Google data", google_data.OAUTH_TOKEN_PATH, "refresh_token"),
+        ("Xero", xero_api.TOKEN_PATH, "refresh_token"),
+    ]
+    sealed, plain, present = [], [], 0
+    for name, path, field in stores:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                v = (json.load(fh) or {}).get(field)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(v, str) or not v:
+            continue
+        present += 1
+        (sealed if tokenvault.is_sealed(v) else plain).append(name)
+    try:
+        users = (_load_json_store(USERS_PATH, "users_store", None) or {}).get("users") or {}
+        for rec in users.values():
+            if not isinstance(rec, dict):
+                continue
+            v = rec.get("mfa_secret")
+            if isinstance(v, str) and v:
+                present += 1
+                (sealed if tokenvault.is_sealed(v) else plain).append("A sign-in code secret")
+    except Exception:
+        pass
+    return {"enabled": tokenvault.enabled(), "stored": present,
+            "sealed": len(sealed), "plaintext": sorted(set(plain))}
 
 
 def _load_users() -> dict:
@@ -21498,6 +21545,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             "volume": {"ok": vol_ok, "detail": vol_detail,
                        "poisoned": sorted(os.path.basename(p) for p in _poisoned_stores)},
             "email_alerts": {"ok": bool(RESEND_API_KEY and ALERT_EMAIL_TO)},
+            # Whether the long-lived credentials on the volume are encrypted.
+            # Read from the FILES, not from the environment: a key that is set
+            # while a token still sits in plaintext looks fine from the
+            # environment alone, and that is the failure worth catching.
+            "token_vault": token_vault_state(),
             # Live updates: whether Shopify is pushing order events to the app,
             # and when one last arrived. Without them the desk falls back to the
             # short cache and the Refresh button, which still work.

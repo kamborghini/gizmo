@@ -19831,6 +19831,26 @@ Projected Image UK"></textarea>
             let s;
             try { s = await api('/api/status', {}); } catch (e) { host.append(el('div', 'setting-sub', 'Could not check connections.')); return; }
             const g = s.google || {};
+            /* Secrets at rest. Named first because it is the one row here that
+               cannot be inferred from anything else working: every connection
+               behaves identically whether or not its token is encrypted. */
+            const tv = s.token_vault || {};
+            if (!tv.enabled) {
+                host.append(connRow('Secrets on the volume', 'off',
+                    'Not encrypted. The refresh tokens and sign-in code secrets are stored '
+                    + 'in plain text. Set TOKEN_ENCRYPTION_KEY in Railway.'));
+            } else if ((tv.plaintext || []).length) {
+                host.append(connRow('Secrets on the volume', 'mid',
+                    'Mostly encrypted, but these are still in plain text: '
+                    + tv.plaintext.join(', ') + '. They are sealed the next time the app '
+                    + 'restarts, or the next time each is written.'));
+            } else {
+                host.append(connRow('Secrets on the volume', 'on',
+                    tv.stored
+                        ? ('Encrypted at rest \u00b7 ' + tv.sealed
+                           + (tv.sealed === 1 ? ' secret' : ' secrets') + ' sealed')
+                        : 'Encrypted at rest. Nothing stored here yet.'));
+            }
             // Shopify
             host.append(connRow('Shopify store', s.shopify && s.shopify.ok ? 'on' : 'off',
                 s.shopify && s.shopify.ok
