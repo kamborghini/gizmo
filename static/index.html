@@ -992,7 +992,41 @@
         .conn-doc tfoot td { font-weight: var(--w-bold); border-bottom: 0; }
         .conn-doc-wrap { overflow-x: auto; }
         .conn-open { cursor: pointer; }
+        /* ONE COLUMN for the Xero sync page.
+           Prose is capped at a 52ch reading measure, which is right. The
+           control rows were not capped at all, so at 1900px an input and two
+           buttons sat in a 1524px bordered box that was 71% empty - beside a
+           414px paragraph. And the result lists, built inside a .setting-sub,
+           inherited the PROSE cap and came out narrower than either. Three
+           different widths, none of them chosen.
+           The rows and results share a column now; prose keeps its own measure
+           inside it, sharing the same left edge. The space that is left over
+           sits OUTSIDE the column, where it reads as margin. */
+        #view-connector .card > .mail-statebar,
+        #view-connector .card > .disp-addr-grid,
+        #view-connector .conn-results { max-width: 56rem; }
+        /* The control bars hold an input and two buttons. Filling the column
+           left them half empty, which reads as a box waiting for something
+           that never arrives, so they shrink to what they hold. Their left
+           edge is the column's, so nothing drifts out of alignment. */
+        #view-connector .card > .lbl-row { width: fit-content; max-width: 100%; }
+        /* A results container with nothing in it should take no space at all;
+           an empty one still contributed its margin, which is half of what
+           read as arbitrary gaps down the page. */
+        #view-connector .conn-results:empty { display: none; }
+        .conn-results > .lbl-row:last-child { margin-bottom: 0; }
         /* The note verbatim, as Xero will hold it: a quotation, not prose. */
+        /* The document reads top to bottom in sections, and h4.card-title
+           carries no top margin - so "Payout note" and "What Shopify says"
+           landed hard against the sentence above them while other blocks had
+           room to spare. One rhythm for the whole sheet. */
+        .modal-body h4.card-title { margin: var(--sp-5) 0 var(--sp-2); }
+        /* Consecutive alerts sat flush against each other. They are separate
+           statements - one about whether the totals agree, one about which
+           customer it lands on - and reading as a single block hid that. */
+        .modal-body .msg + .msg { margin-top: var(--sp-2); }
+        .modal-body h4.card-title:first-child { margin-top: 0; }
+        .modal-body .conn-pairs + .conn-doc-wrap { margin-top: var(--sp-2); }
         .conn-note { font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
             font-size: var(--t-xs); background: var(--surface-2); border: 1px solid var(--border);
             border-radius: var(--r-sm); padding: 10px 12px; margin: var(--sp-2) 0;
@@ -7834,7 +7868,10 @@ Projected Image UK"></textarea>
             oneIn.setAttribute('aria-label', 'Order number');
             const oneChk = el('button', 'btn btn-sm');
             oneChk.append(ico(I.eye), document.createTextNode('Check this order'));
-            const oneOut = el('div', 'setting-sub');
+            /* NOT setting-sub: that carries the 52ch prose measure, which
+               squeezed a row of results to 382px inside a 1558px card and
+               collapsed its flexible column to 26px. */
+            const oneOut = el('div', 'conn-results');
             function paintOne() {
                 const c = connOneCheck && connOneCheck.data;
                 oneOut.innerHTML = '';
@@ -7946,7 +7983,7 @@ Projected Image UK"></textarea>
             paySince.addEventListener('input', () => { connPaySince = paySince.value.trim(); });
             const payChk = el('button', 'btn btn-sm');
             payChk.append(ico(I.eye), document.createTextNode('Check payouts'));
-            const payOut = el('div', 'setting-sub');
+            const payOut = el('div', 'conn-results');
             function paintPay() {
                 payOut.innerHTML = '';
                 const d = connPayResult;

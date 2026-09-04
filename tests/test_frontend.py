@@ -4504,6 +4504,37 @@ def t_an_update_shows_what_it_would_change_in_xero():
        "and an update whose comparison failed says so rather than looking unchanged")
 
 
+@test
+def t_the_xero_page_does_not_borrow_the_prose_measure_for_its_results():
+    """.setting-sub carries a 52ch reading measure, which is right for a
+    paragraph and wrong for a list of results: it squeezed a row to 382px
+    inside a 1558px card and collapsed its flexible column to 26px, so the
+    action read "cre...". Results get their own container."""
+    fn = fn_src("function renderConnector(")
+    ok("el('div', 'conn-results')" in fn,
+       "the result containers do not use the prose class")
+    i = fn.find("const oneOut")
+    ok(i > 0 and "setting-sub" not in fn[i:i + 120],
+       "the one-order results are not a setting-sub")
+    j = fn.find("const payOut")
+    ok(j > 0 and "setting-sub" not in fn[j:j + 120],
+       "nor are the payout results")
+
+
+@test
+def t_the_xero_page_gives_its_rows_a_deliberate_width():
+    """Nothing on the page had a chosen width: prose was capped at 52ch,
+    control rows filled 1524px at 71% empty, and results inherited the prose
+    cap. Three widths, none of them decided."""
+    ok("#view-connector .conn-results { max-width: 56rem; }" in CSS
+       or "#view-connector .conn-results" in CSS,
+       "results share one column")
+    ok("#view-connector .card > .lbl-row { width: fit-content" in CSS,
+       "and a control bar shrinks to what it holds rather than sitting half empty")
+    ok("#view-connector .conn-results:empty { display: none; }" in CSS,
+       "an empty results container takes no vertical space")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
