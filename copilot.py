@@ -20687,10 +20687,35 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Unknown op."}, 400)
         except httpx.HTTPError as e:
             logger.warning("connector unreachable: %r", e)
+            # Three different faults used to read as one sentence, and each has
+            # a different fix: a name that does not resolve, a name that does
+            # with nothing listening, and a service that answers too slowly.
+            # The host and the failure mode are not secrets - the token is
+            # separate - and between them they ARE the diagnosis, so they say
+            # it here rather than only in a log nobody reading the tab can see.
+            host = _connector_url() or "(unset)"
+            text = str(e).lower()
+            unresolved = ("name or service not known" in text
+                          or "nodename nor servname" in text
+                          or "temporary failure in name resolution" in text
+                          or "getaddrinfo" in text)
+            if isinstance(e, (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.PoolTimeout)):
+                why = ("It accepted the connection but did not reply in time, so the "
+                       "service is running and stuck rather than missing. Its own logs "
+                       "will say why.")
+            elif unresolved:
+                why = ("That name does not resolve, so CONNECTOR_URL points at a service "
+                       "this Railway project does not have. Check the service name in it "
+                       "- a bare ${{RAILWAY_PRIVATE_DOMAIN}} resolves to gizmo itself.")
+            elif isinstance(e, httpx.ConnectError):
+                why = ("The name resolves but nothing is listening there. Either the port "
+                       "is wrong, or the service is bound to IPv4: Railway's private "
+                       "network is IPv6 only, so it needs HOST=:: to be reachable.")
+            else:
+                why = "The connection failed (" + type(e).__name__ + ")."
             return _json({"available": True,
-                          "error": "The connector service did not answer. If it was just "
-                                   "deployed, give it a moment; otherwise check the service "
-                                   "in Railway."}, 502)
+                          "error": "The connector did not answer at " + host + ". " + why},
+                         502)
 
     @mcp.custom_route("/api/recon/status", methods=["POST"])
     async def recon_status_route(request: Request):

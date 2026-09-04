@@ -16107,6 +16107,53 @@ def t_deleting_a_unit_that_is_out_is_allowed_but_leaves_a_line_saying_so():
 
 
 @test
+def t_an_unreachable_connector_says_which_of_the_three_faults_it_is():
+    """One sentence covered a name that does not resolve, a name that does with
+    nothing behind it, and a service too slow to answer - three faults with
+    three different fixes, and the detail went only to a log the person reading
+    the tab cannot see. It names the host it tried and what went wrong."""
+    import httpx as _hx
+    ensure_auth()
+    real = copilot._connector_call
+    old_url = os.environ.get("CONNECTOR_URL")
+    os.environ["CONNECTOR_URL"] = "http://xero-conn.railway.internal:8899"
+    cases = [
+        (_hx.ConnectError("[Errno -2] Name or service not known"),
+         ["does not resolve", "service name"]),
+        (_hx.ConnectError("All connection attempts failed"),
+         ["nothing is listening", "IPv6", "HOST=::"]),
+        (_hx.ConnectTimeout("timed out"),
+         ["did not reply in time"]),
+    ]
+    try:
+        for err, wants in cases:
+            async def fake(method, path, params=None, _e=err):
+                raise _e
+            copilot._connector_call = fake
+            r = post("/api/connector", {"op": "status"})
+            eq(r.status_code, 502, r.text)
+            msg = r.json()["error"]
+            ok("xero-conn.railway.internal:8899" in msg,
+               "it names the host it actually tried: " + msg)
+            for w in wants:
+                ok(w in msg, "expected " + repr(w) + " in: " + msg)
+        # The three readings must be distinguishable, not one text three times.
+        outs = []
+        for err, _w in cases:
+            async def fake(method, path, params=None, _e=err):
+                raise _e
+            copilot._connector_call = fake
+            outs.append(post("/api/connector", {"op": "status"}).json()["error"])
+        eq(len(set(outs)), 3, "each fault reads differently")
+    finally:
+        copilot._connector_call = real
+        if old_url is None:
+            os.environ.pop("CONNECTOR_URL", None)
+        else:
+            os.environ["CONNECTOR_URL"] = old_url
+
+
+@test
 def t_the_register_finds_a_projector_in_the_shop():
     """Adding a unit should not mean retyping what the shop already knows.
     Variants are listed separately, because the SKU is what tells two
