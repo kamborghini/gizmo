@@ -12097,12 +12097,33 @@ def _loan_state(loan: dict, chase_days: int) -> str:
     return "due" if _loan_days_out(loan.get("out_at")) > int(chase_days or 0) else "ok"
 
 
+# No O or 0, no I, L or 1: the tag is read off a sticker in a workshop and
+# said down a phone, and those are the characters that come back wrong.
+LOAN_TAG_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+LOAN_TAG_LENGTH = 6
+
+
 def _loan_mint_tag(d: dict) -> str:
-    """The next asset tag. Its own counter, not the record ids: the tag goes on
-    a physical sticker and reads out over a phone, so it stays short and never
-    reuses a number even after a unit is retired."""
-    d["seq_tag"] = int(d.get("seq_tag") or 0) + 1
-    return "PI-%04d" % d["seq_tag"]
+    """An asset tag no one can guess or count.
+
+    A running number told anyone who read one sticker roughly how many units
+    the shop owns, and what the next one would be. Random instead, and checked
+    against every tag already minted: 31^6 is about 900 million, so a clash is
+    vanishingly unlikely, and "vanishingly unlikely" is not the same as
+    impossible when the failure is two projectors wearing one number."""
+    taken = {str(u.get("asset_tag") or "") for u in (d.get("units") or {}).values()}
+    for _ in range(200):
+        tag = "PI-" + "".join(secrets.choice(LOAN_TAG_ALPHABET)
+                              for _ in range(LOAN_TAG_LENGTH))
+        if tag not in taken:
+            return tag
+    # Two hundred collisions in a row is not luck, it is a register so full
+    # that the shape is wrong. Longer, rather than handing back a duplicate.
+    while True:
+        tag = "PI-" + "".join(secrets.choice(LOAN_TAG_ALPHABET)
+                              for _ in range(LOAN_TAG_LENGTH + 2))
+        if tag not in taken:
+            return tag
 
 
 def _loan_codes(tag: str) -> dict:

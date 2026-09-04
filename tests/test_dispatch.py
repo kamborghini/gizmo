@@ -16110,7 +16110,7 @@ def t_a_units_asset_tag_is_minted_once_and_never_changes():
     first = post("/api/loans", {"op": "sticker", "unit_id": unit})
     eq(first.status_code, 200, first.text)
     tag = first.json()["tag"]
-    ok(re.match(r"^PI-\d{4}$", tag), "a running asset tag: %s" % tag)
+    ok(re.match(r"^PI-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$", tag), "an asset tag: %s" % tag)
     again = post("/api/loans", {"op": "sticker", "unit_id": unit}).json()
     eq(again["tag"], tag, "asking again reprints the same tag, it does not mint a second")
     post("/api/loans", {"op": "unit_save", "unit_id": unit, "name": "Renamed",
@@ -16151,6 +16151,51 @@ def t_only_an_admin_mints_a_tag():
     unit = post("/api/loans", {"op": "unit_save", "name": "Members hands off"}).json()["unit"]["id"]
     eq(post_s(sess, "/api/loans", {"op": "sticker", "unit_id": unit}).status_code, 403,
        "minting an asset tag is part of keeping the register")
+
+
+
+
+@test
+def t_an_asset_tag_is_random_unambiguous_and_never_reissued():
+    """A running number told anyone who read a sticker roughly how many units
+    the shop owns, and let them guess the next one. Random instead, from an
+    alphabet with no character that can be misread on a label or over a phone
+    (no O or 0, no I, L or 1), and checked against every tag already minted,
+    because two projectors carrying one number is the whole failure."""
+    d = {"units": {}, "loans": {}, "seq": 0}
+    seen = set()
+    for i in range(400):
+        tag = copilot._loan_mint_tag(d)
+        ok(re.match(r"^PI-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$", tag),
+           "shape and alphabet: %s" % tag)
+        ok(tag not in seen, "the same tag was minted twice: %s" % tag)
+        seen.add(tag)
+        d["units"]["u%d" % i] = {"asset_tag": tag}
+    ok(len({t[3] for t in seen}) > 8, "and it is actually varied, not a counter in disguise")
+
+
+@test
+def t_a_tag_already_on_a_machine_is_never_handed_out_again():
+    """Proved deterministically, not by luck. Drawing 400 tags out of 900
+    million and finding no duplicate says nothing about the collision check:
+    that assertion passes just as happily with the check deleted, which is
+    exactly what it did. With a two-letter alphabet there are only two tags
+    to be had, so the third mint HAS to notice both are taken."""
+    saved = (copilot.LOAN_TAG_ALPHABET, copilot.LOAN_TAG_LENGTH)
+    copilot.LOAN_TAG_ALPHABET, copilot.LOAN_TAG_LENGTH = "AB", 1
+    try:
+        d = {"units": {}, "loans": {}, "seq": 0}
+        first = copilot._loan_mint_tag(d)
+        d["units"]["1"] = {"asset_tag": first}
+        second = copilot._loan_mint_tag(d)
+        d["units"]["2"] = {"asset_tag": second}
+        ok(first != second, "the second mint avoided the first: %s then %s" % (first, second))
+        eq({first, second}, {"PI-A", "PI-B"}, "which are the only two tags that exist")
+        third = copilot._loan_mint_tag(d)
+        ok(third not in (first, second), "with both taken it still does not repeat one")
+        eq(len(third), len("PI-") + 3, "it lengthens rather than duplicate: %s" % third)
+    finally:
+        copilot.LOAN_TAG_ALPHABET, copilot.LOAN_TAG_LENGTH = saved
 
 
 for fn in TESTS:
