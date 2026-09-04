@@ -203,6 +203,12 @@ def build_app():
     actually runs, or over middleware they do not: the tests were built on a
     bare mcp.streamable_http_app() while production wrapped it in two layers,
     so nothing ever exercised those layers against a real route."""
+    # Before the first request: anything long-lived already on the volume gets
+    # encrypted now, rather than whenever it next happens to be rewritten.
+    try:
+        copilot.reseal_secrets_at_rest()
+    except Exception:
+        logger.exception("token vault: re-seal pass failed; continuing")
     app = mcp.streamable_http_app()
     app.add_middleware(MCPAuthMiddleware)
     # Added last, so it wraps outermost and sees every response, including the

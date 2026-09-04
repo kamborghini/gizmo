@@ -11546,6 +11546,52 @@ def _users_default() -> dict:
     return {"version": 2, "seq": 0, "users": {}}
 
 
+def reseal_secrets_at_rest() -> dict:
+    """Encrypt the long-lived secrets already sitting on the volume.
+
+    Setting TOKEN_ENCRYPTION_KEY only changes what is written NEXT. A Xero
+    refresh token that is not due to rotate, or an MFA secret that never
+    rotates at all, would stay in plaintext indefinitely while the key made it
+    look solved - which is worse than knowing it is unencrypted, because
+    nobody goes back to check.
+
+    Runs on every boot and is a no-op without a key, or once everything is
+    already sealed. Never raises: a store that cannot be re-sealed is worth a
+    log line, not a deployment that will not start.
+    """
+    global _users_mem
+    out = {"enabled": tokenvault.enabled(), "sealed": 0, "stores": {}}
+    if not tokenvault.enabled():
+        return out
+    files = [
+        ("gmail_sales", google_mail.TOKEN_PATH, ("refresh_token",)),
+        ("gmail_finance", google_mail.FINANCE_TOKEN_PATH, ("refresh_token",)),
+        ("google_data", google_data.OAUTH_TOKEN_PATH, ("refresh_token",)),
+        ("xero", xero_api.TOKEN_PATH, ("refresh_token",)),
+    ]
+    for name, path, fields in files:
+        try:
+            n = tokenvault.reseal_file(path, fields)
+        except Exception:
+            logger.exception("token vault: could not re-seal %s", name)
+            continue
+        out["stores"][name] = n
+        out["sealed"] += n
+    try:
+        n = tokenvault.reseal_users(USERS_PATH, ("mfa_secret", "mfa_pending"))
+        out["stores"]["mfa"] = n
+        out["sealed"] += n
+        if n:
+            # The file on disk changed underneath the cache. Drop it, or the
+            # next write puts the plaintext straight back.
+            _users_mem = None
+    except Exception:
+        logger.exception("token vault: could not re-seal the MFA secrets")
+    if out["sealed"]:
+        logger.info("token vault: encrypted %d secret(s) already on the volume", out["sealed"])
+    return out
+
+
 def _load_users() -> dict:
     global _users_mem
     if _users_mem is None:

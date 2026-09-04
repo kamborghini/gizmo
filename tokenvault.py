@@ -24,6 +24,7 @@ failure a long way from its cause.
 """
 import base64
 import functools
+import json
 import os
 
 from cryptography.exceptions import InvalidTag
@@ -92,3 +93,94 @@ def unseal(value: str) -> str:
     except (InvalidTag, ValueError, TypeError) as e:
         raise VaultError("This token could not be decrypted: the key has changed, "
                          "or the file was altered.") from e
+
+
+def is_sealed(value) -> bool:
+    """Whether this stored value is an envelope rather than a bare token."""
+    return isinstance(value, str) and value.startswith(PREFIX)
+
+
+def _write_private(path: str, data) -> None:
+    """0600 from the moment it exists, and replaced atomically. A token file
+    that is briefly world-readable, or briefly half-written, is the thing this
+    whole module exists to prevent."""
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    os.replace(tmp, path)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def reseal_file(path: str, fields) -> int:
+    """Seal any bare values at `fields` in a JSON file. Returns how many it changed.
+
+    Turning the key on only affects what is written NEXT: a token already on the
+    volume stays in plaintext until something happens to rewrite it, which for a
+    rarely-refreshed connection can be months. Setting the key would then feel
+    like encryption while the file on disk was unchanged, which is worse than
+    knowing it is unencrypted.
+
+    Safe to run on every boot: a value already sealed is left exactly as it is,
+    and a file that is missing, unreadable or not an object is skipped rather
+    than replaced.
+    """
+    if not enabled():
+        return 0
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(data, dict):
+        return 0
+    changed = 0
+    for f in fields:
+        v = data.get(f)
+        if isinstance(v, str) and v and not is_sealed(v):
+            data[f] = seal(v)
+            changed += 1
+    if changed:
+        _write_private(path, data)
+    return changed
+
+
+def reseal_users(path: str, fields) -> int:
+    """The same, for secrets held per user inside one file (the MFA secrets).
+
+    A user record whose secret cannot be read is left alone rather than
+    dropped: locking someone out of their own account is a worse outcome than
+    one secret staying as it was.
+    """
+    if not enabled():
+        return 0
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return 0
+    users = data.get("users") if isinstance(data, dict) else None
+    if not isinstance(users, dict):
+        return 0
+    changed = 0
+    for rec in users.values():
+        if not isinstance(rec, dict):
+            continue
+        for f in fields:
+            v = rec.get(f)
+            if isinstance(v, str) and v and not is_sealed(v):
+                rec[f] = seal(v)
+                changed += 1
+    if changed:
+        _write_private(path, data)
+    return changed

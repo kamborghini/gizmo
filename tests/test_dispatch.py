@@ -16353,6 +16353,97 @@ def t_a_run_that_needs_attention_is_reported_once_and_only_once():
 
 
 @test
+def t_setting_the_key_encrypts_what_is_already_on_the_volume():
+    """Turning the key on only affects what is written NEXT. A Xero refresh
+    token not due to rotate, or an MFA secret that never rotates, would sit in
+    plaintext indefinitely while the key made it look solved - which is worse
+    than knowing it is unencrypted, because nobody goes back to check."""
+    import tokenvault as _tv
+    d = tempfile.mkdtemp()
+    tok = os.path.join(d, "xero_oauth.json")
+    with open(tok, "w", encoding="utf-8") as fh:
+        json.dump({"refresh_token": "plain-refresh-abc", "tenant": "t1"}, fh)
+
+    old_key = os.environ.get("TOKEN_ENCRYPTION_KEY")
+    try:
+        # No key: a re-seal must change nothing at all.
+        os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
+        _tv._key.cache_clear()
+        eq(_tv.reseal_file(tok, ("refresh_token",)), 0)
+        eq(json.load(open(tok))["refresh_token"], "plain-refresh-abc",
+           "without a key the file is left exactly as it was")
+
+        os.environ["TOKEN_ENCRYPTION_KEY"] = "a-long-random-key-for-the-test"
+        _tv._key.cache_clear()
+        eq(_tv.reseal_file(tok, ("refresh_token",)), 1, "one secret sealed")
+        raw = json.load(open(tok))
+        ok(_tv.is_sealed(raw["refresh_token"]), "the file now holds an envelope")
+        ok("plain-refresh-abc" not in open(tok).read(),
+           "and the plaintext is GONE from the file, not merely alongside it")
+        eq(_tv.unseal(raw["refresh_token"]), "plain-refresh-abc",
+           "and it still opens to the same token")
+        eq(raw["tenant"], "t1", "other fields are untouched")
+        eq(oct(os.stat(tok).st_mode & 0o777), oct(0o600), "and it stays private")
+
+        eq(_tv.reseal_file(tok, ("refresh_token",)), 0,
+           "running again seals nothing: safe on every boot")
+    finally:
+        if old_key is None:
+            os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
+        else:
+            os.environ["TOKEN_ENCRYPTION_KEY"] = old_key
+        _tv._key.cache_clear()
+
+
+@test
+def t_a_reseal_never_destroys_a_secret_it_cannot_handle():
+    """This pass rewrites files holding the only copy of a credential. Every
+    way it can fail must leave the file alone: a missing file, a corrupt one,
+    an empty value. Losing a refresh token means reconnecting Xero by hand."""
+    import tokenvault as _tv
+    d = tempfile.mkdtemp()
+    old_key = os.environ.get("TOKEN_ENCRYPTION_KEY")
+    os.environ["TOKEN_ENCRYPTION_KEY"] = "a-long-random-key-for-the-test"
+    _tv._key.cache_clear()
+    try:
+        eq(_tv.reseal_file(os.path.join(d, "nope.json"), ("refresh_token",)), 0,
+           "a missing file is not an error")
+
+        bad = os.path.join(d, "bad.json")
+        with open(bad, "w", encoding="utf-8") as fh:
+            fh.write("{not json at all")
+        eq(_tv.reseal_file(bad, ("refresh_token",)), 0)
+        eq(open(bad).read(), "{not json at all",
+           "an unreadable file is left exactly as found, never replaced")
+
+        empty = os.path.join(d, "empty.json")
+        with open(empty, "w", encoding="utf-8") as fh:
+            json.dump({"refresh_token": ""}, fh)
+        eq(_tv.reseal_file(empty, ("refresh_token",)), 0,
+           "an empty value is not sealed into something that looks like a token")
+
+        users = os.path.join(d, "users.json")
+        with open(users, "w", encoding="utf-8") as fh:
+            json.dump({"version": 2, "users": {
+                "u1": {"mfa_secret": "SECRETA", "name": "Ada"},
+                "u2": {"name": "Bo"},
+                "u3": "not-a-record"}}, fh)
+        eq(_tv.reseal_users(users, ("mfa_secret", "mfa_pending")), 1)
+        back = json.load(open(users))
+        eq(_tv.unseal(back["users"]["u1"]["mfa_secret"]), "SECRETA",
+           "the secret still opens, so nobody is locked out of their account")
+        eq(back["users"]["u1"]["name"], "Ada")
+        eq(back["users"]["u2"], {"name": "Bo"}, "a user with no secret is untouched")
+        eq(back["users"]["u3"], "not-a-record", "and a record of the wrong shape survives")
+    finally:
+        if old_key is None:
+            os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
+        else:
+            os.environ["TOKEN_ENCRYPTION_KEY"] = old_key
+        _tv._key.cache_clear()
+
+
+@test
 def t_the_register_finds_a_projector_in_the_shop():
     """Adding a unit should not mean retyping what the shop already knows.
     Variants are listed separately, because the SKU is what tells two
