@@ -4085,6 +4085,39 @@ def t_one_order_is_checked_before_it_is_sent():
     ok("connIsAdmin()" in fn, "and only an admin sees the send")
 
 
+
+@test
+def t_the_loan_units_tab_is_fully_plumbed():
+    """A tab is not a page: it is a nav entry with a label, a view, a title, a
+    grant key on both sides and a case in setView. Forgetting any one of them
+    leaves a door painted on a wall."""
+    ok('data-view="loans" id="nav-loans"' in HTML, "the nav button exists")
+    ok('id="view-loans"' in HTML and 'id="loans-content"' in HTML, "and the view it opens")
+    ok("$('nav-loans').append" in SCRIPT, "the nav entry is labelled")
+    ok("'loans'" in SCRIPT.split("const TAB_KEYS = [")[1][:300], "the page knows the grant key")
+    ok("loans: 'Loan units'" in SCRIPT, "the topbar can name it")
+    ok("if (v === 'loans') showLoansView();" in SCRIPT, "and setView opens it")
+    ok("'loans'" in SCRIPT.split("function setView(v) {")[1][:700],
+       "it is in the list of views setView shows and hides")
+    src = open("copilot.py", encoding="utf-8").read()
+    ok('"loans"' in src.split("TAB_KEYS = (")[1][:320], "the server knows the same grant key")
+    ok('("/api/loans", "loans")' in src, "and gates the route behind it")
+
+
+@test
+def t_a_loan_says_who_has_it_and_how_long_it_has_been_gone():
+    """The three questions the page exists to answer, and the one number the
+    app must never take on trust: days out is computed from when it left."""
+    fn = fn_src("function renderLoans(")
+    ok("days_out" in fn, "the row says how long it has been out")
+    ok("'late'" in fn and "'due'" in fn, "and marks the ones past a date or past the threshold")
+    ok("Book back in" in fn, "every loan can be received")
+    out = fn_src("function loanOutModal(")
+    ok("crmTypeahead(" in out, "the borrower field offers CRM contacts as you type")
+    ok("crm_person_id" in out, "and the loan remembers which contact was picked")
+    ok("due_at" in out, "a due-back date can be set when it goes out")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

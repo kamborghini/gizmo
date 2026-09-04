@@ -966,6 +966,13 @@
             border-radius: var(--r-sm); margin-bottom: 8px; cursor: pointer; transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease); text-align: left; width: 100%; }
         .lbl-row:hover { background: var(--surface-2); border-color: var(--border-2); }
         .lbl-row.on { border-color: var(--accent); background: var(--surface); }
+        /* A loan past a date somebody agreed reads as a problem; one that is
+           simply old reads as a nudge. The stripe carries it, not the whole
+           row, so the text keeps its contrast on either state. */
+        .lbl-row.is-late { border-color: var(--danger); box-shadow: inset 3px 0 0 var(--danger); }
+        .lbl-row.is-due { border-color: var(--warn); box-shadow: inset 3px 0 0 var(--warn); }
+        .lbl-row.is-late .lbl-meta { color: var(--danger); }
+        .lbl-row.is-due .lbl-meta { color: var(--warn); }
         /* A list INSIDE a card is content, not a stack of boxes: a white
            bordered row on a white bordered card draws a second frame around
            the same fill, and with a drill-down open the finance list stacked
@@ -3026,6 +3033,7 @@
                 <div class="nav-group">Operations</div>
                 <button class="nav-item" data-view="labels" id="nav-labels"></button>
                 <button class="nav-item" data-view="crm" id="nav-crm"></button>
+                <button class="nav-item" data-view="loans" id="nav-loans"></button>
                 <button class="nav-item" data-view="mail" id="nav-mail"></button>
                 <button class="nav-item" data-view="files" id="nav-files"></button>
                 <div class="nav-group">Workspace</div>
@@ -3096,6 +3104,11 @@
             <!-- Production labels -->
             <section class="view" id="view-crm">
                 <div class="scroll"><div class="ov-wrap" id="crm-content"></div></div>
+            </section>
+
+            <!-- Loan units: which projectors are out, and with whom -->
+            <section class="view" id="view-loans">
+                <div class="scroll"><div class="ov-wrap" id="loans-content"></div></div>
             </section>
 
             <!-- Inbox: shared-mailbox ownership board -->
@@ -3363,6 +3376,7 @@ Projected Image UK"></textarea>
             el('span', 'beta-tag', 'Beta'));
         $('nav-crm').append(ico(I.briefcase), document.createTextNode('CRM'),
             el('span', 'beta-tag', 'Beta'));
+        $('nav-loans').append(ico(I.box), document.createTextNode('Loan units'));
         $('nav-mail').append(ico(I.mail), document.createTextNode('Inbox'));
         $('nav-files').append(ico(I.folder), document.createTextNode('Files'));
         $('nav-team').append(ico(I.userCheck), document.createTextNode('Team'));
@@ -6886,6 +6900,276 @@ Projected Image UK"></textarea>
         }
         function connIsAdmin() {
             return !teamMe || ({ master: 3, admin: 2 }[teamMe.role] || 0) >= 2;
+        }
+
+        /* ---------- Loan units ----------
+           Which loan projectors are out, with whom, and how long they have
+           been gone. Two objects, because they answer different questions: a
+           UNIT is a thing the shop owns, a LOAN is one trip it made. */
+        let loansCache = null;
+        function showLoansView() { if (loansCache) renderLoans(); else loadLoans(); }
+        /* The borrower field suggests CRM contacts, and the CRM's own cache is
+           only filled when somebody opens that tab. Warm it in the background
+           when this page opens, or the suggestions are silently dead for
+           anyone who came straight here. Best effort: a CRM that will not load
+           must not stop a projector going out. */
+        function loansWarmCrm() {
+            if (crmCache && crmCache.persons) return;
+            api('/api/crm/board', {}).then(r => {
+                if (r && r.crm && !crmCache) { crmCache = r.crm; }
+            }).catch(() => {});
+        }
+        async function loadLoans(quiet) {
+            loansWarmCrm();
+            const box = $('loans-content');
+            if (!quiet) { box.innerHTML = ''; box.append(el('div', 'thinking'), loader()); }
+            try { loansCache = await api('/api/loans', { op: 'board' }); }
+            catch (e) { box.innerHTML = ''; box.append(el('div', 'msg error',
+                el('div', 'bubble', e.message || 'Could not read the loan register.'))); return; }
+            renderLoans();
+        }
+        function loanModal(title) {
+            const overlay = el('div', 'modal-overlay show');
+            const modal = el('div', 'modal disp-modal');
+            const head = el('div', 'modal-head');
+            head.append(el('h3', null, title));
+            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
+            x.setAttribute('aria-label', 'Close');
+            head.append(x);
+            const body = el('div', 'modal-body');
+            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+            const close = () => overlay.remove();
+            x.onclick = close;      /* the X is the only way out, as everywhere else */
+            return { overlay: overlay, modal: modal, body: body, close: close };
+        }
+        function loanDays(n) { return n === 1 ? '1 day out' : n + ' days out'; }
+        function loanOutModal(unit) {
+            const m = loanModal('Loan out ' + (unit.name || 'a unit'));
+            const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
+            const whoIn = crmText('', 'Company or person');
+            /* Type freely; matching CRM contacts are offered, and picking one
+               links the loan to that record so a company's history is one
+               place rather than several spellings of its name. */
+            let pickedPerson = '', pickedOrg = '';
+            crmField(grid, 'Going to', crmTypeahead(whoIn, function (q) {
+                const rows = (typeof crmPersonRows === 'function' && crmCache && crmCache.persons)
+                    ? crmPersonRows(q) : [];
+                return rows.slice(0, 8);
+            }, { pick: function (r) {
+                whoIn.value = r.name;
+                pickedPerson = r.id || '';
+                const p = crmCache && crmCache.persons && crmCache.persons[r.id];
+                pickedOrg = (p && p.org_id) || '';
+            } }));
+            whoIn.addEventListener('input', function () { pickedPerson = ''; pickedOrg = ''; });
+            const phoneIn = crmText('', 'Optional');
+            crmField(grid, 'Phone', phoneIn);
+            const dueIn = document.createElement('input');
+            dueIn.type = 'date'; dueIn.className = 'disp-text';
+            crmField(grid, 'Due back', dueIn);
+            const noteIn = crmText('', 'What went with it, condition, anything to remember');
+            crmField(grid, 'Note', noteIn);
+            m.body.append(el('p', 'field-help',
+                'A due date is optional. Without one this loan is never called late; '
+                + 'it turns amber once it has been out longer than the chase threshold.'));
+            const go = el('button', 'btn btn-primary', 'Loan it out');
+            go.onclick = async () => {
+                if (!whoIn.value.trim()) { toastError('Say who it is going to.'); return; }
+                go.disabled = true;
+                try {
+                    await api('/api/loans', { op: 'out', unit_id: unit.id,
+                        who_name: whoIn.value.trim(), phone: phoneIn.value.trim(),
+                        due_at: dueIn.value || '', note: noteIn.value.trim(),
+                        crm_person_id: pickedPerson, crm_org_id: pickedOrg });
+                    m.close(); toastOk((unit.name || 'The unit') + ' is out with ' + whoIn.value.trim() + '.');
+                    loadLoans(true);
+                } catch (e) { go.disabled = false; toastError(e.message); }
+            };
+            m.body.append(el('div', 'mail-statebar', go));
+        }
+        function loanUnitModal(unit) {
+            const u = unit || {};
+            const m = loanModal(u.id ? ('Edit ' + (u.name || 'unit')) : 'Add a loan unit');
+            const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
+            const nameIn = crmText(u.name || '', 'Loan 3');
+            const modelIn = crmText(u.model || '', 'Epson EB-2250U');
+            const serialIn = crmText(u.serial || '', 'Serial or asset tag');
+            const notesIn = crmText(u.notes || '', 'Anything worth knowing');
+            crmField(grid, 'Name', nameIn);
+            crmField(grid, 'Model', modelIn);
+            crmField(grid, 'Serial', serialIn);
+            crmField(grid, 'Notes', notesIn);
+            const save = el('button', 'btn btn-primary', 'Save unit');
+            save.onclick = async () => {
+                if (!nameIn.value.trim()) { toastError('Give the unit a name, for example Loan 3.'); return; }
+                save.disabled = true;
+                try {
+                    await api('/api/loans', { op: 'unit_save', unit_id: u.id || '',
+                        name: nameIn.value.trim(), model: modelIn.value.trim(),
+                        serial: serialIn.value.trim(), notes: notesIn.value.trim() });
+                    m.close(); loadLoans(true);
+                } catch (e) { save.disabled = false; toastError(e.message); }
+            };
+            m.body.append(el('div', 'mail-statebar', save));
+        }
+        async function loanHistoryModal(unit) {
+            const m = loanModal((unit.name || 'Unit') + ' history');
+            m.body.append(el('div', 'thinking'), loader());
+            let r;
+            try { r = await api('/api/loans', { op: 'history', unit_id: unit.id }); }
+            catch (e) { m.body.innerHTML = ''; m.body.append(el('div', 'msg error', el('div', 'bubble', e.message))); return; }
+            m.body.innerHTML = '';
+            const rows = r.history || [];
+            if (!rows.length) { m.body.append(el('div', 'empty', 'This one has never been out.')); return; }
+            rows.forEach(h => {
+                const row = el('div', 'lbl-row');
+                row.append(el('span', null, h.who_name || 'Someone'));
+                row.append(el('span', 'lbl-meta', fmtDate(h.out_at)
+                    + (h.back_at ? ' to ' + fmtDate(h.back_at) : ' · still out')));
+                m.body.append(row);
+            });
+        }
+        function renderLoans() {
+            const d = loansCache || {}; const box = $('loans-content'); box.innerHTML = '';
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
+            const htext = el('div');
+            htext.append(el('h2', null, 'Loan units'),
+                el('p', null, 'The projectors that go out to customers, where each one is, '
+                    + 'and how long it has been gone.'));
+            hero.append(badge, htext); box.append(hero);
+            const counts = d.counts || { out: 0, in: 0, late: 0 };
+            box.append(metricsGrid([
+                { label: 'Out now', value: String(counts.out), note: 'with customers' },
+                { label: 'On the shelf', value: String(counts.in), note: 'ready to go' },
+                { label: 'Overdue', value: String(counts.late),
+                  note: counts.late ? 'past the date agreed' : 'nothing past its date',
+                  trend: counts.late ? 'down' : '' }]));
+
+            /* ---- what is out ---- */
+            const oCard = el('div', 'card');
+            const oHead = el('div', 'card-head');
+            oHead.append(el('h3', 'card-title', 'Out now'));
+            oHead.append(el('p', 'card-desc', 'Longest out first.'));
+            oCard.append(oHead);
+            const out = d.out || [];
+            if (!out.length) {
+                oCard.append(el('div', 'empty', 'Everything is on the shelf.'));
+            } else {
+                out.forEach(r => {
+                    const row = el('div', 'lbl-row' + (r.state === 'late' ? ' is-late'
+                        : r.state === 'due' ? ' is-due' : ''));
+                    const who = el('div');
+                    who.append(el('div', null, r.unit.name + (r.unit.model ? ' · ' + r.unit.model : '')));
+                    who.append(el('div', 'lbl-meta', 'with ' + (r.who_name || 'someone')
+                        + (r.phone ? ' · ' + r.phone : '')));
+                    row.append(who);
+                    const when = el('div');
+                    when.append(el('div', null, loanDays(r.days_out)));
+                    when.append(el('div', 'lbl-meta', r.due_at
+                        ? (r.state === 'late' ? 'due back ' + fmtDate(r.due_at) + ', overdue'
+                            : 'due back ' + fmtDate(r.due_at))
+                        : (r.state === 'due' ? 'no date set, worth a chase' : 'no date set')));
+                    row.append(when);
+                    const back = el('button', 'btn btn-sm', 'Book back in');
+                    back.onclick = async () => {
+                        if (!await uiConfirm((r.unit.name || 'This unit') + ' is back from '
+                            + (r.who_name || 'the customer') + '?',
+                            { title: 'Book back in', okText: 'It is back' })) return;
+                        back.disabled = true;
+                        try { await api('/api/loans', { op: 'back', loan_id: r.id });
+                              toastOk((r.unit.name || 'Unit') + ' is back on the shelf.');
+                              loadLoans(true); }
+                        catch (e) { back.disabled = false; toastError(e.message); }
+                    };
+                    row.append(back);
+                    oCard.append(row);
+                });
+            }
+            box.append(oCard);
+
+            /* ---- the register ---- */
+            const rCard = el('div', 'card');
+            const rHead = el('div', 'card-head');
+            rHead.append(el('h3', 'card-title', 'The register'));
+            rHead.append(el('p', 'card-desc', 'Every loan unit the shop owns.'));
+            if (d.can_manage) {
+                const add = el('button', 'btn btn-sm');
+                add.append(ico(I.plus), document.createTextNode('Add a unit'));
+                add.onclick = () => loanUnitModal(null);
+                const act = el('div', 'card-act'); act.append(add); rHead.append(act);
+            }
+            rCard.append(rHead);
+            const units = d.units || [];
+            if (!units.length) {
+                rCard.append(el('div', 'empty', d.can_manage
+                    ? 'No units yet. Add the first projector to start tracking it.'
+                    : 'No units in the register yet.'));
+            } else {
+                units.forEach(u => {
+                    const row = el('div', 'lbl-row');
+                    const left = el('div');
+                    left.append(el('div', null, u.name));
+                    left.append(el('div', 'lbl-meta', [u.model, u.serial].filter(Boolean).join(' · ')
+                        || 'no model or serial recorded'));
+                    row.append(left);
+                    row.append(el('span', 'mrule-tag', u.status === 'out' ? 'Out'
+                        : u.status === 'retired' ? 'Retired' : 'On the shelf'));
+                    const hist = el('button', 'btn btn-sm', 'History');
+                    hist.onclick = () => loanHistoryModal(u);
+                    row.append(hist);
+                    if (u.status === 'in') {
+                        const outB = el('button', 'btn btn-sm btn-primary', 'Loan out');
+                        outB.onclick = () => loanOutModal(u);
+                        row.append(outB);
+                    }
+                    if (d.can_manage) {
+                        const ed = el('button', 'icon-btn'); ed.innerHTML = I.edit;
+                        ed.title = 'Edit this unit'; ed.setAttribute('aria-label', 'Edit ' + u.name);
+                        ed.onclick = () => loanUnitModal(u);
+                        row.append(ed);
+                        const rt = el('button', 'icon-btn'); rt.innerHTML = I.trash;
+                        rt.title = u.status === 'retired' ? 'Put it back in the register' : 'Retire this unit';
+                        rt.setAttribute('aria-label', (u.status === 'retired' ? 'Unretire ' : 'Retire ') + u.name);
+                        rt.onclick = async () => {
+                            const back = u.status === 'retired';
+                            if (!back && !await uiConfirm('Retire ' + u.name
+                                + '? It stays in the history but cannot be loaned out.',
+                                { title: 'Retire unit', okText: 'Retire it', danger: true })) return;
+                            try { await api('/api/loans', { op: 'unit_retire', unit_id: u.id,
+                                                            unretire: back ? 1 : 0 });
+                                  loadLoans(true); }
+                            catch (e) { toastError(e.message); }
+                        };
+                        row.append(rt);
+                    }
+                    rCard.append(row);
+                });
+            }
+            box.append(rCard);
+
+            if (d.can_manage) {
+                const sCard = el('div', 'card');
+                sCard.append(el('h3', 'card-title', 'Chasing'));
+                sCard.append(el('p', 'card-desc',
+                    'A loan with no due date turns amber once it has been out this long.'));
+                const wrap = el('div', 'lbl-row');
+                const days = document.createElement('input');
+                days.type = 'number'; days.min = '1'; days.max = '365'; days.className = 'disp-text';
+                days.style.maxWidth = '110px';
+                days.value = String((d.settings || {}).chase_days || 28);
+                days.setAttribute('aria-label', 'Chase after this many days');
+                const save = el('button', 'btn btn-sm', 'Save');
+                save.onclick = async () => {
+                    save.disabled = true;
+                    try { await api('/api/loans', { op: 'settings', chase_days: Number(days.value) });
+                          toastOk('Saved.'); loadLoans(true); }
+                    catch (e) { toastError(e.message); }
+                    save.disabled = false;
+                };
+                wrap.append(days, el('span', 'lbl-meta', 'days'), save);
+                sCard.append(wrap);
+                box.append(sCard);
+            }
         }
 
         function renderConnector() {
@@ -18004,7 +18288,7 @@ Projected Image UK"></textarea>
             return data;
         }
         const TAB_KEYS = ['overview', 'seo', 'keywords', 'products', 'customers', 'liability',
-                          'crm', 'mail', 'files', 'labels', 'memory', 'skills', 'chat', 'recon',
+                          'crm', 'loans', 'mail', 'files', 'labels', 'memory', 'skills', 'chat', 'recon',
                           'connector'];
         /* Reconciliation is not part of the default grant: it holds the books,
            the bank line and the accounts mailbox, so it is handed over on
@@ -18404,7 +18688,7 @@ Projected Image UK"></textarea>
                     panel.style.background = 'var(--bg-2)';
                     const NAMES = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords',
                         products: 'Products', customers: 'Customers', liability: 'Liability',
-                        crm: 'CRM', mail: 'Inbox', files: 'Files', labels: 'Production Manager',
+                        crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', labels: 'Production Manager',
                         memory: 'Memory', skills: 'Skills', chat: 'Chat',
                         recon: 'Reconciliation' };
                     const chosen = new Set(Array.isArray(u.tabs) ? u.tabs : DEFAULT_TABS);
@@ -18690,8 +18974,8 @@ Projected Image UK"></textarea>
         const BETA_TABS = ['recon', 'crm', 'connector'];
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
-            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'connector', 'crm', 'mail', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', connector: 'Xero sync', crm: 'CRM', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
+            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'connector', 'crm', 'loans', 'mail', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', connector: 'Xero sync', crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
             /* Beta rides the topbar title as well: it is the only label still
                on screen once the page is scrolled. */
@@ -18718,6 +19002,7 @@ Projected Image UK"></textarea>
             if (v === 'products') showProductsView();
             if (v === 'liability') showLiabilityView();
             if (v === 'crm') showCRMView();
+            if (v === 'loans') showLoansView();
             if (v === 'mail') showMailView();
             if (v === 'files') showFilesView();
             if (v === 'team') showTeamView();

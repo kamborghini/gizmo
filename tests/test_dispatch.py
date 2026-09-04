@@ -48,6 +48,7 @@ os.environ.update({
     "COLLECTIONS_PATH": SCRATCH + "/collections.json",
     "PRIVACY_LOG_PATH": SCRATCH + "/privacy_log.json",
     "EORI_CACHE_PATH": SCRATCH + "/eori_cache.json",
+    "LOANS_PATH": SCRATCH + "/loans.json",
     # The two size-rule files decide the glass an order is cut from, and
     # they live in the REPO data dir rather than on the volume. Without
     # these redirects any test that saved a rule would edit the
@@ -15959,6 +15960,90 @@ def t_one_order_can_be_checked_by_anyone_and_sent_only_by_an_admin():
     finally:
         copilot._connector_call = saved
         os.environ["CONNECTOR_URL"] = old_url
+
+
+
+
+def _loan_row(unit_id):
+    for r in post("/api/loans", {"op": "board"}).json()["out"]:
+        if r["unit"]["id"] == unit_id:
+            return r
+    return None
+
+
+@test
+def t_a_loan_unit_goes_out_once_and_comes_back():
+    """The register has to answer where a projector is. A unit already with
+    someone cannot go out again, or the register drifts from the shelf."""
+    ensure_auth()
+    before = post("/api/loans", {"op": "board"}).json()["counts"]
+    r = post("/api/loans", {"op": "unit_save", "name": "Loan 3",
+                            "model": "Epson EB-2250U", "serial": "X1234"})
+    eq(r.status_code, 200, r.text)
+    unit = r.json()["unit"]["id"]
+    b = post("/api/loans", {"op": "board"}).json()
+    eq(b["counts"]["in"], before["in"] + 1, "a new unit starts on the shelf")
+    r = post("/api/loans", {"op": "out", "unit_id": unit,
+                            "who_name": "Northlight Studios", "due_at": "2099-01-01"})
+    eq(r.status_code, 200, r.text)
+    row = _loan_row(unit)
+    ok(row, "it is on the out list")
+    eq(row["who_name"], "Northlight Studios")
+    eq(row["unit"]["name"], "Loan 3")
+    ok(row["days_out"] >= 0, "days out are counted from when it left, never typed")
+    again = post("/api/loans", {"op": "out", "unit_id": unit, "who_name": "Someone else"})
+    eq(again.status_code, 400, "a unit already out cannot be loaned twice")
+    eq(post("/api/loans", {"op": "back", "loan_id": row["id"]}).status_code, 200)
+    ok(_loan_row(unit) is None, "and booking it back puts it on the shelf")
+    eq(post("/api/loans", {"op": "back", "loan_id": row["id"]}).status_code, 400,
+       "it cannot come back twice")
+
+
+@test
+def t_a_loan_is_late_by_its_date_and_only_amber_by_its_age():
+    """A due date that has passed is late. A loan with no date is not late,
+    however old: it goes amber once it is older than the chase threshold, so a
+    projector legitimately out for months is not shouted about every day."""
+    from datetime import datetime, timezone, timedelta
+    ensure_auth()
+    u1 = post("/api/loans", {"op": "unit_save", "name": "Past its date"}).json()["unit"]["id"]
+    u2 = post("/api/loans", {"op": "unit_save", "name": "Just old"}).json()["unit"]["id"]
+    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
+    post("/api/loans", {"op": "out", "unit_id": u1, "who_name": "A", "due_at": yesterday})
+    post("/api/loans", {"op": "out", "unit_id": u2, "who_name": "B"})
+    d = copilot._load_loans()
+    for lo in d["loans"].values():
+        if lo["unit_id"] == u2:
+            lo["out_at"] = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
+    copilot._write_loans(d)
+    late, old = _loan_row(u1), _loan_row(u2)
+    eq(late["state"], "late", "past its due date")
+    eq(old["state"], "due", "no date, but older than the chase threshold")
+    ok(old["days_out"] >= 40, "and it says how long: %s" % old["days_out"])
+    counts = post("/api/loans", {"op": "board"}).json()["counts"]
+    eq(counts["late"], 1, "only a real due date makes something late")
+
+
+@test
+def t_the_bench_lends_and_receives_but_only_an_admin_keeps_the_register():
+    """Loaning out and booking back is the daily job. The register of what the
+    shop owns is an admin's, and a unit with a customer cannot be retired from
+    under them."""
+    ensure_auth()
+    uid, sess, _ = ready_user("Kit", "kit-loans")
+    eq(post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["loans"]}).status_code, 200)
+    unit = post("/api/loans", {"op": "unit_save", "name": "Bench unit"}).json()["unit"]["id"]
+    r = post_s(sess, "/api/loans", {"op": "out", "unit_id": unit, "who_name": "Harbour AV"})
+    eq(r.status_code, 200, r.text)
+    row = _loan_row(unit)
+    eq(post("/api/loans", {"op": "unit_retire", "unit_id": unit}).status_code, 400,
+       "a unit that is out cannot be retired")
+    eq(post_s(sess, "/api/loans", {"op": "back", "loan_id": row["id"]}).status_code, 200)
+    eq(post_s(sess, "/api/loans", {"op": "unit_save", "name": "Sneaky"}).status_code, 403,
+       "a member does not add to the register")
+    eq(post_s(sess, "/api/loans", {"op": "unit_retire", "unit_id": unit}).status_code, 403)
+    eq(post("/api/loans", {"op": "unit_retire", "unit_id": unit}).status_code, 200,
+       "but an admin retires it once it is home")
 
 
 for fn in TESTS:

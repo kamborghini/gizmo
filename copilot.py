@@ -11896,8 +11896,8 @@ def _master_reset_check(d: dict) -> None:
 # The master is never restricted. Enforcement is central (in _pre_checks) via
 # this path map, so hiding a tab in the page is never the only lock.
 TAB_KEYS = ("overview", "seo", "keywords", "products", "customers", "liability",
-            "crm", "mail", "files", "labels", "memory", "skills", "chat", "recon",
-            "connector")
+            "crm", "loans", "mail", "files", "labels", "memory", "skills", "chat",
+            "recon", "connector")
 # API routes that belong to no tab and are open to every signed-in account:
 # the sign-in flow, a person's own clock and profile, and the admin routes,
 # which refuse non-admins themselves. Anything else under /api/ that is not in
@@ -11917,7 +11917,8 @@ _TAB_ROUTES = (
     ("/api/customers", "customers"), ("/api/customer-history", ("customers", "crm")),
     ("/api/customer-tags", "customers"), ("/api/reorder-radar", "customers"),
     ("/api/liability", "liability"),
-    ("/api/crm/", "crm"), ("/api/mail/", "mail"), ("/api/files/", "files"),
+    ("/api/crm/", "crm"), ("/api/loans", "loans"),
+    ("/api/mail/", "mail"), ("/api/files/", "files"),
     ("/api/production-labels", "labels"), ("/api/production-state", "labels"),
     ("/api/order/", "labels"),
     ("/api/dispatch/", "labels"), ("/api/custom/", "labels"),
@@ -11992,6 +11993,122 @@ def _tab_denied(request: Request) -> Optional[JSONResponse]:
 # Sessions are append-only; an admin resolving a forgotten clock-out closes
 # the session with correction stamps beside the original start, on the ledger.
 # ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# Loan units: the projectors that go out to customers, and where they are.
+# Two objects because they answer different questions. A UNIT is a thing the
+# shop owns and keeps forever; a LOAN is one trip it made. Without the unit
+# register "where is the demo projector" has no answer, because the same
+# machine gets typed six different ways over a year.
+# --------------------------------------------------------------------------
+LOANS_PATH = os.environ.get("LOANS_PATH", "/data/loans.json")
+LOAN_CHASE_DAYS_DEFAULT = 28
+_loans_mem = None
+
+
+def _loans_default() -> dict:
+    return {"units": {}, "loans": {}, "seq": 0,
+            "settings": {"chase_days": LOAN_CHASE_DAYS_DEFAULT}}
+
+
+def _load_loans() -> dict:
+    global _loans_mem
+    if _loans_mem is None:
+        d = _load_json_store(LOANS_PATH, "loans_store", None)
+        base = _loans_default()
+        if isinstance(d, dict):
+            base.update({k: d[k] for k in ("units", "loans", "seq") if k in d})
+            if isinstance(d.get("settings"), dict):
+                base["settings"].update(d["settings"])
+        _loans_mem = base
+    return _loans_mem
+
+
+def _write_loans(d: dict) -> None:
+    """Owner-only: it carries customers' names and phone numbers."""
+    global _loans_mem
+    if not _store_writable(LOANS_PATH):
+        _loans_mem = None
+        raise RuntimeError("the loan register is not writable")
+    try:
+        _write_private_json(LOANS_PATH, "loans_store", d)
+    except Exception:
+        _loans_mem = None
+        raise
+    _loans_mem = d
+
+
+def _loan_id(d: dict, prefix: str) -> str:
+    d["seq"] = int(d.get("seq") or 0) + 1
+    return "%s%d" % (prefix, d["seq"])
+
+
+def _loan_days_out(out_at: str) -> int:
+    try:
+        started = datetime.fromisoformat(str(out_at).replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return max(0, (datetime.now(timezone.utc) - started).days)
+
+
+def _loan_state(loan: dict, chase_days: int) -> str:
+    """late = past a date somebody set. due = no date, and older than the
+    threshold. A loan with no due date is never LATE, however old: nobody
+    promised it back, so calling it late would be the app inventing a
+    commitment the customer never made."""
+    due = str(loan.get("due_at") or "").strip()
+    if due:
+        return "late" if due < datetime.now(timezone.utc).date().isoformat() else "ok"
+    return "due" if _loan_days_out(loan.get("out_at")) > int(chase_days or 0) else "ok"
+
+
+def _loans_board(d: dict, who: str) -> dict:
+    chase = int((d.get("settings") or {}).get("chase_days") or LOAN_CHASE_DAYS_DEFAULT)
+    open_by_unit = {}
+    for lid, lo in (d.get("loans") or {}).items():
+        if not lo.get("back_at"):
+            open_by_unit[str(lo.get("unit_id") or "")] = dict(lo, id=lid)
+    units, out_rows = [], []
+    for uid, u in sorted((d.get("units") or {}).items(),
+                         key=lambda kv: str(kv[1].get("name") or "").lower()):
+        lo = open_by_unit.get(uid)
+        status = "retired" if u.get("retired") else ("out" if lo else "in")
+        shape = {"id": uid, "name": u.get("name") or "", "model": u.get("model") or "",
+                 "serial": u.get("serial") or "", "notes": u.get("notes") or "",
+                 "status": status}
+        units.append(shape)
+        if lo and status == "out":
+            out_rows.append({
+                "id": lo["id"], "unit": shape,
+                "who_name": lo.get("who_name") or "", "phone": lo.get("phone") or "",
+                "crm_person_id": lo.get("crm_person_id") or "",
+                "crm_org_id": lo.get("crm_org_id") or "",
+                "out_at": lo.get("out_at") or "", "due_at": lo.get("due_at") or "",
+                "out_by_name": _team_name(lo.get("out_by") or "") or "",
+                "note": lo.get("note") or "",
+                "days_out": _loan_days_out(lo.get("out_at")),
+                "state": _loan_state(lo, chase)})
+    out_rows.sort(key=lambda r: (-r["days_out"], r["unit"]["name"].lower()))
+    return {"units": units, "out": out_rows,
+            "counts": {"out": len(out_rows),
+                       "in": sum(1 for u in units if u["status"] == "in"),
+                       "late": sum(1 for r in out_rows if r["state"] == "late")},
+            "settings": {"chase_days": chase},
+            "can_manage": _team_level(who) >= ROLE_LEVELS["admin"]}
+
+
+def _loan_history(d: dict, unit_id: str) -> list:
+    rows = [dict(lo, id=lid) for lid, lo in (d.get("loans") or {}).items()
+            if str(lo.get("unit_id") or "") == str(unit_id)]
+    rows.sort(key=lambda r: str(r.get("out_at") or ""), reverse=True)
+    return [{"id": r["id"], "who_name": r.get("who_name") or "",
+             "out_at": r.get("out_at") or "", "due_at": r.get("due_at") or "",
+             "back_at": r.get("back_at") or "", "note": r.get("note") or "",
+             "days_out": (_loan_days_out(r.get("out_at")) if not r.get("back_at") else None)}
+            for r in rows[:50]]
+
+
 WORK_PATH = os.environ.get("WORK_PATH", "/data/worklog.json")
 WORK_KEEP = int(os.environ.get("WORK_KEEP", "2000"))
 # Shorter than this is a mis-tap, not a shift. It also stops the fixed-size
@@ -18420,6 +18537,138 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     # ---- Work routes ------------------------------------------------------
     # The clock. Timestamps are minted HERE, never accepted from the browser.
+    @mcp.custom_route("/api/loans", methods=["POST"])
+    async def loans_route(request: Request):
+        """Loan projectors: the register of what the shop owns, and where each
+        one is. Lending and receiving is the bench's daily job; the register
+        itself is an admin's, because it is an asset list."""
+        pre = _pre_checks(request)
+        if pre:
+            return pre
+        ok_a, who = _authorize(request)
+        if not ok_a:
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        op = str(body.get("op") or "board")
+        admin = _team_level(who) >= ROLE_LEVELS["admin"]
+        keeper = _json({"error": "Only an admin can change the unit register."}, 403)
+        d = _load_loans()
+
+        if op == "board":
+            return _json(_loans_board(d, who))
+        if op == "history":
+            return _json({"history": _loan_history(d, str(body.get("unit_id") or ""))})
+
+        if op == "unit_save":
+            if not admin:
+                return keeper
+            name = " ".join(str(body.get("name") or "").split())[:80]
+            if not name:
+                return _json({"error": "Give the unit a name, for example Loan 3."}, 400)
+            uid = str(body.get("unit_id") or "")
+            u = (d["units"].get(uid) or {}) if uid else {}
+            if uid and not u:
+                return _json({"error": "That unit is no longer in the register."}, 404)
+            if not uid:
+                uid = _loan_id(d, "u")
+                u = {"created_at": datetime.now(timezone.utc).isoformat()}
+            u.update({"name": name,
+                      "model": " ".join(str(body.get("model") or "").split())[:80],
+                      "serial": " ".join(str(body.get("serial") or "").split())[:60],
+                      "notes": str(body.get("notes") or "").strip()[:400]})
+            if "retired" in body:
+                u["retired"] = bool(body.get("retired"))
+            d["units"][uid] = u
+            _write_loans(d)
+            _track(who, "loans", "saved a loan unit", name)
+            return _json({"ok": True, "unit": dict(u, id=uid)})
+
+        if op == "unit_retire":
+            if not admin:
+                return keeper
+            uid = str(body.get("unit_id") or "")
+            u = d["units"].get(uid)
+            if not u:
+                return _json({"error": "That unit is no longer in the register."}, 404)
+            # Retiring a unit that is with a customer would lose the only
+            # record of where a projector went.
+            if any(not lo.get("back_at") and str(lo.get("unit_id")) == uid
+                   for lo in d["loans"].values()):
+                return _json({"error": "That one is out with someone. Book it back in first."}, 400)
+            u["retired"] = not bool(body.get("unretire"))
+            d["units"][uid] = u
+            _write_loans(d)
+            _track(who, "loans", "retired a loan unit" if u["retired"] else "returned a unit to the register",
+                   u.get("name") or "")
+            return _json({"ok": True})
+
+        if op == "out":
+            uid = str(body.get("unit_id") or "")
+            u = d["units"].get(uid)
+            if not u:
+                return _json({"error": "Pick a unit from the register."}, 400)
+            if u.get("retired"):
+                return _json({"error": "That unit is retired. Put it back in the register first."}, 400)
+            open_now = next((lo for lo in d["loans"].values()
+                             if str(lo.get("unit_id")) == uid and not lo.get("back_at")), None)
+            if open_now:
+                return _json({"error": "That unit is already out with "
+                                       + (open_now.get("who_name") or "someone")
+                                       + ". Book it back in first."}, 400)
+            who_name = " ".join(str(body.get("who_name") or "").split())[:120]
+            if not who_name:
+                return _json({"error": "Say who it is going to."}, 400)
+            due = str(body.get("due_at") or "").strip()[:10]
+            if due and not re.match(r"^\d{4}-\d{2}-\d{2}$", due):
+                return _json({"error": "The due date needs to be a date."}, 400)
+            lid = _loan_id(d, "l")
+            d["loans"][lid] = {
+                "unit_id": uid, "who_name": who_name,
+                "crm_person_id": str(body.get("crm_person_id") or "")[:40],
+                "crm_org_id": str(body.get("crm_org_id") or "")[:40],
+                "phone": " ".join(str(body.get("phone") or "").split())[:40],
+                "note": str(body.get("note") or "").strip()[:400],
+                "due_at": due, "out_at": datetime.now(timezone.utc).isoformat(),
+                "out_by": who, "back_at": "", "back_by": ""}
+            _write_loans(d)
+            _track(who, "loans", "loaned out a unit",
+                   (u.get("name") or "") + " to " + who_name)
+            return _json({"ok": True, "loan": dict(d["loans"][lid], id=lid)})
+
+        if op == "back":
+            lid = str(body.get("loan_id") or "")
+            lo = d["loans"].get(lid)
+            if not lo:
+                return _json({"error": "That loan is not on the board."}, 404)
+            if lo.get("back_at"):
+                return _json({"error": "That one is already booked back in."}, 400)
+            lo["back_at"] = datetime.now(timezone.utc).isoformat()
+            lo["back_by"] = who
+            if body.get("note"):
+                lo["note"] = (str(lo.get("note") or "") + "\n" + str(body.get("note"))).strip()[:400]
+            _write_loans(d)
+            _track(who, "loans", "booked a unit back in",
+                   (d["units"].get(str(lo.get("unit_id")), {}).get("name") or ""))
+            return _json({"ok": True})
+
+        if op == "settings":
+            if not admin:
+                return keeper
+            try:
+                days = int(body.get("chase_days"))
+            except (TypeError, ValueError):
+                return _json({"error": "The chase threshold is a number of days."}, 400)
+            if not 1 <= days <= 365:
+                return _json({"error": "Pick between 1 and 365 days."}, 400)
+            d.setdefault("settings", {})["chase_days"] = days
+            _write_loans(d)
+            _track(who, "loans", "changed the loan chase threshold", str(days) + " days")
+            return _json({"ok": True, "settings": d["settings"]})
+
+        return _json({"error": "Unknown op."}, 400)
+
     @mcp.custom_route("/api/work/clock", methods=["POST"])
     async def work_clock_route(request: Request):
         pre = _pre_checks(request)
