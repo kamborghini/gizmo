@@ -6893,6 +6893,8 @@ Projected Image UK"></textarea>
            only the order it names. */
         let connOneCheck = null;
         let connOneBusy = '';
+        let connPaySince = '';
+        let connPayResult = null;
         /* The document a dry run says it would send, laid out the way it will
            appear in Xero. Nothing here writes: it is the last look before the
            accounts are touched, so it shows the fields that decide what lands
@@ -7748,6 +7750,83 @@ Projected Image UK"></textarea>
             rCard.append(oneWrap);
             paintOne();
             rCard.append(oneOut);
+
+            /* ---- payout notes ----
+               A separate pass, because Shopify settles days after the order:
+               at the moment an invoice is written the payout it will arrive in
+               does not exist yet. It only ADDS A NOTE to invoices already in
+               Xero, which cannot change a figure on one. */
+            rCard.append(el('div', 'section-title', 'Which payout paid it'));
+            rCard.append(el('p', 'field-help',
+                'A Shopify payout arrives in the bank as one figure covering many orders. '
+                + 'This writes onto each Xero invoice which payout paid it, with that '
+                + 'order\u2019s share and the Shopify fee, so a bank line can be traced '
+                + 'to its invoices. It adds a note and changes no amount.'));
+            const payWrap = el('div', 'lbl-row'); payWrap.style.marginTop = 'var(--sp-4)';
+            const paySince = crmText(connPaySince, '2026-08-01');
+            paySince.style.maxWidth = '160px';
+            paySince.setAttribute('aria-label', 'Payouts issued since');
+            paySince.addEventListener('input', () => { connPaySince = paySince.value.trim(); });
+            const payChk = el('button', 'btn btn-sm');
+            payChk.append(ico(I.eye), document.createTextNode('Check payouts'));
+            const payOut = el('div', 'setting-sub');
+            function paintPay() {
+                payOut.innerHTML = '';
+                const d = connPayResult;
+                if (!d) return;
+                if (d.error) { payOut.append(el('div', 'msg error', d.error)); return; }
+                const head = (d.dryRun ? 'Would write ' : 'Wrote ')
+                    + (d.dryRun ? (d.notes || []).length : (d.annotated || 0))
+                    + ' note' + (((d.dryRun ? (d.notes || []).length : d.annotated) === 1) ? '' : 's')
+                    + ' \u00b7 ' + (d.ordersWithPayouts || 0) + ' orders paid out'
+                    + (d.alreadyDone ? ', ' + d.alreadyDone + ' already noted' : '')
+                    + (d.noInvoice ? ', ' + d.noInvoice + ' with no invoice yet' : '')
+                    + (d.failed ? ', ' + d.failed + ' failed' : '');
+                payOut.append(el('div', d.failed ? 'msg error' : 'disp-ok-line', head));
+                (d.notes || []).slice(0, 12).forEach(n => {
+                    const row = el('div', 'lbl-row loan-row');
+                    const w = el('div', 'lr-what');
+                    w.append(el('div', null, n.order + ' \u00b7 payout ' + n.payout));
+                    w.append(el('div', 'lbl-meta', n.message || n.note));
+                    row.append(w);
+                    row.append(el('span', 'mrule-tag', n.wrote ? 'Written' : 'Preview'));
+                    payOut.append(row);
+                });
+            }
+            payChk.onclick = async () => {
+                payChk.disabled = true; connPayResult = null;
+                try {
+                    const r = await connOp({ op: 'payouts', dryRun: true,
+                                             since: connPaySince || '' });
+                    connPayResult = (r && r.data) || {};
+                } catch (e) { toastError(e.message); }
+                payChk.disabled = false; renderConnector();
+            };
+            payWrap.append(paySince, payChk);
+            if (connIsAdmin()) {
+                const payGo = el('button', 'btn btn-sm btn-primary', 'Write the notes');
+                /* Armed by a check, the same rule the one-order send follows:
+                   nothing is written that nobody has looked at first. */
+                payGo.disabled = !(connPayResult && connPayResult.dryRun
+                                   && (connPayResult.notes || []).length);
+                payGo.onclick = async () => {
+                    if (!await uiConfirm('Write ' + (connPayResult.notes || []).length
+                        + ' payout note' + ((connPayResult.notes || []).length === 1 ? '' : 's')
+                        + ' onto their Xero invoices? Notes only: no amount changes.',
+                        { title: 'Write payout notes', okText: 'Write them' })) return;
+                    payGo.disabled = true;
+                    try {
+                        const r = await connOp({ op: 'payouts', since: connPaySince || '' });
+                        connPayResult = (r && r.data) || {};
+                        toastOk('Wrote ' + (connPayResult.annotated || 0) + ' notes to Xero.');
+                    } catch (e) { toastError(e.message); }
+                    renderConnector();
+                };
+                payWrap.append(payGo);
+            }
+            rCard.append(payWrap);
+            paintPay();
+            rCard.append(payOut);
             if (running) {
                 const t = el('div', 'thinking'); t.append(loader(),
                     el('span', null, connBusy === 'send' ? 'Sending to Xero\u2026'

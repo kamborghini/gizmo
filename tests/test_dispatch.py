@@ -16189,6 +16189,50 @@ def t_an_unreachable_connector_says_which_of_the_three_faults_it_is():
 
 
 @test
+def t_payout_notes_are_looked_at_by_anyone_and_written_by_an_admin():
+    """A dry run lists the notes and writes nothing, so anyone holding the tab
+    may look. Writing them puts text onto documents that are already in the
+    accounts - harmless text, but on real records - so that stays an admin's."""
+    ensure_auth()
+    uid, sess, _ = ready_user("Pat", "pat-payouts")
+    eq(post("/api/team/user", {"op": "tabs", "id": uid,
+                               "tabs": ["connector"]}).status_code, 200)
+    seen = []
+    real = copilot._connector_call
+    async def fake(method, path, params=None):
+        seen.append((method, path, dict(params or {})))
+        return 200, {"annotated": 0, "dryRun": True, "notes": []}
+    copilot._connector_call = fake
+    old_url = os.environ.get("CONNECTOR_URL")
+    os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
+    try:
+        r = post_s(sess, "/api/connector", {"op": "payouts", "dryRun": 1,
+                                            "since": "2026-08-01"})
+        eq(r.status_code, 200, r.text)
+        eq(seen[-1][1], "/api/payouts")
+        eq(seen[-1][2].get("dryRun"), "1", "a member's look is a DRY RUN")
+        eq(seen[-1][2].get("since"), "2026-08-01")
+
+        n = len(seen)
+        eq(post_s(sess, "/api/connector", {"op": "payouts"}).status_code, 403,
+           "a member cannot write notes onto invoices")
+        eq(len(seen), n, "and the refusal never reaches the connector")
+
+        eq(post("/api/connector", {"op": "payouts"}).status_code, 200,
+           "an admin can")
+        ok("dryRun" not in seen[-1][2], "and that one is a real write")
+
+        bad = post("/api/connector", {"op": "payouts", "since": "last August"})
+        eq(bad.status_code, 400, "a date that is not a date is refused here")
+    finally:
+        copilot._connector_call = real
+        if old_url is None:
+            os.environ.pop("CONNECTOR_URL", None)
+        else:
+            os.environ["CONNECTOR_URL"] = old_url
+
+
+@test
 def t_the_register_finds_a_projector_in_the_shop():
     """Adding a unit should not mean retyping what the shop already knows.
     Variants are listed separately, because the SKU is what tells two

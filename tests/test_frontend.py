@@ -4352,6 +4352,37 @@ def t_the_document_shows_shopifys_own_totals_to_check_against():
     ok("Tax is not" in fn, "and says tax is not part of the reconciliation")
 
 
+@test
+def t_payout_notes_are_previewed_before_any_are_written():
+    """Nothing is written to a real invoice that nobody has looked at. The same
+    rule the one-order send follows: the write button is dead until a check has
+    come back with notes to write."""
+    fn = fn_src("function renderConnector(")
+    i = fn.find("Which payout paid it")
+    ok(i > 0, "the payout card is on the page")
+    seg = fn[i:i + 4000]
+    ok("op: 'payouts', dryRun: true" in seg, "the check is a dry run")
+    ok("payGo.disabled = !(connPayResult && connPayResult.dryRun" in seg,
+       "and the write button is armed only by a dry run that found notes")
+    ok("uiConfirm(" in seg, "the write is confirmed")
+    ok("no amount changes" in seg,
+       "and the confirm says what a note can and cannot do")
+
+
+@test
+def t_the_payout_card_says_it_is_a_second_pass_and_why():
+    """It is not part of the sync and cannot be: Shopify settles days after the
+    order, so at invoice time the payout does not exist. A card that did not
+    say so would read as a step someone forgot to run."""
+    fn = fn_src("function renderConnector(")
+    i = fn.find("Which payout paid it")
+    seg = fn[i:i + 2000]
+    ok("one figure covering many orders" in seg,
+       "it says why a payout needs tracing to invoices at all")
+    ok("Shopify fee" in seg,
+       "and that the fee is in the note, which is what makes a payout tie out")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

@@ -20667,6 +20667,32 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # by its own documented promise. Any tab holder may look.
                 code, data = await _connector_call("POST", "/api/sync", {"dryRun": "1"})
                 return _json({"available": True, "data": data}, code if code >= 400 else 200)
+            if op == "payouts":
+                # Telling an invoice which payout paid it. A DRY RUN lists the
+                # notes and writes nothing, so any tab holder may look; writing
+                # them touches documents in the accounts and stays an admin's,
+                # even though a History note cannot change a figure on one.
+                since = str(body.get("since") or "").strip()[:10]
+                if since and not re.match(r"^\d{4}-\d{2}-\d{2}$", since):
+                    return _json({"error": "The date needs to be a date, for example 2026-08-01."}, 400)
+                dry = bool(body.get("dryRun"))
+                if not dry and _team_level(who) < ROLE_LEVELS["admin"]:
+                    return _json({"error": "Only an admin can write notes onto Xero invoices."}, 403)
+                params = {}
+                if since:
+                    params["since"] = since
+                if dry:
+                    params["dryRun"] = "1"
+                if body.get("limit"):
+                    try:
+                        params["limit"] = str(max(1, min(200, int(body["limit"]))))
+                    except (TypeError, ValueError):
+                        pass
+                code, data = await _connector_call("POST", "/api/payouts", params)
+                if not dry:
+                    _track(who, "connector", "wrote payout notes to Xero",
+                           "since " + (since or "the last 30 days"))
+                return _json({"available": True, "data": data}, code if code >= 400 else 200)
             if op == "reimport":
                 # One order at a time: how a connector is tested against real
                 # books without putting a whole queue through it. A dry run
