@@ -16097,6 +16097,62 @@ def t_the_register_finds_a_projector_in_the_shop():
         copilot._loan_products.update({"at": 0.0, "rows": []})
 
 
+
+
+@test
+def t_a_units_asset_tag_is_minted_once_and_never_changes():
+    """The sticker goes on the metal. A tag that could be changed afterwards,
+    or minted twice, would make the register lie about the machine in front of
+    you, so minting happens once and everything after it is a reprint."""
+    ensure_auth()
+    unit = post("/api/loans", {"op": "unit_save", "name": "Tagged one",
+                               "model": "Optoma UHD38"}).json()["unit"]["id"]
+    first = post("/api/loans", {"op": "sticker", "unit_id": unit})
+    eq(first.status_code, 200, first.text)
+    tag = first.json()["tag"]
+    ok(re.match(r"^PI-\d{4}$", tag), "a running asset tag: %s" % tag)
+    again = post("/api/loans", {"op": "sticker", "unit_id": unit}).json()
+    eq(again["tag"], tag, "asking again reprints the same tag, it does not mint a second")
+    post("/api/loans", {"op": "unit_save", "unit_id": unit, "name": "Renamed",
+                        "asset_tag": "PI-9999"})
+    board = post("/api/loans", {"op": "board"}).json()["units"]
+    row = [u for u in board if u["id"] == unit][0]
+    eq(row["asset_tag"], tag, "an edit cannot overwrite what is printed on the sticker")
+    other = post("/api/loans", {"op": "unit_save", "name": "Second one"}).json()["unit"]["id"]
+    eq(post("/api/loans", {"op": "sticker", "unit_id": other}).json()["tag"] == tag, False,
+       "and the next unit gets its own")
+
+
+@test
+def t_the_sticker_carries_both_codes_and_they_read_back_as_the_tag():
+    """Number, barcode and QR. Generated on the server and handed over as data
+    URIs because the app's CSP allows no CDN script: a browser QR library
+    could not have run at all."""
+    import base64
+    ensure_auth()
+    unit = post("/api/loans", {"op": "unit_save", "name": "Coded"}).json()["unit"]["id"]
+    r = post("/api/loans", {"op": "sticker", "unit_id": unit})
+    eq(r.status_code, 200, r.text)
+    d = r.json()
+    ok(d["qr"].startswith("data:image/png;base64,"), "the QR is a data image")
+    ok(d["barcode"].startswith("data:image/svg+xml;base64,"), "so is the barcode")
+    svg = base64.b64decode(d["barcode"].split(",", 1)[1]).decode("utf-8", "replace")
+    ok(d["tag"] in svg, "the barcode was drawn for this tag, not another")
+    png = base64.b64decode(d["qr"].split(",", 1)[1])
+    ok(png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 100, "and the QR is real image bytes")
+    eq(d["unit"]["name"], "Coded", "the sheet knows which unit it belongs to")
+
+
+@test
+def t_only_an_admin_mints_a_tag():
+    ensure_auth()
+    uid, sess, _ = ready_user("Mo", "mo-sticker")
+    eq(post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["loans"]}).status_code, 200)
+    unit = post("/api/loans", {"op": "unit_save", "name": "Members hands off"}).json()["unit"]["id"]
+    eq(post_s(sess, "/api/loans", {"op": "sticker", "unit_id": unit}).status_code, 403,
+       "minting an asset tag is part of keeping the register")
+
+
 for fn in TESTS:
     try:
         fn(); passed += 1; print(f"  PASS  {fn.__name__}")

@@ -12097,6 +12097,34 @@ def _loan_state(loan: dict, chase_days: int) -> str:
     return "due" if _loan_days_out(loan.get("out_at")) > int(chase_days or 0) else "ok"
 
 
+def _loan_mint_tag(d: dict) -> str:
+    """The next asset tag. Its own counter, not the record ids: the tag goes on
+    a physical sticker and reads out over a phone, so it stays short and never
+    reuses a number even after a unit is retired."""
+    d["seq_tag"] = int(d.get("seq_tag") or 0) + 1
+    return "PI-%04d" % d["seq_tag"]
+
+
+def _loan_codes(tag: str) -> dict:
+    """The QR and the barcode, drawn on the SERVER and handed over as data
+    URIs. The page's CSP allows no script from a CDN, so a browser QR library
+    could never have run; and a Code 128 pattern table written from memory
+    would risk stickers that no scanner reads, discovered weeks later on
+    machines already out with customers. Both libraries are pure Python."""
+    import base64
+    import io as _io
+    import segno
+    import barcode as _barcode
+    from barcode.writer import SVGWriter
+    qr = segno.make(tag, error="m").png_data_uri(scale=6, border=2, dark="#111111")
+    buf = _io.BytesIO()
+    _barcode.get("code128", tag, writer=SVGWriter()).write(
+        buf, options={"module_height": 9.0, "font_size": 0, "text_distance": 1,
+                      "quiet_zone": 2})
+    bc = "data:image/svg+xml;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    return {"qr": qr, "barcode": bc}
+
+
 def _loans_board(d: dict, who: str) -> dict:
     chase = int((d.get("settings") or {}).get("chase_days") or LOAN_CHASE_DAYS_DEFAULT)
     open_by_unit = {}
@@ -12111,7 +12139,8 @@ def _loans_board(d: dict, who: str) -> dict:
         shape = {"id": uid, "name": u.get("name") or "", "model": u.get("model") or "",
                  "serial": u.get("serial") or "", "notes": u.get("notes") or "",
                  "product_id": u.get("product_id") or "", "variant_id": u.get("variant_id") or "",
-                 "sku": u.get("sku") or "", "status": status}
+                 "sku": u.get("sku") or "", "asset_tag": u.get("asset_tag") or "",
+                 "status": status}
         units.append(shape)
         if lo and status == "out":
             out_rows.append({
@@ -18631,12 +18660,48 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             for k in ("product_id", "variant_id", "sku"):
                 if k in body:
                     u[k] = " ".join(str(body.get(k) or "").split())[:60]
+            # asset_tag is deliberately NOT in that list. It is printed on a
+            # sticker stuck to the machine; a tag that could be edited here
+            # would make the register lie about the metal in front of you.
             if "retired" in body:
                 u["retired"] = bool(body.get("retired"))
             d["units"][uid] = u
             _write_loans(d)
             _track(who, "loans", "saved a loan unit", name)
             return _json({"ok": True, "unit": dict(u, id=uid)})
+
+        if op == "sticker":
+            # Minting is part of keeping the register, so it is an admin's.
+            # Everything after the first time is a reprint: labels jam and peel,
+            # and a second mint would put two numbers on one projector.
+            if not admin:
+                return keeper
+            uid = str(body.get("unit_id") or "")
+            u = d["units"].get(uid)
+            if not u:
+                return _json({"error": "That unit is no longer in the register."}, 404)
+            tag = str(u.get("asset_tag") or "")
+            if not tag:
+                tag = _loan_mint_tag(d)
+                u["asset_tag"] = tag
+                d["units"][uid] = u
+                _write_loans(d)
+                _track(who, "loans", "minted an asset tag", tag + " for " + (u.get("name") or ""))
+            try:
+                codes = _loan_codes(tag)
+            except Exception:
+                logger.exception("loans: could not draw the sticker codes")
+                # The tag is minted and saved either way: it is the number on
+                # the register now, and a drawing failure must not leave the
+                # unit tagless on a retry with a different number.
+                return _json({"error": "The tag is " + tag + ", but its codes could not be "
+                                       "drawn just now. Try printing again."}, 502)
+            return _json({"ok": True, "tag": tag, "qr": codes["qr"],
+                          "barcode": codes["barcode"],
+                          "unit": {"id": uid, "name": u.get("name") or "",
+                                   "model": u.get("model") or "",
+                                   "serial": u.get("serial") or "",
+                                   "sku": u.get("sku") or ""}})
 
         if op == "unit_retire":
             if not admin:

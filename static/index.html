@@ -1105,6 +1105,19 @@
         .label-sheet .ls-logo svg.lg { height: 3.4em; width: auto; max-width: 70%; display: block; }
         .label-sheet .ls-company { font-size: 1.68em; font-weight: var(--w-bold); line-height: 1.15; overflow-wrap: break-word; }
         .label-sheet .ls-ono { font-size: 1em; color: #333; margin-top: .3em; font-variant-numeric: tabular-nums; }
+        /* The serial sticker: the tag is the whole point, so it takes the
+           space, and the two codes share the foot. Sized in em like the rest
+           of the sheet, so the label scales as one. */
+        .loan-sticker { display: flex; flex-direction: column; }
+        .loan-sticker .ls-tag { font-size: 2.9em; font-weight: var(--w-bold); line-height: 1.05;
+            letter-spacing: .02em; text-align: center; margin: .35em 0 .1em;
+            font-variant-numeric: tabular-nums; }
+        .loan-sticker .ls-unit { text-align: center; }
+        .loan-sticker .ls-unit .ls-company { font-size: 1.15em; }
+        .loan-sticker .ls-codes { margin-top: auto; display: flex; align-items: flex-end;
+            justify-content: space-between; gap: .6em; }
+        .loan-sticker .ls-barcode { height: 3.1em; width: auto; max-width: 62%; }
+        .loan-sticker .ls-qr { height: 4.2em; width: 4.2em; }
         .label-sheet ul { list-style: none; margin: 0; padding: 0; }
         .label-sheet .ls-row { border-bottom: 1px solid #ddd; padding: .45em 0;
             page-break-inside: avoid; break-inside: avoid; }
@@ -7075,6 +7088,73 @@ Projected Image UK"></textarea>
                 m.body.append(row);
             });
         }
+        /* The serial sticker. Built like a production label so it prints on the
+           same printer, through the same font gate, at the same stock: the
+           size comes from the production setting rather than a hardcoded 4x4,
+           because that setting is what says which labels are actually loaded. */
+        function loanStickerSheet(d) {
+            const sheet = el('div', 'label-sheet loan-sticker');
+            const top = el('div', 'ls-top');
+            const logo = el('div', 'ls-logo');
+            logo.innerHTML = LABEL_LOGO;      /* our own static markup, as the label does */
+            top.append(logo);
+            sheet.append(top);
+            const tag = el('div', 'ls-tag', d.tag || '');
+            sheet.append(tag);
+            const who = el('div', 'ls-unit');
+            who.append(el('div', 'ls-company', (d.unit && d.unit.name) || ''));
+            const sub = [(d.unit && d.unit.model) || '', (d.unit && d.unit.serial)
+                ? 'S/N ' + d.unit.serial : ''].filter(Boolean).join('  \u00b7  ');
+            if (sub) who.append(el('div', 'ls-ono', sub));
+            sheet.append(who);
+            const codes = el('div', 'ls-codes');
+            const bc = document.createElement('img');
+            bc.className = 'ls-barcode'; bc.alt = 'Barcode ' + (d.tag || '');
+            bc.src = d.barcode || '';
+            const qr = document.createElement('img');
+            qr.className = 'ls-qr'; qr.alt = 'QR ' + (d.tag || '');
+            qr.src = d.qr || '';
+            codes.append(bc, qr);
+            sheet.append(codes);
+            return sheet;
+        }
+        async function loanPrintSticker(unit, btn) {
+            btn.disabled = true;
+            let d;
+            try { d = await api('/api/loans', { op: 'sticker', unit_id: unit.id }); }
+            catch (e) { btn.disabled = false; toastError(e.message); return; }
+            const seq = ++printSeq;
+            const box = $('label-print'); box.innerHTML = '';
+            const dims = labelDims();
+            let rule = $('label-page-rule');
+            if (!rule) { rule = document.createElement('style'); rule.id = 'label-page-rule'; document.head.append(rule); }
+            rule.textContent = '@page { size: ' + dims.w + 'mm ' + dims.h + 'mm; margin: 0; }';
+            box.append(loanStickerSheet(d));
+            const cleanup = () => {
+                if (seq !== printSeq) return;
+                document.body.classList.remove('printing-label');
+                box.innerHTML = '';
+                const r = $('label-page-rule');
+                if (r && r.parentNode) r.parentNode.removeChild(r);
+                btn.disabled = false;
+                loadLoans(true);      /* the tag is minted now; the row says Reprint */
+            };
+            /* The codes are images: printing before they decode prints blank
+               squares. Wait for them and for the label typeface, both capped. */
+            const imgs = [...box.querySelectorAll('img')];
+            const ready = Promise.all(imgs.map(im => im.complete ? Promise.resolve()
+                : new Promise(res => { im.onload = res; im.onerror = res; })));
+            /* Waited for, never depended on. document.fonts.load REJECTS when
+               the typeface cannot be fetched, and an unhandled rejection here
+               abandoned the print and left the button dead. A cap already says
+               a slow font must not mean no printout; a broken one is the same
+               problem, so both fall through to printing. */
+            await Promise.race([Promise.all([ready, labelFontReady()]),
+                                new Promise(res => setTimeout(res, 3000))])
+                .catch(() => {});
+            document.body.classList.add('printing-label');
+            setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);
+        }
         function renderLoans() {
             const d = loansCache || {}; const box = $('loans-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
@@ -7163,6 +7243,18 @@ Projected Image UK"></textarea>
                     const hist = el('button', 'btn btn-sm', 'History');
                     hist.onclick = () => loanHistoryModal(u);
                     row.append(hist);
+                    if (d.can_manage) {
+                        /* Minting happens once, so the button says which it is
+                           doing: a first print assigns the number, every one
+                           after is the same sticker again. */
+                        const st = el('button', 'btn btn-sm',
+                            u.asset_tag ? 'Reprint ' + u.asset_tag : 'Serial sticker');
+                        st.title = u.asset_tag
+                            ? 'Print the sticker for ' + u.asset_tag + ' again'
+                            : 'Assign this unit an asset tag and print its sticker';
+                        st.onclick = () => loanPrintSticker(u, st);
+                        row.append(st);
+                    }
                     if (u.status === 'in') {
                         const outB = el('button', 'btn btn-sm btn-primary', 'Loan out');
                         outB.onclick = () => loanOutModal(u);

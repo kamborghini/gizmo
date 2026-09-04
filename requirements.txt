@@ -32,3 +32,11 @@ cryptography==50.0.0
 pyasn1==0.6.4
 pydantic-settings==2.15.0
 boto3==1.43.73
+
+# The serial sticker's two codes, generated SERVER-side and placed as data:
+# URIs. The app's own CSP allows no CDN scripts, so a browser QR library was
+# never an option, and hand-rolling Code 128 from a remembered pattern table
+# risks unscannable labels on machines that are already out with customers.
+# Both are pure Python, MIT, and pull nothing else in.
+segno==1.6.6
+python-barcode==0.16.0

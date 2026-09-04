@@ -4154,6 +4154,29 @@ def t_a_modal_action_button_is_appended_not_stringified():
            name + " appends its action button into the bar")
 
 
+
+@test
+def t_the_serial_sticker_prints_on_the_production_printer_with_its_codes():
+    """A 4x4 sticker for the machine: logo, the tag large, and both codes as
+    images the server drew. It follows the PRODUCTION label size rather than a
+    hardcoded 4x4, so a change of stock cannot print a small sticker onto big
+    labels; and the tag is minted once, so the button says Reprint after."""
+    fn = fn_src("function loanStickerSheet(")
+    ok("ls-logo" in fn and "LABEL_LOGO" in fn, "the shop's logo is on it")
+    ok("asset_tag" in fn or "d.tag" in fn, "the tag is the point of the sticker")
+    ok("d.qr" in fn and "d.barcode" in fn, "both codes are placed")
+    ok("<img" not in fn, "and placed as elements, never innerHTML")
+    pr = fn_src("async function loanPrintSticker(")
+    ok("op: 'sticker'" in pr, "it asks the server to draw them")
+    ok("labelDims()" in pr, "and prints at the production printer's own stock")
+    ok("labelFontReady" in pr, "waiting for the label typeface like every other print path")
+    ok(".catch(" in pr, "and a typeface that will not load still prints, rather than "
+                        "abandoning the job and leaving the button dead")
+    reg = fn_src("function renderLoans(")
+    ok("Reprint" in reg and "Serial sticker" in reg,
+       "the button says which it is doing, because minting happens once")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
