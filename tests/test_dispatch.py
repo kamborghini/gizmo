@@ -16202,13 +16202,32 @@ def t_the_sticker_carries_both_codes_and_they_read_back_as_the_tag():
 
 
 @test
-def t_only_an_admin_mints_a_tag():
+def t_only_an_admin_mints_a_tag_but_anyone_can_reprint_one():
+    """Assigning the number is a change to the register: it goes on the metal
+    and never comes off, so it is an admin's. Reprinting is not a change at
+    all, and the person who finds a peeled label is whoever is holding the
+    projector. One rule was doing both jobs and left members unable to print."""
     ensure_auth()
     uid, sess, _ = ready_user("Mo", "mo-sticker")
     eq(post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["loans"]}).status_code, 200)
     unit = post("/api/loans", {"op": "unit_save", "name": "Members hands off"}).json()["unit"]["id"]
-    eq(post_s(sess, "/api/loans", {"op": "sticker", "unit_id": unit}).status_code, 403,
-       "minting an asset tag is part of keeping the register")
+    r = post_s(sess, "/api/loans", {"op": "sticker", "unit_id": unit})
+    eq(r.status_code, 403, "minting an asset tag is part of keeping the register")
+    ok("admin" in r.json()["error"],
+       "and the refusal says who can do it, not just no")
+    ok(copilot._load_loans()["units"][unit].get("asset_tag") in (None, ""),
+       "a refused mint leaves the unit untagged rather than half-tagged")
+
+    minted = post("/api/loans", {"op": "sticker", "unit_id": unit})
+    eq(minted.status_code, 200, minted.text)
+    tag = minted.json()["tag"]
+
+    again = post_s(sess, "/api/loans", {"op": "sticker", "unit_id": unit})
+    eq(again.status_code, 200, "once it has a number, a member can reprint it")
+    eq(again.json()["tag"], tag, "and gets the SAME number, never a second one")
+    ok(again.json()["qr"] and again.json()["barcode"], "with both codes drawn")
+    eq(copilot._load_loans()["units"][unit]["asset_tag"], tag,
+       "and the reprint changed nothing on the register")
 
 
 

@@ -6792,6 +6792,11 @@ Projected Image UK"></textarea>
             const saved = shippingCfg && shippingCfg.label_size_shipping;
             return LABEL_SIZES[saved] || LABEL_SIZES['4x6'];
         }
+        /* An asset sticker is 4x4 and nothing else. It goes on a machine and
+           stays there for the life of the projector, so it cannot follow the
+           production selection: a gobo run leaving 4x2 chosen would put a
+           different-sized sticker on every unit tagged that afternoon. */
+        function stickerDims() { return LABEL_SIZES['4x4']; }
         // Every print path must wait for the label typeface: it is declared
         // font-display:block, so until the file lands the text is INVISIBLE -
         // a cold cache printed a day sheet with missing text. 2s cap, because
@@ -7128,11 +7133,16 @@ Projected Image UK"></textarea>
             });
         }
         /* The serial sticker. Built like a production label so it prints on the
-           same printer, through the same font gate, at the same stock: the
-           size comes from the production setting rather than a hardcoded 4x4,
-           because that setting is what says which labels are actually loaded. */
+           same printer and through the same font gate, but always at 4x4:
+           the sticker is a permanent fixture on the machine, not part of
+           whatever run is loaded in the printer today. */
         function loanStickerSheet(d) {
             const sheet = el('div', 'label-sheet loan-sticker');
+            /* .label-sheet's stylesheet width is 100x150mm, so a sheet that
+               sets no size of its own lays out at 4x6 whatever the page rule
+               says. Every other print path sizes its sheet; this one did not. */
+            const sd = stickerDims();
+            sheet.style.width = sd.w + 'mm'; sheet.style.height = sd.h + 'mm';
             const top = el('div', 'ls-top');
             const logo = el('div', 'ls-logo');
             logo.innerHTML = LABEL_LOGO;      /* our own static markup, as the label does */
@@ -7164,7 +7174,7 @@ Projected Image UK"></textarea>
             catch (e) { btn.disabled = false; toastError(e.message); return; }
             const seq = ++printSeq;
             const box = $('label-print'); box.innerHTML = '';
-            const dims = labelDims();
+            const dims = stickerDims();
             let rule = $('label-page-rule');
             if (!rule) { rule = document.createElement('style'); rule.id = 'label-page-rule'; document.head.append(rule); }
             rule.textContent = '@page { size: ' + dims.w + 'mm ' + dims.h + 'mm; margin: 0; }';
@@ -7286,10 +7296,13 @@ Projected Image UK"></textarea>
                     const hist = el('button', 'btn btn-sm', 'History');
                     hist.onclick = () => loanHistoryModal(u);
                     row.append(hist);
-                    if (d.can_manage) {
+                    if (d.can_manage || u.asset_tag) {
                         /* Minting happens once, so the button says which it is
                            doing: a first print assigns the number, every one
-                           after is the same sticker again. */
+                           after is the same sticker again. Assigning the number
+                           is an admin's; REPRINTING a tag that already exists is
+                           anyone's, because a peeled label is found by whoever
+                           is holding the projector. */
                         const st = el('button', 'btn btn-sm',
                             u.asset_tag ? 'Reprint ' + u.asset_tag : 'Serial sticker');
                         st.title = u.asset_tag

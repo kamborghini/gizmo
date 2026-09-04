@@ -18692,16 +18692,21 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"ok": True, "unit": dict(u, id=uid)})
 
         if op == "sticker":
-            # Minting is part of keeping the register, so it is an admin's.
-            # Everything after the first time is a reprint: labels jam and peel,
-            # and a second mint would put two numbers on one projector.
-            if not admin:
-                return keeper
             uid = str(body.get("unit_id") or "")
             u = d["units"].get(uid)
             if not u:
                 return _json({"error": "That unit is no longer in the register."}, 404)
             tag = str(u.get("asset_tag") or "")
+            # MINTING is a change to the register and so an admin's: the number
+            # goes on the metal and never comes off. A REPRINT is not a change
+            # at all - it redraws a number that is already the truth - and the
+            # person who needs one is whoever is holding a projector with a
+            # peeling label, not whoever happens to be at a desk. Gating both
+            # behind admin was one rule doing two jobs.
+            if not tag and not admin:
+                return _json({"error": "That unit has no asset tag yet, and assigning one "
+                                       "is an admin's. Ask for it to be tagged, then "
+                                       "anyone can reprint the sticker."}, 403)
             if not tag:
                 tag = _loan_mint_tag(d)
                 u["asset_tag"] = tag

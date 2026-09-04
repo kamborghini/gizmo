@@ -4158,17 +4158,31 @@ def t_a_modal_action_button_is_appended_not_stringified():
 @test
 def t_the_serial_sticker_prints_on_the_production_printer_with_its_codes():
     """A 4x4 sticker for the machine: logo, the tag large, and both codes as
-    images the server drew. It follows the PRODUCTION label size rather than a
-    hardcoded 4x4, so a change of stock cannot print a small sticker onto big
-    labels; and the tag is minted once, so the button says Reprint after."""
+    images the server drew. FIXED at 4x4, not the production selection: the
+    sticker outlives every run, so it cannot come out 4x2 because a gobo job
+    was loaded that afternoon. And the sheet must set its own size - the
+    stylesheet default is 100x150mm, so a sheet that sets none lays its
+    content out at 4x6 and prints it onto a 4x4 page."""
     fn = fn_src("function loanStickerSheet(")
     ok("ls-logo" in fn and "LABEL_LOGO" in fn, "the shop's logo is on it")
     ok("asset_tag" in fn or "d.tag" in fn, "the tag is the point of the sticker")
     ok("d.qr" in fn and "d.barcode" in fn, "both codes are placed")
     ok("<img" not in fn, "and placed as elements, never innerHTML")
+    ok("stickerDims()" in fn and "sheet.style.width" in fn and "sheet.style.height" in fn,
+       "the sheet sizes itself, or it lays out at the 100x150mm stylesheet default")
+    ok("labelDims()" not in fn, "and never at whatever the production dropdown is on")
+    sd = fn_src("function stickerDims(")
+    # Naming 4x4 is not enough: `LABEL_SIZES[prodSize()] || LABEL_SIZES['4x4']`
+    # names it too and still follows the dropdown. 4x4 must be the ONLY size
+    # this function can reach.
+    ok(re.findall(r"LABEL_SIZES\[([^\]]*)\]", sd) == ["'4x4'"],
+       "4x4 is the only stock stickerDims can return")
+    for setting in ("prodSize(", "carrierDims(", "shippingCfg", "labelSizeOverride"):
+        ok(setting not in sd, "and it reads no setting: found " + setting)
     pr = fn_src("async function loanPrintSticker(")
     ok("op: 'sticker'" in pr, "it asks the server to draw them")
-    ok("labelDims()" in pr, "and prints at the production printer's own stock")
+    ok("stickerDims()" in pr and "labelDims()" not in pr,
+       "and the page rule is the same 4x4 the sheet was built at")
     ok("labelFontReady" in pr, "waiting for the label typeface like every other print path")
     ok(".catch(" in pr, "and a typeface that will not load still prints, rather than "
                         "abandoning the job and leaving the button dead")
@@ -4232,6 +4246,17 @@ def t_a_unit_can_be_deleted_from_its_own_record_behind_a_confirm():
     ok("barSave.append(del)" in fn,
        "the button is appended, not handed to el() as text")
     ok("btn btn-danger" in fn, "and reads as the destructive one")
+
+
+@test
+def t_a_sticker_that_already_has_a_number_can_be_reprinted_by_anyone():
+    """Assigning the number is an admin's; reprinting one that exists is not a
+    change to anything, and the person who finds a peeled label is whoever is
+    holding the projector. The row offered the button on can_manage alone, so
+    members could not print a sticker for a unit that already had a tag."""
+    fn = fn_src("function renderLoans(")
+    ok("if (d.can_manage || u.asset_tag) {" in fn,
+       "the sticker button is offered for a tagged unit whether or not you keep the register")
 
 
 if __name__ == "__main__":
