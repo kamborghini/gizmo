@@ -16046,6 +16046,57 @@ def t_the_bench_lends_and_receives_but_only_an_admin_keeps_the_register():
        "but an admin retires it once it is home")
 
 
+
+
+@test
+def t_the_register_finds_a_projector_in_the_shop():
+    """Adding a unit should not mean retyping what the shop already knows.
+    Variants are listed separately, because the SKU is what tells two
+    otherwise identical projectors apart."""
+    catalogue = {"products": [
+        {"id": 11, "title": "Optoma UHD38 Projector", "status": "active", "vendor": "Optoma",
+         "variants": [{"id": 111, "title": "Default Title", "sku": "OPT-UHD38"}]},
+        {"id": 12, "title": "Epson EB-2250U", "status": "active", "vendor": "Epson",
+         "variants": [{"id": 121, "title": "White", "sku": "EPS-2250-W"},
+                      {"id": 122, "title": "Black", "sku": "EPS-2250-B"}]},
+        {"id": 13, "title": "Glass gobo 37.5mm", "status": "active", "vendor": "Projected Image",
+         "variants": [{"id": 131, "title": "Default Title", "sku": "GOBO-375"}]}]}
+    hits, saved = [], copilot._tool_json
+    async def fake(registry, name, args):
+        if name == "shopify_list_products":
+            hits.append(args)
+            return catalogue
+        return await saved(registry, name, args)
+    copilot._tool_json = fake
+    copilot._loan_products.update({"at": 0.0, "rows": []})
+    try:
+        ensure_auth()
+        r = post("/api/loans", {"op": "products", "q": "epson"})
+        eq(r.status_code, 200, r.text)
+        rows = r.json()["products"]
+        eq(len(rows), 2, "both variants, because a SKU is what tells them apart")
+        eq(rows[0]["title"], "Epson EB-2250U \u00b7 White")
+        eq(rows[0]["sku"], "EPS-2250-W")
+        eq(rows[0]["product_id"], "12")
+        eq(rows[0]["variant_id"], "121")
+        one = post("/api/loans", {"op": "products", "q": "OPT-UHD38"}).json()["products"]
+        eq(len(one), 1, "a SKU finds its own product")
+        eq(one[0]["title"], "Optoma UHD38 Projector",
+           "and a single-variant product is not dressed up as 'Default Title'")
+        eq(len(hits), 1, "the catalogue is read once and kept, not on every keystroke")
+        u = post("/api/loans", {"op": "unit_save", "name": "Loan 9",
+                                "model": "Epson EB-2250U \u00b7 White", "product_id": "12",
+                                "variant_id": "121", "sku": "EPS-2250-W"})
+        eq(u.status_code, 200, u.text)
+        unit = [x for x in post("/api/loans", {"op": "board"}).json()["units"]
+                if x["name"] == "Loan 9"][0]
+        eq(unit["sku"], "EPS-2250-W", "the unit remembers what it was picked from")
+        eq(unit["product_id"], "12")
+    finally:
+        copilot._tool_json = saved
+        copilot._loan_products.update({"at": 0.0, "rows": []})
+
+
 for fn in TESTS:
     try:
         fn(); passed += 1; print(f"  PASS  {fn.__name__}")

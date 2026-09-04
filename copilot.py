@@ -12037,6 +12037,40 @@ def _write_loans(d: dict) -> None:
     _loans_mem = d
 
 
+# The shop's catalogue as pickable rows, one per variant. Cached, because the
+# Products tab's own loader pulls up to two years of sales history per product
+# and hanging a typeahead on that would spend a fortune to answer "which Epson
+# is it". One variant per row: a SKU is what tells two identical projectors
+# apart, and the product title alone cannot.
+_loan_products = {"at": 0.0, "rows": []}
+LOAN_PRODUCT_TTL = 600
+
+
+async def _loan_product_rows(registry) -> list:
+    now = time.monotonic()
+    if _loan_products["rows"] and now - _loan_products["at"] < LOAN_PRODUCT_TTL:
+        return _loan_products["rows"]
+    data = await _tool_json(registry, "shopify_list_products",
+                            {"limit": 250,
+                             "fields": "id,title,status,vendor,product_type,variants"})
+    rows = []
+    for prod in (data.get("products") or []):
+        if str(prod.get("status") or "active").lower() == "archived":
+            continue
+        title = " ".join(str(prod.get("title") or "").split())
+        for v in (prod.get("variants") or [{}]):
+            vt = " ".join(str(v.get("title") or "").split())
+            # Shopify calls a single-variant product's only variant "Default
+            # Title"; printing that back at somebody is noise, not information.
+            full = title + (" \u00b7 " + vt if vt and vt.lower() != "default title" else "")
+            rows.append({"product_id": str(prod.get("id") or ""),
+                         "variant_id": str(v.get("id") or ""),
+                         "title": full, "sku": str(v.get("sku") or ""),
+                         "vendor": " ".join(str(prod.get("vendor") or "").split())})
+    _loan_products.update({"at": now, "rows": rows})
+    return rows
+
+
 def _loan_id(d: dict, prefix: str) -> str:
     d["seq"] = int(d.get("seq") or 0) + 1
     return "%s%d" % (prefix, d["seq"])
@@ -12076,7 +12110,8 @@ def _loans_board(d: dict, who: str) -> dict:
         status = "retired" if u.get("retired") else ("out" if lo else "in")
         shape = {"id": uid, "name": u.get("name") or "", "model": u.get("model") or "",
                  "serial": u.get("serial") or "", "notes": u.get("notes") or "",
-                 "status": status}
+                 "product_id": u.get("product_id") or "", "variant_id": u.get("variant_id") or "",
+                 "sku": u.get("sku") or "", "status": status}
         units.append(shape)
         if lo and status == "out":
             out_rows.append({
@@ -18560,6 +18595,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json(_loans_board(d, who))
         if op == "history":
             return _json({"history": _loan_history(d, str(body.get("unit_id") or ""))})
+        if op == "products":
+            q = " ".join(str(body.get("q") or "").split()).lower()
+            try:
+                rows = await _loan_product_rows(registry)
+            except Exception:
+                logger.exception("loans: the catalogue could not be read")
+                return _json({"error": "Could not read the shop's products just now. "
+                                       "You can still type the model in by hand."}, 502)
+            if q:
+                rows = [r for r in rows if q in r["title"].lower()
+                        or q in r["sku"].lower() or q in r["vendor"].lower()]
+            return _json({"products": rows[:20]})
 
         if op == "unit_save":
             if not admin:
@@ -18575,9 +18622,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 uid = _loan_id(d, "u")
                 u = {"created_at": datetime.now(timezone.utc).isoformat()}
             u.update({"name": name,
-                      "model": " ".join(str(body.get("model") or "").split())[:80],
+                      "model": " ".join(str(body.get("model") or "").split())[:120],
                       "serial": " ".join(str(body.get("serial") or "").split())[:60],
                       "notes": str(body.get("notes") or "").strip()[:400]})
+            # What it was picked from, when it was picked from the shop. The
+            # NAME still identifies which one: two units can be the same
+            # product, and only the name and serial tell them apart.
+            for k in ("product_id", "variant_id", "sku"):
+                if k in body:
+                    u[k] = " ".join(str(body.get(k) or "").split())[:60]
             if "retired" in body:
                 u["retired"] = bool(body.get("retired"))
             d["units"][uid] = u

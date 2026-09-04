@@ -4118,6 +4118,27 @@ def t_a_loan_says_who_has_it_and_how_long_it_has_been_gone():
     ok("due_at" in out, "a due-back date can be set when it goes out")
 
 
+
+@test
+def t_a_unit_can_be_found_in_the_shop_rather_than_retyped():
+    """The register searches the shop's own catalogue. Picking a product fills
+    the MODEL and remembers what it was picked from; the NAME stays yours,
+    because two identical projectors are told apart by their name and serial,
+    never by the product they both are."""
+    fn = fn_src("function loanUnitModal(")
+    ok("op: 'products'" in fn, "it searches the catalogue")
+    ok("modelIn.value = " in fn, "a pick fills the model")
+    # The whole function, not a window after some other landmark: the pick
+    # callback sits BEFORE the search call in the source, so a window measured
+    # forward from it proved nothing. The name is set once when the field is
+    # built and never assigned again.
+    ok("nameIn.value =" not in fn and "nameIn.value=" not in fn,
+       "and nothing in this modal ever overwrites the name you chose")
+    ok("product_id" in fn and "variant_id" in fn and "sku" in fn,
+       "the unit remembers which product and variant it came from")
+    ok("Find in the shop" in fn, "the field says what it does")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
