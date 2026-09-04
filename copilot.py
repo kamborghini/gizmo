@@ -20639,6 +20639,20 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                           "note": "The connector service is not linked yet. Set CONNECTOR_URL "
                                   "(and CONNECTOR_TOKEN) in Railway to the private address of "
                                   "the shopify-xero-connector service."})
+        # A URL with a scheme and a port but NO HOST. Railway resolves a
+        # ${{service.VARIABLE}} reference to an empty string when it cannot
+        # find that service, so "http://${{wrong.RAILWAY_PRIVATE_DOMAIN}}:8899"
+        # arrives here as "http://:8899". Left to httpx that surfaces as
+        # UnsupportedProtocol, which describes the symptom and hides the cause.
+        if not urlparse(_connector_url()).hostname:
+            return _json({"available": True,
+                          "error": "CONNECTOR_URL has no hostname in it (" + _connector_url()
+                                   + "). A ${{service.RAILWAY_PRIVATE_DOMAIN}} reference "
+                                     "resolves to nothing when it names a service Railway "
+                                     "cannot find, leaving just the scheme and the port. Copy "
+                                     "the connector's private domain from its Settings, "
+                                     "Networking, Private Networking and type it in full."},
+                         502)
         try:
             if op in _CONNECTOR_READS:
                 method, path = _CONNECTOR_READS[op]

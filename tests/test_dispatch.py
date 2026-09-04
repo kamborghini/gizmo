@@ -16107,6 +16107,41 @@ def t_deleting_a_unit_that_is_out_is_allowed_but_leaves_a_line_saying_so():
 
 
 @test
+def t_a_connector_url_with_no_hostname_is_named_as_the_config_fault_it_is():
+    """Railway resolves a ${{service.VARIABLE}} reference to an EMPTY STRING
+    when it cannot find that service, so a mistyped service name arrives as
+    "http://:8899". httpx calls that UnsupportedProtocol, which names the
+    symptom and buries the cause; it is a configuration fault and says so."""
+    ensure_auth()
+    real = copilot._connector_call
+    called = []
+    async def fake(method, path, params=None):
+        called.append(path)
+        return 200, {"ok": True}
+    copilot._connector_call = fake
+    old_url = os.environ.get("CONNECTOR_URL")
+    try:
+        for bad in ("http://:8899", "http://", "https://:443"):
+            os.environ["CONNECTOR_URL"] = bad
+            r = post("/api/connector", {"op": "status"})
+            eq(r.status_code, 502, bad + " -> " + r.text)
+            msg = r.json()["error"]
+            ok("no hostname" in msg, "it names the fault: " + msg)
+            ok("Private Networking" in msg, "and where to get the right value: " + msg)
+        eq(called, [], "and it never dials a URL it knows is malformed")
+        # A good URL still goes through: the guard must not swallow the tab.
+        os.environ["CONNECTOR_URL"] = "http://xero-conn.railway.internal:8899"
+        eq(post("/api/connector", {"op": "status"}).json().get("available"), True)
+        ok(called, "a well-formed URL is actually called")
+    finally:
+        copilot._connector_call = real
+        if old_url is None:
+            os.environ.pop("CONNECTOR_URL", None)
+        else:
+            os.environ["CONNECTOR_URL"] = old_url
+
+
+@test
 def t_an_unreachable_connector_says_which_of_the_three_faults_it_is():
     """One sentence covered a name that does not resolve, a name that does with
     nothing behind it, and a service too slow to answer - three faults with
