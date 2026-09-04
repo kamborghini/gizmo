@@ -1010,6 +1010,16 @@
            that never arrives, so they shrink to what they hold. Their left
            edge is the column's, so nothing drifts out of alignment. */
         #view-connector .card > .lbl-row { width: fit-content; max-width: 100%; }
+        /* .card is a flex column with gap:16px, and a flex container does NOT
+           collapse margins - so every child's own vertical margins are ADDED to
+           that gap. A heading written for 24px above and a paragraph written
+           for 5px got 16+24 and 16+12+5, and the page paid for its spacing
+           twice: 33px between a heading and its own paragraph, 44 before the
+           control it introduces. The container owns the rhythm here - 16px
+           inside a section, 32 between them - and the children bring none. */
+        #view-connector .card > * { margin-top: 0; margin-bottom: 0; }
+        #view-connector .card > .section-title { margin-top: var(--sp-4); }
+        #view-connector .card > .section-title:first-of-type { margin-top: 0; }
         /* A results container with nothing in it should take no space at all;
            an empty one still contributed its margin, which is half of what
            read as arbitrary gaps down the page. */

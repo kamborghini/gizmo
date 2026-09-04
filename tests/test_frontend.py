@@ -4533,6 +4533,10 @@ def t_the_xero_page_gives_its_rows_a_deliberate_width():
        "and a control bar shrinks to what it holds rather than sitting half empty")
     ok("#view-connector .conn-results:empty { display: none; }" in CSS,
        "an empty results container takes no vertical space")
+    # .card is a flex column with gap:16, and flex does not collapse margins,
+    # so a child's own margins are ADDED to the gap and the page pays twice.
+    ok("#view-connector .card > * { margin-top: 0; margin-bottom: 0; }" in CSS,
+       "the container owns the rhythm; the children bring no vertical margins")
 
 
 if __name__ == "__main__":

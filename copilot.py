@@ -8678,8 +8678,13 @@ async def _connector_watch() -> None:
     lines += ["", "Auto Run is " + ("ON, so this will be retried on the next pass."
                                     if auto else "off; nothing further will happen until someone runs it."),
               "Open gizmo, Finance, Xero sync."]
-    _add_alerts([{"kind": "connector", "title": "Xero connector needs attention",
-                  "detail": str(data.get("line") or ""), "items": problems}])
+    # The banner draws tab_label, metric and pct. I gave it kind/title/detail,
+    # none of which it reads, so the alert rendered as a bare dot and a tilde -
+    # a row that told the reader something was wrong and refused to say what.
+    _add_alerts([{"tab": "connector", "tab_label": "Xero sync",
+                  "metric": (problems[0] if problems
+                             else str(data.get("line") or "the last run needs attention")),
+                  "pct": None}])
     await _send_alert_email("Xero connector: " + str(data.get("line") or "run needs attention"), lines)
     # RELOAD after the await. The snapshot above was taken before an SMTP round
     # trip; writing it back wholesale erases anything else the watch store

@@ -16342,6 +16342,13 @@ def t_a_run_that_needs_attention_is_reported_once_and_only_once():
         health["lastRunId"] = "run-3"
         _run(copilot._connector_watch())
         eq(len(sent), 2, "and a clean run says nothing at all")
+        # The banner draws tab_label, metric and pct and reads nothing else.
+        # An alert built from other keys renders as a dot and a tilde: a row
+        # saying something is wrong and refusing to say what.
+        a = copilot._load_alerts()[0]
+        for field in ("tab", "tab_label", "metric"):
+            ok(a.get(field), "the alert carries " + field + ", or the banner is blank")
+        ok("quarantined" in a["metric"], "and the metric says what is actually wrong")
     finally:
         copilot._connector_call = real_call
         copilot._send_alert_email = real_mail
