@@ -209,6 +209,13 @@ def build_app():
         copilot.reseal_secrets_at_rest()
     except Exception:
         logger.exception("token vault: re-seal pass failed; continuing")
+    # Before the reaper next ticks: rescue files that were marked as macOS junk
+    # by a pattern that also matched ordinary names beginning with an
+    # underscore. They are invisible and on course to be deleted.
+    try:
+        copilot.rescue_misfiled_junk()
+    except Exception:
+        logger.exception("files: junk rescue failed; continuing")
     app = mcp.streamable_http_app()
     app.add_middleware(MCPAuthMiddleware)
     # Added last, so it wraps outermost and sees every response, including the

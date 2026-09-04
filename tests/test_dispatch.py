@@ -16491,6 +16491,149 @@ def t_the_app_can_say_whether_its_secrets_are_encrypted():
 
 
 @test
+def t_the_audit_ledger_cannot_be_flushed_through_the_login_form():
+    """The ledger is a fixed-size FIFO of 8000 rows. Failed sign-ins for an
+    account that EXISTS were written one row per attempt with no coalescing,
+    and the paused and switched-off branches have no lockout of their own - so
+    anyone who knew one username could push every record of who booked a
+    courier label or changed team access out of the far end."""
+    before = dict(copilot._login_noise)
+    start = len(copilot._load_events())
+    try:
+        copilot._login_noise.update({"hour": "", "count": 0, "logged": 0})
+        for _ in range(200):
+            copilot._track_login_refusal("u-ghost", "account is switched off")
+        added = len(copilot._load_events()) - start
+        ok(added <= copilot.LOGIN_NOISE_ROWS + 1,
+           "200 attempts wrote %d rows; the budget is %d"
+           % (added, copilot.LOGIN_NOISE_ROWS + 1))
+        ok(added >= 1, "but the first ones ARE recorded, or an attack is invisible")
+        rows = copilot._load_events()[-added:]
+        ok(any("switched off" in str(r.get("detail") or "") for r in rows),
+           "and they say why the sign-in was refused")
+        ok(any(r.get("sub") == "u-ghost" for r in rows),
+           "and which account was being tried")
+        # The helper coalescing proves nothing if a route still writes directly.
+        # EVERY refusal path must go through it, so none is left unbounded.
+        import inspect
+        src = inspect.getsource(copilot)
+        noise = inspect.getsource(copilot._track_login_noise)
+        marker = '_track(uid, "auth", "failed login"'
+        # Exactly one such write may exist, and it must be the coalescer's own
+        # - that one is bounded by the hourly budget. A second is a route
+        # writing a row per attempt, which is the whole finding.
+        eq(src.count(marker), 1,
+           "every refusal path goes through the coalescer, not around it")
+        ok(marker in noise, "and the one that remains is the coalescer's")
+    finally:
+        copilot._login_noise.update(before)
+
+
+@test
+def t_an_ordinary_filename_is_not_treated_as_macos_junk():
+    """A "junk" file is invisible in the Files tab, absent from the ledger,
+    exempt from the 30-day trash, and DESTROYED thirty days after it was saved.
+    The pattern matched any name starting with an underscore, so a real working
+    file saved from Finder had all four of those properties by accident."""
+    for real in ("_JOB4471-final.eps", "_notes.txt", "_2026 pricing.xlsx",
+                 "Quote 4471.pdf", ".hidden-but-mine.txt"):
+        ok(not copilot._DAV_JUNK.match(real), real + " is somebody's work, not junk")
+    for junk in ("._sidecar", ".DS_Store", "desktop.ini", "Thumbs.db", ".Trashes"):
+        ok(copilot._DAV_JUNK.match(junk), junk + " really is a sidecar")
+
+
+@test
+def t_files_wrongly_marked_as_junk_are_rescued_before_the_reaper_gets_them():
+    """Correcting the pattern only helps files saved afterwards. A record
+    already marked hidden stays hidden and stays on course to be deleted with
+    no trash copy, so the records have to be corrected too."""
+    d = copilot._load_files()
+    d["files"]["f-rescue-1"] = {"name": "_JOB4471-final.eps", "hidden": True,
+                                "status": "active", "uploaded_at": "2020-01-01T00:00:00+00:00"}
+    d["files"]["f-rescue-2"] = {"name": "._sidecar", "hidden": True,
+                                "status": "active", "uploaded_at": "2020-01-01T00:00:00+00:00"}
+    copilot._write_files(d)
+    try:
+        out = copilot.rescue_misfiled_junk()
+        ok(out["rescued"] >= 1, "it rescued something")
+        d2 = copilot._load_files()
+        eq(d2["files"]["f-rescue-1"].get("hidden"), False,
+           "a real file is visible again, and out of the reaper's path")
+        eq(d2["files"]["f-rescue-2"].get("hidden"), True,
+           "a genuine sidecar stays hidden")
+        eq(copilot.rescue_misfiled_junk()["rescued"], 0, "and running again does nothing")
+    finally:
+        d3 = copilot._load_files()
+        d3["files"].pop("f-rescue-1", None)
+        d3["files"].pop("f-rescue-2", None)
+        copilot._write_files(d3)
+
+
+@test
+def t_the_name_an_attachment_is_SENT_under_gets_the_same_gate_as_the_upload():
+    """The program-extension check ran when the file was uploaded, and the name
+    that actually goes out was then re-read from the send request. A file
+    accepted as notes.txt could leave as invoice.hta - from the shop's own
+    address, with its SPF and DKIM behind it."""
+    import inspect
+    src = inspect.getsource(copilot._mail_fetch_parts)
+    ok("_DANGEROUS_EXT" in src,
+       "the outgoing name is checked, not only the uploaded one")
+    ok("_file_ext(nm)" in src, "by its extension")
+    ok("_files_head(key)" in src, "and the object is measured before it is read")
+
+
+@test
+def t_an_oversized_attachment_is_refused_before_its_bytes_are_read():
+    """Files holds objects up to 4GB and any active one is attachable. Reading
+    first and measuring after put the whole object in memory to discover it was
+    too big - on a single worker, which takes dispatch, labels and the CRM down
+    with the inbox. Source ORDER is not the property; not fetching is."""
+    calls = {"head": 0, "get": 0}
+    real = (copilot._files_head, copilot._mail_attachment_ok, copilot._files_s3)
+
+    def fake_head(key):
+        calls["head"] += 1
+        return 900 * 1024 * 1024
+
+    class _S3:
+        def get_object(self, **kw):
+            calls["get"] += 1
+            raise AssertionError("the bytes must never be fetched")
+
+    copilot._files_head = fake_head
+    copilot._mail_attachment_ok = lambda k, u: True
+    copilot._files_s3 = lambda: _S3()
+    try:
+        raised = ""
+        try:
+            _run(copilot._mail_fetch_parts([{"key": "mail/u1/abc-big.pdf",
+                                             "name": "big.pdf"}], "u1"))
+        except ValueError as e:
+            raised = str(e)
+        ok(raised, "a 900MB attachment is refused")
+        eq(calls["get"], 0, "and refused WITHOUT pulling it into memory")
+        ok(calls["head"] >= 1, "having been measured first")
+    finally:
+        copilot._files_head, copilot._mail_attachment_ok, copilot._files_s3 = real
+
+
+@test
+def t_a_mime_type_from_the_browser_cannot_carry_a_newline():
+    """It reaches an email header. A carriage return in it raised inside
+    build_message - which runs AFTER the thread is stamped send_pending - so
+    the request 500'd and the board said a message may have gone out to a
+    customer, forever, with nothing to clear it but checking Gmail by hand."""
+    keep = ["image/png", "application/pdf", "application/vnd.ms-excel"]
+    for good in keep:
+        eq(copilot._mail_part_type(good, "application/octet-stream"), good)
+    for bad in ["image/png\r\nBcc: evil@x.com", "image/png\nX: 1", "", None,
+                "../etc", "text/plain; charset=utf8", "image", "a" * 200 + "/b"]:
+        eq(copilot._mail_part_type(bad, "application/octet-stream"),
+           "application/octet-stream", repr(bad) + " must not reach a header")
+
+
+@test
 def t_the_register_finds_a_projector_in_the_shop():
     """Adding a unit should not mean retyping what the shop already knows.
     Variants are listed separately, because the SKU is what tells two

@@ -8681,8 +8681,14 @@ async def _connector_watch() -> None:
     _add_alerts([{"kind": "connector", "title": "Xero connector needs attention",
                   "detail": str(data.get("line") or ""), "items": problems}])
     await _send_alert_email("Xero connector: " + str(data.get("line") or "run needs attention"), lines)
-    state["connector_run"] = run_id
-    _save_watch(state)
+    # RELOAD after the await. The snapshot above was taken before an SMTP round
+    # trip; writing it back wholesale erases anything else the watch store
+    # gained meanwhile - team_established among them, and the watchdog's
+    # "the accounts were lost" alarm keys off that flag. The single-writer rule
+    # this codebase runs on, broken in code I added this morning.
+    fresh = _load_watch()
+    fresh["connector_run"] = run_id
+    _save_watch(fresh)
 
 
 async def _scheduler_loop(registry: dict) -> None:
@@ -9264,6 +9270,43 @@ def _load_files() -> dict:
         pass
     _files_mem = d
     return d
+
+
+def rescue_misfiled_junk() -> dict:
+    """Un-hide files that were only ever "junk" because the pattern was wrong.
+
+    A hidden file is invisible in the Files tab, absent from the ledger, exempt
+    from the 30-day trash, and DESTROYED thirty days after it was saved. The old
+    pattern matched any name beginning with an underscore, so `_JOB4471.eps`
+    saved from Finder had all four of those properties by accident.
+
+    Fixing the pattern only helps files saved from now on: a record already
+    marked hidden stays hidden, and stays on course to be reaped. This corrects
+    the records, and must run before the reaper next ticks.
+
+    Idempotent, and a no-op once nothing is mis-marked. Never raises: a repair
+    that cannot run is a log line, not a deployment that will not start.
+    """
+    out = {"rescued": 0, "names": []}
+    try:
+        d = _load_files()
+        for f in (d.get("files") or {}).values():
+            if not isinstance(f, dict) or not f.get("hidden"):
+                continue
+            name = str(f.get("name") or "")
+            if name and not _DAV_JUNK.match(name):
+                f["hidden"] = False
+                out["rescued"] += 1
+                if len(out["names"]) < 20:
+                    out["names"].append(name)
+        if out["rescued"]:
+            _write_files(d)
+            logger.warning("files: un-hid %d file(s) that were never junk; they were "
+                           "invisible in the app and due to be deleted 30 days after "
+                           "they were saved: %s", out["rescued"], ", ".join(out["names"]))
+    except Exception:
+        logger.exception("files: could not rescue mis-marked files")
+    return out
 
 
 def _write_files(d: dict) -> None:
@@ -9960,15 +10003,45 @@ def _mail_part_name(key: str) -> str:
     return last.split("-", 1)[-1] if "-" in last else last
 
 
+# A type must START with a letter: "." is a legal token character, so a
+# looser pattern accepts "../etc" as a MIME type. Harmless, but a header this
+# app emits should not contain something that reads like a path.
+_MIME_TOKEN = r"[A-Za-z][A-Za-z0-9!#$&^_.+-]{0,63}"
+
+
+def _mail_part_type(value, fallback: str) -> str:
+    """A MIME type safe to put in a header.
+
+    The client's value used to be copied through and truncated. A carriage
+    return in it made Python's email policy raise INSIDE build_message, which
+    is called after the thread has already been stamped send_pending - so the
+    request 500'd and the board kept saying a message may have gone out to a
+    customer, forever, with no way to clear it but checking Gmail by hand.
+    """
+    t = str(value or "").strip()
+    return t if re.fullmatch(_MIME_TOKEN + "/" + _MIME_TOKEN, t) else fallback
+
+
 async def _mail_fetch_parts(files: list, uid: str, inline_keys: list = None):
     """Bytes for every part, or a ValueError naming the first part that cannot
     be sent. All or nothing, and the total is checked as it grows so a set
     that will not fit is refused before the last file is read."""
     out_files, out_inline, total = [], [], 0
 
-    async def _read(key):
+    async def _read(key, budget):
         if not _mail_attachment_ok(key, uid):
             raise ValueError(f"{_mail_part_name(key)} is not one of your uploads.")
+        # SIZE BEFORE BYTES. Files holds objects up to 4GB and any active one
+        # is attachable, so reading first and measuring after put the whole
+        # object in memory to discover it was too big - on a single worker,
+        # which takes dispatch, labels and the inbox down with the inbox.
+        try:
+            size = _files_head(key)
+        except Exception:
+            size = None
+        if size is not None and size > budget:
+            raise ValueError(f"{_mail_part_name(key)} does not fit: attachments come to "
+                             "more than 25MB in total.")
         try:
             obj = await asyncio.to_thread(_files_s3().get_object, Bucket=R2_BUCKET, Key=key)
             return await asyncio.to_thread(obj["Body"].read)
@@ -9977,16 +10050,24 @@ async def _mail_fetch_parts(files: list, uid: str, inline_keys: list = None):
 
     for f in (files or []):
         key = str(f.get("key") or "")
-        data = await _read(key)
+        data = await _read(key, MAIL_ATTACH_MAX - total)
         total += len(data)
         if total > MAIL_ATTACH_MAX:
             raise ValueError("Attachments come to more than 25MB in total.")
-        out_files.append({"name": _mail_attach_name(f.get("name") or _mail_part_name(key)),
-                          "type": str(f.get("type") or "application/octet-stream")[:100],
+        # The NAME THAT IS SENT gets the same gate as the name that was
+        # uploaded. The extension check ran at upload and the outgoing name was
+        # then re-read from the send request, so a file accepted as notes.txt
+        # could leave as invoice.hta - from the shop's own address, with its
+        # SPF and DKIM behind it. That is the shape of the control's absence.
+        nm = _mail_attach_name(f.get("name") or _mail_part_name(key))
+        if _file_ext(nm) in _DANGEROUS_EXT:
+            raise ValueError(f"{nm} is a program, not a document. Rename it or send a link.")
+        out_files.append({"name": nm,
+                          "type": _mail_part_type(f.get("type"), "application/octet-stream"),
                           "data": data})
     for im in (inline_keys or []):
         key = str(im.get("key") or "")
-        data = await _read(key)
+        data = await _read(key, min(MAIL_INLINE_MAX, MAIL_ATTACH_MAX - total))
         if len(data) > MAIL_INLINE_MAX:
             raise ValueError(f"{_mail_part_name(key)} is over 5MB, too large for an "
                              "inline image.")
@@ -9996,7 +10077,7 @@ async def _mail_fetch_parts(files: list, uid: str, inline_keys: list = None):
         out_inline.append({"cid": re.sub(r"[^A-Za-z0-9._-]", "",
                                          str(im.get("cid") or ""))[:64] or "img",
                            "name": _mail_part_name(key),
-                           "type": str(im.get("type") or "image/png")[:100],
+                           "type": _mail_part_type(im.get("type"), "image/png"),
                            "data": data})
     return out_files, out_inline, total
 
@@ -12475,7 +12556,23 @@ _login_noise = {"hour": "", "count": 0, "logged": 0}
 LOGIN_NOISE_ROWS = 10      # ledger rows per hour for unknown-username failures
 
 
-def _track_login_noise(username: str) -> None:
+def _track_login_refusal(uid: str, reason: str, username: str = "") -> None:
+    """A failed login for an account that EXISTS but cannot sign in.
+
+    These were written one row per attempt, unthrottled. The ledger is a
+    fixed-size FIFO of 8000 rows, so anyone who could reach the login form and
+    knew one username - a switched-off ex-employee's, say - could push every
+    record of who booked a courier label, who marked orders made and who
+    changed team access out of the far end. The paused and switched-off
+    branches have no lockout of their own, so nothing else bounded them.
+
+    Coalesced on the same hourly budget as the unknown-username path: the first
+    few in full, then counted and said once.
+    """
+    _track_login_noise(username or "(known account)", uid=uid, reason=reason)
+
+
+def _track_login_noise(username: str, uid: str = "", reason: str = "") -> None:
     """Failed logins for usernames that do not exist are the one ledger write
     an unauthenticated caller can drive. Log the first few an hour in full,
     then count silently and say so once - the audit history must not be
@@ -12486,11 +12583,12 @@ def _track_login_noise(username: str) -> None:
     _login_noise["count"] += 1
     if _login_noise["logged"] < LOGIN_NOISE_ROWS:
         _login_noise["logged"] += 1
-        _track("", "auth", "failed login", f"unknown username {username[:40]}")
+        _track(uid, "auth", "failed login",
+               reason or f"unknown username {username[:40]}")
     elif _login_noise["logged"] == LOGIN_NOISE_ROWS:
         _login_noise["logged"] += 1
         _track("", "auth", "failed logins continuing",
-               "further unknown-username attempts this hour are not being listed")
+               "further failed sign-ins this hour are not being listed")
 
 
 def _track(sub: Optional[str], area: str, action: str, detail: str = "") -> None:
@@ -12648,7 +12746,7 @@ def _dav_check_auth(header: str):
         _dav_fail_cache[username] = (cnt, now + LOGIN_LOCK_MINUTES * 60 if cnt >= LOGIN_FAIL_LIMIT else 0)
         if len(_dav_fail_cache) > 500:
             _dav_fail_cache.clear()
-        _track(uid, "auth", "failed login", "wrong password at the file drive")
+        _track_login_refusal(uid, "wrong password at the file drive")
         return None, 401
     _dav_fail_cache.pop(username, None)
     if len(_dav_auth_cache) > 500:
@@ -12720,7 +12818,14 @@ def _dav_path_of_folder(d: dict, fid: str) -> list:
     return out
 
 
-_DAV_JUNK = re.compile(r"^(\.|_)|^desktop\.ini$", re.I)
+# macOS and Windows sidecars, and NOTHING else. The alternation used to be
+# `^(\.|_)`, which caught every ordinary filename beginning with an underscore
+# - and a junk file here is invisible in the Files tab, absent from the audit
+# ledger, exempt from the 30-day trash, and destroyed 30 days after it was
+# saved. `_JOB4471-final.eps` saved from Finder worked for a month and then
+# disappeared, with nothing anywhere to say why.
+_DAV_JUNK = re.compile(r"^\._|^\.DS_Store$|^\.(Trashes|Spotlight-V100|fseventsd|TemporaryItems|apdisk)"
+                       r"|^desktop\.ini$|^Thumbs\.db$", re.I)
 
 
 def _dav_rfc1123(iso: str) -> str:
@@ -17901,17 +18006,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if str(u.get("lock_until") or "") > now.isoformat():
             # Locked answers exactly like wrong: a different reply would tell
             # a guesser which usernames exist.
-            _track(uid, "auth", "failed login", "account is paused")
+            _track_login_refusal(uid, "account is paused")
             return vague
         if not u.get("active", True):
-            _track(uid, "auth", "failed login", "account is switched off")
+            _track_login_refusal(uid, "account is switched off")
             return vague
         exp = str(u.get("pw_expires_at") or "")
         if exp and exp < now.isoformat():
             # A break-glass password that was never used in time. Refused
             # exactly like a wrong one, so the reply says nothing about which
             # accounts exist or which are mid-reset.
-            _track(uid, "auth", "failed login", "the temporary password had expired")
+            _track_login_refusal(uid, "the temporary password had expired")
             return vague
         if not _check_pw(pw, u.get("pw") or ""):
             u["fails"] = int(u.get("fails") or 0) + 1
@@ -17923,7 +18028,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _write_users(d)
             except RuntimeError:
                 pass
-            _track(uid, "auth", "failed login", "wrong password")
+            _track_login_refusal(uid, "wrong password")
             return vague
         u["fails"] = 0
         u["lock_until"] = ""
@@ -18696,6 +18801,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if dparent is None:
                     return Response(status_code=409, headers=hdrs)
                 dname = _files_clean_name(dsegs[-1])
+                # Every other naming path refuses a program extension - upload,
+                # rename, mail attach, and PUT through _file_verdict. A rename
+                # over the drive did not, so a .txt accepted on the way in
+                # could become a .bat on a mount every staff Mac has attached.
+                if _file_ext(dname) in _DANGEROUS_EXT:
+                    return Response(status_code=403, headers=hdrs)
                 dk, did = _dav_resolve(d, "/".join(dsegs))
                 if dk is not None and did != kid:
                     if request.headers.get("overwrite", "T").upper() == "F":
