@@ -8072,7 +8072,9 @@ def _json(data: dict, status: int = 200) -> JSONResponse:
 # threaded and these helpers never await, so no lock is needed.
 _rl_hits: dict[str, list[float]] = {}
 _rl_global: list[float] = []
-_oauth_states: dict[str, float] = {}   # state nonce -> expiry (Google OAuth connect flow)
+_oauth_states: dict[str, float] = {}
+# Sign-in attempts per client, whichever account is being tried.
+_login_hits: dict[str, list[float]] = {}   # state nonce -> expiry (Google OAuth connect flow)
 # EORI checks, app-wide rather than per-client: the limit being respected is
 # the EU service's, and it counts requests from this deployment, not from
 # whichever member of staff happens to be typing.
@@ -11599,12 +11601,22 @@ def _redact_customer(email: str, customer_id="") -> dict:
 
 ACTIVITY_MAX = int(os.environ.get("ACTIVITY_MAX", "8000"))
 SESSION_HOURS = float(os.environ.get("SESSION_HOURS", "24"))
-LOGIN_FAIL_LIMIT = 8
+LOGIN_FAIL_LIMIT = 5
 # A real hash to verify against when the username does not exist, so an unknown
 # user costs the same time as a wrong password and the response cannot be used
 # to enumerate accounts. Built once at import.
 _PW_DUMMY = ""   # filled just below _hash_pw, which is defined further down
 LOGIN_LOCK_MINUTES = 15
+# Each consecutive lock lasts longer than the last. Without it, serving a lock
+# handed the guesser a fresh five attempts every quarter of an hour - twenty an
+# hour, for as long as they cared to keep going. A person who has genuinely
+# forgotten their password tries a few times and asks for a reset; nobody
+# reaches the fourth lock by accident.
+LOGIN_LOCK_STEPS = (15, 30, 60, 240)
+# The login form's own ceiling, well under the app-wide 120/minute. Guessing
+# does not need a wide door, and legitimate sign-in never needs more than a
+# handful in a minute.
+LOGIN_MAX_PER_MIN = 8
 ROLE_LEVELS = {"master": 3, "admin": 2, "member": 1, "parttime": 1}
 _users_mem: Optional[dict] = None
 _sessions_mem: Optional[dict] = None
@@ -12106,7 +12118,7 @@ def _master_reset_check(d: dict) -> None:
             # the log holds a dead string.
             u["pw_expires_at"] = (datetime.now(timezone.utc)
                                   + timedelta(minutes=MASTER_RESET_MINUTES)).isoformat()
-            u["fails"], u["lock_until"] = 0, ""
+            u["fails"], u["lock_until"], u["locks"] = 0, "", 0
             try:
                 _write_users(d)
             except Exception:
@@ -17988,6 +18000,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, body = await _auth_guard(request)
         if err:
             return err
+        # The login form's OWN ceiling. _pre_checks allows 120 requests a
+        # minute, which is right for a page listing orders and far too wide for
+        # one that checks passwords: the per-account lockout does nothing
+        # against someone spraying a single password across many usernames.
+        if not _window_ok(_login_hits.setdefault(_client_key(request), []),
+                          LOGIN_MAX_PER_MIN, time.monotonic()):
+            return _json({"error": "Too many sign-in attempts from here. Wait a "
+                                   "minute and try again."}, 429)
         username = _clean_username(body.get("username"))
         pw = str(body.get("password") or "")
         d = _load_users()
@@ -18027,8 +18047,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             u["fails"] = int(u.get("fails") or 0) + 1
             if u["fails"] >= LOGIN_FAIL_LIMIT:
                 u["fails"] = 0
-                u["lock_until"] = (now + timedelta(minutes=LOGIN_LOCK_MINUTES)).isoformat()
-                _track(uid, "auth", "account paused", "too many wrong passwords")
+                step = min(int(u.get("locks") or 0), len(LOGIN_LOCK_STEPS) - 1)
+                u["locks"] = int(u.get("locks") or 0) + 1
+                mins = LOGIN_LOCK_STEPS[step]
+                u["lock_until"] = (now + timedelta(minutes=mins)).isoformat()
+                _track(uid, "auth", "account paused",
+                       "too many wrong passwords; locked for %d minutes" % mins)
             try:
                 _write_users(d)
             except RuntimeError:
@@ -18037,6 +18061,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return vague
         u["fails"] = 0
         u["lock_until"] = ""
+        # The escalation goes with them: proving you are the account holder
+        # ends the run of locks, so one bad afternoon cannot make every
+        # future mistake cost four hours.
+        u["locks"] = 0
         u["last_login_at"] = now.isoformat()
         try:
             _write_users(d)
@@ -18209,6 +18237,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             d["users"][uid]["must_change"] = False
             d["users"][uid]["fails"] = 0
             d["users"][uid]["lock_until"] = ""
+            d["users"][uid]["locks"] = 0
             # The expiry belonged to the break-glass password, not to this one:
             # left behind, the master's chosen password would stop working half
             # an hour later and lock them out of their own app.
@@ -18484,7 +18513,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 starter = _starter_password()
                 u["pw"] = _hash_pw(starter)
                 u["must_change"] = True
-                u["fails"], u["lock_until"] = 0, ""
+                u["fails"], u["lock_until"], u["locks"] = 0, "", 0
                 # This one is handed over in person, not written to a log, so
                 # it does not expire - and it must not inherit an expiry left
                 # behind by an earlier break-glass reset.

@@ -6612,14 +6612,23 @@ def make_user(name, username, role="member"):
     return uid, j["starter_password"]
 
 def login(username, pw):
+    """One sign-in. The per-client ceiling is cleared once per TEST by the
+    runner, not per call: clearing it here made it impossible for any test to
+    observe the ceiling at all, which is how it came to be asserted and never
+    actually exercised."""
     return bare("/api/auth/login", {"username": username, "password": pw})
 
 def ready_user(name, username, role="member", pw="chosen-pw-123456"):
     """Create an account and take it THROUGH the forced first-password change,
     returning (uid, session, pw) ready for normal use."""
     uid, starter = make_user(name, username, role=role)
+    # Account SETUP, not a sign-in burst: a test that builds eight accounts is
+    # not one browser making sixteen attempts in a minute. Cleared here rather
+    # than in login(), which would make the ceiling unobservable everywhere.
+    copilot._login_hits.clear()
     s0 = login(username, starter).json()["session"]
     post_s(s0, "/api/auth/password", {"current": starter, "new": pw})
+    copilot._login_hits.clear()
     return uid, login(username, pw).json()["session"], pw
 
 @test
@@ -6658,8 +6667,13 @@ def t_auth_login_is_vague_locked_and_logged():
         r2 = login("nobody", "whatever12")
         eq(r2.status_code, 401)
         eq(r.json()["error"], r2.json()["error"], "the same vague answer for user and password")
-        for _ in range(8):
+        # Enough wrong passwords to trip the ACCOUNT lock, clearing the
+        # per-client ceiling between them: that is a separate control with its
+        # own test, and it would answer 429 before this one ever locks.
+        for _ in range(copilot.LOGIN_FAIL_LIMIT + 1):
+            copilot._login_hits.clear()
             login("cameron", "wrong-password")
+        copilot._login_hits.clear()
         r3 = login("cameron", MASTER_PW)
         eq(r3.status_code, 401, "the pause blocks even the right password")
         eq(r3.json()["error"], r.json()["error"],
@@ -16537,6 +16551,80 @@ def t_the_audit_ledger_cannot_be_flushed_through_the_login_form():
 
 
 @test
+def t_five_wrong_passwords_pause_the_account_and_each_lock_lasts_longer():
+    """Five, not eight. And serving a lock used to hand the guesser a fresh
+    five every quarter of an hour - twenty an hour, indefinitely. Each
+    consecutive lock is longer, so the channel closes instead of throttling.
+    Somebody who has genuinely forgotten asks for a reset; nobody reaches the
+    fourth lock by accident."""
+    ensure_auth()
+    eq(copilot.LOGIN_FAIL_LIMIT, 5, "five attempts, as asked")
+    uid, sess, pw = ready_user("Lock", "lock-test")
+    for i in range(copilot.LOGIN_FAIL_LIMIT - 1):
+        # The per-client ceiling is a different control with its own test; it
+        # would otherwise answer 429 before the account ever locks.
+        copilot._login_hits.clear()
+        eq(login("lock-test", "wrong-" + str(i)).status_code, 401,
+           "attempt %d is refused but does not lock" % (i + 1))
+        ok(not (copilot._load_users()["users"][uid].get("lock_until") or ""),
+           "still open after %d" % (i + 1))
+    copilot._login_hits.clear()
+    eq(login("lock-test", "wrong-last").status_code, 401)
+    u = copilot._load_users()["users"][uid]
+    ok(u.get("lock_until"), "the fifth locks it")
+    eq(int(u.get("locks") or 0), 1)
+
+    def lock_minutes(rec):
+        from datetime import datetime as _dt, timezone as _tz
+        return round((_dt.fromisoformat(rec["lock_until"])
+                      - _dt.now(_tz.utc)).total_seconds() / 60)
+
+    first = lock_minutes(u)
+    ok(abs(first - copilot.LOGIN_LOCK_STEPS[0]) <= 1,
+       "the first lock is %d minutes" % copilot.LOGIN_LOCK_STEPS[0])
+
+    # Serve the lock, then fail five more: the second lock must be longer.
+    d = copilot._load_users()
+    d["users"][uid]["lock_until"] = ""
+    copilot._write_users(d)
+    for i in range(copilot.LOGIN_FAIL_LIMIT):
+        copilot._login_hits.clear()
+        login("lock-test", "again-" + str(i))
+    u2 = copilot._load_users()["users"][uid]
+    second = lock_minutes(u2)
+    ok(second > first,
+       "the second lock (%d min) must outlast the first (%d min), or serving one "
+       "just buys another five attempts" % (second, first))
+    eq(int(u2.get("locks") or 0), 2)
+
+    # Getting in clears the run of locks.
+    d = copilot._load_users()
+    d["users"][uid]["lock_until"] = ""
+    copilot._write_users(d)
+    copilot._login_hits.clear()
+    eq(login("lock-test", pw).status_code, 200, "the right password still works")
+    u3 = copilot._load_users()["users"][uid]
+    eq(int(u3.get("locks") or 0), 0,
+       "and proving who you are ends the escalation, so one bad afternoon does "
+       "not make every later mistake cost four hours")
+
+
+@test
+def t_the_sign_in_form_has_a_tighter_ceiling_than_the_rest_of_the_app():
+    """The per-account lockout does nothing against one password sprayed
+    across many usernames. The app-wide limit is 120 a minute, which is right
+    for a page listing orders and far too wide for one checking passwords."""
+    ok(copilot.LOGIN_MAX_PER_MIN < copilot.RATE_MAX_CLIENT,
+       "the sign-in ceiling is tighter than the app's")
+    copilot._login_hits.clear()
+    codes = [login("nobody-at-all", "x").status_code
+             for _ in range(copilot.LOGIN_MAX_PER_MIN + 3)]
+    ok(429 in codes, "spraying usernames is stopped by the client ceiling")
+    eq(codes.count(429), 3, "and it stops exactly at the limit")
+    copilot._login_hits.clear()
+
+
+@test
 def t_an_ordinary_filename_is_not_treated_as_macos_junk():
     """A "junk" file is invisible in the Files tab, absent from the ledger,
     exempt from the 30-day trash, and DESTROYED thirty days after it was saved.
@@ -16810,6 +16898,11 @@ def t_a_tag_already_on_a_machine_is_never_handed_out_again():
 
 
 for fn in TESTS:
+    # A fresh client per test, for the per-client SIGN-IN ceiling only. The
+    # suite makes hundreds of sign-ins from one address; a browser makes a
+    # handful, which is what LOGIN_MAX_PER_MIN is sized for. The ceiling has
+    # its own test rather than being weakened for everyone else's sake.
+    copilot._login_hits.clear()
     try:
         fn(); passed += 1; print(f"  PASS  {fn.__name__}")
     except Exception as e:
