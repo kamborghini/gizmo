@@ -4139,6 +4139,21 @@ def t_a_unit_can_be_found_in_the_shop_rather_than_retyped():
     ok("Find in the shop" in fn, "the field says what it does")
 
 
+
+@test
+def t_a_modal_action_button_is_appended_not_stringified():
+    """el(tag, class, text) sets textContent, so handing it a button prints the
+    words [object HTMLButtonElement] and the modal ends up with no button at
+    all. Both loan modals shipped that way, and the register could not be
+    added to. Appending is the only way a child element survives."""
+    for name in ("function loanUnitModal(", "function loanOutModal("):
+        fn = fn_src(name)
+        for bad in ("mail-statebar', save)", "mail-statebar', go)"):
+            ok(bad not in fn, name + " hands its action button to el() as text")
+        ok(".append(save)" in fn or ".append(go)" in fn,
+           name + " appends its action button into the bar")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

@@ -6985,7 +6985,9 @@ Projected Image UK"></textarea>
                     loadLoans(true);
                 } catch (e) { go.disabled = false; toastError(e.message); }
             };
-            m.body.append(el('div', 'mail-statebar', go));
+            const barGo = el('div', 'mail-statebar');
+            barGo.append(go);
+            m.body.append(barGo);
         }
         function loanUnitModal(unit) {
             const u = unit || {};
@@ -7052,7 +7054,9 @@ Projected Image UK"></textarea>
                     m.close(); loadLoans(true);
                 } catch (e) { save.disabled = false; toastError(e.message); }
             };
-            m.body.append(el('div', 'mail-statebar', save));
+            const barSave = el('div', 'mail-statebar');
+            barSave.append(save);
+            m.body.append(barSave);
         }
         async function loanHistoryModal(unit) {
             const m = loanModal((unit.name || 'Unit') + ' history');
