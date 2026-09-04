@@ -4302,6 +4302,56 @@ def t_only_a_document_the_connector_returned_can_be_opened():
     ok("connDocModal(d)" in seg, "and it opens that document")
 
 
+@test
+def t_the_document_leads_with_whether_it_reconciles_with_shopify():
+    """A discount code once went missing and the invoice looked perfectly
+    plausible: only the comparison against Shopify's own total caught it. That
+    comparison is the first thing on the document, and it is the CONNECTOR's
+    number - gizmo working it out again could disagree with the warning, and
+    then neither figure would be worth reading."""
+    fn = fn_src("function connDocModal(")
+    ok("p.reconcile" in fn, "the reconciliation comes from the connector")
+    ok("rec.computed" in fn and "rec.expected" in fn and "rec.diff" in fn,
+       "and is displayed, all three numbers")
+    for arithmetic in ("rec.computed -", "rec.expected -", "- rec.expected", "Math.abs("):
+        ok(arithmetic not in fn, "gizmo does not recompute it: found " + arithmetic)
+    ok("rec.ok" in fn, "and it says plainly whether it reconciles")
+    ok("strict" in fn and "Do not send it" in fn,
+       "a mismatch under warn mode says the send is NOT blocked")
+
+
+@test
+def t_the_document_says_which_xero_customer_it_lands_on():
+    """"Will this hit the right account" is the question a total cannot answer.
+    An unmatched contact already quarantines the document; showing it here means
+    finding out before the send rather than from a quarantine list."""
+    fn = fn_src("function connDocModal(")
+    ok("cust.matched" in fn, "it says whether a Xero contact was actually matched")
+    ok("cust.xeroContactId" in fn, "and which one")
+    # Both outcomes must NAME the customer: "lands on the Xero contact" without
+    # saying which one answers nothing, and that is the whole question here.
+    ok(fn.count("cust.name") >= 2,
+       "the matched and the unmatched message each name the customer")
+    ok("cust.reference" in fn, "with the customer reference Xero matches on")
+    ok("cust.email" in fn, "and the email")
+    ok("cannot be sent until one exists" in fn,
+       "an unmatched contact reads as the blocker it is")
+
+
+@test
+def t_the_document_shows_shopifys_own_totals_to_check_against():
+    """The screen is only worth anything if it can be read against the shop.
+    Shopify's figures go on it unaltered, and the note says which of them the
+    reconciliation actually uses, because tax is not one of them."""
+    fn = fn_src("function connDocModal(")
+    ok("p.order" in fn, "the order's own totals are carried")
+    for f in ("o.subtotal", "o.shipping", "o.tax", "o.total"):
+        ok(f in fn, "showing " + f)
+    ok("o.gateways" in fn, "and the gateway, which is what chose the due date")
+    ok("p.key" in fn, "and the ledger key that stops a second send")
+    ok("Tax is not" in fn, "and says tax is not part of the reconciliation")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

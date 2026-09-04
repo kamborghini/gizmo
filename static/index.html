@@ -6901,6 +6901,8 @@ Projected Image UK"></textarea>
         function connDocModal(d) {
             const p = d.preview || {};
             const credit = d.kind === 'creditnote';
+            const money2 = n => (typeof n === 'number' ? n.toFixed(2)
+                                 : (n === undefined || n === null || n === '') ? '' : String(n));
             const m = sheetModal((credit ? 'Credit note ' : 'Invoice ')
                                  + (p.number || d.key || ''));
             const what = p.updatesExisting
@@ -6912,6 +6914,39 @@ Projected Image UK"></textarea>
                 m.body.append(el('div', 'msg ' + (d.action === 'quarantined' || d.action === 'blocked'
                                                   ? 'error' : ''), d.message));
             }
+            /* The reconciliation FIRST, because it is the one line that says
+               whether everything below it can be trusted. It is the number the
+               connector's own check uses, not one worked out here. */
+            const rec = p.reconcile;
+            if (rec) {
+                const box = el('div', 'msg ' + (rec.ok ? '' : 'error'));
+                box.append(el('div', null, rec.ok
+                    ? 'Reconciles with Shopify: ' + money2(rec.computed) + ' both sides.'
+                    : 'Does NOT reconcile. This document comes to '
+                      + money2(rec.computed) + ', Shopify says ' + money2(rec.expected)
+                      + ', a difference of ' + money2(rec.diff) + '.'));
+                if (!rec.ok) {
+                    box.append(el('div', 'lbl-meta', rec.mode === 'strict'
+                        ? 'Held back: reconcile mode is strict, so this will not be sent.'
+                        : 'Reconcile mode is warn, so this WOULD be sent. Do not send it.'));
+                }
+                m.body.append(box);
+            }
+
+            const cust = p.customer;
+            if (cust) {
+                const box = el('div', 'msg ' + (cust.matched ? '' : 'error'));
+                box.append(el('div', null, cust.matched
+                    ? 'Lands on the Xero contact ' + (cust.name || '(unnamed)') + '.'
+                    : 'No Xero contact matched for ' + (cust.name || 'this customer')
+                      + ', so this cannot be sent until one exists.'));
+                const sub = [cust.email, cust.reference ? 'ref ' + cust.reference : '',
+                             cust.xeroContactId ? 'Xero id ' + cust.xeroContactId : '']
+                    .filter(Boolean).join(' \u00b7 ');
+                if (sub) box.append(el('div', 'lbl-meta', sub));
+                m.body.append(box);
+            }
+
             const dl = el('dl', 'conn-pairs');
             const pair = (k, v) => {
                 if (!v) return;
@@ -6925,6 +6960,15 @@ Projected Image UK"></textarea>
             pair('Reference', p.reference);
             pair('Currency', p.currency);
             pair('Status', p.status);
+            pair('Ledger key', p.key);
+            const o = p.order;
+            if (o) {
+                pair('Shopify order', o.name + (o.financialStatus
+                    ? ' \u00b7 ' + String(o.financialStatus).toLowerCase().replace(/_/g, ' ') : ''));
+                pair('Placed', o.createdAt ? fmtDate(o.createdAt) : '');
+                /* The gateway is what chose the due date, so it belongs beside it. */
+                pair('Paid by', (o.gateways || []).join(', '));
+            }
             m.body.append(dl);
 
             const lines = p.lines || [];
@@ -6943,7 +6987,7 @@ Projected Image UK"></textarea>
             });
             thead.append(hr); t.append(thead);
             const tb = document.createElement('tbody');
-            const money = n => (typeof n === 'number' ? n.toFixed(2) : '');
+            const money = money2;
             lines.forEach(l => {
                 const tr = document.createElement('tr');
                 const cells = [[l.description || '', ''],
@@ -6980,6 +7024,31 @@ Projected Image UK"></textarea>
                 m.body.append(el('div', 'field-help',
                     'Xero adds tax from the tax type on each line, so the invoice total '
                     + 'there will be higher than this.'));
+            }
+            /* Shopify's own figures, unaltered, so the screen can be read
+               straight against the order rather than trusted on its own. */
+            if (p.order) {
+                const o = p.order;
+                m.body.append(el('h4', 'card-title', 'What Shopify says'));
+                const st = document.createElement('table'); st.className = 'conn-doc';
+                const stb = document.createElement('tbody');
+                [['Subtotal, after discounts', o.subtotal],
+                 ['Shipping', o.shipping],
+                 ['Tax', o.tax],
+                 ['Total', o.total]].forEach(([k, v]) => {
+                    if (v === undefined || v === null || v === '') return;
+                    const tr = document.createElement('tr');
+                    const a = document.createElement('td'); a.textContent = k;
+                    const b = document.createElement('td'); b.className = 'num';
+                    b.textContent = (o.currency ? o.currency + ' ' : '') + money2(v);
+                    tr.append(a, b); stb.append(tr);
+                });
+                st.append(stb);
+                const sw = el('div', 'conn-doc-wrap'); sw.append(st);
+                m.body.append(sw);
+                m.body.append(el('div', 'field-help',
+                    'Subtotal plus shipping is what this document is reconciled against. '
+                    + 'Tax is not, because Xero works that out itself.'));
             }
         }
         function connOneArmed(order) {
