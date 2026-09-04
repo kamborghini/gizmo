@@ -11526,9 +11526,17 @@ def _write_users(d: dict) -> None:
     try:
         os.makedirs(os.path.dirname(USERS_PATH) or ".", exist_ok=True)
         tmp = USERS_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
+        # Owner-only, like the token files beside it: this register holds the
+        # password hashes, the second-factor secrets and the recovery codes.
+        # It had been taking the container umask, which is 0644.
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(json.dumps({"users_store": d}))
         os.replace(tmp, USERS_PATH)
+        try:
+            os.chmod(USERS_PATH, 0o600)   # a register written before this keeps 0644 otherwise
+        except OSError:
+            pass
     except Exception:
         _users_mem = None
         raise
@@ -11550,9 +11558,16 @@ def _write_sessions(d: dict) -> None:
         return    # sessions are re-creatable; losing them only forces a login
     os.makedirs(os.path.dirname(SESSIONS_PATH) or ".", exist_ok=True)
     tmp = SESSIONS_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
+    # A session row is a live credential's hash and who it belongs to; it gets
+    # the same mode as the register it authenticates against.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(json.dumps({"sessions": d}))
     os.replace(tmp, SESSIONS_PATH)
+    try:
+        os.chmod(SESSIONS_PATH, 0o600)
+    except OSError:
+        pass
 
 
 SESSIONS_PER_USER = int(os.environ.get("SESSIONS_PER_USER", "12"))
@@ -12254,23 +12269,32 @@ def _dav_check_auth(header: str):
         if not last or last < now - 300:
             _dav_fail_cache[mark] = now
             _track(uid, "auth", "drive refused", reason)
+    def level(code):
+        """Refuse having spent what a real password check costs.
+
+        An unknown username used to return before anything was hashed, while a
+        live account paid for scrypt - and that difference in timing answers
+        the question the 401 refuses to: does this account exist? The web login
+        levels itself the same way, with the same dummy hash."""
+        _check_pw(pw, _PW_DUMMY)
+        return None, code
     # Every live gate, checked every time -- the cache below only vouches for
     # the password, nothing else.
     if not u or not u.get("active", True):
         if u is not None:
             refused("their access is switched off")
-        return None, 401
+        return level(401)
     if str(u.get("lock_until") or "") > datetime.now(timezone.utc).isoformat():
         refused("their sign-in is paused after wrong passwords")
-        return None, 401
+        return level(401)
     if _user_tabs(uid) is not None and "files" not in (_user_tabs(uid) or []):
         refused("the Files tab is switched off for their account")
-        return None, 403
+        return level(403)
     if u.get("must_change"):
         # A starter password is for the first web sign-in only; it never mounts
         # the drive. Once they have chosen their own, the drive opens.
         refused("they have not chosen their own password in the app yet")
-        return None, 401
+        return level(401)
     key = hashlib.sha256(raw.encode()).hexdigest()
     hit = _dav_auth_cache.get(key)
     if hit and hit[1] > now:

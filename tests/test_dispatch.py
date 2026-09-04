@@ -15872,6 +15872,55 @@ def t_each_label_printer_keeps_its_own_stock_size():
        "changing what the bench prints on is an admin act")
 
 
+
+
+@test
+def t_the_password_register_is_as_private_as_the_tokens_beside_it():
+    """The users register holds the scrypt password hashes, the TOTP secrets
+    and the recovery-code hashes; the session store holds live sessions. Both
+    were written with whatever the container umask gives while the recon store
+    and every token file next to them were owner-only."""
+    import stat
+    ensure_auth()
+    copilot._write_users(copilot._load_users())
+    copilot._write_sessions(copilot._load_sessions())
+    for path, what in ((copilot.USERS_PATH, "the users register"),
+                       (copilot.SESSIONS_PATH, "the session store")):
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+        eq(mode & 0o077, 0, "%s is owner-only: %o" % (what, mode))
+
+
+@test
+def t_the_drive_door_does_not_answer_whether_a_username_exists():
+    """An unknown username returned before the password was ever hashed while
+    a real one paid for scrypt, and that difference answers the question the
+    401 refuses to. The web login already levels it with a dummy verify.
+    Counted rather than timed: a clock makes a flaky test, the work does not."""
+    import base64
+    ensure_auth()
+    uid, _sess, _pw = ready_user("Dee", "dee-dav")
+    eq(post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["files"]}).status_code, 200)
+    spent, real = [], copilot._check_pw
+    copilot._check_pw = lambda pw, stored: (spent.append(1), real(pw, stored))[1]
+    try:
+        def knock(user, password):
+            spent.clear()
+            copilot._dav_check_auth("Basic " + base64.b64encode(
+                (user + ":" + password).encode()).decode())
+            return len(spent)
+        known = knock("dee-dav", "not-the-password")
+        unknown = knock("no-such-person-at-all", "not-the-password")
+        ok(known >= 1, "a real username is checked against its stored hash")
+        eq(unknown, known, "and an unknown one costs exactly the same work")
+        off = copilot._load_users()
+        off["users"][uid]["active"] = False
+        copilot._write_users(off)
+        eq(knock("dee-dav", "not-the-password"), known,
+           "so does a real account that has been switched off")
+    finally:
+        copilot._check_pw = real
+
+
 for fn in TESTS:
     try:
         fn(); passed += 1; print(f"  PASS  {fn.__name__}")
