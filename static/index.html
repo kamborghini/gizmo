@@ -992,6 +992,11 @@
         .conn-doc tfoot td { font-weight: var(--w-bold); border-bottom: 0; }
         .conn-doc-wrap { overflow-x: auto; }
         .conn-open { cursor: pointer; }
+        /* The note verbatim, as Xero will hold it: a quotation, not prose. */
+        .conn-note { font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+            font-size: var(--t-xs); background: var(--surface-2); border: 1px solid var(--border);
+            border-radius: var(--r-sm); padding: 10px 12px; margin: var(--sp-2) 0;
+            white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2, var(--ink)); }
         /* Loan rows are a name, a state and a row of buttons. With nothing
            flexible between them they all bunched against the left edge and
            left half the row empty, which read as a layout that had not
@@ -7027,6 +7032,42 @@ Projected Image UK"></textarea>
                     'Xero adds tax from the tax type on each line, so the invoice total '
                     + 'there will be higher than this.'));
             }
+            /* The payout note, on the document it would be written to. Four
+               states, and only one of them is a problem: not yet paid out is
+               the ordinary answer for a recent order. */
+            const pay = p.payout;
+            if (pay) {
+                m.body.append(el('h4', 'card-title', 'Payout note'));
+                if (pay.state === 'unavailable') {
+                    const b = el('div', 'msg error');
+                    b.append(el('div', null, 'The payout could not be looked up, '
+                        + 'so no note can be shown. The invoice itself is unaffected.'));
+                    if (pay.message) b.append(el('div', 'lbl-meta', pay.message));
+                    m.body.append(b);
+                } else if (pay.state === 'not_yet') {
+                    m.body.append(el('div', 'field-help',
+                        'This order has not been paid out by Shopify yet, so there is no '
+                        + 'payout to name. Shopify settles a few days after an order; run '
+                        + 'the payout pass again once it has.'));
+                } else {
+                    m.body.append(el('div', 'disp-ok-line', pay.state === 'already_added'
+                        ? 'This note is already on the invoice in Xero.'
+                        : 'This note would be added to the invoice in Xero.'));
+                    const q = el('div', 'conn-note');
+                    q.textContent = pay.note || '';
+                    m.body.append(q);
+                    const bits = [pay.gross ? 'gross ' + (pay.currency || '') + ' ' + pay.gross : '',
+                                  pay.fee ? 'fee ' + pay.fee : '',
+                                  pay.net ? 'net ' + pay.net : ''].filter(Boolean).join(' \u00b7 ');
+                    if (bits) {
+                        m.body.append(el('div', 'field-help',
+                            'This order in that payout: ' + bits
+                            + '. The bank receives the payout after the fee, which is why '
+                            + 'the invoice total and the bank line differ.'));
+                    }
+                }
+            }
+
             /* Shopify's own figures, unaltered, so the screen can be read
                straight against the order rather than trusted on its own. */
             if (p.order) {

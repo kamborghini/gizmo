@@ -4383,6 +4383,42 @@ def t_the_payout_card_says_it_is_a_second_pass_and_why():
        "and that the fee is in the note, which is what makes a payout tie out")
 
 
+@test
+def t_the_payout_note_is_readable_on_the_invoice_before_it_is_sent():
+    """The note and the invoice were two separate screens. It now sits on the
+    document it would be written to, quoted verbatim, so what Xero will hold
+    can be read rather than described."""
+    fn = fn_src("function connDocModal(")
+    ok("p.payout" in fn, "the document carries its payout")
+    ok("conn-note" in fn and "q.textContent = pay.note" in fn,
+       "and quotes the note itself, as text rather than as HTML")
+    # The two states must READ differently. Asserting the branch exists proves
+    # nothing: a ternary with the same sentence on both sides still branches.
+    ok("already on the invoice" in fn, "a note already in Xero says so")
+    ok("would be added" in fn, "and one not yet written says that instead")
+    ok("pay.state === 'already_added'" in fn, "chosen by the state, not guessed")
+    ok("fee" in fn and "after the fee" in fn,
+       "and explains why the invoice total and the bank line differ")
+
+
+@test
+def t_an_unpaid_order_and_a_failed_lookup_read_differently():
+    """Shopify settles days after an order, so "not paid out yet" is the
+    ordinary answer for anything recent. Showing it as an error would teach
+    people to ignore a box that also reports missing scopes."""
+    fn = fn_src("function connDocModal(")
+    i = fn.find("pay.state === 'unavailable'")
+    ok(i > 0, "a failed lookup has its own branch")
+    ok("msg error" in fn[i:i + 400], "and that one is an error")
+    j = fn.find("pay.state === 'not_yet'")
+    ok(j > 0, "not yet paid out has its own branch")
+    seg = fn[j:j + 600]
+    ok("msg error" not in seg, "which is NOT an error")
+    ok("field-help" in seg, "just a note saying to come back to it")
+    ok("The invoice itself is unaffected" in fn,
+       "and a payout that cannot be read never implies the invoice is wrong")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
