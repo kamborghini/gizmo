@@ -6828,6 +6828,14 @@ Projected Image UK"></textarea>
         let connCache = null;     // last status payload from the service
         let connRuns = null;      // recent run records
         let connReview = null;    // the completed dry run awaiting a Send
+        /* The per-order equivalent: {order, data} from a check, and it arms
+           only the order it names. */
+        let connOneCheck = null;
+        let connOneBusy = '';
+        function connOneArmed(order) {
+            return !!(connOneCheck && connOneCheck.order
+                      && connOneCheck.order === String(order || '').trim());
+        }
         let connBusy = '';        // 'review' | 'send' | 'retry' while one is in flight
         let connWatch = 0;
 
@@ -6983,6 +6991,90 @@ Projected Image UK"></textarea>
                 rAct.append(send);
             }
             rHead.append(rAct); rCard.append(rHead);
+            /* ---- one order at a time ----
+               Sending the whole queue is the wrong first act against real
+               books. This is the same discipline as above, per order: check,
+               read what it would do, then send THAT order. */
+            const oneWrap = el('div', 'lbl-row'); oneWrap.style.marginTop = 'var(--sp-4)';
+            const oneIn = crmText(connOneCheck ? connOneCheck.order : '', '#104300');
+            oneIn.style.maxWidth = '180px';
+            oneIn.setAttribute('aria-label', 'Order number');
+            const oneChk = el('button', 'btn btn-sm');
+            oneChk.append(ico(I.eye), document.createTextNode('Check this order'));
+            const oneOut = el('div', 'setting-sub');
+            function paintOne() {
+                const c = connOneCheck && connOneCheck.data;
+                oneOut.innerHTML = '';
+                if (!c) return;
+                if (c.error) { oneOut.append(el('div', 'msg error', c.error)); return; }
+                if (!c.found) {
+                    oneOut.append(el('div', 'msg error',
+                        'No order ' + connOneCheck.order + ' in Shopify.'));
+                    return;
+                }
+                (c.docs || []).forEach(d => {
+                    const row = el('div', 'lbl-row');
+                    row.append(el('span', 'mrule-tag', d.kind === 'creditnote' ? 'Credit note' : 'Invoice'));
+                    row.append(el('span', null, d.action || ''));
+                    if (d.message) row.append(el('span', 'lbl-meta', d.message));
+                    oneOut.append(row);
+                });
+            }
+            oneChk.onclick = async () => {
+                const order = oneIn.value.trim();
+                if (!order) { toastError('Type the order number first, for example #104300.'); return; }
+                oneChk.disabled = true; connOneBusy = 'check'; connOneCheck = null;
+                try {
+                    const r = await connOp({ op: 'reimport', order: order, dryRun: true });
+                    connOneCheck = { order: order, data: (r && r.data) || {} };
+                } catch (e) { toastError(e.message); }
+                connOneBusy = ''; oneChk.disabled = false;
+                renderConnector();
+            };
+            oneWrap.append(oneIn, oneChk);
+            if (connIsAdmin()) {
+                const oneSend = el('button', 'btn btn-sm btn-primary');
+                oneSend.append(ico(I.send), document.createTextNode('Send this order'));
+                const armed = connOneArmed(oneIn.value);
+                oneSend.disabled = running || connOneBusy || !armed;
+                oneSend.title = armed ? 'Write just this order into Xero'
+                    : 'Check the order first: Send does what the check showed';
+                /* Retyping the box disarms it: what was checked is no longer
+                   what would be sent. */
+                oneIn.oninput = () => {
+                    const now = connOneArmed(oneIn.value);
+                    oneSend.disabled = running || connOneBusy || !now;
+                    oneSend.title = now ? 'Write just this order into Xero'
+                        : 'Check the order first: Send does what the check showed';
+                };
+                oneSend.onclick = async () => {
+                    const order = oneIn.value.trim();
+                    const docs = ((connOneCheck || {}).data || {}).docs || [];
+                    const what = docs.length
+                        ? docs.map(d => (d.kind === 'creditnote' ? 'a credit note' : 'an invoice')).join(' and ')
+                        : 'nothing the check could name';
+                    if (!await uiConfirm('Send order ' + order + ' to Xero? The check said it would write '
+                        + what + '.', { title: 'Send one order', okText: 'Send it' })) return;
+                    oneSend.disabled = true; connOneBusy = 'send';
+                    try {
+                        const r = await connOp({ op: 'reimport', order: order });
+                        connOneCheck = null;      /* spent: the next send needs its own check */
+                        connOneBusy = '';
+                        toastOk('Sent ' + order + ' to Xero.');
+                        connStartWatch(); renderConnector();
+                        void r;
+                    } catch (e) { connOneBusy = ''; toastError(e.message); renderConnector(); }
+                };
+                oneWrap.append(oneSend);
+            }
+            rCard.append(el('div', 'section-title', 'One order at a time'));
+            rCard.append(el('p', 'field-help',
+                'For testing, or for a single order that needs to go now. Check it, read what '
+                + 'it would write, then send that order. The connector keeps a ledger, so an '
+                + 'order already sent is not sent twice.'));
+            rCard.append(oneWrap);
+            paintOne();
+            rCard.append(oneOut);
             if (running) {
                 const t = el('div', 'thinking'); t.append(loader(),
                     el('span', null, connBusy === 'send' ? 'Sending to Xero\u2026'

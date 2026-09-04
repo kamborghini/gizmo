@@ -15921,6 +15921,46 @@ def t_the_drive_door_does_not_answer_whether_a_username_exists():
         copilot._check_pw = real
 
 
+
+
+@test
+def t_one_order_can_be_checked_by_anyone_and_sent_only_by_an_admin():
+    """Testing a connector against real books means sending one order, not the
+    whole queue. The check writes nothing, so it is the same act as a review
+    and any tab holder may run it; the send writes an invoice into the
+    accounts, so it stays an admin's."""
+    calls = []
+    async def fake(method, path, params=None):
+        calls.append((method, path, dict(params or {})))
+        return 200, {"order": "#104300", "found": True,
+                     "dryRun": bool((params or {}).get("dryRun")),
+                     "docs": [{"kind": "invoice", "key": "#104300", "action": "created"}]}
+    saved, old_url = copilot._connector_call, os.environ.get("CONNECTOR_URL", "")
+    copilot._connector_call = fake
+    os.environ["CONNECTOR_URL"] = "http://connector.test:8899"
+    try:
+        ensure_auth()
+        uid, sess, _ = ready_user("Ivy", "ivy-conn")
+        eq(post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["connector"]}).status_code, 200)
+        r = post_s(sess, "/api/connector", {"op": "reimport", "order": "#104300", "dryRun": True})
+        eq(r.status_code, 200, r.text)
+        eq(calls[-1][2].get("dryRun"), "1", "the dry run is passed through, not merely implied")
+        eq(calls[-1][2].get("order"), "#104300")
+        before = len(calls)
+        eq(post_s(sess, "/api/connector", {"op": "reimport", "order": "#104300"}).status_code, 403,
+           "a member cannot send one either")
+        eq(len(calls), before, "and the refusal never troubled the connector")
+        r = post("/api/connector", {"op": "reimport", "order": "#104300"})
+        eq(r.status_code, 200, r.text)
+        ok("dryRun" not in calls[-1][2], "an admin's send is not a dry run")
+        eq(post("/api/connector", {"op": "reimport", "order": "   "}).status_code, 400,
+           "an order name that is only spaces is refused here, not at the connector")
+        eq(len(calls), before + 1, "and that refusal reached nothing either")
+    finally:
+        copilot._connector_call = saved
+        os.environ["CONNECTOR_URL"] = old_url
+
+
 for fn in TESTS:
     try:
         fn(); passed += 1; print(f"  PASS  {fn.__name__}")

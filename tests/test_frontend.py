@@ -4070,6 +4070,21 @@ def t_no_guard_is_stranded_below_the_runner():
        "a test is defined below the runner and will never execute")
 
 
+
+@test
+def t_one_order_is_checked_before_it_is_sent():
+    """The same review-before-send discipline as the batch, per order: a check
+    arms exactly the order it was run for, so retyping the box disarms the
+    send rather than sending something nobody looked at."""
+    armed = fn_src("function connOneArmed(")
+    ok("connOneCheck.order ===" in armed, "the check must be for the order in the box")
+    fn = fn_src("function renderConnector(")
+    ok("connOneArmed(" in fn, "and the send button asks it rather than deciding for itself")
+    ok("dryRun: true" in fn, "the check is a dry run, which writes nothing")
+    ok("connOneCheck = null" in fn, "a send spends its check")
+    ok("connIsAdmin()" in fn, "and only an admin sees the send")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

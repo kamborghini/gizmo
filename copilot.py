@@ -20233,23 +20233,36 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # by its own documented promise. Any tab holder may look.
                 code, data = await _connector_call("POST", "/api/sync", {"dryRun": "1"})
                 return _json({"available": True, "data": data}, code if code >= 400 else 200)
-            if op in ("send", "retry", "reimport"):
+            if op == "reimport":
+                # One order at a time: how a connector is tested against real
+                # books without putting a whole queue through it. A dry run
+                # writes nothing, by the service's documented promise, so it is
+                # the same act as a review and any tab holder may run it; the
+                # send writes into the accounts and stays an admin's.
+                order = str(body.get("order") or "").strip()
+                if not order:
+                    return _json({"error": "Say which order to send (e.g. #104300)."}, 400)
+                dry = bool(body.get("dryRun"))
+                if not dry and _team_level(who) < ROLE_LEVELS["admin"]:
+                    return _json({"error": "Only an admin can send documents to Xero."}, 403)
+                params = {"order": order}
+                if dry:
+                    params["dryRun"] = "1"
+                if body.get("force"):
+                    params["force"] = "1"
+                code, data = await _connector_call("POST", "/api/reimport", params)
+                if not dry:
+                    _track(who, "connector", "sent one order to Xero", order)
+                return _json({"available": True, "data": data}, code if code >= 400 else 200)
+            if op in ("send", "retry"):
                 # These write invoices and credit notes into Xero.
                 if _team_level(who) < ROLE_LEVELS["admin"]:
                     return _json({"error": "Only an admin can send documents to Xero."}, 403)
                 if op == "send":
                     code, data = await _connector_call("POST", "/api/sync")
-                elif op == "retry":
-                    code, data = await _connector_call("POST", "/api/retry")
                 else:
-                    order = str(body.get("order") or "").strip()
-                    if not order:
-                        return _json({"error": "Say which order to re-import (e.g. #104300)."}, 400)
-                    code, data = await _connector_call("POST", "/api/reimport",
-                                                       {"order": order,
-                                                        **({"force": "1"} if body.get("force") else {})})
-                _track(who, "connector", "connector " + op,
-                       (str(body.get("order")) if op == "reimport" else ""))
+                    code, data = await _connector_call("POST", "/api/retry")
+                _track(who, "connector", "connector " + op)
                 return _json({"available": True, "data": data}, code if code >= 400 else 200)
             return _json({"error": "Unknown op."}, 400)
         except httpx.HTTPError as e:
