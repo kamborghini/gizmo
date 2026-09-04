@@ -6947,7 +6947,7 @@ Projected Image UK"></textarea>
                     ? 'Lands on the Xero contact ' + (cust.name || '(unnamed)') + '.'
                     : 'No Xero contact matched for ' + (cust.name || 'this customer')
                       + ', so this cannot be sent until one exists.'));
-                const sub = [cust.email, cust.reference ? 'ref ' + cust.reference : '',
+                const sub = [cust.email,
                              cust.xeroContactId ? 'Xero id ' + cust.xeroContactId : '']
                     .filter(Boolean).join(' \u00b7 ');
                 if (sub) box.append(el('div', 'lbl-meta', sub));
@@ -6967,6 +6967,18 @@ Projected Image UK"></textarea>
             pair('Reference', p.reference);
             pair('Currency', p.currency);
             pair('Status', p.status);
+            /* The customer reference gets its own labelled row rather than an
+               abbreviation in a meta line: it is the field Xero matches on
+               account number, so it is checked, not glanced at. When it is
+               empty the row says WHERE it was looked for, because a customer
+               with no reference and a connector reading the wrong metafield
+               look identical otherwise. */
+            if (cust && cust.reference) {
+                pair('Customer reference', cust.reference
+                    + (cust.referenceField ? '  (' + cust.referenceField + ')' : ''));
+            } else if (cust && cust.referenceField) {
+                pair('Customer reference', 'none set in ' + cust.referenceField);
+            }
             pair('Ledger key', p.key);
             const o = p.order;
             if (o) {

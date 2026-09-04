@@ -4419,6 +4419,28 @@ def t_an_unpaid_order_and_a_failed_lookup_read_differently():
        "and a payout that cannot be read never implies the invoice is wrong")
 
 
+@test
+def t_the_customer_reference_is_a_labelled_row_not_an_abbreviation():
+    """It is the field Xero matches on account number, so it is checked rather
+    than glanced at. And when it is empty the row names the metafield it read,
+    because a customer with no reference and a connector pointed at the wrong
+    metafield produce the same blank."""
+    fn = fn_src("function connDocModal(")
+    ok("'Customer reference'" in fn, "it has its own labelled row")
+    # Scoped to the POPULATED branch. Counting mentions across the function is
+    # not enough: the empty branch names the field twice by itself, so a
+    # populated row that stopped naming it still left the count looking right.
+    i = fn.find("if (cust && cust.reference) {")
+    ok(i > 0, "there is a branch for a populated reference")
+    populated = fn[i:fn.find("} else if", i)]
+    ok("cust.reference" in populated, "which shows the value")
+    ok("cust.referenceField" in populated,
+       "and names the metafield it came from, not just the value")
+    ok("none set in" in fn, "and says so when the customer has none")
+    ok("'ref ' + cust.reference" not in fn,
+       "no longer abbreviated into the meta line under the contact")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
