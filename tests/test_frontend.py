@@ -4441,6 +4441,69 @@ def t_the_customer_reference_is_a_labelled_row_not_an_abbreviation():
        "no longer abbreviated into the meta line under the contact")
 
 
+@test
+def t_auto_run_shows_the_services_state_not_what_this_tab_last_clicked():
+    """A control over unattended writing into the accounts has one lie it must
+    never tell: that it is running when it is not. The state comes from the
+    service on every load, so a redeploy that started no timer reads OFF."""
+    fn = fn_src("async function refreshConnector(")
+    ok("op: 'autorun'" in fn, "the state is fetched, not remembered")
+    r = fn_src("function renderConnector(")
+    i = r.find("Auto Run")
+    ok(i > 0, "the card is on the page")
+    seg = r[i - 400:i + 2600]
+    ok("connAuto.enabled" in seg, "and reads the service's own flag")
+    ok("'Auto Run ON'" in seg and "'Auto Run OFF'" in seg,
+       "which is spelled out, not left to a toggle's position")
+    ok("Nothing runs on its own" in seg,
+       "and OFF says what off means, rather than only being unlit")
+
+
+@test
+def t_turning_auto_run_on_says_what_it_will_do_unattended():
+    """It sends to Xero with nobody reviewing. Someone agreeing to that should
+    be agreeing to the thing itself, not to the word "on"."""
+    r = fn_src("function renderConnector(")
+    i = r.find("Turn Auto Run on")
+    ok(i > 0, "there is a control")
+    seg = r[i:i + 1600]
+    # Presence of uiConfirm proves nothing: `false && !await uiConfirm(...)`
+    # still contains it and asks nobody anything. The GUARD is the property.
+    ok("!on && !await uiConfirm(" in seg,
+       "turning it ON is what requires the confirm, and turning it off does not")
+    ok("WITHOUT anyone reviewing" in seg, "that says nobody reviews what it sends")
+    ok("until you turn it off" in seg, "and that it does not stop on its own")
+    ok("never sent twice" in seg, "and that an order cannot go twice")
+    ok("connIsAdmin()" in r[i - 2200:i], "and only an admin sees it")
+
+
+@test
+def t_the_settings_form_offers_no_credential():
+    """Operational knobs became reachable without a Railway trip. Credentials
+    did not: they are not on the form, and the server refuses them anyway."""
+    r = fn_src("function renderConnector(")
+    i = r.find("How it behaves")
+    ok(i > 0, "the settings section exists")
+    seg = r[i:i + 3000]
+    ok("RECONCILE_MODE" in seg, "the reconcile mode is settable")
+    ok("MAX_DOCS_PER_RUN" in seg, "so is the runaway cap")
+    for secret in ("CLIENT_SECRET", "DASHBOARD_TOKEN", "ADMIN_TOKEN", "SHOPIFY_SHOP"):
+        ok(secret not in seg, secret + " must not be on this form")
+
+
+@test
+def t_an_update_shows_what_it_would_change_in_xero():
+    """Updating is the only thing done to a document already in the accounts,
+    and it reported the word "updated". Three columns: the field, what Xero
+    holds now, and what it would become."""
+    fn = fn_src("function connDocModal(")
+    ok("p.changes" in fn, "the document carries its changes")
+    ok("'In Xero now'" in fn and "'Would become'" in fn,
+       "shown as before and after, not as a list of new values")
+    ok("could not be read to say" in fn,
+       "and an update whose comparison failed says so rather than looking unchanged")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

@@ -16233,6 +16233,126 @@ def t_payout_notes_are_looked_at_by_anyone_and_written_by_an_admin():
 
 
 @test
+def t_auto_run_is_off_by_default_and_only_an_admin_moves_it():
+    """The automation writes into the accounts unattended, so turning it on is
+    a deliberate act by someone who could have sent the batch by hand."""
+    ensure_auth()
+    uid, sess, _ = ready_user("Ada", "ada-autorun")
+    eq(post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["connector"]}).status_code, 200)
+    seen = []
+    real = copilot._connector_call
+    async def fake(method, path, params=None):
+        seen.append((method, path, dict(params or {})))
+        return 200, {"enabled": False, "intervalMinutes": 10, "ticks": 0}
+    copilot._connector_call = fake
+    old_url = os.environ.get("CONNECTOR_URL")
+    os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
+    try:
+        eq(post_s(sess, "/api/connector", {"op": "autorun"}).status_code, 200,
+           "anyone with the tab can SEE whether it is on")
+        n = len(seen)
+        eq(post_s(sess, "/api/connector",
+                  {"op": "autorun_set", "enabled": True}).status_code, 403,
+           "but only an admin turns it on")
+        eq(len(seen), n, "and the refusal never reaches the connector")
+        eq(post("/api/connector", {"op": "autorun_set", "enabled": True}).status_code, 200)
+        eq(seen[-1][2].get("enabled"), "true")
+        eq(post("/api/connector", {"op": "autorun_set", "enabled": False}).status_code, 200)
+        eq(seen[-1][2].get("enabled"), "false", "and off again")
+    finally:
+        copilot._connector_call = real
+        if old_url is None:
+            os.environ.pop("CONNECTOR_URL", None)
+        else:
+            os.environ["CONNECTOR_URL"] = old_url
+
+
+@test
+def t_only_operational_settings_can_be_changed_from_the_page():
+    """Saving settings from a browser must not be a pass-through into the
+    service's configuration. Reconcile mode and a document cap are operational;
+    the shop, the Xero organisation and every credential are not."""
+    ensure_auth()
+    seen = []
+    real = copilot._connector_call
+    async def fake(method, path, params=None):
+        seen.append((method, path, dict(params or {})))
+        return 200, {"ok": True}
+    copilot._connector_call = fake
+    old_url = os.environ.get("CONNECTOR_URL")
+    os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
+    try:
+        r = post("/api/connector", {"op": "settings_save", "fields": {
+            "RECONCILE_MODE": "strict",
+            "XERO_CLIENT_SECRET": "hunter2",
+            "SHOPIFY_SHOP": "someone-elses.myshopify.com",
+            "DASHBOARD_TOKEN": "nope"}})
+        eq(r.status_code, 200, r.text)
+        sent = seen[-1][2]
+        eq(sent.get("RECONCILE_MODE"), "strict", "the operational one goes through")
+        for blocked in ("XERO_CLIENT_SECRET", "SHOPIFY_SHOP", "DASHBOARD_TOKEN"):
+            ok(blocked not in sent, blocked + " must not be settable from a browser")
+        eq(post("/api/connector", {"op": "settings_save",
+                                   "fields": {"DASHBOARD_TOKEN": "x"}}).status_code, 400,
+           "a save of nothing settable is refused rather than sent as empty")
+    finally:
+        copilot._connector_call = real
+        if old_url is None:
+            os.environ.pop("CONNECTOR_URL", None)
+        else:
+            os.environ["CONNECTOR_URL"] = old_url
+
+
+@test
+def t_a_run_that_needs_attention_is_reported_once_and_only_once():
+    """A quarantined order is silent - not an error anywhere, it simply never
+    reaches the accounts. With Auto Run on nobody has a reason to open the tab,
+    which is what makes telling them necessary. And telling them about the same
+    run every scheduler tick would teach them to filter it."""
+    ensure_auth()
+    sent = []
+    real_call, real_mail = copilot._connector_call, copilot._send_alert_email
+    async def fake_mail(subject, lines):
+        sent.append((subject, list(lines)))
+        return True
+    health = {"lastRunId": "run-1", "needsAttention": True,
+              "line": "8 orders checked, 1 needing attention",
+              "problems": ["1 invoice quarantined"], "autoRun": {"enabled": True}}
+    async def fake(method, path, params=None):
+        return 200, health
+    copilot._connector_call = fake
+    copilot._send_alert_email = fake_mail
+    old_url = os.environ.get("CONNECTOR_URL")
+    os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
+    st = copilot._load_watch()
+    try:
+        _run(copilot._connector_watch())
+        eq(len(sent), 1, "the first tick reports it")
+        ok("quarantined" in "\n".join(sent[0][1]), "and says what is wrong")
+        ok("Auto Run is ON" in "\n".join(sent[0][1]),
+           "and whether anything will retry it")
+        _run(copilot._connector_watch())
+        eq(len(sent), 1, "the same run is not reported again")
+
+        health["lastRunId"] = "run-2"
+        _run(copilot._connector_watch())
+        eq(len(sent), 2, "but the NEXT bad run is")
+
+        health["needsAttention"] = False
+        health["lastRunId"] = "run-3"
+        _run(copilot._connector_watch())
+        eq(len(sent), 2, "and a clean run says nothing at all")
+    finally:
+        copilot._connector_call = real_call
+        copilot._send_alert_email = real_mail
+        copilot._save_watch(st)
+        if old_url is None:
+            os.environ.pop("CONNECTOR_URL", None)
+        else:
+            os.environ["CONNECTOR_URL"] = old_url
+
+
+@test
 def t_the_register_finds_a_projector_in_the_shop():
     """Adding a unit should not mean retyping what the shop already knows.
     Variants are listed separately, because the SKU is what tells two

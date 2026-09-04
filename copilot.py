@@ -8637,6 +8637,54 @@ async def _recon_nightly() -> None:
         logger.exception("recon nightly sweep failed")
 
 
+async def _connector_watch() -> None:
+    """Tell someone when the Xero connector needs attention.
+
+    A quarantined order is silent: it is not an error anywhere, it simply never
+    arrives in the accounts, and nobody finds out until they happen to open the
+    tab. With Auto Run on, nobody has a reason to open the tab at all - so the
+    automation is exactly what makes this necessary rather than nice.
+
+    Polled, not pushed. gizmo already holds the connector's token and calls
+    into it; a webhook the other way would mean that service authenticating
+    INTO this one, which is a second credential and a new direction of trust
+    for the sake of a few minutes on a message about an accounting run.
+
+    Never raises: the scheduler has other work after this.
+    """
+    if not _connector_url():
+        return
+    try:
+        code, data = await _connector_call("GET", "/api/health")
+    except Exception:
+        # The service being unreachable is its own alert, but a noisy one
+        # during a redeploy. The tab says it plainly; this stays quiet.
+        return
+    if code >= 400 or not isinstance(data, dict):
+        return
+    if not data.get("needsAttention"):
+        return
+    run_id = str(data.get("lastRunId") or "")
+    if not run_id:
+        return
+    state = _load_watch()
+    if state.get("connector_run") == run_id:
+        return                      # already told them about this one
+    problems = [str(p) for p in (data.get("problems") or [])][:12]
+    auto = (data.get("autoRun") or {}).get("enabled")
+    lines = ["The Xero connector finished a run that needs looking at.", "",
+             str(data.get("line") or ""), ""]
+    lines += ["- " + p for p in problems]
+    lines += ["", "Auto Run is " + ("ON, so this will be retried on the next pass."
+                                    if auto else "off; nothing further will happen until someone runs it."),
+              "Open gizmo, Finance, Xero sync."]
+    _add_alerts([{"kind": "connector", "title": "Xero connector needs attention",
+                  "detail": str(data.get("line") or ""), "items": problems}])
+    await _send_alert_email("Xero connector: " + str(data.get("line") or "run needs attention"), lines)
+    state["connector_run"] = run_id
+    _save_watch(state)
+
+
 async def _scheduler_loop(registry: dict) -> None:
     await asyncio.sleep(60)  # let the app settle after boot
     while True:
@@ -8649,6 +8697,7 @@ async def _scheduler_loop(registry: dict) -> None:
             # drift silently between sweeps: both are the scheduler's problem.
             await xero_api.keepalive()
             await _recon_nightly()
+            await _connector_watch()
             cfg = _load_schedule()
             if not shopify_up:
                 logger.warning("scheduler: Shopify unreachable; skipping paid audits this tick")
@@ -20619,6 +20668,21 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         "runs": ("GET", "/api/runs"),
         "quarantine": ("GET", "/api/quarantine"),
         "ledger": ("GET", "/api/ledger"),
+        "health": ("GET", "/api/health"),
+        "autorun": ("GET", "/api/autorun"),
+        # Reading settings is safe: the service returns secrets as presence
+        # flags and never their values, which a test here checks.
+        "settings": ("GET", "/api/settings"),
+    }
+
+    # The settings the Xero sync page may change. Deliberately a short list of
+    # OPERATIONAL knobs: nothing here can point the service at a different shop,
+    # a different Xero organisation, or a different set of credentials.
+    _CONNECTOR_SETTABLE = {
+        "RECONCILE_MODE", "RECONCILE_TOLERANCE", "MAX_DOCS_PER_RUN",
+        "ORDERS_SINCE", "SHOP_TIMEZONE", "XERO_SALES_ACCOUNT_CODE",
+        "XERO_TAX_TYPE_STANDARD", "XERO_TAX_TYPE_ZERO",
+        "CUSTOMER_REF_METAFIELD_NAMESPACE", "CUSTOMER_REF_METAFIELD_KEY",
     }
 
     @mcp.custom_route("/api/connector", methods=["POST"])
@@ -20667,6 +20731,39 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # by its own documented promise. Any tab holder may look.
                 code, data = await _connector_call("POST", "/api/sync", {"dryRun": "1"})
                 return _json({"available": True, "data": data}, code if code >= 400 else 200)
+            if op == "autorun_set":
+                # Turning the automation on or off. Admin only, and the state
+                # lives on the connector's volume rather than here, so gizmo
+                # cannot drift out of step with what is actually running.
+                if _team_level(who) < ROLE_LEVELS["admin"]:
+                    return _json({"error": "Only an admin can turn Auto Run on or off."}, 403)
+                on = bool(body.get("enabled"))
+                code, data = await _connector_call("POST", "/api/autorun",
+                                                   {"enabled": "true" if on else "false"})
+                if code < 400:
+                    _track(who, "connector",
+                           "turned Auto Run " + ("on" if on else "off"),
+                           "every 10 minutes" if on else "")
+                return _json({"available": True, "data": data}, code if code >= 400 else 200)
+
+            if op == "settings_save":
+                if _team_level(who) < ROLE_LEVELS["admin"]:
+                    return _json({"error": "Only an admin can change the connector's settings."}, 403)
+                fields = body.get("fields")
+                if not isinstance(fields, dict) or not fields:
+                    return _json({"error": "Nothing to save."}, 400)
+                # Only the settings the page offers. A pass-through would let
+                # anything be written into the service's config from a browser.
+                clean = {k: ("" if v is None else str(v))[:200]
+                         for k, v in fields.items() if k in _CONNECTOR_SETTABLE}
+                if not clean:
+                    return _json({"error": "None of those are settings this page can change."}, 400)
+                code, data = await _connector_call("POST", "/api/settings", clean)
+                if code < 400:
+                    _track(who, "connector", "changed connector settings",
+                           ", ".join(sorted(clean)))
+                return _json({"available": True, "data": data}, code if code >= 400 else 200)
+
             if op == "payouts":
                 # Telling an invoice which payout paid it. A DRY RUN lists the
                 # notes and writes nothing, so any tab holder may look; writing

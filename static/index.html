@@ -6900,11 +6900,32 @@ Projected Image UK"></textarea>
         let connOneBusy = '';
         let connPaySince = '';
         let connPayResult = null;
+        let connAuto = null;
+        let connHealth = null;
+        let connSettings = null;
+        let connSettingsOpen = false;
         /* The document a dry run says it would send, laid out the way it will
            appear in Xero. Nothing here writes: it is the last look before the
            accounts are touched, so it shows the fields that decide what lands
            there - the contact, the dates, and every line's account code and
            tax type - rather than an outcome word. */
+        /* A time a person can act on: "4 minutes ago", "in 6 minutes". An
+           Auto Run status showing a raw timestamp makes the reader do the
+           arithmetic to answer the only question they have, which is whether
+           it is still going. */
+        function fmtWhen(iso) {
+            const t = Date.parse(iso);
+            if (!t) return '';
+            const secs = Math.round((t - Date.now()) / 1000);
+            const ahead = secs > 0;
+            const n = Math.abs(secs);
+            const say = n < 60 ? 'less than a minute'
+                : n < 3600 ? Math.round(n / 60) + (Math.round(n / 60) === 1 ? ' minute' : ' minutes')
+                : n < 86400 ? Math.round(n / 3600) + (Math.round(n / 3600) === 1 ? ' hour' : ' hours')
+                : fmtDate(iso);
+            if (say === fmtDate(iso)) return say;
+            return ahead ? 'in ' + say : say + ' ago';
+        }
         function connDocModal(d) {
             const p = d.preview || {};
             const credit = d.kind === 'creditnote';
@@ -7044,6 +7065,35 @@ Projected Image UK"></textarea>
                     'Xero adds tax from the tax type on each line, so the invoice total '
                     + 'there will be higher than this.'));
             }
+            /* What an update would MOVE. Only present when this is an update,
+               which is the one action that alters a document already in the
+               accounts. */
+            const changes = p.changes;
+            if (changes && changes.length) {
+                m.body.append(el('h4', 'card-title', 'What this changes in Xero'));
+                const cw = el('div', 'conn-doc-wrap');
+                const ct = document.createElement('table'); ct.className = 'conn-doc';
+                const chead = document.createElement('thead');
+                const chr = document.createElement('tr');
+                ['Field', 'In Xero now', 'Would become'].forEach(h => {
+                    const th = document.createElement('th'); th.textContent = h; chr.append(th);
+                });
+                chead.append(chr); ct.append(chead);
+                const ctb = document.createElement('tbody');
+                changes.forEach(c => {
+                    const tr = document.createElement('tr');
+                    [c.field, c.from, c.to].forEach(v => {
+                        const td = document.createElement('td'); td.textContent = v || ''; tr.append(td);
+                    });
+                    ctb.append(tr);
+                });
+                ct.append(ctb); cw.append(ct); m.body.append(cw);
+            } else if (d.action === 'updated') {
+                m.body.append(el('div', 'field-help',
+                    'This is an update, but the document in Xero could not be read to say '
+                    + 'what would change.'));
+            }
+
             /* The payout note, on the document it would be written to. Four
                states, and only one of them is a problem: not yet paid out is
                the ordinary answer for a recent order. */
@@ -7125,6 +7175,13 @@ Projected Image UK"></textarea>
                 connCache = st;
                 if (st.available && !st.error) {
                     try { connRuns = (await connOp({ op: 'runs' })).data || []; } catch (e) { /* runs are a nicety */ }
+                    /* Auto Run's state and the health verdict come from the
+                       service, never from anything remembered here: a toggle
+                       that shows what this tab last set would say ON after a
+                       redeploy that started nothing. */
+                    try { connAuto = (await connOp({ op: 'autorun' })).data || null; } catch (e) { connAuto = null; }
+                    try { connHealth = (await connOp({ op: 'health' })).data || null; } catch (e) { connHealth = null; }
+                    try { connSettings = (await connOp({ op: 'settings' })).data || null; } catch (e) { connSettings = null; }
                 }
             } catch (e) { connCache = { available: true, error: e.message }; }
             if (document.querySelector('#view-connector.active')) renderConnector();
@@ -7641,6 +7698,73 @@ Projected Image UK"></textarea>
             const rf = el('button', 'btn btn-sm'); rf.append(ico(I.refresh), document.createTextNode('Refresh'));
             rf.onclick = () => { rf.disabled = true; refreshConnector().finally(() => { rf.disabled = false; }); };
             sAct.append(rf); sHead.append(sAct); sCard.append(sHead);
+
+            /* ---- Auto Run ----
+               The state shown is the SERVICE's, fetched every load. A toggle
+               reflecting what this tab last clicked would read ON after a
+               redeploy that started nothing, which is the one lie a control
+               over unattended writing into the accounts must not tell. */
+            if (connAuto) {
+                const on = !!connAuto.enabled;
+                const ar = el('div', 'lbl-row loan-row' + (on ? ' is-due' : ''));
+                const w = el('div', 'lr-what');
+                const line = el('div');
+                line.append(el('span', 'mrule-tag' + (on ? ' made' : ''),
+                               on ? 'Auto Run ON' : 'Auto Run OFF'));
+                line.append(document.createTextNode('  ' + (on
+                    ? 'Checking for new orders every '
+                      + (connAuto.intervalMinutes || 10) + ' minutes and sending them to Xero.'
+                    : 'Nothing runs on its own. Orders go to Xero only when you send them.')));
+                w.append(line);
+                const bits = [];
+                if (connAuto.lastTickAt) bits.push('last check ' + fmtWhen(connAuto.lastTickAt));
+                if (on && connAuto.nextTickAt) {
+                    /* A next-tick time that has passed means the tab has been
+                       open a while, or a check is running. "next 5 hours ago"
+                       is nonsense; "due now" is the truth. */
+                    bits.push(Date.parse(connAuto.nextTickAt) > Date.now()
+                        ? 'next ' + fmtWhen(connAuto.nextTickAt) : 'next check due now');
+                }
+                if (connAuto.ticks) bits.push(connAuto.ticks + ' checks so far');
+                if (connAuto.lastOutcome) bits.push(connAuto.lastOutcome);
+                if (bits.length) w.append(el('div', 'lbl-meta', bits.join(' \u00b7 ')));
+                if (connAuto.lastError) {
+                    w.append(el('div', 'lbl-meta', 'Last check failed: ' + connAuto.lastError
+                                + '. It keeps trying.'));
+                }
+                ar.append(w);
+                if (connIsAdmin()) {
+                    const t = el('button', 'btn btn-sm' + (on ? '' : ' btn-primary'),
+                                 on ? 'Turn Auto Run off' : 'Turn Auto Run on');
+                    t.onclick = async () => {
+                        if (!on && !await uiConfirm(
+                            'Turn Auto Run on? Every 10 minutes the connector will check for new '
+                            + 'orders and send them to Xero WITHOUT anyone reviewing them first. '
+                            + 'It keeps going until you turn it off. An order already sent is '
+                            + 'never sent twice.',
+                            { title: 'Turn Auto Run on', okText: 'Turn it on' })) return;
+                        t.disabled = true;
+                        try {
+                            await connOp({ op: 'autorun_set', enabled: !on });
+                            toastOk(on ? 'Auto Run is off.' : 'Auto Run is on, every 10 minutes.');
+                            await refreshConnector();
+                        } catch (e) { t.disabled = false; toastError(e.message); }
+                    };
+                    ar.append(t);
+                }
+                sCard.append(ar);
+            }
+            /* ---- what the last run left behind ---- */
+            if (connHealth && connHealth.needsAttention) {
+                const h = el('div', 'msg error');
+                h.append(el('div', null, connHealth.line || 'The last run needs attention.'));
+                (connHealth.problems || []).slice(0, 8).forEach(p2 => {
+                    h.append(el('div', 'lbl-meta', '\u00b7 ' + p2));
+                });
+                sCard.append(h);
+            } else if (connHealth && connHealth.line) {
+                sCard.append(el('div', 'disp-ok-line', connHealth.line));
+            }
             const chipRow = el('div'); chipRow.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
             chipRow.append(el('span', 'lbl-chip ' + (cfg.shop ? 'made' : 'warn'),
                 cfg.shop ? ('Shopify \u00b7 ' + cfg.shop) : 'Shopify not configured'));
@@ -7880,6 +8004,77 @@ Projected Image UK"></textarea>
             rCard.append(payWrap);
             paintPay();
             rCard.append(payOut);
+
+            /* ---- settings ----
+               Operational knobs only. The shop, the Xero organisation and every
+               credential stay environment variables on the service, where a
+               browser cannot reach them; the server refuses anything not on
+               its own list rather than trusting this form. */
+            if (connSettings && connIsAdmin()) {
+                rCard.append(el('div', 'section-title', 'How it behaves'));
+                const toggle = el('button', 'btn btn-sm',
+                                  connSettingsOpen ? 'Hide settings' : 'Change settings');
+                toggle.onclick = () => { connSettingsOpen = !connSettingsOpen; renderConnector(); };
+                const tb = el('div', 'mail-statebar'); tb.append(toggle);
+                rCard.append(el('p', 'field-help',
+                    'These used to mean a Railway variable and a redeploy. Credentials still do: '
+                    + 'they are not on this form and the server will not accept them from it.'));
+                rCard.append(tb);
+                if (connSettingsOpen) {
+                    const grid = el('div', 'disp-addr-grid');
+                    const fields = {};
+                    const add = (key, label, help, opts) => {
+                        let input;
+                        if (opts) {
+                            input = document.createElement('select');
+                            input.className = 'crm-input';
+                            opts.forEach(o => {
+                                const op = document.createElement('option');
+                                op.value = o; op.textContent = o; input.append(op);
+                            });
+                            input.value = connSettings[key] || opts[0];
+                        } else {
+                            input = crmText(connSettings[key] || '', '');
+                        }
+                        fields[key] = input;
+                        crmField(grid, label, input);
+                        if (help) grid.append(el('div', 'field-help', help));
+                    };
+                    add('RECONCILE_MODE', 'When a total disagrees with Shopify', '', 
+                        ['warn', 'strict', 'off']);
+                    grid.append(el('div', 'field-help',
+                        'warn sends it anyway and reports. strict holds it back. '
+                        + 'A discounted invoice once went through on warn, out by 33.50.'));
+                    add('RECONCILE_TOLERANCE', 'Tolerance', 'How far apart is close enough, in pounds.');
+                    add('MAX_DOCS_PER_RUN', 'Most documents in one run',
+                        'The runaway guard. A run above this aborts rather than pushing everything.');
+                    add('ORDERS_SINCE', 'Only orders since',
+                        'yyyy-mm-dd. read_orders reaches back 60 days, so a date older than that finds nothing.');
+                    add('SHOP_TIMEZONE', 'Shop timezone',
+                        'The date an invoice carries. Europe/London unless you move.');
+                    add('XERO_SALES_ACCOUNT_CODE', 'Sales account code', '');
+                    add('XERO_TAX_TYPE_STANDARD', 'Standard tax type', '');
+                    add('XERO_TAX_TYPE_ZERO', 'Zero-rated tax type', '');
+                    add('CUSTOMER_REF_METAFIELD_NAMESPACE', 'Customer reference namespace', '');
+                    add('CUSTOMER_REF_METAFIELD_KEY', 'Customer reference key',
+                        'Where the reference on the document view is read from.');
+                    rCard.append(grid);
+                    const save = el('button', 'btn btn-primary', 'Save settings');
+                    save.onclick = async () => {
+                        const out = {};
+                        Object.keys(fields).forEach(k => { out[k] = fields[k].value.trim(); });
+                        save.disabled = true;
+                        try {
+                            await connOp({ op: 'settings_save', fields: out });
+                            toastOk('Saved. They apply to the next run.');
+                            connSettingsOpen = false;
+                            await refreshConnector();
+                        } catch (e) { save.disabled = false; toastError(e.message); }
+                    };
+                    const sb = el('div', 'mail-statebar'); sb.append(save);
+                    rCard.append(sb);
+                }
+            }
             if (running) {
                 const t = el('div', 'thinking'); t.append(loader(),
                     el('span', null, connBusy === 'send' ? 'Sending to Xero\u2026'
