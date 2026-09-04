@@ -4177,6 +4177,63 @@ def t_the_serial_sticker_prints_on_the_production_printer_with_its_codes():
        "the button says which it is doing, because minting happens once")
 
 
+@test
+def t_a_row_inset_by_a_margin_is_not_also_a_full_width_row():
+    """.lbl-row carries width:100% so button rows fill their container. Inside a
+    card it ALSO takes a 16px margin each side, and 100% plus two margins is 32px
+    wider than the card: every row in every card hung its right border out past
+    the frame. Whichever half is removed, the two must never coexist."""
+    m = re.search(r"\.card > \.lia-bar, \.card > \.lbl-row.*?\{(.*?)\}", CSS, re.S)
+    ok(m is not None, "the rule that insets card rows by a margin is still there")
+    inset = m.group(1)
+    ok("margin-left" in inset, "and it is still a margin that does the insetting")
+    row = re.search(r"\n\s*\.lbl-row \{(.*?)\}", CSS, re.S)
+    ok(row is not None, ".lbl-row is still declared")
+    ok("width: auto" in inset or "width: 100%" not in row.group(1),
+       "an inset row must either reset its width or not claim 100% in the first place")
+
+
+@test
+def t_the_topbar_button_hides_itself_rather_than_naming_the_tabs_that_want_it():
+    """The corner button was hidden by a list of view names, so every tab added
+    after that list - Loan units - arrived with an empty 26px button in the
+    corner. Content is the only honest test of whether it has anything to do."""
+    fn = fn_src("function setView(")
+    ok("act.style.display = act.innerHTML ? '' : 'none';" in fn,
+       "the button is shown only when a branch actually filled it")
+    for line in fn.splitlines():
+        if "act.style.display" in line:
+            ok("v ===" not in line,
+               "showing the corner button must not depend on naming views: " + line.strip())
+
+
+@test
+def t_loan_units_puts_three_stats_on_three_columns():
+    """The shared grid is four columns wide. Three stats on it leave a hole where
+    a fourth would be, which reads as a KPI that failed to load rather than as a
+    row of three."""
+    fn = fn_src("function renderLoans(")
+    head = fn[:fn.index("mgrid.classList")] if "mgrid.classList" in fn else fn
+    ok("metrics-3" in fn, "the three-column modifier is applied")
+    ok(head.count("{ label: ") == 3,
+       "and there are still exactly three stats - a fourth means dropping metrics-3")
+
+
+@test
+def t_a_unit_can_be_deleted_from_its_own_record_behind_a_confirm():
+    """Retire hides a unit and keeps its history; delete is the other thing, and
+    people expect it. It sits in the record rather than on the row so it costs an
+    extra click, and it says what it is about to destroy before it does it."""
+    fn = fn_src("function loanUnitModal(")
+    ok("unit_delete" in fn, "the modal can delete the unit it is editing")
+    ok("if (u.id)" in fn, "and only offers it for a unit that already exists")
+    ok("uiConfirm(" in fn, "behind a confirm")
+    ok("cannot be undone" in fn, "that says the history goes too")
+    ok("barSave.append(del)" in fn,
+       "the button is appended, not handed to el() as text")
+    ok("btn btn-danger" in fn, "and reads as the destructive one")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

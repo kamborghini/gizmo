@@ -18743,6 +18743,33 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                    u.get("name") or "")
             return _json({"ok": True})
 
+        if op == "unit_delete":
+            if not admin:
+                return keeper
+            uid = str(body.get("unit_id") or "")
+            u = d["units"].get(uid)
+            if not u:
+                return _json({"error": "That unit is no longer in the register."}, 404)
+            # Retiring keeps the history; deleting is the other thing, and it is
+            # the whole thing. A unit still out with someone goes too, because
+            # the person at the keyboard can see that on the row and asked
+            # anyway - but the audit line says what went with it, so the fact
+            # that a projector was at a customer survives the register.
+            gone = [lid for lid, lo in d["loans"].items()
+                    if str(lo.get("unit_id")) == uid]
+            open_with = next((lo.get("who_name") or "someone" for lo in d["loans"].values()
+                              if str(lo.get("unit_id")) == uid and not lo.get("back_at")), "")
+            for lid in gone:
+                d["loans"].pop(lid, None)
+            d["units"].pop(uid, None)
+            _write_loans(d)
+            _track(who, "loans", "deleted a loan unit",
+                   (u.get("name") or "") + (" [" + str(u.get("asset_tag")) + "]"
+                                            if u.get("asset_tag") else "")
+                   + " with " + str(len(gone)) + " loan record(s)"
+                   + (", was out with " + open_with if open_with else ""))
+            return _json({"ok": True, "loans_removed": len(gone)})
+
         if op == "out":
             uid = str(body.get("unit_id") or "")
             u = d["units"].get(uid)

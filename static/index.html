@@ -717,7 +717,13 @@
         .card > .lia-bar, .card > .ktable-wrap { padding-left: 0; padding-right: 0; }
         .card > .lia-bar, .card > .lbl-row, .card > .ktable-wrap,
         .card > .empty, .card-bleed > .empty {
-            margin-left: var(--sp-4); margin-right: var(--sp-4); }
+            margin-left: var(--sp-4); margin-right: var(--sp-4);
+            /* The inset is a MARGIN, so the width must not also be 100%:
+               .lbl-row carries width:100% to make button rows fill, and
+               100% of the card PLUS two 16px margins put every row 32px
+               wider than the card, hanging its right border out past the
+               frame. Filling is what auto already does for a block. */
+            width: auto; }
         /* A LIST THAT IS ALREADY IN A CARD IS A LIST OF ROWS, NOT A STACK OF
            CARDS. Insight cards, Details disclosures and the opportunity list
            each drew their own 1px hairline in the same grey, on the same white,
@@ -969,6 +975,12 @@
         /* A loan past a date somebody agreed reads as a problem; one that is
            simply old reads as a nudge. The stripe carries it, not the whole
            row, so the text keeps its contrast on either state. */
+        /* Loan rows are a name, a state and a row of buttons. With nothing
+           flexible between them they all bunched against the left edge and
+           left half the row empty, which read as a layout that had not
+           finished loading. The name takes the slack instead. */
+        .loan-row .lr-what { flex: 1 1 auto; min-width: 0; }
+        .loan-row .lr-what > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .lbl-row.is-late { border-color: var(--danger); box-shadow: inset 3px 0 0 var(--danger); }
         .lbl-row.is-due { border-color: var(--warn); box-shadow: inset 3px 0 0 var(--warn); }
         .lbl-row.is-late .lbl-meta { color: var(--danger); }
@@ -7069,6 +7081,33 @@ Projected Image UK"></textarea>
             };
             const barSave = el('div', 'mail-statebar');
             barSave.append(save);
+            /* Retiring and deleting are different things and both are wanted.
+               Retire is the reversible one on the row; this is the other one,
+               and it takes the unit and everything it ever did with it. It
+               lives here rather than on the row because the row already
+               carries six controls, and because deleting should cost the
+               extra click of opening the record first. */
+            if (u.id) {
+                const del = el('button', 'btn btn-danger', 'Delete permanently');
+                del.style.marginLeft = 'auto';
+                del.onclick = async () => {
+                    const outNow = ((loansCache || {}).out || [])
+                        .find(r => r.unit && r.unit.id === u.id);
+                    if (!await uiConfirm('Delete ' + (u.name || 'this unit')
+                        + ' and its whole loan history? This cannot be undone.'
+                        + (outNow ? ' It is out with ' + (outNow.who_name || 'a customer')
+                                    + ' right now, and that record goes too.' : '')
+                        + ' Retiring keeps the history instead.',
+                        { title: 'Delete unit', okText: 'Delete it', danger: true })) return;
+                    del.disabled = true;
+                    try {
+                        await api('/api/loans', { op: 'unit_delete', unit_id: u.id });
+                        toastOk((u.name || 'That unit') + ' is off the register.');
+                        m.close(); loadLoans(true);
+                    } catch (e) { del.disabled = false; toastError(e.message); }
+                };
+                barSave.append(del);
+            }
             m.body.append(barSave);
         }
         async function loanHistoryModal(unit) {
@@ -7164,12 +7203,16 @@ Projected Image UK"></textarea>
                     + 'and how long it has been gone.'));
             hero.append(badge, htext); box.append(hero);
             const counts = d.counts || { out: 0, in: 0, late: 0 };
-            box.append(metricsGrid([
+            /* Three stats, three columns: on the shared four-column grid the
+               empty fourth cell read as a KPI that had failed to load. */
+            const mgrid = metricsGrid([
                 { label: 'Out now', value: String(counts.out), note: 'with customers' },
                 { label: 'On the shelf', value: String(counts.in), note: 'ready to go' },
                 { label: 'Overdue', value: String(counts.late),
                   note: counts.late ? 'past the date agreed' : 'nothing past its date',
-                  trend: counts.late ? 'down' : '' }]));
+                  trend: counts.late ? 'down' : '' }]);
+            mgrid.classList.add('metrics-3');
+            box.append(mgrid);
 
             /* ---- what is out ---- */
             const oCard = el('div', 'card');
@@ -7182,9 +7225,9 @@ Projected Image UK"></textarea>
                 oCard.append(el('div', 'empty', 'Everything is on the shelf.'));
             } else {
                 out.forEach(r => {
-                    const row = el('div', 'lbl-row' + (r.state === 'late' ? ' is-late'
+                    const row = el('div', 'lbl-row loan-row' + (r.state === 'late' ? ' is-late'
                         : r.state === 'due' ? ' is-due' : ''));
-                    const who = el('div');
+                    const who = el('div', 'lr-what');
                     who.append(el('div', null, r.unit.name + (r.unit.model ? ' · ' + r.unit.model : '')));
                     who.append(el('div', 'lbl-meta', 'with ' + (r.who_name || 'someone')
                         + (r.phone ? ' · ' + r.phone : '')));
@@ -7232,8 +7275,8 @@ Projected Image UK"></textarea>
                     : 'No units in the register yet.'));
             } else {
                 units.forEach(u => {
-                    const row = el('div', 'lbl-row');
-                    const left = el('div');
+                    const row = el('div', 'lbl-row loan-row');
+                    const left = el('div', 'lr-what');
                     left.append(el('div', null, u.name));
                     left.append(el('div', 'lbl-meta', [u.model, u.serial].filter(Boolean).join(' · ')
                         || 'no model or serial recorded'));
@@ -7271,7 +7314,8 @@ Projected Image UK"></textarea>
                         rt.onclick = async () => {
                             const back = u.status === 'retired';
                             if (!back && !await uiConfirm('Retire ' + u.name
-                                + '? It stays in the history but cannot be loaned out.',
+                                + '? It stays in the history but cannot be loaned out. '
+                                + 'To remove it altogether, open it and choose Delete.',
                                 { title: 'Retire unit', okText: 'Retire it', danger: true })) return;
                             try { await api('/api/loans', { op: 'unit_retire', unit_id: u.id,
                                                             unretire: back ? 1 : 0 });
@@ -19118,7 +19162,7 @@ Projected Image UK"></textarea>
             /* Beta rides the topbar title as well: it is the only label still
                on screen once the page is scrolled. */
             if (BETA_TABS.indexOf(v) >= 0) $('view-title').append(el('span', 'beta-tag', 'Beta'));
-            const act = $('topbar-action'); act.innerHTML = ''; act.style.display = (v === 'memory' || v === 'skills' || v === 'labels' || v === 'guide' || v === 'crm' || v === 'mail' || v === 'files' || v === 'team' || v === 'recon' || v === 'connector') ? 'none' : '';
+            const act = $('topbar-action'); act.innerHTML = '';
             if (v === 'guide') renderGuide();
             // Only offer the PDF when there is actually a report to print: the print
             // stylesheet hides the Run gate, so printing an un-run tab yields a blank page.
@@ -19130,6 +19174,11 @@ Projected Image UK"></textarea>
             else if (v === 'customers') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadCustomers(true); }
             else if (v === 'liability') { act.append(ico(I.refresh), document.createTextNode('Refresh')); act.className = 'btn'; act.onclick = () => loadLiability(true, true); }
             else if (v === 'chat') { act.append(ico(I.plus), document.createTextNode('New chat')); act.className = 'btn btn-primary'; act.onclick = () => newConvo(); }
+            /* Shown only when one of those branches actually put something in
+               it. The rule here used to NAME the views that wanted it hidden,
+               so every tab added afterwards - Loan units among them - arrived
+               with an empty 26px button sitting in the corner. */
+            act.style.display = act.innerHTML ? '' : 'none';
             closeSidebar();
             // Tabs render cached results if present, otherwise an idle "Run" gate.
             // Nothing fetches or spends tokens until the user starts the task.

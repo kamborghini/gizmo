@@ -16049,6 +16049,64 @@ def t_the_bench_lends_and_receives_but_only_an_admin_keeps_the_register():
 
 
 @test
+def t_a_unit_can_be_deleted_outright_and_takes_only_its_own_history():
+    """Retiring keeps a unit in the history; deleting is the other thing the
+    register needs, and it has to be the whole thing. What it must NOT do is
+    reach past the unit it was given: one delete that emptied the loan book
+    would lose where every other projector went."""
+    ensure_auth()
+    uid, sess, _ = ready_user("Del", "del-loans")
+    eq(post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["loans"]}).status_code, 200)
+    doomed = post("/api/loans", {"op": "unit_save", "name": "Doomed unit"}).json()["unit"]["id"]
+    keeper_u = post("/api/loans", {"op": "unit_save", "name": "Keeper unit"}).json()["unit"]["id"]
+    # Both have been out, so both have history to lose.
+    eq(post("/api/loans", {"op": "out", "unit_id": doomed, "who_name": "Harbour AV"}).status_code, 200)
+    eq(post("/api/loans", {"op": "back",
+                           "loan_id": _loan_row(doomed)["id"]}).status_code, 200)
+    eq(post("/api/loans", {"op": "out", "unit_id": keeper_u, "who_name": "Northlight"}).status_code, 200)
+    eq(len(post("/api/loans", {"op": "history", "unit_id": doomed}).json()["history"]), 1)
+
+    eq(post_s(sess, "/api/loans", {"op": "unit_delete", "unit_id": doomed}).status_code, 403,
+       "a member does not delete from the register")
+    eq(post("/api/loans", {"op": "unit_delete", "unit_id": "u-nope"}).status_code, 404)
+
+    r = post("/api/loans", {"op": "unit_delete", "unit_id": doomed})
+    eq(r.status_code, 200, r.text)
+    eq(r.json()["loans_removed"], 1, "its own loan row went with it")
+
+    board = post("/api/loans", {"op": "board"}).json()
+    ok(all(u["id"] != doomed for u in board["units"]), "the unit is off the register")
+    ok(any(u["id"] == keeper_u for u in board["units"]), "the other one is untouched")
+    eq(len(post("/api/loans", {"op": "history", "unit_id": doomed}).json()["history"]), 0,
+       "and its history went with it")
+    eq(len(post("/api/loans", {"op": "history", "unit_id": keeper_u}).json()["history"]), 1,
+       "while the OTHER unit still knows where it went")
+    ok(any(r["unit"]["id"] == keeper_u for r in board["out"]),
+       "the loan that was open on the other unit is still open")
+
+
+@test
+def t_deleting_a_unit_that_is_out_is_allowed_but_leaves_a_line_saying_so():
+    """Blocking the delete would be us deciding for the person holding the
+    paperwork. Letting it go silently would lose the only record that a
+    projector is at a customer. So it goes, and the ledger says where it was."""
+    ensure_auth()
+    unit = post("/api/loans", {"op": "unit_save", "name": "Out and gone"}).json()["unit"]["id"]
+    eq(post("/api/loans", {"op": "out", "unit_id": unit,
+                           "who_name": "Cathedral Lighting"}).status_code, 200)
+    eq(post("/api/loans", {"op": "unit_delete", "unit_id": unit}).status_code, 200,
+       "a unit with a customer can still be deleted")
+    board = post("/api/loans", {"op": "board"}).json()
+    ok(all(r["unit"]["id"] != unit for r in board["out"]), "and it leaves the out list")
+    line = next((e for e in reversed(copilot._load_events())
+                 if e.get("area") == "loans" and "deleted" in e.get("action", "")), None)
+    ok(line is not None, "the delete is on the ledger")
+    ok("Out and gone" in line["detail"], "with the name of what went")
+    ok("Cathedral Lighting" in line["detail"],
+       "and who was holding it, which is the part the register can no longer answer")
+
+
+@test
 def t_the_register_finds_a_projector_in_the_shop():
     """Adding a unit should not mean retyping what the shop already knows.
     Variants are listed separately, because the SKU is what tells two
