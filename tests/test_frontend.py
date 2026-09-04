@@ -4259,6 +4259,49 @@ def t_a_sticker_that_already_has_a_number_can_be_reprinted_by_anyone():
        "the sticker button is offered for a tagged unit whether or not you keep the register")
 
 
+@test
+def t_a_checked_order_can_be_opened_and_read_as_the_document_it_will_send():
+    """A dry run existed to be READ, and reported an outcome word. The row now
+    opens the document itself: the account code and the tax type get their own
+    columns, because those are the two fields a wrong mapping gets wrong and
+    the two a one-line summary can never show."""
+    fn = fn_src("function connDocModal(")
+    for col in ("'Description'", "'Qty'", "'Unit'", "'Account'", "'Tax'", "'Amount'"):
+        ok(col in fn, "the line table has a " + col + " column")
+    ok("sheetModal(" in fn, "it opens in the house modal, which closes by its X only")
+    ok("updatesExisting" in fn,
+       "and says whether this replaces a document already in Xero or creates one")
+    ok("innerHTML" not in fn,
+       "the document is text from the connector, so it is never written as HTML")
+
+
+@test
+def t_the_document_view_never_invents_a_tax_figure():
+    """Xero computes tax from the tax type on each line. A total worked out
+    here could disagree with the invoice that actually appears, and a person
+    checking an order against a number gizmo invented would be checking
+    nothing. The line total is a fact; the tax is Xero's."""
+    fn = fn_src("function connDocModal(").lower()
+    for invented in ("0.2", "* 1.2", "vat", "taxtotal", "grosstotal"):
+        ok(invented not in fn, "no tax arithmetic here: found " + invented)
+    ok("before tax" in fn and "inclusive" in fn,
+       "the label says which the number is, rather than calling it 'Total'")
+    ok("xero adds tax" in fn, "and it says who does compute it")
+
+
+@test
+def t_only_a_document_the_connector_returned_can_be_opened():
+    """A row with no preview has nothing to show. Offering it anyway would open
+    an empty modal and read as a fault in the connector rather than an older
+    reply that carried no document."""
+    fn = fn_src("function renderConnector(")
+    i = fn.find("c.docs")
+    ok(i > 0, "the check result still renders its docs")
+    seg = fn[i:i + 2000]
+    ok("if (d.preview)" in seg, "the opener is offered only when a document came back")
+    ok("connDocModal(d)" in seg, "and it opens that document")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

@@ -975,6 +975,23 @@
         /* A loan past a date somebody agreed reads as a problem; one that is
            simply old reads as a nudge. The stripe carries it, not the whole
            row, so the text keeps its contrast on either state. */
+        /* The dry run's document, read as an invoice rather than as a status
+           word. The account code and the tax type get their own columns:
+           those are the two fields a wrong mapping gets wrong, and the two
+           a one-line summary can never show. */
+        .conn-pairs { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px;
+            font-size: var(--t-sm); margin: var(--sp-3) 0; }
+        .conn-pairs dt { color: var(--ink-3); }
+        .conn-pairs dd { margin: 0; }
+        .conn-doc { width: 100%; border-collapse: collapse; margin-top: var(--sp-3); }
+        .conn-doc th { text-align: left; font-size: var(--t-xs); color: var(--ink-3);
+            font-weight: var(--w-bold); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+        .conn-doc td { padding: 8px; border-bottom: 1px solid var(--border);
+            vertical-align: top; font-size: var(--t-sm); }
+        .conn-doc .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .conn-doc tfoot td { font-weight: var(--w-bold); border-bottom: 0; }
+        .conn-doc-wrap { overflow-x: auto; }
+        .conn-open { cursor: pointer; }
         /* Loan rows are a name, a state and a row of buttons. With nothing
            flexible between them they all bunched against the left edge and
            left half the row empty, which read as a layout that had not
@@ -6876,6 +6893,95 @@ Projected Image UK"></textarea>
            only the order it names. */
         let connOneCheck = null;
         let connOneBusy = '';
+        /* The document a dry run says it would send, laid out the way it will
+           appear in Xero. Nothing here writes: it is the last look before the
+           accounts are touched, so it shows the fields that decide what lands
+           there - the contact, the dates, and every line's account code and
+           tax type - rather than an outcome word. */
+        function connDocModal(d) {
+            const p = d.preview || {};
+            const credit = d.kind === 'creditnote';
+            const m = sheetModal((credit ? 'Credit note ' : 'Invoice ')
+                                 + (p.number || d.key || ''));
+            const what = p.updatesExisting
+                ? ('Replaces the ' + (credit ? 'credit note' : 'invoice')
+                   + ' already in Xero, in place.')
+                : ('Creates a new ' + (credit ? 'credit note' : 'invoice') + ' in Xero.');
+            m.body.append(el('div', 'field-help', what));
+            if (d.message) {
+                m.body.append(el('div', 'msg ' + (d.action === 'quarantined' || d.action === 'blocked'
+                                                  ? 'error' : ''), d.message));
+            }
+            const dl = el('dl', 'conn-pairs');
+            const pair = (k, v) => {
+                if (!v) return;
+                dl.append(el('dt', null, k));
+                dl.append(el('dd', null, String(v)));
+            };
+            pair('Contact', p.contact);
+            pair('Type', p.type);
+            pair('Date', p.date);
+            pair('Due', p.dueDate);
+            pair('Reference', p.reference);
+            pair('Currency', p.currency);
+            pair('Status', p.status);
+            m.body.append(dl);
+
+            const lines = p.lines || [];
+            if (!lines.length) {
+                m.body.append(el('div', 'empty', 'This document has no lines.'));
+                return;
+            }
+            const wrap = el('div', 'conn-doc-wrap');
+            const t = document.createElement('table'); t.className = 'conn-doc';
+            const thead = document.createElement('thead');
+            const hr = document.createElement('tr');
+            [['Description', ''], ['Qty', 'num'], ['Unit', 'num'],
+             ['Account', ''], ['Tax', ''], ['Amount', 'num']].forEach(([h, c]) => {
+                const th = document.createElement('th');
+                th.textContent = h; if (c) th.className = c; hr.append(th);
+            });
+            thead.append(hr); t.append(thead);
+            const tb = document.createElement('tbody');
+            const money = n => (typeof n === 'number' ? n.toFixed(2) : '');
+            lines.forEach(l => {
+                const tr = document.createElement('tr');
+                const cells = [[l.description || '', ''],
+                               [String(l.quantity), 'num'],
+                               [money(l.unitAmount), 'num'],
+                               [l.accountCode || '', ''],
+                               [l.taxType || '', ''],
+                               [money(l.lineAmount), 'num']];
+                cells.forEach(([v, c]) => {
+                    const td = document.createElement('td');
+                    td.textContent = v; if (c) td.className = c; tr.append(td);
+                });
+                if (l.discountRate) {
+                    tr.children[0].append(el('div', 'lbl-meta',
+                        'less ' + l.discountRate + '% discount'));
+                }
+                tb.append(tr);
+            });
+            t.append(tb);
+            const tf = document.createElement('tfoot');
+            const fr = document.createElement('tr');
+            const lbl = document.createElement('td'); lbl.colSpan = 5;
+            /* Never a tax figure and never a gross total: with Exclusive lines
+               Xero works the tax out from the tax types above, and a number
+               invented here could disagree with the invoice that appears. */
+            lbl.textContent = p.lineAmountTypes === 'Inclusive'
+                ? 'Total of lines, tax included'
+                : 'Total of lines, before tax';
+            const val = document.createElement('td'); val.className = 'num';
+            val.textContent = (p.currency ? p.currency + ' ' : '') + money(p.lineTotal);
+            fr.append(lbl, val); tf.append(fr); t.append(tf);
+            wrap.append(t); m.body.append(wrap);
+            if (p.lineAmountTypes !== 'Inclusive') {
+                m.body.append(el('div', 'field-help',
+                    'Xero adds tax from the tax type on each line, so the invoice total '
+                    + 'there will be higher than this.'));
+            }
+        }
         function connOneArmed(order) {
             return !!(connOneCheck && connOneCheck.order
                       && connOneCheck.order === String(order || '').trim());
@@ -6958,7 +7064,7 @@ Projected Image UK"></textarea>
                 el('div', 'bubble', e.message || 'Could not read the loan register.'))); return; }
             renderLoans();
         }
-        function loanModal(title) {
+        function sheetModal(title) {
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal disp-modal');
             const head = el('div', 'modal-head');
@@ -6974,7 +7080,7 @@ Projected Image UK"></textarea>
         }
         function loanDays(n) { return n === 1 ? '1 day out' : n + ' days out'; }
         function loanOutModal(unit) {
-            const m = loanModal('Loan out ' + (unit.name || 'a unit'));
+            const m = sheetModal('Loan out ' + (unit.name || 'a unit'));
             const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
             const whoIn = crmText('', 'Company or person');
             /* Type freely; matching CRM contacts are offered, and picking one
@@ -7021,7 +7127,7 @@ Projected Image UK"></textarea>
         }
         function loanUnitModal(unit) {
             const u = unit || {};
-            const m = loanModal(u.id ? ('Edit ' + (u.name || 'unit')) : 'Add a loan unit');
+            const m = sheetModal(u.id ? ('Edit ' + (u.name || 'unit')) : 'Add a loan unit');
             const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
             const nameIn = crmText(u.name || '', 'Loan 3');
             const modelIn = crmText(u.model || '', 'Epson EB-2250U');
@@ -7116,7 +7222,7 @@ Projected Image UK"></textarea>
             m.body.append(barSave);
         }
         async function loanHistoryModal(unit) {
-            const m = loanModal((unit.name || 'Unit') + ' history');
+            const m = sheetModal((unit.name || 'Unit') + ' history');
             m.body.append(el('div', 'thinking'), loader());
             let r;
             try { r = await api('/api/loans', { op: 'history', unit_id: unit.id }); }
@@ -7492,10 +7598,29 @@ Projected Image UK"></textarea>
                     return;
                 }
                 (c.docs || []).forEach(d => {
-                    const row = el('div', 'lbl-row');
+                    const row = el('div', 'lbl-row loan-row');
                     row.append(el('span', 'mrule-tag', d.kind === 'creditnote' ? 'Credit note' : 'Invoice'));
-                    row.append(el('span', null, d.action || ''));
-                    if (d.message) row.append(el('span', 'lbl-meta', d.message));
+                    const what = el('div', 'lr-what');
+                    what.append(el('div', null, d.action || ''));
+                    if (d.message) what.append(el('div', 'lbl-meta', d.message));
+                    row.append(what);
+                    /* The whole point of a dry run is to be READ. A preview
+                       means the connector handed back the document itself, so
+                       the row opens it rather than only naming its outcome. */
+                    if (d.preview) {
+                        const p = d.preview;
+                        if (p.lines && p.lines.length) {
+                            row.append(el('span', 'lbl-meta',
+                                p.lines.length + (p.lines.length === 1 ? ' line' : ' lines')
+                                + ' \u00b7 ' + (p.currency ? p.currency + ' ' : '')
+                                + (typeof p.lineTotal === 'number' ? p.lineTotal.toFixed(2) : '')));
+                        }
+                        const open = el('button', 'btn btn-sm', 'See the document');
+                        open.onclick = () => connDocModal(d);
+                        row.append(open);
+                        row.classList.add('conn-open');
+                        row.onclick = e => { if (e.target === row || what.contains(e.target)) connDocModal(d); };
+                    }
                     oneOut.append(row);
                 });
             }
