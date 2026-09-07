@@ -290,9 +290,10 @@ every one:
 | 2 One writer | `1f34f2a` | `_write_json_store`; 33 writers converted (195 lines out); a guard names the five non-JSON temp-file writers that remain |
 | 3 One door | `9d7a693` | `_guard`; 69 routes and 4 helpers through it (608 lines out); `_authorize` called in exactly one place; the AI slot spent only after the session and the rank |
 | 4 Config | `ff7a464` | `docs/ENVIRONMENT.md` generated from the code (206 variables) and checked in CI; `env.example` rewritten; `make run` sources `.env`; a boot report of what is off |
-| 5 Measure | `043de77` | **Changed from the plan.** The cache was not added: eight CRM routes were written assuming a fresh copy per call, and the CRM's cost was a comment, not a number. The app now measures every store over a megabyte at boot and in Settings. The cache follows the number |
+| 5 Measure, then cache | `043de77`, `6c9096d` | The measurement went in first: every store over a megabyte at boot and in Settings. The cache followed the same day, on the owner's decision: keyed on the file (mtime, size, inode), refreshed by the writer, forgotten on a failed write or a handler that blew up mid-change. The CRM's per-read normalisation now runs once per file version |
 | 6 Ergonomics | this commit | `Makefile`, `.claude/launch.json`, a README that describes gizmo, `docs/ARCHITECTURE.md` with the "where does it belong" table and the how-to-add recipes |
 | 7 Split | — | Not done. §7 stands; the recommended order is unchanged |
+| M7 Booking flows | `ce96af7` | Done on the owner's decision, with the two flows read side by side first. `_book_and_record`, `_customs_dossier` and `_shops_for` are the shared spine; three of the ten differences were accidents and are reconciled, the rest stay with their caller |
 
 The suites went from 704 to 711 dispatch tests and stayed at 282 frontend
 guards; the real process was started with a minimal environment and answered

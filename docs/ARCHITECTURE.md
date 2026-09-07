@@ -76,8 +76,10 @@ it trims to a cap and archives what it trims.
 | Credentials are sealed with `tokenvault` before they are written | the boot re-seal covers what was written before the key existed |
 | Cross-store writes are not transactional; the record is written **first** | a crash leaves a bookable record, never a paid-for label with no record |
 
-Sizes and read costs are in the boot log and Settings → Connections; a cache
-is added to a store when that number says so, not before.
+The three busiest stores (dispatch, production, CRM) cache on the file's
+own stat key, so a restore or a hand repair invalidates without anyone
+remembering to. Sizes and read costs are in the boot log and Settings →
+Connections.
 
 Who owns what, and what happens on delete, is tabulated in the audit (§3).
 
