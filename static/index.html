@@ -2768,8 +2768,10 @@
         .idelta .iv { font-size: var(--text-sm); font-weight: var(--weight-medium); }
         .idelta.up .iv { color: var(--success); } .idelta.down .iv { color: var(--error); } .idelta.flat .iv { color: var(--text-secondary); }
         /* ---------- Customer segments ---------- */
-        .segs { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--sp-3); }
-        @media (min-width: 1800px) { .segs { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); } }
+        /* auto-FIT, not auto-fill: a fill keeps its empty tracks, so four
+           segments on a wide screen sat in the left half of their card. */
+        .segs { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--sp-3); }
+        @media (min-width: 1800px) { .segs { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); } }
         .seg-card { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); padding: var(--sp-4); box-shadow: var(--shadow-sm); }
         .seg-card .seg-n { font-size: var(--text-xl); font-weight: var(--weight-semibold); letter-spacing: -.025em; }
         .seg-card .seg-name { font-size: var(--text-sm); font-weight: var(--weight-medium); margin-top: 0; }
@@ -2881,10 +2883,20 @@
            bottom margin, meant for the standalone case, added a phantom 16px
            row to every grid and turned one 24px rhythm into 24, 39, 40. */
         .charts-grid > .chart-card { margin-bottom: 0; }
+        /* Ultra-wide: six tracks, two per chart, so a row's leftovers can fill
+           it. One chart left over takes the row and two take half each; a grid
+           of exactly two or four charts reads as pairs, not as a row of three
+           with a hole (the SEO page builds two grids of two). */
         @media (min-width: 1800px) {
-            .charts-grid { grid-template-columns: repeat(3, 1fr); }
-            /* Three across, so an odd last card already closes its own row. */
-            .charts-grid > .chart-card:last-child:nth-child(odd):not(:only-child) { grid-column: auto; }
+            .charts-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+            .charts-grid > .chart-card { grid-column: span 2; }
+            .charts-grid > .chart-card:last-child:nth-child(odd) { grid-column: span 2; }
+            .charts-grid > .chart-card:only-child { grid-column: 1 / -1; }
+            .charts-grid > .chart-card:nth-child(3n+1):last-child { grid-column: 1 / -1; }
+            .charts-grid > .chart-card:nth-child(3n+1):nth-last-child(2),
+            .charts-grid > .chart-card:nth-child(3n+2):last-child { grid-column: span 3; }
+            .charts-grid:has(> :nth-child(2):last-child) > .chart-card,
+            .charts-grid:has(> :nth-child(4):last-child) > .chart-card { grid-column: span 3; }
         }
         .charts-grid > .chart-card:only-child { grid-column: 1 / -1; }  /* no orphan half-width charts */
         /* The same rule one row down: an odd count would sit the last chart
