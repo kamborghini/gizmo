@@ -54,6 +54,8 @@ jobs:
           bandit -q -lll -iii -r copilot.py server.py google_mail.py google_data.py xero.py worldoptions.py recon.py mailmime.py eori.py tokenvault.py logdrain.py totp.py pipedrive.py
       - name: No credentials or invisible characters in the tree
         run: python tools/sweep_tree.py
+      - name: The environment reference is current
+        run: python tools/env_reference.py --check
       - name: The AI tool registry stays read-only
         run: |
           python - <<'PY'

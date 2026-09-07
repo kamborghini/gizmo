@@ -195,6 +195,32 @@ class CompressionMiddleware:
         await self.app(scope, receive, send_wrapper)
 
 
+def _boot_report() -> None:
+    """What this deployment can and cannot do, said once at boot.
+
+    Two hundred variables are read and every one has a default, so a mistyped
+    name is not an error - the feature is simply off, and nothing says so
+    until somebody clicks it. The ones that turn off something a person will
+    notice are named here, with what stops working. The vault and the /mcp
+    lock already say their own piece."""
+    import copilot as _c
+    gaps = []
+    if not SHOPIFY_STORE:
+        gaps.append("SHOPIFY_STORE: nothing can reach Shopify")
+    if not SHOPIFY_TOKEN and not (SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET):
+        gaps.append("SHOPIFY_ACCESS_TOKEN, or SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET: "
+                    "no Shopify credential at all")
+    if not getattr(_c, "SHOPIFY_API_SECRET", ""):
+        gaps.append("SHOPIFY_API_SECRET: session tokens and webhook signatures cannot be verified, "
+                    "so the embedded app and the webhooks are off")
+    if not getattr(_c, "ANTHROPIC_API_KEY", ""):
+        gaps.append("ANTHROPIC_API_KEY: chat, overview, SEO and the audits are off")
+    for g in gaps:
+        logger.warning("config: %s", g)
+    if not gaps:
+        logger.info("config: complete (the full reference is docs/ENVIRONMENT.md)")
+
+
 def build_app():
     """The app exactly as it is served.
 
@@ -203,6 +229,7 @@ def build_app():
     actually runs, or over middleware they do not: the tests were built on a
     bare mcp.streamable_http_app() while production wrapped it in two layers,
     so nothing ever exercised those layers against a real route."""
+    _boot_report()
     # Before the first request: anything long-lived already on the volume gets
     # encrypted now, rather than whenever it next happens to be rewritten.
     try:

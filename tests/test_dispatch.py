@@ -17649,6 +17649,26 @@ def t_the_door_checks_rank_before_it_spends_an_ai_slot():
     with_accounts(go)
 
 
+@test
+def t_the_environment_reference_is_generated_from_the_code():
+    """Two hundred variables are read; the hand-written example documented
+    thirty-nine and carried another project's defaults. The reference is
+    built from the syntax tree, and this fails when it has not been rebuilt."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("env_reference", os.path.join(HERE, "tools", "env_reference.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    rows = mod.collect(HERE)
+    names = {r[0] for r in rows}
+    ok(len(names) >= 200, "every variable the code reads is collected: %d" % len(names))
+    ok({"SHOPIFY_STORE", "TOKEN_ENCRYPTION_KEY", "GOBO_OVERRIDES_LIVE", "DISPATCH_ARCHIVE_PATH"} <= names)
+    eq(mod.render(HERE), open(os.path.join(HERE, "docs", "ENVIRONMENT.md"), encoding="utf-8").read(),
+       "docs/ENVIRONMENT.md is stale: run `make env-doc`")
+    # And the short example file names nothing the code does not read.
+    ex = set(re.findall(r"^\s*#?\s*([A-Z][A-Z0-9_]+)=", open(os.path.join(HERE, "env.example"), encoding="utf-8").read(), re.M))
+    eq(sorted(ex - names), [], "env.example names a variable nothing reads")
+
+
 for fn in TESTS:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a
