@@ -7138,7 +7138,13 @@ Projected Image UK"></textarea>
                                  : (n === undefined || n === null || n === '') ? '' : String(n));
             const m = sheetModal((credit ? 'Credit note ' : 'Invoice ')
                                  + (p.number || d.key || ''));
-            const what = p.updatesExisting
+            /* Three outcomes, not two: an invoice the previous feed raised
+               that already says the same money is adopted, and adopted means
+               nothing is written. Calling that a replacement would be false. */
+            const what = d.action === 'unchanged'
+                ? ('Already in Xero. Nothing will be written to the '
+                   + (credit ? 'credit note' : 'invoice') + '.')
+                : p.updatesExisting
                 ? ('Replaces the ' + (credit ? 'credit note' : 'invoice')
                    + ' already in Xero, in place.')
                 : ('Creates a new ' + (credit ? 'credit note' : 'invoice') + ' in Xero.');
@@ -7419,7 +7425,7 @@ Projected Image UK"></textarea>
             const c = (res || {})[kind] || {};
             const skipped = Object.keys(c).filter(k => k.indexOf('skipped') === 0)
                 .reduce((n, k) => n + (c[k] || 0), 0);
-            return { created: c.created || 0, failed: c.failed || 0,
+            return { created: c.created || 0, updated: c.updated || 0, failed: c.failed || 0,
                      quarantined: c.quarantined || 0, skipped: skipped };
         }
         function connIsAdmin() {
@@ -8019,7 +8025,8 @@ Projected Image UK"></textarea>
                     const r = (connReview || {}).result || {};
                     const inv = connCounts(r, 'invoices'), cn = connCounts(r, 'creditNotes'), ct = connCounts(r, 'contacts');
                     if (!await uiConfirm('Send to Xero now? Based on the review: '
-                        + inv.created + (inv.created === 1 ? ' invoice' : ' invoices') + ', '
+                        + inv.created + (inv.created === 1 ? ' invoice' : ' invoices')
+                        + (inv.updated ? ' (and ' + inv.updated + ' already in Xero updated in place)' : '') + ', '
                         + cn.created + (cn.created === 1 ? ' credit note' : ' credit notes') + ' and '
                         + ct.created + (ct.created === 1 ? ' new contact' : ' new contacts')
                         + ' will be written into your accounts.',
@@ -8301,6 +8308,7 @@ Projected Image UK"></textarea>
                 const wrapT = el('div', 'ktable-wrap');
                 const tb = el('table', 'ktable');
                 tb.innerHTML = '<thead><tr><th></th><th class="num">Will create</th>'
+                    + '<th class="num">Will update</th>'
                     + '<th class="num">Quarantined</th><th class="num">Failed</th>'
                     + '<th class="num">Skipped</th></tr></thead>';
                 const tbody = el('tbody');
@@ -8308,6 +8316,7 @@ Projected Image UK"></textarea>
                     const c = connCounts(r, k);
                     const tr = el('tr');
                     tr.append(el('td', 'kw', lab2), el('td', 'num', String(c.created)),
+                        el('td', 'num', String(c.updated)),
                         el('td', 'num', String(c.quarantined)), el('td', 'num', String(c.failed)),
                         el('td', 'num', String(c.skipped)));
                     tbody.append(tr);
