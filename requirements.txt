@@ -11,6 +11,11 @@ PyJWT==2.13.0
 beautifulsoup4==4.14.3
 google-auth==2.53.0
 pypdfium2==4.30.0
+# Nothing here imports PIL, and removing this pin broke the label printer in
+# CI: pypdfium2 rasterises a page through Pillow (page.render().to_pil()) and
+# only finds out at call time. An import scan cannot see that; the test suite
+# run against a fresh install can, and did.
+pillow==12.3.0
 
 # Transitive dependencies pinned to their security floors. These are pulled in by
 # mcp / uvicorn / google-auth rather than named by us, so nothing constrained them

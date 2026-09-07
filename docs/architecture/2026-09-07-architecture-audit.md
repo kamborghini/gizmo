@@ -95,7 +95,7 @@ None. Nothing found that is losing data or money today.
 | M6 | **Whole-file rewrite per save.** Every change to the CRM or mailbox serialises and replaces the entire file. Inherent to one-JSON-file-per-store; fine at today's size, the first thing to hurt as the CRM grows. | `_write_crm`, `_write_mail` |
 | M7 | **Two booking flows.** `_dispatch_book_locked` (297 lines) and `_custom_book_locked` (251) share 16 helpers and differ in 10; the shared spine is duplicated rather than extracted. | L6306, L5767 |
 | M8 | **Timestamp field names vary by store**: `created_at`/`updated_at` (CRM, files), `at` (privacy log, alerts), `t` (audit ledger), `state_at`/`printed_at`/`made_at`/`dispatched_at` (domain stamps). | grep counts 57 / 80 / 12 / 19 |
-| M9 | **`requirements.txt` carries two packages nothing imports** (`requests`, `pillow`) and three transitive packages pinned with no note saying why (`pyasn1`, `python-multipart`, `pydantic-settings`). | import scan vs requirements |
+| M9 | **`requirements.txt` carries a package nothing imports** (`requests`) and three transitive packages pinned with no note saying why (`pyasn1`, `python-multipart`, `pydantic-settings`). `pillow` also imports nowhere — and is required at call time by `pypdfium2`'s `to_pil()`, which an import scan cannot see; removing it broke the label printer in CI and it is back with a note. | import scan vs requirements; CI run on `8ea0450` |
 
 ### Low
 
@@ -286,7 +286,7 @@ every one:
 
 | Stage | Commit | Result |
 |---|---|---|
-| 1 Integrity | `3349160` | Dispatch evictions archived whole, and not trimmed if the archive fails; size-rule files read from and written to the volume with the repo copies as seeds; 3 dead functions, 1 dead route, 1 dead test and 2 unused packages removed |
+| 1 Integrity | `3349160` | Dispatch evictions archived whole, and not trimmed if the archive fails; size-rule files read from and written to the volume with the repo copies as seeds; 3 dead functions, 1 dead route, 1 dead test and 1 unused package removed (`pillow` went too, and came back: see M9) |
 | 2 One writer | `1f34f2a` | `_write_json_store`; 33 writers converted (195 lines out); a guard names the five non-JSON temp-file writers that remain |
 | 3 One door | `9d7a693` | `_guard`; 69 routes and 4 helpers through it (608 lines out); `_authorize` called in exactly one place; the AI slot spent only after the session and the rank |
 | 4 Config | `ff7a464` | `docs/ENVIRONMENT.md` generated from the code (206 variables) and checked in CI; `env.example` rewritten; `make run` sources `.env`; a boot report of what is off |
