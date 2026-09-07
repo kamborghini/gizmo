@@ -873,7 +873,7 @@ def t_the_targets_a_finger_has_to_hit_are_big_enough():
     Both fixes had to leave the row heights alone, so they pair padding with a
     cancelling negative margin, or grow only where there is no mouse."""
     name = re.search(r"\.files-name \{.*?\}", HTML, re.S).group(0)
-    ok("padding: 5px 0; margin: -5px 0" in name,
+    ok("padding: var(--control-pad-y) 0; margin: calc(-1 * var(--control-pad-y)) 0" in name,
        "the folder name's hit box is padded out, and the row keeps its height")
     touch = re.search(r"@media \(hover: none\) \{\s*\.fslot input.*?\n        \}", HTML, re.S)
     ok(touch, "there is a touch-only rule for the file tick")
@@ -2369,7 +2369,7 @@ def t_the_chart_legend_belongs_to_the_plot():
        "12 then 20 before the first gridline")
     sw = CSS.split(".chart-legend .sw {")[1].split("}")[0]
     ok("width: 8px" in sw and "height: 8px" in sw, "the key is an 8px square")
-    ok("border-radius: 2px" in sw, "with a 2px corner, not the app's own radius")
+    ok("border-radius: var(--radius-3xs)" in sw, "with a 2px corner, not the app's own radius")
     item = CSS.split(".chart-legend .lg {")[1].split("}")[0]
     ok("gap: var(--sp-1-5)" in item, "6px between a key and its name")
     ok("color: var(--text-primary)" in item, "and the name in full ink, as the reference sets it")
@@ -2843,8 +2843,8 @@ def t_no_control_grows_its_way_out_of_the_scale():
     for sel in (r"\.run-gate \.rg-btn", r"\.nav-refresh, \.nav-ask", r"\.sk-input, \.sk-textarea"):
         rule = re.search(sel + r" \{[^}]*\}", CSS)
         ok(rule, "the %s rule is still there" % sel)
-        pad = re.search(r"padding:\s*([\d]+)px", rule.group(0))
-        ok(pad and int(pad.group(1)) <= 5,
+        pad = re.search(r"padding:\s*(?:var\(--control-pad-y\)|([\d]+)px)", rule.group(0))
+        ok(pad and (pad.group(1) is None or int(pad.group(1)) <= 5),
            "%s keeps the house 5px vertical padding, not its own" % sel)
 
 
@@ -4620,6 +4620,62 @@ def t_the_header_is_one_implementation_with_one_collapse_point():
     ok(collapse == ["760"], "the menu button appears at exactly one width, 760: %s" % collapse)
     ok(re.search(r"@media \(max-width: 760px\)[^@]*?\.sidebar \{ position: fixed;", CSS),
        "and the sidebar leaves the flow in the same block")
+
+
+def _rules(css):
+    """(selector with its @media context, body) for every innermost rule."""
+    out = []; stack = []; sel_start = 0; i = 0; n = len(css)
+    while i < n:
+        if css.startswith("/*", i):
+            i = css.index("*/", i) + 2; continue
+        ch = css[i]
+        if ch == "{":
+            stack.append((css[sel_start:i], i + 1)); i += 1; continue
+        if ch == "}":
+            sel, b0 = stack.pop(); body = css[b0:i]
+            if "{" not in body:
+                ctx = " ".join(re.sub(r"\s+", " ", re.sub(r"/\*.*?\*/", "", x, flags=re.S)).strip() for x, _ in stack)
+                out.append(((ctx + " " if ctx else "") + re.sub(r"\s+", " ", re.sub(r"/\*.*?\*/", "", sel, flags=re.S)).strip(), body))
+            sel_start = i + 1; i += 1; continue
+        if ch == ";" and not stack: sel_start = i + 1
+        i += 1
+    return out
+
+
+@test
+def t_screen_css_carries_no_arbitrary_lengths():
+    """Spacing, line-height, radius, border width and type size come from the
+    scale, never from the rule. Measured 2026-09-07 before this: 632 spacing
+    declarations bypassed the scale, over 165 distinct values. The print sheets
+    are the documented exception: physical artefacts sized in mm and em so a
+    4x4 and a 4x6 label scale together."""
+    paper = re.compile(r"label-sheet|day-sheet|loan-sticker|@page|@font-face")
+    strip = lambda v: re.sub(r"var\(--[\w-]+\)|env\([^)]*\)", "", v)
+    bad = []
+    for sel, body in _rules(CSS):
+        if paper.search(sel): continue
+        for m in re.finditer(r"(?<![\w-])(padding|margin|gap|row-gap|column-gap|padding-(?:top|right|bottom|left)|margin-(?:top|right|bottom|left)|border-radius|font-size|border|border-top|border-right|border-bottom|border-left|border-width)\s*:\s*([^;}]+)", body):
+            if re.search(r"\d(px|em|rem)", strip(m.group(2))):
+                bad.append(sel[:50] + " { " + m.group(0).strip() + " }")
+        for m in re.finditer(r"line-height:\s*([^;}]+)", body):
+            if not re.fullmatch(r"var\(--lh-[\w-]+\)|inherit|normal|initial", m.group(1).strip()):
+                bad.append(sel[:50] + " { " + m.group(0).strip() + " }")
+    ok(not bad, "%d arbitrary lengths in screen CSS, e.g. %s" % (len(bad), bad[:6]))
+
+
+@test
+def t_every_breakpoint_is_on_the_scale():
+    """Seven stops, each with a job: 640 phone, 760 the sidebar collapses, 900
+    tablet, 1100 the KPI row goes to four columns, 1200 the dispatch row goes
+    single-line, 1500 wide, 1800 ultra-wide. There were nineteen distinct
+    widths before; the near-misses (560, 600, 620, 700, 720, 960, 2100) folded
+    onto their neighbours."""
+    stops = {640, 641, 760, 761, 900, 901, 1100, 1101, 1199, 1200, 1500, 1800}
+    widths = set()
+    for pre in re.findall(r"@media([^{]+)\{", CSS):
+        widths |= {int(w) for w in re.findall(r"(?:min|max)-width:\s*(\d+)px", pre)}
+    ok(widths <= stops, "off-scale breakpoints: %s" % sorted(widths - stops))
+    ok({640, 760, 900, 1100, 1200, 1500, 1800} <= widths, "and every stop on the scale is in use: %s" % sorted(widths))
 
 
 if __name__ == "__main__":
