@@ -17549,6 +17549,69 @@ def t_a_size_rule_saved_in_the_app_lands_on_the_volume_not_in_the_image():
     with_accounts(go)
 
 
+@test
+def t_every_json_store_reaches_disk_through_the_one_writer():
+    """Thirty-five hand-written copies of the write loop had four safety
+    properties between them, applied to different subsets. The primitive is
+    what makes every store get every property; this is what keeps the next
+    store from writing its own loop."""
+    import ast as _ast
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    tree = _ast.parse(src)
+    def owners(needle):
+        out = set()
+        for n in _ast.walk(tree):
+            if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and n.name != "add_routes":
+                if needle in _ast.get_source_segment(src, n):
+                    out.add(n.name)
+        return out
+    # Text written as a temp file and swapped in: JSON goes through the primitive;
+    # the rest is CSV, a zip, or the raw bytes of a restore.
+    eq(owners('+ ".tmp"'), {"_write_json_store", "_write_gobo_rule_rows", "_weekly_snapshot",
+                             "gobo_sizes_upload_route", "restore_route"},
+       "a new temp-and-replace writer appeared; use _write_json_store")
+    # JSON serialised straight into a file handle: only the primitive and the two
+    # append-only archives, which are lines added to a log, not a store rewritten.
+    eq(owners("fh.write(json.dumps"), {"_archive_dispatch_rows", "_write_prod_state"},
+       "JSON is being written to disk outside the primitive")
+    ok("allow_nan=False" in src.split("def _write_json_store")[1][:1500], "NaN is refused for every store")
+
+
+@test
+def t_the_one_writer_refuses_nan_a_poisoned_store_and_keeps_secrets_private():
+    p = os.path.join(SCRATCH, "one-writer.json")
+    for f in (p, p + ".tmp"):
+        try:
+            os.remove(f)
+        except FileNotFoundError:
+            pass
+    copilot._write_json_store(p, "things", {"a": 1})
+    eq(json.load(open(p))["things"], {"a": 1}, "keyed, the shape every loader reads")
+    try:
+        copilot._write_json_store(p, "things", {"a": float("nan")})
+        ok(False, "NaN should have been refused")
+    except ValueError:
+        pass
+    eq(json.load(open(p))["things"], {"a": 1}, "and the store is exactly as it was")
+    ok(not os.path.exists(p + ".tmp"), "with no half-written temp file left beside it")
+    copilot._poisoned_stores.add(p)
+    try:
+        try:
+            copilot._write_json_store(p, "things", {"a": 2})
+            ok(False, "a poisoned store must not be overwritten")
+        except copilot.StoreUnwritable:
+            pass
+        eq(json.load(open(p))["things"], {"a": 1}, "untouched")
+    finally:
+        copilot._poisoned_stores.discard(p)
+    os.chmod(p, 0o644)
+    copilot._write_json_store(p, None, {"secret": "x"}, private=True)
+    eq(oct(os.stat(p).st_mode & 0o777), "0o600", "a private write leaves the file owner-only, "
+       "even one that existed at 0644")
+    eq(json.load(open(p)), {"secret": "x"}, "None writes the object itself")
+    os.remove(p)
+
+
 for fn in TESTS:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a

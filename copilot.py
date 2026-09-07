@@ -380,11 +380,7 @@ def _save_profile(data: dict) -> dict:
     }
     if not _store_writable(PROFILE_PATH):
         return clean
-    os.makedirs(os.path.dirname(PROFILE_PATH) or ".", exist_ok=True)
-    tmp = PROFILE_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps(clean))
-    os.replace(tmp, PROFILE_PATH)
+    _write_json_store(PROFILE_PATH, None, clean)
     return clean
 
 
@@ -435,11 +431,7 @@ def _write_memory(memories: list[dict]) -> list[dict]:
         # Hand-written merchant work: preserve the broken file for repair rather
         # than replacing it with whatever loaded as the default.
         return memories
-    os.makedirs(os.path.dirname(MEMORY_PATH) or ".", exist_ok=True)
-    tmp = MEMORY_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"memories": memories}))
-    os.replace(tmp, MEMORY_PATH)
+    _write_json_store(MEMORY_PATH, "memories", memories)
     return memories
 
 
@@ -570,11 +562,7 @@ def _write_skills(skills: list[dict]) -> list[dict]:
         # Hand-written merchant work: preserve the broken file for repair rather
         # than replacing it with whatever loaded as the default.
         return skills
-    os.makedirs(os.path.dirname(SKILLS_PATH) or ".", exist_ok=True)
-    tmp = SKILLS_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"skills": skills}))
-    os.replace(tmp, SKILLS_PATH)
+    _write_json_store(SKILLS_PATH, "skills", skills)
     return skills
 
 
@@ -720,11 +708,7 @@ def _save_analysis(kind: str, result: dict) -> dict:
         cache[kind] = {"result": json.loads(blob), "at": datetime.now(timezone.utc).isoformat(), "snapshot": snap}
         if not _store_writable(ANALYSIS_CACHE_PATH):
             return result
-        os.makedirs(os.path.dirname(ANALYSIS_CACHE_PATH) or ".", exist_ok=True)
-        tmp = ANALYSIS_CACHE_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps(cache))
-        os.replace(tmp, ANALYSIS_CACHE_PATH)
+        _write_json_store(ANALYSIS_CACHE_PATH, None, cache)
     except Exception:
         logger.exception("analysis cache: failed to save %s", kind)
     return result
@@ -754,11 +738,7 @@ def _save_customer_segment(seg_key: str, result: dict) -> dict:
         cache["customers_segments"] = segs
         if not _store_writable(ANALYSIS_CACHE_PATH):
             return result
-        os.makedirs(os.path.dirname(ANALYSIS_CACHE_PATH) or ".", exist_ok=True)
-        tmp = ANALYSIS_CACHE_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps(cache))
-        os.replace(tmp, ANALYSIS_CACHE_PATH)
+        _write_json_store(ANALYSIS_CACHE_PATH, None, cache)
     except Exception:
         logger.exception("analysis cache: failed to save customer segment %s", seg_key)
     return result
@@ -834,6 +814,45 @@ def _store_writable(path: str) -> bool:
         logger.error("refusing to overwrite unreadable store %s", path)
         return False
     return True
+
+
+class StoreUnwritable(RuntimeError):
+    """A store the poison guard has paused. The one writer raises this; a
+    caller that would rather stay silent checks _store_writable first and
+    says why, which is what every writer already did."""
+
+
+def _write_json_store(path: str, key: Optional[str], data, *, private: bool = False) -> None:
+    """The one way a store reaches disk.
+
+    Thirty-five hand-written copies of this loop had four safety properties
+    between them - the poison guard, allow_nan=False, an atomic replace, and
+    owner-only permissions for credential-bearing files - applied to different
+    subsets: NaN was refused on four stores, 0600 on three. A store could only
+    get every property by every writer remembering every line. Now it gets
+    them by calling this.
+
+    `key` wraps the data as {key: data}, the shape the loaders expect; None
+    writes the object itself. allow_nan is always False: Python will happily
+    WRITE NaN, which is not JSON, and the next read would poison the store."""
+    if not _store_writable(path):
+        raise StoreUnwritable(path)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    payload = json.dumps({key: data} if key is not None else data, allow_nan=False)
+    tmp = path + ".tmp"
+    if private:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        fh = os.fdopen(fd, "w", encoding="utf-8")
+    else:
+        fh = open(tmp, "w", encoding="utf-8")
+    with fh:
+        fh.write(payload)
+    os.replace(tmp, path)
+    if private:
+        try:
+            os.chmod(path, 0o600)   # a file written before it was private keeps its mode otherwise
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -950,13 +969,7 @@ def _save_shipping(cfg: dict) -> dict:
     if not _store_writable(SHIPPING_PATH):
         return cfg
     keep = {k: cfg.get(k, _SHIPPING_DEFAULT[k]) for k in _SHIPPING_DEFAULT}
-    os.makedirs(os.path.dirname(SHIPPING_PATH) or ".", exist_ok=True)
-    tmp = SHIPPING_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        # allow_nan=False, like the CRM and mail stores: a NaN saves and reads
-        # back fine but kills every later JSON response built from it.
-        fh.write(json.dumps(keep, allow_nan=False))
-    os.replace(tmp, SHIPPING_PATH)
+    _write_json_store(SHIPPING_PATH, None, keep)
     return keep
 
 
@@ -1131,10 +1144,7 @@ def _save_dispatch_labels(order_id, labels: list) -> None:
     try:
         os.makedirs(DISPATCH_LABELS_DIR, exist_ok=True)
         path = _label_path(order_id)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps({"labels": labels or []}))
-        os.replace(tmp, path)
+        _write_json_store(path, "labels", labels or [])
         # With print images a label file is ~1MB, and nothing ever pruned this
         # directory. Oldest go first; a months-old label is in the courier's past
         # anyway and its tracking number stays in the dispatch record.
@@ -1194,11 +1204,7 @@ def _record_wo_failure(tech: dict) -> None:
         rows = _load_json_store(WO_FAILURES_PATH, "failures", [])
         rows = ([tech] + list(rows))[:WO_FAILURES_MAX]
         if _store_writable(WO_FAILURES_PATH):
-            os.makedirs(os.path.dirname(WO_FAILURES_PATH) or ".", exist_ok=True)
-            tmp = WO_FAILURES_PATH + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as fh:
-                fh.write(json.dumps({"failures": rows}))
-            os.replace(tmp, WO_FAILURES_PATH)
+            _write_json_store(WO_FAILURES_PATH, "failures", rows)
     except Exception:
         logger.exception("could not record the World Options failure")
 
@@ -1223,11 +1229,7 @@ def _record_error(where: str, exc: BaseException) -> None:
                  "error": (type(exc).__name__ + ": " + str(exc))[:400]}] + list(rows)
         rows = rows[:ERRORS_MAX]
         if _store_writable(ERRORS_PATH):
-            os.makedirs(os.path.dirname(ERRORS_PATH) or ".", exist_ok=True)
-            tmp = ERRORS_PATH + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as fh:
-                fh.write(json.dumps({"errors": rows}))
-            os.replace(tmp, ERRORS_PATH)
+            _write_json_store(ERRORS_PATH, "errors", rows)
     except Exception:
         logger.exception("could not record an app error")
 
@@ -1335,11 +1337,7 @@ def _note_backup(kind: str) -> None:
         st = _load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}
         st[kind + "_at"] = datetime.now(timezone.utc).isoformat()
         if _store_writable(BACKUP_STATE_PATH):
-            os.makedirs(os.path.dirname(BACKUP_STATE_PATH) or ".", exist_ok=True)
-            tmp = BACKUP_STATE_PATH + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as fh:
-                fh.write(json.dumps({"backup": st}))
-            os.replace(tmp, BACKUP_STATE_PATH)
+            _write_json_store(BACKUP_STATE_PATH, "backup", st)
     except Exception:
         logger.exception("could not record the backup time")
 
@@ -1391,7 +1389,7 @@ def _load_dispatch() -> dict:
     return _load_json_store(DISPATCH_STATE_PATH, "orders", {})
 
 
-class DispatchStoreUnwritable(RuntimeError):
+class DispatchStoreUnwritable(StoreUnwritable):
     """The dispatch record could not be saved. Raised rather than returned, because
     a silent no-op here loses the only record that money was spent."""
 
@@ -1424,11 +1422,7 @@ def _write_dispatch(orders: dict) -> dict:
         else:
             logger.error("dispatch: %d rows are past the cap but could not be archived; "
                          "keeping them in the live store", len(evicted))
-    os.makedirs(os.path.dirname(DISPATCH_STATE_PATH) or ".", exist_ok=True)
-    tmp = DISPATCH_STATE_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"orders": orders}))
-    os.replace(tmp, DISPATCH_STATE_PATH)
+    _write_json_store(DISPATCH_STATE_PATH, "orders", orders)
     return orders
 
 
@@ -1565,7 +1559,7 @@ PRODUCTION_ARCHIVE_PATH = os.environ.get(
     os.path.join(os.path.dirname(PRODUCTION_STATE_PATH) or ".", "production_state_archive.jsonl"))
 
 
-class ProdStateUnwritable(RuntimeError):
+class ProdStateUnwritable(StoreUnwritable):
     """The production state could not be saved. Raised rather than returned,
     because the caller has usually ALREADY fulfilled Shopify and booked glass
     by this point - reporting success would leave the merchant believing a
@@ -1596,11 +1590,7 @@ def _write_prod_state(orders: dict) -> dict:
             except Exception:
                 logger.exception("production archive append failed")
         orders = dict(keep[-PRODUCTION_STATE_MAX:])
-    os.makedirs(os.path.dirname(PRODUCTION_STATE_PATH) or ".", exist_ok=True)
-    tmp = PRODUCTION_STATE_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"orders": orders}))
-    os.replace(tmp, PRODUCTION_STATE_PATH)
+    _write_json_store(PRODUCTION_STATE_PATH, "orders", orders)
     return orders
 
 
@@ -1667,11 +1657,7 @@ def _load_impact() -> list[dict]:
 def _write_impact(items: list[dict]) -> list[dict]:
     if not _store_writable(IMPACT_PATH):
         return items[:IMPACT_MAX]
-    os.makedirs(os.path.dirname(IMPACT_PATH) or ".", exist_ok=True)
-    tmp = IMPACT_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"items": items[:IMPACT_MAX]}))
-    os.replace(tmp, IMPACT_PATH)
+    _write_json_store(IMPACT_PATH, "items", items[:IMPACT_MAX])
     return items[:IMPACT_MAX]
 
 
@@ -1791,11 +1777,7 @@ def _save_knowledge(text: str, sources: list[str]) -> dict:
             "learned_at": datetime.now(timezone.utc).isoformat()}
     if not _store_writable(KNOWLEDGE_PATH):
         return data
-    os.makedirs(os.path.dirname(KNOWLEDGE_PATH) or ".", exist_ok=True)
-    tmp = KNOWLEDGE_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps(data))
-    os.replace(tmp, KNOWLEDGE_PATH)
+    _write_json_store(KNOWLEDGE_PATH, None, data)
     return data
 
 
@@ -1981,11 +1963,7 @@ def _log_usage(kind: str, model: str, usage) -> None:
             return
         events.append(rec)
         events = events[-USAGE_MAX:]
-        os.makedirs(os.path.dirname(USAGE_PATH) or ".", exist_ok=True)
-        tmp = USAGE_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps({"events": events}))
-        os.replace(tmp, USAGE_PATH)
+        _write_json_store(USAGE_PATH, "events", events)
         # Monthly rollup survives the event log trimming itself: the pricing
         # dataset must not evaporate at USAGE_MAX.
         rollup_path = os.path.join(os.path.dirname(USAGE_PATH) or ".", "usage_rollup.json")
@@ -2003,10 +1981,7 @@ def _log_usage(kind: str, model: str, usage) -> None:
         k = m["by_kind"].setdefault(kind, {"runs": 0, "cost": 0.0})
         k["runs"] += 1
         k["cost"] = round(k["cost"] + rec["cost"], 6)
-        tmp2 = rollup_path + ".tmp"
-        with open(tmp2, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps(roll))
-        os.replace(tmp2, rollup_path)
+        _write_json_store(rollup_path, None, roll)
     except Exception:
         logger.exception("usage log failed")
 
@@ -5088,11 +5063,7 @@ async def _variant_costs(registry: dict, variant_ids: list) -> dict:
                 keep = sorted(cache.items(), key=lambda kv: str(kv[1].get("at") or ""))
                 cache = dict(keep[-COST_CACHE_MAX:])
             if _store_writable(COST_CACHE_PATH):
-                os.makedirs(os.path.dirname(COST_CACHE_PATH) or ".", exist_ok=True)
-                tmp = COST_CACHE_PATH + ".tmp"
-                with open(tmp, "w", encoding="utf-8") as fh:
-                    fh.write(json.dumps({"variants": cache}))
-                os.replace(tmp, COST_CACHE_PATH)
+                _write_json_store(COST_CACHE_PATH, "variants", cache)
         except Exception:
             logger.exception("could not save the cost cache")
     return out
@@ -5146,11 +5117,7 @@ def _remember_customs(lines: list) -> None:
             keep = sorted(mem.items(), key=lambda kv: str(kv[1].get("at") or ""))
             mem = dict(keep[-CUSTOMS_MEMORY_MAX:])
         if _store_writable(CUSTOMS_MEMORY_PATH):
-            os.makedirs(os.path.dirname(CUSTOMS_MEMORY_PATH) or ".", exist_ok=True)
-            tmp = CUSTOMS_MEMORY_PATH + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as fh:
-                fh.write(json.dumps({"items": mem}))
-            os.replace(tmp, CUSTOMS_MEMORY_PATH)
+            _write_json_store(CUSTOMS_MEMORY_PATH, "items", mem)
     except Exception:
         logger.exception("could not remember the customs values")
 
@@ -6764,11 +6731,7 @@ def _mark_chased(key: str, by: str = "") -> dict:
         accounts = dict(drop[-CHASE_LOG_MAX:])
     if not _store_writable(CHASE_LOG_PATH):
         raise RuntimeError("chase log is not writable")
-    os.makedirs(os.path.dirname(CHASE_LOG_PATH) or ".", exist_ok=True)
-    tmp = CHASE_LOG_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"accounts": accounts}))
-    os.replace(tmp, CHASE_LOG_PATH)
+    _write_json_store(CHASE_LOG_PATH, "accounts", accounts)
     return accounts[str(key)]
 
 
@@ -7046,11 +7009,7 @@ def _write_zeta_pending(p: dict) -> bool:
     try:
         if not _store_writable(ZETA_SYNC_PATH):
             return False
-        os.makedirs(os.path.dirname(ZETA_SYNC_PATH) or ".", exist_ok=True)
-        tmp = ZETA_SYNC_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps({"pending": p}))
-        os.replace(tmp, ZETA_SYNC_PATH)
+        _write_json_store(ZETA_SYNC_PATH, "pending", p)
         return True
     except Exception:
         logger.exception("stock bridge: could not save the pending queue")
@@ -8183,22 +8142,13 @@ def _load_recon() -> dict:
 
 
 def _write_private_json(path: str, key: str, d: dict) -> None:
-    """Atomic, and owner-only. These three stores hold accounting records, the
-    contents of bank statements and remittances, and the exception list built
-    from both. Data taken out of Xero and the accounts mailbox deserves the
-    same file mode as the tokens that fetched it, not the default 0644."""
+    """Owner-only, and silent when the poison guard refuses. These stores hold
+    accounting records, the contents of bank statements and remittances, and
+    the exception list built from both: data taken out of Xero and the accounts
+    mailbox deserves the same file mode as the tokens that fetched it."""
     if not _store_writable(path):
         return
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp = path + ".tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({key: d}, allow_nan=False))
-    os.replace(tmp, path)
-    try:
-        os.chmod(path, 0o600)      # a pre-existing 0644 file keeps its mode
-    except OSError:
-        pass
+    _write_json_store(path, key, d, private=True)
 
 
 def _write_recon(d: dict) -> None:
@@ -8429,11 +8379,7 @@ def _save_schedule(cfg: dict, _internal: bool = False) -> dict:
         cur["last_run"] = cfg["last_run"]
     if not _store_writable(SCHEDULE_PATH):
         return cur
-    os.makedirs(os.path.dirname(SCHEDULE_PATH) or ".", exist_ok=True)
-    tmp = SCHEDULE_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps(cur))
-    os.replace(tmp, SCHEDULE_PATH)
+    _write_json_store(SCHEDULE_PATH, None, cur)
     return cur
 
 
@@ -8456,11 +8402,7 @@ def _load_alerts() -> list:
 def _write_alerts(alerts: list) -> list:
     if not _store_writable(ALERTS_PATH):
         return alerts[:ALERTS_MAX]
-    os.makedirs(os.path.dirname(ALERTS_PATH) or ".", exist_ok=True)
-    tmp = ALERTS_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"alerts": alerts[:ALERTS_MAX]}))
-    os.replace(tmp, ALERTS_PATH)
+    _write_json_store(ALERTS_PATH, "alerts", alerts[:ALERTS_MAX])
     return alerts[:ALERTS_MAX]
 
 
@@ -8505,11 +8447,7 @@ def _save_watch(state: dict) -> None:
     if not _store_writable(WATCH_PATH):
         return
     try:
-        os.makedirs(os.path.dirname(WATCH_PATH) or ".", exist_ok=True)
-        tmp = WATCH_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps(state))
-        os.replace(tmp, WATCH_PATH)
+        _write_json_store(WATCH_PATH, None, state)
     except Exception:
         logger.exception("watch state write failed")
 
@@ -8995,14 +8933,7 @@ def _write_crm(d: dict) -> None:
     no-op would lose real pipeline."""
     if not _store_writable(CRM_PATH):
         raise RuntimeError("CRM store is not writable")
-    os.makedirs(os.path.dirname(CRM_PATH) or ".", exist_ok=True)
-    tmp = CRM_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        # allow_nan=False: Python would happily WRITE NaN, which is not JSON,
-        # so the next read would poison the store and brick the CRM. Refusing
-        # here fails one request and preserves everything.
-        fh.write(json.dumps({"crm": d}, allow_nan=False))
-    os.replace(tmp, CRM_PATH)
+    _write_json_store(CRM_PATH, "crm", d)
 
 
 def _crm_value(x) -> float:
@@ -9419,11 +9350,7 @@ def _write_files(d: dict) -> None:
     try:
         if not _store_writable(FILES_PATH):
             raise RuntimeError("files store is not writable")
-        os.makedirs(os.path.dirname(FILES_PATH) or ".", exist_ok=True)
-        tmp = FILES_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps({"files_store": d}))
-        os.replace(tmp, FILES_PATH)
+        _write_json_store(FILES_PATH, "files_store", d)
         _files_mem = d
     except Exception:
         _files_mem = None    # memory never outlives a failed write
@@ -9987,11 +9914,7 @@ def _write_mail(d: dict) -> None:
         _mail_mem = None
         raise RuntimeError("mailbox store is not writable")
     try:
-        os.makedirs(os.path.dirname(MAILBOX_PATH) or ".", exist_ok=True)
-        tmp = MAILBOX_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps({"mailbox": d}, allow_nan=False))
-        os.replace(tmp, MAILBOX_PATH)
+        _write_json_store(MAILBOX_PATH, "mailbox", d)
     except Exception:
         _mail_mem = None      # force a re-read; never serve an unsaved board
         raise
@@ -11541,11 +11464,7 @@ def _load_feedback() -> dict:
 def _write_feedback(d: dict) -> None:
     if not _store_writable(FEEDBACK_PATH):
         raise RuntimeError("feedback store is not writable")
-    os.makedirs(os.path.dirname(FEEDBACK_PATH) or ".", exist_ok=True)
-    tmp = FEEDBACK_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"feedback": d}, allow_nan=False))
-    os.replace(tmp, FEEDBACK_PATH)
+    _write_json_store(FEEDBACK_PATH, "feedback", d)
 
 
 FEEDBACK_STATES = ("open", "planned", "shipped", "declined")
@@ -11576,11 +11495,7 @@ def _privacy_note(topic: str, email: str, customer_id, detail: str) -> None:
                             "customer_id": str(customer_id or ""), "detail": detail})
         d["events"] = d["events"][-2000:]
         if _store_writable(PRIVACY_LOG_PATH):
-            os.makedirs(os.path.dirname(PRIVACY_LOG_PATH) or ".", exist_ok=True)
-            tmp = PRIVACY_LOG_PATH + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as fh:
-                fh.write(json.dumps(d))
-            os.replace(tmp, PRIVACY_LOG_PATH)
+            _write_json_store(PRIVACY_LOG_PATH, None, d)
     except Exception:
         logger.exception("privacy log write failed")
 
@@ -11900,19 +11815,9 @@ def _write_users(d: dict) -> None:
         _users_mem = None      # the caller already mutated the shared object
         raise RuntimeError("users register is not writable")
     try:
-        os.makedirs(os.path.dirname(USERS_PATH) or ".", exist_ok=True)
-        tmp = USERS_PATH + ".tmp"
         # Owner-only, like the token files beside it: this register holds the
         # password hashes, the second-factor secrets and the recovery codes.
-        # It had been taking the container umask, which is 0644.
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps({"users_store": d}))
-        os.replace(tmp, USERS_PATH)
-        try:
-            os.chmod(USERS_PATH, 0o600)   # a register written before this keeps 0644 otherwise
-        except OSError:
-            pass
+        _write_json_store(USERS_PATH, "users_store", d, private=True)
     except Exception:
         _users_mem = None
         raise
@@ -11932,18 +11837,9 @@ def _write_sessions(d: dict) -> None:
     _sessions_mem = d
     if not _store_writable(SESSIONS_PATH):
         return    # sessions are re-creatable; losing them only forces a login
-    os.makedirs(os.path.dirname(SESSIONS_PATH) or ".", exist_ok=True)
-    tmp = SESSIONS_PATH + ".tmp"
     # A session row is a live credential's hash and who it belongs to; it gets
     # the same mode as the register it authenticates against.
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"sessions": d}))
-    os.replace(tmp, SESSIONS_PATH)
-    try:
-        os.chmod(SESSIONS_PATH, 0o600)
-    except OSError:
-        pass
+    _write_json_store(SESSIONS_PATH, "sessions", d, private=True)
 
 
 SESSIONS_PER_USER = int(os.environ.get("SESSIONS_PER_USER", "12"))
@@ -12609,11 +12505,7 @@ def _write_work(d: dict) -> None:
         _work_mem = None
         raise RuntimeError("work log is not writable")
     try:
-        os.makedirs(os.path.dirname(WORK_PATH) or ".", exist_ok=True)
-        tmp = WORK_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps({"work_store": d}))
-        os.replace(tmp, WORK_PATH)
+        _write_json_store(WORK_PATH, "work_store", d)
     except Exception:
         _work_mem = None
         raise
@@ -12706,11 +12598,7 @@ def _events_flush() -> None:
     try:
         rows = _load_events()
         if _store_writable(ACTIVITY_PATH):
-            os.makedirs(os.path.dirname(ACTIVITY_PATH) or ".", exist_ok=True)
-            tmp = ACTIVITY_PATH + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as fh:
-                fh.write(json.dumps({"events": rows}))
-            os.replace(tmp, ACTIVITY_PATH)
+            _write_json_store(ACTIVITY_PATH, "events", rows)
         _events_dirty = False
     except Exception:
         logger.exception("activity ledger write failed")
@@ -19713,11 +19601,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 sheets = {}
             sheets[usage["date"]] = rec
             if _store_writable(USAGE_SHEETS_PATH):
-                os.makedirs(os.path.dirname(USAGE_SHEETS_PATH) or ".", exist_ok=True)
-                tmp = USAGE_SHEETS_PATH + ".tmp"
-                with open(tmp, "w", encoding="utf-8") as fh:
-                    fh.write(json.dumps({"sheets": sheets}))
-                os.replace(tmp, USAGE_SHEETS_PATH)
+                _write_json_store(USAGE_SHEETS_PATH, "sheets", sheets)
         except Exception:
             logger.exception("usage sheet record failed (the stock app HAS the sheet)")
         _track(who, "production", "sent a stock sheet",
