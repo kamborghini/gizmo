@@ -17691,6 +17691,82 @@ def t_the_stores_are_measured_not_guessed():
         os.remove(big)
 
 
+@test
+def t_a_hot_store_is_read_from_disk_once_until_the_file_changes():
+    """The dispatch state, the production state and the CRM were parsed from
+    disk on every request that needed them. The cache is keyed on the file -
+    mtime, size, inode - so a restore, a repair by hand or a test writing the
+    file directly is a miss without anyone remembering to invalidate."""
+    p = copilot.DISPATCH_STATE_PATH
+    try:
+        os.remove(p)
+    except FileNotFoundError:
+        pass
+    copilot._forget_store(p)
+    calls = {"n": 0}
+    real = copilot._load_json_store
+    def counting(path, key, default):
+        if path == p:
+            calls["n"] += 1
+        return real(path, key, default)
+    copilot._load_json_store = counting
+    try:
+        copilot._write_dispatch({"1": {"tracking_number": "A", "dispatched_at": "2026-09-01T00:00:00+00:00"}})
+        a = copilot._load_dispatch(); b = copilot._load_dispatch(); copilot._load_dispatch()
+        eq(calls["n"], 0, "after a write the store is what was written; nothing is re-parsed")
+        ok(a is b, "and every reader in the process sees one object")
+        # Somebody else replaces the file: the next read notices.
+        json.dump({"orders": {"1": {"tracking_number": "B", "dispatched_at": "2026-09-01T00:00:00+00:00"}}},
+                  open(p, "w", encoding="utf-8"))
+        eq(copilot._load_dispatch()["1"]["tracking_number"], "B", "a file written behind the cache is read fresh")
+        eq(calls["n"], 1)
+        copilot._load_dispatch()
+        eq(calls["n"], 1, "and then served from memory again")
+        os.remove(p)
+        eq(copilot._load_dispatch(), {}, "a store that is gone is empty, not remembered")
+    finally:
+        copilot._load_json_store = real
+        copilot._forget_store(p)
+
+
+@test
+def t_a_failed_write_forgets_the_cached_store():
+    """Callers mutate the object the loader hands them and then write. If the
+    write is refused, the memory copy already carries a change that never
+    reached disk - and every later reader would trust it. Memory never
+    outlives a failed write."""
+    p = copilot.PRODUCTION_STATE_PATH
+    try:
+        os.remove(p)
+    except FileNotFoundError:
+        pass
+    copilot._forget_store(p)
+    copilot._write_prod_state({"7": {"printed_at": "2026-09-01T00:00:00+00:00"}})
+    state = copilot._load_prod_state()
+    state["7"]["made_at"] = "2026-09-07T00:00:00+00:00"       # mutated in memory...
+    copilot._poisoned_stores.add(p)
+    try:
+        try:
+            copilot._write_prod_state(state)                       # ...and the write is refused
+            ok(False, "should have raised")
+        except copilot.ProdStateUnwritable:
+            pass
+    finally:
+        copilot._poisoned_stores.discard(p)
+    eq(copilot._load_prod_state()["7"].get("made_at"), None,
+       "the unsaved change is gone: the next read came from the disk that never had it")
+    # The CRM's per-read normalisation now runs once per file version.
+    crm_wipe()
+    copilot._forget_store(copilot.CRM_PATH)
+    d = copilot._load_crm()
+    d["persons"]["p1"] = {"id": "p1", "name": "Cached"}
+    copilot._write_crm(d)
+    ok(copilot._load_crm() is d, "the CRM is one object across reads once written")
+    crm_wipe()
+    copilot._forget_store(copilot.CRM_PATH)
+    eq(copilot._load_crm()["persons"], {}, "and a wiped store is empty again")
+
+
 for fn in TESTS:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a

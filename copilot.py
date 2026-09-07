@@ -860,6 +860,47 @@ class StoreUnwritable(RuntimeError):
     says why, which is what every writer already did."""
 
 
+# path -> (stat key, the object the loader returned). The three busiest stores
+# were parsed from disk on every request that needed them - the CRM at up to
+# tens of megabytes, on the event loop, twenty times a request cycle. The
+# cache is keyed on the FILE (mtime, size, inode), so anything that replaces
+# the file - a restore, a test writing it directly, a repair by hand - is a
+# miss, and nobody has to remember to invalidate. Two rules keep it honest:
+# the writer refreshes the entry after a successful write and forgets it on a
+# failed one ("memory never outlives a failed write"), and a caller that
+# mutated the object and then could not write must forget it too.
+_json_cache: dict = {}
+
+
+def _stat_key(path: str):
+    try:
+        st = os.stat(path)
+        return (st.st_mtime_ns, st.st_size, st.st_ino)
+    except OSError:
+        return None
+
+
+def _load_json_cached(path: str, key, default, prepare=None):
+    """_load_json_store with a cache keyed on the file. `prepare` runs once
+    per file version, on the miss, and its result is what is cached - for a
+    store whose loader normalises what it read."""
+    sk = _stat_key(path)
+    hit = _json_cache.get(path)
+    if hit is not None and sk is not None and hit[0] == sk:
+        return hit[1]
+    obj = _load_json_store(path, key, default)
+    if prepare is not None:
+        obj = prepare(obj)
+    if sk is not None and path not in _poisoned_stores:
+        _json_cache[path] = (sk, obj)
+    return obj
+
+
+def _forget_store(path: str) -> None:
+    """Drop the cached copy: the next read comes from disk."""
+    _json_cache.pop(path, None)
+
+
 def _write_json_store(path: str, key: Optional[str], data, *, private: bool = False) -> None:
     """The one way a store reaches disk.
 
@@ -874,23 +915,32 @@ def _write_json_store(path: str, key: Optional[str], data, *, private: bool = Fa
     writes the object itself. allow_nan is always False: Python will happily
     WRITE NaN, which is not JSON, and the next read would poison the store."""
     if not _store_writable(path):
+        _forget_store(path)
         raise StoreUnwritable(path)
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    payload = json.dumps({key: data} if key is not None else data, allow_nan=False)
-    tmp = path + ".tmp"
-    if private:
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        fh = os.fdopen(fd, "w", encoding="utf-8")
-    else:
-        fh = open(tmp, "w", encoding="utf-8")
-    with fh:
-        fh.write(payload)
-    os.replace(tmp, path)
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        payload = json.dumps({key: data} if key is not None else data, allow_nan=False)
+        tmp = path + ".tmp"
+        if private:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            fh = os.fdopen(fd, "w", encoding="utf-8")
+        else:
+            fh = open(tmp, "w", encoding="utf-8")
+        with fh:
+            fh.write(payload)
+        os.replace(tmp, path)
+    except Exception:
+        _forget_store(path)      # memory never outlives a failed write
+        raise
     if private:
         try:
             os.chmod(path, 0o600)   # a file written before it was private keeps its mode otherwise
         except OSError:
             pass
+    # What was just written IS the store now; a re-parse would only produce
+    # an equal object more slowly. Kept for every store, not only the ones
+    # read through the cache: an entry nobody reads costs one reference.
+    _json_cache[path] = (_stat_key(path), data)
 
 
 # ---------------------------------------------------------------------------
@@ -1424,7 +1474,7 @@ def _weekly_snapshot(force: bool = False) -> bool:
 
 
 def _load_dispatch() -> dict:
-    return _load_json_store(DISPATCH_STATE_PATH, "orders", {})
+    return _load_json_cached(DISPATCH_STATE_PATH, "orders", {})
 
 
 class DispatchStoreUnwritable(StoreUnwritable):
@@ -1448,6 +1498,7 @@ def _archive_dispatch_rows(rows: list) -> bool:
 
 def _write_dispatch(orders: dict) -> dict:
     if not _store_writable(DISPATCH_STATE_PATH):
+        _forget_store(DISPATCH_STATE_PATH)
         raise DispatchStoreUnwritable(DISPATCH_STATE_PATH)
     if len(orders) > DISPATCH_STATE_MAX:
         keep = sorted(orders.items(), key=lambda kv: str(kv[1].get("dispatched_at") or ""))
@@ -1589,7 +1640,7 @@ def _record_dispatch(order_id, entry: dict) -> dict:
 
 
 def _load_prod_state() -> dict:
-    return _load_json_store(PRODUCTION_STATE_PATH, "orders", {})
+    return _load_json_cached(PRODUCTION_STATE_PATH, "orders", {})
 
 
 PRODUCTION_ARCHIVE_PATH = os.environ.get(
@@ -1606,6 +1657,7 @@ class ProdStateUnwritable(StoreUnwritable):
 
 def _write_prod_state(orders: dict) -> dict:
     if not _store_writable(PRODUCTION_STATE_PATH):
+        _forget_store(PRODUCTION_STATE_PATH)
         raise ProdStateUnwritable("the production state store is not writable")
     if len(orders) > PRODUCTION_STATE_MAX:
         # Evict the least-recently-touched entries. Sort by the NEWEST stamp so an
@@ -8983,7 +9035,13 @@ def _crm_default() -> dict:
 
 
 def _load_crm() -> dict:
-    d = _load_json_store(CRM_PATH, "crm", None)
+    return _load_json_cached(CRM_PATH, "crm", None, prepare=_crm_prepare)
+
+
+def _crm_prepare(d) -> dict:
+    """What every read of the CRM used to do, now done once per file version:
+    the seq recovery below walks every id in five collections, which at tens
+    of thousands of deals was real work on every request."""
     if not isinstance(d, dict) or "deals" not in d:
         d = _crm_default()
     for k, v in _crm_default().items():
@@ -9011,6 +9069,7 @@ def _write_crm(d: dict) -> None:
     be written: the CRM is the only record these deals exist, so a silent
     no-op would lose real pipeline."""
     if not _store_writable(CRM_PATH):
+        _forget_store(CRM_PATH)
         raise RuntimeError("CRM store is not writable")
     _write_json_store(CRM_PATH, "crm", d)
 
@@ -11373,6 +11432,7 @@ async def _crm_shopify_link_nightly(registry: dict) -> None:
         logger.info("crm: shopify link sweep %s", rep)
     except Exception:
         logger.exception("crm: shopify link sweep failed")
+        _forget_store(CRM_PATH)   # a half-made change must not be served
 
 
 def _crm_link_order_customer(order: dict) -> None:
@@ -11397,6 +11457,7 @@ def _crm_link_order_customer(order: dict) -> None:
             _write_crm(d)
     except Exception:
         logger.exception("crm: order-customer link failed")
+        _forget_store(CRM_PATH)   # a half-made change must not be served
 
 
 _crm_bg_tasks: set = set()
@@ -11418,6 +11479,7 @@ async def _crm_link_order_later(body_txt: str) -> None:
         _crm_link_order_customer(json.loads(body_txt))
     except Exception:
         logger.exception("crm: order-customer link failed")
+        _forget_store(CRM_PATH)   # a half-made change must not be served
 
 
 def _spawn_bg(coro) -> bool:
@@ -16084,6 +16146,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             _mail_mem = None
             _events_dirty = False
             _dav_auth_cache.clear()
+            _json_cache.clear()
         async with _files_lock:
             try:
                 for info, base, target in todo:
@@ -16383,6 +16446,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Unknown op."}, 400)
         except Exception:
             logger.exception("Production state update failed")
+            _forget_store(PRODUCTION_STATE_PATH)   # a half-made change must not be served
             return _json({"error": "Couldn't update production state."}, 500)
 
     @mcp.custom_route("/api/liability", methods=["POST"])
@@ -16977,6 +17041,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                    "unwritable; check Settings, Connections."}, 500)
         except Exception:
             logger.exception("CRM deal op failed")
+            _forget_store(CRM_PATH)   # a half-made change must not be served
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/crm/activity", methods=["POST"])
@@ -17087,6 +17152,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                    "unwritable; check Settings, Connections."}, 500)
         except Exception:
             logger.exception("CRM activity op failed")
+            _forget_store(CRM_PATH)   # a half-made change must not be served
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/crm/contact", methods=["POST"])
@@ -17364,6 +17430,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                    "unwritable; check Settings, Connections."}, 500)
         except Exception:
             logger.exception("CRM contact op failed")
+            _forget_store(CRM_PATH)   # a half-made change must not be served
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/crm/lead", methods=["POST"])
@@ -17453,6 +17520,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                    "unwritable; check Settings, Connections."}, 500)
         except Exception:
             logger.exception("CRM lead op failed")
+            _forget_store(CRM_PATH)   # a half-made change must not be served
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/crm/stages", methods=["POST"])
@@ -17564,6 +17632,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                    "unwritable; check Settings, Connections."}, 500)
         except Exception:
             logger.exception("CRM stages op failed")
+            _forget_store(CRM_PATH)   # a half-made change must not be served
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
     # ---- Files routes -----------------------------------------------------
