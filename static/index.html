@@ -284,7 +284,12 @@
         .main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
         .topbar { height: var(--topbar-h); flex-shrink: 0; border-bottom: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary);
             display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-6); position: relative; z-index: 5; }
-        .topbar h1 { font-size: var(--text-sm); font-weight: var(--weight-medium); margin: 0; letter-spacing: normal; }
+        /* One line, always. A conversation title is user-written and can run to
+           sixty characters; at 375px that wrapped to three lines inside a
+           48px bar and spilled over its border. min-width:0 lets the flex item
+           shrink past its text; the full title rides in the tooltip. */
+        .topbar h1 { font-size: var(--text-sm); font-weight: var(--weight-medium); margin: 0; letter-spacing: normal;
+            min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .topbar .spacer { flex: 1; }
         .menu-btn { display: none; }
         .btn { border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); color: var(--text-primary); border-radius: var(--radius-sm);
@@ -19805,6 +19810,8 @@ Projected Image UK"></textarea>
             host.append(list, el('div', 'files-hint',
                 'The newest actions are at the top. The feed shows the last 600; the full ledger keeps 8,000 and is in every backup.'));
         }
+        /* The bar shows one line of it; the tooltip carries all of it. */
+        function setViewTitle(text) { const h = $('view-title'); h.textContent = text; h.title = text; }
         function currentView() {
             const n = document.querySelector('.nav-item.active');
             return (n && n.dataset.view) || '';
@@ -19817,7 +19824,7 @@ Projected Image UK"></textarea>
             });
             ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'connector', 'crm', 'loans', 'mail', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
             const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', connector: 'Xero sync', crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
-            $('view-title').textContent = titles[v] || (active() ? (active().title || 'Chat') : 'Chat');
+            setViewTitle(titles[v] || (active() ? (active().title || 'Chat') : 'Chat'));
             /* Beta rides the topbar title as well: it is the only label still
                on screen once the page is scrolled. */
             if (BETA_TABS.indexOf(v) >= 0) $('view-title').append(el('span', 'beta-tag', 'Beta'));

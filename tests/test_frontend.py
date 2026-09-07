@@ -4603,6 +4603,25 @@ def t_focus_is_declared_once_per_kind():
        "custom-drawn checkbox, and the menu item which insets it), and nowhere else")
 
 
+@test
+def t_the_header_is_one_implementation_with_one_collapse_point():
+    """Measured 2026-09-07: one .topbar, 48px on every view at 375, 640, 760,
+    761, 900 and 1200, no overflow, no overlap. The one defect was a long
+    conversation title wrapping to 63px inside the 48px bar."""
+    ok(HTML.count('class="topbar"') == 1 and CSS.count(".topbar {") == 1, "one header, one rule")
+    ok(".topbar { height: var(--topbar-h);" in CSS and "--topbar-h: 48px" in CSS, "at the shell's height token")
+    h1 = CSS.split(".topbar h1 {")[1].split("}")[0]
+    for prop in ("min-width: 0", "overflow: hidden", "text-overflow: ellipsis", "white-space: nowrap"):
+        ok(prop in h1, "the title truncates rather than wraps: " + prop)
+    ok("function setViewTitle(text) { const h = $('view-title'); h.textContent = text; h.title = text; }" in SCRIPT,
+       "and the full title rides in the tooltip")
+    ok("$('view-title').textContent =" not in SCRIPT, "every writer goes through it")
+    collapse = re.findall(r"@media \(max-width: (\d+)px\)[^{]*\{[^@]*?\.menu-btn \{ display: inline-grid; \}", CSS)
+    ok(collapse == ["760"], "the menu button appears at exactly one width, 760: %s" % collapse)
+    ok(re.search(r"@media \(max-width: 760px\)[^@]*?\.sidebar \{ position: fixed;", CSS),
+       "and the sidebar leaves the flow in the same block")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
