@@ -213,12 +213,22 @@ def _boot_report() -> None:
     if not getattr(_c, "SHOPIFY_API_SECRET", ""):
         gaps.append("SHOPIFY_API_SECRET: session tokens and webhook signatures cannot be verified, "
                     "so the embedded app and the webhooks are off")
-    if not getattr(_c, "ANTHROPIC_API_KEY", ""):
-        gaps.append("ANTHROPIC_API_KEY: chat, overview, SEO and the audits are off")
     for g in gaps:
         logger.warning("config: %s", g)
     if not gaps:
         logger.info("config: complete (the full reference is docs/ENVIRONMENT.md)")
+    # The stores by size, and what the big ones cost to read. Said once, so a
+    # CRM that has quietly grown past what a per-request parse can carry is
+    # a line in the boot log rather than a feeling at the desk.
+    try:
+        big = [r for r in _c._store_report() if r["bytes"] >= _c.STORE_REPORT_PARSE_MIN]
+        if big:
+            logger.info("stores: " + ", ".join(
+                f"{r['name']} {r['bytes'] / 1048576:.1f} MB"
+                + (f" (parsed in {r['parse_ms']:.0f} ms)" if r.get("parse_ms") is not None else "")
+                for r in big))
+    except Exception:
+        logger.exception("stores: the size report failed; continuing")
 
 
 def build_app():

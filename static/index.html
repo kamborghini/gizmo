@@ -20207,6 +20207,18 @@ Projected Image UK"></textarea>
             host.append(connRow('Data storage', s.volume && s.volume.ok ? 'on' : 'off',
                 s.volume && s.volume.ok ? 'The data disk is healthy. Back it up below now and then.'
                     : 'The data disk is NOT writable: nothing new is being saved. ' + ((s.volume && s.volume.detail) || '')));
+            /* The stores by size, with the read cost of anything over a
+               megabyte. Most stores are read from disk on every request that
+               needs them, so a store that has grown is felt as a slow desk
+               long before anybody knows why; this is the number, in advance. */
+            const big = ((s.volume && s.volume.stores) || []).filter(r => r.bytes >= 1048576);
+            if (big.length) {
+                const slow = big.some(r => (r.parse_ms || 0) > 150);
+                host.append(connRow('Store sizes', slow ? 'mid' : 'on',
+                    big.map(r => r.name + ' ' + (r.bytes / 1048576).toFixed(1) + ' MB'
+                        + (r.parse_ms != null ? ' (read in ' + Math.round(r.parse_ms) + ' ms)' : '')).join(' \u00b7 ')
+                    + (slow ? '. A save on a store this size rewrites all of it; worth mentioning.' : '')));
+            }
             // Email alerts
             host.append(connRow('Email alerts', s.email_alerts && s.email_alerts.ok ? 'on' : 'mid',
                 s.email_alerts && s.email_alerts.ok ? 'Alerts and failures also reach your inbox.'

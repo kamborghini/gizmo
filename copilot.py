@@ -816,6 +816,44 @@ def _store_writable(path: str) -> bool:
     return True
 
 
+STORE_REPORT_PARSE_MIN = 1024 * 1024     # measure the parse of anything this big
+
+
+def _store_report(parse: bool = True) -> list:
+    """The stores on the volume, largest first, with the cost of reading the
+    big ones. Most stores are re-read from disk on every request that needs
+    them; the CRM, the dispatch state and the production state each have a
+    dozen or more call sites and no cache. Whether that matters is a number,
+    not an opinion: this is the number, at boot and in Settings, so the day
+    a save on the CRM is slow it is visible before somebody feels it."""
+    data_dir = os.path.dirname(SCHEDULE_PATH) or "/data"
+    out = []
+    try:
+        names = os.listdir(data_dir)
+    except OSError:
+        return out
+    for n in names:
+        if not n.endswith((".json", ".jsonl")):
+            continue
+        p = os.path.join(data_dir, n)
+        try:
+            size = os.path.getsize(p)
+        except OSError:
+            continue
+        row = {"name": n, "bytes": size}
+        if parse and n.endswith(".json") and size >= STORE_REPORT_PARSE_MIN:
+            t0 = time.perf_counter()
+            try:
+                with open(p, encoding="utf-8") as fh:
+                    json.load(fh)
+                row["parse_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            except Exception:
+                row["parse_ms"] = None
+        out.append(row)
+    out.sort(key=lambda r: -r["bytes"])
+    return out[:12]
+
+
 class StoreUnwritable(RuntimeError):
     """A store the poison guard has paused. The one writer raises this; a
     caller that would rather stay silent checks _store_writable first and
@@ -21498,7 +21536,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                          "available": bool(worldoptions),
                          "fulfillment": bool(_fulfillment_writer is not None)},
             "volume": {"ok": vol_ok, "detail": vol_detail,
-                       "poisoned": sorted(os.path.basename(p) for p in _poisoned_stores)},
+                       "poisoned": sorted(os.path.basename(p) for p in _poisoned_stores),
+                       # Sizes, and the parse cost of anything over a megabyte:
+                       # the stores are read from disk per request, so this is
+                       # what a slow CRM save would show up as, before it does.
+                       "stores": _store_report()},
             "email_alerts": {"ok": bool(RESEND_API_KEY and ALERT_EMAIL_TO)},
             # Whether the long-lived credentials on the volume are encrypted.
             # Read from the FILES, not from the environment: a key that is set

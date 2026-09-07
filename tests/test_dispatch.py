@@ -17669,6 +17669,28 @@ def t_the_environment_reference_is_generated_from_the_code():
     eq(sorted(ex - names), [], "env.example names a variable nothing reads")
 
 
+@test
+def t_the_stores_are_measured_not_guessed():
+    """Most stores are parsed from disk on every request that needs them. The
+    audit could not say whether that costs anything, because the volume is
+    not visible from the code. Now the app says it: sizes at boot and in
+    Settings, with the read cost of anything over a megabyte."""
+    data_dir = os.path.dirname(copilot.SCHEDULE_PATH)
+    big = os.path.join(data_dir, "measured_big.json")
+    open(big, "w", encoding="utf-8").write(json.dumps({"rows": [{"i": i, "pad": "x" * 40} for i in range(25000)]}))
+    try:
+        rep = copilot._store_report()
+        row = next(r for r in rep if r["name"] == "measured_big.json")
+        ok(row["bytes"] >= 1024 * 1024, "a store over a megabyte is listed with its size: %d" % row["bytes"])
+        ok(isinstance(row.get("parse_ms"), float) and row["parse_ms"] >= 0, "and its read cost was measured")
+        eq(rep[0]["bytes"], max(r["bytes"] for r in rep), "largest first")
+        ok(all("parse_ms" not in r for r in rep if r["bytes"] < 1024 * 1024), "small stores are not parsed for it")
+        s = post("/api/status", {}).json()
+        ok(any(r["name"] == "measured_big.json" for r in s["volume"]["stores"]), "and Settings can see it")
+    finally:
+        os.remove(big)
+
+
 for fn in TESTS:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a
