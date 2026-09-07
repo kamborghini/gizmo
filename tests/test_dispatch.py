@@ -13781,8 +13781,10 @@ def t_a_collection_belongs_to_the_day_the_van_comes():
        "while a second parcel for the same day rides the one already booked")
     # And the record keeps the ready date so the day can be worked out later.
     src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
-    eq(src.count('"ready_date": _ready_dmy'), 2,
-       "both booking paths store the day the courier was asked to come")
+    eq(src.count('"ready_date": _ready_dmy'), 1,
+       "the record stores the day the courier was asked to come, in the one place records are made")
+    eq(src.count("await _book_and_record("), 2,
+       "and both booking paths make their record there")
 
 
 @test
@@ -13842,8 +13844,9 @@ def t_a_custom_shipment_books_the_collection_its_courier_needs():
     src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
     eq(src.count("collection_option=str(cfg.get(\"collection_option\") or \"\")"), 0,
        "no booking path sends the standing setting regardless of courier")
-    eq(src.count("_record_collection("), 3,
-       "one writer, called from both booking paths")
+    eq(src.count("_record_collection("), 2,
+       "one writer, called from the one booking spine both paths go through")
+    eq(src.count("await _book_and_record("), 2, "which both paths do")
     ok("_record_collection(shipment.get(\"carrier_name\") or option.get(\"carrier_name\")" in src,
        "including the custom one")
     # The writer only files a van when one was actually asked for.
@@ -13999,7 +14002,7 @@ def t_a_booked_collection_is_written_down_before_anything_can_fail():
     the stretch that must not raise. If it were not, a crash between booking and
     recording would let the next parcel book a second pickup."""
     src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
-    i = src.index("_record_collection(option.get(\"carrier_name\"), _asked_collection")
+    i = src.index("_record_collection(shipment.get(\"carrier_name\") or option.get(\"carrier_name\")")
     charged = src.index("From here the courier is BOOKED and the account is charged")
     ok(charged < i, "it is recorded after the booking is known to have succeeded")
     seg = src[src.index("def _record_collection("):][:1200]

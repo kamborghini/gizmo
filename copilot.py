@@ -5916,185 +5916,47 @@ async def _custom_book_locked(registry: dict, key: str, option: dict, dest: dict
     international = str(dest.get("country") or "").upper() not in ("GB", "")
     customs = None
     if international:
-        if not str(cfg.get("eori") or "").strip():
-            return {"error": "International shipments need your EORI number. Add it under "
-                             "Settings, Shipping."}
-        goods = []
-        for g in ((customs_body or {}).get("lines") or []):
-            if not isinstance(g, dict):
-                continue
-            try:
-                q = int(float(g.get("quantity") or 0))
-                up = float(g.get("unit_price") or 0)
-            except (TypeError, ValueError):
-                continue
-            desc = str(g.get("description") or "").strip()
-            if not desc or q <= 0 or up < 0:
-                continue
-            goods.append({"description": desc, "quantity": q, "unit_price": round(up, 2),
-                          "weight": g.get("weight") or "",
-                          "hs": str(g.get("hs") or cfg.get("default_hs_code") or "").strip(),
-                          "country": str(g.get("country") or "GB").strip()})
-        if not goods:
-            return {"error": "International shipments need at least one customs goods line "
-                             "(what it is, how many, unit value). Fill in the customs section "
-                             "before booking."}
         # Not remembered per product the way an order's lines are: these have no
-        # variant behind them, so they would land under a title key and pollute the
-        # prices that prefill real orders.
-        total = round(sum(g["quantity"] * g["unit_price"] for g in goods), 2)
-        boxes = _spread_value(boxes, total)
-        total_weight = round(sum(float(bx.get("weight") or 0) for bx in boxes), 3)
-        total_qty = sum(g["quantity"] for g in goods) or 1
-        for g in goods:
-            if not g.get("weight"):
-                g["weight"] = round(total_weight * g["quantity"] / total_qty, 3)
-        customs = {
-            "eori": cfg.get("eori"), "vat": cfg.get("vat_number"),
-            "invoice_type": "Help_Me_Generate",
-            "export_reason": cfg.get("export_reason") or "Sale",
-            "duties_payor": cfg.get("duties_payor") or "Duties_To_Be_Paid_By_Receiver",
-            "trade_term": cfg.get("trade_term") or "",
-            "invoice_number": reference,
-            "receiver_tax_id": str((customs_body or {}).get("receiver_tax_id") or "")[:40],
-            "receiver_company_number": str((customs_body or {}).get("receiver_company_number") or "")[:40],
-            "goods": goods, "total_value": total,
-        }
-
-    dropoff_shop = None
-    if cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages":
-        shops = option.get("shops") or []
-        if shops and isinstance(shops[0], dict):
-            dropoff_shop = shops[0]
-    delivery_shop = None
-    if option.get("delivery_dropoff"):
-        dshops = option.get("delivery_shops") or []
-        if dshops and isinstance(dshops[0], dict):
-            delivery_shop = dshops[0]
-        else:
-            return {"error": "This is a collect-from-shop service but World Options did not "
-                             "return a shop for this address. Pick a to-the-door service instead."}
-
-    _ready_dmy, _ready_hm = _collection_ready(cfg)
-    # The same per-carrier arrangement an order booking gets. This used to send
-    # the standing setting whatever the courier was, so a DHL custom shipment
-    # asked for whatever UPS is set to.
-    _asked_collection = _collection_plan(cfg, option.get("carrier_name"), None,
-                                         _ready_dmy)["arrangement"]
-    try:
-        shipment = await _book_with_one_retry(
-            option, origin, dest, boxes, currency=currency, reference=reference,
-            ready_time=_ready_hm, ready_date=_ready_dmy,
-            close_time=str(cfg.get("close_time") or ""),
-            collection_option=_asked_collection,
-            insurance=insurance,
-            signature=(option.get("signature_type") or signature),
-            quoted_signature=(option.get("signature_type") or ""),
-            dropoff_shop=dropoff_shop, customs=customs,
-            description=(str(contents or "").strip()[:100] or "Goods"),
-            delivery_shop=delivery_shop)
-    except worldoptions.WorldOptionsError as e:
-        msg = str(e)
-        if getattr(e, "retried", False):
-            msg += " The app already retried once for you; if this keeps happening it is a World Options outage."
-        out = {"error": msg}
-        tech = {}
-        if getattr(e, "raw", ""):
-            tech["reply"] = str(e.raw)[:2000]
-        tech["sent"] = bool(getattr(e, "envelope", "")) or bool(getattr(e, "sent", False))
-        if getattr(e, "envelope", ""):
-            tech["request"] = str(e.envelope)[:20000]
-        if tech:
-            tech["when"] = datetime.now(timezone.utc).isoformat()
-            # There is no order number to file this under, so name the shipment by
-            # where it was going: an unattributable envelope is no evidence at all.
-            tech["order"] = reference + " to " + str(dest.get("postcode") or "")
-            out["tech"] = tech
-            _record_wo_failure(tech)
-        return out
-    except Exception as e:
-        logger.exception("custom dispatch booking failed")
-        _record_error("booking a courier", e)
-        tech = {"reply": repr(e)[:2000], "when": datetime.now(timezone.utc).isoformat(),
-                "order": reference + " to " + str(dest.get("postcode") or "")}
-        _record_wo_failure(tech)
-        return {"error": "The booking failed at World Options. Check the server logs; "
-                         "no charge is confirmed until a tracking number comes back.",
-                "tech": tech}
-    if not shipment.get("tracking_number"):
-        return {"error": "World Options accepted the request but returned no tracking number. "
-                         "Check your World Options portal before retrying so you are not charged twice."}
-
-    # From here the courier is BOOKED and the account is charged. Nothing below
-    # may raise: an exception now would be reported as "the booking failed" and
-    # the operator would book (and pay for) a second label.
-    try:
-        shipment["labels"] = await _resolve_label_links(shipment.get("labels") or [])
-    except Exception:
-        logger.exception("label download failed after booking %s; keeping the links", key)
-    try:
-        shipment["labels"] = _with_print_images(shipment.get("labels") or [])
-    except Exception:
-        logger.exception("label render failed after booking %s; Download still works", key)
-    try:
-        _save_dispatch_labels(key, shipment.get("labels") or [])
-    except Exception:
-        logger.exception("saving labels failed after a successful booking, %s", key)
+        # variant behind them, so they would land under a title key and pollute
+        # the prices that prefill real orders.
+        customs, boxes, why = _customs_dossier(cfg, customs_body, boxes, reference, "shipments")
+        if why:
+            return {"error": why}
+    dropoff_shop, delivery_shop, why = _shops_for(cfg, option)
+    if why:
+        return {"error": why}
 
     who = (dest.get("company") or dest.get("name")
            or " ".join(x for x in [dest.get("firstname"), dest.get("lastname")] if x) or "")
-    entry = {
-        "tracking_number": shipment["tracking_number"],
-        "carrier_name": shipment.get("carrier_name"),
-        "carrier_known": shipment.get("carrier_known") or shipment.get("carrier_name") or "",
-        "carrier_label": (shipment.get("carrier_label") or option.get("carrier_label")
-                          or worldoptions.carrier_display(shipment.get("carrier_name") or "")),
-        "service_name": shipment.get("service_name"),
-        "service_code": option.get("service_type_code") or "",
-        "product_code": option.get("product_code") or "",
-        "amount": shipment.get("amount"),
-        "amount_ex_vat": option.get("amount_ex_vat"),
-        # The manifest prints this, so it must read as something, not as the key.
-        "order_name": reference,
-        "by": str(by or "")[:40],
-        "customer": who,
-        # Genuinely unknown rather than zero: nobody paid this app for carriage.
-        "shipping_paid": "",
-        "currency": shipment.get("currency"),
-        "dispatched_at": datetime.now(timezone.utc).isoformat(),
-        # There is no order to fulfil and no customer to email, and these two
-        # fields are what would otherwise make that happen later.
-        "fulfilled": False,
-        "notify": False,
-        "notified": False,
-        "has_label": bool(shipment.get("labels")),
-        "label_report": shipment.get("label_report") or [],
-        "collection_date": shipment.get("collection_date") or "",
-        # The day the courier was asked to come. A collection belongs to THIS
-        # date, not to the moment the booking happened: book after the close on
-        # a Friday and the van comes Monday.
-        "ready_date": _ready_dmy,
-        "insured": insurance or "",
-        "international": international,
-        "dropoff": (dropoff_shop or {}).get("name") or "",
-        "delivery_shop": (delivery_shop or {}).get("name") or "",
-        "custom": True,
-        "contents": str(contents or "").strip()[:100],
-        "declared": declared,
-        "address": {k: dest.get(k, "") for k in
-                    ("name", "company", "street", "street2", "city", "state",
-                     "postcode", "country", "phone", "email")},
-    }
-    _record_collection(shipment.get("carrier_name") or option.get("carrier_name"),
-                       _asked_collection, _ready_dmy, reference,
-                       shipment.get("service_name") or option.get("carrier_label") or "")
-    book_note = ""
-    try:
-        _record_dispatch(key, entry)
-    except Exception:
-        logger.exception("recording the dispatch failed after a successful booking, %s", key)
-        book_note = ("The label was booked but the app could not save it. Write the tracking "
-                     "number down before closing this window.")
+    booked = await _book_and_record(
+        # There is no order number to file a failure under, so name the
+        # shipment by where it was going: an unattributable envelope is no
+        # evidence at all.
+        key=key, order_label=reference + " to " + str(dest.get("postcode") or ""),
+        log_label="custom dispatch",
+        option=option, origin=origin, dest=dest, boxes=boxes, cfg=cfg, currency=currency,
+        reference=reference, description=(str(contents or "").strip()[:100] or "Goods"),
+        insurance=insurance, signature=signature, collection_option="", customs=customs,
+        dropoff_shop=dropoff_shop, delivery_shop=delivery_shop, international=international,
+        by=by, entry_extra={
+            # The manifest prints this, so it must read as something, not as the key.
+            "order_name": reference,
+            "customer": who,
+            # Genuinely unknown rather than zero: nobody paid this app for carriage.
+            "shipping_paid": "",
+            # There is no order to fulfil and no customer to email, and this
+            # field is what would otherwise make that happen later.
+            "notify": False,
+            "custom": True,
+            "contents": str(contents or "").strip()[:100],
+            "declared": declared,
+            "address": {k: dest.get(k, "") for k in
+                        ("name", "company", "street", "street2", "city", "state",
+                         "postcode", "country", "phone", "email")},
+        })
+    if booked.get("error"):
+        return booked
+    shipment, entry, book_note = booked["shipment"], booked["entry"], booked["book_note"]
 
     return {
         "ok": True,
@@ -6395,6 +6257,214 @@ def _record_collection(carrier: str, arrangement: str, ready_dmy: str,
         logger.exception("could not record the collection for %s", carrier)
 
 
+def _customs_dossier(cfg: dict, customs_body: Optional[dict], boxes: list,
+                     reference: str, noun: str) -> tuple:
+    """(customs, boxes, error) for an international shipment: the goods lines
+    from the desk, the settings' EORI/VAT/export defaults, the boxes re-spread
+    so the per-parcel declared values sum to the invoice total, and each goods
+    line given its weight share. One function for both booking paths, which
+    carried two copies of it and would have drifted apart at the next edit.
+    `noun` is "orders" or "shipments", for the message a person reads."""
+    if not str(cfg.get("eori") or "").strip():
+        return None, boxes, ("International " + noun + " need your EORI number. Add it under "
+                             "Settings, Shipping, International, then try again.")
+    lines = (customs_body or {}).get("lines") if isinstance(customs_body, dict) else None
+    goods = []
+    for g in (lines or []):
+        if not isinstance(g, dict):
+            continue
+        try:
+            q = int(float(g.get("quantity") or 0))
+            up = float(g.get("unit_price") or 0)
+        except (TypeError, ValueError):
+            continue
+        desc = str(g.get("description") or "").strip()
+        if not desc or q <= 0 or up < 0:
+            continue
+        goods.append({"description": desc, "quantity": q, "unit_price": round(up, 2),
+                      "weight": g.get("weight") or "",
+                      "hs": str(g.get("hs") or cfg.get("default_hs_code") or "").strip(),
+                      "country": str(g.get("country") or "GB").strip()})
+    if not goods:
+        return None, boxes, ("International " + noun + " need at least one customs goods line "
+                             "(what it is, how many, unit value). Fill in the customs section "
+                             "before booking.")
+    total = round(sum(g["quantity"] * g["unit_price"] for g in goods), 2)
+    # The dossier total is the single source of truth: re-spread the boxes so
+    # the per-parcel declared values sum to the invoice total, and give each
+    # goods line its weight share (WO rejects nothing, but 0 kg lines make
+    # customs paperwork look wrong).
+    boxes = _spread_value(boxes, total)
+    total_weight = round(sum(float(bx.get("weight") or 0) for bx in boxes), 3)
+    total_qty = sum(g["quantity"] for g in goods) or 1
+    for g in goods:
+        if not g.get("weight"):
+            g["weight"] = round(total_weight * g["quantity"] / total_qty, 3)
+    customs = {
+        "eori": cfg.get("eori"), "vat": cfg.get("vat_number"),
+        "invoice_type": "Help_Me_Generate",
+        "export_reason": cfg.get("export_reason") or "Sale",
+        "duties_payor": cfg.get("duties_payor") or "Duties_To_Be_Paid_By_Receiver",
+        "trade_term": cfg.get("trade_term") or "",
+        "invoice_number": reference,
+        "receiver_tax_id": str((customs_body or {}).get("receiver_tax_id") or "")[:40],
+        "receiver_company_number": str((customs_body or {}).get("receiver_company_number") or "")[:40],
+        "goods": goods, "total_value": total,
+    }
+    return customs, boxes, ""
+
+
+def _shops_for(cfg: dict, option: dict) -> tuple:
+    """(dropoff_shop, delivery_shop, error). When the merchant drops off, the
+    option's nearest offered shop; when the service delivers to a shop the
+    customer collects from, that shop must travel with the booking."""
+    dropoff_shop = None
+    if cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages":
+        shops = option.get("shops") or []
+        if shops and isinstance(shops[0], dict):
+            dropoff_shop = shops[0]
+    delivery_shop = None
+    if option.get("delivery_dropoff"):
+        dshops = option.get("delivery_shops") or []
+        if dshops and isinstance(dshops[0], dict):
+            delivery_shop = dshops[0]
+        else:
+            return None, None, ("This is a collect-from-shop service but World Options did not "
+                                "return a shop for this address. Pick a to-the-door service instead.")
+    return dropoff_shop, delivery_shop, ""
+
+
+async def _book_and_record(*, key, order_label: str, log_label: str, option: dict,
+                           origin: dict, dest: dict, boxes: list, cfg: dict, currency: str,
+                           reference: str, description: str, insurance: str, signature: str,
+                           collection_option: str, customs: Optional[dict], dropoff_shop,
+                           delivery_shop, international: bool, by: str, entry_extra: dict) -> dict:
+    """Book at World Options and write the record: everything about a booking
+    that is the same whether a Shopify order or an ad-hoc address is behind it.
+    The two paths each carried their own copy - 550 lines that differed in ten
+    places, most of them by accident. What differs on purpose stays with the
+    caller: what the parcel is and where it goes, what goes into the record
+    beyond the booking itself (`entry_extra`), and what happens afterwards.
+
+    `key` is the dispatch record's key (the order id, or the ad-hoc key);
+    `order_label` is how a failure names the shipment in the evidence file.
+
+    Returns {"error": ...} up to the moment the courier is booked. After that
+    nothing raises and nothing returns an error: the account is charged, and
+    a failure reported now would have the operator book a second label."""
+    _ready_dmy, _ready_hm = _collection_ready(cfg)
+    # What this courier is asked for. A one-off choice at the desk wins;
+    # otherwise the courier's own arrangement, softened to "already scheduled"
+    # when today has already booked one with them.
+    _plan = _collection_plan(cfg, option.get("carrier_name"), None, _ready_dmy)
+    _asked_collection = str(collection_option or _plan["arrangement"])
+    try:
+        shipment = await _book_with_one_retry(
+            option, origin, dest, boxes, currency=currency, reference=reference,
+            ready_time=_ready_hm, ready_date=_ready_dmy,
+            close_time=str(cfg.get("close_time") or ""),
+            # A collection rides on a shipment - World Options has no endpoint
+            # for booking one on its own - so "book a collection" means asking
+            # for one alongside this parcel.
+            collection_option=_asked_collection,
+            insurance=insurance,
+            # The option's own signature wins: it is what the displayed price
+            # was quoted under.
+            signature=(option.get("signature_type") or signature),
+            quoted_signature=(option.get("signature_type") or ""),
+            dropoff_shop=dropoff_shop, customs=customs,
+            description=description, delivery_shop=delivery_shop)
+    except worldoptions.WorldOptionsError as e:
+        # Hand the evidence to the person standing at the desk. Their errors
+        # name a .NET parameter rather than a field, so the request is the only
+        # way to tell which field they meant, and waiting on a developer to
+        # read a server log is not a dispatch process.
+        msg = str(e)
+        if getattr(e, "retried", False):
+            msg += " The app already retried once for you; if this keeps happening it is a World Options outage."
+        out = {"error": msg}
+        tech = _wo_tech(e, order_label)
+        if tech:
+            out["tech"] = tech
+            _record_wo_failure(tech)
+        return out
+    except Exception as e:
+        logger.exception("%s booking failed", log_label)
+        _record_error("booking a courier", e)
+        tech = {"reply": repr(e)[:2000], "when": datetime.now(timezone.utc).isoformat(),
+                "order": order_label}
+        _record_wo_failure(tech)
+        return {"error": "The booking failed at World Options. Check the server logs; "
+                         "no charge is confirmed until a tracking number comes back.",
+                "tech": tech}
+    if not shipment.get("tracking_number"):
+        return {"error": "World Options accepted the request but returned no tracking number. "
+                         "Check your World Options portal before retrying so you are not charged twice."}
+
+    # From here the courier is BOOKED and the account is charged. Nothing below
+    # may raise: an exception now would be reported as "the booking failed" and
+    # the operator would book (and pay for) a second label.
+    _record_collection(shipment.get("carrier_name") or option.get("carrier_name"),
+                       _asked_collection, _ready_dmy, reference,
+                       shipment.get("service_name") or option.get("service_name")
+                       or option.get("carrier_label") or "")
+    try:
+        shipment["labels"] = await _resolve_label_links(shipment.get("labels") or [])
+    except Exception:
+        logger.exception("label download failed after booking %s; keeping the links", order_label)
+    try:
+        shipment["labels"] = _with_print_images(shipment.get("labels") or [])
+    except Exception:
+        logger.exception("label render failed after booking %s; Download still works", order_label)
+    try:
+        _save_dispatch_labels(key, shipment.get("labels") or [])
+    except Exception:
+        logger.exception("saving labels failed after a successful booking, %s", order_label)
+    entry = {
+        "tracking_number": shipment["tracking_number"],
+        "carrier_name": shipment.get("carrier_name"),
+        "carrier_known": shipment.get("carrier_known") or shipment.get("carrier_name") or "",
+        # The readable name is stored beside the booking enum: the queue shows
+        # this weeks later, and re-deriving it needs the quote that is long gone.
+        "carrier_label": (shipment.get("carrier_label") or option.get("carrier_label")
+                          or worldoptions.carrier_display(shipment.get("carrier_name") or "")),
+        "service_name": shipment.get("service_name"),
+        "service_code": option.get("service_type_code") or "",
+        "product_code": option.get("product_code") or "",
+        "amount": shipment.get("amount"),
+        "amount_ex_vat": option.get("amount_ex_vat"),
+        # Which staff member booked it: with one operator this is noise, with
+        # two it is the answer to "who booked this and why is it wrong".
+        "by": str(by or "")[:40],
+        "customer": (dest.get("company") or dest.get("name")
+                     or " ".join(x for x in [dest.get("firstname"), dest.get("lastname")] if x) or ""),
+        "currency": shipment.get("currency"),
+        "dispatched_at": datetime.now(timezone.utc).isoformat(),
+        "fulfilled": False,
+        "notified": False,
+        "has_label": bool(shipment.get("labels")),
+        "label_report": shipment.get("label_report") or [],
+        "collection_date": shipment.get("collection_date") or "",
+        # The day the courier was asked to come. A collection belongs to THIS
+        # date, not to the moment the booking happened: book after the close on
+        # a Friday and the van comes Monday.
+        "ready_date": _ready_dmy,
+        "insured": insurance or "",
+        "international": international,
+        "dropoff": (dropoff_shop or {}).get("name") or "",
+        "delivery_shop": (delivery_shop or {}).get("name") or "",
+        **entry_extra,
+    }
+    book_note = ""
+    try:
+        _record_dispatch(key, entry)
+    except Exception:
+        logger.exception("recording the dispatch failed after a successful booking, %s", order_label)
+        book_note = ("The label was booked but the app could not save it. Write the tracking "
+                     "number down before closing this window.")
+    return {"ok": True, "shipment": shipment, "entry": entry, "book_note": book_note}
+
+
 async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: list,
                                 notify, force: bool, insurance: str, signature: str,
                                 customs_body: Optional[dict], by: str = "",
@@ -6470,198 +6540,39 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
     international = str(dest.get("country") or "").upper() not in ("GB", "")
     customs = None
     if international:
-        if not str(cfg.get("eori") or "").strip():
-            return {"error": "International orders need your EORI number. Add it under "
-                             "Shipping settings, International, then try again."}
         lines = (customs_body or {}).get("lines") if isinstance(customs_body, dict) else None
         # Remember what was typed BEFORE the booking is attempted: the values are
         # right whether or not World Options accepts the shipment, and a failed
         # booking is exactly when nobody wants to retype them.
         _remember_customs(lines or [])
-        goods = []
-        for g in (lines or []):
-            if not isinstance(g, dict):
-                continue
-            try:
-                q = int(float(g.get("quantity") or 0))
-                up = float(g.get("unit_price") or 0)
-            except (TypeError, ValueError):
-                continue
-            desc = str(g.get("description") or "").strip()
-            if not desc or q <= 0 or up < 0:
-                continue
-            goods.append({"description": desc, "quantity": q, "unit_price": round(up, 2),
-                          "weight": g.get("weight") or "",
-                          "hs": str(g.get("hs") or cfg.get("default_hs_code") or "").strip(),
-                          "country": str(g.get("country") or "GB").strip()})
-        if not goods:
-            return {"error": "International orders need at least one customs goods line "
-                             "(what it is, how many, unit value). Fill in the customs "
-                             "section before booking."}
-        total = round(sum(g["quantity"] * g["unit_price"] for g in goods), 2)
-        # The dossier total is the single source of truth: re-spread the boxes so
-        # the per-parcel declared values sum to the invoice total, and give each
-        # goods line its weight share (WO rejects nothing, but 0 kg lines make
-        # customs paperwork look wrong).
-        boxes = _spread_value(boxes, total)
-        total_weight = round(sum(float(bx.get("weight") or 0) for bx in boxes), 3)
-        total_qty = sum(g["quantity"] for g in goods) or 1
-        for g in goods:
-            if not g.get("weight"):
-                g["weight"] = round(total_weight * g["quantity"] / total_qty, 3)
-        customs = {
-            "eori": cfg.get("eori"), "vat": cfg.get("vat_number"),
-            "invoice_type": "Help_Me_Generate",
-            "export_reason": cfg.get("export_reason") or "Sale",
-            "duties_payor": cfg.get("duties_payor") or "Duties_To_Be_Paid_By_Receiver",
-            "trade_term": cfg.get("trade_term") or "",
-            "invoice_number": reference,
-            "receiver_tax_id": str((customs_body or {}).get("receiver_tax_id") or "")[:40],
-            "receiver_company_number": str((customs_body or {}).get("receiver_company_number") or "")[:40],
-            "goods": goods, "total_value": total,
-        }
-
-    # Parcel-shop drop-off: when the merchant drops off, book against the
-    # option's nearest offered shop.
-    dropoff_shop = None
-    if cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages":
-        shops = option.get("shops") or []
-        if shops and isinstance(shops[0], dict):
-            dropoff_shop = shops[0]
-
-    # An Access Point service delivers to a shop the customer collects from, so the
-    # chosen shop must travel with the booking.
-    delivery_shop = None
-    if option.get("delivery_dropoff"):
-        dshops = option.get("delivery_shops") or []
-        if dshops and isinstance(dshops[0], dict):
-            delivery_shop = dshops[0]
-        else:
-            return {"error": "This is a collect-from-shop service but World Options did not "
-                             "return a shop for this address. Pick a to-the-door service instead."}
-
-    _ready_dmy, _ready_hm = _collection_ready(cfg)
-    # What this courier is asked for. A one-off choice at the desk wins;
-    # otherwise the courier's own arrangement, softened to "already scheduled"
-    # when today has already booked one with them.
-    _plan = _collection_plan(cfg, option.get("carrier_name"), None, _ready_dmy)
-    _asked_collection = str(collection_option or _plan["arrangement"])
-    try:
-        shipment = await _book_with_one_retry(option, origin, dest, boxes, currency=currency, reference=reference,
-                                           ready_time=_ready_hm,
-                                           ready_date=_ready_dmy,
-                                           close_time=str(cfg.get("close_time") or ""),
-                                           # This job's arrangement if one was chosen at the
-                                           # desk, otherwise the standing setting. A collection
-                                           # rides on a shipment - World Options has no endpoint
-                                           # for booking one on its own - so "book a collection"
-                                           # means asking for one alongside this parcel.
-                                           collection_option=_asked_collection,
-                                           insurance=insurance,
-                                           # The option's own signature wins: it is what the
-                                           # displayed price was quoted under.
-                                           signature=(option.get("signature_type") or signature),
-                                           quoted_signature=(option.get("signature_type") or ""),
-                                           dropoff_shop=dropoff_shop, customs=customs,
-                                           description=_goods_summary(o),
-                                           delivery_shop=delivery_shop)
-    except worldoptions.WorldOptionsError as e:
-        # Hand the evidence to the person standing at the desk. Their errors name a
-        # .NET parameter rather than a field, so the request is the only way to tell
-        # which field they meant, and waiting on a developer to read a server log is
-        # not a dispatch process.
-        msg = str(e)
-        if getattr(e, "retried", False):
-            msg += " The app already retried once for you; if this keeps happening it is a World Options outage."
-        out = {"error": msg}
-        tech = _wo_tech(e, order_id)
-        if tech:
-            out["tech"] = tech
-            _record_wo_failure(tech)
-        return out
-    except Exception as e:
-        logger.exception("dispatch booking failed")
-        _record_error("booking a courier", e)
-        return {"error": "The booking failed at World Options. Check the server logs; "
-                         "no charge is confirmed until a tracking number comes back.",
-                "tech": {"reply": repr(e)[:2000],
-                         "when": datetime.now(timezone.utc).isoformat(),
-                         "order": str(order_id)}}
-    if not shipment.get("tracking_number"):
-        return {"error": "World Options accepted the request but returned no tracking number. "
-                         "Check your World Options portal before retrying so you are not charged twice."}
-
+        customs, boxes, why = _customs_dossier(cfg, customs_body, boxes, reference, "orders")
+        if why:
+            return {"error": why}
+    dropoff_shop, delivery_shop, why = _shops_for(cfg, option)
+    if why:
+        return {"error": why}
     do_notify = cfg.get("notify_customer", True) if notify is None else bool(notify)
 
-    # From here the courier is BOOKED and the account is charged. Nothing below
-    # may raise: an exception now would be reported as "the booking failed" and
-    # the operator would book (and pay for) a second label.
-    _record_collection(option.get("carrier_name"), _asked_collection, _ready_dmy,
-                       str(reference or order_id or ""),
-                       option.get("service_name") or option.get("carrier_label") or "")
-    try:
-        shipment["labels"] = await _resolve_label_links(shipment.get("labels") or [])
-    except Exception:
-        logger.exception("label download failed after booking, order %s; keeping the links", order_id)
-    try:
-        shipment["labels"] = _with_print_images(shipment.get("labels") or [])
-    except Exception:
-        logger.exception("label render failed after booking, order %s; Download still works", order_id)
-    try:
-        _save_dispatch_labels(int(order_id), shipment.get("labels") or [])
-    except Exception:
-        logger.exception("saving labels failed after a successful booking, order %s", order_id)
-    entry = {
-        "tracking_number": shipment["tracking_number"],
-        "carrier_name": shipment.get("carrier_name"),
-        "carrier_known": shipment.get("carrier_known") or shipment.get("carrier_name") or "",
-        # The readable name is stored beside the booking enum: the queue shows this
-        # weeks later, and re-deriving it needs the quote that is long gone.
-        "carrier_label": (shipment.get("carrier_label")
-                          or option.get("carrier_label")
-                          or worldoptions.carrier_display(shipment.get("carrier_name") or "")),
-        "service_name": shipment.get("service_name"),
-        "service_code": option.get("service_type_code") or "",
-        "product_code": option.get("product_code") or "",
-        "amount": shipment.get("amount"),
-        "amount_ex_vat": option.get("amount_ex_vat"),
-        # Who and what, so the end-of-day manifest reads without a Shopify join,
-        # and what the customer paid for delivery, so margin is one subtraction.
-        "order_name": str(o.get("name") or ("#" + str(order_id))),
-        # Which staff member booked it. Shopify's session token carries their user
-        # id in `sub`; with one operator this is noise, with two it is the answer to
-        # "who booked this and why is it wrong".
-        "by": str(by or "")[:40],
-        "customer": (dest.get("company") or dest.get("name")
-                     or " ".join(x for x in [dest.get("firstname"), dest.get("lastname")] if x)),
-        "shipping_paid": (lambda sl: str(sl[0].get("price") or "") if sl else "")(
-            o.get("shipping_lines") or []),
-        "currency": shipment.get("currency"),
-        "dispatched_at": datetime.now(timezone.utc).isoformat(),
-        "fulfilled": False,
-        # The merchant's email choice is made HERE but used when the order is
-        # marked made, which is when Shopify is actually told it shipped.
-        "notify": do_notify,
-        "notified": False,
-        "has_label": bool(shipment.get("labels")),
-        "label_report": shipment.get("label_report") or [],
-        "collection_date": shipment.get("collection_date") or "",
-        # The day the courier was asked to come. A collection belongs to THIS
-        # date, not to the moment the booking happened: book after the close on
-        # a Friday and the van comes Monday.
-        "ready_date": _ready_dmy,
-        "insured": insurance or "",
-        "international": international,
-        "dropoff": (dropoff_shop or {}).get("name") or "",
-        "delivery_shop": (delivery_shop or {}).get("name") or "",
-    }
-    book_note = ""
-    try:
-        _record_dispatch(int(order_id), entry)
-    except Exception:
-        logger.exception("recording the dispatch failed after a successful booking, order %s", order_id)
-        book_note = ("The label was booked but the app could not save it. Write the tracking "
-                     "number down before closing this window.")
+    booked = await _book_and_record(
+        key=int(order_id), order_label=str(order_id), log_label="dispatch",
+        option=option, origin=origin, dest=dest, boxes=boxes, cfg=cfg, currency=currency,
+        reference=reference, description=_goods_summary(o), insurance=insurance,
+        signature=signature, collection_option=collection_option, customs=customs,
+        dropoff_shop=dropoff_shop, delivery_shop=delivery_shop, international=international,
+        by=by, entry_extra={
+            # Who and what, so the end-of-day manifest reads without a Shopify
+            # join, and what the customer paid for delivery, so margin is one
+            # subtraction.
+            "order_name": str(o.get("name") or ("#" + str(order_id))),
+            "shipping_paid": (lambda sl: str(sl[0].get("price") or "") if sl else "")(
+                o.get("shipping_lines") or []),
+            # The merchant's email choice is made HERE but used when the order
+            # is marked made, which is when Shopify is actually told it shipped.
+            "notify": do_notify,
+        })
+    if booked.get("error"):
+        return booked
+    shipment, entry, book_note = booked["shipment"], booked["entry"], booked["book_note"]
 
     # Booking a label is preparation, not shipping: fulfilment waits until the
     # order is ALSO marked made. If it already is, this fulfils right now.
