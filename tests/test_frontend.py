@@ -964,7 +964,7 @@ def t_the_dead_elevation_token_is_gone():
     # control in the app silently lost its selected state while the guard stayed
     # green. A marker has to be asserted by its EFFECT, never by the presence of
     # a token that may resolve to nothing.
-    for sel in (r"\.lbl-segbtn\.on", r"\.seg button\.on"):
+    for sel in (r"\.lbl-segbtn:is\(\.on, \[aria-pressed=\"true\"\]\)", r"\.seg button:is\(\.on, \[aria-pressed=\"true\"\]\)"):
         rule = re.search(sel + r" \{[^}]*\}", HTML, re.S)
         ok(rule, "the %s rule is still there" % sel)
         shadow = re.search(r"box-shadow:\s*([^;}]+)", rule.group(0))
@@ -2118,10 +2118,10 @@ def t_the_menu_and_tabs_are_the_reference_measurements():
     tab = CSS.split(".ftab {")[1].split("}")[0]
     ok("height: 24px" in tab and "padding: var(--sp-0-5) var(--sp-1-5)" in tab, "tabs are 24px")
     ok("background: none" in tab, "with no filled pill")
-    on = CSS.split(".ftab.on {")[1].split("}")[0]
+    on = CSS.split(".ftab:is(.on, [aria-selected=\"true\"]) {")[1].split("}")[0]
     ok("color: var(--text-primary)" in on and "background" not in on,
        "the live tab takes full ink and still no fill behind it")
-    rule = CSS.split(".ftab.on::after {")[1].split("}")[0]
+    rule = CSS.split(".ftab:is(.on, [aria-selected=\"true\"])::after {")[1].split("}")[0]
     ok("height: 2px" in rule, "and a 2px rule under it")
     ok("var(--action-primary)" in rule, "painted in the near-black, not a tint that may resolve to nothing")
     ok("left: 0" in rule and "right: 0" in rule, "the width of the tab itself, as the reference draws it")
@@ -2162,9 +2162,9 @@ def t_the_finance_pages_share_the_reference_tab_strip():
     ok("height: 25px" in tab and "padding: var(--sp-0-5) var(--sp-1-5)" in tab, "25px tall, as the reference draws it")
     ok("font-size: var(--text-sm)" in tab, "at 14px, bigger than a filter tab inside a card")
     ok("background: none" in tab, "with no pill")
-    on = CSS.split(".ptab.on {")[1].split("}")[0]
+    on = CSS.split(".ptab:is(.on, [aria-current=\"page\"]) {")[1].split("}")[0]
     ok("color: var(--text-primary)" in on and "background" not in on, "the live page takes full ink, with no pill")
-    rule = CSS.split(".ptab.on::after {")[1].split("}")[0]
+    rule = CSS.split(".ptab:is(.on, [aria-current=\"page\"])::after {")[1].split("}")[0]
     ok("height: 2px" in rule, "and carries the reference's 2px rule under it")
     ok("var(--action-primary)" in rule, "in the near-black, which is a colour that actually paints")
     ok("left: 0" in rule and "right: 0" in rule, "spanning the trigger's own width")
@@ -2699,7 +2699,7 @@ def t_the_sidebar_does_not_dim_where_you_are_not():
     ok("height: 32px" in item, "nav items are 32px, as the reference draws them")
     ok("color: var(--text-primary)" in item, "an inactive item is full-strength ink")
     ok("font-weight: var(--weight-regular)" in item, "at normal weight")
-    act = CSS.split(".nav-item.active {")[1].split("}")[0]
+    act = CSS.split(".nav-item:is(.active, [aria-current=\"page\"]) {")[1].split("}")[0]
     ok("font-weight: var(--weight-medium)" in act, "and the active one carries the weight")
     ok("background: var(--surface-tertiary)" in act, "on the muted pill")
     side = CSS.split(".sidebar {")[1].split("}")[0]
@@ -3297,7 +3297,7 @@ def t_the_owner_tint_did_not_quietly_take_unreads_signal():
 def t_a_selected_row_still_reads_as_selected_over_a_tint():
     """Selection is transient and deliberate - you are about to act on those
     rows - so it wins over whose they are."""
-    idx_sel = CSS.index(".mrow.selected")
+    idx_sel = CSS.index(".mrow:is(.selected")
     idx_own = CSS.index(".own-red")
     ok(idx_own < idx_sel,
        "the selected rule comes after the tints, so it overrides rather than "
@@ -4549,6 +4549,58 @@ def t_the_xero_page_gives_its_rows_a_deliberate_width():
     # so a child's own margins are ADDED to the gap and the page pays twice.
     ok("#view-connector .card > * { margin-top: 0; margin-bottom: 0; }" in CSS,
        "the container owns the rhythm; the children bring no vertical margins")
+
+
+@test
+def t_every_control_family_declares_its_states():
+    """The state contract (docs/superpowers/specs/2026-09-07-design-system-tokens-design.md).
+    A family without a pressed or disabled look is one whose state the user
+    cannot read; a disabled look that fades with opacity is a second recipe."""
+    families = {".btn": ("hover", "active", "disabled"), ".btn-primary": ("hover", "active", "disabled"),
+                ".btn-danger": ("hover", "active"), ".icon-btn": ("hover", "active", "disabled"),
+                ".nav-item": ("hover", "active"), ".chip": ("hover", "active", "disabled"),
+                ".lbl-segbtn": ("hover", "active", "disabled"), ".mail-claim": ("hover", "active", "disabled"),
+                ".send": ("hover", "active", "disabled"), ".dmenu-item": ("hover", "active"),
+                ".convo": ("hover", "active"), ".mem-btn": ("hover", "active"), ".track-btn": ("hover", "active"),
+                ".ptab": ("hover", "active"), ".ftab": ("hover", "active"), ".stat-move": ("disabled",)}
+    for sel, states in families.items():
+        for st in states:
+            ok(sel + ":" + st in CSS, "%s declares :%s" % (sel, st))
+    for body in re.findall(r":disabled[^{]*\{([^}]*)\}", CSS):
+        ok("opacity" not in body, "no disabled recipe fades with opacity: " + body[:80])
+    ok(CSS.count("var(--text-disabled)") >= 6, "disabled controls share one ink")
+    ok(".btn-primary:hover { background: var(--action-hover)" in CSS
+       and ".btn-primary:active { background: var(--action-active)" in CSS,
+       "a primary button's hover and pressed are two different colours")
+    ok('[aria-busy="true"] { cursor: progress; }' in CSS and 'svg { animation: navspin' in CSS,
+       "loading is a recipe any control can carry")
+    ok('[aria-invalid="true"] { border-color: var(--error); }' in CSS, "and so is invalid, for fields")
+    ok('.is-cancelled, [data-status="cancelled"] { color: var(--text-tertiary); text-decoration: line-through; }' in CSS,
+       "and cancelled")
+    ok("function setBusy(" in SCRIPT and "function markInvalid(" in SCRIPT, "the script owns the two ARIA entry points")
+    ok("setBusy(btn, true)" in SCRIPT and "markInvalid(reasonIn, true)" in SCRIPT, "and uses them")
+    for sel, attr in ((".nav-item", 'aria-current="page"'), (".btn", "aria-pressed"), (".ptab", "aria-current"),
+                      (".ftab", "aria-selected"), (".toggle", "aria-checked"), (".mrow", "aria-selected"),
+                      (".files-row", "aria-selected"), (".lbl-segbtn", "aria-pressed"), (".stat.stat-pick", "aria-pressed")):
+        ok(re.search(re.escape(sel) + r":is\([^)]*" + attr, CSS), "%s's selected rule has its %s twin" % (sel, attr))
+    ok("n.setAttribute('aria-current', 'page')" in SCRIPT, "and the nav actually sets aria-current")
+
+
+@test
+def t_focus_is_declared_once_per_kind():
+    """Controls draw the outline, fields draw the ring, each written once. The
+    field rule had been copied nine times, once per component, and one copy
+    drew the outline instead."""
+    ok(CSS.count("box-shadow: var(--focus-ring)") == 3,
+       "the ring is read by the field rule and by the two composite fields that "
+       "focus as a whole (the radio card, the composer box), and nowhere else")
+    ok(':is(input, textarea, select, [contenteditable="true"]):focus { outline: none; border-color: var(--action-primary); box-shadow: var(--focus-ring); }' in CSS,
+       "one rule for every field, contenteditable included")
+    ok(not re.search(r"\.[\w-]+:focus \{[^}]*(focus-ring|focus-outline)", CSS),
+       "no component carries its own copy of either focus look")
+    ok(CSS.count("outline: var(--focus-outline)") == 3,
+       "the outline is read by the control rule and by two deliberate variants (the "
+       "custom-drawn checkbox, and the menu item which insets it), and nowhere else")
 
 
 if __name__ == "__main__":
