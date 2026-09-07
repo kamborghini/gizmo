@@ -3040,7 +3040,7 @@ def t_nothing_that_draws_an_edge_sits_on_the_cards_edge():
     rows = re.search(r"\.card-bleed > \.insights > \.insight,[\s\S]{0,220}?\{([^}]*)\}", CSS)
     ok(rows and "border: 0" in rows.group(1),
        "a list already inside a card draws no second frame of its own")
-    ok(re.search(r"\.card-bleed > \.insights > \.insight \+ \.insight,[\s\S]{0,120}?"
+    ok(re.search(r"\.card-bleed > \.insights > \.insight \+ \.insight,[\s\S]{0,260}?"
                  r"\{[^}]*border-top: var\(--bw-hairline\) solid var\(--border-default\)", CSS),
        "the rows are separated by one hairline instead")
     ins = re.search(r"^\s*\.insight \{([^}]*)\}", CSS, re.M)
