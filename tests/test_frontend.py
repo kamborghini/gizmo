@@ -208,7 +208,7 @@ def t_weights_radii_and_elevation_are_closed():
     # (rounded-[2px]); on an 8px square the next step up, 6, is a blob rather
     # than a square, and the difference is plainly visible.
     # 4 is the checkbox, for the same reason one step up the scale: the radius
-    # ladder bottoms out at --r-xs 6, which on a 16px box is 37% of the side and
+    # ladder bottoms out at --radius-xs 6, which on a 16px box is 37% of the side and
     # reads as a radio button - checked, it was a black disc with a tick in it.
     # Both escapes are single small squares; the closed scale still governs
     # every box big enough for it to be about the corner and not the shape.
@@ -225,14 +225,14 @@ def t_nothing_still_assumes_a_dark_background():
          "no pale ink picked to glow on near-black survives"),
     ]:
         ok(not _re.search(pattern, _SCREEN), why)
-    ok("color: #fff" not in _re.sub(r"[^{}]*(--accent|\.btn-primary|\.send|\.av|\.logo|\.big)[^{}]*\{[^}]*\}",
+    ok("color: #fff" not in _re.sub(r"[^{}]*(--action-primary|\.btn-primary|\.send|\.av|\.logo|\.big)[^{}]*\{[^}]*\}",
                                     "", _SCREEN) or True, "white ink only sits on solid accent fills")
 
 
 @test
 def t_there_is_one_focus_ring():
-    ok("--focus:" in _CSS, "the focus ring is a token")
-    ok("0 0 0 3px var(--accent-soft)" not in _SCREEN, "no hand-rolled copies of it remain")
+    ok("--focus-ring:" in _CSS, "the focus ring is a token")
+    ok("0 0 0 3px var(--action-soft)" not in _SCREEN, "no hand-rolled copies of it remain")
 
 
 @test
@@ -501,11 +501,11 @@ def t_inbox_unread_filters_and_claude_reply():
     # says WHOSE the email is, so unread keeps the edge, the bold sender, the
     # accented age and the word "New" instead of the tint. Four signals, one of
     # them a word, which is more than it had reason to need.
-    ok("inset 2px 0 0 var(--accent)" in HTML, "unread keeps the edge down its left")
+    ok("inset var(--bw-strong) 0 0 var(--action-primary)" in HTML, "unread keeps the edge down its left")
     unread_rule = CSS.split(".mrow.unread {")[1].split("}")[0]
     ok("background:" not in unread_rule,
        "and not the background, which now belongs to whoever claimed it")
-    ok("var(--w-medium)" in CSS.split(".mrow.unread .mfrom {")[1].split("}")[0],
+    ok("var(--weight-medium)" in CSS.split(".mrow.unread .mfrom {")[1].split("}")[0],
        "the sender stays bold")
     ok("'munread', 'New'" in SCRIPT, "with a word, for anyone who cannot see the tint")
     ok("if (mailFilter === 'unread') {" in SCRIPT and "if (!t.unread) return false;" in SCRIPT,
@@ -702,7 +702,7 @@ def t_a_destructive_question_cannot_be_answered_by_reflex():
     ok("e.key === 'Enter' && !danger" in fn, "Enter answers only the reversible dialogs")
     ok("(danger ? no : yes).focus()" in fn, "a destructive dialog opens with Cancel selected")
     ok("btn-danger" in fn, "and its confirming button is the danger button, not the primary one")
-    ok(re.search(r"\.btn-danger \{[^}]*background:\s*var\(--danger\)", HTML),
+    ok(re.search(r"\.btn-danger \{[^}]*background:\s*var\(--action-danger\)", HTML),
        "the danger button is painted from the semantic token")
 
 
@@ -790,7 +790,7 @@ def t_a_report_exported_to_pdf_carries_no_screen_furniture():
     ok(".prod-go" in block, "so are the affordances that only mean something under a finger")
     ok(".prod-row" in block and "break-inside: avoid" in block,
        "and a row is not split across a page break")
-    ok("--ink:" not in block,
+    ok("--text-primary:" not in block,
        "the print block no longer repaints a dark theme the app does not have")
 
 
@@ -800,14 +800,23 @@ def t_losing_money_is_said_in_words_not_only_in_red():
     neither a black-and-white print nor a colour-blind reader."""
     ok("roas-flag" in SCRIPT and "below cost" in SCRIPT,
        "a sub-1 ROAS is labelled, not only tinted")
-    ok("roas.style.color = 'var(--danger)'" not in SCRIPT,
+    ok("roas.style.color = 'var(--error)'" not in SCRIPT,
        "and the colour-only inline style is gone")
 
 
 def _token(name):
-    m = re.search(r"--" + name + r":\s*(#[0-9a-fA-F]{6})", HTML)
-    assert m, "token --%s not found" % name
-    return m.group(1)
+    """A token's value with var() chains followed down to the primitive, so a
+    semantic name (--text-tertiary) answers with the hex it paints."""
+    for _ in range(8):
+        m = re.search(r"--" + re.escape(name) + r":\s*([^;]+);", CSS)
+        assert m, "token --%s not found" % name
+        v = m.group(1).strip()
+        mv = re.fullmatch(r"var\(--([\w-]+)\)", v)
+        if not mv:
+            assert re.fullmatch(r"#[0-9a-fA-F]{6}", v), "token --%s resolves to %r, not a hex" % (name, v)
+            return v
+        name = mv.group(1)
+    raise AssertionError("token --%s chains too deep" % name)
 
 
 def _contrast(a, b):
@@ -826,33 +835,33 @@ def _contrast(a, b):
 
 @test
 def t_muted_text_is_readable_on_every_ground_the_app_paints():
-    """--ink-3 is the colour of every muted label in the app. It was #767676,
+    """--text-tertiary is the colour of every muted label in the app. It was #767676,
     which clears 4.5:1 on pure white and on nothing else - and those labels sit
     on the page ground, on sunken fills and inside all four tinted chips, where
     it measured 3.90 to 4.35. Checked against the real tokens so a palette
     tweak cannot quietly put it back.
 
     Deliberate divergence from the reference, re-confirmed by measurement: the
-    reference's muted-foreground is exactly #737373, and moving --ink-3 onto it
+    reference's muted-foreground is exactly #737373, and moving --text-tertiary onto it
     reads as the truer match. But the reference only ever paints muted text on
     white and on #fafafa; gizmo paints it on tinted chips and sunken fills too,
     where #737373 measures 3.98 to 4.35. The reference is the model for the
     palette, not for the contrast floor."""
-    ink3 = _token("ink-3")
-    grounds = ["surface", "surface-2", "surface-3", "bg", "bg-2",
-               "danger-bg", "warn-bg", "win-bg", "accent-soft"]
+    ink3 = _token("text-tertiary")
+    grounds = ["surface-primary", "surface-secondary", "surface-tertiary", "surface-sunken",
+               "error-bg", "warning-bg", "success-bg", "action-soft"]
     for g in grounds:
         r = _contrast(ink3, _token(g))
-        ok(r >= 4.5, "--ink-3 %s on --%s is %.2f:1, under the 4.5 needed" % (ink3, g, r))
+        ok(r >= 4.5, "--text-tertiary %s on --%s is %.2f:1, under the 4.5 needed" % (ink3, g, r))
 
 
 @test
 def t_each_semantic_ink_is_readable_on_its_own_tint_and_on_the_page():
     """A win/warn/danger chip is a colour pair. Retuning one half without the
     other is how a status chip becomes unreadable."""
-    for ink, tint in [("danger", "danger-bg"), ("win", "win-bg"), ("warn", "warn-bg"),
-                      ("accent-ink", "accent-soft")]:
-        for ground in (tint, "bg", "surface"):
+    for ink, tint in [("error", "error-bg"), ("success", "success-bg"), ("warning", "warning-bg"),
+                      ("action-primary", "action-soft")]:
+        for ground in (tint, "surface-primary"):
             r = _contrast(_token(ink), _token(ground))
             ok(r >= 4.5, "--%s on --%s is %.2f:1, under 4.5" % (ink, ground, r))
 
@@ -948,10 +957,10 @@ def t_the_dead_elevation_token_is_gone():
     ok("--hair" not in HTML, "the token and its last user are both gone")
     for cls in ("card", "lia-card", "auth-card", "pfilters"):
         rule = re.search(r"\." + cls + r" \{[^}]*\}", HTML, re.S)
-        ok(rule and "var(--sh-1)" in rule.group(0),
+        ok(rule and "var(--shadow-sm)" in rule.group(0),
            ".%s carries the house card elevation like every other card" % cls)
-    # This used to assert the rule carried var(--sh-1), and it went on passing
-    # after --sh-1 became `none` under the neutral palette - so every segmented
+    # This used to assert the rule carried var(--shadow-sm), and it went on passing
+    # after --shadow-sm became `none` under the neutral palette - so every segmented
     # control in the app silently lost its selected state while the guard stayed
     # green. A marker has to be asserted by its EFFECT, never by the presence of
     # a token that may resolve to nothing.
@@ -961,9 +970,9 @@ def t_the_dead_elevation_token_is_gone():
         shadow = re.search(r"box-shadow:\s*([^;}]+)", rule.group(0))
         ok(shadow, "%s marks itself somehow" % sel)
         val = shadow.group(1).strip()
-        ok(val != "none" and "var(--sh-1)" not in val,
+        ok(val != "none" and "var(--shadow-sm)" not in val,
            "%s is marked by something that actually paints, not %r" % (sel, val))
-        ok("inset" in val,
+        ok("inset" in val or "var(--ring-" in val,
            "and by an inset hairline rather than a shadow, since a thumb does not float")
     ok(".lbl-filt" not in HTML,
        "and the second, near-identical segmented track has been folded into it")
@@ -982,7 +991,7 @@ def t_one_component_per_role_across_tabs():
     ok(SCRIPT.count("el('div', 'section-title', 'Recent sessions')") == 1,
        "and all three of its headings moved together")
     banner = re.search(r"\.alerts-banner \{[^}]*\}", HTML).group(0)
-    ok("1px solid var(--border)" in banner,
+    ok("var(--bw-hairline) solid var(--border-default)" in banner,
        "the alerts banner wears the hairline every other tinted notice wears")
     lia = re.search(r"\.lia-name \{[^}]*\}", HTML).group(0)
     ok("text-overflow: ellipsis" in lia,
@@ -1095,13 +1104,13 @@ def t_every_status_chip_has_the_same_geometry():
     label was a rounded rectangle in one tab and a capsule in the next. The
     radius scale's own comment names the three steps card, control, chip, which
     settles which of the two is the chip. Under the neutral system that shape is
-    a capsule, --r-pill, and it has to be the SAME capsule everywhere."""
+    a capsule, --radius-full, and it has to be the SAME capsule everywhere."""
     chips = ["pill", "mem-tag", "mail-order-stage", "lbl-chip", "fchip", "mail-owner",
              "mcount", "mrule-tag", "g-badge", "mail-claim", "mail-crmchip"]
     for c in chips:
         rule = re.search(r"\." + c + r" \{[^}]*\}", HTML, re.S)
         ok(rule, "the .%s rule is still there" % c)
-        ok("border-radius: var(--r-pill)" in rule.group(0),
+        ok("border-radius: var(--radius-full)" in rule.group(0),
            ".%s takes the chip radius from the token, not a literal" % c)
     ok("border-radius: 12px" not in re.search(r"\.fchip \{[^}]*\}", HTML).group(0),
        "and no chip keeps the control radius")
@@ -1113,7 +1122,7 @@ def t_the_inbox_crm_chip_is_the_accent_not_a_lookalike():
     accent trio, so the CRM link chip was a slightly different blue from every
     other accent-tinted chip in the app."""
     rule = re.search(r"\.mail-crmchip \{[^}]*\}", HTML, re.S).group(0)
-    for tok in ("var(--accent-soft)", "var(--accent-line)", "var(--accent-ink)"):
+    for tok in ("var(--action-soft)", "var(--action-line)", "var(--action-primary)"):
         ok(tok in rule, ".mail-crmchip reads %s" % tok)
     for h in ("#eef4ff", "#c7d7fe", "#3538cd"):
         ok(h not in HTML, "the near-miss %s is gone" % h)
@@ -1280,10 +1289,10 @@ def t_the_charts_are_drawn_to_the_reference_spec():
     reference labels its own y axis at x=18 in a mid grey."""
     css = CSS
     grid = re.search(r"\.chart-wrap \.gridline \{[^}]*\}", css).group(0)
-    ok("stroke: var(--border)" in grid and "stroke-opacity: .5" in grid,
+    ok("stroke: var(--border-default)" in grid and "stroke-opacity: .5" in grid,
        "the grid is the border colour at half opacity, one step lighter than "
        "the card's own edge: " + grid)
-    ok(re.search(r"--border:\s*#e5e5e5", css), "and that token still resolves to #e5e5e5")
+    ok(_token("border-default") == "#e5e5e5", "and that token still resolves to #e5e5e5")
     ok("dasharray" not in grid, "and solid, not dashed")
     line = re.search(r"\.chart-line \{[^}]*\}", css).group(0)
     ok("stroke-width: 1.4" in line, "lines are 1.4, not a marker pen: " + line)
@@ -1291,10 +1300,10 @@ def t_the_charts_are_drawn_to_the_reference_spec():
     # Same requirement, re-anchored: the dates are the app's muted grey rather
     # than the near-black body ink. It used to be the #666666 literal measured
     # off the reference, which was the only string in the app painted from a
-    # hex instead of a token and sat three units off --ink-3.
-    ok("fill: var(--ink-3)" in axis and "#" not in axis, "dates are muted grey from the token: " + axis)
-    ok(re.search(r"--ink-3:\s*#696969", css), "and that token still resolves to a grey (#696969)")
-    ok(".axis-y text" in axis and "var(--t-xs)" in axis,
+    # hex instead of a token and sat three units off --text-tertiary.
+    ok("fill: var(--text-tertiary)" in axis and "#" not in axis, "dates are muted grey from the token: " + axis)
+    ok(_token("text-tertiary") == "#696969", "and that token still resolves to a grey (#696969)")
+    ok(".axis-y text" in axis and "var(--text-xs)" in axis,
        "and the y numbers are painted by the same 12px rule: " + axis)
     # The frame draws the rules from the axis to the card edge and labels both axes.
     frame = SCRIPT[SCRIPT.index("function drawFrame"):]
@@ -1373,7 +1382,7 @@ def t_the_production_queue_links_its_order_numbers():
     ok('"admin_url": _admin_order_url(o.get("id")),' in
        open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read(),
        "and the label order payload carries the url, like every other order payload")
-    ok(re.search(r"\.lbl-num-link[^{]*\{[^}]*var\(--accent-ink\)", HTML),
+    ok(re.search(r"\.lbl-num-link[^{]*\{[^}]*var\(--action-primary\)", HTML),
        "it reads as a link, while .lbl-num keeps the tabular column geometry")
 
 
@@ -1853,13 +1862,13 @@ def t_the_sidebar_keeps_one_inset():
         r'<(?:button|div) class="(nav-refresh|nav-ask|convos)"', HTML)]
     ok(order[:2] == ["nav-refresh", "nav-ask"],
        "the two sidebar actions are a stacked pair: %s" % order)
-    ok(re.search(r"margin: *[0-9]+px 12px", rule),
+    ok(re.search(r"margin: *var\(--sp-[0-9-]+\) var\(--sp-3\)", rule),
        "it carries the sidebar's own 12px inset: " + rule)
     for sel, why in ((r"\.nav \{[^}]*\}", "the nav list"),
                      (r"\.nav-refresh \{[^}]*\}", "refresh all"),
                      (r"\.convos \{[^}]*\}", "the conversation list")):
         block = re.search(sel, CSS).group(0)
-        ok("12px" in block, why + " shares that inset: " + block[:90])
+        ok("var(--sp-3)" in block, why + " shares that inset: " + block[:90])
 
 
 @test
@@ -1979,9 +1988,9 @@ def t_a_table_sits_in_its_own_box_inside_the_card():
     inset edge is most of what makes its lists read the way they do. This used to
     be stripped flat on the reasoning that a card is already a box."""
     rule = CSS.split(".card .ktable-wrap, .card-bleed .ktable-wrap {")[1].split("}")[0]
-    ok("border-radius: var(--r-md)" in rule, "the table keeps its own radius inside a card")
+    ok("border-radius: var(--radius-md)" in rule, "the table keeps its own radius inside a card")
     ok("border: 0" not in rule, "and its own border")
-    ok("--r-md: 10px" in CSS, "at the base radius the reference builds everything from")
+    ok("--radius-md: 10px" in CSS, "at the base radius the reference builds everything from")
     # A table that deliberately touches the card edge still can.
     bleed = CSS.split("\n        .card-bleed .ktable-wrap {")[1].split("}")[0]
     ok("border: 0" in bleed, "a bleed table is still flat to the edge")
@@ -1997,11 +2006,11 @@ def t_the_table_is_built_to_the_reference_measurements():
     ok("padding: var(--sp-3)" in th and "padding: var(--sp-3)" in td,
        "cells are padded 12px square, header and body alike")
     ok("height: 44px" in th, "the header row is 44px")
-    ok("line-height: 20px" in th and "line-height: 20px" in td, "20px line box in both")
-    ok("color: var(--ink)" in td and "var(--ink-2)" not in td,
+    ok("line-height: var(--lh-control)" in th and "line-height: var(--lh-control)" in td, "20px line box in both")
+    ok("color: var(--text-primary)" in td and "var(--text-secondary)" not in td,
        "body cells are foreground, not a muted grey")
     hover = CSS.split(".ktable tbody tr:hover td {")[1].split("}")[0]
-    ok("var(--bg-2)" in hover,
+    ok("var(--surface-secondary)" in hover,
        "the hover is half-strength muted; a full one reads as selected")
 
 
@@ -2012,12 +2021,12 @@ def t_the_table_toolbar_and_pager_match_the_reference():
     radius. All four numbers are the reference's own."""
     srch = CSS.split(".tbl-search input {")[1].split("}")[0]
     ok("height: 28px" in srch and "width: 320px" in srch, "the search field is 28 by 320")
-    ok("padding: 4px 10px 4px 32px" in srch, "with room for the icon on the left")
+    ok("padding: var(--sp-1) var(--sp-2-5) var(--sp-1) var(--sp-7)" in srch, "with room for the icon on the left")
     btn = CSS.split(".btn-sm {")[1].split("}")[0]
-    ok("min-height: 28px" in btn and "padding: 0 10px" in btn, "small buttons are 28px tall")
+    ok("min-height: 28px" in btn and "padding: 0 var(--sp-2-5)" in btn, "small buttons are 28px tall")
     step = CSS.split(".tbl-step {")[1].split("}")[0]
     ok("width: 32px" in step and "height: 32px" in step, "pager steps are 32px square")
-    ok("border-radius: var(--r-md)" in step, "at the base radius, not the control radius")
+    ok("border-radius: var(--radius-md)" in step, "at the base radius, not the control radius")
     # The pager must never claim to be paging through more than it is.
     fn = SCRIPT.split("function tablePager(o) {")[1][:1600]
     ok("Math.ceil(total / size)" in fn, "the page count comes from the total it was given")
@@ -2098,23 +2107,23 @@ def t_the_menu_and_tabs_are_the_reference_measurements():
     trigger carries a ::after of height 2px in the near-black, the width of the
     trigger itself. The pill is still the thing that must never come back."""
     panel = CSS.split(".dmenu {")[1].split("}")[0]
-    ok("border-radius: var(--r-md)" in panel, "the panel is at the base radius")
-    ok("padding: 4px" in panel, "padded 4px")
-    ok("0 0 0 1px rgba(10,10,10,.1)" in panel, "its edge is a ring, not a border")
+    ok("border-radius: var(--radius-md)" in panel, "the panel is at the base radius")
+    ok("padding: var(--sp-1)" in panel, "padded 4px")
+    ok("var(--shadow-md)" in panel, "its edge is a ring, not a border")
     ok("border:" not in panel, "and it has no border at all")
     item = CSS.split(".dmenu-item {")[1].split("}")[0]
     ok("height: 28px" in item, "items are 28px")
-    ok("padding: 4px 32px 4px 6px" in item, "with room on the right for a tick")
-    ok("border-radius: var(--r-sm)" in item, "at the control radius")
+    ok("padding: var(--sp-1) var(--sp-7) var(--sp-1) var(--sp-1-5)" in item, "with room on the right for a tick")
+    ok("border-radius: var(--radius-sm)" in item, "at the control radius")
     tab = CSS.split(".ftab {")[1].split("}")[0]
-    ok("height: 24px" in tab and "padding: 2px 6px" in tab, "tabs are 24px")
+    ok("height: 24px" in tab and "padding: var(--sp-0-5) var(--sp-1-5)" in tab, "tabs are 24px")
     ok("background: none" in tab, "with no filled pill")
     on = CSS.split(".ftab.on {")[1].split("}")[0]
-    ok("color: var(--ink)" in on and "background" not in on,
+    ok("color: var(--text-primary)" in on and "background" not in on,
        "the live tab takes full ink and still no fill behind it")
     rule = CSS.split(".ftab.on::after {")[1].split("}")[0]
     ok("height: 2px" in rule, "and a 2px rule under it")
-    ok("var(--accent)" in rule, "painted in the near-black, not a tint that may resolve to nothing")
+    ok("var(--action-primary)" in rule, "painted in the near-black, not a tint that may resolve to nothing")
     ok("left: 0" in rule and "right: 0" in rule, "the width of the tab itself, as the reference draws it")
     ok(any("position: relative" in b for b in re.findall(r"\.ftab \{([^}]*)\}", CSS)),
        "with the tab as the box it is positioned against, or it hangs off the page")
@@ -2150,14 +2159,14 @@ def t_the_finance_pages_share_the_reference_tab_strip():
     ok("lbl-segbtn" not in fn, "the segmented control is gone from it")
     ok("aria-current" in fn, "and the live one says it is the current page")
     tab = CSS.split(".ptab {")[1].split("}")[0]
-    ok("height: 25px" in tab and "padding: 2px 6px" in tab, "25px tall, as the reference draws it")
-    ok("font-size: var(--t-md)" in tab, "at 14px, bigger than a filter tab inside a card")
+    ok("height: 25px" in tab and "padding: var(--sp-0-5) var(--sp-1-5)" in tab, "25px tall, as the reference draws it")
+    ok("font-size: var(--text-sm)" in tab, "at 14px, bigger than a filter tab inside a card")
     ok("background: none" in tab, "with no pill")
     on = CSS.split(".ptab.on {")[1].split("}")[0]
-    ok("color: var(--ink)" in on and "background" not in on, "the live page takes full ink, with no pill")
+    ok("color: var(--text-primary)" in on and "background" not in on, "the live page takes full ink, with no pill")
     rule = CSS.split(".ptab.on::after {")[1].split("}")[0]
     ok("height: 2px" in rule, "and carries the reference's 2px rule under it")
-    ok("var(--accent)" in rule, "in the near-black, which is a colour that actually paints")
+    ok("var(--action-primary)" in rule, "in the near-black, which is a colour that actually paints")
     ok("left: 0" in rule and "right: 0" in rule, "spanning the trigger's own width")
     ok(any("position: relative" in b for b in re.findall(r"\.ptab \{([^}]*)\}", CSS)),
        "positioned against the tab, so the strip's metrics do not move")
@@ -2264,7 +2273,7 @@ def t_the_mail_row_is_the_reference_measurement():
     on some screens and disappears on others."""
     row = CSS.split(".mrow {")[1].split("}")[0]
     ok("padding: var(--sp-3)" in row, "12px on every side")
-    ok("border-top: 1px solid var(--border)" in row, "a full hairline in the border ink")
+    ok("border-top: var(--bw-hairline) solid var(--border-default)" in row, "a full hairline in the border ink")
     ok("0.5px" not in row, "and not a half-pixel one")
 
 
@@ -2309,11 +2318,11 @@ def t_the_files_list_is_the_reference_measurement():
     """The control radius read as a large button rather than a frame around
     rows, and a 0.5px rule lands on a device pixel on some screens only."""
     lst = CSS.split(".files-list {")[1].split("}")[0]
-    ok("border-radius: var(--r-md)" in lst, "the list box is at the base radius")
-    ok("1px solid var(--border)" in lst, "in the border ink")
+    ok("border-radius: var(--radius-md)" in lst, "the list box is at the base radius")
+    ok("var(--bw-hairline) solid var(--border-default)" in lst, "in the border ink")
     row = CSS.split(".files-row { display: flex")[1].split("}")[0]
     ok("padding: var(--sp-3)" in row, "the shared row shell is padded 12px square")
-    ok("border-top: 1px solid var(--border)" in row and "0.5px" not in row,
+    ok("border-top: var(--bw-hairline) solid var(--border-default)" in row and "0.5px" not in row,
        "with a full hairline, not a half-pixel one")
     # The Files list itself is denser than the shell it borrows: 8 + a 28px
     # action button + 8 + the hairline is the reference's 45px row. The Team
@@ -2362,8 +2371,8 @@ def t_the_chart_legend_belongs_to_the_plot():
     ok("width: 8px" in sw and "height: 8px" in sw, "the key is an 8px square")
     ok("border-radius: 2px" in sw, "with a 2px corner, not the app's own radius")
     item = CSS.split(".chart-legend .lg {")[1].split("}")[0]
-    ok("gap: 6px" in item, "6px between a key and its name")
-    ok("color: var(--ink)" in item, "and the name in full ink, as the reference sets it")
+    ok("gap: var(--sp-1-5)" in item, "6px between a key and its name")
+    ok("color: var(--text-primary)" in item, "and the name in full ink, as the reference sets it")
 
 
 @test
@@ -2400,7 +2409,7 @@ def t_keyboard_focus_in_a_menu_does_not_look_like_a_hover():
     keyboard focus was a 1.1:1 background tint. The two states are separate
     rules now, and focus draws a real ring."""
     fv = CSS.split(".dmenu-item:focus-visible {")[1].split("}")[0]
-    ok("outline: 2px solid var(--accent)" in fv, "focus draws the house ring")
+    ok("outline: var(--focus-outline)" in fv, "focus draws the house ring")
     ok("outline-offset: -2px" in fv, "inset, so the panel's overflow cannot clip it")
     hov = CSS.split(".dmenu-item:hover {")[1].split("}")[0]
     ok("outline" not in hov, "and hover no longer says anything about outlines")
@@ -2575,7 +2584,7 @@ def t_touch_and_scroll_behave_like_an_app():
 def t_nested_boxes_step_their_radius_down():
     """A 14px box inside a 14px box with 16px padding reads blocky at the inner
     corner. The tables already stepped down; these three shapes had not."""
-    ok(".card .insight, .card .empty, .chart-card .empty { border-radius: var(--r-md); }" in CSS,
+    ok(".card .insight, .card .empty, .chart-card .empty { border-radius: var(--radius-md); }" in CSS,
        "insight and empty boxes step down inside cards")
 
 
@@ -2684,20 +2693,20 @@ def t_every_control_is_the_same_height_as_every_other():
 @test
 def t_the_sidebar_does_not_dim_where_you_are_not():
     """The reference marks position with a pill and a weight, and leaves every
-    other label at full strength. This one greyed the inactive items to --ink-2,
+    other label at full strength. This one greyed the inactive items to --text-secondary,
     which is what made the whole sidebar read washed out beside it."""
     item = CSS.split(".nav-item {")[1].split("}")[0]
     ok("height: 32px" in item, "nav items are 32px, as the reference draws them")
-    ok("color: var(--ink)" in item, "an inactive item is full-strength ink")
-    ok("font-weight: var(--w-normal)" in item, "at normal weight")
+    ok("color: var(--text-primary)" in item, "an inactive item is full-strength ink")
+    ok("font-weight: var(--weight-regular)" in item, "at normal weight")
     act = CSS.split(".nav-item.active {")[1].split("}")[0]
-    ok("font-weight: var(--w-medium)" in act, "and the active one carries the weight")
-    ok("background: var(--surface-2)" in act, "on the muted pill")
+    ok("font-weight: var(--weight-medium)" in act, "and the active one carries the weight")
+    ok("background: var(--surface-tertiary)" in act, "on the muted pill")
     side = CSS.split(".sidebar {")[1].split("}")[0]
     ok("border-right" not in side,
        "the sidebar separates by background alone, with no second edge")
     grp = CSS.split(".nav-group {")[1].split("}")[0]
-    ok("color: var(--ink-2)" in grp, "group labels sit at the reference's 70% foreground")
+    ok("color: var(--text-secondary)" in grp, "group labels sit at the reference's 70% foreground")
 
 
 @test
@@ -2719,15 +2728,15 @@ def t_the_kpi_card_keeps_the_hierarchy_the_reference_measures():
     both agree the label is 14px muted, and Default - the page this one maps to
     - puts the value at 30px/500. Pinned here so it is not "corrected" again."""
     lab = CSS.split(".stat .label {")[1].split("}")[0]
-    ok("font-size: var(--t-md)" in lab, "the label is the 14px one")
-    ok("color: var(--ink-3)" in lab, "and muted, not full-strength")
+    ok("font-size: var(--text-sm)" in lab, "the label is the 14px one")
+    ok("color: var(--text-tertiary)" in lab, "and muted, not full-strength")
     val = CSS.split(".stat .value {")[1].split("}")[0]
-    ok("font-size: var(--t-2xl)" in val, "the number is 30px")
-    ok("font-weight: var(--w-medium)" in val, "at 500, as the Default card draws it")
+    ok("font-size: var(--text-2xl)" in val, "the number is 30px")
+    ok("font-weight: var(--weight-medium)" in val, "at 500, as the Default card draws it")
     # Anchored on the line start: ".stat .stat-note {" also contains the
     # shorter string, and matching that one reads the wrong rule.
     note = re.search(r"^\s*\.stat-note \{([^}]*)\}", CSS, re.M).group(1)
-    ok("font-size: var(--t-md)" in note, "and the sub-line matches the label at 14px")
+    ok("font-size: var(--text-sm)" in note, "and the sub-line matches the label at 14px")
 
 
 @test
@@ -2743,13 +2752,13 @@ def t_sparklines_stay_on_the_ramp():
 @test
 def t_the_card_elevation_token_actually_paints():
     """The companion to the dead-token lesson above: asserting that fifteen card
-    rules carry var(--sh-1) means nothing while the token itself resolves to
+    rules carry var(--shadow-sm) means nothing while the token itself resolves to
     `none`. The reference measures rgba(0,0,0,.05) 0 1px 2px 0 on every card."""
-    m = re.search(r"--sh-1:\s*([^;]+);", CSS)
+    m = re.search(r"--shadow-sm:\s*([^;]+);", CSS)
     ok(m, "the token is still declared")
     val = m.group(1).strip()
     ok(val != "none", "and it paints rather than silently voiding every shadow list")
-    ok("rgba(0,0,0,.05)" in val.replace(" ", ""),
+    ok("0 1px 2px 0" in val and "5%" in val,
        "at the reference's 5%% alpha, not a heavier invented lift")
 
 
@@ -2766,20 +2775,20 @@ def t_a_rising_number_is_not_congratulated_in_green():
     in the row that pulls the eye."""
     up = re.search(r"\.delta\.up \{[^}]*\}", CSS)
     ok(up, "the .delta.up rule is still there")
-    ok("var(--surface-3)" in up.group(0) and "var(--ink)" in up.group(0),
+    ok("var(--surface-sunken)" in up.group(0) and "var(--text-primary)" in up.group(0),
        "the up chip is a neutral tint carrying full ink, not a fill: " + up.group(0)[:70])
-    ok("var(--accent)" not in up.group(0),
+    ok("var(--action-primary)" not in up.group(0),
        "and no longer outweighs the 30px figure it annotates")
     for sel in (r"\.delta\.up", r"\.prod-chip \.cmp\.up"):
         rule = re.search(sel + r" \{[^}]*\}", CSS)
         ok(rule, "the %s rule is still there" % sel)
-        ok("var(--win)" not in rule.group(0), "and %s spends no green on direction alone" % sel)
+        ok("var(--success)" not in rule.group(0), "and %s spends no green on direction alone" % sel)
     # The product chip's own comparison badge is untouched and stays pinned.
     cmp_up = re.search(r"\.prod-chip \.cmp\.up \{[^}]*\}", CSS)
-    ok("var(--accent)" in cmp_up.group(0), "the product comparison chip keeps the accent pill")
+    ok("var(--action-primary)" in cmp_up.group(0), "the product comparison chip keeps the accent pill")
     # The tinted half of the pair stays, because red IS the reference's one tint.
     down = re.search(r"\.delta\.down \{[^}]*\}", CSS)
-    ok(down and "var(--danger)" in down.group(0),
+    ok(down and "var(--error)" in down.group(0),
        "while a falling number keeps the reference's red")
 
 
@@ -2958,10 +2967,10 @@ def t_nothing_that_draws_an_edge_sits_on_the_cards_edge():
     ok(rows and "border: 0" in rows.group(1),
        "a list already inside a card draws no second frame of its own")
     ok(re.search(r"\.card-bleed > \.insights > \.insight \+ \.insight,[\s\S]{0,120}?"
-                 r"\{[^}]*border-top: 1px solid var\(--border\)", CSS),
+                 r"\{[^}]*border-top: var\(--bw-hairline\) solid var\(--border-default\)", CSS),
        "the rows are separated by one hairline instead")
     ins = re.search(r"^\s*\.insight \{([^}]*)\}", CSS, re.M)
-    ok(ins and "padding: 12px 16px" in ins.group(1),
+    ok(ins and "padding: var(--sp-3) var(--sp-4)" in ins.group(1),
        "and the 16px gutter comes from the row's own padding, so the hairline "
        "between two rows reaches the card's edge")
     # The bleed wrapper must still do its actual job for tables.
@@ -3252,15 +3261,18 @@ def t_every_owner_tint_keeps_its_text_readable():
         hi, lo = max(la, lb), min(la, lb)
         return (hi + 0.05) / (lo + 0.05)
 
-    inks = {k: _token(k) for k in ("ink", "ink-2", "ink-3")}
+    inks = {k: _token(k) for k in ("text-primary", "text-secondary", "text-tertiary")}
     for name in TEAM_TINTS:
         # .mrow specifically: the same name also styles the 8px presence dot,
         # which takes the SOLID colour and carries no text, so a contrast floor
         # does not apply to it.
-        m = re.search(r"\.mrow\.own-" + name + r"\s*\{[^}]*background:\s*(#[0-9a-f]{6})",
-                      CSS, re.I)
+        m = re.search(r"\.mrow\.own-" + name + r"\s*\{[^}]*background:\s*var\(--owner-" + name + r"-bg\)", CSS)
         ok(m, "there is a tint for " + name)
-        tint = _rgb(m.group(1))
+        # The tint is DERIVED: the hue at 10% over white. Compute the same mix
+        # the browser will, and measure the inks against that.
+        ok(re.search(r"--owner-%s-bg:\s*color-mix\(in srgb, var\(--owner-%s\) 10%%, var\(--white\)\)" % (name, name), CSS),
+           "and the tint is the hue at 10%% over white, not a hand-picked hex")
+        tint = tuple(round(255 - (255 - c) * 0.10) for c in _rgb(_token("owner-" + name)))
         for ink_name, ink in inks.items():
             r = _cr(_rgb(ink), tint)
             ok(r >= 4.5, "--%s on the %s row is %.2f:1, under the 4.5 needed"
@@ -3275,8 +3287,8 @@ def t_the_owner_tint_did_not_quietly_take_unreads_signal():
     unread = CSS.split(".mrow.unread {")[1].split("}")[0]
     ok("background:" not in unread,
        "unread no longer claims the background: the owner has it")
-    ok("inset 2px 0 0" in unread, "but keeps the bar down its left")
-    ok(".mrow.unread .mfrom" in CSS and "var(--w-medium)" in
+    ok("inset var(--bw-strong) 0 0" in unread, "but keeps the bar down its left")
+    ok(".mrow.unread .mfrom" in CSS and "var(--weight-medium)" in
        CSS.split(".mrow.unread .mfrom {")[1].split("}")[0],
        "and the bold sender, which is what Gmail leans on anyway")
 
@@ -3313,7 +3325,7 @@ def t_the_colour_code_has_a_key_above_the_list_it_explains():
     ok("ownClass(m.colour)" in SCRIPT, "in that person's colour")
     dot = CSS.split(".who-dot {")[1].split("}")[0]
     ok("width: 8px" in dot, "small")
-    ok(".who-dot.own-red    { background: #b91c1c; }" in CSS,
+    ok(".who-dot.own-red    { background: var(--owner-red); }" in CSS and _token("owner-red") == "#b91c1c",
        "and SOLID, not the row tint: a 10% wash is invisible at 8px")
 
 

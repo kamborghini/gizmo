@@ -61,7 +61,7 @@ Named by the Tailwind step they came from; custom steps carry a comment.
 | Paper (print sheets) | `--paper` white, `--paper-ink` black, `--paper-ink-2` #333, `--paper-ink-3` #222, `--paper-rule` #ddd, `--paper-rule-2` #bbb, `--paper-rule-strong` #111 |
 | Typography | `--font-sans`, `--font-mono`, `--font-print`; `--text-xs` 12, `--text-sm` 14, `--text-md` 16, `--text-lg` 18, `--text-xl` 20, `--text-2xl` 30; `--weight-regular` 400, `--weight-medium` 500, `--weight-semibold` 600; `--lh-none` 1, `--lh-tight` 1.15, `--lh-snug` 1.35, `--lh-body` 1.5, `--lh-prose` 1.6, `--lh-control` 20px |
 | Spacing | `--sp-0-5` 2, `--sp-1` 4, `--sp-1-5` 6, `--sp-2` 8, `--sp-2-5` 10, `--sp-3` 12, `--sp-4` 16, `--sp-5` 20, `--sp-6` 24, `--sp-7` 32, `--sp-8` 40 |
-| Radius | `--radius-2xs` 4, `--radius-xs` 6, `--radius-sm` 8, `--radius-md` 10, `--radius-lg` 14, `--radius-full` 999px |
+| Radius | `--radius-2xs` 4, `--radius-xs` 6, `--radius-sm` 8, `--radius-md` 10, `--radius-lg` 14, `--radius-full` 999px (pills), `--radius-circle` 50% (dots and avatars) |
 | Border width | `--bw-hairline` 1px, `--bw-strong` 2px, `--bw-marker` 3px |
 | Motion | `--dur` .15s, `--ease` |
 | Layout | `--wrap`, `--wrap-pad` (unchanged) |
