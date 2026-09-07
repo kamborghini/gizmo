@@ -8352,7 +8352,19 @@ def _save_schedule(cfg: dict, _internal: bool = False) -> dict:
 
 
 def _load_alerts() -> list:
-    return _load_json_store(ALERTS_PATH, "alerts", [])
+    alerts = _load_json_store(ALERTS_PATH, "alerts", [])
+    # Records written before the banner's fields were settled carried kind,
+    # title and detail, none of which the banner reads, so they rendered as a
+    # dot and a tilde. Read them as what they meant rather than shredding them.
+    for a in alerts:
+        kind = a.get("tab") or a.get("kind") or ""
+        if not a.get("tab"):
+            a["tab"] = kind
+        if not a.get("tab_label"):
+            a["tab_label"] = {"connector": "Xero sync"}.get(kind, kind.replace("_", " ").title())
+        if not a.get("metric"):
+            a["metric"] = a.get("title") or a.get("detail") or "The last run needs attention"
+    return alerts
 
 
 def _write_alerts(alerts: list) -> list:

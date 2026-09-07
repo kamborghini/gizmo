@@ -2949,8 +2949,8 @@ def t_nothing_that_draws_an_edge_sits_on_the_cards_edge():
     with only its content inset. Padding sits INSIDE the border box, so a child
     with a border of its own still spans the full width and its border lands
     exactly on the card's. Those take the inset as MARGIN instead."""
-    rule = re.search(r"\.card > \.lia-bar, \.card > \.lbl-row, \.card > \.ktable-wrap,\s*\n\s*"
-                     r"\.card > \.empty, \.card-bleed > \.empty \{([^}]*)\}", CSS)
+    rule = re.search(r"\.card > :is\(\.lia-bar, \.lbl-row, \.ktable-wrap, \.empty[^)]*\),\s*\n\s*"
+                     r"\.card-bleed > \.empty \{([^}]*)\}", CSS)
     ok(rule, "the gutter exception is still there")
     body = rule.group(1)
     ok("margin-left: var(--sp-4)" in body and "margin-right: var(--sp-4)" in body,
@@ -3078,7 +3078,7 @@ def t_a_table_in_a_card_is_inset_rather_than_welded_to_it():
     rule = re.search(r"\.card > \.lia-bar, \.card > \.ktable-wrap \{([^}]*)\}", CSS)
     ok(rule and "padding-left: 0" in rule.group(1),
        "the wrap drops the padding it was handed")
-    ok(re.search(r"\.card > \.lia-bar, \.card > \.lbl-row, \.card > \.ktable-wrap,", CSS),
+    ok(re.search(r"\.card > :is\(\.lia-bar, \.lbl-row, \.ktable-wrap", CSS),
        "and takes the inset as margin instead, like the other boxed children")
 
 
@@ -4212,7 +4212,7 @@ def t_a_row_inset_by_a_margin_is_not_also_a_full_width_row():
     card it ALSO takes a 16px margin each side, and 100% plus two margins is 32px
     wider than the card: every row in every card hung its right border out past
     the frame. Whichever half is removed, the two must never coexist."""
-    m = re.search(r"\.card > \.lia-bar, \.card > \.lbl-row.*?\{(.*?)\}", CSS, re.S)
+    m = re.search(r"\.card > :is\(\.lia-bar, \.lbl-row.*?\{(.*?)\}", CSS, re.S)
     ok(m is not None, "the rule that insets card rows by a margin is still there")
     inset = m.group(1)
     ok("margin-left" in inset, "and it is still a margin that does the insetting")
@@ -4716,6 +4716,35 @@ def t_the_script_paints_from_tokens_only():
            or "font-family:" in m.group(0) and "var(--font-" not in m.group(0)]
     ok(not bad, "no cssText carries a pixel length or a font name: %s" % bad[:4])
     ok(not re.search(r"\.style\.fontWeight = '\d+'", SCRIPT), "weights are tokens too")
+
+
+@test
+def t_a_boxed_child_of_a_card_is_inset():
+    """Sweep, 2026-09-07: the Xero run banner (.msg) and the Mail send warning
+    sat flush against their card's border on both sides. A card pads its
+    children, so a child that paints its own box has to take the inset as a
+    margin instead, and the list of those is derived here: every painted class
+    the script appends straight into a card must be in it."""
+    m = re.search(r"\.card > :is\(([^)]*)\)", CSS)
+    ok(m, "the inset list exists")
+    inset = {c.strip().lstrip(".") for c in m.group(1).split(",")}
+    for c in ("msg", "mail-sendwarn", "disp-warn", "mail-empty", "lbl-row", "ktable-wrap", "lia-bar", "empty"):
+        ok(c in inset, "." + c + " is inset")
+    appended = set(re.findall(r"(?:sCard|card|box|host|wrap)\.append\(el\('div', '([a-z0-9-]+)[' ]", SCRIPT))
+    for c in sorted(appended):
+        rule = re.search(r"(?<![\w-])\." + re.escape(c) + r"(?![\w-])\s*\{([^}]*)\}", CSS)
+        if not rule: continue
+        b = rule.group(1)
+        if re.search(r"(?<![\w-])(background|border)(?!-radius|-collapse)\s*:", b) and "transparent" not in b and "none" not in b.split("background")[-1][:12]:
+            ok(c in inset, "." + c + " paints a box and is appended to a card, so it must be inset")
+    ok(".card > :is(.msg, .mail-sendwarn, .disp-warn) { max-width: 56rem; }" in CSS, "and a notice reads as prose, not a ribbon")
+    ok("max-width: calc(100% - 2 * var(--sp-4))" in CSS.split("#view-connector .card > .lbl-row {")[1].split("}")[0],
+       "a fit-content row counts its own inset, so it cannot hang out of the card at 375")
+    ok(".ov-wrap > * + .run-gate { margin-top: 0; }" in CSS, "the run gate centres itself only when it is the whole page")
+    ok("line-height: var(--lh-snug)" in CSS.split(".lbl-segbtn {")[1].split("}")[0], "segmented buttons are 24 tall in a 32 strip")
+    ok("const label = a.metric || a.title || a.detail || 'A change was recorded without a description';" in SCRIPT,
+       "an alert row shows whatever its record carries")
+    ok("board.append(el('div', 'empty', 'No pipeline stages are set up yet.'))" in SCRIPT, "an empty pipeline says so")
 
 
 if __name__ == "__main__":

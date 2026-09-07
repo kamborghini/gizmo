@@ -16897,6 +16897,29 @@ def t_a_tag_already_on_a_machine_is_never_handed_out_again():
         copilot.LOAN_TAG_ALPHABET, copilot.LOAN_TAG_LENGTH = saved
 
 
+@test
+def t_a_legacy_alert_record_still_says_what_it_meant():
+    """Alerts written before the banner's fields were settled carried kind,
+    title and detail. The banner reads tab_label, metric and pct, so those
+    records rendered as a dot and a tilde: a row saying something was wrong
+    and refusing to say what. They are read as what they meant, at load, so
+    every consumer sees the same record."""
+    copilot._write_alerts([
+        {"id": "old1", "at": "2026-09-01T00:00:00+00:00", "status": "new",
+         "kind": "connector", "title": "Reviewed 21 orders, wrote nothing", "detail": "run aborted"},
+        {"id": "old2", "at": "2026-09-01T00:00:00+00:00", "status": "new", "kind": "labels", "detail": "only a detail"},
+        {"id": "new1", "at": "2026-09-02T00:00:00+00:00", "status": "new",
+         "tab": "seo", "tab_label": "SEO", "metric": "Clicks", "pct": 12},
+    ])
+    a, b, c = copilot._load_alerts()
+    eq(a["tab"], "connector", "a legacy record's kind becomes its tab")
+    eq(a["tab_label"], "Xero sync", "with the label the banner shows for that tab")
+    eq(a["metric"], "Reviewed 21 orders, wrote nothing", "and its title becomes the metric")
+    eq(b["metric"], "only a detail", "a detail serves when there is no title")
+    eq(b["tab_label"], "Labels", "and an unknown kind is still titled rather than blank")
+    eq((c["tab_label"], c["metric"], c["pct"]), ("SEO", "Clicks", 12), "a current record is untouched")
+
+
 for fn in TESTS:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a

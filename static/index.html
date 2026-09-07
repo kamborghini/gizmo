@@ -789,8 +789,12 @@
            exactly on the card's. Two borders meeting is a seam, not a frame.
            These take the inset as MARGIN and keep their own padding. */
         .card > .lia-bar, .card > .ktable-wrap { padding-left: 0; padding-right: 0; }
-        .card > .lia-bar, .card > .lbl-row, .card > .ktable-wrap,
-        .card > .empty, .card-bleed > .empty {
+        /* A card pads its children (the rule above), so a child that paints its
+           OWN box would sit flush against the card's border on both sides.
+           Those are inset by margin instead. The list is every boxed class the
+           script puts straight into a card; the rig sweep finds new ones. */
+        .card > :is(.lia-bar, .lbl-row, .ktable-wrap, .empty, .msg, .mail-sendwarn, .disp-warn, .mail-empty),
+        .card-bleed > .empty {
             margin-left: var(--sp-4); margin-right: var(--sp-4);
             /* The inset is a MARGIN, so the width must not also be 100%:
                .lbl-row carries width:100% to make button rows fill, and
@@ -798,6 +802,8 @@
                wider than the card, hanging its right border out past the
                frame. Filling is what auto already does for a block. */
             width: auto; }
+        /* A notice is prose: at 1900px a one-line warning is a ribbon. */
+        .card > :is(.msg, .mail-sendwarn, .disp-warn) { max-width: 56rem; }
         /* A LIST THAT IS ALREADY IN A CARD IS A LIST OF ROWS, NOT A STACK OF
            CARDS. Insight cards, Details disclosures and the opportunity list
            each drew their own 1px hairline in the same grey, on the same white,
@@ -1090,7 +1096,7 @@
            left them half empty, which reads as a box waiting for something
            that never arrives, so they shrink to what they hold. Their left
            edge is the column's, so nothing drifts out of alignment. */
-        #view-connector .card > .lbl-row { width: fit-content; max-width: 100%; }
+        #view-connector .card > .lbl-row { width: fit-content; max-width: calc(100% - 2 * var(--sp-4)); }
         /* .card is a flex column with gap:16px, and a flex container does NOT
            collapse margins - so every child's own vertical margins are ADDED to
            that gap. A heading written for 24px above and a paragraph written
@@ -1371,7 +1377,7 @@
             border: 0; max-width: 100%;
             border-radius: var(--radius-sm); padding: var(--sp-1); margin-bottom: var(--sp-3); }
         .lbl-segbtn { background: transparent; border: 0; color: var(--text-tertiary); font: inherit; font-size: var(--text-xs);
-            font-weight: var(--weight-medium); padding: var(--sp-1) var(--sp-3); border-radius: var(--radius-xs); cursor: pointer; }
+            font-weight: var(--weight-medium); line-height: var(--lh-snug); padding: var(--sp-1) var(--sp-3); border-radius: var(--radius-xs); cursor: pointer; }
         .lbl-segbtn:is(.on, [aria-pressed="true"]) { background: var(--surface-primary); color: var(--text-primary); box-shadow: var(--ring-default); }
         .lbl-segbtn:hover { color: var(--text-primary); }
         .lbl-segbtn:active { background: var(--surface-sunken); }
@@ -2395,6 +2401,9 @@
         }
         /* run-task gate (tabs stay idle until the user starts the task) */
         .run-gate { max-width: 480px; margin: 7vh auto 0; text-align: center; display: flex; flex-direction: column; align-items: center; background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); padding: var(--sp-8) var(--sp-7); box-shadow: var(--shadow-sm); animation: fadeUp .4s ease backwards; }
+        /* 7vh is for a page that is only the gate. Under a card it is stacked
+           on the card's own margin, which measured 65 to 71px of nothing. */
+        .ov-wrap > * + .run-gate { margin-top: 0; }
         .run-gate .rg-ic { width: 56px; height: 56px; border-radius: var(--radius-lg); background: var(--action-soft); color: var(--action-primary); display: grid; place-items: center; box-shadow: var(--ring-line); margin-bottom: var(--sp-4); }
         .run-gate .rg-ic svg { width: 26px; height: 26px; }
         .run-gate h2 { font-size: var(--text-xl); font-weight: var(--weight-medium); letter-spacing: -.025em; margin: 0 0 var(--sp-2); }
@@ -5224,7 +5233,11 @@ Projected Image UK"></textarea>
             const clear = el('button', 'alerts-clear'); clear.textContent = 'Dismiss all'; clear.onclick = () => alertOp({ op: 'clear' });
             head.append(clear); wrap.append(head);
             fresh.slice(0, 8).forEach(a => {
-                const lowerBetter = /position|at risk|unfulfilled|low stock|cpc|bounce/i.test(a.metric || '');
+                /* Report, don't shred: a record from before the banner's fields were
+                   settled still has a title or a detail, and a row that shows a dot
+                   and a tilde has told the reader nothing. */
+                const label = a.metric || a.title || a.detail || 'A change was recorded without a description';
+                const lowerBetter = /position|at risk|unfulfilled|low stock|cpc|bounce/i.test(label);
                 const good = a.pct == null ? null : (lowerBetter ? a.pct < 0 : a.pct > 0);
                 const dir = good == null ? 'flat' : good ? 'up' : 'down';
                 const row = el('div', 'alert-row');
@@ -5234,15 +5247,15 @@ Projected Image UK"></textarea>
                    back on the next scan. Now the metric itself opens the size
                    check that can settle it. */
                 let metric;
-                if (/size list/i.test(a.metric || '')) {
+                if (/size list/i.test(label)) {
                     metric = el('button', 'a-metric seclink');
-                    metric.textContent = a.metric || '';
+                    metric.textContent = label;
                     metric.title = 'Open the size check and resolve this';
                     metric.onclick = () => { setView('labels'); runCoverage(); };
                 } else {
-                    metric = el('span', 'a-metric', a.metric || '');
+                    metric = el('span', 'a-metric', label);
                 }
-                row.append(el('span', 'adot ' + dir), el('span', 'a-tab', a.tab_label || ''), metric,
+                row.append(el('span', 'adot ' + dir), el('span', 'a-tab', a.tab_label || a.kind || ''), metric,
                     el('span', 'a-pct ' + dir, a.pct == null ? '~' : ((a.pct > 0 ? '+' : '') + a.pct + '%')));
                 const x = el('button', 'alert-x'); x.innerHTML = I.x; x.title = 'Dismiss'; x.onclick = () => alertOp({ op: 'dismiss', id: a.id });
                 row.append(x); wrap.append(row);
@@ -14119,6 +14132,7 @@ Projected Image UK"></textarea>
         function paintBoard(host) {
             const d = crmCache;
             const board = el('div', 'crm-board crm-pipeline');
+            if (!(d.stages || []).length) board.append(el('div', 'empty', 'No pipeline stages are set up yet.'));
             const rank = { overdue: 0, today: 1, none: 2, future: 3 };
             const deals = crmVisibleDeals().filter(x => x.status === 'open');
             d.stages.forEach(s => {
