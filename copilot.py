@@ -20929,7 +20929,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # OPERATIONAL knobs: nothing here can point the service at a different shop,
     # a different Xero organisation, or a different set of credentials.
     _CONNECTOR_SETTABLE = {
-        "RECONCILE_MODE", "RECONCILE_TOLERANCE", "MAX_DOCS_PER_RUN",
+        "RECONCILE_MODE", "RECONCILE_TOLERANCE", "MAX_DOCS_PER_RUN", "RUNAWAY_ABORT_ABOVE",
         "ORDERS_SINCE", "SHOP_TIMEZONE", "XERO_SALES_ACCOUNT_CODE",
         "XERO_TAX_TYPE_STANDARD", "XERO_TAX_TYPE_ZERO",
         "CUSTOMER_REF_METAFIELD_NAMESPACE", "CUSTOMER_REF_METAFIELD_KEY",

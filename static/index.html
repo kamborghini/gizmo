@@ -8199,7 +8199,9 @@ Projected Image UK"></textarea>
                         + 'A discounted invoice once went through on warn, out by 33.50.'));
                     add('RECONCILE_TOLERANCE', 'Tolerance', 'How far apart is close enough, in pounds.');
                     add('MAX_DOCS_PER_RUN', 'Most documents in one run',
-                        'The runaway guard. A run above this aborts rather than pushing everything.');
+                        'The first this many go, oldest first; the rest wait for the next run and the run says how many are waiting.');
+                    add('RUNAWAY_ABORT_ABOVE', 'Stop entirely above',
+                        'More orders waiting than this and the run creates nothing at all, not even contacts: that is a widened window, not a backlog.');
                     add('ORDERS_SINCE', 'Only orders since',
                         'yyyy-mm-dd. read_orders reaches back 60 days, so a date older than that finds nothing.');
                     add('SHOP_TIMEZONE', 'Shop timezone',
