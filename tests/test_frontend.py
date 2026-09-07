@@ -4747,6 +4747,19 @@ def t_a_boxed_child_of_a_card_is_inset():
     ok("board.append(el('div', 'empty', 'No pipeline stages are set up yet.'))" in SCRIPT, "an empty pipeline says so")
 
 
+@test
+def t_a_credit_note_preview_shows_the_vat_it_carries():
+    """Since 2026-09-07 the connector sends each credit-note line with the VAT
+    Shopify refunded on it, and reconciles the note gross to gross. The screen
+    has to say both, or a 43.20 refund reads as 36.00 against 43.20."""
+    fn = fn_src("function connDocModal(")
+    ok("(l.taxType || '') + (l.taxAmount != null ? ' \\u00b7 ' + money(l.taxAmount) : '')" in fn,
+       "the Tax cell shows the amount beside the type when the line carries one")
+    ok("(credit ? ' both sides, tax included.' : ' both sides.')" in fn
+       and "(credit ? ' with tax' : '')" in fn,
+       "and the reconciliation sentence says a credit note's figure includes the tax")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

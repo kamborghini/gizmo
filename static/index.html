@@ -7096,9 +7096,9 @@ Projected Image UK"></textarea>
             if (rec) {
                 const box = el('div', 'msg ' + (rec.ok ? '' : 'error'));
                 box.append(el('div', null, rec.ok
-                    ? 'Reconciles with Shopify: ' + money2(rec.computed) + ' both sides.'
+                    ? 'Reconciles with Shopify: ' + money2(rec.computed) + (credit ? ' both sides, tax included.' : ' both sides.')
                     : 'Does NOT reconcile. This document comes to '
-                      + money2(rec.computed) + ', Shopify says ' + money2(rec.expected)
+                      + money2(rec.computed) + (credit ? ' with tax' : '') + ', Shopify says ' + money2(rec.expected)
                       + ', a difference of ' + money2(rec.diff) + '.'));
                 if (!rec.ok) {
                     box.append(el('div', 'lbl-meta', rec.mode === 'strict'
@@ -7181,7 +7181,9 @@ Projected Image UK"></textarea>
                                [String(l.quantity), 'num'],
                                [money(l.unitAmount), 'num'],
                                [l.accountCode || '', ''],
-                               [l.taxType || '', ''],
+                               /* A credit-note line carries the VAT Shopify refunded on it;
+                                  an invoice line leaves the figure to Xero and shows only the type. */
+                               [(l.taxType || '') + (l.taxAmount != null ? ' \u00b7 ' + money(l.taxAmount) : ''), ''],
                                [money(l.lineAmount), 'num']];
                 cells.forEach(([v, c]) => {
                     const td = document.createElement('td');
