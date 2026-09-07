@@ -18,3 +18,9 @@ env.example
 *.txt
 !requirements.txt
 .github/
+# Never bake a local environment file or a captured log into an image. Railway
+# builds from git so neither is present there; a local `docker build` would
+# otherwise copy both in through `COPY . .`.
+.env
+.env.*
+*.log

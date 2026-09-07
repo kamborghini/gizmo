@@ -7,3 +7,13 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+  # The base image is pinned by tag, so nothing was watching it: "Dependabot
+  # will bump it" was only true for the ecosystems actually listed here.
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: weekly }
+  # The two Shopify admin print extensions build from this lockfile.
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5

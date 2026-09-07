@@ -16,6 +16,20 @@ SECRETS = [
     re.compile(r"\b1//0[A-Za-z0-9_\-]{20,}"),
     re.compile(r"-----BEGIN (RSA|EC|OPENSSH|PGP) PRIVATE KEY-----"),
 ]
+# The tests carry fake credentials on purpose - the vault test needs a value
+# shaped like a Google refresh token to prove it gets sealed. Naming the exact
+# fixtures is the difference between "the tests are exempt" (which is where a
+# real key pasted into a test would have lived, unnoticed, in an 800KB file)
+# and "these four strings are known and everything else is a finding".
+# Written in halves so this file does not trip its own scan - which is also
+# the proof that the scan reads it like any other file.
+_G = "1//"
+TEST_FIXTURES = {
+    _G + "0gRefreshTokenThatWouldReadAMailbox",
+    _G + "0gTheRealRefreshToken",
+    _G + "0gSecretValueHere",
+    _G + "refresh-token",
+}
 INVISIBLE = re.compile("[\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029\ufeff]")
 TEXT = (".py", ".js", ".html", ".yml", ".yaml", ".toml", ".md", ".txt", ".csv", ".json", ".css")
 
@@ -34,10 +48,10 @@ for f in files:
         probe = line[1:] if (i == 1 and f.endswith(".csv") and line[:1] == "\ufeff") else line
         if INVISIBLE.search(probe):
             print(f"{f}:{i}: invisible or bidirectional character"); bad += 1
-        if f.startswith("tests/"):
-            continue        # the tests carry fake tokens on purpose; the vault test needs one
         for pat in SECRETS:
             m = pat.search(line)
+            if m and f.startswith("tests/") and m.group(0) in TEST_FIXTURES:
+                continue
             if m and not re.fullmatch(r"[A-Za-z_]+x{10,}", m.group(0).split("_", 1)[-1] if "_" in m.group(0) else ""):
                 print(f"{f}:{i}: looks like a credential ({pat.pattern[:24]}...)"); bad += 1
 if bad:
