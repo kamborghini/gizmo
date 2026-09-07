@@ -1025,7 +1025,10 @@ def t_the_dead_elevation_token_is_gone():
     components silently lost their elevation with no error anywhere. The token
     is retired rather than left as a trap for the next edit."""
     ok("--hair" not in HTML, "the token and its last user are both gone")
-    for cls in ("card", "lia-card", "auth-card", "pfilters"):
+    # .pfilters left this list when Products became a card: it is a panel
+    # INSIDE that card now, on the muted ground, and a shadow inside a card
+    # is a second frame.
+    for cls in ("card", "lia-card", "auth-card"):
         rule = re.search(r"\." + cls + r" \{[^}]*\}", HTML, re.S)
         ok(rule and "var(--shadow-sm)" in rule.group(0),
            ".%s carries the house card elevation like every other card" % cls)
@@ -2222,7 +2225,7 @@ def t_the_finance_pages_share_the_reference_tab_strip():
     live trigger, and colour on its own left three near-identical links."""
     ok("const seg = el('div', 'ptabs')" in SCRIPT, "the strip is the page-level one")
     ok("el('button', 'ptab'" in SCRIPT, "and its tabs are page tabs")
-    fn = SCRIPT.split("function financeTabs(active, updated) {")[1][:900]
+    fn = SCRIPT.split("function financeTabs(active, updated, actions) {")[1][:900]
     ok("lbl-segbtn" not in fn, "the segmented control is gone from it")
     ok("aria-current" in fn, "and the live one says it is the current page")
     tab = CSS.split(".ptab {")[1].split("}")[0]
@@ -2352,7 +2355,7 @@ def t_the_files_browser_is_composed_like_the_reference():
     fn = SCRIPT.split("function renderFilesBrowser(host) {")[1]
     fn = fn[:fn.index("\n        function ")]
     ok("const fCard = el('div', 'card')" in fn, "the browser is a card")
-    ok("fAct.append(nf, up, fi)" in fn, "New folder and Upload are header actions")
+    ok("filesHeroAct.append(nf, up, fi)" in fn, "New folder and Upload are page-header actions, in the hero's slot")
     ok("fCard.append(tableTools([qWrap], [srt]))" in fn, "search left, sort right")
     ok("filterChip('Sort'" in fn, "the sort is a chip that says what it is set to")
     ok("el('div', 'lbl-toolbar')" not in fn, "the old four-control row is gone")
@@ -2633,7 +2636,8 @@ def t_search_repaints_are_debounced_everywhere():
     # so the guard follows it there rather than pinning the retired timer.
     ok("tableSearch('Search deals" in SCRIPT,
        "and the deals search is built by the factory, which debounces it")
-    ok("search._t = setTimeout(drawList, 150)" in SCRIPT, "and the products search")
+    ok("tableSearch('Search products…', pState.q" in SCRIPT,
+       "and the products search, which is the house search box and debounces inside tableSearch")
     ok("find._t = setTimeout(paint, 150)" in SCRIPT, "and the booked-shipments search")
     ok("inp.onchange = () => {" in SCRIPT.split("function tableSearch(")[1][:1300],
        "and a blur or Enter flushes the pending run, so chips cannot act on a stale query")
@@ -2801,7 +2805,7 @@ def t_the_kpi_card_keeps_the_hierarchy_the_reference_measures():
     ok("font-size: var(--text-sm)" in lab, "the label is the 14px one")
     ok("color: var(--text-tertiary)" in lab, "and muted, not full-strength")
     val = CSS.split(".stat .value {")[1].split("}")[0]
-    ok("font-size: var(--text-2xl)" in val, "the number is 30px")
+    ok("font-size: var(--text-3xl)" in val, "the number is 30px (the scale gained the reference's 24px step as --text-2xl, so 30 is --text-3xl)")
     ok("font-weight: var(--weight-medium)" in val, "at 500, as the Default card draws it")
     # Anchored on the line start: ".stat .stat-note {" also contains the
     # shorter string, and matching that one reads the wrong rule.
