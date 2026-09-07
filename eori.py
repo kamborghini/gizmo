@@ -287,7 +287,10 @@ def _cache_put(number: str, result: dict, at: str) -> None:
 # --------------------------------------------------------------------------
 async def _default_transport(xml_body: str):
     """POST the envelope. Returns (status_code, text)."""
-    async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as c:
+    # No redirects: a SOAP endpoint that answers 302 has been moved or
+    # intercepted, and following it would post the envelope somewhere this
+    # code has never checked. Better a visible failure than a silent one.
+    async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as c:
         r = await c.post(ENDPOINT, content=xml_body.encode("utf-8"),
                          headers={"Content-Type": "text/xml; charset=utf-8",
                                   "SOAPAction": '""', "User-Agent": _UA})

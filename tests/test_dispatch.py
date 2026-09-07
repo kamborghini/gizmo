@@ -17133,6 +17133,308 @@ def t_wrong_current_passwords_escalate_like_the_front_door():
     with_accounts(go)
 
 
+@test
+def t_an_erasure_survives_the_next_pipedrive_import():
+    """The privacy log said the person was erased. The importer put them back
+    within the hour, because the CRM was only popped, not tombstoned - the
+    anti-resurrection list every hand-deletion already used."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        copilot._webhook_seen.clear()
+        async def fake_export(progress=None):
+            return dict(PD_EXPORT)
+        saved = (pipedrive.export, pipedrive.API_TOKEN)
+        pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
+        try:
+            eq(post("/api/crm/import", {"go": True}).status_code, 200)
+            d = copilot._load_crm()
+            person = [p for p in d["persons"].values() if p["pd_id"] == "20"][0]
+            ok("sarah@lumen.co.uk" in person["emails"], "the imported person is there")
+            raw = json.dumps({"customer": {"id": 901, "email": "Sarah@Lumen.co.uk"},
+                              "shop_domain": "test-store.myshopify.com"}).encode()
+            r = client.post("/webhooks/privacy", content=raw,
+                            headers=wh_headers(raw, topic="customers/redact", delivery="res1"))
+            eq(r.status_code, 200, r.text)
+            gone = copilot._load_crm()
+            eq(any(p.get("pd_id") == "20" for p in gone["persons"].values()), False, "erased")
+            ok("20" in (gone.get("pd_deleted_persons") or []), "and tombstoned as it went")
+            eq(post("/api/crm/import", {"go": True}).status_code, 200, "the next import runs")
+            after = copilot._load_crm()
+            eq(any(p.get("pd_id") == "20" for p in after["persons"].values()), False,
+               "and does NOT put the erased person back")
+        finally:
+            pipedrive.export, pipedrive.API_TOKEN = saved
+    with_accounts(go)
+
+
+@test
+def t_an_erased_persons_email_is_not_re_imported_by_the_next_sync():
+    """Gmail still holds the correspondence and the sync looks two years back,
+    so a deleted thread was simply 'not in threads' and came straight back."""
+    def go():
+        ensure_auth()
+        copilot._webhook_seen.clear()
+        store = copilot._load_mail()
+        store.setdefault("threads", {})["tgone"] = {
+            "id": "tgone", "from_email": "erase.me@example.com",
+            "subject": "Please delete me", "state": "open"}
+        copilot._write_mail(store)
+        raw = json.dumps({"customer": {"id": 902, "email": "erase.me@example.com"},
+                          "shop_domain": "test-store.myshopify.com"}).encode()
+        eq(client.post("/webhooks/privacy", content=raw,
+                       headers=wh_headers(raw, topic="customers/redact", delivery="res2")
+                       ).status_code, 200)
+        store = copilot._load_mail()
+        eq("tgone" in store["threads"], False, "gone")
+        ok("erase.me@example.com" in (store.get("redacted") or []), "and remembered as erased")
+        # Exactly what the next sync does with what Gmail hands back.
+        copilot._mail_apply_thread(store, {
+            "id": "tgone", "messages": [{"id": "m1", "from_email": "erase.me@example.com",
+                                         "from_name": "Erase Me", "subject": "Please delete me",
+                                         "date": "2026-09-07T09:00:00Z", "snippet": "hello"}]},
+            "sales@example.com")
+        eq("tgone" in store["threads"], False, "the sync does not bring them back")
+        copilot._mail_apply_thread(store, {
+            "id": "tstay", "messages": [{"id": "m2", "from_email": "other@example.com",
+                                         "from_name": "Other", "subject": "Unrelated",
+                                         "date": "2026-09-07T09:00:00Z", "snippet": "hi"}]},
+            "sales@example.com")
+        eq("tstay" in store["threads"], True, "and nobody else is affected")
+        store["redacted"] = []
+        copilot._write_mail(store)
+    with_accounts(go)
+
+
+@test
+def t_the_courier_credentials_are_sealed_like_every_other_credential():
+    """The one long-lived credential the vault did not cover, while its own
+    docstring said it covered them all. What it holds books shipments."""
+    import tokenvault
+    os.environ["TOKEN_ENCRYPTION_KEY"] = "a-long-enough-test-key-for-scrypt-0123456789"
+    tokenvault._key.cache_clear()
+    try:
+        copilot._save_wo_creds(meter="METER-5555", key="KEY-super-secret", password="PW-very-secret")
+        raw = open(copilot.WO_SECRET_PATH, encoding="utf-8").read()
+        ok("KEY-super-secret" not in raw, "the key is not sitting in the file")
+        ok("PW-very-secret" not in raw, "nor the password")
+        creds = copilot._load_wo_creds()
+        eq(creds["key"], "KEY-super-secret", "and it opens again for the courier call")
+        eq(creds["password"], "PW-very-secret")
+        eq(oct(os.stat(copilot.WO_SECRET_PATH).st_mode & 0o777), "0o600", "0600 from creation")
+        src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+        ok('("world_options", WO_SECRET_PATH' in src,
+           "and the boot re-seal covers it, so an existing plaintext file is fixed")
+    finally:
+        os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
+        tokenvault._key.cache_clear()
+        copilot._save_wo_creds(meter="METER-9999", key="KEY-abc", password="PW-xyz")
+
+
+@test
+def t_the_drain_scrubs_the_shapes_a_person_actually_writes():
+    """A credential reaching a third-party sink is a leak with extra steps.
+    Scrubbing the SERIALISED event could also make it invalid JSON, and the
+    audit row was then dropped on the floor rather than shipped."""
+    import logdrain
+    got = []
+    logdrain.stop()
+    logdrain.install("https://sink.example/ingest", sender=lambda b: got.extend(b))
+    try:
+        logdrain.audit({"detail": "World Options key: 0123456789abcdef"})
+        logdrain.audit({"note": 'password: hunter2hunter2'})
+        logdrain.audit({"who": "u1", "action": "booked a shipment", "n": 3, "ok": True})
+        logdrain.flush(timeout=3)
+        blob = json.dumps(got)
+        ok("0123456789abcdef" not in blob, "a key written as a phrase is redacted")
+        ok("hunter2hunter2" not in blob, "and so is a password")
+        rows = [e for e in got if e.get("action") == "booked a shipment"]
+        eq(len(rows), 1, "an ordinary audit row still arrives - scrubbing must not drop it")
+        eq(rows[0]["n"], 3, "with its non-string fields intact")
+        eq(rows[0]["ok"], True)
+    finally:
+        logdrain.stop()
+
+
+@test
+def t_the_break_glass_password_never_leaves_the_operators_console():
+    """It is logged on purpose so Railway shows it. That is not a reason to
+    ship it to a third-party sink as well."""
+    import logdrain, logging as _lg
+    got = []
+    logdrain.stop()
+    logdrain.install("https://sink.example/ingest", sender=lambda b: got.extend(b))
+    try:
+        _lg.getLogger("shopify_mcp.copilot").error(
+            "MASTER RESET: temporary password for %s is: %s", "cameron", "Ab3dEf9hIjKl",
+            extra={"no_drain": True})
+        logdrain.flush(timeout=3)
+        ok("Ab3dEf9hIjKl" not in json.dumps(got), "the starter password did not travel")
+    finally:
+        logdrain.stop()
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    seg = src.split("MASTER RESET: temporary password")[1][:600]
+    ok('"no_drain": True' in seg, "and the real call site carries the flag")
+
+
+@test
+def t_a_drain_url_that_is_not_https_is_not_installed():
+    """LOG_DRAIN_TOKEN rides in a header on every batch. A typo'd http:// host
+    would put it on the wire in the clear, with logs arriving normally."""
+    import logdrain
+    logdrain.stop()
+    eq(logdrain.install("http://sink.example/ingest"), False, "refused")
+    eq(logdrain.pending(), 0, "and nothing is queued for it")
+    logdrain.stop()
+
+
+@test
+def t_the_orders_webhook_takes_order_topics_only():
+    """Shopify counts a 200 as handled. A privacy topic acknowledged by the
+    orders door would be a redaction request that quietly never happened."""
+    copilot._webhook_seen.clear()
+    raw = json.dumps({"customer": {"id": 1, "email": "x@example.com"}}).encode()
+    r = client.post("/webhooks/orders", content=raw,
+                    headers=wh_headers(raw, topic="customers/redact", delivery="wrong1"))
+    eq(r.status_code, 422, "not 200: Shopify must retry or alert, not tick it off")
+    ok(copilot._load_privacy_log() is not None)
+    raw2 = json.dumps({"id": 2}).encode()
+    eq(client.post("/webhooks/orders", content=raw2,
+                   headers=wh_headers(raw2, topic="orders/updated", delivery="right1")
+                   ).status_code, 200, "an order topic is still handled")
+
+
+@test
+def t_the_pre_redact_archive_does_not_live_forever():
+    """shop/redact archives everything before erasing it, which is the undo for
+    an uninstall that was a mistake. Nothing deleted it, so the erasure was met
+    by moving the data into a zip and keeping it indefinitely."""
+    import time as _t
+    data_dir = os.path.dirname(copilot.SCHEDULE_PATH) or "/data"
+    old = os.path.join(data_dir, "pre-redact-backup-20250101000000.zip")
+    new = os.path.join(data_dir, "pre-redact-backup-20260907000000.zip")
+    for p in (old, new):
+        open(p, "wb").write(b"PK\x03\x04")
+    os.utime(old, (_t.time() - 40 * 86400, _t.time() - 40 * 86400))
+    try:
+        eq(copilot._redact_archive_reap(), 1, "one archive was old enough")
+        eq(os.path.exists(old), False, "the 40-day-old copy is gone")
+        eq(os.path.exists(new), True, "today's is not")
+        ok(any(e.get("topic") == "archive/expire"
+               for e in copilot._load_privacy_log()["events"]), "and it is evidenced")
+    finally:
+        for p in (old, new):
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+
+
+@test
+def t_authenticated_json_is_not_stored_by_any_cache():
+    """A shared dispatch PC: the browser's disk and back-forward caches outlive
+    the session that fetched the customer list."""
+    eq(copilot._API_HEADERS.get("Cache-Control"), "no-store")
+    r = post("/api/team/me", {})
+    eq(r.headers.get("cache-control"), "no-store", "on a real API answer")
+    shell = client.get("/", headers={"Authorization": "Bearer " + tok()})
+    eq(shell.headers.get("cache-control"), "private, no-cache",
+       "but the page shell still revalidates rather than refetching in full")
+
+
+@test
+def t_the_connector_token_only_travels_somewhere_it_is_safe():
+    saved = os.environ.get("CONNECTOR_URL"), os.environ.get("CONNECTOR_TOKEN")
+    os.environ["CONNECTOR_TOKEN"] = "a-real-token"
+    try:
+        for url, allowed in (("http://connector.example.com", False),
+                             ("https://connector.example.com", True),
+                             ("http://gizmo-connector.railway.internal:8080", True),
+                             ("http://localhost:8080", True)):
+            eq(copilot._connector_url_safe(url), allowed, url)
+        os.environ["CONNECTOR_URL"] = "http://connector.example.com"
+        try:
+            asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+                copilot._connector_call("GET", "/status"))
+            ok(False, "a plain http host should have been refused")
+        except RuntimeError as e:
+            ok("will not be sent" in str(e), str(e))
+    finally:
+        for k, v in (("CONNECTOR_URL", saved[0]), ("CONNECTOR_TOKEN", saved[1])):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+@test
+def t_the_eori_check_does_not_follow_a_redirect():
+    """A SOAP endpoint answering 302 has been moved or intercepted. Following
+    it posts the envelope somewhere this code has never checked."""
+    src = open(os.path.join(HERE, "eori.py"), encoding="utf-8").read()
+    ok("follow_redirects=False" in src and "follow_redirects=True" not in src, "pinned")
+
+
+@test
+def t_a_chunked_drive_upload_cannot_spool_past_the_quota():
+    """The quota was only checked after the whole body had been written to the
+    container's disk. A client that sends no Content-Length could therefore
+    fill the disk with bytes that were always going to be refused."""
+    def go():
+        ensure_auth()
+        import base64 as b64
+        fake = FakeS3()
+        saved = (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
+                 copilot._files_s3_client, copilot.FILES_QUOTA_GB)
+        copilot.R2_ACCOUNT_ID = copilot.R2_ACCESS_KEY_ID = copilot.R2_SECRET_ACCESS_KEY = "acct"
+        copilot._files_s3_client = fake
+        copilot.FILES_QUOTA_GB = 4 / (1024 * 1024 * 1024)      # four bytes of room
+        copilot._files_mem = None
+        copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
+        try:
+            os.remove(copilot.FILES_PATH)
+        except FileNotFoundError:
+            pass
+        # What reaches the CONTAINER'S DISK is the thing at issue, and the test
+        # client buffers the request body before it sends it - so count the
+        # bytes the server spools, not the bytes the client produced.
+        import tempfile as _tf
+        spooled = {"n": 0}
+        real_tmp = _tf.TemporaryFile
+        class Counting:
+            def __init__(self, *a, **k):
+                self._f = real_tmp(*a, **k)
+            def write(self, b):
+                spooled["n"] += len(b)
+                return self._f.write(b)
+            def __getattr__(self, name):
+                return getattr(self._f, name)
+        def body():
+            for _ in range(200):
+                yield b"x" * 1024
+        _tf.TemporaryFile = Counting
+        try:
+            _pt, starter = make_user("Pat", "pat")
+            sess = login("pat", starter).json()["session"]
+            post_s(sess, "/api/auth/password", {"current": starter, "new": "pats-own-pw-91"})
+            auth = {"Authorization": "Basic " + b64.b64encode(b"pat:pats-own-pw-91").decode()}
+            r = client.put("/dav/big.pdf", headers=auth, content=body())
+            eq(r.status_code, 507, "refused for space, not accepted and then refused")
+            ok(spooled["n"] <= 16 * 1024,
+               "and it stopped writing to disk early: %d bytes spooled" % spooled["n"])
+        finally:
+            _tf.TemporaryFile = real_tmp
+            (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
+             copilot._files_s3_client, copilot.FILES_QUOTA_GB) = saved
+            copilot._files_mem = None
+            copilot._dav_auth_cache.clear()
+            try:
+                os.remove(copilot.FILES_PATH)
+            except FileNotFoundError:
+                pass
+    with_accounts(go)
+
+
 for fn in TESTS:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a

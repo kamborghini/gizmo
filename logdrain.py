@@ -40,8 +40,12 @@ _SECRETS = [
     re.compile(r"\bghp_[A-Za-z0-9]{10,}", re.I),                        # GitHub
     re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}", re.I),                      # API keys
     re.compile(r"\bBearer\s+[A-Za-z0-9._\-]{16,}", re.I),
-    re.compile(r"(?i)(refresh_token|access_token|api[_-]?key|password|secret)"
-               r"\s*[=:]\s*\"?([A-Za-z0-9._/\-+]{8,})\"?"),
+    # The phrase form, as a person would write it in a sentence:
+    # "temporary password for cameron is: Ab3dEf9hIjKl".
+    re.compile(r"(?i)\b(password|passcode|secret|api[_-]?key|token)\b[^:=\n]{0,40}"
+               r"(?:is|are|=|:)\s*[\"']?([A-Za-z0-9._/\-+]{8,})"),
+    re.compile(r"(?i)[\"']?(refresh_token|access_token|api[_-]?key|password|secret|key|token)"
+               r"[\"']?\s*(?:is|=|:)\s*[\"']?([A-Za-z0-9._/\-+]{8,})[\"']?"),
 ]
 
 _q: "queue.Queue" = queue.Queue(maxsize=2000)
@@ -69,12 +73,30 @@ def pending() -> int:
     return _q.qsize()
 
 
+def _scrub_deep(value):
+    """Scrub every string INSIDE the event, rather than the JSON text of the
+    whole event. Scrubbing the serialised form could turn valid JSON into
+    invalid JSON - a redaction that swallowed a closing quote made json.loads
+    raise, and the caller swallowed that, so the audit row reached the local
+    ledger and never reached the drain. Silently dropping audit events is the
+    one failure this module exists to prevent."""
+    if isinstance(value, str):
+        return scrub(value)
+    if isinstance(value, dict):
+        return {k: _scrub_deep(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_scrub_deep(v) for v in value]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return scrub(str(value))
+
+
 def _put(event: dict) -> None:
     """Never blocks. When the queue is full the OLDEST goes, because during an
     incident the newest lines are the ones worth having."""
     if not _state["url"]:
         return
-    event = json.loads(scrub(json.dumps(event, default=str)))
+    event = _scrub_deep(event)
     try:
         _q.put_nowait(event)
     except queue.Full:
@@ -98,6 +120,11 @@ def audit(event: dict) -> None:
 class _Handler(logging.Handler):
     def emit(self, record):
         try:
+            # Some lines are for the operator's own console and nowhere else:
+            # the break-glass starter password is logged on purpose so Railway
+            # shows it, and must not also travel to a third-party sink.
+            if getattr(record, "no_drain", False):
+                return
             _put({"kind": "log", "at": datetime.now(timezone.utc).isoformat(),
                   "level": record.levelname, "logger": record.name,
                   "message": record.getMessage()})
@@ -153,6 +180,13 @@ def install(url: str = None, token: str = None, sender=None,
     url = url if url is not None else os.environ.get("LOG_DRAIN_URL", "")
     token = token if token is not None else os.environ.get("LOG_DRAIN_TOKEN", "")
     if not url:
+        return False
+    if not sender and not str(url).lower().startswith("https://"):
+        # LOG_DRAIN_TOKEN rides in a header on every post. A typo'd http://
+        # sink would put it on the wire in the clear, on every batch, and the
+        # only symptom would be logs arriving normally. Refuse to install.
+        logger.error("log drain: LOG_DRAIN_URL is not https, so nothing is installed. "
+                     "Logs stay on stdout.")
         return False
     if maxsize:
         _q = queue.Queue(maxsize=maxsize)

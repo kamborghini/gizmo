@@ -101,6 +101,10 @@ APP_BASE_URL       = os.environ.get("APP_BASE_URL", "").strip()
 
 # Headers applied to every API/page response (defense in depth).
 _API_HEADERS = {
+    # Authenticated JSON, and the browser's own disk cache and back-forward
+    # cache are shared with whoever uses the machine next. The page shell sets
+    # its own (it must revalidate, not vanish), so it spreads these FIRST.
+    "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
@@ -965,7 +969,18 @@ def _load_wo_creds() -> dict:
     disk = _load_json_store(WO_SECRET_PATH, None, {})
     disk = disk if isinstance(disk, dict) else {}
     env = _wo_env_creds()
-    return {k: (env[k] or str(disk.get(k) or "").strip()) for k in _WO_ENV}
+
+    def opened(k):
+        try:
+            return str(tokenvault.unseal(str(disk.get(k) or "")) or "").strip()
+        except Exception:
+            # Sealed with a key this deployment does not have. Reading it as
+            # "not configured" says so in the UI; raising would take booking
+            # down with a stack trace nobody can act on.
+            logger.error("World Options: the stored %s cannot be decrypted "
+                         "(TOKEN_ENCRYPTION_KEY changed?)", k)
+            return ""
+    return {k: (env[k] or opened(k)) for k in _WO_ENV}
 
 
 def _wo_creds_from_env() -> bool:
@@ -982,16 +997,15 @@ def _save_wo_creds(meter=None, key=None, password=None) -> bool:
     env = _wo_env_creds()
     for name, val in (("meter", meter), ("key", key), ("password", password)):
         if val is not None and not env[name]:
-            disk[name] = str(val).strip()
+            # Sealed like the OAuth tokens and the sign-in secrets. This file
+            # was the one long-lived credential the vault did not cover, while
+            # its own documentation said it covered them all - and what it
+            # holds books shipments on the merchant's courier account.
+            disk[name] = tokenvault.seal(str(val).strip())
     os.makedirs(os.path.dirname(WO_SECRET_PATH) or ".", exist_ok=True)
-    tmp = WO_SECRET_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps(disk))
-    os.replace(tmp, WO_SECRET_PATH)
-    try:
-        os.chmod(WO_SECRET_PATH, 0o600)
-    except OSError:
-        pass
+    # 0600 from the moment it exists, not after the replace: the old write
+    # left it briefly at whatever the umask allowed.
+    tokenvault.write_private(WO_SECRET_PATH, disk)
     return True
 
 
@@ -8002,6 +8016,7 @@ def _frame_headers(request: Request) -> dict:
         f"frame-ancestors {ancestors};"
     )
     return {
+        **_API_HEADERS,
         "Content-Security-Policy": csp,
         # The shell must be revalidated on every open so a deploy is never
         # missed; its ETag is the build's own content hash, so revalidating
@@ -8009,7 +8024,6 @@ def _frame_headers(request: Request) -> dict:
         # carries no build hash, so there would be no way to bust it. The bulk
         # of the app lives in the hashed /assets URLs, which cache for a year.
         "Cache-Control": "private, no-cache",
-        **_API_HEADERS,
     }
 
 
@@ -8040,6 +8054,17 @@ def _connector_url() -> str:
     return (os.environ.get("CONNECTOR_URL") or "").rstrip("/")
 
 
+def _connector_url_safe(url: str) -> bool:
+    """The bearer token rides on every call. Railway's private network is
+    encrypted and its names end .railway.internal; anything else has to be
+    https. A typo'd public http:// host would put the token on the wire in
+    the clear on every poll, with no symptom at all."""
+    u = urlparse(url or "")
+    return bool(u.scheme == "https"
+                or (u.hostname or "").endswith(".railway.internal")
+                or (u.hostname or "") in ("localhost", "127.0.0.1", "::1"))
+
+
 async def _connector_call(method: str, path: str, params: Optional[dict] = None):
     """One call to the connector service. The service's own token rides in the
     Authorization header and NEVER leaves this process; X-Connector is its CSRF
@@ -8048,6 +8073,9 @@ async def _connector_call(method: str, path: str, params: Optional[dict] = None)
     answering with an error of its own (returned as-is)."""
     headers = {}
     token = os.environ.get("CONNECTOR_TOKEN") or ""
+    if token and not _connector_url_safe(_connector_url()):
+        raise RuntimeError("CONNECTOR_URL is neither https nor a private Railway address, "
+                           "so the connector token will not be sent to it.")
     if token:
         headers["Authorization"] = "Bearer " + token
     if method == "POST":
@@ -10260,6 +10288,13 @@ def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str) -> None:
     msgs = list(full.get("messages") or [])
     if not tid or not msgs:
         return
+    # One choke point for every sync path: a thread from someone who asked to
+    # be erased is not re-imported, however it was fetched.
+    erased = set(store.get("redacted") or [])
+    if erased:
+        senders = {str(m.get("from_email") or "").strip().lower() for m in msgs}
+        if senders & erased:
+            return
     msgs = msgs[-MAIL_MSGS_PER_THREAD:]
     threads = store.setdefault("threads", {})
     t = threads.get(tid)
@@ -11559,7 +11594,9 @@ def _redact_shop() -> dict:
         except Exception:
             logger.exception("shop/redact: could not remove %s", path)
     _privacy_note("shop/redact", "", "",
-                  f"erased {wiped} store(s); archive at {kept or '(none - see logs)'}")
+                  f"erased {wiped} store(s); archive at {kept or '(none - see logs)'}; "
+                  f"the archive is deleted after {REDACT_ARCHIVE_DAYS} days, and weekly "
+                  f"snapshots are kept for {BACKUP_KEEP} weeks")
     return {"wiped": wiped, "archive": kept}
 
 
@@ -11584,7 +11621,15 @@ def _redact_customer(email: str, customer_id="") -> dict:
         for pid in [k for k, v in (d.get("persons") or {}).items()
                     if addr in {str(e).strip().lower() for e in (v.get("emails") or [])}
                     or str(v.get("email") or "").strip().lower() == addr]:
-            d["persons"].pop(pid, None); erased += 1
+            # TOMBSTONED, not just popped. The Pipedrive importer refuses to
+            # recreate a contact it has been told is deleted, and it already
+            # did that for contacts deleted by hand. An erasure that the next
+            # import quietly undid was worse than none: the privacy log said
+            # the person was erased, and they were back within the hour.
+            rec = d["persons"][pid]
+            rec["id"] = pid           # the tombstone pops by the record's own id
+            _crm_tombstone_contact(d, "persons", rec)
+            erased += 1
         for lid in [k for k, v in (d.get("leads") or {}).items()
                     if str(v.get("email") or "").strip().lower() == addr]:
             d["leads"].pop(lid, None); erased += 1
@@ -11599,6 +11644,14 @@ def _redact_customer(email: str, customer_id="") -> dict:
         for tid in [k for k, t in threads.items()
                     if str(t.get("from_email") or "").strip().lower() == addr]:
             threads.pop(tid, None); erased += 1
+        # The same anti-resurrection rule for the mailbox. Gmail is still
+        # holding the correspondence and the sync looks two years back, so a
+        # deleted thread was simply "not in threads" and was fetched again on
+        # the next pass, minutes later.
+        gone = [a for a in (store.get("redacted") or []) if isinstance(a, str)]
+        if addr not in gone:
+            gone.append(addr)
+        store["redacted"] = gone[-5000:]
         _write_mail(store)
     except Exception:
         logger.exception("redact: mailbox")
@@ -11723,6 +11776,7 @@ def reseal_secrets_at_rest() -> dict:
         ("gmail_finance", google_mail.FINANCE_TOKEN_PATH, ("refresh_token",)),
         ("google_data", google_data.OAUTH_TOKEN_PATH, ("refresh_token",)),
         ("xero", xero_api.TOKEN_PATH, ("refresh_token",)),
+        ("world_options", WO_SECRET_PATH, ("meter", "key", "password")),
     ]
     for name, path, fields in files:
         try:
@@ -12189,7 +12243,11 @@ def _master_reset_check(d: dict) -> None:
             logger.error("MASTER RESET: temporary password for %s is: %s  "
                          "It stops working in %d minutes. Sign in with it now, choose a "
                          "new password, and REMOVE the MASTER_RESET variable.",
-                         u.get("username"), starter, MASTER_RESET_MINUTES)
+                         u.get("username"), starter, MASTER_RESET_MINUTES,
+                         # Deliberately in the platform's own log, where only the
+                         # operator can read it - and deliberately NOT shipped to
+                         # the log drain, which is a third party.
+                         extra={"no_drain": True})
             _track(uid, "auth", "master password reset", "via the MASTER_RESET variable")
             return
 
@@ -12955,6 +13013,39 @@ def _dav_entry_xml(href: str, name: str, is_dir: bool, size: int = 0, mtime: str
             "</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>")
 
 
+REDACT_ARCHIVE_DAYS = int(os.environ.get("REDACT_ARCHIVE_DAYS", "30"))
+
+
+def _redact_archive_reap(now: Optional[float] = None) -> int:
+    """The pre-redact archive is the undo for an uninstall that was a mistake.
+    It is a COMPLETE copy of the store's data, and nothing deleted it, so an
+    erasure obligation was met by moving the data into a zip and keeping it
+    forever. Thirty days is long enough to notice a misfire."""
+    now = now if now is not None else time.time()
+    data_dir = os.path.dirname(SCHEDULE_PATH) or "/data"
+    gone = 0
+    try:
+        names = os.listdir(data_dir)
+    except OSError:
+        return 0
+    for n in names:
+        if not (n.startswith("pre-redact-backup-") and n.endswith(".zip")):
+            continue
+        p = os.path.join(data_dir, n)
+        try:
+            if now - os.path.getmtime(p) > REDACT_ARCHIVE_DAYS * 86400:
+                os.remove(p)
+                gone += 1
+                logger.warning("privacy: removed the pre-redact archive %s (older than %d days)",
+                               n, REDACT_ARCHIVE_DAYS)
+        except OSError:
+            continue
+    if gone:
+        _privacy_note("archive/expire", "", "",
+                      f"deleted {gone} pre-redact archive(s) older than {REDACT_ARCHIVE_DAYS} days")
+    return gone
+
+
 def _files_tick() -> None:
     """Hourly housekeeping: move expired trash and abandoned uploads to the
     doomed list, persist that, and only then reap doomed bytes from the
@@ -12982,6 +13073,10 @@ def _files_tick() -> None:
             _mail_sweep_attachments()
         except Exception:
             logger.warning("mail: the attachment sweep did not finish; next tick retries")
+        try:
+            _redact_archive_reap()
+        except Exception:
+            logger.warning("privacy: the pre-redact archive sweep did not finish")
 
 
 # ---------------------------------------------------------------------------
@@ -13125,6 +13220,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         shop = str(request.headers.get("x-shopify-shop-domain") or "")
         if SHOPIFY_STORE and not shop.lower().startswith(SHOPIFY_STORE.split(".")[0].lower() + "."):
             return PlainTextResponse("Unauthorized", status_code=401)
+        # Signed by us, for us, but this door is the ORDERS door. A privacy or
+        # app topic delivered here would be acknowledged 200 and dropped, which
+        # is how a redaction request goes missing: Shopify counts a 200 as
+        # handled. Say plainly it was sent to the wrong endpoint.
+        topic = str(request.headers.get("x-shopify-topic") or "")
+        if topic and not topic.startswith("orders/"):
+            logger.warning("webhook: %s was delivered to the orders endpoint", topic)
+            return PlainTextResponse("Wrong endpoint for this topic", status_code=422)
         delivery = str(request.headers.get("x-shopify-webhook-id") or "")
         if delivery and not _webhook_note_delivery(delivery):
             return PlainTextResponse("ok", status_code=200)   # a redelivery, already handled
@@ -16168,7 +16271,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # Every memory copy now lies; drop them all and start from disk truth.
         _drop_all_caches()
         _write_sessions({})          # already empty; re-assert against the restored disk
-        _track(who, "settings", "restored a backup", f"{restored} files")
+        # Written AFTER the caches are dropped, so it lands in the RESTORED
+        # ledger: the history now on the volume is the backup's, and this is
+        # the line that says where it came from and who did it. Without it the
+        # jump backwards in the audit trail has no explanation in the trail.
+        _track(who, "settings", "restored a backup",
+               f"{restored} files; the history before this line is from the backup"
+               + (f" built {built_at}" if built_at else ""))
         _events_flush()
         logger.warning("backup restored by %s: %d files; all sessions dropped", who, restored)
         return _json({"ok": True, "restored": restored, "backup_built_at": built_at,
@@ -18801,17 +18910,31 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 declared = 0
             if declared > FILES_MAX_UPLOAD:
                 return Response(status_code=413, headers=hdrs)
-            if declared > 0:
-                async with _files_lock:
-                    if _files_usage(_load_files()) + declared > int(FILES_QUOTA_GB * 1024 * 1024 * 1024):
-                        return Response(status_code=507, headers=hdrs)
+            quota_bytes = int(FILES_QUOTA_GB * 1024 * 1024 * 1024)
+            async with _files_lock:
+                dq = _load_files()
+                _kq, _fq = _dav_resolve(dq, path)
+                # What this save is replacing does not count against the room
+                # it needs, or overwriting a large file near the quota would be
+                # refused for the space it is about to give back.
+                replacing = int(dq["files"][_fq].get("size") or 0) if _kq == "file" else 0
+                room = max(0, quota_bytes - _files_usage(dq) + replacing)
+            if declared > room:
+                return Response(status_code=507, headers=hdrs)
+            # A body with no Content-Length (chunked) still cannot spool more
+            # than the store could ever accept: the quota was only checked
+            # after the whole thing had been written to the container's disk,
+            # so an unlabelled upload could fill the disk with bytes that were
+            # always going to be refused.
+            ceiling = min(FILES_MAX_UPLOAD, room)
             spool = _tf.TemporaryFile()
             try:
                 total = 0
                 async for chunk in request.stream():
                     total += len(chunk)
-                    if total > FILES_MAX_UPLOAD:
-                        return Response(status_code=413, headers=hdrs)
+                    if total > ceiling:
+                        return Response(status_code=507 if total <= FILES_MAX_UPLOAD else 413,
+                                        headers=hdrs)
                     spool.write(chunk)
                 spool.seek(0)
                 okv, why, safe_type = _file_verdict(name, "", spool.read(64))

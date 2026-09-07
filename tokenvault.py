@@ -1,6 +1,6 @@
 """Encryption at rest for the third-party refresh tokens.
 
-Four files on the data volume hold long-lived credentials - two Gmail mailboxes,
+Five files on the data volume hold long-lived credentials - two Gmail mailboxes,
 Google's data API, and Xero. They are 0600, which stops another user on the box
 reading them, and does nothing at all about a volume snapshot, a backup that
 escapes, or anyone who gets a shell as the app.
@@ -100,7 +100,7 @@ def is_sealed(value) -> bool:
     return isinstance(value, str) and value.startswith(PREFIX)
 
 
-def _write_private(path: str, data) -> None:
+def write_private(path: str, data) -> None:
     """0600 from the moment it exists, and replaced atomically. A token file
     that is briefly world-readable, or briefly half-written, is the thing this
     whole module exists to prevent."""
@@ -120,6 +120,9 @@ def _write_private(path: str, data) -> None:
         os.chmod(path, 0o600)
     except OSError:
         pass
+
+
+_write_private = write_private     # the name this module used before it had callers
 
 
 def reseal_file(path: str, fields) -> int:
