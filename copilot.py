@@ -353,14 +353,6 @@ def _effort_for(model: str) -> str:
     return eff
 
 
-def _context_block(context: Optional[str]) -> str:
-    """Format ad-hoc custom instructions (legacy single-field) as a system addendum."""
-    if not context or not str(context).strip():
-        return ""
-    text = str(context).strip()[:STORE_CONTEXT_CAP]
-    return ("\n\n## Store profile — set by the merchant (authoritative)\n"
-            "Follow these preferences and constraints in every answer; never contradict them:\n"
-            + text)
 
 
 def _load_profile() -> dict:
@@ -858,6 +850,15 @@ DISPATCH_LABELS_DIR = os.environ.get(
     "DISPATCH_LABELS_DIR",
     os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".", "dispatch_labels"))
 DISPATCH_STATE_MAX  = int(os.environ.get("DISPATCH_STATE_MAX", "2000"))
+# Rows leaving the live store go here, whole. A dispatch record is a customs
+# declaration and a courier booking - the records the redaction code keeps
+# "under a legal obligation" because HMRC can ask for them within six years.
+# The live store is capped because the desk reads it on every request; the
+# cap used to DROP what it trimmed, so the retention the app promised ended
+# at record 2,001. Append-only, one JSON object per line, beside the store.
+DISPATCH_ARCHIVE_PATH = os.environ.get(
+    "DISPATCH_ARCHIVE_PATH",
+    os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".", "dispatch_state_archive.jsonl"))
 DISPATCHED_TAG      = os.environ.get("DISPATCHED_TAG", "Complete")
 # Orders finished before the tag was renamed still carry the old word. The queue
 # accepts both so history does not vanish from the app; nothing writes the old one.
@@ -1395,12 +1396,34 @@ class DispatchStoreUnwritable(RuntimeError):
     a silent no-op here loses the only record that money was spent."""
 
 
+def _archive_dispatch_rows(rows: list) -> bool:
+    """Append evicted dispatch records to the archive. False when the append
+    did not happen, so the caller keeps the rows rather than losing them."""
+    try:
+        os.makedirs(os.path.dirname(DISPATCH_ARCHIVE_PATH) or ".", exist_ok=True)
+        with open(DISPATCH_ARCHIVE_PATH, "a", encoding="utf-8") as fh:
+            for oid, rec in rows:
+                fh.write(json.dumps({"order_id": str(oid), **(rec or {})}, default=str) + "\n")
+        return True
+    except Exception:
+        logger.exception("dispatch archive append failed")
+        return False
+
+
 def _write_dispatch(orders: dict) -> dict:
     if not _store_writable(DISPATCH_STATE_PATH):
         raise DispatchStoreUnwritable(DISPATCH_STATE_PATH)
     if len(orders) > DISPATCH_STATE_MAX:
         keep = sorted(orders.items(), key=lambda kv: str(kv[1].get("dispatched_at") or ""))
-        orders = dict(keep[-DISPATCH_STATE_MAX:])
+        evicted = keep[:-DISPATCH_STATE_MAX]
+        # Archived FIRST, and only trimmed once the archive holds them: a
+        # record that cannot be archived stays in the live store, however
+        # large that makes it. A wrong deletion here is forever.
+        if _archive_dispatch_rows(evicted):
+            orders = dict(keep[-DISPATCH_STATE_MAX:])
+        else:
+            logger.error("dispatch: %d rows are past the cap but could not be archived; "
+                         "keeping them in the live store", len(evicted))
     os.makedirs(os.path.dirname(DISPATCH_STATE_PATH) or ".", exist_ok=True)
     tmp = DISPATCH_STATE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -3251,13 +3274,6 @@ async def _paginate_orders(registry: dict, days: int, max_pages: int = ORDER_PAG
     return out
 
 
-def _orders_monthly_revenue(orders: list, months: list) -> list:
-    idx = {mk: 0.0 for mk in months}
-    for o in orders:
-        mk = _month_key(o.get("created_at"))
-        if mk in idx:
-            idx[mk] += float(o.get("total_price") or 0)
-    return [{"label": mk, "value": round(idx[mk], 2)} for mk in months]
 
 
 def _orders_product_monthly(orders: list, months: list) -> dict:
@@ -3425,22 +3441,38 @@ GOBO_ALIASES_PATH = os.environ.get("GOBO_ALIASES_PATH",
 GOBO_OVERRIDES_PATH = os.environ.get("GOBO_OVERRIDES_PATH",
                                      os.path.join(os.path.dirname(__file__), "data", "gobo-overrides.csv"))
 GOBO_SIZES_LIVE = os.environ.get("GOBO_SIZES_LIVE", "/data/gobo-sizes.csv")
+# The two rule files the app EDITS. The repo copies are seeds that ship with
+# the code; a rule saved in the app has to outlive the container that saved it,
+# so it is written to the volume, and the volume copy wins on read - exactly
+# how the size sheet already works (_sizes_path). Until this existed the
+# editor wrote into the container's own filesystem, which a redeploy replaces.
+GOBO_OVERRIDES_LIVE = os.environ.get("GOBO_OVERRIDES_LIVE", "/data/gobo-overrides.csv")
+GOBO_ALIASES_LIVE = os.environ.get("GOBO_ALIASES_LIVE", "/data/gobo-aliases.csv")
 
 # The two rule files, and the columns their loaders read. A merchant's ruling on
 # a model lives here rather than in the sheet, so replacing the sheet never
 # throws the rulings away.
+# kind -> (seed in the repo, live copy on the volume, the columns the loader reads)
 GOBO_RULE_FILES = {
-    "override": (GOBO_OVERRIDES_PATH,
+    "override": (GOBO_OVERRIDES_PATH, GOBO_OVERRIDES_LIVE,
                  ["Manufacturer", "Model", "Customer Email Domain", "Production Size (mm)"]),
-    "alias": (GOBO_ALIASES_PATH, ["Manufacturer", "Store Model", "List Model"]),
+    "alias": (GOBO_ALIASES_PATH, GOBO_ALIASES_LIVE, ["Manufacturer", "Store Model", "List Model"]),
 }
+
+
+def _rule_path(kind: str) -> str:
+    """The rule file the app READS: the volume copy when there is one, else the
+    seed that shipped with the code. Writes always go to the volume copy."""
+    seed, live, _header = GOBO_RULE_FILES[kind]
+    return live if os.path.isfile(live) else seed
 
 
 def _gobo_rule_rows(kind: str) -> list:
     """Every row of one rule file, as plain dicts. A missing file is an empty
     list; an unreadable one RAISES, because reporting "no rules" for a file that
     exists would invite the merchant to add a duplicate of a rule already there."""
-    path, header = GOBO_RULE_FILES[kind]
+    header = GOBO_RULE_FILES[kind][2]
+    path = _rule_path(kind)
     import csv as _csv
     try:
         with open(path, newline="", encoding="utf-8-sig") as fh:
@@ -3454,7 +3486,7 @@ def _write_gobo_rule_rows(kind: str, rows: list) -> None:
     """Atomic, keeping the five most recent generations. These files decide the
     glass a real order is cut from, so a half-written one must never be readable
     and a bad edit must always have something to go back to."""
-    path, header = GOBO_RULE_FILES[kind]
+    _seed, path, header = GOBO_RULE_FILES[kind]
     import csv as _csv
     import io as _io
     import shutil
@@ -3557,7 +3589,10 @@ def _gobo_sizes() -> dict:
             return os.path.getmtime(p)
         except OSError:
             return None
-    mtime = (sizes_path, mtime, _mt(GOBO_ALIASES_PATH), _mt(GOBO_OVERRIDES_PATH))
+    alias_path, override_path = _rule_path("alias"), _rule_path("override")
+    # The paths are part of the key: the first save moves a rule file from the
+    # seed to the volume, and that switch must reload even if the stamps match.
+    mtime = (sizes_path, mtime, alias_path, _mt(alias_path), override_path, _mt(override_path))
     if _gobo_cache["mtime"] == mtime:
         return _gobo_cache
     import csv as _csv
@@ -3582,7 +3617,7 @@ def _gobo_sizes() -> dict:
 
     excludes, sets, domain_rules, dead_aliases = set(), {}, [], 0
     try:
-        with open(GOBO_OVERRIDES_PATH, newline="", encoding="utf-8-sig") as fh:
+        with open(override_path, newline="", encoding="utf-8-sig") as fh:
             for row in _csv.DictReader(fh):
                 mfr = str(row.get("Manufacturer") or "").strip()
                 model = str(row.get("Model") or "").strip()
@@ -3601,7 +3636,7 @@ def _gobo_sizes() -> dict:
     except FileNotFoundError:
         pass
     except Exception:
-        logger.exception("gobo overrides: failed to load %s", GOBO_OVERRIDES_PATH)
+        logger.exception("gobo overrides: failed to load %s", override_path)
 
     try:
         with open(sizes_path, newline="", encoding="utf-8-sig") as fh:
@@ -3638,7 +3673,7 @@ def _gobo_sizes() -> dict:
                      "production_size": ruled["size"], "review": ""}
             index_model(entry, key[0], _loose_key(ruled["manufacturer"]), ruled["model"])
     try:
-        with open(GOBO_ALIASES_PATH, newline="", encoding="utf-8-sig") as fh:
+        with open(alias_path, newline="", encoding="utf-8-sig") as fh:
             for row in _csv.DictReader(fh):
                 mfr = str(row.get("Manufacturer") or "").strip()
                 store = str(row.get("Store Model") or "").strip()
@@ -3653,7 +3688,7 @@ def _gobo_sizes() -> dict:
     except FileNotFoundError:
         pass
     except Exception:
-        logger.exception("gobo aliases: failed to load %s", GOBO_ALIASES_PATH)
+        logger.exception("gobo aliases: failed to load %s", alias_path)
     try:
         sheet_at = datetime.fromtimestamp(os.path.getmtime(sizes_path), timezone.utc).isoformat()
     except OSError:
@@ -9976,22 +10011,6 @@ MAIL_REPLY_TEXT_MAX = 5000
 MAIL_REPLIES_MAX = 50
 
 
-def _mail_outgoing_text(body: str, sign_off: str, footer: str) -> str:
-    """The words that actually leave: the reply, the sender's sign-off, the
-    shop's footer, in that order, one blank line apart.
-
-    Pure, and applied at the moment of sending rather than baked into the
-    draft. That ordering matters twice over: a draft written last week goes out
-    under this week's footer, and a person editing their words in the compose
-    box is never editing around a footer they cannot change anyway.
-
-    Whitespace-only settings count as unset - otherwise a stray space left in a
-    settings box would append a blank block to every email the shop sends."""
-    out = (body or "").rstrip()
-    for extra in ((sign_off or "").strip(), (footer or "").strip()):
-        if extra:
-            out += "\n\n" + extra
-    return out
 
 
 def _mail_sign_off(uid) -> str:
@@ -10028,10 +10047,6 @@ def _mail_email_repair(store: dict) -> dict:
     return em
 
 
-def _mail_footer_text(store: dict) -> str:
-    """The shop's footer as plain text, for the plain-text path and the twin."""
-    em = _mail_email_repair(store)
-    return mailmime.render_footer(em.get("footer_slots") or {})[1]
 
 
 # ---------------------------------------------------------------------------
@@ -21685,18 +21700,6 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         return _oauth_page("✅ Connected to Google", "Search Console & Analytics are now linked. "
                            "You can close this tab and return to Store Copilot.")
 
-    @mcp.custom_route("/api/google/status", methods=["POST"])
-    async def google_status(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
-        return _json(google_data.status())
 
     # ----- Gmail connect: same shape as the Google one, its own token -----
     # The mailbox is a DIFFERENT Google account from the analytics one (the

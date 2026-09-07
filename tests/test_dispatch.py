@@ -55,6 +55,9 @@ os.environ.update({
     # merchant's real overrides - which is why the route had no test.
     "GOBO_OVERRIDES_PATH": SCRATCH + "/gobo-overrides.csv",
     "GOBO_ALIASES_PATH": SCRATCH + "/gobo-aliases.csv",
+    # And the VOLUME copies the editor writes, which win over the seeds above.
+    "GOBO_OVERRIDES_LIVE": SCRATCH + "/live/gobo-overrides.csv",
+    "GOBO_ALIASES_LIVE": SCRATCH + "/live/gobo-aliases.csv",
 })
 # Seed the scratch rule files from the repo's real ones, so the size lookup
 # behaves exactly as it does in production (a Source Four Junior really is
@@ -14993,23 +14996,6 @@ def t_eori_route_stops_at_twenty_checks_a_minute():
 # still goes out under today's footer.
 
 
-@test
-def t_mail_outgoing_text_assembles_words_then_signoff_then_footer():
-    f = copilot._mail_outgoing_text
-    eq(f("Hello Jo.", "", ""), "Hello Jo.", "nothing set, nothing added")
-    eq(f("Hello Jo.", "Thanks,\nCameron", ""), "Hello Jo.\n\nThanks,\nCameron")
-    eq(f("Hello Jo.", "", "Projected Image Ltd"), "Hello Jo.\n\nProjected Image Ltd")
-    eq(f("Hello Jo.", "Thanks,\nCameron", "Projected Image Ltd"),
-       "Hello Jo.\n\nThanks,\nCameron\n\nProjected Image Ltd",
-       "sign-off first, then the shop's footer")
-    # The body is rstripped so a draft ending in newlines does not open a gap,
-    # and the two settings are stripped so a stray trailing space in a text box
-    # never reaches a customer.
-    eq(f("Hello Jo.\n\n  ", "  Thanks,\nCameron  ", "  Projected Image Ltd  "),
-       "Hello Jo.\n\nThanks,\nCameron\n\nProjected Image Ltd")
-    # Whitespace-only settings are not settings.
-    eq(f("Hello Jo.", "   ", "\n\n"), "Hello Jo.")
-    eq(f("", "Thanks", "PI"), "\n\nThanks\n\nPI", "an empty body still gets them")
 
 
 @test
@@ -17486,6 +17472,81 @@ def t_the_streaming_chat_route_checks_the_session_before_it_spends_an_ai_slot():
     src = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
     seg = src.split("async function streamChat(")[1][:1200]
     ok("X-App-Session" in seg, "and the page now sends the session on the streaming call")
+
+
+@test
+def t_evicted_dispatch_records_are_archived_whole_not_dropped():
+    """A dispatch record is the customs declaration and the courier booking
+    HMRC can ask for within six years - the app says so where it refuses to
+    erase them. The live store is capped for speed; what leaves it must not
+    vanish, and if it cannot be archived it must not leave."""
+    saved_max, saved_arch = copilot.DISPATCH_STATE_MAX, copilot.DISPATCH_ARCHIVE_PATH
+    copilot.DISPATCH_STATE_MAX = 3
+    try:
+        for p in (copilot.DISPATCH_STATE_PATH, copilot.DISPATCH_ARCHIVE_PATH):
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+        rows = {str(100 + i): {"dispatched_at": f"2026-09-0{i}T10:00:00+00:00",
+                               "name": f"Customer {i}", "address1": f"{i} Glass Works",
+                               "tracking": f"TRK{i}"} for i in range(1, 6)}
+        kept = copilot._write_dispatch(dict(rows))
+        eq(sorted(kept), ["103", "104", "105"], "the three newest stay live")
+        arch = [json.loads(l) for l in open(copilot.DISPATCH_ARCHIVE_PATH, encoding="utf-8")]
+        eq([a["order_id"] for a in arch], ["101", "102"], "the two oldest were archived first")
+        eq(arch[0]["address1"], "1 Glass Works", "whole - the record, not just an id")
+        eq(arch[0]["tracking"], "TRK1")
+        # An archive that cannot be written means nothing is trimmed.
+        copilot.DISPATCH_ARCHIVE_PATH = os.path.join(copilot.DISPATCH_STATE_PATH, "not-a-dir", "x.jsonl")
+        kept2 = copilot._write_dispatch(dict(rows))
+        eq(len(kept2), 5, "the live store keeps every row rather than lose one")
+    finally:
+        copilot.DISPATCH_STATE_MAX, copilot.DISPATCH_ARCHIVE_PATH = saved_max, saved_arch
+        for p in (copilot.DISPATCH_STATE_PATH, copilot.DISPATCH_ARCHIVE_PATH):
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+
+
+@test
+def t_a_size_rule_saved_in_the_app_lands_on_the_volume_not_in_the_image():
+    """The seed rule files ship with the code, inside the container. A rule the
+    bench saves has to outlive the container that saved it, so it goes to the
+    volume - and the volume copy is what the lookup reads from then on."""
+    def go():
+        ensure_auth()
+        live, seed = copilot.GOBO_OVERRIDES_LIVE, copilot.GOBO_OVERRIDES_PATH
+        try:
+            os.remove(live)
+        except FileNotFoundError:
+            pass
+        copilot._gobo_cache["mtime"] = None
+        try:
+            eq(copilot._rule_path("override"), seed, "with no volume copy, the seed is read")
+            before = len(copilot._gobo_rule_rows("override"))
+            r = post("/api/gobo-sizes/rule",
+                     {"op": "set", "manufacturer": "Showtec", "model": "Volume", "size": "37.5"})
+            eq(r.status_code, 200, r.text)
+            ok(os.path.isfile(live), "the save created the volume copy")
+            eq(copilot._rule_path("override"), live, "which is read from now on")
+            rows = copilot._gobo_rule_rows("override")
+            ok(any(x["Model"] == "Volume" for x in rows), "with the new rule in it")
+            eq(len(rows), before + 1, "and every seed rule carried across with it")
+            ok("Volume" not in open(seed, encoding="utf-8").read(),
+               "the seed inside the image is untouched")
+            sheet = copilot._gobo_sizes()
+            hits = [e for k, es in sheet["by_mm"].items() if k == ("showtec", "volume") for e in es]
+            ok(hits and hits[0].get("production_size") == "37.5",
+               "and the size lookup answers from the volume copy: %r" % hits[:1])
+        finally:
+            try:
+                os.remove(live)
+            except FileNotFoundError:
+                pass
+            copilot._gobo_cache["mtime"] = None
+    with_accounts(go)
 
 
 for fn in TESTS:
