@@ -891,7 +891,7 @@ def t_icon_only_buttons_clear_the_minimum():
     rule = re.search(r"\.icon-btn \{.*?\}", HTML, re.S).group(0)
     ok("min-width: 28px" in rule and "min-height: 28px" in rule,
        "icon buttons carry an explicit floor rather than inheriting one from their glyph")
-    ok(re.search(r"\.toast-x \{ min-width: 24px; min-height: 24px", HTML),
+    ok(re.search(r"\.toast-x \{ min-width: var\(--control-h-sm\); min-height: var\(--control-h-sm\)", HTML),
        "so does the toast dismiss, which sits on its own over the page")
 
 
@@ -1042,7 +1042,7 @@ def t_deleting_a_conversation_is_reachable_and_visible():
     ok(re.search(r"@media \(hover: none\) \{ \.convo \.del", HTML),
        "and touch, which has no hover, does not leave it invisible-but-live")
     rule = re.search(r"\.convo \.del \{[^}]*\}", HTML, re.S).group(0)
-    ok("min-width: 24px" in rule, "it also clears the minimum target size")
+    ok("min-width: var(--control-h-sm)" in rule, "it also clears the minimum target size")
 
 
 @test
@@ -2025,7 +2025,7 @@ def t_the_table_toolbar_and_pager_match_the_reference():
     btn = CSS.split(".btn-sm {")[1].split("}")[0]
     ok("min-height: 28px" in btn and "padding: 0 var(--sp-2-5)" in btn, "small buttons are 28px tall")
     step = CSS.split(".tbl-step {")[1].split("}")[0]
-    ok("width: 32px" in step and "height: 32px" in step, "pager steps are 32px square")
+    ok("width: var(--control-h)" in step and "height: var(--control-h)" in step, "pager steps are 32px square")
     ok("border-radius: var(--radius-md)" in step, "at the base radius, not the control radius")
     # The pager must never claim to be paging through more than it is.
     fn = SCRIPT.split("function tablePager(o) {")[1][:1600]
@@ -2116,7 +2116,7 @@ def t_the_menu_and_tabs_are_the_reference_measurements():
     ok("padding: var(--sp-1) var(--sp-7) var(--sp-1) var(--sp-1-5)" in item, "with room on the right for a tick")
     ok("border-radius: var(--radius-sm)" in item, "at the control radius")
     tab = CSS.split(".ftab {")[1].split("}")[0]
-    ok("height: 24px" in tab and "padding: var(--sp-0-5) var(--sp-1-5)" in tab, "tabs are 24px")
+    ok("height: var(--control-h-sm)" in tab and "padding: var(--sp-0-5) var(--sp-1-5)" in tab, "tabs are 24px")
     ok("background: none" in tab, "with no filled pill")
     on = CSS.split(".ftab:is(.on, [aria-selected=\"true\"]) {")[1].split("}")[0]
     ok("color: var(--text-primary)" in on and "background" not in on,
@@ -2340,8 +2340,11 @@ def t_every_chart_line_comes_off_the_ramp():
     ok(not _re.search(r"color: '#[0-9a-fA-F]{3,6}'", SCRIPT),
        "no chart is given a colour literal")
     ramp = SCRIPT.split("const CH = [")[1].split("]")[0]
-    for c in ("'#171717'", "'#525252'", "'#737373'", "'#a1a1a1'", "'#d4d4d4'"):
-        ok(c in ramp, "the ramp still holds " + c)
+    ok("'--chart-1', '--chart-2', '--chart-3', '--chart-4', '--chart-5'" in ramp
+       and "].map(tokenValue)" in SCRIPT.split("const CH = [")[1][:120],
+       "the ramp is read from the tokens, not carried as hex")
+    for i, hexv in enumerate(("#171717", "#525252", "#737373", "#a1a1a1", "#d4d4d4"), 1):
+        ok(_token("chart-%d" % i) == hexv, "--chart-%d still resolves to %s" % (i, hexv))
     # Every series names a ramp slot.
     for m in _re.finditer(r"color: (CH\[\d\]|[A-Za-z_$][\w.$]*)", SCRIPT):
         ok(m.group(1).startswith("CH[") or not m.group(1).startswith("#"),
@@ -2683,8 +2686,8 @@ def t_every_control_is_the_same_height_as_every_other():
                      (".disp-text {", "dispatch text fields"), (".disp-num {", "dispatch number fields"),
                      (".tm-field {", "team fields")]:
         block = CSS.split(sel)[1].split("}")[0]
-        ok("min-height: 32px" in block or "32px" in block, why + " are 32px")
-    ok("input[type=date], input[type=time] { height: 32px; }" in CSS,
+        ok("min-height: var(--control-h)" in block or "var(--control-h)" in block, why + " are 32px")
+    ok("input[type=date], input[type=time] { height: var(--control-h); }" in CSS,
        "and a native date control is pinned, since it carries its own height")
     sm = CSS.split(".btn-sm {")[1].split("}")[0]
     ok("min-height: 28px" in sm, "the small button stays 28")
@@ -2696,7 +2699,7 @@ def t_the_sidebar_does_not_dim_where_you_are_not():
     other label at full strength. This one greyed the inactive items to --text-secondary,
     which is what made the whole sidebar read washed out beside it."""
     item = CSS.split(".nav-item {")[1].split("}")[0]
-    ok("height: 32px" in item, "nav items are 32px, as the reference draws them")
+    ok("height: var(--control-h)" in item, "nav items are 32px, as the reference draws them")
     ok("color: var(--text-primary)" in item, "an inactive item is full-strength ink")
     ok("font-weight: var(--weight-regular)" in item, "at normal weight")
     act = CSS.split(".nav-item:is(.active, [aria-current=\"page\"]) {")[1].split("}")[0]
@@ -4676,6 +4679,43 @@ def t_every_breakpoint_is_on_the_scale():
         widths |= {int(w) for w in re.findall(r"(?:min|max)-width:\s*(\d+)px", pre)}
     ok(widths <= stops, "off-scale breakpoints: %s" % sorted(widths - stops))
     ok({640, 760, 900, 1100, 1200, 1500, 1800} <= widths, "and every stop on the scale is in use: %s" % sorted(widths))
+
+
+@test
+def t_every_defined_token_is_read():
+    """A token nobody reads is a value nobody sees, and the next edit deletes
+    it or, worse, trusts it. Every token in the block is read by the
+    stylesheet, the script or the composer."""
+    root = CSS.split(":root {")[1].split("\n        }")[0]
+    defined = re.findall(r"(--[\w-]+)\s*:", root)
+    readers = CSS + SCRIPT + COMPOSER
+    unread = [d for d in defined if "var(" + d + ")" not in readers and "'" + d + "'" not in readers
+              and "'" + d.replace("--owner-", "--owner-") + "'" not in readers]
+    # the owner hues are read by name composition: tokenValue('--owner-' + k)
+    unread = [d for d in unread if not (d.startswith("--owner-") and "tokenValue('--owner-' + k)" in SCRIPT)]
+    ok(not unread, "defined but never read: %s" % unread)
+    ok(len(defined) > 150, "the block is the whole system: %d tokens" % len(defined))
+
+
+@test
+def t_the_script_paints_from_tokens_only():
+    """Three hex palettes used to live in JavaScript: the chart ramp, the CRM
+    owner colours and the composer's font colours. Now the script asks the
+    stylesheet. And an element the script styles by hand takes its lengths
+    from the scale, so the 61 marginTop pixels are gone."""
+    ok("function tokenValue(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }" in SCRIPT,
+       "one reader for the tokens")
+    hexes = [h for h in re.findall(r"'#([0-9a-fA-F]{6})'", SCRIPT) if not h.isdigit()]
+    ok(not hexes, "the script carries no colour literal: %s" % hexes[:5])
+    ok(not re.search(r"#[0-9a-fA-F]{6}\b", COMPOSER), "nor does the composer")
+    ok("tok('--owner-red')" in COMPOSER and "tok('--text-primary')" in COMPOSER, "the composer reads the same tokens")
+    ok(not re.search(r"\.style\.(margin\w*|padding\w*|gap|rowGap|fontSize|lineHeight) = '[^']*\d+px", SCRIPT),
+       "no inline length is written as pixels")
+    bad = [m.group(0) for m in re.finditer(r"cssText = '[^']*'", SCRIPT)
+           if re.search(r"(margin|padding|gap|font-size|line-height)[^;']*:\s*[^;']*\d+(px|em)", m.group(0))
+           or "font-family:" in m.group(0) and "var(--font-" not in m.group(0)]
+    ok(not bad, "no cssText carries a pixel length or a font name: %s" % bad[:4])
+    ok(not re.search(r"\.style\.fontWeight = '\d+'", SCRIPT), "weights are tokens too")
 
 
 if __name__ == "__main__":

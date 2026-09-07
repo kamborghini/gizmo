@@ -30,9 +30,13 @@
     var MAX_INLINE = 5 * 1024 * 1024;        /* one picture in a body is not a film */
     var FONTS = ['Arial', 'Georgia', 'Verdana', 'Trebuchet MS', 'Courier New'];
     var SIZES = [['Small', '2'], ['Normal', '3'], ['Large', '5'], ['Huge', '7']];
-    var COLOURS = [['Default', ''], ['Black', '#0a0a0a'], ['Grey', '#525252'], ['Red', '#b91c1c'],
-                   ['Orange', '#c2410c'], ['Green', '#15803d'], ['Blue', '#1d4ed8'],
-                   ['Purple', '#7e22ce'], ['Pink', '#be185d']];
+    /* The palette is the app's own, read from the stylesheet's tokens, so a
+       colour in an outgoing email is the colour the page paints. The email
+       itself carries the hex, because a mail client has no :root to read. */
+    function tok(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+    var COLOURS = [['Default', ''], ['Black', tok('--text-primary')], ['Grey', tok('--text-secondary')], ['Red', tok('--owner-red')],
+                   ['Orange', tok('--owner-orange')], ['Green', tok('--owner-green')], ['Blue', tok('--owner-blue')],
+                   ['Purple', tok('--owner-purple')], ['Pink', tok('--owner-pink')]];
 
     var ICONS = {
         justifyLeft: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1" y="3" width="14" height="1.6" rx=".8"/><rect x="1" y="7.2" width="9" height="1.6" rx=".8"/><rect x="1" y="11.4" width="13" height="1.6" rx=".8"/></svg>',
@@ -425,7 +429,7 @@
                 if (c[1]) sw.style.background = c[1];
                 sw.onmousedown = function (e) { e.preventDefault(); };
                 sw.onclick = function () {
-                    cmd('foreColor', c[1] || '#0a0a0a');
+                    cmd('foreColor', c[1] || tok('--text-primary'));
                     if (pop) { pop.remove(); pop = null; }
                 };
                 pop.append(sw);

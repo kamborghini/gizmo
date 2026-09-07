@@ -237,14 +237,14 @@
         /* Foreground at 70% over the sidebar, which lands on this palette's
            --text-secondary. It was a step lighter, which let the groups fade out. */
         .nav-group { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-secondary);
-            height: 32px; display: flex; align-items: center; padding: 0 var(--sp-2);
+            height: var(--control-h); display: flex; align-items: center; padding: 0 var(--sp-2);
             margin-top: var(--sp-2); }
         .nav-group:first-child { margin-top: 0; }
         /* 32px, and an INACTIVE item is full-strength ink at normal weight -
            the reference does not dim the places you are not. Position is marked
            by the pill and the weight, not by greying everything else out, which
            is what made this sidebar read washed out beside the reference's. */
-        .nav-item { display: flex; align-items: center; gap: var(--sp-2); height: 32px; padding: 0 var(--sp-2);
+        .nav-item { display: flex; align-items: center; gap: var(--sp-2); height: var(--control-h); padding: 0 var(--sp-2);
             border-radius: var(--radius-sm); border: 0; background: transparent; color: var(--text-primary);
             font-size: var(--text-sm); font-weight: var(--weight-regular); width: 100%; text-align: left;
             transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
@@ -273,7 +273,7 @@
                the negative margin cancels its effect on the row height. */
             padding: var(--sp-2); margin: calc(-1 * var(--sp-2)) 0 calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)); }
         .convo .del { opacity: 0; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-xs); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease);
-            border: 0; background: transparent; min-width: 24px; min-height: 24px; }
+            border: 0; background: transparent; min-width: var(--control-h-sm); min-height: var(--control-h-sm); }
         .convo .del svg { width: 14px; height: 14px; }
         .convo:hover .del, .convo:focus-within .del { opacity: .65; }
         /* Hover-reveal alone leaves the trash invisible but still tappable. */
@@ -300,7 +300,7 @@
                made every button 34 where the reference's is 32. */
             padding: var(--control-pad-y) var(--sp-3); font-size: var(--text-sm); font-weight: var(--weight-medium); line-height: var(--lh-control); white-space: nowrap;
             display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
-            transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease); min-height: 32px; }
+            transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease); min-height: var(--control-h); }
         .btn:hover { background: var(--surface-tertiary); }
         .btn:active { background: var(--surface-sunken); }
         /* ---- Disabled. One recipe for a control (muted fill, disabled ink,
@@ -722,7 +722,7 @@
         .ptools { display: flex; flex-direction: column; gap: var(--sp-3); margin-bottom: var(--sp-3); }
         .ptools .row1 { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
         .ptools .grow { flex: 1; min-width: 200px; }
-        .psel { border-radius: var(--radius-sm); padding: var(--control-pad-y) var(--sp-3); font-size: var(--text-sm); min-height: 32px; }
+        .psel { border-radius: var(--radius-sm); padding: var(--control-pad-y) var(--sp-3); font-size: var(--text-sm); min-height: var(--control-h); }
         select.psel { cursor: pointer; } .pnum { width: 110px; }
         .btn:is(.on, [aria-pressed="true"]) { background: var(--action-soft); border-color: var(--action-primary); color: var(--text-primary); font-weight: var(--weight-medium); }
         .btn.ghost:hover { background: var(--surface-tertiary); }
@@ -736,7 +736,7 @@
         /* The 12px glyph was the whole target; the box grows around it and the
            negative margin keeps the chip the height it was. */
         .fchip button { border: 0; background: transparent; color: inherit; display: grid; place-items: center; padding: 0; border-radius: var(--radius-circle); cursor: pointer;
-            min-width: 24px; min-height: 24px; margin: calc(-1 * var(--sp-1)) calc(-1 * var(--sp-1)); }
+            min-width: var(--control-h-sm); min-height: var(--control-h-sm); margin: calc(-1 * var(--sp-1)) calc(-1 * var(--sp-1)); }
         .fchip button:hover { background: var(--surface-sunken); } .fchip button:active { background: var(--border-strong); } .fchip button svg { width: 12px; height: 12px; display: block; }
         .psummary { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; color: var(--text-secondary); font-size: var(--text-sm); margin-bottom: var(--sp-3); }
         .psummary b { color: var(--text-primary); font-weight: var(--weight-medium); }
@@ -853,7 +853,7 @@
             color: var(--text-primary); font: inherit; font-size: var(--text-sm); line-height: var(--lh-control); padding: var(--control-pad-y) var(--sp-3);
             /* 32px like every other control. At 36 an input beside a button did
                not even line up with it, let alone with the reference. */
-            min-height: 32px;
+            min-height: var(--control-h);
             transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
         input:hover:not(:disabled), textarea:hover:not(:disabled), select:hover:not(:disabled) {
             border-color: var(--border-emphasis); }
@@ -871,7 +871,7 @@
         /* A native date/time control carries its own intrinsic content height,
            so it ignores the shared line box and lands 2px proud of every other
            field in the same row. Pinned. */
-        input[type=date], input[type=time] { height: 32px; }
+        input[type=date], input[type=time] { height: var(--control-h); }
         select { appearance: none; -webkit-appearance: none; padding-right: var(--chevron-room);
             background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23616161' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
             background-repeat: no-repeat; background-position: right 9px center; }
@@ -966,7 +966,7 @@
         .sk-form-title svg { width: 15px; height: 15px; color: var(--action-primary); }
         .sk-field { display: block; margin-bottom: var(--sp-3); }
         .sk-field > span { display: block; font-size: var(--text-xs); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); margin-bottom: var(--sp-1); }
-        .sk-input, .sk-textarea { width: 100%; background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-3); min-height: 32px; line-height: var(--lh-control); transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+        .sk-input, .sk-textarea { width: 100%; background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-3); min-height: var(--control-h); line-height: var(--lh-control); transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
         .sk-textarea { resize: vertical; min-height: 104px; line-height: var(--lh-body); }
         .sk-form-row { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-1); }
         .sk-spacer { flex: 1; }
@@ -989,7 +989,7 @@
            heights. line-height is explicit here so neither can drift again;
            only the margins differ, because only their positions do. */
         .nav-refresh, .nav-ask { display: flex; align-items: center; gap: var(--sp-2);
-            padding: var(--control-pad-y) var(--sp-3); min-height: 32px; border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm);
+            padding: var(--control-pad-y) var(--sp-3); min-height: var(--control-h); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm);
             background: transparent; color: var(--text-secondary); font-family: inherit;
             font-size: var(--text-xs); font-weight: var(--weight-medium); line-height: var(--lh-control); text-align: left;
             cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
@@ -1312,7 +1312,7 @@
            a shorthand there made the caret vanish under the pointer. */
         .lbl-size { background-color: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm);
             color: var(--text-primary); font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); padding: var(--control-pad-y) var(--sp-3);
-            line-height: var(--lh-control); cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); min-height: 32px; }
+            line-height: var(--lh-control); cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); min-height: var(--control-h); }
         /* The caret needs its gutter back too: the padding shorthand above
            overrode the base rule's padding-right, so a restored glyph would
            have been drawn on top of the label. Selects only - .lbl-size is
@@ -1404,7 +1404,7 @@
         .disp-fld-lab { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: var(--weight-medium); }
         .disp-num { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm);
             color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-2); line-height: var(--lh-control);
-            min-height: 32px; width: 100%; }
+            min-height: var(--control-h); width: 100%; }
         .disp-subhead { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: var(--weight-medium); margin-bottom: var(--sp-1); }
         /* Custom address shipment: the paste box and the fields it fills. */
         .disp-paste { width: 100%; box-sizing: border-box; min-height: 84px; resize: vertical;
@@ -1415,7 +1415,7 @@
         .disp-addr-lab { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: var(--weight-medium); }
         .disp-text { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm);
             color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-2-5); line-height: var(--lh-control);
-            min-height: 32px; width: 100%; box-sizing: border-box; }
+            min-height: var(--control-h); width: 100%; box-sizing: border-box; }
         .disp-recent { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
             padding: var(--sp-2-5) 0; border-bottom: var(--bw-hairline) solid var(--border-default); }
         .disp-recent:last-child { border-bottom: 0; }
@@ -1609,7 +1609,7 @@
            set the height of all three chips in the strip and left the two
            without one carrying 14px of air around an 18px line. 24 is the row
            scale the chip is already built from: .mail-claim and .mail-owner. */
-        .mail-who-card .mail-presence-pick { height: 24px; min-height: 24px; box-sizing: border-box; }
+        .mail-who-card .mail-presence-pick { height: var(--control-h-sm); min-height: var(--control-h-sm); box-sizing: border-box; }
         .mail-card-sub { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--sp-px);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .mail-card.overdue-soft { background: var(--warning-bg); border-color: var(--border-default); }
@@ -1631,11 +1631,11 @@
            the chip under 4:1. So the EDGE carries the shape, the same
            1px --border-strong the Claim button beside it already reads on every
            tint with. Padding drops 1px to hold the measured width. */
-        .mail-owner { display: inline-flex; align-items: center; height: 24px; max-width: 100%;
+        .mail-owner { display: inline-flex; align-items: center; height: var(--control-h-sm); max-width: 100%;
             gap: var(--sp-1); font-size: var(--text-xs); border: var(--bw-hairline) solid var(--border-strong);
             background: var(--surface-sunken); border-radius: var(--radius-full); padding: var(--sp-0-5) var(--sp-2); color: var(--text-secondary); }
         .mail-owner-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .mail-claim { display: inline-flex; align-items: center; justify-content: center; height: 24px;
+        .mail-claim { display: inline-flex; align-items: center; justify-content: center; height: var(--control-h-sm);
             border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-primary); color: var(--action-primary);
             font: inherit; font-size: var(--text-xs); font-weight: var(--weight-medium); border-radius: var(--radius-full); padding: var(--sp-0-5) var(--sp-2-5); cursor: pointer; }
         .mail-claim:hover { border-color: var(--action-primary); }
@@ -1840,7 +1840,7 @@
             border: var(--bw-hairline) solid var(--action-line); border-radius: var(--radius-sm);
             padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-2); }
         .linkish { border: 0; background: none; padding: 0; font: inherit; font-size: var(--text-xs);
-            font-weight: var(--weight-medium); color: var(--action-primary); text-decoration: underline; cursor: pointer; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
+            font-weight: var(--weight-medium); color: var(--text-link); text-decoration: underline; cursor: pointer; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
         .mrule { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-2); }
         .mrule-head { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
         .mrule-name { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-primary); }
@@ -1977,7 +1977,7 @@
            its own height sets the height of the whole row. */
         .crm-types { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
         .tbl-tools .crm-ticon { width: 28px; height: 28px; }
-        .crm-ticon { width: 32px; height: 32px; border-radius: var(--radius-sm); border: var(--bw-hairline) solid var(--border-strong);
+        .crm-ticon { width: var(--control-h); height: var(--control-h); border-radius: var(--radius-sm); border: var(--bw-hairline) solid var(--border-strong);
             background: var(--surface-primary); cursor: pointer; display: inline-flex; align-items: center;
             justify-content: center; color: var(--text-tertiary); }
         .crm-ticon svg { width: 15px; height: 15px; }
@@ -2525,7 +2525,7 @@
         .tbl-steps { display: flex; align-items: center; gap: var(--sp-2); }
         /* Square, and at the base radius rather than the control radius: the
            reference's pager steps are 32px boxes, not small buttons. */
-        .tbl-step { width: 32px; height: 32px; min-height: 32px; padding: 0; border-radius: var(--radius-md); }
+        .tbl-step { width: var(--control-h); height: var(--control-h); min-height: var(--control-h); padding: 0; border-radius: var(--radius-md); }
         .tbl-step svg { width: 16px; height: 16px; }
         @media (max-width: 900px) {
             .tbl-foot { flex-wrap: wrap; }
@@ -2596,7 +2596,7 @@
            the live one by ink alone; its inactive tabs are the foreground at
            60%, which over white is this palette's muted ink to within a shade. */
         .ftabs { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
-        .ftab { height: 24px; padding: var(--sp-0-5) var(--sp-1-5); border: 0; background: none;
+        .ftab { height: var(--control-h-sm); padding: var(--sp-0-5) var(--sp-1-5); border: 0; background: none;
             border-radius: var(--radius-sm); font: inherit; font-size: var(--text-xs);
             font-weight: var(--weight-medium); color: var(--text-tertiary); cursor: pointer;
             white-space: nowrap; }
@@ -2942,7 +2942,7 @@
         .auth-field { margin-bottom: var(--sp-3); }
         .auth-field label { display: block; font-size: var(--text-xs); color: var(--text-secondary); margin-bottom: var(--sp-1); }
         .auth-field input { width: 100%; box-sizing: border-box; font: inherit; font-size: var(--text-sm);
-            padding: var(--control-pad-y) var(--sp-2-5); min-height: 32px; line-height: var(--lh-control);
+            padding: var(--control-pad-y) var(--sp-2-5); min-height: var(--control-h); line-height: var(--lh-control);
             border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-sm);
             background: var(--surface-primary); color: var(--text-primary); }
         .auth-error { color: var(--error); font-size: var(--text-xs); min-height: 16px; margin: var(--sp-0-5) 0 var(--sp-2); }
@@ -3093,10 +3093,10 @@
         /* A text field that matches the height of .lbl-size selects, so a row
            mixing inputs, a select and a button lines up. */
         .tm-field { flex: 1 1 120px; min-width: 0; background: var(--surface-primary); color: var(--text-primary);
-            font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-3); line-height: var(--lh-control); min-height: 32px;
+            font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-3); line-height: var(--lh-control); min-height: var(--control-h);
             border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); }
         .tm-tabpick { display: inline-flex; align-items: center; gap: var(--sp-1-5); margin: 0 var(--sp-2-5) var(--sp-2) 0;
-            cursor: pointer; font-size: var(--text-sm); color: var(--text-secondary); min-height: 32px; }
+            cursor: pointer; font-size: var(--text-sm); color: var(--text-secondary); min-height: var(--control-h); }
         .tm-tabpick input { width: 16px; height: 16px; accent-color: var(--action-primary); cursor: pointer; }
         /* On a phone the name owns the first line; size and date step down a line
            rather than crushing the name to a letter. */
@@ -3129,7 +3129,7 @@
         .toast.good { border-left-color: var(--success); }
         .toast-msg { flex: 1 1 auto; line-height: var(--lh-snug); }
         .toast-x { background: none; border: 0; color: var(--text-tertiary); cursor: pointer; padding: 0; line-height: var(--lh-none); flex: none; }
-        .toast-x { min-width: 24px; min-height: 24px; display: grid; place-items: center; }
+        .toast-x { min-width: var(--control-h-sm); min-height: var(--control-h-sm); display: grid; place-items: center; }
         .toast-x svg { width: 14px; height: 14px; }
         /* Not on the colour token: this fade is paired with the 320ms
            removal timer in toast(), so the two have to say the same number. */
@@ -3424,6 +3424,14 @@ Projected Image UK"></textarea>
 
     <script>
     (function () {
+        /* ---------- design tokens, read from the stylesheet ----------
+           Colour lives in :root and nowhere else. A script that needs a
+           value (an SVG stop, a swatch, an email body) asks for it here
+           rather than carrying a copy. The stylesheet has loaded before
+           this runs, and a custom property's computed value already has
+           its var() chain substituted, so what comes back is the hex. */
+        function tokenValue(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
         /* ---------- icons (constant SVG; safe to inject) ---------- */
         // Feather Icons (https://feathericons.com), inlined so there are no extra requests.
         /* aria-hidden on the factory, so it holds for every icon in the app
@@ -4624,7 +4632,7 @@ Projected Image UK"></textarea>
             const wrap = el('div', 'chart-wrap'); card.append(wrap);
             if (!items.length) { wrap.append(el('div', 'empty', 'No breakdown available for this range.')); return card; }
             const max = Math.max.apply(null, items.map(d => +d.value || 0).concat([1]));
-            const bl = el('div', 'barlist'); bl.style.marginTop = '4px';
+            const bl = el('div', 'barlist'); bl.style.marginTop = 'var(--sp-1)';
             items.forEach(d => { const row = el('div', 'barrow'); row.append(el('div', 'bn', d.label)); const tr = el('div', 'bartrack'); const i = el('i'); i.style.width = Math.max(2, (+d.value || 0) / max * 100) + '%'; i.style.background = color; tr.append(i); row.append(tr, el('div', 'bv', fmt(d.value))); bl.append(row); });
             wrap.append(bl);
             if (opts.note) card.append(el('div', 'chart-note', opts.note));
@@ -4664,7 +4672,7 @@ Projected Image UK"></textarea>
            were still painting in a purple, a blue and a green from before this
            app went monochrome, so a page of grey lines had three coloured ones
            in it for no reason a reader could work out. */
-        const CH = ['#171717', '#525252', '#737373', '#a1a1a1', '#d4d4d4'];
+        const CH = ['--chart-1', '--chart-2', '--chart-3', '--chart-4', '--chart-5'].map(tokenValue);
 
         /* Monotone cubic (Fritsch-Carlson), which is the rounded shape the
            reference draws - with one deliberate difference. The reference uses a
@@ -5188,7 +5196,7 @@ Projected Image UK"></textarea>
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.grid;
             const htext = el('div'); htext.append(el('h2', null, 'Store overview'), el('p', null, 'Analyzing your store…'));
             hero.append(badge, htext); box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = '8px'; const orb = loader(); t.append(orb, el('span', null, 'Computing live metrics and insights…')); box.append(t);
+            const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; const orb = loader(); t.append(orb, el('span', null, 'Computing live metrics and insights…')); box.append(t);
             try {
                 const data = await api('/api/overview', { fresh: !!force });
                 overviewCache = { data, at: Date.now() }; renderOverview(overviewCache);
@@ -5292,7 +5300,7 @@ Projected Image UK"></textarea>
             const ofu = memories.filter(m => m.type === 'followup' && m.status === 'open');
             if (ofu.length) {
                 box.append(el('div', 'section-title', 'Open follow-ups'));
-                const card = el('div', 'card actions'); card.style.marginBottom = '18px';
+                const card = el('div', 'card actions'); card.style.marginBottom = 'var(--sp-5)';
                 ofu.slice(0, 6).forEach(m => {
                     const row = el('div', 'action');
                     const ck = el('div', 'check'); ck.innerHTML = I.check; ck.title = 'Mark done';
@@ -5346,7 +5354,7 @@ Projected Image UK"></textarea>
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.search;
             const htext = el('div'); htext.append(el('h2', null, 'SEO and optimization'), el('p', null, 'Auditing your store…'));
             hero.append(badge, htext); box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = '8px';
+            const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)';
             t.append(loader(), el('span', null, 'Crawling pages: indexation, structured data, metadata, alt text…'));
             box.append(t);
             try { const data = await api('/api/seo', {}); seoCache = { data, at: Date.now() }; renderSEO(seoCache); }
@@ -5415,7 +5423,7 @@ Projected Image UK"></textarea>
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.tag;
             const ht = el('div'); ht.append(el('h2', null, 'Keyword and CPC intelligence'), el('p', null, 'Analyzing your keywords and paid search…'));
             hero.append(badge, ht); box.append(hero, sectorBar());
-            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Fusing Search Console keywords with Google Ads. This can take up to a minute…')); box.append(t);
+            const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Fusing Search Console keywords with Google Ads. This can take up to a minute…')); box.append(t);
             try { const data = await api('/api/keywords', {}); keywordsCache = { data, at: Date.now() }; renderKeywords(keywordsCache); }
             catch (e) {
                 box.innerHTML = ''; box.append(hero);
@@ -5457,7 +5465,7 @@ Projected Image UK"></textarea>
                 { label: 'ROAS', value: t.roas ? (t.roas + 'x') : 'n/a', tone: (t.roas && t.roas < 1) ? 'warn' : null },
             ]));
             if (Array.isArray(ads.campaigns) && ads.campaigns.length) {
-                const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = '12px'; const tbl = el('table', 'ktable');
+                const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = 'var(--sp-3)'; const tbl = el('table', 'ktable');
                 const thead = el('thead'); const htr = el('tr');
                 ['Campaign', 'Cost', 'CPC', 'Conv.', 'ROAS'].forEach((h, i) => htr.append(el('th', i ? 'num' : null, h)));
                 thead.append(htr); tbl.append(thead); const tb = el('tbody');
@@ -5497,11 +5505,11 @@ Projected Image UK"></textarea>
             const ht = el('div'); ht.append(el('div', 'know-title', 'Scan a URL for keywords'));
             ht.append(el('div', 'know-sub', 'Paste any public page (a competitor, a blog post) to extract the keywords and topics it targets, with ideas to compete.'));
             head.append(ic, ht); card.append(head);
-            const row = el('div', 'scan-row'); row.style.marginTop = '13px';
+            const row = el('div', 'scan-row'); row.style.marginTop = 'var(--sp-3)';
             const inp = el('input', 'psel'); inp.placeholder = 'https://example.com/page'; inp.type = 'url';
             const btn = el('button', 'btn btn-primary'); btn.append(ico(I.search), document.createTextNode('Scan'));
             row.append(inp, btn); card.append(row);
-            const out = el('div'); out.style.marginTop = '13px'; card.append(out);
+            const out = el('div'); out.style.marginTop = 'var(--sp-3)'; card.append(out);
             async function go() {
                 const url = inp.value.trim(); if (!url || btn.disabled) return;
                 out.innerHTML = ''; const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Reading the page and extracting keywords…')); out.append(t); btn.disabled = true;
@@ -5627,7 +5635,7 @@ Projected Image UK"></textarea>
             slot.append(radarCard(radarCache.data));
         }
         function radarCard(d) {
-            const card = el('div', 'card'); card.style.margin = '0 0 16px';
+            const card = el('div', 'card'); card.style.margin = '0 0 var(--sp-4)';
             const head = el('div', 'cov-head');
             head.append(el('h3', null, 'Trade radar'));
             head.append(el('span', 'cov-line', 'From your orders and customer list. No AI credits used.'));
@@ -5637,7 +5645,7 @@ Projected Image UK"></textarea>
             if (!od.length) {
                 card.append(el('div', 'cov-line', 'Nobody with a reorder rhythm is overdue right now.'));
             } else {
-                const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = '8px';
+                const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = 'var(--sp-2)';
                 const tb = el('table', 'ktable');
                 tb.innerHTML = '<thead><tr><th>Account</th><th>Orders</th><th>Usually every</th><th>Last order</th><th>Overdue by</th><th>Last bought</th><th></th></tr></thead>';
                 const tbody = el('tbody');
@@ -5667,7 +5675,7 @@ Projected Image UK"></textarea>
                 card.append(el('div', 'cov-line', 'Every likely-trade customer already carries a sector tag.'));
             } else {
                 card.append(el('div', 'cov-line', 'Tag these in Shopify and the sector analytics will see the whole trade side.'));
-                const wrap2 = el('div', 'ktable-wrap'); wrap2.style.marginTop = '8px';
+                const wrap2 = el('div', 'ktable-wrap'); wrap2.style.marginTop = 'var(--sp-2)';
                 const tb2 = el('table', 'ktable');
                 tb2.innerHTML = '<thead><tr><th>Customer</th><th>Orders</th><th>Lifetime spend</th><th>Why flagged</th></tr></thead>';
                 const tbody2 = el('tbody');
@@ -5694,7 +5702,7 @@ Projected Image UK"></textarea>
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.users;
             const ht = el('div'); ht.append(el('h2', null, comp ? 'Customers and retention' : (seg + ' sector')), el('p', null, 'Analyzing ' + (comp ? 'your customers and sectors' : ('the ' + seg + ' sector')) + '…'));
             hero.append(badge, ht); box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Reading customers and 12 months of orders. This can take up to a minute…')); box.append(t);
+            const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Reading customers and 12 months of orders. This can take up to a minute…')); box.append(t);
             customersLoading = seg;
             try {
                 const data = await api('/api/customers', { segment: comp ? '' : seg, fresh: !!force });
@@ -5828,7 +5836,7 @@ Projected Image UK"></textarea>
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
             const ht = el('div'); ht.append(el('h2', null, 'Products'), el('p', null, 'Loading your products and sales…'));
             hero.append(badge, ht); box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Loading products and up to 24 months of sales…')); box.append(t);
+            const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Loading products and up to 24 months of sales…')); box.append(t);
             try { productList = await api('/api/products', { months: 24, fresh: !!force }); productListAt = Date.now(); renderProductList(); }
             catch (e) {
                 box.innerHTML = ''; box.append(hero);
@@ -6038,7 +6046,7 @@ Projected Image UK"></textarea>
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
             const ht = el('div'); ht.append(el('h2', null, title || 'Product'), el('p', null, 'Analyzing search, traffic, sales and on-page SEO…'));
             hero.append(badge, ht); box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Building the optimization plan. This can take up to a minute…')); box.append(t);
+            const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Building the optimization plan. This can take up to a minute…')); box.append(t);
             try { renderProductDetail(await api('/api/product', { product_id: id })); }
             catch (e) {
                 box.innerHTML = ''; box.append(productBack());
@@ -6452,7 +6460,7 @@ Projected Image UK"></textarea>
             const ht = el('div'); ht.append(el('h2', null, 'Liability'),
                 el('p', null, 'Reading unpaid purchase orders\u2026'));
             hero.append(badge, ht); box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = '8px';
+            const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)';
             t.append(loader(), el('span', null, 'Checking up to two years of orders. No AI credits used\u2026'));
             box.append(t);
             try {
@@ -6796,7 +6804,7 @@ Projected Image UK"></textarea>
                     row.onclick = () => { liaOpen = (liaOpen === key ? null : key); renderLiability(); };
                     host.append(row);
                     if (liaOpen === key) {
-                        const wrap = el('div', 'ktable-wrap'); wrap.style.margin = '4px 0 16px';
+                        const wrap = el('div', 'ktable-wrap'); wrap.style.margin = 'var(--sp-1) 0 var(--sp-4)';
                         const tb = el('table', 'ktable');
                         tb.innerHTML = '<thead><tr><th>Order</th><th>Order date</th><th>Due</th><th class="num">Value</th>'
                             + '<th class="num">Paid</th><th class="num">Outstanding</th><th>Terms</th><th>Channel</th><th>Status</th></tr></thead>';
@@ -7891,7 +7899,7 @@ Projected Image UK"></textarea>
             } else if (connHealth && connHealth.line) {
                 sCard.append(el('div', 'disp-ok-line', connHealth.line));
             }
-            const chipRow = el('div'); chipRow.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+            const chipRow = el('div'); chipRow.style.cssText = 'display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap';
             chipRow.append(el('span', 'lbl-chip ' + (cfg.shop ? 'made' : 'warn'),
                 cfg.shop ? ('Shopify \u00b7 ' + cfg.shop) : 'Shopify not configured'));
             chipRow.append(el('span', 'lbl-chip ' + (cfg.dryOnly ? 'warn' : 'made'),
@@ -8396,7 +8404,7 @@ Projected Image UK"></textarea>
             const st = reconCache.st || {};
             /* Connection + sweep card */
             const card = el('div', 'card');
-            const row = el('div'); row.style.cssText = 'display:flex;gap:16px;align-items:center;flex-wrap:wrap';
+            const row = el('div'); row.style.cssText = 'display:flex;gap:var(--sp-4);align-items:center;flex-wrap:wrap';
             const xs = st.xero || {};
             row.append(el('span', 'lbl-chip ' + (xs.connected ? 'made' : 'bad'),
                 xs.connected ? ('Xero \u00b7 ' + (xs.tenant || 'Connected')) : 'Xero not connected'));
@@ -8449,7 +8457,7 @@ Projected Image UK"></textarea>
                 try { await api('/api/recon/sweep', {}); toastOk('Sweep finished.'); }
                 catch (e) { toastError(e.message); }
                 refreshRecon(); };
-            row.style.rowGap = '8px'; row.append(sw);
+            row.style.rowGap = 'var(--sp-2)'; row.append(sw);
             discon('xero', 'Disconnect Xero', xs.connected);
             discon('mailbox', 'Disconnect mailbox', mb.connected);
             card.append(row);
@@ -8458,7 +8466,7 @@ Projected Image UK"></textarea>
                then the link is gone. A log line nobody reads is not a warning. */
             if (xs.warning) {
                 const xw = el('div', 'mail-viewwarn', xs.warning);
-                xw.style.cssText = 'margin-top:12px;margin-bottom:0';
+                xw.style.cssText = 'margin-top:var(--sp-3);margin-bottom:0';
                 card.append(xw);
             }
             (st.sweep_notes || []).forEach(n => card.append(el('div', 'field-help', n)));
@@ -8490,7 +8498,7 @@ Projected Image UK"></textarea>
                     + 'sign-in with "Access blocked: this app\u2019s request is invalid".'));
                 const proj = mb.project ? '?project=' + encodeURIComponent(mb.project) : '';
                 const openRow = el('div', 'field-help');
-                openRow.style.marginTop = '6px';
+                openRow.style.marginTop = 'var(--sp-1-5)';
                 const ca = el('a', null, 'Open your OAuth clients in the Google console');
                 ca.href = 'https://console.cloud.google.com/auth/clients' + proj;
                 ca.target = '_blank'; ca.rel = 'noopener';
@@ -8498,12 +8506,12 @@ Projected Image UK"></textarea>
                 openRow.append(ca);
                 mc.append(openRow);
                 const uriRow = el('div', 'field-help');
-                uriRow.style.marginTop = '6px';
+                uriRow.style.marginTop = 'var(--sp-1-5)';
                 const uri = el('b', null, mb.redirect_uri || '');
                 uri.style.cssText = 'word-break:break-all;user-select:all;cursor:text';
                 uriRow.append(uri);
                 const cp = el('button', 'btn');
-                cp.style.cssText = 'display:block;margin-top:6px';
+                cp.style.cssText = 'display:block;margin-top:var(--sp-1-5)';
                 cp.append(ico(I.copy), document.createTextNode('Copy callback URL'));
                 cp.onclick = async () => {
                     try { await navigator.clipboard.writeText(mb.redirect_uri || '');
@@ -8519,12 +8527,12 @@ Projected Image UK"></textarea>
                        for rather than accepting whatever turns up. */
                     const who = el('input', 'mail-search');
                     who.placeholder = 'accounts@yourdomain.com'; who.type = 'email'; who.setAttribute('aria-label', 'Accounts mailbox address'); who.spellcheck = false;
-                    who.style.cssText = 'max-width:320px;display:block;margin-top:10px';
+                    who.style.cssText = 'max-width:320px;display:block;margin-top:var(--sp-2-5)';
                     who.value = mb.last_try || '';
                     mc.append(who);
                     const go = el('button', 'btn btn-primary');
                     go.append(ico(I.mail), document.createTextNode('Connect the accounts mailbox'));
-                    go.style.marginTop = '10px';
+                    go.style.marginTop = 'var(--sp-2-5)';
                     go.onclick = async () => {
                         /* The tab is opened SYNCHRONOUSLY, inside the click, and
                            pointed at the URL afterwards. Opening it after the
@@ -8605,10 +8613,10 @@ Projected Image UK"></textarea>
                     const sc = el('details', 'know-body');
                     sc.append(el('summary', null, 'Permissions this will ask Xero for'));
                     const list = el('div', 'field-help');
-                    list.style.marginTop = '6px';
+                    list.style.marginTop = 'var(--sp-1-5)';
                     st.setup.scopes.forEach(x => {
                         const li = el('div', null, x);
-                        li.style.cssText = 'font-family:ui-monospace,monospace;font-size:12px';
+                        li.style.cssText = 'font-family:var(--font-mono);font-size:var(--text-xs)';
                         list.append(li);
                     });
                     list.append(el('div', null,
@@ -8622,7 +8630,7 @@ Projected Image UK"></textarea>
                     /* Same shape as the mailbox button: the tab opens inside the
                        click, or the browser blocks it. */
                     const xgo = el('button', 'btn btn-primary');
-                    xgo.style.marginTop = '10px';
+                    xgo.style.marginTop = 'var(--sp-2-5)';
                     xgo.append(ico(I.link || I.check), document.createTextNode('Connect Xero'));
                     xgo.onclick = async () => {
                         const tab = window.open('', '_blank');
@@ -8764,7 +8772,7 @@ Projected Image UK"></textarea>
         function reconPrivateLink(card, absUrl) {
             if (card.querySelector('.recon-priv')) return;
             const row = el('div', 'field-help recon-priv');
-            row.style.marginTop = '8px';
+            row.style.marginTop = 'var(--sp-2)';
             row.append(document.createTextNode(
                 'Still landing on the wrong mailbox? Google consents as whichever account '
                 + 'the browser is signed into, whatever it is asked for. Open this in a '
@@ -8773,7 +8781,7 @@ Projected Image UK"></textarea>
             code.style.cssText = 'word-break:break-all;user-select:all;cursor:text';
             row.append(code);
             const copy = el('button', 'btn');
-            copy.style.marginTop = '6px';
+            copy.style.marginTop = 'var(--sp-1-5)';
             copy.append(ico(I.copy), document.createTextNode('Copy link'));
             copy.onclick = async () => {
                 try { await navigator.clipboard.writeText(absUrl); toastOk('Link copied.'); }
@@ -8868,7 +8876,7 @@ Projected Image UK"></textarea>
         function paintReconDetail(box) {
             const e = reconOpen; if (!e) return;
             const d = el('div', 'lbl-drill'); d.id = 'recon-detail';
-            const head = el('div'); head.style.cssText = 'display:flex;gap:10px;align-items:flex-start';
+            const head = el('div'); head.style.cssText = 'display:flex;gap:var(--sp-2-5);align-items:flex-start';
             const [lab, cls] = RECON_SEV[e.severity] || ['?', 'note'];
             head.append(el('span', 'lbl-chip ' + cls, lab));
             const hd = el('div'); hd.append(el('div', 'know-title', e.title));
@@ -8941,7 +8949,7 @@ Projected Image UK"></textarea>
                 stbar.append(b);
             });
             d.append(stbar);
-            const reasonRow = el('div'); reasonRow.style.cssText = 'display:none;margin-top:8px;gap:8px';
+            const reasonRow = el('div'); reasonRow.style.cssText = 'display:none;margin-top:var(--sp-2);gap:var(--sp-2)';
             reasonRow.style.display = 'none';
             const reasonIn = el('input', 'mail-search');
             reasonIn.placeholder = 'Why is this being ignored? (required)'; reasonIn.setAttribute('aria-label', 'Reason for ignoring');
@@ -8955,7 +8963,7 @@ Projected Image UK"></textarea>
                     reasonRow.style.display = 'none'; reconOpen = r.exception; refreshRecon(); }
                 catch (er) { toastError(er.message); }
             };
-            const rr = el('div'); rr.style.cssText = 'display:flex;gap:8px;margin-top:8px';
+            const rr = el('div'); rr.style.cssText = 'display:flex;gap:var(--sp-2);margin-top:var(--sp-2)';
             rr.append(reasonIn, reasonGo); reasonRow.append(rr);
             d.append(reasonRow);
             if ((e.history || []).length) {
@@ -8989,7 +8997,7 @@ Projected Image UK"></textarea>
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
             const ht = el('div'); ht.append(el('h2', null, 'Production Manager'), el('p', null, 'Finding orders tagged "' + queueTag() + '"…'));
             hero.append(badge, ht); box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Reading your Shopify orders…')); box.append(t);
+            const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Reading your Shopify orders…')); box.append(t);
             labelsLoading = true;
             const rq = ++labelsReq;   // only the newest fetch may commit its result
             try {
@@ -9892,12 +9900,12 @@ Projected Image UK"></textarea>
                 list.append(row);
                 if (labelSel === o.id) {
                     const wrap = el('div', 'lbl-preview');
-                    if (!pane) wrap.style.margin = '4px 0 16px';
+                    if (!pane) wrap.style.margin = 'var(--sp-1) 0 var(--sp-4)';
                     if (o.customer_id) wrap.append(histLine(o));
                     const sheet = labelSheet(o);
                     wrap.append(sheet);
                     const note = el('div', 'lbl-preview-note'); wrap.append(note);
-                    const act = el('div', 'lbl-toolbar'); act.style.marginTop = '12px';
+                    const act = el('div', 'lbl-toolbar'); act.style.marginTop = 'var(--sp-3)';
                     const p2 = el('button', 'btn btn-primary'); p2.append(ico(I.printer), document.createTextNode('Print this label'));
                     p2.onclick = () => printLabels([o]);
                     act.append(p2); wrap.append(act);
@@ -10253,7 +10261,7 @@ Projected Image UK"></textarea>
             if (!(d.flagged || []).length) {
                 card.append(el('div', 'cov-ok', 'Every gobo item on these orders matches the size list. Nothing to fix.'));
             } else {
-                const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = '10px';
+                const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = 'var(--sp-2-5)';
                 const tb = el('table', 'ktable');
                 tb.innerHTML = '<thead><tr><th>Model as written on orders</th><th>Manufacturer</th><th>Why it flags</th><th class="num">Items</th><th>Seen on</th><th></th></tr></thead>';
                 const tbody = el('tbody');
@@ -10377,7 +10385,7 @@ Projected Image UK"></textarea>
                     head2.append(el('div', null, tt.counted + ' of ' + tt.orders + ' dispatched orders costed'));
                     head2.append(el('div', 'sub', 'Revenue ' + money(tt.revenue) + ' \u00b7 goods ' + money(tt.goods_cost)
                         + ' \u00b7 couriers ' + money(tt.courier_cost)));
-                    const m = el('div'); m.style.cssText = 'font-weight:var(--weight-semibold);font-size:var(--text-md);margin-top:6px';
+                    const m = el('div'); m.style.cssText = 'font-weight:var(--weight-semibold);font-size:var(--text-md);margin-top:var(--sp-1-5)';
                     m.textContent = 'Kept ' + money(tt.margin) + (tt.margin_pct != null ? '  (' + tt.margin_pct + '%)' : '');
                     head2.append(m);
                     out.append(head2);
@@ -10615,7 +10623,7 @@ Projected Image UK"></textarea>
                             b.style.color = 'var(--action-primary)';
                             sheetHost.append(b);
                         }
-                        const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = '10px';
+                        const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = 'var(--sp-2-5)';
                         const tb = el('table', 'ktable');
                         tb.innerHTML = '<thead><tr><th>Size</th><th>Glass</th><th>Unit</th>'
                             + '<th class="num">Estimated</th><th class="num">Final</th><th></th></tr></thead>';
@@ -10624,7 +10632,7 @@ Projected Image UK"></textarea>
                             const tr = el('tr');
                             const inp = document.createElement('input');
                             inp.type = 'number'; inp.min = '0'; inp.max = '10000'; inp.value = r.final;
-                            inp.className = 'tm-field'; inp.style.cssText = 'width:76px;flex:none;padding:4px 8px';
+                            inp.className = 'tm-field'; inp.style.cssText = 'width:76px;flex:none;padding:var(--sp-1) var(--sp-2)';
                             inp.setAttribute('aria-label', 'Final quantity for ' + r.family + ' ' + r.size);
                             inp.oninput = () => { r.final = inp.value; };
                             const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove this line (not actually used)';
@@ -10642,10 +10650,10 @@ Projected Image UK"></textarea>
                         ['Mono', 'HM', 'Colour', 'Ring'].forEach(f => { const o = el('option', null, f); o.value = f; famSel.append(o); });
                         const szIn = document.createElement('input');
                         szIn.className = 'tm-field'; szIn.placeholder = 'Size mm'; szIn.setAttribute('aria-label', 'Size in millimetres');
-                        szIn.style.cssText = 'width:82px;flex:none;padding:4px 8px';
+                        szIn.style.cssText = 'width:82px;flex:none;padding:var(--sp-1) var(--sp-2)';
                         const qIn = document.createElement('input');
                         qIn.type = 'number'; qIn.min = '1'; qIn.max = '10000'; qIn.placeholder = 'Qty';
-                        qIn.className = 'tm-field'; qIn.style.cssText = 'width:70px;flex:none;padding:4px 8px';
+                        qIn.className = 'tm-field'; qIn.style.cssText = 'width:70px;flex:none;padding:var(--sp-1) var(--sp-2)';
                         const addB = el('button', 'btn'); addB.append(ico(I.plus), document.createTextNode('Add'));
                         addB.title = 'Add something that was used but not in the estimate';
                         addB.onclick = () => {
@@ -10660,7 +10668,7 @@ Projected Image UK"></textarea>
                         tds.forEach(t2 => addTr.append(t2));
                         tbody.append(addTr);
                         tb.append(tbody); wrap.append(tb); sheetHost.append(wrap);
-                        const send = el('button', 'btn btn-primary'); send.style.marginTop = '10px';
+                        const send = el('button', 'btn btn-primary'); send.style.marginTop = 'var(--sp-2-5)';
                         send.append(ico(I.send), document.createTextNode(
                             d.sent ? 'Send again (replaces the earlier sheet)' : 'Send to stock sheet'));
                         send.onclick = async () => {
@@ -10684,7 +10692,7 @@ Projected Image UK"></textarea>
                         };
                         sheetHost.append(send);
                         if (lastResult && lastResult.results) {
-                            const box = el('div'); box.style.marginTop = '10px';
+                            const box = el('div'); box.style.marginTop = 'var(--sp-2-5)';
                             lastResult.results.forEach(rr => {
                                 let txt = rr.family + ' ' + rr.size + 'mm: ';
                                 if (rr.status === 'adjusted') {
@@ -11044,8 +11052,8 @@ Projected Image UK"></textarea>
             m.body.append(el('p', 'field-help', 'These are the courier labels for orders already '
                 + 'dispatched in this list. Each courier prints on its own stock, so pick one run '
                 + 'at a time.'));
-            const status = el('div', 'sub'); status.style.marginTop = '8px';
-            const problems = el('div'); problems.style.marginTop = '8px';
+            const status = el('div', 'sub'); status.style.marginTop = 'var(--sp-2)';
+            const problems = el('div'); problems.style.marginTop = 'var(--sp-2)';
             async function go(list, what) {
                 if (run.busy) return;             /* one run at a time, per picker */
                 if (list.length > SHIP_RUN_MAX) {
@@ -11500,7 +11508,7 @@ Projected Image UK"></textarea>
 
             const quoteBtn = el('button', 'btn btn-primary disp-quote');
             quoteBtn.append(ico(I.truck), document.createTextNode('Get courier quotes'));
-            quoteWrap = el('div'); quoteWrap.style.marginTop = '12px';
+            quoteWrap = el('div'); quoteWrap.style.marginTop = 'var(--sp-3)';
             body.append(quoteBtn, quoteWrap);
 
             // If the queue already priced this exact parcel, show it now. The guard
@@ -11647,7 +11655,7 @@ Projected Image UK"></textarea>
                 };
                 card.addEventListener('input', checkZeros);
                 setTimeout(checkZeros, 0);
-                const rt = el('label', 'disp-fld'); rt.style.marginTop = '8px';
+                const rt = el('label', 'disp-fld'); rt.style.marginTop = 'var(--sp-2)';
                 rt.append(el('span', 'disp-fld-lab', "Receiver's tax / VAT id (optional, helps clearance)"));
                 recvTaxIn = document.createElement('input'); recvTaxIn.type = 'text'; recvTaxIn.className = 'disp-num';
                 /* What the customer already gave Shopify, so an export does not
@@ -11804,11 +11812,11 @@ Projected Image UK"></textarea>
                 quoteWrap.append(list);
                 // Expected a service that is not here? Ask World Options the same
                 // question several ways and show what each way returns.
-                const diagRow = el('div'); diagRow.style.marginTop = '8px';
-                const diagBtn = el('button', 'btn'); diagBtn.style.fontSize = '12px';
+                const diagRow = el('div'); diagRow.style.marginTop = 'var(--sp-2)';
+                const diagBtn = el('button', 'btn'); diagBtn.style.fontSize = 'var(--text-xs)';
                 diagBtn.textContent = 'Missing a service?';
                 diagBtn.title = 'Re-quote this parcel several ways to see which services each returns. Free, and books nothing.';
-                const diagOut = el('div'); diagOut.style.marginTop = '8px';
+                const diagOut = el('div'); diagOut.style.marginTop = 'var(--sp-2)';
                 diagBtn.onclick = async () => {
                     diagBtn.disabled = true; diagOut.innerHTML = '';
                     const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Asking World Options several ways…')); diagOut.append(t);
@@ -11874,7 +11882,7 @@ Projected Image UK"></textarea>
                 const sigVals = chosen.no_signature ? [] : (sigGroups[(chosen.carrier_name || '').toUpperCase()] || []);
                 let sigSel = null;
                 if (sigVals.length) {
-                    const sigF = el('label', 'disp-fld'); sigF.style.margin = '6px 0';
+                    const sigF = el('label', 'disp-fld'); sigF.style.margin = 'var(--sp-1-5) 0';
                     sigF.append(el('span', 'disp-fld-lab', 'Delivery signature'));
                     sigSel = el('select', 'psel');
                     const d0 = el('option', null, 'Courier default'); d0.value = ''; sigSel.append(d0);
@@ -12034,7 +12042,7 @@ Projected Image UK"></textarea>
                 else if (f.reason && f.reason !== 'not_attempted') out.append(el('div', 'disp-warn', f.detail || 'Shopify fulfillment could not be completed.'));
                 if (res.tag && !res.tag.ok && res.tag.note) out.append(el('div', 'disp-warn', res.tag.note));
                 labelButtons(out, s.labels);
-                const done = el('button', 'btn'); done.style.marginTop = '14px'; done.textContent = 'Done'; done.onclick = close;
+                const done = el('button', 'btn'); done.style.marginTop = 'var(--sp-4)'; done.textContent = 'Done'; done.onclick = close;
                 out.append(done);
                 body.innerHTML = '';
                 body.append(out);
@@ -12064,7 +12072,7 @@ Projected Image UK"></textarea>
                             + String((err && err.message) || err)
                             + '. Write the tracking number down, then close this and press '
                             + 'Dispatch again to see the shipment and print the label.'));
-                        const done = el('button', 'btn'); done.style.marginTop = '14px';
+                        const done = el('button', 'btn'); done.style.marginTop = 'var(--sp-4)';
                         done.textContent = 'Done'; done.onclick = close; body.append(done);
                     } catch (e2) {
                         // No helpers left. Plain text still carries the number.
@@ -12434,7 +12442,7 @@ Projected Image UK"></textarea>
             // ---- quotes ----
             const quoteBtn = el('button', 'btn btn-primary disp-quote');
             quoteBtn.append(ico(I.truck), document.createTextNode('Get courier quotes'));
-            const quoteWrap = el('div'); quoteWrap.style.marginTop = '12px';
+            const quoteWrap = el('div'); quoteWrap.style.marginTop = 'var(--sp-3)';
             body.append(quoteBtn, quoteWrap);
 
             function staleQuote() {
@@ -12845,7 +12853,7 @@ Projected Image UK"></textarea>
                 body.append(el('label', 'field-label', lab), inp);
                 credIn[k] = inp;
             });
-            const pluginRow = el('label', 'disp-fld'); pluginRow.style.marginTop = '8px';
+            const pluginRow = el('label', 'disp-fld'); pluginRow.style.marginTop = 'var(--sp-2)';
             pluginRow.append(el('span', 'disp-fld-lab', 'Plugin code (leave as Web_Service unless told otherwise)'));
             const pluginIn = el('select', 'psel'); pluginIn.setAttribute('aria-label', 'Plugin code');
             (cfg.plugin_codes || ['Web_Service']).forEach(v => {
@@ -12854,8 +12862,8 @@ Projected Image UK"></textarea>
                 pluginIn.append(op);
             });
             pluginRow.append(pluginIn); body.append(pluginRow);
-            const testBtn = el('button', 'btn'); testBtn.style.marginTop = '10px'; testBtn.append(ico(I.check), document.createTextNode('Save & test connection'));
-            const testOut = el('span', 'setting-sub'); testOut.style.marginLeft = '10px';
+            const testBtn = el('button', 'btn'); testBtn.style.marginTop = 'var(--sp-2-5)'; testBtn.append(ico(I.check), document.createTextNode('Save & test connection'));
+            const testOut = el('span', 'setting-sub'); testOut.style.marginLeft = 'var(--sp-2-5)';
             testBtn.onclick = async () => {
                 testBtn.disabled = true; testOut.textContent = 'Testing…';
                 try {
@@ -12907,7 +12915,7 @@ Projected Image UK"></textarea>
             closeIn.value = cfg.close_time || ''; closeF.append(closeIn);
             timeGrid.append(readyF, closeF);
             body.append(timeGrid);
-            const coF = el('label', 'disp-fld'); coF.style.marginTop = '8px';
+            const coF = el('label', 'disp-fld'); coF.style.marginTop = 'var(--sp-2)';
             coF.append(el('span', 'disp-fld-lab', 'Collection arrangement'));
             const coSel = el('select', 'psel');
             const CO_LABELS = {
@@ -12939,7 +12947,7 @@ Projected Image UK"></textarea>
             const labelWarn = el('div', 'setting-sub');
             [['label_size_production', 'Production label stock', '4x4'],
              ['label_size_shipping', 'Courier label stock', '4x6']].forEach(([k, lab, fallback]) => {
-                const w = el('label', 'disp-fld'); w.style.marginTop = '6px';
+                const w = el('label', 'disp-fld'); w.style.marginTop = 'var(--sp-1-5)';
                 w.append(el('span', 'disp-fld-lab', lab));
                 const sel = el('select', 'psel'); sel.setAttribute('aria-label', lab);
                 const cur = LABEL_SIZES[cfg[k]] ? cfg[k] : fallback;
@@ -12968,17 +12976,17 @@ Projected Image UK"></textarea>
             const intlIn = {};
             [['eori', 'EORI number (e.g. GB123456789000)'], ['vat_number', 'VAT number (optional)'],
              ['default_hs_code', 'Default HS / commodity code (optional, e.g. 70200080)'], ['trade_term', 'Trade term (optional, e.g. DAP)']].forEach(([k, lab]) => {
-                const w = el('label', 'disp-fld'); w.style.marginTop = '6px';
+                const w = el('label', 'disp-fld'); w.style.marginTop = 'var(--sp-1-5)';
                 w.append(el('span', 'disp-fld-lab', lab));
                 const inp = document.createElement('input'); inp.type = 'text'; inp.spellcheck = false; inp.className = 'disp-num'; inp.value = cfg[k] || '';
                 w.append(inp); intlIn[k] = inp; body.append(w);
             });
-            const erF = el('label', 'disp-fld'); erF.style.marginTop = '6px';
+            const erF = el('label', 'disp-fld'); erF.style.marginTop = 'var(--sp-1-5)';
             erF.append(el('span', 'disp-fld-lab', 'Reason for export'));
             const erSel = el('select', 'psel');
             (cfg.export_reasons || ['Sale']).forEach(v => { const op3 = el('option', null, v.replace(/_/g, ' ')); op3.value = v; if (v === (cfg.export_reason || 'Sale')) op3.selected = true; erSel.append(op3); });
             erF.append(erSel); body.append(erF);
-            const dpF = el('label', 'disp-fld'); dpF.style.marginTop = '6px';
+            const dpF = el('label', 'disp-fld'); dpF.style.marginTop = 'var(--sp-1-5)';
             dpF.append(el('span', 'disp-fld-lab', 'Who pays import duties'));
             const dpSel = el('select', 'psel');
             const DP_LABELS = { 'Duties_To_Be_Paid_By_Receiver': 'The customer (receiver) pays duties', 'Duties_To_Be_Paid_By_Sender': 'We (the sender) pay duties', 'Duties_To_Be_Paid_By_Third_Party': 'A third party pays duties' };
@@ -12990,7 +12998,7 @@ Projected Image UK"></textarea>
                ourselves makes the error go away. It also makes us liable for
                the customer's import charges, which is why the answer is no. */
             const dpWarn = el('div', 'mail-viewwarn');
-            dpWarn.style.cssText = 'margin-top:8px;margin-bottom:0;display:none';
+            dpWarn.style.cssText = 'margin-top:var(--sp-2);margin-bottom:0;display:none';
             dpWarn.textContent = 'Paying duties on the customer\u2019s behalf makes this business '
                 + 'liable for their import charges. This is deliberately set to the customer, and a '
                 + 'courier refusing a booking is not a reason to change it.';
@@ -13110,7 +13118,7 @@ Projected Image UK"></textarea>
                     rowb.append(rm);
                     boxHost.append(rowb);
                 });
-                const add = el('button', 'btn'); add.style.marginTop = '6px'; add.append(ico(I.plus), document.createTextNode('Add box'));
+                const add = el('button', 'btn'); add.style.marginTop = 'var(--sp-1-5)'; add.append(ico(I.plus), document.createTextNode('Add box'));
                 add.onclick = () => { boxes.push({ id: 'box' + (boxes.length + 1) + '_' + Date.now(), name: 'New box', width: 20, length: 15, depth: 10, weight: 0.5 }); renderBoxes(); };
                 boxHost.append(add);
             }
@@ -13159,7 +13167,7 @@ Projected Image UK"></textarea>
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
             const ht = el('div'); ht.append(el('h2', null, 'Production Manager'), el('p', null, 'Preparing the label for this order\u2026'));
             hero.append(badge, ht); box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Fetching the order\u2026')); box.append(t);
+            const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Fetching the order\u2026')); box.append(t);
             labelsLoading = true;
             try {
                 const data = await api('/api/production-labels', { order_id: orderId });
@@ -13181,7 +13189,7 @@ Projected Image UK"></textarea>
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
             const ht = el('div'); ht.append(el('h2', null, 'Production Manager'), el('p', null, 'Opening dispatch for this order\u2026'));
             hero.append(badge, ht); box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = '8px'; t.append(loader(), el('span', null, 'Fetching the order\u2026')); box.append(t);
+            const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Fetching the order\u2026')); box.append(t);
             labelsLoading = true;
             try {
                 const data = await api('/api/production-labels', { order_id: orderId });
@@ -13368,11 +13376,11 @@ Projected Image UK"></textarea>
             const host = el('div'); box.append(host);
             if (guideSeg === 'guide') {
                 GUIDE.forEach(sec => {
-                    const card = el('div', 'card'); card.style.marginTop = '14px';
-                    const h = el('div', 'section-title', sec.h); h.style.margin = '0 0 8px';
+                    const card = el('div', 'card'); card.style.marginTop = 'var(--sp-4)';
+                    const h = el('div', 'section-title', sec.h); h.style.margin = '0 0 var(--sp-2)';
                     card.append(h);
                     sec.body.forEach(([t, d]) => {
-                        const row = el('div'); row.style.cssText = 'padding:9px 0;border-top:1px solid var(--border-default)';
+                        const row = el('div'); row.style.cssText = 'padding:var(--sp-2) 0;border-top:var(--bw-hairline) solid var(--border-default)';
                         row.append(el('div', 'setting-title', t), el('div', 'setting-sub', d));
                         card.append(row);
                     });
@@ -13419,7 +13427,7 @@ Projected Image UK"></textarea>
             host.append(card);
             /* The version line: what this app IS right now, in plain terms. */
             const foot = el('div', 'setting-sub');
-            foot.style.marginTop = '10px';
+            foot.style.marginTop = 'var(--sp-2-5)';
             foot.textContent = 'Running the ' + (v.latest ? fmtDate(v.latest) + ' release' : 'current build')
                 + (v.releases ? ' \u00b7 ' + v.releases + ' releases on record' : '')
                 + (v.sha ? ' \u00b7 build ' + v.sha : '')
@@ -13508,7 +13516,7 @@ Projected Image UK"></textarea>
             GUIDE.forEach(sec => {
                 ds.append(el('h2', null, sec.h));
                 sec.body.forEach(([t, d]) => {
-                    const p = el('div'); p.style.cssText = 'margin:0 0 7px';
+                    const p = el('div'); p.style.cssText = 'margin:0 0 var(--sp-2)';
                     p.append(el('b', null, t + ': '), document.createTextNode(d));
                     ds.append(p);
                 });
@@ -13573,10 +13581,8 @@ Projected Image UK"></textarea>
            imported labels keep the colours they had. Where a name collides
            with a house semantic (red, green, yellow) it wears the house
            token's value, so a Hot label and a lost chip are the SAME red. */
-        const CRM_COLOR_CSS = { red: '#b91c1c', orange: '#c2410c', yellow: '#b45309',
-                                green: '#15803d', blue: '#1d4ed8', purple: '#7e22ce',
-                                pink: '#be185d', brown: '#78350f', gray: '#737373',
-                                'dark-gray': '#525252' };
+        const CRM_COLOR_CSS = Object.fromEntries(['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'gray', 'dark-gray']
+            .map(k => [k, tokenValue('--owner-' + k)]));
         function crmLabelColor(name) {
             /* Only the known names map to a colour. The raw string used to fall
                through into style.background, and a Pipedrive label coloured
@@ -13843,7 +13849,7 @@ Projected Image UK"></textarea>
                field names, pipeline names and who owns how much. No deal
                titles, no customer names, no email addresses. */
             const copy = el('button', 'btn');
-            copy.style.marginTop = '10px';
+            copy.style.marginTop = 'var(--sp-2-5)';
             copy.append(ico(I.copy), document.createTextNode('Copy summary'));
             copy.onclick = async () => {
                 const L = [];
@@ -13885,7 +13891,7 @@ Projected Image UK"></textarea>
             /* The import lives behind the survey deliberately: nobody should
                reach it without first seeing what is in the account. */
             const imp = el('button', 'btn');
-            imp.style.cssText = 'margin-top:10px;margin-left:8px';
+            imp.style.cssText = 'margin-top:var(--sp-2-5);margin-left:var(--sp-2)';
             imp.textContent = 'Preview the import';
             imp.onclick = () => runPipedriveImport(host, imp, false);
             host.append(imp);
@@ -13895,7 +13901,7 @@ Projected Image UK"></textarea>
             btn.disabled = true;
             btn.textContent = go ? 'Importing\u2026' : 'Reading Pipedrive\u2026';
             const out = el('div', 'crm-focus');
-            out.style.marginTop = '10px';
+            out.style.marginTop = 'var(--sp-2-5)';
             out.append((() => { const t = el('div', 'thinking');
                 t.append(loader(), el('span', null, go
                     ? 'Copying it in. Do not close this tab.'
@@ -13962,7 +13968,7 @@ Projected Image UK"></textarea>
             }
             btn.textContent = 'Preview again';
             const doIt = el('button', 'btn btn-primary', 'Import it for real');
-            doIt.style.marginTop = '10px';
+            doIt.style.marginTop = 'var(--sp-2-5)';
             doIt.onclick = async () => {
                 if (!(await uiConfirm('Copy ' + ((rep.deals || {}).new || 0) + ' deals, '
                     + ((rep.persons || {}).new || 0) + ' people and '
@@ -14751,7 +14757,7 @@ Projected Image UK"></textarea>
                     crmDealX.threads.forEach(t => {
                         const r = el('div', 'crm-hist-row');
                         const a = actionLink('miss-open', t.subject);
-                        if (t.unread) a.style.fontWeight = '600';
+                        if (t.unread) a.style.fontWeight = 'var(--weight-semibold)';
                         a.onclick = () => { m.close(); setView('mail'); openMailThread(t.id); };
                         r.append(a);
                         const bits = [t.msg_count + (t.msg_count === 1 ? ' message' : ' messages'),
@@ -15592,7 +15598,7 @@ Projected Image UK"></textarea>
                             const r = await api('/api/crm/contact', { op: 'shopify_search', q: sIn.value.trim() });
                             (r.matches || []).forEach(c2 => {
                                 const b = el('button', 'btn');
-                                b.style.margin = '4px 4px 0 0';
+                                b.style.margin = 'var(--sp-1) var(--sp-1) 0 0';
                                 b.textContent = c2.name + (c2.company ? ' · ' + c2.company : '') + ' (' + (c2.orders || 0) + ' orders)';
                                 b.onclick = () => { shopifyId = c2.id; status.textContent = 'Will link to ' + c2.name; };
                                 results.append(b);
@@ -15701,7 +15707,7 @@ Projected Image UK"></textarea>
                 const left = el('div', 'lia-name');
                 if (!l.seen && !l.archived) left.append(el('span', 'crm-new-dot'));
                 const t = el('span', null, ' ' + l.title);
-                if (!l.seen && !l.archived) t.style.fontWeight = '600';
+                if (!l.seen && !l.archived) t.style.fontWeight = 'var(--weight-semibold)';
                 left.append(t); row.append(left);
                 const mid = el('div', 'lbl-who');
                 const bits = [];
@@ -16222,7 +16228,7 @@ Projected Image UK"></textarea>
                     card.append(p1);
                     if (d.client) {
                         const go = el('button', 'btn btn-primary', 'Connect mailbox');
-                        go.style.marginTop = '10px';
+                        go.style.marginTop = 'var(--sp-2-5)';
                         go.onclick = async () => {
                             /* The tab must be opened INSIDE the click, before any
                                await, or the popup blocker eats it. Google refuses
@@ -16254,7 +16260,7 @@ Projected Image UK"></textarea>
                        cannot read must not take the address down with it. */
                     if (d.client && su.redirect_uri) {
                         const box2 = el('div');
-                        box2.style.cssText = 'margin-top:14px;padding-top:12px;border-top:1px solid var(--border-default)';
+                        box2.style.cssText = 'margin-top:var(--sp-4);padding-top:var(--sp-3);border-top:var(--bw-hairline) solid var(--border-default)';
                         box2.append(el('div', 'setting-title', 'First time? Two switches in Google'));
                         box2.append(el('div', 'setting-sub', su.project
                             ? 'These open the Google project this app already uses (project '
@@ -16263,7 +16269,7 @@ Projected Image UK"></textarea>
                               + 'you have already set up changes.'));
                         const step = (n, text, href, linkText) => {
                             const row = el('div', 'setting-sub');
-                            row.style.marginTop = '8px';
+                            row.style.marginTop = 'var(--sp-2)';
                             row.append(document.createTextNode(n + '. ' + text + ' '));
                             const a = el('a', null, linkText);
                             a.href = href; a.target = '_blank'; a.rel = 'noopener';
@@ -16279,7 +16285,7 @@ Projected Image UK"></textarea>
                         step(2, 'Open your existing web client and add one more address under Authorised redirect URIs:',
                             'https://console.cloud.google.com/auth/clients' + proj, 'open your clients');
                         const uri = el('div');
-                        uri.style.cssText = 'font-family:ui-monospace,monospace;font-size:12px;user-select:all;'
+                        uri.style.cssText = 'font-family:var(--font-mono);font-size:var(--text-xs);user-select:all;'
                             + 'background:var(--surface-tertiary);border:1px solid var(--border-default);border-radius:6px;'
                             + 'padding:6px 8px;margin-top:6px;word-break:break-all';
                         uri.textContent = su.redirect_uri || '';
@@ -16636,7 +16642,7 @@ Projected Image UK"></textarea>
             host.append(list);
             if (rows.length > mailListCap) {
                 const more = el('button', 'btn');
-                more.style.marginTop = '8px';
+                more.style.marginTop = 'var(--sp-2)';
                 more.textContent = 'Show more (' + (rows.length - mailListCap) + ' older)';
                 more.onclick = () => { mailListCap += 400; renderMail(); };
                 host.append(more);
@@ -16941,7 +16947,7 @@ Projected Image UK"></textarea>
                 catch (e) { toastError(e.message); return null; }
             };
             const list = el('div');
-            list.style.margin = '12px 0';
+            list.style.margin = 'var(--sp-3) 0';
             (data.rules || []).forEach((r, i) => {
                 const row = el('div', 'mrule');
                 const head = el('div', 'mrule-head');
@@ -17194,7 +17200,7 @@ Projected Image UK"></textarea>
             const name = crmText(r.name, 'What is this filter for?');
             crmField(m.body, 'Name', name);
             const modeRow = el('div', 'setting-sub');
-            modeRow.style.margin = '10px 0 4px';
+            modeRow.style.margin = 'var(--sp-2-5) 0 var(--sp-1)';
             modeRow.append(document.createTextNode('Match '));
             const mode = document.createElement('select');
             mode.className = 'mail-presence-pick';
@@ -17797,7 +17803,7 @@ Projected Image UK"></textarea>
             /* Steering: say what to change and it drafts again, rather than
                making the person rewrite a paragraph they did not want. */
             const steer = el('div', 'mrule-cond');
-            steer.style.marginTop = '8px';
+            steer.style.marginTop = 'var(--sp-2)';
             const note = crmText('', 'Not right? Say what to change, then Try again');
             note.style.flex = '1';
             const again = el('button', 'btn', 'Try again');
@@ -17889,10 +17895,10 @@ Projected Image UK"></textarea>
                 + encodeURIComponent(mailCache.address || '')
                 + '#all/' + encodeURIComponent(t.id);
             gm.target = '_blank'; gm.rel = 'noopener';
-            gm.style.cssText = 'display:inline-block;margin:4px 0;color:var(--action-primary)';
+            gm.style.cssText = 'display:inline-block;margin:var(--sp-1) 0;color:var(--action-primary)';
             m.body.append(gm);
             const msgs = el('div');
-            msgs.style.cssText = 'max-height:360px;overflow-y:auto;margin:10px 0';
+            msgs.style.cssText = 'max-height:360px;overflow-y:auto;margin:var(--sp-2-5) 0';
             m.body.append(msgs);
             let r;
             try { r = await api('/api/mail/body', { id: t.id, archive: true }); }
@@ -18082,7 +18088,7 @@ Projected Image UK"></textarea>
                 + encodeURIComponent(mailCache.address || '')
                 + '#all/' + encodeURIComponent(t.id);
             gm.target = '_blank'; gm.rel = 'noopener';
-            gm.style.cssText = 'display:inline-block;margin:4px 0;color:var(--action-primary)';
+            gm.style.cssText = 'display:inline-block;margin:var(--sp-1) 0;color:var(--action-primary)';
             m.body.append(gm);
             /* ---- ownership + state controls ---- */
             const bar = el('div', 'mail-statebar');
@@ -18159,7 +18165,7 @@ Projected Image UK"></textarea>
                 m.body.append(row);
             }
             /* ---- the conversation ---- */
-            const msgs = el('div'); msgs.style.cssText = 'max-height:260px;overflow-y:auto;margin:10px 0';
+            const msgs = el('div'); msgs.style.cssText = 'max-height:260px;overflow-y:auto;margin:var(--sp-2-5) 0';
             const ourAddr = (mailCache && mailCache.address || '').toLowerCase();
             (t.messages || []).forEach(msg => {
                 const box = el('div', 'mail-msg' + (ourAddr && msg.from_email === ourAddr ? ' ours' : ''));
@@ -18228,7 +18234,7 @@ Projected Image UK"></textarea>
             m.body.append(nrow);
             /* ---- activity ---- */
             const actHead = el('div', 'setting-title', 'Activity');
-            actHead.style.marginTop = '10px';
+            actHead.style.marginTop = 'var(--sp-2-5)';
             m.body.append(actHead);
             (t.activity || []).slice().reverse().slice(0, 20).forEach(a => {
                 m.body.append(el('div', 'mail-act',
@@ -18375,7 +18381,7 @@ Projected Image UK"></textarea>
                 const p = el('p', null, 'Files keeps its storage in a Cloudflare R2 bucket: durable, '
                     + 'priced in pennies, and the app signs every transfer so nothing is public. '
                     + 'Three keys in Railway switch it on; the Guide tab has the exact steps.');
-                p.style.cssText = 'margin:8px 0 0;font-size:13px;color:var(--text-secondary);line-height:1.55;max-width:64ch';
+                p.style.cssText = 'margin:var(--sp-2) 0 0;font-size:var(--text-xs);color:var(--text-secondary);line-height:var(--lh-body);max-width:64ch';
                 card.append(p);
                 if (d.setup_error) card.append(el('div', 'msg error', 'Storage answered with an error: ' + d.setup_error));
                 box.append(card);
@@ -18898,7 +18904,7 @@ Projected Image UK"></textarea>
                     if (hits.length > filesHitCap) {
                         const more = el('button', 'btn',
                             'Show more (' + (hits.length - filesHitCap) + ' remaining)');
-                        more.style.cssText = 'margin:8px auto;display:block';
+                        more.style.cssText = 'margin:var(--sp-2) auto;display:block';
                         more.onclick = () => { filesHitCap += FILES_HIT_STEP; paintList(); };
                         list.append(more);
                     }
@@ -19219,7 +19225,7 @@ Projected Image UK"></textarea>
                 go.onclick = submit;
                 inCode.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
                 const back = el('button', 'files-crumb', 'Start again');
-                back.style.marginTop = '10px';
+                back.style.marginTop = 'var(--sp-2-5)';
                 back.onclick = () => { ov.dataset.mode = ''; authShow('login'); };
                 card.append(fc, err2, go, back);
                 setTimeout(() => inCode.focus(), 50);
@@ -19278,7 +19284,7 @@ Projected Image UK"></textarea>
                     } catch (e) { err.textContent = e.message; go.disabled = false; }
                 };
                 const back = el('button', 'files-crumb', 'Sign in as someone else');
-                back.style.marginTop = '10px';
+                back.style.marginTop = 'var(--sp-2-5)';
                 back.onclick = () => { setAppSession(''); ov.dataset.mode = ''; authShow('login'); };
                 card.append(fc, fp, err, go, back);
             } else {
@@ -19620,7 +19626,7 @@ Projected Image UK"></textarea>
                             'Sign-off for ' + (u.name || 'this account'));
                         sl2.append(sta); sw.append(sl2);
                         const ssave = el('button', 'btn', 'Save sign-off');
-                        ssave.style.marginTop = '6px';
+                        ssave.style.marginTop = 'var(--sp-1-5)';
                         ssave.onclick = async () => {
                             ssave.disabled = true;
                             try {
@@ -19737,7 +19743,7 @@ Projected Image UK"></textarea>
                     sl.append(row);
                 });
                 wrap.append(sl);
-                const bar = el('div', 'lbl-toolbar'); bar.style.marginTop = '12px';
+                const bar = el('div', 'lbl-toolbar'); bar.style.marginTop = 'var(--sp-3)';
                 const frm = document.createElement('input'); frm.type = 'date'; frm.className = 'lbl-size';
                 const to = document.createElement('input'); to.type = 'date'; to.className = 'lbl-size';
                 const exp = el('button', 'btn'); exp.append(ico(I.download), document.createTextNode('Export for payroll'));
@@ -20127,7 +20133,7 @@ Projected Image UK"></textarea>
             }
             // Master only, matching the server: the zip carries the accounts
             // register, so it is not an admin-level thing to walk off with.
-            const bk = el('button', 'btn'); bk.style.marginTop = '10px';
+            const bk = el('button', 'btn'); bk.style.marginTop = 'var(--sp-2-5)';
             bk.style.display = (!teamMe || teamMe.role === 'master') ? '' : 'none';
             bk.append(ico(I.download), document.createTextNode('Download backup'));
             bk.title = 'A zip of everything the app has learned: rulings, aliases, state, usage.';
@@ -20151,7 +20157,7 @@ Projected Image UK"></textarea>
             if (!teamMe || teamMe.role === 'master') {   // unknown role: show it; the server enforces master-only
                 const rsInput = document.createElement('input');
                 rsInput.type = 'file'; rsInput.accept = '.zip'; rsInput.style.display = 'none';
-                const rs = el('button', 'btn'); rs.style.cssText = 'margin-top:10px;margin-left:8px';
+                const rs = el('button', 'btn'); rs.style.cssText = 'margin-top:var(--sp-2-5);margin-left:var(--sp-2)';
                 rs.append(ico(I.upload), document.createTextNode('Restore a backup'));
                 rs.title = 'Put a downloaded backup zip back: after a lost volume, or a region move.';
                 rsInput.onchange = async () => {
@@ -20259,7 +20265,7 @@ Projected Image UK"></textarea>
                     'Add this to an authenticator app, then type the six-digit code it '
                     + 'shows to prove it works. It is not on until you do.'));
                 const code = el('div', 'evidence'); code.textContent = st.secret;
-                code.style.cssText = 'font-family:ui-monospace,monospace;padding:10px 12px;'
+                code.style.cssText = 'font-family:var(--font-mono);padding:var(--sp-2-5) var(--sp-3);'
                     + 'background:var(--surface-tertiary);border-radius:var(--radius-sm);word-break:break-all';
                 body.append(code);
                 const f = el('label', 'pfield');
@@ -20281,7 +20287,7 @@ Projected Image UK"></textarea>
                         + 'each one gets you in once if you lose your phone, and this is the '
                         + 'only time they are shown.'));
                     const list = el('div', 'evidence');
-                    list.style.cssText = 'font-family:ui-monospace,monospace;line-height:1.9;'
+                    list.style.cssText = 'font-family:var(--font-mono);line-height:var(--lh-prose);'
                         + 'padding:10px 12px;background:var(--surface-tertiary);border-radius:var(--radius-sm)';
                     (r.recovery || []).forEach(c => list.append(el('div', null, c)));
                     body.append(list);
@@ -20345,7 +20351,7 @@ Projected Image UK"></textarea>
                 top.append(document.createTextNode(' across ' + (u.runs || 0) + ' calls. Same volume on Sonnet ≈ $' + (u.cost_if_sonnet || 0).toFixed(2) + ', on Haiku ≈ $' + (u.cost_if_haiku || 0).toFixed(2) + '.'));
                 box.append(top);
                 if (Array.isArray(u.by_kind) && u.by_kind.length) {
-                    const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = '10px'; const tbl = el('table', 'ktable');
+                    const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = 'var(--sp-2-5)'; const tbl = el('table', 'ktable');
                     const thead = el('thead'); const htr = el('tr');
                     ['Type', 'Runs', 'Avg cost', 'Total'].forEach((h, i) => htr.append(el('th', i ? 'num' : null, h)));
                     thead.append(htr); tbl.append(thead); const tb = el('tbody');
