@@ -1,6 +1,7 @@
 # Design system tokens for the gizmo SPA
 
-Date: 2026-09-07. Status: approved, in implementation.
+Date: 2026-09-07. Status: implemented 2026-09-07 in five commits (bbf346d, cf3a352,
+bbdd71d, 181ffec, 520355f); see Deviations at the end.
 
 ## Why
 
@@ -181,6 +182,26 @@ and after each commit and diffed in Python.
    the listed rules.
 5. JS sources, utilities, `--warning-text`. Diff zero apart from the amber.
 6. Enforcement tests land with the commit that makes each pass.
+
+## Deviations found in implementation
+
+- **No utility classes.** The 61 `style.marginTop` sites and the cssText
+  strings write the token into the same inline style (`'var(--sp-2)'`)
+  instead of taking a class. An inline style beats rules like the Xero page's
+  `.card > * { margin-top: 0 }`; a class would not, and matching that would
+  have meant `!important` on every utility. Precedence is preserved exactly.
+- **`--radius-circle: 50%`** joins `--radius-full: 999px`. A dot and a pill
+  render the same on a square, but they are different intents, and keeping
+  them apart kept the commit-1 snapshot diff at literally zero.
+- **`--sp-px: 1px`** (three optical nudges), **`--radius-3xs: 2px`** (the chart
+  legend swatch) and three tier-3 widths (`--chevron-room` 30, `--icon-col`
+  34, `--stat-tools-w` 78) were needed to leave no literal behind.
+- **Two focus-outline variants stay** beside the base rule: the custom-drawn
+  checkbox and the menu item, which insets its outline by 2px.
+- **Primary hover/active** landed with the state contract (commit 2) rather
+  than with the snaps.
+- **Snapshot tolerance**: colours compare after normalising `color(srgb ...)`
+  to rgba, so `color-mix()` results match the literals they replaced.
 
 ## Decisions taken
 
