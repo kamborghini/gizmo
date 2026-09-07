@@ -1913,32 +1913,29 @@ def t_every_tab_shares_one_page_wrapper():
 
 @test
 def t_the_sidebar_keeps_one_inset():
-    """Every control in the sidebar sits 12px from each edge. The ask button
-    used to be width:100% with no horizontal margin, so it alone ran the full
-    264px and broke the line the whole column keeps."""
-    shared = re.search(r"\.nav-refresh, \.nav-ask \{[^}]*\}", CSS)
-    ok(shared, "the two sidebar buttons are declared as ONE rule, so their "
-               "size, radius and hover cannot drift apart")
-    ok("line-height:" in shared.group(0),
-       "with an explicit line-height: `font: inherit` once pulled the body's "
-       "1.5 and made one button 3px taller than the other")
-    rule = re.search(r"\.nav-ask \{ *margin[^}]*\}", CSS).group(0)
-    ok("width: 100%" not in CSS.split(".nav-refresh, .nav-ask")[1][:400],
-       "neither button spans the sidebar")
-    # It sits with Refresh all, above the conversation list, not stranded at
-    # the bottom of a column that flexes.
-    order = [m.group(1) for m in re.finditer(
-        r'<(?:button|div) class="(nav-refresh|nav-ask|convos)"', HTML)]
-    ok(order[:2] == ["nav-refresh", "nav-ask"],
-       "the two sidebar actions are a stacked pair: %s" % order)
-    ok(re.search(r"margin: *var\(--sp-[0-9-]+\) var\(--sp-3\)", rule),
-       "it carries the sidebar's own 12px inset: " + rule)
-    for sel, why in ((r"\.nav \{[^}]*\}", "the nav list"),
-                     (r"\.nav-refresh \{[^}]*\}", "refresh all"),
-                     (r"\.convos \{[^}]*\}", "the conversation list")):
+    """Every block in the sidebar sits 8px from each edge, the reference's
+    p-2 on its header, each group and its footer. The ask button used to be
+    width:100% with no horizontal margin, so it alone ran the full width and
+    broke the line the whole column keeps."""
+    for sel, why in ((r"\.side-head \{[^}]*\}", "the brand row"),
+                     (r"\.nav-quick \{[^}]*\}", "the primary button"),
+                     (r"\.nav \{[^}]*\}", "the nav list"),
+                     (r"\.convos \{[^}]*\}", "the conversation list"),
+                     (r"\.side-foot \{[^}]*\}", "the footer")):
         block = re.search(sel, CSS).group(0)
-        ok("var(--sp-3)" in block, why + " shares that inset: " + block[:90])
-
+        ok("var(--sp-2)" in block, why + " shares the 8px inset: " + block[:90])
+    refresh = re.search(r"\.nav-refresh \{[^}]*\}", CSS)
+    ok(refresh and "width: 100%" in refresh.group(0) and "line-height:" in refresh.group(0),
+       "Refresh all fills its 8px-inset group, with an explicit line-height: `font: inherit` once "
+       "pulled the body's 1.5 and made it 3px taller than its neighbour")
+    ok("var(--action-primary)" in refresh.group(0), "and it is the reference's primary button")
+    order = [m.group(1) for m in re.finditer(r'<(?:button|div) class="(nav-quick|nav|convos|side-support|side-user)[" ]', HTML)]
+    ok(order == ["nav-quick", "nav", "convos", "side-support", "side-user"],
+       "primary button, sections, conversations, then the support card and the account row: %s" % order)
+    ok('class="linkish" id="ask-feature"' in HTML,
+       "Ask for a feature is the link in the support card, as the reference's card carries one")
+    ok("function userMenu()" in SCRIPT and "$('side-user').onclick = userMenu" in SCRIPT,
+       "and the account row opens the menu that holds Settings, the clock and Log out")
 
 @test
 def t_the_connect_tab_opens_inside_the_click():
@@ -2694,7 +2691,7 @@ def t_the_live_region_predates_the_first_toast():
     """Content that arrives together with a brand-new live region is
     unreliably announced. The host is created at boot now, empty, so the first
     toast mutates an established region."""
-    boot = SCRIPT.split("$('menu-btn').onclick = openSidebar")[0][-700:]
+    boot = SCRIPT.split("$('menu-btn').onclick = toggleSidebar")[0][-700:]
     ok("host.setAttribute('aria-live', 'polite')" in boot,
        "the region exists before anything can toast")
 
@@ -2775,8 +2772,8 @@ def t_the_sidebar_does_not_dim_where_you_are_not():
     ok("font-weight: var(--weight-medium)" in act, "and the active one carries the weight")
     ok("background: var(--surface-tertiary)" in act, "on the muted pill")
     side = CSS.split(".sidebar {")[1].split("}")[0]
-    ok("border-right" not in side,
-       "the sidebar separates by background alone, with no second edge")
+    ok("border-right: var(--bw-hairline) solid var(--border-default)" in side,
+       "the sidebar wears the reference's hairline on its right edge (its 'sidebar' variant)")
     grp = CSS.split(".nav-group {")[1].split("}")[0]
     ok("color: var(--text-secondary)" in grp, "group labels sit at the reference's 70% foreground")
 
@@ -2912,7 +2909,7 @@ def t_no_control_grows_its_way_out_of_the_scale():
     growing it. Three recipes had overridden their way off that scale by
     setting their own vertical padding: the sidebar's two footer buttons at 34,
     the skills input at 39, and the run-gate CTA at 46."""
-    for sel in (r"\.run-gate \.rg-btn", r"\.nav-refresh, \.nav-ask", r"\.sk-input, \.sk-textarea"):
+    for sel in (r"\.run-gate \.rg-btn", r"\.nav-refresh", r"\.sk-input, \.sk-textarea"):
         rule = re.search(sel + r" \{[^}]*\}", CSS)
         ok(rule, "the %s rule is still there" % sel)
         pad = re.search(r"padding:\s*(?:var\(--control-pad-y\)|([\d]+)px)", rule.group(0))
@@ -4711,10 +4708,20 @@ def t_the_header_is_one_implementation_with_one_collapse_point():
     ok("function setViewTitle(text) { const h = $('view-title'); h.textContent = text; h.title = text; }" in SCRIPT,
        "and the full title rides in the tooltip")
     ok("$('view-title').textContent =" not in SCRIPT, "every writer goes through it")
-    collapse = re.findall(r"@media \(max-width: (\d+)px\)[^{]*\{[^@]*?\.menu-btn \{ display: inline-grid; \}", CSS)
-    ok(collapse == ["760"], "the menu button appears at exactly one width, 760: %s" % collapse)
+    # The trigger is always there, as the reference's is: on a phone it opens
+    # the drawer, on a desk it folds the sidebar away. The drawer itself still
+    # happens at exactly one width.
+    ok(".menu-btn { display: inline-grid; }" in CSS, "the trigger is always shown")
+    for m in re.finditer(r"@media[^{]*\{", CSS):
+        depth, i = 1, m.end()
+        while i < len(CSS) and depth:
+            depth += {"{": 1, "}": -1}.get(CSS[i], 0); i += 1
+        ok(".menu-btn" not in CSS[m.end():i], "and no breakpoint hides or reveals it: " + m.group(0))
     ok(re.search(r"@media \(max-width: 760px\)[^@]*?\.sidebar \{ position: fixed;", CSS),
-       "and the sidebar leaves the flow in the same block")
+       "the sidebar leaves the flow at 760 and only there")
+    ok("@media (min-width: 761px) { body.sidebar-collapsed .sidebar { margin-left: calc(-1 * var(--sidebar-w)); } }" in CSS,
+       "and folds away by its own width above it")
+    ok("function toggleSidebar()" in SCRIPT and "k === 'b'" in SCRIPT, "one toggle serves the trigger and Cmd+B")
 
 
 def _rules(css):
