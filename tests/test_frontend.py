@@ -771,8 +771,9 @@ def t_a_destructive_question_cannot_be_answered_by_reflex():
     ok("e.key === 'Enter' && !danger" in fn, "Enter answers only the reversible dialogs")
     ok("(danger ? no : yes).focus()" in fn, "a destructive dialog opens with Cancel selected")
     ok("btn-danger" in fn, "and its confirming button is the danger button, not the primary one")
-    ok(re.search(r"\.btn-danger \{[^}]*background:\s*var\(--action-danger\)", HTML),
-       "the danger button is painted from the semantic token")
+    ok(re.search(r"\.btn-danger \{[^}]*background:\s*var\(--action-danger-soft\)", HTML),
+       "the danger button is painted from the semantic token: the reference's destructive "
+       "button is the red ink on a tint of itself, not a red fill")
 
 
 def _destructive_re():
@@ -4840,7 +4841,7 @@ def t_a_boxed_child_of_a_card_is_inset():
     ok("max-width: calc(100% - 2 * var(--sp-4))" in CSS.split("#view-connector .card > .lbl-row {")[1].split("}")[0],
        "a fit-content row counts its own inset, so it cannot hang out of the card at 375")
     ok(".ov-wrap > * + .run-gate { margin-top: 0; }" in CSS, "the run gate centres itself only when it is the whole page")
-    ok("line-height: var(--lh-snug)" in CSS.split(".lbl-segbtn {")[1].split("}")[0], "segmented buttons are 24 tall in a 32 strip")
+    ok("line-height: var(--lh-control)" in CSS.split(".lbl-segbtn {")[1].split("}")[0], "segmented buttons are 24 tall in a 32 strip")
     ok("const label = a.metric || a.title || a.detail || 'A change was recorded without a description';" in SCRIPT,
        "an alert row shows whatever its record carries")
     ok("board.append(el('div', 'empty', 'No pipeline stages are set up yet.'))" in SCRIPT, "an empty pipeline says so")

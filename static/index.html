@@ -49,7 +49,7 @@
                                          the binding one is --neutral-150 at 4.61. */
             --neutral-600: #525252; --neutral-800: #262626; --neutral-900: #171717; --neutral-950: #0a0a0a;
             --red-50: #fef2f2; --red-300: #fca5a5; --red-500: #ef4444;
-            --red-700: #b91c1c; --red-800: #991b1b; --red-900: #7f1d1d;
+            --red-700: #b91c1c; --red-900: #7f1d1d;
             --orange-700: #c2410c;
             --amber-50: #fffbeb; --amber-700: #b45309; --amber-800: #92400e; --amber-900: #78350f;
             --green-50: #f0fdf4; --green-700: #15803d;
@@ -79,8 +79,12 @@
             --action-primary: var(--neutral-900); --action-hover: var(--neutral-800);
             --action-active: var(--black);
             --action-soft: var(--neutral-100); --action-line: var(--neutral-200);
-            --action-danger: var(--red-700); --action-danger-hover: var(--red-800);
-            --action-danger-active: var(--red-900);
+            /* Destructive is a tint, not a fill: the reference's destructive
+               button is the red ink on 10% of itself, deepening on hover and
+               press. A filled red button was the loudest thing on any page. */
+            --action-danger-soft: color-mix(in srgb, var(--error) 10%, var(--surface-primary));
+            --action-danger-soft-hover: color-mix(in srgb, var(--error) 18%, var(--surface-primary));
+            --action-danger-soft-active: color-mix(in srgb, var(--error) 26%, var(--surface-primary));
             /* Status. A dispatch queue needs to say made / booked / late / owed
                at a glance. Each pair clears 4.5:1 on its own ground. */
             --success: var(--green-700); --success-bg: var(--green-50);
@@ -111,7 +115,7 @@
             --focus-ring: 0 0 0 3px color-mix(in srgb, var(--black) 18%, transparent);
             --focus-outline: var(--bw-strong) solid var(--action-primary);
             --overlay-scrim: color-mix(in srgb, var(--neutral-900) 32%, transparent);
-            --overlay-modal: color-mix(in srgb, var(--neutral-900) 44%, transparent);
+            --overlay-modal: color-mix(in srgb, var(--black) 10%, transparent);
             /* Elevation. A card is a hairline plus shadow-sm; only things that
                genuinely float get more. Rings are inset hairlines for things
                that cannot carry a border. */
@@ -121,7 +125,6 @@
                          0 2px 4px -2px color-mix(in srgb, var(--black) 10%, transparent);
             --shadow-lg: 0 10px 15px -3px color-mix(in srgb, var(--black) 10%, transparent),
                          0 4px 6px -4px color-mix(in srgb, var(--black) 10%, transparent);
-            --shadow-knob: 0 1px 2px color-mix(in srgb, var(--neutral-900) 28%, transparent);
             --ring-default: inset 0 0 0 var(--bw-hairline) var(--border-default);
             --ring-strong: inset 0 0 0 var(--bw-hairline) var(--border-strong);
             --ring-emphasis: inset 0 0 0 var(--bw-hairline) var(--border-emphasis);
@@ -203,6 +206,8 @@
            conversations scrolls under a brand row and an account row that stay. */
         .side-head { padding: var(--sp-2); flex: none; }
         .side-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+        .side-body { scrollbar-width: none; }
+        .side-body::-webkit-scrollbar { display: none; }
         .side-foot { padding: var(--sp-2); flex: none; display: flex; flex-direction: column; gap: var(--sp-2); }
         .brand { display: flex; align-items: center; gap: var(--sp-2); width: 100%; height: var(--control-h); padding: 0 var(--sp-2);
             border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-primary); text-align: left;
@@ -238,7 +243,7 @@
            a price, and a third child there lands in the wrong cell. */
         .coll-row { display: flex; flex-direction: column; gap: var(--sp-1);
             padding: var(--sp-3) var(--sp-4); border: var(--bw-hairline) solid var(--border-default);
-            border-radius: var(--radius-sm); background: var(--surface-primary); }
+            border-radius: var(--radius-md); background: var(--surface-primary); }
         .coll-row + .coll-row { margin-top: var(--sp-2); }
         .coll-row-top { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
         .coll-row-name { font-weight: var(--weight-medium); }
@@ -269,7 +274,7 @@
         .nav-item:is(.active, [aria-current="page"]) svg { color: var(--action-primary); }
         .convo-head { display: flex; align-items: center; justify-content: space-between; height: var(--control-h); padding: 0 var(--sp-2); margin: var(--sp-4) var(--sp-2) 0; }
         .convo-head span { font-size: var(--text-xs); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-secondary); }
-        .icon-btn { border: 0; background: transparent; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-xs);
+        .icon-btn { border: 0; background: transparent; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-sm);
             min-width: 28px; min-height: 28px; display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
         .icon-btn:hover { background: var(--surface-tertiary); color: var(--text-primary); }
         .icon-btn:active { background: var(--surface-sunken); }
@@ -353,14 +358,14 @@
             border-radius: 0; padding: var(--sp-1) var(--sp-2); }
         .dpanel-search input:focus { box-shadow: none; border-color: var(--border-default); }
         .dsearch-list { display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; }
-        .btn { border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); color: var(--text-primary); border-radius: var(--radius-sm);
+        .btn { border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); color: var(--text-primary); border-radius: var(--radius-md);
             /* 5px, not 6: the 1px border counts toward the box, and 6+20+6+2
                made every button 34 where the reference's is 32. */
             padding: var(--control-pad-y) var(--sp-3); font-size: var(--text-sm); font-weight: var(--weight-medium); line-height: var(--lh-control); white-space: nowrap;
             display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
             transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease); min-height: var(--control-h); }
         .btn:hover { background: var(--surface-tertiary); }
-        .btn:active { background: var(--surface-sunken); }
+        .btn:active { background: var(--surface-sunken); transform: translateY(var(--sp-px)); }
         /* ---- Disabled. One recipe for a control (muted fill, disabled ink,
            not-allowed) and one for a field (muted fill, but the VALUE stays
            readable, because a locked address is still an address). Nothing
@@ -384,9 +389,9 @@
         .btn-primary:active { background: var(--action-active); border-color: var(--action-active); }
         .btn-primary[aria-disabled="true"], .btn-primary[disabled], .btn-primary:disabled { background: var(--surface-tertiary); border-color: var(--border-default); color: var(--text-disabled); }
         /* The one-way door. Only ever the confirming button of a destructive dialog. */
-        .btn-danger { background: var(--action-danger); border-color: var(--action-danger); color: var(--text-on-action); }
-        .btn-danger:hover { background: var(--action-danger-hover); border-color: var(--action-danger-hover); }
-        .btn-danger:active { background: var(--action-danger-active); border-color: var(--action-danger-active); }
+        .btn-danger { background: var(--action-danger-soft); border-color: transparent; color: var(--error); }
+        .btn-danger:hover { background: var(--action-danger-soft-hover); border-color: transparent; color: var(--error); }
+        .btn-danger:active { background: var(--action-danger-soft-active); border-color: transparent; }
         /* ---- Loading. A control that is working keeps its own colours (it is
            busy, not inactive), cannot be pressed twice, and its icon turns.
            setBusy() in the script sets aria-busy; any control may carry it. ---- */
@@ -496,7 +501,7 @@
            page are set the same way. Untracked, this was the one 30px text in
            the app that stood outside its own system: .stat .value directly
            under it and .empty-chat h2 both carry -0.025em. */
-        .ov-hero h2 { font-size: var(--text-2xl); margin: 0 0 var(--sp-2); font-weight: var(--weight-regular);
+        .ov-hero h2 { font-size: var(--text-2xl); margin: 0 0 var(--sp-1); font-weight: var(--weight-regular);
             letter-spacing: -.025em; line-height: var(--lh-tight); }
         .ov-hero p { margin: 0; color: var(--text-tertiary); font-size: var(--text-sm); line-height: var(--lh-control); max-width: 62ch; }
         .ov-updated { font-size: var(--text-xs); color: var(--text-tertiary); margin-left: auto; white-space: nowrap; padding-top: var(--sp-1-5); }
@@ -527,7 +532,7 @@
             grid-template-columns: repeat(4, minmax(0, 1fr)); }
         @media (max-width: 1100px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 640px) { .metrics { grid-template-columns: 1fr; } }
-        .stat { position: relative; overflow: hidden; background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg);
+        .stat { position: relative; overflow: hidden; background: linear-gradient(to top, color-mix(in srgb, var(--action-primary) 5%, var(--surface-primary)), var(--surface-primary)); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg);
             padding: var(--sp-4); box-shadow: var(--shadow-sm); animation: fadeUp .4s ease backwards;
             display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-1);
             min-height: 154px; justify-content: flex-start; }
@@ -548,7 +553,7 @@
            is the reference's own icon-to-label step, so the tile sets no margin
            of its own. --surface-tertiary under --text-tertiary keeps it quieter than anything
            it introduces. */
-        .stat-ic { width: 28px; height: 28px; flex: none; border-radius: var(--radius-sm);
+        .stat-ic { width: 28px; height: 28px; flex: none; border-radius: var(--radius-md);
             border: var(--bw-hairline) solid var(--border-default); background: var(--surface-tertiary); color: var(--text-tertiary);
             display: grid; place-items: center; }
         .stat-ic svg { width: 16px; height: 16px; display: block; }
@@ -637,7 +642,7 @@
             text-underline-offset: 3px; transition: text-decoration-color var(--dur) var(--ease); }
         .stat .label.has-help:hover, .stat .label.has-help:focus-visible { text-decoration-color: var(--border-emphasis); }
         /* chat drill-down: show the data behind this */
-        .data-drill { margin-top: var(--sp-3); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); background: var(--surface-primary); overflow: hidden; }
+        .data-drill { margin-top: var(--sp-3); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); background: var(--surface-primary); overflow: hidden; }
         .data-drill summary { padding: var(--sp-3) var(--sp-3); cursor: pointer; list-style: none; display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); color: var(--text-secondary); font-weight: var(--weight-medium); }
         .data-drill summary::-webkit-details-marker { display: none; }
         .data-drill summary > span { display: grid; place-items: center; } .data-drill summary svg { width: 13px; height: 13px; opacity: .6; }
@@ -683,7 +688,7 @@
             border-radius: var(--radius-lg); padding: var(--sp-4); box-shadow: var(--shadow-sm); position: relative; overflow: hidden; }
         .seo-score .num { font-size: var(--text-2xl); font-weight: var(--weight-semibold); letter-spacing: -.04em; line-height: var(--lh-none); }
         .seo-score .out { color: var(--text-secondary); font-size: var(--text-sm); margin-top: 0; }
-        .seo-score .bar { flex: 1; height: 8px; border-radius: var(--radius-full); background: var(--surface-sunken); overflow: hidden; min-width: 90px; box-shadow: var(--ring-default); }
+        .seo-score .bar { flex: 1; height: var(--sp-1); border-radius: var(--radius-full); background: var(--surface-tertiary); overflow: hidden; min-width: 90px; }
         /* The fill is neutral and the tier colour lives on the number alone.
            Painted in its tier hue, this bar was the only opaque saturated block
            anywhere in the app: 709x8 of #b45309 at 1600, about 116 times the
@@ -721,7 +726,7 @@
         .mem-tag.preference { background: var(--info-bg); color: var(--info); }
         .mem-tag.insight { background: var(--action-soft); color: var(--action-primary); }
         .mem-acts { display: flex; gap: var(--sp-1); flex-shrink: 0; }
-        .mem-btn { border: 0; background: transparent; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-xs); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+        .mem-btn { border: 0; background: transparent; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-sm); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
         .mem-btn svg { width: 15px; height: 15px; }
         .mem-btn:hover { background: var(--surface-tertiary); color: var(--text-primary); }
         .mem-btn:active { background: var(--surface-sunken); }
@@ -730,7 +735,7 @@
         /* Store-knowledge card */
         .know { padding: var(--sp-4) var(--sp-5); margin-bottom: var(--sp-5); }
         .know-head { display: flex; align-items: flex-start; gap: var(--sp-3); }
-        .know-ic { width: 34px; height: 34px; border-radius: var(--radius-sm); background: var(--action-soft); color: var(--action-primary); display: grid; place-items: center; flex-shrink: 0; box-shadow: var(--ring-line); }
+        .know-ic { width: 34px; height: 34px; border-radius: var(--radius-md); background: var(--action-soft); color: var(--action-primary); display: grid; place-items: center; flex-shrink: 0; box-shadow: var(--ring-line); }
         .know-ic svg { width: 17px; height: 17px; }
         .know-title { font-weight: var(--weight-medium); font-size: var(--text-sm); letter-spacing: -.01em; }
         .know-sub { color: var(--text-secondary); font-size: var(--text-xs); margin-top: var(--sp-1); line-height: var(--lh-body); }
@@ -746,7 +751,7 @@
         .roas-flag { display: block; font-size: var(--text-xs); font-weight: var(--weight-medium); letter-spacing: normal;
             text-transform: none; color: var(--error); }
         .prod-search { width: 100%; border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3); font: inherit; font-size: var(--text-sm); outline: none; margin-bottom: var(--sp-3); background: var(--surface-sunken); color: var(--text-primary); }
-        .prod-row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-3); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm);
+        .prod-row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2-5) var(--sp-3); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md);
             background: var(--surface-primary); box-shadow: var(--shadow-sm); margin-bottom: var(--sp-2); cursor: pointer; text-align: left; width: 100%; font: inherit; color: var(--text-primary); transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
         .prod-row:hover { border-color: var(--action-line); background: var(--surface-tertiary); }
         .prod-thumb { width: 42px; height: 42px; border-radius: var(--radius-sm); object-fit: cover; background: var(--surface-sunken); flex-shrink: 0; }
@@ -780,7 +785,7 @@
         .ptools { display: flex; flex-direction: column; gap: var(--sp-3); margin-bottom: var(--sp-3); }
         .ptools .row1 { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
         .ptools .grow { flex: 1; min-width: 200px; }
-        .psel { border-radius: var(--radius-sm); padding: var(--control-pad-y) var(--sp-3); font-size: var(--text-sm); min-height: var(--control-h); }
+        .psel { border-radius: var(--radius-md); padding: var(--control-pad-y) var(--sp-3); font-size: var(--text-sm); min-height: var(--control-h); }
         select.psel { cursor: pointer; } .pnum { width: 110px; }
         .btn:is(.on, [aria-pressed="true"]) { background: var(--action-soft); border-color: var(--action-primary); color: var(--text-primary); font-weight: var(--weight-medium); }
         .btn.ghost:hover { background: var(--surface-tertiary); }
@@ -913,7 +918,7 @@
         /* ---------- Form controls: one recipe, applied by element ---------- */
         input[type=text], input[type=number], input[type=date], input[type=search],
         input[type=email], input[type=password], textarea, select {
-            background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm);
+            background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md);
             color: var(--text-primary); font: inherit; font-size: var(--text-sm); line-height: var(--lh-control); padding: var(--control-pad-y) var(--sp-3);
             /* 32px like every other control. At 36 an input beside a button did
                not even line up with it, let alone with the reference. */
@@ -1004,9 +1009,9 @@
         }
 
         .followups { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
-        .chip { border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-tertiary); border-radius: var(--radius-lg); padding: var(--sp-2) var(--sp-3); font-size: var(--text-xs);
-            color: var(--text-primary); display: inline-flex; align-items: center; gap: var(--sp-2); transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); cursor: pointer; }
-        .chip:hover { background: var(--action-soft); border-color: var(--action-line); color: var(--action-primary); }
+        .chip { border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); border-radius: var(--radius-sm); padding: 0 var(--sp-2-5); font-size: var(--text-xs);
+            color: var(--text-primary); display: inline-flex; align-items: center; gap: var(--sp-2); transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); cursor: pointer; height: 28px; }
+        .chip:hover { background: var(--surface-tertiary); border-color: var(--border-default); color: var(--text-primary); }
         .chip:active { background: var(--surface-sunken); }
         .chip > span { display: grid; place-items: center; flex: none; }
         .chip svg { width: 13px; height: 13px; opacity: .6; display: block; }
@@ -1021,16 +1026,18 @@
            off the box and onto the text, as padding: both sides compute the
            same value, so a long sentence still breaks near 52ch and stays
            centred, and the frame still spans its container. */
-        .empty { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg);
-            padding: var(--sp-5) max(var(--sp-5), calc((100% - 52ch) / 2)); color: var(--text-secondary);
-            font-size: var(--text-sm); text-align: center; }
+        .empty { background: transparent; border: 0; border-radius: 0; padding: var(--sp-6) max(var(--sp-4), calc((100% - 52ch) / 2));
+            color: var(--text-tertiary); font-size: var(--text-sm); line-height: var(--lh-prose); text-align: center; }
+        /* ...unless it stands alone on the page or in a grid of cards, where it
+           needs the card's own edge or it floats. */
+        .ov-wrap > .empty, .card-grid > .empty { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); }
         /* skills */
         .skill-form { padding: var(--sp-4) var(--sp-4) var(--sp-3); margin-bottom: var(--sp-5); }
         .sk-form-title { font-size: var(--text-sm); font-weight: var(--weight-medium); margin: 0 0 var(--sp-3); display: flex; align-items: center; gap: var(--sp-2); }
         .sk-form-title svg { width: 15px; height: 15px; color: var(--action-primary); }
         .sk-field { display: block; margin-bottom: var(--sp-3); }
         .sk-field > span { display: block; font-size: var(--text-xs); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); margin-bottom: var(--sp-1); }
-        .sk-input, .sk-textarea { width: 100%; background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-3); min-height: var(--control-h); line-height: var(--lh-control); transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+        .sk-input, .sk-textarea { width: 100%; background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-3); min-height: var(--control-h); line-height: var(--lh-control); transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
         .sk-textarea { resize: vertical; min-height: 104px; line-height: var(--lh-body); }
         .sk-form-row { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-1); }
         .sk-spacer { flex: 1; }
@@ -1074,7 +1081,7 @@
         .pchat-thread .msg.user { align-self: flex-end; max-width: 86%; }
         .pchat-thread .msg.assistant { align-self: stretch; }
         .pchat-input { display: flex; gap: var(--sp-2); align-items: flex-end; padding: var(--sp-3) var(--sp-3); border-top: var(--bw-hairline) solid var(--border-default); background: var(--surface-tertiary); }
-        .pchat-ta { flex: 1; resize: none; max-height: 140px; background: var(--surface-secondary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--sp-2) var(--sp-3); line-height: var(--lh-body); outline: none; transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+        .pchat-ta { flex: 1; resize: none; max-height: 140px; background: var(--surface-secondary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--sp-2) var(--sp-3); line-height: var(--lh-body); outline: none; transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
         .pchat-send { flex-shrink: 0; padding: 0; width: 40px; height: 40px; display: grid; place-items: center; }
         .pchat-send svg { width: 16px; height: 16px; }
         /* customer sector selector */
@@ -1086,7 +1093,7 @@
         .changes-head { font-size: var(--text-xs); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
         .changes-head svg { width: 13px; height: 13px; }
         /* scheduled-change alerts */
-        .alerts-banner { background: var(--warning-bg); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-5); }
+        .alerts-banner { background: var(--warning-bg); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-5); }
         .alerts-head { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--warning); margin-bottom: var(--sp-2); }
         .alerts-head svg { width: 15px; height: 15px; }
         .alerts-clear { margin-left: auto; background: transparent; border: 0; color: var(--text-tertiary); font: inherit; font-size: var(--text-xs); font-weight: var(--weight-medium); cursor: pointer; }
@@ -1112,10 +1119,10 @@
         .lbl-tools .btn svg { opacity: .7; }
         .lbl-tools .lbl-count { margin-left: auto; }
         .lbl-count { font-size: var(--text-xs); color: var(--text-tertiary); }
-        .lbl-row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default);
-            border-radius: var(--radius-sm); margin-bottom: var(--sp-2); cursor: pointer; transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease); text-align: left; width: 100%; }
+        .lbl-row { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-2-5) var(--sp-3); background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default);
+            border-radius: var(--radius-md); margin-bottom: var(--sp-2); cursor: pointer; transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease); text-align: left; width: 100%; }
         .lbl-row:hover { background: var(--surface-tertiary); border-color: var(--border-strong); }
-        .lbl-row:is(.on, [aria-selected="true"]) { border-color: var(--action-primary); background: var(--surface-primary); }
+        .lbl-row:is(.on, [aria-selected="true"]) { border-color: var(--action-primary); background: var(--surface-secondary); }
         /* A loan past a date somebody agreed reads as a problem; one that is
            simply old reads as a nudge. The stripe carries it, not the whole
            row, so the text keeps its contrast on either state. */
@@ -1373,7 +1380,7 @@
            rule paints - so every filter select in the app rendered as a plain
            bordered pill with no sign it opened anything. Same reason on hover:
            a shorthand there made the caret vanish under the pointer. */
-        .lbl-size { background-color: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm);
+        .lbl-size { background-color: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md);
             color: var(--text-primary); font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); padding: var(--control-pad-y) var(--sp-3);
             line-height: var(--lh-control); cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); min-height: var(--control-h); }
         /* The caret needs its gutter back too: the padding shorthand above
@@ -1430,18 +1437,19 @@
            the CRM's Insights and the Production Manager's Custom Shipments
            were unreachable on a phone. Wrapping keeps every segment tappable
            inside the same track. */
-        .lbl-seg { display: inline-flex; flex-wrap: wrap; gap: var(--sp-1); background: var(--surface-tertiary);
+        .lbl-seg { display: inline-flex; flex-wrap: wrap; gap: 0; background: var(--surface-tertiary);
             border: 0; max-width: 100%;
-            border-radius: var(--radius-sm); padding: var(--sp-1); margin-bottom: var(--sp-3); }
-        .lbl-segbtn { background: transparent; border: 0; color: var(--text-tertiary); font: inherit; font-size: var(--text-xs);
-            font-weight: var(--weight-medium); line-height: var(--lh-snug); padding: var(--sp-1) var(--sp-3); border-radius: var(--radius-xs); cursor: pointer; }
+            border-radius: var(--radius-md); padding: var(--sp-1); margin-bottom: var(--sp-3); }
+        .lbl-segbtn { background: transparent; border: 0; color: var(--text-tertiary); font: inherit; font-size: var(--text-sm);
+            font-weight: var(--weight-medium); line-height: var(--lh-control); padding: var(--sp-0-5) var(--sp-1-5);
+            border-radius: var(--radius-sm); cursor: pointer; }
         .lbl-segbtn:is(.on, [aria-pressed="true"]) { background: var(--surface-primary); color: var(--text-primary); box-shadow: var(--ring-default); }
         .lbl-segbtn:hover { color: var(--text-primary); }
         .lbl-segbtn:active { background: var(--surface-sunken); }
         /* Inside a toolbar row the track sits beside .btn controls, so it drops
            the standalone bottom margin and tightens its thumbs. */
         .lbl-seg.tight { margin-bottom: 0; }
-        .lbl-seg.tight .lbl-segbtn { padding: var(--sp-1) var(--sp-2); }
+        .lbl-seg.tight .lbl-segbtn { padding: var(--sp-0-5) var(--sp-1-5); }
         .modal.disp-modal { max-width: 720px; width: 94vw; }
         .disp-dest { padding: var(--sp-3) var(--sp-3); background: var(--surface-secondary); border: var(--bw-hairline) solid var(--border-strong);
             border-radius: var(--radius-sm); margin-bottom: var(--sp-4); }
@@ -1465,7 +1473,7 @@
         .disp-origin { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
         .disp-fld { display: flex; flex-direction: column; gap: var(--sp-1); }
         .disp-fld-lab { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: var(--weight-medium); }
-        .disp-num { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm);
+        .disp-num { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md);
             color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-2); line-height: var(--lh-control);
             min-height: var(--control-h); width: 100%; }
         .disp-subhead { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: var(--weight-medium); margin-bottom: var(--sp-1); }
@@ -1476,7 +1484,7 @@
         .disp-addr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2-5); margin: var(--sp-3) 0 var(--sp-1); }
         .disp-addr-f { display: flex; flex-direction: column; gap: var(--sp-1); }
         .disp-addr-lab { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: var(--weight-medium); }
-        .disp-text { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm);
+        .disp-text { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md);
             color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-2-5); line-height: var(--lh-control);
             min-height: var(--control-h); width: 100%; box-sizing: border-box; }
         .disp-recent { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
@@ -1526,7 +1534,7 @@
         .skip-link { position: fixed; top: 8px; left: 8px; z-index: 300;
             transform: translateY(-200%); transition: transform var(--dur) var(--ease);
             background: var(--surface-primary); color: var(--text-primary); border: var(--bw-hairline) solid var(--border-default);
-            border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3); font-size: var(--text-sm);
+            border-radius: var(--radius-md); padding: var(--sp-2) var(--sp-3); font-size: var(--text-sm);
             font-weight: var(--weight-medium); text-decoration: none; box-shadow: var(--shadow-lg); }
         .skip-link:focus { transform: translateY(0); }
         #main:focus { outline: none; }
@@ -1580,7 +1588,7 @@
         .crm-seg-insights { max-width: 1120px; }
         /* Kept: older markup and the tests still name it. */
 
-        .crm-board { display: flex; gap: var(--sp-2); overflow-x: auto; align-items: flex-start;
+        .crm-board { display: flex; gap: var(--sp-4); overflow-x: auto; align-items: flex-start;
             padding-bottom: var(--sp-3); min-height: 300px; }
         /* THE PIPELINE BOARD ONLY - the inbox reuses this board for its five
            states and neither of these applies there. stretch, not flex-start:
@@ -1590,13 +1598,12 @@
            ran past the 380px floor. Equal-height lanes put every one of them
            back on one line, whatever each column holds. */
         .crm-pipeline { align-items: stretch; }
-        .crm-col { min-width: 228px; flex: 1 0 228px; max-width: 300px; background: var(--surface-tertiary);
-            border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); padding: var(--sp-2);
-            min-height: 380px; display: flex; flex-direction: column; }
+        .crm-col { min-width: 300px; flex: 1 0 300px; background: var(--surface-secondary); border: var(--bw-hairline) solid var(--border-default);
+            border-radius: var(--radius-lg) var(--radius-lg) 0 0; padding: 0 0 var(--sp-3); min-height: 380px; display: flex; flex-direction: column; }
         .crm-col .crm-col-add { margin-top: auto; }
         .crm-col.dragover { border-color: var(--action-primary); background: var(--surface-sunken); }
-        .crm-col-name { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-primary); padding: var(--sp-0-5) var(--sp-1) 0; }
-        .crm-col-sum { font-size: var(--text-xs); color: var(--text-tertiary); padding: 0 var(--sp-1) var(--sp-2); }
+        .crm-col-name { font-size: var(--text-md); font-weight: var(--weight-medium); color: var(--text-primary); line-height: var(--lh-none); padding: var(--sp-4) var(--sp-4) 0; }
+        .crm-col-sum { font-size: var(--text-sm); color: var(--text-tertiary); line-height: var(--lh-none); padding: var(--sp-1) var(--sp-4) var(--sp-3); }
         /* Two line boxes, always. Below 1440 a pipeline column is 228px and the
            longer money strings wrap, so three of the five headers stayed one
            line and two became two: the first card in each column started on a
@@ -1604,19 +1611,18 @@
            wrapped height, so the header block measures the same either way.
            The inbox's own column count never wraps and keeps its one line. */
         .crm-pipeline .crm-col-sum { min-height: 44px; }
-        .crm-col-note { font-size: var(--text-xs); color: var(--text-tertiary); padding: var(--sp-2) var(--sp-1) 0;
+        .crm-col-note { font-size: var(--text-xs); color: var(--text-tertiary); padding: 0 var(--sp-4) var(--sp-3);
             line-height: var(--lh-snug); }
-        .crm-col-add { width: 100%; border: var(--bw-hairline) solid var(--border-default); background: none;
-            border-radius: var(--radius-sm); color: var(--text-tertiary); font: inherit; font-size: var(--text-xs);
-            padding: var(--sp-1) 0; cursor: pointer; }
+        .crm-col-add { width: auto; margin: 0 var(--sp-3); border: var(--bw-hairline) solid var(--border-default); background: none;
+            border-radius: var(--radius-sm); color: var(--text-tertiary); font: inherit; font-size: var(--text-sm); padding: var(--sp-1) 0; cursor: pointer; }
         .crm-col-add:hover { color: var(--action-primary); border-color: var(--action-primary); }
-        .crm-card { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-sm);
-            padding: var(--sp-2) var(--sp-2-5); margin-bottom: var(--sp-2); cursor: grab; }
+        .crm-card { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg);
+            padding: var(--sp-4); margin: 0 var(--sp-3) var(--sp-3); box-shadow: var(--shadow-sm); cursor: grab; }
         .crm-card:hover { border-color: var(--border-emphasis); }
         .crm-card.rotten { background: var(--error-bg); border-color: var(--border-strong); }
         .crm-card-t { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-primary); }
-        .crm-card-who { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--sp-px); }
-        .crm-card-bot { display: flex; align-items: center; gap: var(--sp-1-5); margin-top: var(--sp-1); font-size: var(--text-xs); }
+        .crm-card-who { font-size: var(--text-sm); color: var(--text-tertiary); margin-top: var(--sp-px); }
+        .crm-card-bot { display: flex; align-items: center; gap: var(--sp-1-5); margin-top: var(--sp-2); font-size: var(--text-sm); }
         .crm-card-val { font-weight: var(--weight-medium); }
         .crm-dot { width: 8px; height: 8px; border-radius: var(--radius-circle); flex: none; }
         .crm-av { width: 20px; height: 20px; border-radius: var(--radius-circle); background: var(--surface-sunken);
@@ -1705,13 +1711,13 @@
         .mail-age { margin-left: auto; font-size: var(--text-xs); color: var(--text-tertiary); }
         .mail-age.hot { color: var(--error); font-weight: var(--weight-medium); }
         .mail-viewwarn { background: var(--warning-bg); border: var(--bw-hairline) solid var(--border-default); color: var(--warning);
-            border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3); font-size: var(--text-xs); margin-bottom: var(--sp-3); }
+            border-radius: var(--radius-md); padding: var(--sp-2) var(--sp-3); font-size: var(--text-xs); margin-bottom: var(--sp-3); }
         /* The same warning, under a class of its own. The viewing heartbeat
            finds .mail-viewwarn BY CLASS and removes it the moment nobody else
            is looking at the thread, which would have swept an unconfirmed send
            off the screen ten seconds after it appeared. */
         .mail-sendwarn { background: var(--warning-bg); border: var(--bw-hairline) solid var(--border-default); color: var(--warning);
-            border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3); font-size: var(--text-xs); margin-bottom: var(--sp-3); }
+            border-radius: var(--radius-md); padding: var(--sp-2) var(--sp-3); font-size: var(--text-xs); margin-bottom: var(--sp-3); }
         .mail-msg { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-2-5); margin-bottom: var(--sp-2); }
         .mail-msg.ours { background: var(--surface-tertiary); }
         .mail-msg-head { display: flex; gap: var(--sp-2); font-size: var(--text-xs); margin-bottom: var(--sp-1); }
@@ -2226,7 +2232,7 @@
             grid-template-columns: minmax(0, 1fr) auto;
             column-gap: var(--sp-3); row-gap: 0; align-items: center;
             padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-3); cursor: pointer; overflow: hidden;
-            background: var(--surface-secondary); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-sm);
+            background: var(--surface-secondary); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-md);
             transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease); }
         /* Selection spine: still legible when the card scrolls under the header. */
         .disp-opt::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
@@ -2273,7 +2279,7 @@
         .disp-track { font-size: var(--text-sm); margin-bottom: var(--sp-1); }
         .disp-track b { font-family: var(--font-mono); }
         .disp-warn { font-size: var(--text-xs); color: var(--warning); background: var(--warning-bg);
-            border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-2); margin: var(--sp-2) 0; }
+            border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); padding: var(--sp-2) var(--sp-2); margin: var(--sp-2) 0; }
         .disp-ok-line { font-size: var(--text-xs); color: var(--success); margin: var(--sp-2) 0; }
         /* One line, three tones. The tone is the answer: green only for a
            number the EU database confirmed, and muted (never red) for one it
@@ -2568,7 +2574,7 @@
         .tbl-tools select { height: 28px; min-height: 28px; padding: var(--sp-1) var(--chevron-room) var(--sp-1) var(--sp-2-5);
             border-radius: var(--radius-sm); font-size: var(--text-sm); line-height: var(--lh-control); }
         .tbl-tools .lbl-seg { margin-bottom: 0; padding: var(--sp-0-5); }
-        .tbl-tools .lbl-segbtn { padding: var(--sp-0-5) var(--sp-2); line-height: var(--lh-control); }
+        .tbl-tools .lbl-segbtn { padding: var(--sp-0-5) var(--sp-1-5); line-height: var(--lh-control); }
         /* The small button. The reference builds its card actions, its table
            filters and its pager from this one size, which is why they line up. */
         .btn-sm { min-height: 28px; padding: 0 var(--sp-2-5); font-size: var(--text-xs); gap: var(--sp-1); }
@@ -2611,7 +2617,7 @@
            moment it opened. The 28px item height is unaffected - it is set. */
         .dmenu-item { display: flex; align-items: center; gap: var(--sp-1-5); width: 100%;
             height: 28px; padding: var(--sp-1) var(--sp-7) var(--sp-1) var(--sp-1-5); border: 0; background: none;
-            border-radius: var(--radius-sm); font: inherit; font-size: var(--text-xs);
+            border-radius: var(--radius-sm); font: inherit; font-size: var(--text-sm);
             color: var(--text-primary); text-align: left; cursor: pointer; white-space: nowrap; }
         .dmenu-item:hover { background: var(--surface-tertiary); }
         .dmenu-item:active { background: var(--surface-sunken); }
@@ -2686,7 +2692,7 @@
         .kchip b { color: var(--text-primary); font-weight: var(--weight-medium); }
         .kmeta { font-size: var(--text-xs); color: var(--text-secondary); margin: var(--sp-1) 0 var(--sp-0-5); word-break: break-all; } .kmeta b { color: var(--text-primary); }
         /* ---------- Impact tracking ---------- */
-        .track-btn { border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-tertiary); color: var(--text-secondary); font: inherit; font-size: var(--text-xs); font-weight: var(--weight-medium); padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-xs); display: inline-flex; align-items: center; gap: var(--sp-1); flex: none; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+        .track-btn { border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-tertiary); color: var(--text-secondary); font: inherit; font-size: var(--text-xs); font-weight: var(--weight-medium); padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); display: inline-flex; align-items: center; gap: var(--sp-1); flex: none; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
         .track-btn:hover { color: var(--text-primary); border-color: var(--border-emphasis); }
         .track-btn:active { background: var(--surface-tertiary); }
         .track-btn:is(.on, [aria-pressed="true"]) { background: var(--success-bg); color: var(--success); border-color: transparent; cursor: default; }
@@ -2705,7 +2711,7 @@
         /* ---------- Customer segments ---------- */
         .segs { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--sp-3); }
         @media (min-width: 1800px) { .segs { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); } }
-        .seg-card { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); padding: var(--sp-3) var(--sp-4); box-shadow: var(--shadow-sm); }
+        .seg-card { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); padding: var(--sp-4); box-shadow: var(--shadow-sm); }
         .seg-card .seg-n { font-size: var(--text-xl); font-weight: var(--weight-semibold); letter-spacing: -.025em; }
         .seg-card .seg-name { font-size: var(--text-sm); font-weight: var(--weight-medium); margin-top: 0; }
         .seg-card .seg-desc { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--sp-1); line-height: var(--lh-body); }
@@ -2844,12 +2850,12 @@
            every button and field in the app is, and the reference's own tab
            strip measures the same 32. At 4px it stood 4px proud of the toolbar
            it sits in. */
-        .seg { display: inline-flex; background: var(--surface-tertiary); border: 0; border-radius: var(--radius-sm); padding: var(--sp-0-5); gap: 0; }
+        .seg { display: inline-flex; background: var(--surface-tertiary); border: 0; border-radius: var(--radius-md); padding: var(--sp-0-5); gap: 0; }
         /* Its own leading, or the control is as tall as whatever it is dropped
            into: with no line-height of its own it inherited the 28px line box
            of a section heading and rendered 44px there against 34px in a
            toolbar. 20 + 4 + 4 is the 28px every small control in the app is. */
-        .seg button { border: 0; background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-xs); font-weight: var(--weight-medium); line-height: var(--lh-control); padding: var(--sp-1) var(--sp-3); border-radius: var(--radius-xs); transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+        .seg button { border: 0; background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); line-height: var(--lh-control); padding: var(--sp-0-5) var(--sp-1-5); border-radius: var(--radius-sm); transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
         .seg button:hover { color: var(--text-primary); }        .seg button:is(.on, [aria-pressed="true"]) { background: var(--surface-primary); color: var(--text-primary); box-shadow: var(--ring-default); font-weight: var(--weight-medium); }
         .seg button:active { background: var(--surface-sunken); }
 
@@ -2861,48 +2867,36 @@
         .msg.user .bubble { background: var(--action-primary); color: var(--text-on-action); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-lg) var(--radius-md) var(--radius-xs) var(--radius-md); font-size: var(--text-sm); white-space: pre-wrap; }
         .msg.assistant { align-self: stretch; }
         .resp-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-3); }
-        .resp-head .av { width: 24px; height: 24px; border-radius: var(--radius-xs); background: linear-gradient(140deg, var(--action-primary), var(--action-active)); display: grid; place-items: center; }
-        .resp-head .av svg { width: 13px; height: 13px; color: var(--text-on-action); }
+        .resp-head .av { width: 24px; height: 24px; border-radius: var(--radius-circle); background: var(--surface-tertiary); color: var(--text-primary); display: grid; place-items: center; }
+        .resp-head .av svg { width: 13px; height: 13px; }
         .resp-head .who { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-primary); }
         .resp-head .tag { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--action-primary); background: var(--action-soft); border: var(--bw-hairline) solid var(--action-line); border-radius: var(--radius-xs); padding: 0 var(--sp-2); text-transform: none; letter-spacing: normal; }
         .summary { font-size: var(--text-md); font-weight: var(--weight-medium); line-height: var(--lh-body); letter-spacing: -.012em; margin-bottom: var(--sp-4); color: var(--text-primary); }
         .block { margin-bottom: var(--sp-4); }
-        .msg.error .bubble { background: var(--error-bg); border: var(--bw-hairline) solid var(--border-default); color: var(--error); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-lg); font-size: var(--text-sm); }
+        .msg.error .bubble { background: var(--error-bg); border: var(--bw-hairline) solid var(--border-default); color: var(--error); padding: var(--sp-2) var(--sp-2-5); border-radius: var(--radius-md); font-size: var(--text-sm); }
         /* Nineteen call sites build el('div','msg error', 'text') with no
            .bubble child, and the rule above only ever styled the child - so a
            real failure rendered as unstyled black body text in eight tabs. */
         .msg.error:not(:has(.bubble)) { background: var(--error-bg); border: var(--bw-hairline) solid var(--border-default);
-            color: var(--error); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-lg); font-size: var(--text-sm); }
+            color: var(--error); padding: var(--sp-2) var(--sp-2-5); border-radius: var(--radius-md); font-size: var(--text-sm); }
 
         .load-failed, .pchat-err { display: flex; align-items: center; justify-content: space-between;
             gap: var(--sp-3); flex-wrap: wrap; margin: var(--sp-1) 0 0; }
         .thinking { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-secondary); font-size: var(--text-sm); }
-        .thinking .three-body { --uib-size: 24px; --uib-speed: .8s; --uib-color: var(--action-primary);
-            position: relative; display: inline-block; flex: none; height: var(--uib-size); width: var(--uib-size);
-            animation: tb-spin calc(var(--uib-speed) * 2.5) infinite linear; }
-        .thinking .three-body__dot { position: absolute; height: 100%; width: 30%; }
-        .thinking .three-body__dot::after { content: ""; position: absolute; height: 0; width: 100%; padding-bottom: 100%; background-color: var(--uib-color); border-radius: var(--radius-circle); }
-        .thinking .three-body__dot:nth-child(1) { bottom: 5%; left: 0; transform: rotate(60deg); transform-origin: 50% 85%; }
-        .thinking .three-body__dot:nth-child(1)::after { bottom: 0; left: 0; animation: tb-wobble1 var(--uib-speed) infinite ease-in-out; animation-delay: calc(var(--uib-speed) * -.3); }
-        .thinking .three-body__dot:nth-child(2) { bottom: 5%; right: 0; transform: rotate(-60deg); transform-origin: 50% 85%; }
-        .thinking .three-body__dot:nth-child(2)::after { bottom: 0; left: 0; animation: tb-wobble1 var(--uib-speed) infinite calc(var(--uib-speed) * -.15) ease-in-out; }
-        .thinking .three-body__dot:nth-child(3) { bottom: -5%; left: 0; transform: translateX(116.666%); }
-        .thinking .three-body__dot:nth-child(3)::after { top: 0; left: 0; animation: tb-wobble2 var(--uib-speed) infinite ease-in-out; }
-        @keyframes tb-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        @keyframes tb-wobble1 { 0%,100% { transform: translateY(0%) scale(1); opacity: 1; } 50% { transform: translateY(-66%) scale(.65); opacity: .8; } }
-        @keyframes tb-wobble2 { 0%,100% { transform: translateY(0%) scale(1); opacity: 1; } 50% { transform: translateY(66%) scale(.65); opacity: .8; } }
+        .thinking .spinner { flex: none; }
+        .spinner { display: inline-grid; place-items: center; width: 16px; height: 16px; color: var(--text-tertiary); }
+        .spinner svg { width: 16px; height: 16px; animation: navspin 1s linear infinite; }
         .empty-chat { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: var(--sp-7); }
-        .empty-chat .big { width: 56px; height: 56px; border-radius: var(--radius-lg); background: linear-gradient(140deg, var(--action-primary), var(--action-active));
-            display: grid; place-items: center; margin-bottom: var(--sp-4); }
-        .empty-chat .big svg { width: 27px; height: 27px; color: var(--text-on-action); }
-        .empty-chat h2 { font-size: var(--text-2xl); margin: 0 0 var(--sp-2); font-weight: var(--weight-regular); letter-spacing: -.025em; line-height: var(--lh-tight); }
+        .empty-chat .big { width: 40px; height: 40px; border-radius: var(--radius-md); background: var(--surface-tertiary); color: var(--text-primary); display: grid; place-items: center; margin-bottom: var(--sp-4); }
+        .empty-chat .big svg { width: 20px; height: 20px; }
+        .empty-chat h2 { font-size: var(--text-xl); margin: 0 0 var(--sp-2); font-weight: var(--weight-medium); letter-spacing: -.025em; line-height: var(--lh-tight); }
         .empty-chat p { color: var(--text-secondary); margin: 0 0 var(--sp-6); max-width: 430px; line-height: var(--lh-prose); }
         .starters { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: center; max-width: 580px; }
 
         /* ---------- Composer ---------- */
         .composer-wrap { border-top: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); padding: var(--sp-4) var(--sp-6) var(--sp-5); }
         .composer { max-width: 780px; margin: 0 auto; }
-        .composer .box { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); background: var(--surface-primary); padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+        .composer .box { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); background: var(--surface-primary); padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
             display: flex; align-items: flex-end; gap: var(--sp-2); box-shadow: var(--shadow-sm); transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
         .composer .box:focus-within { border-color: var(--action-primary); box-shadow: var(--focus-ring); }
         #input { flex: 1; border: 0; outline: 0; resize: none; font: inherit; font-size: var(--text-sm); max-height: 160px; padding: var(--sp-2) 0; background: transparent; color: var(--text-primary); }
@@ -2911,9 +2905,9 @@
         .send svg { width: 17px; height: 17px; }
         .composer .row { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); padding: 0 var(--sp-1); }
         .toggle { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); color: var(--text-secondary); cursor: pointer; user-select: none; }
-        .toggle .sw { width: 32px; height: 18px; border-radius: var(--radius-lg); background: var(--surface-sunken); position: relative; transition: background var(--dur) var(--ease); box-shadow: var(--ring-strong); }
-        .toggle .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: var(--radius-circle); background: var(--surface-primary); transition: transform .18s; box-shadow: var(--shadow-knob); }
-        .toggle:is(.on, [aria-checked="true"]) .sw { background: linear-gradient(135deg, var(--action-primary), var(--action-active)); box-shadow: none; } .toggle:is(.on, [aria-checked="true"]) .sw::after { transform: translateX(14px); background: var(--surface-primary); }
+        .toggle .sw { width: 32px; height: 18px; border-radius: var(--radius-full); background: var(--border-default); position: relative; transition: background var(--dur) var(--ease); }
+        .toggle .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: var(--radius-circle); background: var(--surface-primary); transition: transform .18s; }
+        .toggle:is(.on, [aria-checked="true"]) .sw { background: var(--action-primary); } .toggle:is(.on, [aria-checked="true"]) .sw::after { transform: translateX(14px); background: var(--surface-primary); }
         .composer .hint { margin-left: auto; font-size: var(--text-xs); color: var(--text-tertiary); }
 
         @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
@@ -2930,15 +2924,15 @@
 
         /* ---------- Settings modal ---------- */
         .modal-overlay { display: none; position: fixed; inset: 0; background: var(--overlay-modal); z-index: 50;
-            align-items: center; justify-content: center; padding: var(--sp-5); }
+            align-items: center; justify-content: center; padding: var(--sp-5); backdrop-filter: blur(4px); }
         .modal-overlay.show { display: flex; }
-        .modal { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); width: 100%; max-width: 520px;
+        .modal { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); box-shadow: none; width: 100%; max-width: 520px;
             max-height: 90vh; display: flex; flex-direction: column; animation: fadeUp .22s ease; }
         /* Wide variant for the data tables that do not fit the reading-width default. */
         .modal.wide { max-width: 900px; }
-        .modal-head { display: flex; align-items: center; padding: var(--sp-4) var(--sp-5); border-bottom: var(--bw-hairline) solid var(--border-default); }
-        .modal-head h3 { margin: 0; font-size: var(--text-md); font-weight: var(--weight-semibold); flex: 1; letter-spacing: -.02em; }
-        .modal-body { padding: var(--sp-5); overflow-y: auto; }
+        .modal-head { display: flex; align-items: center; padding: var(--sp-4); border-bottom: var(--bw-hairline) solid var(--border-default); }
+        .modal-head h3 { margin: 0; font-size: var(--text-md); font-weight: var(--weight-medium); line-height: var(--lh-none); flex: 1; letter-spacing: normal; }
+        .modal-body { padding: var(--sp-4); overflow-y: auto; }
         #toast-host { position: fixed; z-index: 100; display: flex;
             top: calc(14px + env(safe-area-inset-top, 0px));
             right: calc(14px + env(safe-area-inset-right, 0px));
@@ -2996,8 +2990,8 @@
             justify-content: center; background: var(--surface-primary); }
         .auth-card { width: min(380px, calc(100vw - 48px)); background: var(--surface-primary);
             border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); padding: var(--sp-7); box-shadow: var(--shadow-sm); }
-        .auth-brand { width: 40px; height: 40px; border-radius: var(--radius-lg); margin-bottom: var(--sp-4);
-            background: linear-gradient(140deg, var(--action-primary), var(--action-active)); color: var(--text-on-action);
+        .auth-brand { width: 40px; height: 40px; border-radius: var(--radius-md); margin-bottom: var(--sp-4);
+            background: var(--action-primary); color: var(--text-on-action);
             display: flex; align-items: center; justify-content: center; }
         .auth-brand svg { width: 20px; height: 20px; }
         .auth-card h2 { margin: 0 0 var(--sp-1-5); font-size: var(--text-xl); font-weight: var(--weight-semibold); letter-spacing: -.02em; }
@@ -3006,7 +3000,7 @@
         .auth-field label { display: block; font-size: var(--text-xs); color: var(--text-secondary); margin-bottom: var(--sp-1); }
         .auth-field input { width: 100%; box-sizing: border-box; font: inherit; font-size: var(--text-sm);
             padding: var(--control-pad-y) var(--sp-2-5); min-height: var(--control-h); line-height: var(--lh-control);
-            border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-sm);
+            border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-md);
             background: var(--surface-primary); color: var(--text-primary); }
         .auth-error { color: var(--error); font-size: var(--text-xs); min-height: 16px; margin: var(--sp-0-5) 0 var(--sp-2); }
         .auth-go { width: 100%; justify-content: center; }
@@ -3018,8 +3012,8 @@
            line, which doubled the meter's height. */
         .files-meter { display: flex; align-items: center; gap: var(--sp-2-5); font-size: var(--text-sm); color: var(--text-secondary); margin: var(--sp-1) 0 var(--sp-4); }
         .files-meter span { white-space: nowrap; }
-        .files-meter .bar { flex: 1 1 120px; min-width: 80px; max-width: 220px; height: 6px; border-radius: var(--radius-xs); background: var(--surface-sunken); overflow: hidden; }
-        .files-meter .bar i { display: block; height: 100%; background: var(--action-primary); border-radius: var(--radius-xs); }
+        .files-meter .bar { flex: 1 1 120px; min-width: 80px; max-width: 220px; height: var(--sp-1); border-radius: var(--radius-full); background: var(--surface-tertiary); overflow: hidden; }
+        .files-meter .bar i { display: block; height: 100%; background: var(--action-primary); border-radius: var(--radius-full); }
         .files-meter.warn .bar i { background: var(--error); }
         /* No margin of its own: the card's 16px gap is the rhythm here, and a
            12/8 margin on top of it made the trail's two sides differ. */
@@ -3155,7 +3149,7 @@
            mixing inputs, a select and a button lines up. */
         .tm-field { flex: 1 1 120px; min-width: 0; background: var(--surface-primary); color: var(--text-primary);
             font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-3); line-height: var(--lh-control); min-height: var(--control-h);
-            border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); }
+            border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); }
         .tm-tabpick { display: inline-flex; align-items: center; gap: var(--sp-1-5); margin: 0 var(--sp-2-5) var(--sp-2) 0;
             cursor: pointer; font-size: var(--text-sm); color: var(--text-secondary); min-height: var(--control-h); }
         .tm-tabpick input { width: 16px; height: 16px; accent-color: var(--action-primary); cursor: pointer; }
@@ -3183,7 +3177,7 @@
                 justify-content: flex-start; margin-left: var(--icon-col); }
         }
         .toast { display: flex; gap: var(--sp-2); align-items: flex-start; background: var(--surface-primary);
-            border: var(--bw-hairline) solid var(--border-strong); border-left: var(--bw-marker) solid var(--action-primary); border-radius: var(--radius-sm);
+            border: var(--bw-hairline) solid var(--border-default); border-left: var(--bw-marker) solid var(--action-primary); border-radius: var(--radius-md);
             padding: var(--sp-3) var(--sp-3); box-shadow: var(--shadow-lg); font-size: var(--text-sm); color: var(--text-primary);
             animation: toastin .18s ease-out; }
         .toast.bad { border-left-color: var(--error); }
@@ -3203,8 +3197,8 @@
             left: calc(16px + env(safe-area-inset-left, 0px));
             bottom: calc(16px + env(safe-area-inset-bottom, 0px));
             display: flex; gap: var(--sp-2-5); align-items: flex-start; flex-wrap: wrap;
-            background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-strong); border-left: var(--bw-marker) solid var(--action-primary);
-            border-radius: var(--radius-sm); padding: var(--sp-3) var(--sp-4); box-shadow: var(--shadow-lg);
+            background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-left: var(--bw-marker) solid var(--action-primary);
+            border-radius: var(--radius-md); padding: var(--sp-3) var(--sp-4); box-shadow: var(--shadow-lg);
             font-size: var(--text-sm); color: var(--text-primary); line-height: var(--lh-snug); }
         .build-bar span { flex: 1 1 100%; }
         @media print { .build-bar { display: none !important; } }
@@ -3228,14 +3222,16 @@
         }
         .field-label { font-size: var(--text-sm); font-weight: var(--weight-medium); display: block; margin-top: var(--sp-2); }
         .field-help { font-size: var(--text-xs); color: var(--text-secondary); margin: var(--sp-1) 0 var(--sp-3); line-height: var(--lh-body); }
-        .pf-input { width: 100%; resize: vertical; border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm);
+        .pf-input { width: 100%; resize: vertical; border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md);
             padding: var(--sp-2) var(--sp-3); font: inherit; font-size: var(--text-sm); line-height: var(--lh-body); outline: none; color: var(--text-primary); margin: var(--sp-2) 0 var(--sp-3); background: var(--surface-sunken); }
         .settings-toggles { margin-top: var(--sp-1); }
         .setting-row { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-3) 0; border-top: var(--bw-hairline) solid var(--border-default); }
         .setting-row > div:first-child { flex: 1; }
         .setting-title { font-size: var(--text-sm); font-weight: var(--weight-medium); }
         .setting-sub { font-size: var(--text-xs); color: var(--text-secondary); margin-top: var(--sp-1); line-height: var(--lh-body); }
-        .modal-foot { display: flex; justify-content: flex-end; gap: var(--sp-2); padding: var(--sp-4) var(--sp-5); border-top: var(--bw-hairline) solid var(--border-default); }
+        .modal-foot { display: flex; justify-content: flex-end; gap: var(--sp-2); padding: var(--sp-4);
+            border-top: var(--bw-hairline) solid var(--border-default); background: var(--surface-secondary);
+            border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
         .g-badge { font-size: var(--text-xs); font-weight: var(--weight-medium); padding: var(--sp-1) var(--sp-3); border-radius: var(--radius-full); white-space: nowrap; }
         .g-badge.on { background: var(--success-bg); color: var(--success); }
         .g-badge.off { background: var(--surface-sunken); color: var(--text-tertiary); }
@@ -3602,7 +3598,7 @@ Projected Image UK"></textarea>
             moveTo: SV('<polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>'),
         };
         const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
-        const loader = () => { const b = el('div', 'three-body'); b.append(el('div', 'three-body__dot'), el('div', 'three-body__dot'), el('div', 'three-body__dot')); return b; };
+        const loader = () => { const s = el('span', 'spinner'); s.innerHTML = I.loader; s.setAttribute('aria-hidden', 'true'); return s; };
         /* The .ic class is the whole fix for icons floating above button text:
            a bare span leaves the svg sitting ON the text baseline inside the
            button's 20px line box, ~3px above the text's optical middle. */
