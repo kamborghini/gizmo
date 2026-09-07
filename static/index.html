@@ -19530,7 +19530,19 @@ Projected Image UK"></textarea>
                             catch (e) { toastError(e.message); }
                             loadTeam();
                         };
-                        acts.append(rp, off);
+                        acts.append(rp);
+                        if (u.mfa) {
+                            const rm = el('button', 'btn', 'Reset 2-step');
+                            rm.onclick = async () => {
+                                if (!(await uiConfirm('Reset ' + u.name + '\'s two-step sign-in? '
+                                    + 'Their password alone signs them in until they set it up again.'))) return;
+                                try { await api('/api/team/user', { op: 'reset_mfa', id: u.id }); }
+                                catch (e) { toastError(e.message); }
+                                loadTeam();
+                            };
+                            acts.append(rm);
+                        }
+                        acts.append(off);
                     }
                     if (manageable) {
                         const tb = el('button', 'btn', 'Tabs');
@@ -20212,9 +20224,42 @@ Projected Image UK"></textarea>
                 host.append(rs, rsInput);
             }
         }
+        /* Ask for the person's own password before a change that a borrowed
+           session must not be able to make alone. Resolves to the password,
+           or null when they cancel. */
+        function uiAskPassword(title, message, okText) {
+            return new Promise(resolve => {
+                const overlay = el('div', 'modal-overlay show');
+                const modal = el('div', 'modal');
+                const head = el('div', 'modal-head');
+                head.append(el('h3', null, title));
+                const finish = (v) => { overlay.remove(); resolve(v); };
+                const x = el('button', 'icon-btn'); x.innerHTML = I.x;
+                x.title = 'Close'; x.setAttribute('aria-label', 'Close');
+                x.onclick = () => finish(null);
+                head.append(x);
+                const body = el('div', 'modal-body');
+                if (message) body.append(el('p', 'field-help', message));
+                const f = el('label', 'pfield');
+                f.append(el('span', null, 'Your password'));
+                const inp = el('input', 'psel'); inp.type = 'password'; inp.autocomplete = 'current-password';
+                f.append(inp); body.append(f);
+                const foot = el('div', 'modal-foot');
+                const cancel = el('button', 'btn', 'Cancel'); cancel.onclick = () => finish(null);
+                const go = el('button', 'btn btn-primary', okText || 'Continue');
+                go.onclick = () => finish(inp.value);
+                inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); go.click(); } };
+                foot.append(cancel, go);
+                modal.append(head, body, foot); overlay.append(modal); document.body.append(overlay);
+                inp.focus();
+            });
+        }
+
         /* Two-step sign-in. Enrolment is deliberately two moves: scan, then
            prove a code works. Turning it on because someone SAID they scanned
-           it is how an account locks its owner out. */
+           it is how an account locks its owner out. Turning it off, or
+           starting again, takes the password: the second factor exists for
+           the day a session token is in the wrong hands. */
         async function refreshMfaRow() {
             const btn = $('mfa-btn'), sub = $('mfa-sub');
             if (!btn) return;
@@ -20226,10 +20271,11 @@ Projected Image UK"></textarea>
                     + ' recovery code' + ((st.recovery_left === 1) ? '' : 's') + ' left.';
                 btn.textContent = 'Turn off';
                 btn.onclick = async () => {
-                    if (!await uiConfirm('Turn off two-step sign-in? Your password '
-                        + 'becomes the only thing protecting the dispatch desk and the books.',
-                        { title: 'Turn off two-step sign-in', okText: 'Turn it off' })) return;
-                    try { await api('/api/auth/mfa', { op: 'off' }); }
+                    const pw = await uiAskPassword('Turn off two-step sign-in',
+                        'Your password becomes the only thing protecting the dispatch desk '
+                        + 'and the books.', 'Turn it off');
+                    if (pw === null) return;
+                    try { await api('/api/auth/mfa', { op: 'off', current: pw }); }
                     catch (e) { toastError(e.message); return; }
                     toastOk('Two-step sign-in is off.');
                     refreshMfaRow();
@@ -20263,7 +20309,10 @@ Projected Image UK"></textarea>
             };
         }
 
-        function openMfaSetup() {
+        async function openMfaSetup() {
+            const pw = await uiAskPassword('Two-step sign-in',
+                'Confirm it is you before a second factor is added to this account.');
+            if (pw === null) return;
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal');
             const head = el('div', 'modal-head');
@@ -20277,7 +20326,7 @@ Projected Image UK"></textarea>
 
             (async () => {
                 let st;
-                try { st = await api('/api/auth/mfa', { op: 'start' }); }
+                try { st = await api('/api/auth/mfa', { op: 'start', current: pw }); }
                 catch (e) { body.append(el('div', 'msg error', e.message)); return; }
                 body.append(el('p', 'field-help',
                     'Add this to an authenticator app, then type the six-digit code it '

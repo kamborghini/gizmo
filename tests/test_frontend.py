@@ -3234,8 +3234,10 @@ def t_two_step_sign_in_can_be_turned_on_from_settings():
     ok("op: 'start'" in fn and "op: 'confirm'" in fn,
        "scan, then prove a code works: enrolling on trust locks people out")
     ok("only time they are shown" in fn, "recovery codes are shown once, and say so")
-    ok("uiConfirm(" in SCRIPT[SCRIPT.index("async function refreshMfaRow("):][:1400],
-       "and turning it off asks first")
+    off = SCRIPT[SCRIPT.index("async function refreshMfaRow("):][:1600]
+    ok("uiAskPassword(" in off and "op: 'off', current: pw" in off,
+       "turning it off takes the password, not a click: a borrowed session must not be able to")
+    ok("op: 'start', current: pw" in fn, "and so does starting again with a different phone")
 
 
 # --- per-person colour -------------------------------------------------------

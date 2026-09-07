@@ -1862,6 +1862,9 @@ _TOOL_TABS = {
     "shopify_list_customers": "customers", "shopify_search_customers": "customers",
     "shopify_get_customer": "customers", "shopify_get_customer_orders": "customers",
     "recon_summary": "recon", "recon_exceptions": "recon", "recon_exception": "recon",
+    # Payouts and disputes are the books: the same tab as reconciliation.
+    "shopify_list_payouts": "recon", "shopify_payout_transactions": "recon",
+    "shopify_list_disputes": "recon",
 }
 
 
@@ -8261,6 +8264,13 @@ def _window_ok(bucket: list[float], limit: int, now: float) -> bool:
     return True
 
 
+def _window_hits(bucket: list[float], now: float) -> int:
+    """How many marks the window holds, without adding one."""
+    cutoff = now - RATE_WINDOW
+    bucket[:] = [t for t in bucket if t >= cutoff]
+    return len(bucket)
+
+
 def _pre_checks(request: Request, ai: bool = False, max_body: Optional[int] = None) -> Optional[JSONResponse]:
     """Rate-limit (per-client + global for AI endpoints) and reject oversized bodies."""
     now = time.monotonic()
@@ -11613,6 +11623,11 @@ def _redact_customer(email: str, customer_id="") -> dict:
 
 ACTIVITY_MAX = int(os.environ.get("ACTIVITY_MAX", "8000"))
 SESSION_HOURS = float(os.environ.get("SESSION_HOURS", "24"))
+# The sliding window alone let a session used once a day live forever, and a
+# stolen one with it. A month is longer than any shift pattern here.
+SESSION_MAX_DAYS = float(os.environ.get("SESSION_MAX_DAYS", "30"))
+DAV_FAIL_PER_MIN = 20      # wrong drive passwords per client per minute before 429
+MFA_FAIL_LIMIT = 10        # wrong second-factor codes per account before it pauses
 LOGIN_FAIL_LIMIT = 5
 # A real hash to verify against when the username does not exist, so an unknown
 # user costs the same time as a wrong password and the response cannot be used
@@ -11647,6 +11662,33 @@ def _check_pw(pw: str, stored: str) -> bool:
         return hmac.compare_digest(h.hex(), h_hex)
     except Exception:
         return False
+
+
+def _note_wrong_password(d: dict, u: dict, uid: str, where: str = "",
+                         now: Optional[datetime] = None) -> None:
+    """One wrong password, wherever it was typed: the login, the password
+    change, or the second-factor settings. They share one counter and one
+    escalating lock, because a guesser does not care which form accepts the
+    guess. The password change used to keep its own flat fifteen minutes,
+    and the second-factor settings had no counter at all."""
+    now = now or datetime.now(timezone.utc)
+    u["fails"] = int(u.get("fails") or 0) + 1
+    if u["fails"] >= LOGIN_FAIL_LIMIT:
+        u["fails"] = 0
+        step = min(int(u.get("locks") or 0), len(LOGIN_LOCK_STEPS) - 1)
+        u["locks"] = int(u.get("locks") or 0) + 1
+        mins = LOGIN_LOCK_STEPS[step]
+        u["lock_until"] = (now + timedelta(minutes=mins)).isoformat()
+        _track(uid, "auth", "account paused",
+               "too many wrong passwords%s; locked for %d minutes" % (where, mins))
+    try:
+        _write_users(d)
+    except RuntimeError:
+        pass
+
+
+def _locked_now(u: dict) -> bool:
+    return str(u.get("lock_until") or "") > datetime.now(timezone.utc).isoformat()
 
 
 
@@ -11894,6 +11936,14 @@ def _session_uid(raw: Optional[str]) -> Optional[str]:
     now = datetime.now(timezone.utc)
     if str(row.get("exp") or "") < now.isoformat():
         return None
+    try:
+        born = datetime.fromisoformat(str(row.get("created_at") or ""))
+        if (now - born).total_seconds() > SESSION_MAX_DAYS * 86400:
+            s.pop(hashlib.sha256(str(raw).encode()).hexdigest(), None)
+            _write_sessions(s)
+            return None
+    except ValueError:
+        pass
     # Sliding window: steady work never logs you out mid-shift. The bump is
     # written at most every few hours, not per request.
     try:
@@ -12233,6 +12283,7 @@ def _tab_denied(request: Request) -> Optional[JSONResponse]:
     allowed = (tab,) if isinstance(tab, str) else tab
     if tabs is None or any(t in tabs for t in allowed):
         return None
+    _track_denied(uid, path)
     return _json({"error": "That part of the app is switched off for your account. "
                            "Ask an admin if you need it."}, 403)
 
@@ -12527,6 +12578,7 @@ def _user_public(uid: str, u: dict) -> dict:
             "role": u.get("role") or "member", "active": u.get("active", True),
             "deleted": bool(u.get("deleted")), "must_change": bool(u.get("must_change")),
             "created_at": u.get("created_at") or "", "last_login_at": u.get("last_login_at") or "",
+            "mfa": bool(u.get("mfa_secret")),
             "tabs": (None if u.get("role") == "master" or not isinstance(u.get("tabs"), list)
                      else u.get("tabs")),
             # Reported separately from the raw flag: an admin holds it by rank,
@@ -12583,6 +12635,24 @@ atexit.register(_events_flush)
 
 _login_noise = {"hour": "", "count": 0, "logged": 0}
 LOGIN_NOISE_ROWS = 10      # ledger rows per hour for unknown-username failures
+_deny_noise = {"hour": "", "logged": 0}
+DENY_NOISE_ROWS = 20       # ledger rows per hour for closed-tab refusals
+
+
+def _track_denied(uid: str, path: str) -> None:
+    """A signed-in account asking for a tab it does not have. One is a stale
+    browser; a run of them is somebody probing. Listed the first few an hour,
+    then not - the ledger must not be flushable from a member account."""
+    hour = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
+    if _deny_noise["hour"] != hour:
+        _deny_noise.update({"hour": hour, "logged": 0})
+    if _deny_noise["logged"] < DENY_NOISE_ROWS:
+        _deny_noise["logged"] += 1
+        _track(uid, "auth", "refused a closed tab", path[:120])
+    elif _deny_noise["logged"] == DENY_NOISE_ROWS:
+        _deny_noise["logged"] += 1
+        _track("", "auth", "refusals continuing",
+               "further closed-tab refusals this hour are not being listed")
 
 
 def _track_login_refusal(uid: str, reason: str, username: str = "") -> None:
@@ -17831,6 +17901,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     return _files_ok(d, action=("put files in the trash" if op == "trash"
                                                 else "moved files"), detail=label, who=_who)
                 if op == "empty_trash":
+                    if _team_level(_who) < ROLE_LEVELS["admin"]:
+                        return _json({"error": "Only an admin can delete files for good."}, 403)
                     doomed = [k for k, v in d["files"].items() if v.get("trashed_at")]
                     if not doomed:
                         return _json({"error": "The trash is already empty."}, 400)
@@ -17887,7 +17959,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if op == "destroy":
                     # "Delete now" from the trash: the record goes at once (so
                     # the space frees), the key joins the doomed list, and the
-                    # hourly reaper removes the bytes from the bucket.
+                    # hourly reaper removes the bytes from the bucket. The
+                    # trash is the undo; skipping it is an admin's call.
+                    if _team_level(_who) < ROLE_LEVELS["admin"]:
+                        return _json({"error": "Only an admin can delete files for good."}, 403)
                     if not f.get("trashed_at"):
                         return _json({"error": "Only files already in the trash can be "
                                                "deleted for good."}, 400)
@@ -18016,6 +18091,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # minute, which is right for a page listing orders and far too wide for
         # one that checks passwords: the per-account lockout does nothing
         # against someone spraying a single password across many usernames.
+        if len(_login_hits) > 5000:
+            _login_hits.clear()
         if not _window_ok(_login_hits.setdefault(_client_key(request), []),
                           LOGIN_MAX_PER_MIN, time.monotonic()):
             return _json({"error": "Too many sign-in attempts from here. Wait a "
@@ -18056,19 +18133,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             _track_login_refusal(uid, "the temporary password had expired")
             return vague
         if not _check_pw(pw, u.get("pw") or ""):
-            u["fails"] = int(u.get("fails") or 0) + 1
-            if u["fails"] >= LOGIN_FAIL_LIMIT:
-                u["fails"] = 0
-                step = min(int(u.get("locks") or 0), len(LOGIN_LOCK_STEPS) - 1)
-                u["locks"] = int(u.get("locks") or 0) + 1
-                mins = LOGIN_LOCK_STEPS[step]
-                u["lock_until"] = (now + timedelta(minutes=mins)).isoformat()
-                _track(uid, "auth", "account paused",
-                       "too many wrong passwords; locked for %d minutes" % mins)
-            try:
-                _write_users(d)
-            except RuntimeError:
-                pass
+            _note_wrong_password(d, u, uid, now=now)
             _track_login_refusal(uid, "wrong password")
             return vague
         u["fails"] = 0
@@ -18114,12 +18179,25 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if op == "status":
             return _json({"enabled": bool(u.get("mfa_secret")),
                           "recovery_left": len(u.get("mfa_recovery") or [])})
+        if op in ("start", "off"):
+            # The password, again, from inside the session. A session is a
+            # token in a browser; the second factor exists for the day that
+            # token is in the wrong hands, and a change to it that the token
+            # alone could make would be a lock whose key hangs on the door.
+            if _locked_now(u):
+                return _json({"error": "Too many wrong attempts. Try again in a few minutes."}, 429)
+            if not _check_pw(str(body.get("current") or ""), u.get("pw") or ""):
+                _note_wrong_password(d, u, who, " at the second-factor settings")
+                _track(who, "auth", "refused a second-factor change", "wrong password")
+                return _json({"error": "Enter your current password to change two-step sign-in."}, 400)
+            u["fails"] = 0
         if op == "start":
             # Held UNCONFIRMED until a code proves the app really has it.
             # Enrolling on "I scanned it" is how people lock themselves out.
             secret = totp.new_secret()
             u["mfa_pending"] = tokenvault.seal(secret)
             _write_users(d)
+            _track(who, "auth", "started setting up a second factor")
             return _json({"secret": secret,
                           "uri": totp.provisioning_uri(secret, u.get("username") or "user")})
         if op == "confirm":
@@ -18134,15 +18212,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             u["mfa_secret"] = tokenvault.seal(secret)
             u["mfa_recovery"] = [totp.hash_recovery(c) for c in codes]
             u["mfa_at"] = datetime.now(timezone.utc).isoformat()
-            u["mfa_counter"] = totp.used_counter()
+            u["mfa_counter"] = totp.verify_counter(secret, body.get("code"))
+            u["mfa_fails"] = 0
             u.pop("mfa_pending", None)
             _write_users(d)
             _track(who, "auth", "turned on a second factor")
             # The only time these are readable. They are stored hashed.
             return _json({"ok": True, "recovery": codes})
         if op == "off":
-            u.pop("mfa_secret", None); u.pop("mfa_recovery", None)
-            u.pop("mfa_pending", None); u.pop("mfa_counter", None)
+            for k in ("mfa_secret", "mfa_recovery", "mfa_pending", "mfa_counter", "mfa_fails"):
+                u.pop(k, None)
             _write_users(d)
             _track(who, "auth", "turned off their second factor")
             return _json({"ok": True})
@@ -18164,14 +18243,40 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         u = d["users"].get(uid)
         if not u or not u.get("mfa_secret"):
             return vague
+        if _locked_now(u):
+            # The password step already passed, so the lock here is the
+            # code's own: ten misses across any number of tickets pauses the
+            # account, and a pause reads exactly like a wrong code.
+            _track_login_refusal(uid, "account is paused")
+            return vague
         given = str(body.get("code") or "")
         secret = tokenvault.unseal(str(u["mfa_secret"]))
-        if totp.verify(secret, given, last_counter=u.get("mfa_counter")):
-            u["mfa_counter"] = totp.used_counter()
+        matched = totp.verify_counter(secret, given, last_counter=u.get("mfa_counter"))
+        if matched >= 0:
+            u["mfa_counter"] = max(int(u.get("mfa_counter") or 0), matched)
+            u["mfa_fails"] = 0
         else:
             idx = totp.check_recovery(given, u.get("mfa_recovery") or [])
             if idx < 0:
-                _track(uid, "auth", "a second-factor code was refused")
+                # Coalesced like the password path: a ticket costs one right
+                # password, and tickets are minted eight a minute, so one row
+                # per wrong code was a ledger-flushing loop for anyone holding
+                # a password. Ten misses against the ACCOUNT pauses it, on the
+                # same escalating clock as wrong passwords.
+                _track_login_refusal(uid, "wrong second-factor code")
+                u["mfa_fails"] = int(u.get("mfa_fails") or 0) + 1
+                if u["mfa_fails"] >= MFA_FAIL_LIMIT:
+                    u["mfa_fails"] = 0
+                    step = min(int(u.get("locks") or 0), len(LOGIN_LOCK_STEPS) - 1)
+                    u["locks"] = int(u.get("locks") or 0) + 1
+                    mins = LOGIN_LOCK_STEPS[step]
+                    u["lock_until"] = (datetime.now(timezone.utc) + timedelta(minutes=mins)).isoformat()
+                    _track(uid, "auth", "account paused",
+                           "too many wrong second-factor codes; locked for %d minutes" % mins)
+                try:
+                    _write_users(d)
+                except RuntimeError:
+                    pass
                 # Wrong codes spend the ticket. Five misses inside one
                 # three-minute window is not a person mistyping.
                 ticket = str(body.get("ticket") or "")
@@ -18179,7 +18284,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if _mfa_tries[ticket] >= MFA_MAX_TRIES:
                     _mfa_tickets.pop(ticket, None)
                     _mfa_tries.pop(ticket, None)
-                    _track(uid, "auth", "too many wrong codes", "the sign-in was ended")
+                    _track_login_refusal(uid, "too many wrong codes; the sign-in was ended")
                     return _json({"error": "Too many wrong codes. Sign in again."}, 401)
                 return vague
             # Spent. A recovery code is one journey back in, not a password.
@@ -18228,17 +18333,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Too many wrong attempts. Try again in a few minutes."}, 429)
         current, new = str(body.get("current") or ""), str(body.get("new") or "")
         if not _check_pw(current, u.get("pw") or ""):
-            try:
-                d0 = _load_users()
-                uu = d0["users"].get(uid) or {}
-                uu["fails"] = int(uu.get("fails") or 0) + 1
-                if uu["fails"] >= LOGIN_FAIL_LIMIT:
-                    uu["fails"] = 0
-                    uu["lock_until"] = (now_dt + timedelta(minutes=LOGIN_LOCK_MINUTES)).isoformat()
-                    _track(uid, "auth", "account paused", "too many wrong password changes")
-                _write_users(d0)
-            except RuntimeError:
-                pass
+            d0 = _load_users()
+            _note_wrong_password(d0, d0["users"].get(uid) or {}, uid,
+                                 " at the password change", now=now_dt)
             _track(uid, "auth", "failed password change", "wrong current password")
             return _json({"error": "The current password is wrong."}, 400)
         if len(new) < 8:
@@ -18536,6 +18633,20 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _track(who, "team", "reset a password", label)
                 return _json({"ok": True, "starter_password": starter,
                               "users": _team_public_list(d)})
+            elif op == "reset_mfa":
+                # The phone is gone. Same rank rule as a password reset: the
+                # person loses the second factor, keeps the password, and is
+                # told in the ledger who did it.
+                if not may_manage():
+                    return _json({"error": "You cannot manage that account."}, 403)
+                if not u.get("mfa_secret") and not u.get("mfa_pending"):
+                    return _json({"error": "That account has no second factor to reset."}, 400)
+                for k in ("mfa_secret", "mfa_recovery", "mfa_pending", "mfa_counter",
+                          "mfa_fails", "mfa_at"):
+                    u.pop(k, None)
+                _write_users(d)
+                _track(who, "team", "reset a second factor", label)
+                return _json({"ok": True, "users": _team_public_list(d)})
             elif op == "delete":
                 if my_level < ROLE_LEVELS["master"]:
                     return _json({"error": "Only the master admin can delete accounts."}, 403)
@@ -18585,7 +18696,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not _window_ok(_rl_hits.setdefault("dav:" + _client_key(request), []),
                           max(RATE_MAX_CLIENT, 300), time.monotonic()):
             return Response(status_code=429, headers=hdrs)
-        uid, code = _dav_check_auth(request.headers.get("authorization", ""))
+        # Every wrong password costs one scrypt on the event loop, and the
+        # ceiling above is generous on purpose. Twenty misses a minute from one
+        # client is not Finder retrying a keychain entry: refuse before hashing.
+        auth_hdr = request.headers.get("authorization", "")
+        fails = _rl_hits.setdefault("davfail:" + _client_key(request), [])
+        if auth_hdr.startswith("Basic ") and _window_hits(fails, time.monotonic()) >= DAV_FAIL_PER_MIN:
+            return Response(status_code=429, headers=hdrs)
+        uid, code = _dav_check_auth(auth_hdr)
+        if code == 401 and auth_hdr.startswith("Basic "):
+            fails.append(time.monotonic())
         if code:
             return Response(status_code=code, headers={**hdrs,
                 "WWW-Authenticate": 'Basic realm="Store Copilot Files"'} if code == 401 else hdrs)

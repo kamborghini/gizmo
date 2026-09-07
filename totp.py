@@ -58,23 +58,32 @@ def code(secret: str, at: float = None) -> str:
     return _counter_code(secret, int((at if at is not None else time.time()) // STEP))
 
 
-def verify(secret: str, given: str, at: float = None, last_counter=None):
-    """True when the code is good. False otherwise - including for a counter
-    that has already been spent.
+def verify_counter(secret: str, given: str, at: float = None, last_counter=None) -> int:
+    """The counter the code matched, or -1.
 
     last_counter is the highest counter this account has already used. Passing
-    it is what stops a replay inside the same 30-second window."""
+    it is what stops a replay inside the same 30-second window - and the
+    caller must store what THIS returns, not the current step. Storing the
+    current step let a code from a phone one step ahead be accepted, and then
+    accepted again a moment later, because the stored counter never caught up
+    with the one that had actually been spent."""
     given = str(given or "").strip().replace(" ", "")
     if not given.isdigit() or len(given) != DIGITS or not secret:
-        return False
+        return -1
     now = int((at if at is not None else time.time()) // STEP)
     for delta in range(-SKEW, SKEW + 1):
         c = now + delta
         if last_counter is not None and c <= int(last_counter):
             continue        # already spent: a code is good once
         if hmac.compare_digest(_counter_code(secret, c), given):
-            return True
-    return False
+            return c
+    return -1
+
+
+def verify(secret: str, given: str, at: float = None, last_counter=None) -> bool:
+    """True when the code is good. False otherwise - including for a counter
+    that has already been spent."""
+    return verify_counter(secret, given, at, last_counter) >= 0
 
 
 def used_counter(at: float = None) -> int:

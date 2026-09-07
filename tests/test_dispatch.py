@@ -4123,7 +4123,7 @@ def t_turning_on_a_second_factor_takes_a_code_to_confirm():
     themselves out. It is not on until a code from the app proves it works."""
     def go():
         ensure_auth()
-        r = post("/api/auth/mfa", {"op": "start"})
+        r = post("/api/auth/mfa", {"op": "start", "current": MASTER_PW})
         eq(r.status_code, 200, r.text)
         j = r.json()
         ok(j.get("secret"), "a secret to scan")
@@ -4145,7 +4145,7 @@ def t_with_a_second_factor_a_password_alone_is_not_a_session():
     def go():
         ensure_auth()
         import totp
-        j = post("/api/auth/mfa", {"op": "start"}).json()
+        j = post("/api/auth/mfa", {"op": "start", "current": MASTER_PW}).json()
         post("/api/auth/mfa", {"op": "confirm", "code": totp.code(j["secret"])})
         r = bare("/api/auth/login", {"username": "cameron", "password": MASTER_PW})
         eq(r.status_code, 200, r.text)
@@ -4173,7 +4173,7 @@ def t_a_recovery_code_gets_you_in_when_the_phone_is_gone():
     def go():
         ensure_auth()
         import totp
-        j = post("/api/auth/mfa", {"op": "start"}).json()
+        j = post("/api/auth/mfa", {"op": "start", "current": MASTER_PW}).json()
         codes = post("/api/auth/mfa",
                      {"op": "confirm", "code": totp.code(j["secret"])}).json()["recovery"]
         tick = bare("/api/auth/login",
@@ -4197,7 +4197,7 @@ def t_the_totp_secret_is_not_stored_in_the_clear():
         os.environ["TOKEN_ENCRYPTION_KEY"] = "a-long-enough-test-key-for-scrypt-0123456789"
         tokenvault._key.cache_clear()
         try:
-            j = post("/api/auth/mfa", {"op": "start"}).json()
+            j = post("/api/auth/mfa", {"op": "start", "current": MASTER_PW}).json()
             post("/api/auth/mfa", {"op": "confirm", "code": totp.code(j["secret"])})
             raw = open(copilot.USERS_PATH, encoding="utf-8").read()
             ok(j["secret"] not in raw, "the secret is not sitting in the users file")
@@ -16918,6 +16918,219 @@ def t_a_legacy_alert_record_still_says_what_it_meant():
     eq(b["metric"], "only a detail", "a detail serves when there is no title")
     eq(b["tab_label"], "Labels", "and an unknown kind is still titled rather than blank")
     eq((c["tab_label"], c["metric"], c["pct"]), ("SEO", "Clicks", 12), "a current record is untouched")
+
+
+@test
+def t_turning_off_or_rebinding_the_second_factor_takes_the_password():
+    """A session is a token in a browser. Without the password, whoever held
+    the token could remove the one factor that exists for exactly that day,
+    or bind their own phone in its place."""
+    def go():
+        ensure_auth()
+        import totp
+        eq(post("/api/auth/mfa", {"op": "start"}).status_code, 400, "no password, no enrolment")
+        eq(post("/api/auth/mfa", {"op": "start", "current": "not-it"}).status_code, 400)
+        j = post("/api/auth/mfa", {"op": "start", "current": MASTER_PW}).json()
+        ok(j.get("secret"), "the right password starts it")
+        post("/api/auth/mfa", {"op": "confirm", "code": totp.code(j["secret"])})
+        eq(post("/api/auth/mfa", {"op": "off"}).status_code, 400, "no password, no switching it off")
+        eq(post("/api/auth/mfa", {"op": "status"}).json()["enabled"], True, "still on")
+        eq(post("/api/auth/mfa", {"op": "off", "current": MASTER_PW}).status_code, 200)
+        eq(post("/api/auth/mfa", {"op": "status"}).json()["enabled"], False)
+        # Wrong passwords here are wrong passwords: the same counter, the
+        # same escalating pause as the login.
+        for _ in range(copilot.LOGIN_FAIL_LIMIT):
+            post("/api/auth/mfa", {"op": "start", "current": "wrong-wrong"})
+        eq(post("/api/auth/mfa", {"op": "start", "current": MASTER_PW}).status_code, 429, "paused")
+        copilot._login_hits.clear()
+        eq(login("cameron", MASTER_PW).status_code, 401, "and the front door is paused with it")
+    with_accounts(go)
+
+
+@test
+def t_a_code_from_a_phone_a_step_ahead_cannot_be_replayed():
+    """The stored counter is the one the code MATCHED, not the current step.
+    Storing the current step let a code from a phone thirty seconds ahead be
+    accepted now, and again once the clock had caught up with it."""
+    def go():
+        ensure_auth()
+        import totp, time as _t
+        j = post("/api/auth/mfa", {"op": "start", "current": MASTER_PW}).json()
+        post("/api/auth/mfa", {"op": "confirm", "code": totp.code(j["secret"])})
+        ahead = totp.code(j["secret"], at=_t.time() + 30)
+        t1 = login("cameron", MASTER_PW).json()["ticket"]
+        eq(bare("/api/auth/mfa-verify", {"ticket": t1, "code": ahead}).status_code, 200,
+           "a phone one step ahead is within the skew")
+        copilot._login_hits.clear()
+        t2 = login("cameron", MASTER_PW).json()["ticket"]
+        eq(bare("/api/auth/mfa-verify", {"ticket": t2, "code": ahead}).status_code, 401,
+           "and the same code is spent, not good a second time")
+    with_accounts(go)
+
+
+@test
+def t_ten_wrong_second_factor_codes_pause_the_account():
+    """A ticket costs one right password and five misses end it, so whoever
+    held the password used to get a fresh five per ticket, forever, with a
+    ledger row for each. The ACCOUNT counts them now, and pauses on the same
+    clock as wrong passwords."""
+    def go():
+        ensure_auth()
+        import totp
+        j = post("/api/auth/mfa", {"op": "start", "current": MASTER_PW}).json()
+        post("/api/auth/mfa", {"op": "confirm", "code": totp.code(j["secret"])})
+        for _ in range(3):
+            copilot._login_hits.clear()
+            tick = login("cameron", MASTER_PW).json()["ticket"]
+            for _ in range(4):
+                bare("/api/auth/mfa-verify", {"ticket": tick, "code": "000000"})
+        copilot._login_hits.clear()
+        r = login("cameron", MASTER_PW)
+        eq(r.status_code, 401, "twelve misses: paused, and the pause reads like a wrong password")
+        ok("do not match" in r.json()["error"], r.text)
+        rows = [e for e in copilot._load_events() if e.get("action") == "account paused"]
+        ok(rows and "second-factor" in rows[-1]["detail"], rows[-1:])
+        listed = [e for e in copilot._load_events() if "second-factor code" in e.get("detail", "")]
+        ok(len(listed) <= copilot.LOGIN_NOISE_ROWS, "coalesced, not one row per miss: %d" % len(listed))
+    with_accounts(go)
+
+
+@test
+def t_an_admin_can_reset_a_lost_second_factor():
+    def go():
+        ensure_auth()
+        import totp
+        owen, sess, pw = ready_user("Owen", "owen")
+        j = post_s(sess, "/api/auth/mfa", {"op": "start", "current": pw}).json()
+        eq(post_s(sess, "/api/auth/mfa", {"op": "confirm", "code": totp.code(j["secret"])}).status_code, 200)
+        copilot._login_hits.clear()
+        eq(login("owen", pw).json().get("mfa"), True, "the password alone is now half a login")
+        team = post("/api/team/user", {"op": "reset_mfa", "id": owen})
+        eq(team.status_code, 200, team.text)
+        eq([u for u in team.json()["users"] if u["id"] == owen][0]["mfa"], False, "the list says it is gone")
+        copilot._login_hits.clear()
+        ok(login("owen", pw).json().get("session"), "and the password signs them in again")
+        eq(post("/api/team/user", {"op": "reset_mfa", "id": owen}).status_code, 400, "nothing left to reset")
+        ian, ian_sess, ian_pw = ready_user("Ian", "ian", role="admin")
+        j2 = post_s(ian_sess, "/api/auth/mfa", {"op": "start", "current": ian_pw}).json()
+        post_s(ian_sess, "/api/auth/mfa", {"op": "confirm", "code": totp.code(j2["secret"])})
+        eq(post_s(sess, "/api/team/user", {"op": "reset_mfa", "id": ian}).status_code, 403,
+           "a member cannot reset an admin's")
+        eq(post("/api/team/user", {"op": "reset_mfa", "id": ian}).status_code, 200, "the master can")
+        ok(any(e.get("action") == "reset a second factor" for e in copilot._load_events()), "and it is in the ledger")
+    with_accounts(go)
+
+
+@test
+def t_only_an_admin_can_delete_files_for_good():
+    """The trash is the undo. Skipping it - destroy, empty the trash - is the
+    one file operation with no way back, so it is an admin's call."""
+    def go(fake):
+        ensure_auth()
+        up = post("/api/files/upload-url", {"name": "a.pdf", "size": 10}).json()
+        key = up["url"].split("?")[0].replace("https://fake-r2.test/", "")
+        fake.objects[key] = 10
+        post("/api/files/complete", {"id": up["id"]})
+        eq(post("/api/files/file", {"op": "trash", "id": up["id"]}).status_code, 200)
+        _owen, sess, _pw = ready_user("Owen", "owen")
+        r = post_s(sess, "/api/files/file", {"op": "destroy", "id": up["id"]})
+        eq(r.status_code, 403, r.text)
+        eq(post_s(sess, "/api/files/file", {"op": "empty_trash"}).status_code, 403, "nor empty the trash")
+        eq(post_s(sess, "/api/files/file", {"op": "restore", "id": up["id"]}).status_code, 200,
+           "the undo is still theirs")
+        eq(post_s(sess, "/api/files/file", {"op": "trash", "id": up["id"]}).status_code, 200)
+        eq(post("/api/files/file", {"op": "destroy", "id": up["id"]}).status_code, 200, "an admin's call")
+    with_accounts(lambda: with_files(go))
+
+
+@test
+def t_payout_tools_belong_to_the_recon_tab():
+    src = open(os.path.join(HERE, "server.py"), encoding="utf-8").read()
+    for name in ("shopify_list_payouts", "shopify_payout_transactions", "shopify_list_disputes"):
+        ok("def " + name in src, name + " is a tool")
+        eq(copilot._TOOL_TABS.get(name), "recon", name + " is the books, so it is gated on the recon tab")
+
+
+@test
+def t_a_session_ends_after_thirty_days_however_active():
+    """The sliding window alone let a session used once a day live forever,
+    and a stolen one with it."""
+    def go():
+        ensure_auth()
+        import hashlib as _h
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        _owen, sess, _pw = ready_user("Owen", "owen")
+        eq(post_s(sess, "/api/team/me", {}).status_code, 200)
+        s = copilot._load_sessions()
+        s[_h.sha256(sess.encode()).hexdigest()]["created_at"] = (_dt.now(_tz.utc) - _td(days=31)).isoformat()
+        copilot._write_sessions(s)
+        eq(post_s(sess, "/api/team/me", {}).status_code, 401, "a month old: gone, however recently used")
+    with_accounts(go)
+
+
+@test
+def t_wrong_drive_passwords_stop_costing_a_hash_after_twenty_a_minute():
+    """Every miss at the drive costs one scrypt on the event loop, and the
+    drive's ceiling is three hundred a minute for Finder's sake. Twenty misses
+    a minute from one client is not Finder."""
+    def go():
+        ensure_auth()
+        import base64 as b64
+        copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear(); copilot._rl_hits.clear()
+        calls = {"n": 0}
+        real = copilot._check_pw
+        def counting(pw, stored):
+            calls["n"] += 1
+            return real(pw, stored)
+        copilot._check_pw = counting
+        try:
+            codes = []
+            for i in range(25):
+                bad = {"Authorization": "Basic " + b64.b64encode(f"nobody{i}:guess".encode()).decode()}
+                codes.append(client.request("PROPFIND", "/dav/", headers={**bad, "Depth": "0"}).status_code)
+        finally:
+            copilot._check_pw = real
+        eq(codes[:20], [401] * 20, "twenty misses are answered like misses")
+        eq(codes[20:], [429] * 5, "the rest are refused before anything is hashed")
+        ok(calls["n"] <= 20, "at most one hash per miss, none after: %d" % calls["n"])
+        eq(client.request("PROPFIND", "/dav/").status_code, 401,
+           "a bare challenge (no credentials yet) is neither counted nor refused")
+    with_accounts(go)
+
+
+@test
+def t_a_refused_tab_is_in_the_ledger_a_bounded_number_of_times():
+    def go():
+        ensure_auth()
+        owen, sess, _pw = ready_user("Owen", "owen")
+        eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["labels"]}).status_code, 200)
+        copilot._deny_noise.update({"hour": "", "logged": 0})
+        for _ in range(copilot.DENY_NOISE_ROWS + 5):
+            eq(post_s(sess, "/api/files/tree", {}).status_code, 403)
+        rows = [e for e in copilot._load_events() if e.get("action") == "refused a closed tab"]
+        eq(len(rows), copilot.DENY_NOISE_ROWS, "the first twenty are listed")
+        eq(rows[0]["sub"], owen, "naming the account")
+        ok(rows[0]["detail"].startswith("/api/files/tree"), rows[0]["detail"])
+        more = [e for e in copilot._load_events() if e.get("action") == "refusals continuing"]
+        eq(len(more), 1, "then one line saying the rest are not listed")
+    with_accounts(go)
+
+
+@test
+def t_wrong_current_passwords_escalate_like_the_front_door():
+    def go():
+        ensure_auth()
+        owen, sess, pw = ready_user("Owen", "owen")
+        for _ in range(copilot.LOGIN_FAIL_LIMIT):
+            post_s(sess, "/api/auth/password", {"current": "nope-nope-nope", "new": "something-new-12"})
+        eq(post_s(sess, "/api/auth/password", {"current": pw, "new": "something-new-12"}).status_code,
+           429, "paused")
+        copilot._login_hits.clear()
+        eq(login("owen", pw).status_code, 401, "the pause is the account's, so the login is paused too")
+        eq(copilot._load_users()["users"][owen].get("locks"), 1, "and it counts toward the escalation")
+        rows = [e for e in copilot._load_events() if e.get("action") == "account paused"]
+        ok("at the password change" in rows[-1]["detail"], rows[-1]["detail"])
+    with_accounts(go)
 
 
 for fn in TESTS:
