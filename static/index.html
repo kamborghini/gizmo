@@ -7453,6 +7453,17 @@ Projected Image UK"></textarea>
                     const last = (connRuns || [])[0];
                     if (connBusy === 'review' && last && last.dryRun) connReview = last;
                     if (connBusy === 'send') connReview = null;   // spent: the next send needs a fresh review
+                    /* A tag job reports through the status, not the run list:
+                       it is a list of single sends, not a sync. */
+                    if (connTagBusy) {
+                        const job = st.data && st.data.tagJob;
+                        connTagCheck = job
+                            ? { tag: job.tag, sent: !job.dryRun,
+                                data: job.result || { error: job.error || 'The connector stopped before it finished the tag.' } }
+                            : { tag: (connTagCheck || {}).tag || '', sent: connTagBusy === 'send',
+                                data: { error: 'The connector reported no tag job. Check the tag again.' } };
+                        connTagBusy = '';
+                    }
                     connBusy = '';
                 }
                 renderConnector();
@@ -8198,11 +8209,15 @@ Projected Image UK"></textarea>
                 const tag = tagIn.value.trim();
                 if (!tag) { toastError('Type the tag first, for example xero-price-check.'); return; }
                 tagChk.disabled = true; connTagBusy = 'check'; connTagCheck = null;
+                /* The connector answers at once and works in the background: a
+                   tag can be a hundred orders, each a few lookups, and a reply
+                   that waited for all of them was the reply that never came.
+                   The watcher collects the outcome from the status once the
+                   service says it has stopped running. */
                 try {
-                    const r = await connOp({ op: 'reimport_tag', tag: tag, dryRun: true });
-                    connTagCheck = { tag: tag, data: (r && r.data) || {} };
-                } catch (e) { toastError(e.message); }
-                connTagBusy = ''; tagChk.disabled = false;
+                    await connOp({ op: 'reimport_tag', tag: tag, dryRun: true });
+                    connStartWatch();
+                } catch (e) { toastError(e.message); connTagBusy = ''; }
                 renderConnector();
             };
             tagWrap.append(tagIn, tagChk);
@@ -8228,12 +8243,13 @@ Projected Image UK"></textarea>
                         + (c.updated || 0) + ' to update in place. The rest are already in Xero or blocked.',
                         { title: 'Send tagged orders', okText: 'Send them' })) return;
                     tagSend.disabled = true; connTagBusy = 'send';
+                    /* Spent now, not when it finishes: a second click while the
+                       service works must find nothing armed. The outcome lands
+                       through the watcher, marked sent, and stays to be read. */
+                    connTagCheck = { tag: tag, data: {}, sent: true };
                     try {
-                        const r = await connOp({ op: 'reimport_tag', tag: tag });
-                        /* Spent: the results stay to be read, the send does not. */
-                        connTagCheck = { tag: tag, data: (r && r.data) || {}, sent: true };
-                        connTagBusy = '';
-                        toastOk('Sent the orders tagged "' + tag + '" to Xero.');
+                        await connOp({ op: 'reimport_tag', tag: tag });
+                        toastOk('Sending the orders tagged "' + tag + '" to Xero.');
                         connStartWatch(); renderConnector();
                     } catch (e) { connTagBusy = ''; toastError(e.message); renderConnector(); }
                 };
@@ -8245,6 +8261,7 @@ Projected Image UK"></textarea>
                 + 'The tag stays on the orders, so the same tag can be sent again: an order already in '
                 + 'Xero and unchanged is looked up, not written.'));
             rCard.append(tagWrap);
+            if (connTagBusy) connStartWatch();   /* a tab left and come back to still collects */
             paintTag();
             rCard.append(tagOut);
 

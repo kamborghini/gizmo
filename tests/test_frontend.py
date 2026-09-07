@@ -4169,6 +4169,9 @@ def t_a_tag_is_checked_before_it_is_sent():
     ok("connTagArmed(" in fn, "the send button asks it rather than deciding for itself")
     ok("op: 'reimport_tag', tag: tag, dryRun: true" in fn, "the check is a dry run, which writes nothing")
     ok("sent: true" in fn, "and the live send marks the check spent")
+    watch = fn_src("function connStartWatch(")
+    ok("tagJob" in watch, "the outcome is collected from the status once the service stops, never awaited in the reply")
+    ok("if (connTagBusy) connStartWatch();" in fn, "and a tab left mid-job collects it on return")
     ok(fn.count("connDocRow(d)") == 2, "one order and a tagged list paint a document with the same row")
     ok("connIsAdmin()" in fn, "and only an admin sees the send")
 
