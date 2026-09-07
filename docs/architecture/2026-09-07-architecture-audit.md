@@ -276,3 +276,24 @@ fewer edges.
 **The recommended order:** close the deploy gate, land stages 1–6, then split
 one section at a time — dispatch first, because it has the best tests and the
 clearest boundary — each as its own reviewed change.
+
+---
+
+## 8. Outcome
+
+Stages 1–6 landed the same day, one commit each, both suites green between
+every one:
+
+| Stage | Commit | Result |
+|---|---|---|
+| 1 Integrity | `3349160` | Dispatch evictions archived whole, and not trimmed if the archive fails; size-rule files read from and written to the volume with the repo copies as seeds; 3 dead functions, 1 dead route, 1 dead test and 2 unused packages removed |
+| 2 One writer | `1f34f2a` | `_write_json_store`; 33 writers converted (195 lines out); a guard names the five non-JSON temp-file writers that remain |
+| 3 One door | `9d7a693` | `_guard`; 69 routes and 4 helpers through it (608 lines out); `_authorize` called in exactly one place; the AI slot spent only after the session and the rank |
+| 4 Config | `ff7a464` | `docs/ENVIRONMENT.md` generated from the code (206 variables) and checked in CI; `env.example` rewritten; `make run` sources `.env`; a boot report of what is off |
+| 5 Measure | `043de77` | **Changed from the plan.** The cache was not added: eight CRM routes were written assuming a fresh copy per call, and the CRM's cost was a comment, not a number. The app now measures every store over a megabyte at boot and in Settings. The cache follows the number |
+| 6 Ergonomics | this commit | `Makefile`, `.claude/launch.json`, a README that describes gizmo, `docs/ARCHITECTURE.md` with the "where does it belong" table and the how-to-add recipes |
+| 7 Split | — | Not done. §7 stands; the recommended order is unchanged |
+
+The suites went from 704 to 711 dispatch tests and stayed at 282 frontend
+guards; the real process was started with a minimal environment and answered
+`/healthz`, served the shell, and refused an unauthenticated API call.
