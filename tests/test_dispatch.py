@@ -17435,6 +17435,59 @@ def t_a_chunked_drive_upload_cannot_spool_past_the_quota():
     with_accounts(go)
 
 
+@test
+def t_the_csp_trusts_one_shopify_script_not_every_shopify_host():
+    """cdn.shopify.com is also where Shopify serves every store's uploaded
+    Files, and Files accepts .js - so a bare host entry trusted JavaScript
+    uploaded by anyone with a free development store. That is the host a
+    future markup sink would have loaded a session-stealer from."""
+    import copilot as _c
+    class _Req:
+        headers = {}
+        query_params = {}
+        url = type("U", (), {"path": "/"})()
+    csp = _c._frame_headers(_Req())["Content-Security-Policy"]
+    part = lambda name: [d for d in csp.split(";") if d.strip().startswith(name)][0].strip()
+    script = part("script-src")
+    ok("https://cdn.shopify.com/shopifycloud/" in script, "App Bridge still loads: " + script)
+    ok("https://cdn.shopify.com;" not in script + ";" and not script.endswith("https://cdn.shopify.com"),
+       "but not the bare host, which serves merchant uploads: " + script)
+    ok("*.shopify.com" not in script, "and no wildcard host in script-src: " + script)
+    img = part("img-src")
+    ok(" https:" not in img.replace("https://", " "), "img-src is not every host alive: " + img)
+    ok("https://cdn.shopify.com" in img, "product images still load")
+    connect = part("connect-src")
+    ok("*.myshopify.com" not in connect,
+       "a *.myshopify.com name costs a free trial signup, so it is not an allowed "
+       "destination for anything this page sends: " + connect)
+
+
+@test
+def t_an_oauth_landing_page_cannot_be_framed():
+    # A nested helper, so it is read where it is written: the Google and Xero
+    # callback results are the only pages the app serves outside the shell, and
+    # the shell's frame-ancestors never applied to them.
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    seg = src.split("def _oauth_page(")[1][:1600]
+    ok("default-src 'none'" in seg, "no scripts at all on the callback pages")
+    ok("frame-ancestors 'none'" in seg, "and they cannot be framed")
+
+
+@test
+def t_the_streaming_chat_route_checks_the_session_before_it_spends_an_ai_slot():
+    """The global AI window is the app's most expensive shared resource. An
+    unauthenticated caller was taking a slot from it on the way to a 401 -
+    and the page never sent the session header at all, so every chat turn
+    paid for that round trip before falling back."""
+    copilot._rl_global.clear()
+    r = bare("/api/chat/stream", {"message": "hello"})
+    eq(r.status_code, 401, "no app session, no answer")
+    eq(len(copilot._rl_global), 0, "and no slot was spent getting there")
+    src = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    seg = src.split("async function streamChat(")[1][:1200]
+    ok("X-App-Session" in seg, "and the page now sends the session on the streaming call")
+
+
 for fn in TESTS:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a

@@ -3519,7 +3519,16 @@ Projected Image UK"></textarea>
         /* The .ic class is the whole fix for icons floating above button text:
            a bare span leaves the svg sitting ON the text baseline inside the
            button's 20px line box, ~3px above the text's optical middle. */
-        const ico = (svg) => { const s = el('span', 'ic'); s.innerHTML = svg; return s; };
+        /* ico() is the one helper that puts a string into innerHTML on purpose,
+           so it checks that the string is one of OUR icons rather than trusting
+           its caller. Every caller passes an I.* constant today; this is what
+           keeps that true when somebody writes ico(item.icon) from server JSON. */
+        const ICON_MARKUP = new Set(Object.values(I).filter(v => typeof v === 'string'));
+        const ico = (svg) => {
+            const s = el('span', 'ic');
+            if (ICON_MARKUP.has(svg)) s.innerHTML = svg;
+            return s;
+        };
         /* An anchor with an onclick and no href is a button wearing a link's
            clothes: the pointer stays an arrow and the tab order walks straight
            past it, so the word looks like a door to a mouse and does not exist
@@ -3662,6 +3671,15 @@ Projected Image UK"></textarea>
 
         /* ---------- state + storage ---------- */
         const LS = 'sc_convos_v1';
+        /* Whose cached work is in this browser. The chat history, the store
+           profile and the overview layout live in localStorage so the desk
+           survives a reload - and on a shared dispatch PC they survived the
+           person, too: sign out, next person signs in, and the sidebar still
+           listed "top 20 customers by lifetime spend" with the answer in it.
+           Nothing server-side was bypassed; the data was simply never removed.
+           The owner is stamped on sign-in and the cache is dropped whenever it
+           belongs to somebody else. */
+        const LS_OWNER = 'sc_cache_owner_v1';
         let convos = [];
         let activeId = null;
         let deep = false;
@@ -3693,6 +3711,33 @@ Projected Image UK"></textarea>
                 if (d && d.profile) { profile = Object.assign(profile, d.profile); profile.prefs = Object.assign({}, DEFAULT_PREFS, d.profile.prefs || {}); cacheProfile(); }
             } catch (e) { /* keep cached profile */ }
         }
+        function clearLocalCache() {
+            [LS, LS_SET, LS_OWNER, OV_LAYOUT_KEY].forEach(k => {
+                try { localStorage.removeItem(k); } catch (e) {}
+            });
+        }
+        /* Called the moment the app knows who is signed in. A different owner
+           (or none recorded, which is the state a pre-fix browser is in) means
+           the cache is not theirs: drop it and reload, so no in-memory copy of
+           the previous session's answers survives either. */
+        function claimLocalCache(id) {
+            if (!id) return;
+            let owner = null;
+            try { owner = localStorage.getItem(LS_OWNER); } catch (e) { return; }
+            if (owner === id) return;
+            const hadCache = (() => {
+                try { return Boolean(localStorage.getItem(LS) || localStorage.getItem(LS_SET)); }
+                catch (e) { return false; }
+            })();
+            clearLocalCache();
+            try { localStorage.setItem(LS_OWNER, id); } catch (e) {}
+            if (hadCache) { location.reload(); return; }
+            convos = []; activeId = null;
+            profile = { brand_voice: '', business_goals: '', strategy: '', notes: '',
+                        prefs: Object.assign({}, DEFAULT_PREFS) };
+            renderSidebar(); renderChat();
+        }
+
         const active = () => convos.find(c => c.id === activeId);
         const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
@@ -3746,7 +3791,14 @@ Projected Image UK"></textarea>
             if (res.status === 401) {
                 // The embed token was fine, so this is the app's own door: the
                 // session is missing or expired. Show the login screen.
-                if (!path.startsWith('/api/auth/')) { setAppSession(''); authShow('login'); }
+                if (!path.startsWith('/api/auth/')) {
+                    setAppSession('');
+                    clearLocalCache();
+                    /* An expired session on an unattended machine leaves the
+                       same residue a sign-out did. Reload rather than paint a
+                       login screen over the last person's work. */
+                    location.reload();
+                }
                 throw new Error('Please log in.');
             }
             if (res.status === 429) {
@@ -4932,9 +4984,15 @@ Projected Image UK"></textarea>
         async function streamChat(payload, onStep) {
             let res;
             try {
+                const hdrs = Object.assign({ 'Content-Type': 'application/json' }, await authHeaders());
+                /* The app's own session, exactly as api() sends it. Without it
+                   the server answered 401 on every turn and the page silently
+                   fell back to /api/chat - so the streaming path was dead code
+                   that cost a round trip per message. */
+                const sess = appSession(); if (sess) hdrs['X-App-Session'] = sess;
                 res = await fetch('/api/chat/stream', {
                     method: 'POST',
-                    headers: Object.assign({ 'Content-Type': 'application/json' }, await authHeaders()),
+                    headers: hdrs,
                     body: JSON.stringify(payload),
                 });
             } catch (e) { throw new Error('STREAM_TRANSPORT'); }
@@ -9288,7 +9346,16 @@ Projected Image UK"></textarea>
             const body = el('div', 'modal-body proof-body');
             const fr = document.createElement('iframe');
             fr.className = 'proof-frame';
-            fr.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups');
+            /* allow-same-origin is only safe while the framed page is on a
+                   DIFFERENT origin: on our own, the frame would run with this
+               page's origin and reach its localStorage. The host is pinned
+               server-side, and this is the check that says so out loud. */
+            let proofSameOrigin = true;
+            try { proofSameOrigin = new URL(o.proposal_url, location.href).host === location.host; }
+            catch (e) { proofSameOrigin = true; }
+            fr.setAttribute('sandbox', proofSameOrigin
+                ? 'allow-scripts allow-popups'
+                : 'allow-scripts allow-same-origin allow-popups');
             fr.src = o.proposal_url;
             fr.title = 'Proposal proof';
             body.append(fr);
@@ -10978,7 +11045,6 @@ Projected Image UK"></textarea>
                     toastError('This label only exists as a link at World Options; print it from your portal.');
                     return;
                 }
-                if (l.type === 'dataurl') { window.open(l.value, '_blank', 'noopener'); return; }
                 const url = labelBlobUrl(l);
                 if (!url) { toastError('This label format cannot be saved; get it from your World Options portal.'); return; }
                 const a = document.createElement('a'); a.href = url;
@@ -19256,6 +19322,7 @@ Projected Image UK"></textarea>
                 if (p && p.mfa && p.ticket) { authShowMfa(p.ticket); return; }
                 setAppSession(p.session);
                 teamMe = p.me;
+                claimLocalCache(p.me && p.me.id);
                 if (p.me && p.me.must_change) { authShow('change'); return; }
                 ov.style.display = 'none'; ov.dataset.mode = '';
                 applyRoleChrome();
@@ -19338,6 +19405,7 @@ Projected Image UK"></textarea>
                 if (st.setup) { authShow('setup'); return; }
                 if (!st.logged_in) { authShow('login'); return; }
                 teamMe = st.me;
+                claimLocalCache(st.me && st.me.id);
                 if (st.me.must_change) { authShow('change'); return; }
                 const ov = $('auth-overlay'); if (ov) { ov.style.display = 'none'; ov.dataset.mode = ''; }
                 applyRoleChrome();
@@ -19352,7 +19420,11 @@ Projected Image UK"></textarea>
             try { await authApi('/api/auth/logout', {}); } catch (e) {}
             setAppSession('');
             teamMe = null;
-            authShow('login');
+            /* The reload is the point: it drops every in-memory cache - orders,
+               customers, CRM, the mailbox - which "show the login screen" left
+               sitting behind the overlay for whoever sat down next. */
+            clearLocalCache();
+            location.reload();
         }
         function showTeamView() {
             if (teamCache) { renderTeam(); }

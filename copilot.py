@@ -7994,17 +7994,30 @@ def _frame_headers(request: Request) -> dict:
     # its own pass and buys far less.
     csp = (
         "default-src 'self'; "
-        "script-src 'self' https://cdn.shopify.com https://*.shopify.com; "
+        # PATH-scoped, and only the one script the shell actually loads.
+        # cdn.shopify.com is also where Shopify serves every store's uploaded
+        # Files, and Shopify Files accepts .js - so a bare host entry trusts
+        # JavaScript uploaded by anyone with a free development store, which
+        # is the whole of what this directive is here to prevent.
+        "script-src 'self' https://cdn.shopify.com/shopifycloud/; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
-        "img-src 'self' data: https:"
+        # Every image the page shows is a Shopify CDN product image, a data:
+        # barcode, or a signed link to this account's own bucket (appended
+        # below). "https:" additionally made every host on the internet a
+        # beacon for anything a compromised page wanted to send out.
+        "img-src 'self' data: https://cdn.shopify.com"
         + (" " + _files_endpoint() if _files_configured() else "")   # image preview from the bucket
         + "; "
         # Files uploads/downloads go browser-to-bucket, so the page must be
         # allowed to talk to this account's R2 endpoint and nothing broader.
         # Without it the browser kills the PUT before it starts and the only
         # symptom is "the transfer failed".
-        "connect-src 'self' https://*.shopify.com https://*.myshopify.com"
+        # No *.myshopify.com: the page never calls one, and a name under it
+        # costs a free trial signup - which made it an exfiltration host
+        # anybody could register. *.shopify.com stays for App Bridge; those
+        # names cannot be registered by an outsider.
+        "connect-src 'self' https://*.shopify.com"
         + (" " + _files_endpoint() if _files_configured() else "")
         + "; "
         # The store's own quote domain is allowed so the Proof modal can embed
@@ -13374,12 +13387,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         """Server-sent-events variant of /api/chat: emits real tool-step progress as
         the model works, then a final structured result. The client falls back to
         /api/chat if streaming is unavailable."""
-        pre = _pre_checks(request, ai=True)
-        if pre:
-            return pre
+        # Authorised BEFORE the AI window is touched: the global AI ceiling is
+        # the app's most expensive shared resource, and a caller with no
+        # session was spending a slot from it on the way to a 401.
         ok, _who = _authorize(request)
         if not ok:
             return _json({"error": "Unauthorized"}, 401)
+        pre = _pre_checks(request, ai=True)
+        if pre:
+            return pre
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
@@ -21089,7 +21105,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 "h1{font-size:17px;margin:0 0 8px}p{color:#5c5f66;font-size:14px;margin:0}</style>"
                 f"<div class=c><h1>{t}</h1><p>{m}</p></div>")
         headers = {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
-                   "base-uri 'none'; form-action 'none'", **_API_HEADERS}
+                   "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+                   **_API_HEADERS}
         return HTMLResponse(body, headers=headers)
 
     # ----- Xero connect: the accounts side of the reconciliation engine -----

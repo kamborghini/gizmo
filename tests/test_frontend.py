@@ -115,7 +115,15 @@ def t_label_image_data_is_validated_before_it_becomes_html():
 
 @test
 def t_untrusted_text_never_reaches_innerHTML():
-    """el() sets textContent; innerHTML is for static markup only."""
+    """el() sets textContent; innerHTML is for static markup only.
+
+    The guard used to require the exact text ".innerHTML = ", so `x.innerHTML +=`,
+    `x.innerHTML= v`, `x['innerHTML'] = v`, insertAdjacentHTML, outerHTML and
+    friends all passed silently - and it only ever read the page script, so the
+    composer was outside it entirely. Every one of those is a way to put a
+    server string into the DOM as markup, which is the sink the whole CSP is
+    there to make survivable.
+    """
     STATIC = ("svg", "LABEL_LOGO", "o.icon")
 
     def static_markup(expr: str) -> bool:
@@ -130,10 +138,69 @@ def t_untrusted_text_never_reaches_innerHTML():
         return (e.startswith(("'", '"')) or e.startswith("I.") or e.startswith("I[")
                 or e in STATIC)
 
-    for m in re.finditer(r"\.innerHTML = ([^;\n]+)", SCRIPT):
+    for m in re.finditer(r"\.(?:innerHTML|outerHTML)\s*\+?=\s*([^;\n]+)", SCRIPT):
         val = m.group(1).strip()
         ok(static_markup(val),
            "innerHTML fed something that is not static markup: " + val[:70])
+    ok(not re.search(r"\[\s*['\"](?:inner|outer)HTML['\"]\s*\]", SCRIPT),
+       "and nothing reaches the same sink through a string index")
+
+
+@test
+def t_the_other_html_sinks_are_not_used_at_all():
+    """Sinks with no safe form in this app. Each one takes a string and parses
+    it as markup, so a single server-provided value in any of them is the
+    injection the strict script-src exists to contain."""
+    # srcdoc is not here: the label printer builds one on purpose and the
+    # base64 going into it is regex-validated at the point of interpolation,
+    # which t_label_image_data_is_validated_before_it_becomes_html asserts.
+    BANNED = (r"insertAdjacentHTML", r"\bouterHTML\s*=", r"document\.write",
+              r"createContextualFragment", r"new Function", r"\beval\(",
+              r"setAttribute\(\s*['\"]on")
+    for pat in BANNED:
+        hits = re.findall(pat, SCRIPT)
+        ok(not hits, "the page script uses a banned HTML/script sink: " + pat)
+    # The composer builds mail HTML on purpose, so it gets an allow-list rather
+    # than a ban: its own sanitiser, its icon table, and its paragraph escaper.
+    for m in re.finditer(r"\.(?:innerHTML|outerHTML)\s*\+?=\s*([^;\n]+)", COMPOSER):
+        val = m.group(1).strip()
+        ok(val.startswith(("'", '"', "cleanHtml(", "ICONS[", "esc(")),
+           "composer.js put something unsanitised into markup: " + val[:70])
+    SAFE = ("'", '"', "paras(", "cleanHtml(", "esc(")
+
+    def resolved(val: str, src: str, at: int) -> str:
+        """A local `var html = paras(text)` one line up is the same thing as
+        passing paras(text) inline; anything else stays as written."""
+        if re.fullmatch(r"[A-Za-z_$][\w$]*", val):
+            before = src[:at].splitlines()[-6:]
+            for line in reversed(before):
+                m2 = re.search(r"\b(?:var|let|const)\s+" + re.escape(val) + r"\s*=\s*(.+?);", line)
+                if m2:
+                    return m2.group(1).strip()
+        return val
+
+    for m in re.finditer(r"insertAdjacentHTML\(\s*[^,]+,\s*([^;\n]+?)\)", COMPOSER):
+        val = resolved(m.group(1).strip(), COMPOSER, m.start())
+        ok(val.startswith(SAFE),
+           "composer.js inserted unsanitised markup: " + val[:70])
+    for banned in ("document.write", "new Function", "eval("):
+        ok(banned not in COMPOSER, "composer.js uses " + banned)
+
+
+@test
+def t_every_icon_helper_call_is_given_a_constant():
+    """ico() takes its argument straight to innerHTML, and the guard above
+    whitelists the parameter name - so `ico(item.icon)` fed from server JSON
+    would be invisible to it. The callers are what has to be checked."""
+    ok("ICON_MARKUP.has(svg)" in SCRIPT,
+       "ico() checks the string is one of OUR icons before it becomes markup")
+    for m in re.finditer(r"\bico\(([^),]+)", SCRIPT):
+        arg = m.group(1).strip()
+        if arg.startswith(("I.", "I[", "'", '"', "svg")):
+            continue
+        # Anything else is only allowed because the sink itself refuses a
+        # string that is not in the icon table.
+        ok("ICON_MARKUP" in SCRIPT, "ico() was handed a variable: " + arg[:60])
 
 
 @test
@@ -358,8 +425,10 @@ def t_the_app_has_its_own_front_door():
     ok("authShow" in SCRIPT and "'/api/auth/login'" in SCRIPT, "the login screen exists")
     ok("'/api/auth/setup'" in SCRIPT, "and the first-run setup screen")
     ok("X-App-Session" in SCRIPT, "the session rides on every api call")
-    ok(re.search(r"setAppSession\(''\); authShow\('login'\)", SCRIPT),
-       "a 401 clears the session and asks for a login")
+    ok(re.search(r"setAppSession\(''\);\s*\n\s*clearLocalCache\(\);\s*\n\s*"
+                 r"/\*[^/]*?\*/\s*\n\s*location\.reload\(\)", SCRIPT, re.S),
+       "a 401 clears the session AND the cached work, then reloads: showing a "
+       "login screen over the last person's data is not signing them out")
     ok("authField('Password" in SCRIPT and "'password', 'au-pw'" in SCRIPT,
        "passwords are typed into password fields")
     ok("starter_password" in SCRIPT and "showStarterPw" in SCRIPT,
