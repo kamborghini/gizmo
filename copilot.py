@@ -8297,16 +8297,15 @@ def _window_hits(bucket: list[float], now: float) -> int:
     return len(bucket)
 
 
-def _pre_checks(request: Request, ai: bool = False, max_body: Optional[int] = None) -> Optional[JSONResponse]:
-    """Rate-limit (per-client + global for AI endpoints) and reject oversized bodies."""
+def _pre_checks(request: Request, max_body: Optional[int] = None) -> Optional[JSONResponse]:
+    """The per-client rate window, the body cap, and the tab gate. Anonymous:
+    nothing here needs to know who is asking."""
     now = time.monotonic()
     if len(_rl_hits) > 5000:  # guard the dict from unbounded growth
         _rl_hits.clear()
     if not _window_ok(_rl_hits.setdefault(_client_key(request), []), RATE_MAX_CLIENT, now):
         return _json({"error": "Too many requests in the last minute. Wait about a minute "
                                "and try again - nothing was booked or charged."}, 429)
-    if ai and not _window_ok(_rl_global, RATE_MAX_GLOBAL, now):
-        return _json({"error": "The assistant is busy right now. Please try again shortly."}, 429)
     cl = request.headers.get("content-length", "")
     if cl.isdigit() and int(cl) > (max_body or MAX_BODY_BYTES):
         return _json({"error": "Request too large."}, 413)
@@ -8314,6 +8313,48 @@ def _pre_checks(request: Request, ai: bool = False, max_body: Optional[int] = No
     if denied is not None:
         return denied
     return None
+
+
+def _ai_slot() -> Optional[JSONResponse]:
+    """A slot in the global AI window - the app's most expensive shared
+    resource. Taken only once the caller is known to be a signed-in account,
+    so a request with no session cannot spend one on its way to a 401."""
+    if not _window_ok(_rl_global, RATE_MAX_GLOBAL, time.monotonic()):
+        return _json({"error": "The assistant is busy right now. Please try again shortly."}, 429)
+    return None
+
+
+async def _guard(request: Request, *, ai: bool = False, min_level: int = 0,
+                 max_body: Optional[int] = None, cap: Optional[int] = None,
+                 body: bool = True):
+    """(error_response, body, uid): the one door every signed-in route uses.
+
+    Seventy routes carried their own copy of the same nine lines - rate
+    window, session, body - and five helpers wrapped those lines again, each
+    returning a different tuple. One of the copies spent an AI slot before it
+    had checked the session. The order here is the order: anonymous checks,
+    then who is asking, then what rank they hold, then the paid window, then
+    the body. `body=False` is for a route that reads its own body later, after
+    a check the caller wants to make first."""
+    pre = _pre_checks(request, max_body=max_body)
+    if pre:
+        return pre, None, ""
+    ok, who = _authorize(request)
+    if not ok:
+        return _json({"error": "Unauthorized"}, 401), None, ""
+    uid = str(who or "")
+    if min_level and _team_level(uid) < min_level:
+        return _json({"error": "Only an admin can do that."}, 403), None, ""
+    if ai:
+        busy = _ai_slot()
+        if busy:
+            return busy, None, ""
+    if not body:
+        return None, {}, uid
+    parsed = await _read_json_capped(request, cap=cap)
+    if parsed is None:
+        return _json({"error": "Request too large."}, 413), None, ""
+    return None, parsed, uid
 
 
 async def _read_json_capped(request: Request, cap: Optional[int] = None) -> Optional[dict]:
@@ -13243,15 +13284,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/chat", methods=["POST"])
     async def chat(request: Request):
-        pre = _pre_checks(request, ai=True)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request, ai=True)
+        if err:
+            return err
 
         history = body.get("messages")
         if not history and body.get("message"):
@@ -13293,15 +13328,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # Authorised BEFORE the AI window is touched: the global AI ceiling is
         # the app's most expensive shared resource, and a caller with no
         # session was spending a slot from it on the way to a 401.
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        pre = _pre_checks(request, ai=True)
-        if pre:
-            return pre
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request, ai=True)
+        if err:
+            return err
         history = body.get("messages")
         if not history and body.get("message"):
             history = [{"role": "user", "content": body["message"]}]
@@ -13358,15 +13387,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/overview", methods=["POST"])
     async def overview(request: Request):
-        pre = _pre_checks(request, ai=True)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request, ai=True)
+        if err:
+            return err
         profile = _load_profile()
         extra = _profile_to_system(profile) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         track = (profile.get("prefs") or {}).get("track_inventory", True)
@@ -13386,15 +13409,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/profile", methods=["POST"])
     async def profile_route(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         # Save when a profile object is supplied; otherwise just load.
         if isinstance(body.get("profile"), dict):
             if _team_level(_who) < ROLE_LEVELS["admin"]:
@@ -13410,15 +13427,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/seo", methods=["POST"])
     async def seo_route(request: Request):
-        pre = _pre_checks(request, ai=True)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request, ai=True)
+        if err:
+            return err
         extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         try:
             result = await run_seo_audit(registry, extra)
@@ -13435,15 +13446,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/keywords", methods=["POST"])
     async def keywords_route(request: Request):
-        pre = _pre_checks(request, ai=True)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request, ai=True)
+        if err:
+            return err
         extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         try:
             res = await run_keywords(registry, extra)
@@ -13458,15 +13463,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/keyword-scan", methods=["POST"])
     async def keyword_scan_route(request: Request):
-        pre = _pre_checks(request, ai=True)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request, ai=True)
+        if err:
+            return err
         url = (body.get("url") or "").strip()
         if not url:
             return _json({"error": "Enter a URL to scan."}, 400)
@@ -13488,15 +13487,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/memory", methods=["POST"])
     async def memory_route(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         op = body.get("op")
         try:
             if op == "add" and isinstance(body.get("items"), list):
@@ -13515,15 +13508,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/skills", methods=["POST"])
     async def skills_route(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         op = body.get("op")
         try:
             if op == "add":
@@ -13546,12 +13533,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def cache_route(request: Request):
         # Returns the last saved result of each AI tab so the app can show it
         # instantly on open. Read-only, no AI, no body needed.
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, who = await _guard(request, body=False)
+        if err:
+            return err
         cache = _load_analysis_cache()
         # This one route carries several tabs' cached results, so the tab map
         # cannot gate it wholesale: filter each section to what this account
@@ -13571,15 +13555,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         signed-in account and NOT tab-gated: release notes are how a part-time
         member learns what changed under them, and the request box is worth
         most from the people who never get asked."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         op = str(body.get("op") or "")
         try:
             d = _load_feedback()
@@ -13648,15 +13626,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/schedule", methods=["POST"])
     async def schedule_route(request: Request):
         # Get or set the automatic-refresh config (off by default).
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         try:
             if isinstance(body.get("config"), dict):
                 if _team_level(_who) < ROLE_LEVELS["admin"]:
@@ -13674,15 +13646,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/alerts", methods=["POST"])
     async def alerts_route(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         op = body.get("op")
         try:
             if op == "dismiss" and body.get("id"):
@@ -13699,12 +13665,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/usage", methods=["POST"])
     async def usage_route(request: Request):
         # AI token usage + estimated cost (measurement, no AI).
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, _who = await _guard(request, body=False)
+        if err:
+            return err
         body = await _read_json_capped(request)
         days = 30
         if isinstance(body, dict):
@@ -13716,15 +13679,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/impact", methods=["POST"])
     async def impact_route(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         op = body.get("op") or "list"
         try:
             # Snapshots take seconds; take them BEFORE loading the list so the
@@ -13766,15 +13723,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/learn", methods=["POST"])
     async def learn_route(request: Request):
-        pre = _pre_checks(request, ai=True)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request, ai=True)
+        if err:
+            return err
         op = body.get("op")
         if op == "learn":
             try:
@@ -13799,15 +13750,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/production-labels", methods=["POST"])
     async def production_labels_route(request: Request):
         # Orders carrying the production tag, shaped for printing. Shopify read, no AI.
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         tag = str(body.get("tag") or "").strip()[:60] or None
         try:
             days = int(body.get("days") or 0) or None
@@ -13833,12 +13778,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         previous sheet, and report the before/after so a bad file can't quietly
         wipe the size list."""
         big = 2 * 1024 * 1024
-        pre = _pre_checks(request, max_body=big)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, who = await _guard(request, max_body=big, body=False)
+        if err:
+            return err
         if _team_level(who) < ROLE_LEVELS["admin"]:
             return _json({"error": "Only an admin can replace the size list."}, 403)
         body = await _read_json_capped(request, cap=big)
@@ -13902,12 +13844,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         """The merchant's standing rulings on models, and whether this person may
         change them. Read is open to anyone who can see the tab: knowing why a
         model resolves the way it does is part of reading the size check."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, who = await _guard(request, body=False)
+        if err:
+            return err
         try:
             return _json({"overrides": _gobo_rule_rows("override"),
                           "aliases": _gobo_rule_rows("alias"),
@@ -13921,15 +13860,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         """Models already on the sheet, for the picker behind 'this is another
         name for'. Searching the real sheet is what stops an alias being written
         onto a model that does not exist, which loads as a dead rule."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         q = str(body.get("q") or "").strip().lower()
         if len(q) < 2:
             return _json({"models": []})
@@ -13958,12 +13891,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         already on the sheet, or say it is not a gobo at all. Each writes one row
         to the rule files the size lookup already reads, so nothing here invents a
         mechanism - it opens the one that existed only as a CSV on the volume."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, who = await _guard(request, body=False)
+        if err:
+            return err
         if not _may_edit_sizes(who):
             return _json({"error": "You do not have access to edit the size list. "
                           "An admin can grant it on the Team tab."}, 403)
@@ -14059,15 +13989,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/reorder-radar", methods=["POST"])
     async def reorder_radar_route(request: Request):
         # Overdue repeat accounts + untagged trade customers. Shopify read, no AI.
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         try:
             return _json(await run_reorder_radar(registry))
         except Exception:
@@ -14077,15 +14001,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/customer-history", methods=["POST"])
     async def customer_history_route(request: Request):
         # How many times this label's customer has ordered before. Read-only.
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         try:
             cid = int(body.get("customer_id") or 0)
         except (TypeError, ValueError, OverflowError):
@@ -14108,18 +14026,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     # ----- Shared inbox: who owns which email ----------------------------
     async def _mail_guard(request: Request):
-        """(error_response, body, actor_uid). Same shape as _crm_guard: the
-        inbox is buttons in the app's own UI behind the session auth."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre, None, ""
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401), None, ""
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413), None, ""
-        return None, body, str(who or "")
+        """(error_response, body, actor_uid): the one door, for the inbox."""
+        return await _guard(request)
 
     def _mail_thread_or_404(body: dict):
         t = _load_mail().get("threads", {}).get(str(body.get("id") or ""))
@@ -16056,12 +15964,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         the volume's own JSON/CSV files are accepted, by basename, so a
         crafted zip cannot write anywhere else."""
         big = 120 * 1024 * 1024
-        pre = _pre_checks(request, max_body=big)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, who = await _guard(request, max_body=big, body=False)
+        if err:
+            return err
         if _team_role(who) != "master":
             return _json({"error": "Only the master admin can restore a backup."}, 403)
         body = await _read_json_capped(request, cap=big)
@@ -16210,12 +16115,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def backup_route(request: Request):
         """Everything the app has learned lives as files on one volume; this hands
         the merchant a zip of it. JSON and CSV only, fonts and code excluded."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, who = await _guard(request, body=False)
+        if err:
+            return err
         # Master only, matching /api/restore. The zip deliberately carries the
         # accounts register, so an admin could take home every password hash
         # (including the master's) and grind it offline - while not being
@@ -16260,12 +16162,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         rewriting where a paid order ships. This matches the other writes on this
         tab that change a shared record of truth (the size list, shipping setup).
         """
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, _who = await _guard(request, body=False)
+        if err:
+            return err
         uid = _live_uid(request)
         if _team_level(uid) < ROLE_LEVELS["admin"]:
             return _json({"error": "Only an admin can change an order."}, 403)
@@ -16295,15 +16194,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/production-state", methods=["POST"])
     async def production_state_route(request: Request):
         # Printed and made stamps per order. Local JSON on the volume, no AI.
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         op = str(body.get("op") or "")
         try:
             if op == "printed":
@@ -16457,15 +16350,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/liability", methods=["POST"])
     async def liability_route(request: Request):
         # Accounts receivable overview. Shopify read, no AI.
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         try:
             _refresh_asked(body)
             res = await run_liability(registry)
@@ -16478,15 +16365,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def liability_chase_route(request: Request):
         """Stamp an account as chased today. Local state only: the merchant's
         own mail client sends the email, so this records the fact, not the act."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         key = str(body.get("key") or "").strip()[:120]
         if not key:
             return _json({"error": "No account given."}, 400)
@@ -16505,19 +16386,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         uses the same session auth as everything else; the AI never sees it.
         The caller's id is stashed for _crm_ok's ledger line: the two always
         run inside one request, and nothing awaits between them."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre, None
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401), None
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413), None
+        err, body, who = await _guard(request)
+        if err:
+            return err, None
         # Set LAST, after every await in this guard: the route reads it on the
         # very next synchronous line, so no other request can overwrite it in
         # between on the single event loop.
-        _crm_actor["sub"] = str(who or "")
+        _crm_actor["sub"] = who
         return None, body
 
     _crm_actor = {"sub": ""}
@@ -17657,16 +17532,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # The office file server, minus the office. These routes only ever handle
     # names and signed URLs; the bytes go browser-to-bucket directly.
     async def _files_guard(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre, None, ""
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401), None, ""
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413), None, ""
-        return None, body, str(who or "")
+        return await _guard(request)
 
     def _files_ok(d: dict, extra: Optional[dict] = None, action: str = "",
                   detail: str = "", who: str = "") -> JSONResponse:
@@ -18190,15 +18056,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def auth_mfa_route(request: Request):
         """Turn a second factor on, or ask whether it is on. Behind a session:
         you enrol as yourself, from inside."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok_, who = _authorize(request)
-        if not ok_:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         op = str(body.get("op") or "status")
         d = _load_users()
         u = d["users"].get(str(who))
@@ -18391,27 +18251,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     # ---- Team management --------------------------------------------------
     async def _team_guard(request: Request, min_level: int):
-        pre = _pre_checks(request)
-        if pre:
-            return pre, None
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401), None
-        if _team_level(who) < min_level:
-            return _json({"error": "Only an admin can do that."}, 403), None
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413), None
-        return None, (str(who), body)
+        err, body, who = await _guard(request, min_level=min_level)
+        if err:
+            return err, None
+        return None, (who, body)
 
     @mcp.custom_route("/api/team/me", methods=["POST"])
     async def team_me_route(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, who = await _guard(request, body=False)
+        if err:
+            return err
         u = _team_user(who) or {}
         return _json({"me": {"sub": who, "id": who, "name": u.get("name") or "",
                              "role": u.get("role") or "member", "grace": False,
@@ -19088,15 +18937,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         """Loan projectors: the register of what the shop owns, and where each
         one is. Lending and receiving is the bench's daily job; the register
         itself is an admin's, because it is an asset list."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok_a, who = _authorize(request)
-        if not ok_a:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         op = str(body.get("op") or "board")
         admin = _team_level(who) >= ROLE_LEVELS["admin"]
         keeper = _json({"error": "Only an admin can change the unit register."}, 403)
@@ -19303,15 +19146,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/work/clock", methods=["POST"])
     async def work_clock_route(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         if not _work_monitored(who):
             return _json({"error": "Only part-time accounts clock in and out."}, 400)
         op = str(body.get("op") or "")
@@ -19360,12 +19197,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/work/status", methods=["POST"])
     async def work_status_route(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, who = await _guard(request, body=False)
+        if err:
+            return err
         if not _work_monitored(who):
             return _json({"monitored": False})
         ws = _work_open_session(who)
@@ -19507,15 +19341,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/stock-usage", methods=["POST"])
     async def stock_usage_route(request: Request):
         # Glass blanks consumed by everything marked Made on one day. Read-only, no AI.
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         try:
             res = await run_stock_usage(registry, str(body.get("date") or ""))
             if not res.get("error"):
@@ -19539,15 +19367,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         re-sending a day REPLACES its previous sheet. Every line comes back
         with its own status, and the send is recorded here for the record of
         final-versus-estimate."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         if not _zeta_configured():
             return _json({"error": "The stock app isn't connected (ZETA_URL and the sync "
                                    "token are needed)."}, 400)
@@ -19615,15 +19437,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def labels_queue_route(request: Request):
         # One-click intake from the missed-orders strip: tag the order into
         # production through the same guarded writer the print path uses.
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         try:
             oid = int(body.get("order_id") or 0)
         except (TypeError, ValueError, OverflowError):
@@ -19734,15 +19550,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def shipping_config_route(request: Request):
         """Get or set shipping settings. The API key is write-only: it is saved
         server-side and never returned; the UI only ever sees connected + last4."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         op = str(body.get("op") or "get").lower()
         if op != "set":
             return _json({"config": _shipping_public(_load_shipping())})
@@ -19850,15 +19660,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def shipping_validate_route(request: Request):
         """Confirm the World Options credentials work by pricing a tiny test parcel
         (read-only; never charges)."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         if not worldoptions or not worldoptions.configured():
             return _json({"ok": False, "error": "No credentials set."}, 200)
         try:
@@ -19877,15 +19681,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         the customs paperwork right before a parcel leaves. The answer is only
         ever advisory - see eori.py for why an unreachable service must read as
         "unknown" here and never as "invalid"."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         raw = body.get("number")
         kind = eori.classify(raw)
         if kind == "bad":
@@ -19917,15 +19715,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def parse_address_route(request: Request):
         """Turn a pasted block of text into address fields. Free, and local unless
         the local pass cannot place something."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         text = str(body.get("text") or "")[:4000]
         if not text.strip():
             return _json({"error": "Paste an address first."}, 400)
@@ -19952,15 +19744,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/custom/quote", methods=["POST"])
     async def custom_quote_route(request: Request):
         """Price couriers to a pasted address. Free / read-only, no charge."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         dest = _clean_address(body.get("address") or {})
         boxes, err = _clean_parcel_list(body)
         if err:
@@ -19980,15 +19766,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/custom/book", methods=["POST"])
     async def custom_book_route(request: Request):
         """Book a courier to a pasted address. THIS SPENDS MONEY."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         option = body.get("option")
         if not isinstance(option, dict):
             return _json({"error": "Pick a courier service first."}, 400)
@@ -20028,15 +19808,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         reachable from inside the booking window: a person looking for last
         month's label had to press a button that reads like "spend money
         again". They get their own queue on the desk instead."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         try:
             limit = max(1, min(int(body.get("limit") or 200), 500))
         except (TypeError, ValueError):
@@ -20061,15 +19835,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         there is nothing to query. This is gizmo's own record of the collections
         IT booked, which is why the panel says so rather than implying it read
         the courier's diary."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok_a, who = _authorize(request)
-        if not ok_a:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         day = str(body.get("date") or "")[:10] or _dispatch_today()
         cfg = _load_shipping()
         # The courier's own confirmations for the day, less anything cleared.
@@ -20120,15 +19888,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/dispatch/quote", methods=["POST"])
     async def dispatch_quote_route(request: Request):
         """Price couriers for one order. Free / read-only, no charge."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         try:
             oid = int(body.get("order_id") or 0)
         except (TypeError, ValueError, OverflowError):
@@ -20149,15 +19911,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def dispatch_diagnose_route(request: Request):
         """Why is a courier service missing? Quotes the same parcel several ways
         and reports what each returns. Free and read-only."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         try:
             oid = int(body.get("order_id") or 0)
         except (TypeError, ValueError, OverflowError):
@@ -20177,15 +19933,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/dispatch/book", methods=["POST"])
     async def dispatch_book_route(request: Request):
         """Book the chosen courier (CHARGES the WO account), fulfill + tag."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         try:
             oid = int(body.get("order_id") or 0)
         except (TypeError, ValueError, OverflowError):
@@ -20225,15 +19975,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         """Return the stored label(s) for an already-dispatched order (reprint).
         Read-only; the SOAP API has no fetch-by-tracking service, so labels are
         kept from the booking."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         # Either a Shopify order or a pasted-address shipment: both keep their
         # label in the same place, so reprint is one path.
         oid = _shipment_key(body)
@@ -20284,15 +20028,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def dispatch_manifest_route(request: Request):
         """Everything booked on one day (Europe/London): the driver handover list
         and the sheet to check the World Options invoice against. Read-only."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        okd, _who = _authorize(request)
-        if not okd:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         want = str((body or {}).get("date") or "").strip()
         london = ZoneInfo("Europe/London")
         if want:
@@ -20364,15 +20102,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/margin", methods=["POST"])
     async def margin_route(request: Request):
         """What dispatched orders actually made. Read-only, no AI."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        okd, _who = _authorize(request)
-        if not okd:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         try:
             days = int((body or {}).get("days") or 30)
         except (TypeError, ValueError):
@@ -20386,15 +20118,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/dispatch/cancel", methods=["POST"])
     async def dispatch_cancel_route(request: Request):
         """Cancel a booked shipment at World Options (best-effort)."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         if not worldoptions or not worldoptions.configured():
             return _json({"error": "World Options is not connected."}, 400)
         tn = str(body.get("tracking_number") or "").strip()
@@ -20494,15 +20220,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/production-labels/missing", methods=["POST"])
     async def labels_missing_route(request: Request):
         # Paid gobo orders that never got the production tag. Shopify read, no AI.
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         try:
             res = await run_missing_production(registry)
             return _json(res, 502 if res.get("error") else 200)
@@ -20513,15 +20233,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/production-labels/coverage", methods=["POST"])
     async def labels_coverage_route(request: Request):
         # Size-list coverage over recent orders. Shopify read, no AI.
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         try:
             n = int(body.get("orders") or 200)
         except (TypeError, ValueError, OverflowError):
@@ -20892,15 +20606,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/products", methods=["POST"])
     async def products_route(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request)
+        if err:
+            return err
         try:
             months = int(body.get("months") or 0) or None
         except (TypeError, ValueError):
@@ -20914,15 +20622,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/customers", methods=["POST"])
     async def customers_route(request: Request):
-        pre = _pre_checks(request, ai=True)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request, ai=True)
+        if err:
+            return err
         segment = (body.get("segment") or "").strip()[:80]
         extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
         try:
@@ -20940,12 +20642,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/customer-tags", methods=["POST"])
     async def customer_tags_route(request: Request):
         # Auto-detect the customer-account tags in use (the merchant's sectors). No AI.
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, _who = await _guard(request, body=False)
+        if err:
+            return err
         try:
             cm: dict = {}
             customers = await _paginate_customers(registry, meta=cm)
@@ -20958,15 +20657,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/product", methods=["POST"])
     async def product_route(request: Request):
-        pre = _pre_checks(request, ai=True)
-        if pre:
-            return pre
-        ok, _who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, _who = await _guard(request, ai=True)
+        if err:
+            return err
         try:
             pid = int(body.get("product_id"))
         except (TypeError, ValueError):
@@ -21097,15 +20790,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/connector", methods=["POST"])
     async def connector_route(request: Request):
         """The Xero connector tab's whole API. op says what; the service does it."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok_a, who = _authorize(request)
-        if not ok_a:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         op = str(body.get("op") or "status")
         if not _connector_url():
             return _json({"available": False,
@@ -21265,15 +20952,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/recon/status", methods=["POST"])
     async def recon_status_route(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         d = _load_recon()
         docs = _load_recon_docs()
         xs = xero_api.status()
@@ -21316,12 +20997,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     @mcp.custom_route("/api/recon/xero-link", methods=["POST"])
     async def recon_xero_link_route(request: Request):
         """Master-only: a single-use ticket for the Xero consent walk."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, who = await _guard(request, body=False)
+        if err:
+            return err
         if _team_role(who) != "master":
             return _json({"error": "Only the master account can connect Xero."}, 403)
         if not xero_api.client_configured():
@@ -21341,12 +21019,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def recon_connect_link_route(request: Request):
         """Master-only: mint a single-use ticket for the accounts-mailbox
         consent walk, so nobody has to paste a server secret into a URL."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, who = await _guard(request, body=False)
+        if err:
+            return err
         if _team_role(who) != "master":
             return _json({"error": "Only the master account can connect the accounts mailbox."}, 403)
         body = await _read_json_capped(request)
@@ -21388,12 +21063,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         forget stays valid at Xero for up to 60 days and at Google until
         someone notices. The Xero-derived cache goes with it, because keeping
         a copy of the books after the merchant said stop is not defensible."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, who = await _guard(request, body=False)
+        if err:
+            return err
         if _team_role(who) != "master":
             return _json({"error": "Only the master account can disconnect."}, 403)
         body = await _read_json_capped(request)
@@ -21442,17 +21114,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/recon/sweep", methods=["POST"])
     async def recon_sweep_route(request: Request):
-        pre = _pre_checks(request, ai=True)   # a sweep can read documents with the model
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        if _team_level(who) < ROLE_LEVELS["admin"]:
-            return _json({"error": "Only an admin can run a sweep."}, 403)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        # ai=True: a sweep can read documents with the model. The rank is
+        # checked before the AI slot is spent, so a member cannot burn one.
+        err, body, who = await _guard(request, ai=True, min_level=ROLE_LEVELS["admin"])
+        if err:
+            return err
         if not xero_api.connected():
             return _json({"error": "Connect Xero first: without the accounts there is "
                                    "nothing to reconcile against."}, 400)
@@ -21467,15 +21133,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/recon/exceptions", methods=["POST"])
     async def recon_exceptions_route(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         d = _load_recon()
         rows = _recon_filter(d.get("exceptions", {}),
                              severity=str(body.get("severity") or ""),
@@ -21490,15 +21150,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/recon/exception", methods=["POST"])
     async def recon_exception_route(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
+        err, body, who = await _guard(request)
+        if err:
+            return err
         d = _load_recon()
         e = d.get("exceptions", {}).get(str(body.get("id") or ""))
         if not e:
@@ -21792,12 +21446,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         Admin+ only: the health detail carries internal error strings (the R2
         endpoint with the account id, the stock-app URL, the /data path), which
         a restricted part-time member has no business reading."""
-        pre = _pre_checks(request)
-        if pre:
-            return pre
-        ok, who = _authorize(request)
-        if not ok:
-            return _json({"error": "Unauthorized"}, 401)
+        err, _body, who = await _guard(request, body=False)
+        if err:
+            return err
         if _team_role(who) not in ("master", "admin"):
             return _json({"error": "Connection status is for admins."}, 403)
         body = await _read_json_capped(request)

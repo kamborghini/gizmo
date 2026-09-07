@@ -4539,22 +4539,24 @@ def t_no_api_route_skips_the_pre_checks():
     # has to accept the effect, not insist on one spelling of it.
     # Named, not discovered: _spend_guard is an AI-budget check, not an auth
     # one, and sweeping every *_guard would assert something untrue of it.
-    guards = {"_mail_guard", "_crm_guard", "_team_guard", "_files_guard",
-              # The door's own guard. The auth routes answer anonymously by
-              # design, but they still go through the rate limiter and the body
-              # cap - a login endpoint without those is a brute-force target.
+    guards = {"_guard",   # the one door: rate window, session, rank, AI slot, body
+              "_mail_guard", "_crm_guard", "_team_guard", "_files_guard",
+              # The login door. The auth routes answer anonymously by design,
+              # but they still go through the rate limiter and the body cap -
+              # a login endpoint without those is a brute-force target.
               "_auth_guard"}
     ok(all(("def " + g + "(") in text for g in guards),
-       "the four auth guards are all still there")
+       "the auth guards are all still there")
     for g in guards:
-        seg = text[text.index("def " + g + "("):][:900]
-        ok("_pre_checks" in seg,
-           f"{g} runs the rate limiter and the body cap, or delegating to it "
-           "proves nothing")
-        # The door is the one guard that does NOT authorize: there is no session
-        # yet when you are asking to make one. Everything behind it must.
+        seg = text[text.index("def " + g + "("):][:1400]
+        # A guard proves itself by running the checks, or by delegating to the
+        # one door that does - which is what the four domain guards do now.
+        ok("_pre_checks" in seg or "await _guard(request" in seg,
+           f"{g} runs the rate limiter and the body cap, or delegates to the door")
+        # The login door is the one guard that does NOT authorize: there is no
+        # session yet when you are asking to make one. Everything behind it must.
         if g != "_auth_guard":
-            ok("_authorize" in seg, f"{g} authenticates the caller")
+            ok("_authorize" in seg or "await _guard(request" in seg, f"{g} authenticates the caller")
     bad = []
     for m in re.finditer(r'custom_route\("(/api/[^"]+)"[^)]*\)\s*\n\s*async def (\w+)', text):
         path, fn = m.group(1), m.group(2)
@@ -14906,9 +14908,7 @@ def t_eori_the_request_matches_the_shape_the_eu_service_actually_wants():
 @test
 def t_eori_route_is_gated_exactly_like_the_shipping_config_route():
     route = _copilot_src("eori_check_route")
-    ok("_pre_checks(request)" in route, "same rate/size/tab pre-checks")
-    ok("_authorize(request)" in route, "and the same app session")
-    ok('"Unauthorized"' in route, "answering 401 the same way")
+    ok("await _guard(request" in route, "the same door: rate window, tab gate, session, body cap")
     # The tab lock is driven by the path table, not by the route body.
     ok(("/api/eori", "labels") in copilot._TAB_ROUTES,
        "the checker sits behind the labels/dispatch tab, like /api/shipping")
@@ -17610,6 +17610,43 @@ def t_the_one_writer_refuses_nan_a_poisoned_store_and_keeps_secrets_private():
        "even one that existed at 0644")
     eq(json.load(open(p)), {"secret": "x"}, "None writes the object itself")
     os.remove(p)
+
+
+@test
+def t_every_signed_in_route_goes_through_the_one_door():
+    """Seventy routes carried their own copy of the nine-line preamble, and one
+    copy spent an AI slot before it had checked the session. The session is
+    checked in one place now; this keeps it there."""
+    import ast as _ast
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    tree = _ast.parse(src)
+    spans = [(n.lineno, n.end_lineno, n.name) for n in _ast.walk(tree)
+             if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and n.name != "add_routes"]
+    def owner(lineno):
+        inner = min((s for s in spans if s[0] <= lineno <= s[1]), key=lambda s: s[1] - s[0], default=None)
+        return inner[2] if inner else "(module)"
+    lines = src.splitlines()
+    def owners(needle):
+        return {owner(i) for i, l in enumerate(lines, 1)
+                if needle in l and not l.strip().startswith(("#", "def ", "async def "))}
+    eq(owners("_authorize(request"), {"_guard"}, "the session is checked in exactly one place")
+    eq(owners("_pre_checks(request"), {"_guard", "_auth_guard", "sign_label_doc", "print_labels_doc"},
+       "the anonymous checks run from the door, the anonymous auth guard, and the two print pages")
+    eq(owners("_ai_slot()"), {"_guard"}, "the paid window is only ever spent by the door, after the session")
+    ok(not any("_pre_checks(request, ai" in l for l in lines), "no route spends an AI slot before it knows who is asking")
+
+
+@test
+def t_the_door_checks_rank_before_it_spends_an_ai_slot():
+    def go():
+        ensure_auth()
+        owen, sess, _pw = ready_user("Owen", "owen")
+        eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["recon"]}).status_code, 200)
+        r = post_s(sess, "/api/recon/sweep", {})
+        eq(r.status_code, 403, r.text)
+        ok("admin" in r.json()["error"], r.text)
+        eq(len(copilot._rl_global), 0, "a member's refused sweep did not spend an AI slot")
+    with_accounts(go)
 
 
 for fn in TESTS:
