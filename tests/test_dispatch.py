@@ -13636,6 +13636,13 @@ def t_the_connector_tab_is_a_guarded_proxy():
         eq(r.status_code, 400, "a reimport with no order is refused")
         r = post("/api/connector", {"op": "reimport", "order": "#104300"}).json()
         eq(called[-1][2].get("order"), "#104300", "and with one, it passes it through")
+        # A tag send names the tag, and its check is the dry run.
+        eq(post("/api/connector", {"op": "reimport_tag"}).status_code, 400, "a tag send with no tag is refused")
+        post("/api/connector", {"op": "reimport_tag", "tag": "xero-price-check", "dryRun": True})
+        eq(called[-1], ("POST", "/api/reimport-tag", {"tag": "xero-price-check", "dryRun": "1"}),
+           "the tag and the dry run reach the service as they are")
+        post("/api/connector", {"op": "reimport_tag", "tag": "xero-price-check"})
+        eq(called[-1][2], {"tag": "xero-price-check"}, "and an admin's send carries no dryRun")
         # Unknown op refused.
         eq(post("/api/connector", {"op": "explode"}).status_code, 400, "unknown ops are refused")
         # The service's token never appears in any reply.
@@ -13681,12 +13688,12 @@ def t_only_an_admin_can_write_to_xero():
            "the clerk can look")
         eq(post_s(sess, "/api/connector", {"op": "review"}).status_code, 200,
            "and review, which writes nothing")
-        for op in ("send", "retry", "reimport"):
-            rr = post_s(sess, "/api/connector", {"op": op, "order": "#1"})
+        for op in ("send", "retry", "reimport", "reimport_tag"):
+            rr = post_s(sess, "/api/connector", {"op": op, "order": "#1", "tag": "t"})
             eq(rr.status_code, 403, op + " is refused for a member")
         wrote = [c for c in called if c[0] == "POST" and c[1] in ("/api/sync",) ]
         # the clerk's review was a POST /api/sync (dry) - allowed; no other writes
-        ok(all(c[1] != "/api/retry" and c[1] != "/api/reimport" for c in called),
+        ok(all(c[1] not in ("/api/retry", "/api/reimport", "/api/reimport-tag") for c in called),
            "no write ever reached the service from the member")
         # And an account WITHOUT the tab cannot even look.
         post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["overview"]})

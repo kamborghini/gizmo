@@ -20925,6 +20925,26 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if not dry:
                     _track(who, "connector", "sent one order to Xero", order)
                 return _json({"available": True, "data": data}, code if code >= 400 else 200)
+            if op == "reimport_tag":
+                # Every order carrying a tag, one at a time through the same
+                # path as a single send. The tag stays on the orders: it is a
+                # label, not a to-do, so the same tag can be sent again and an
+                # order already in Xero and unchanged is a lookup, not a write.
+                tag = str(body.get("tag") or "").strip()
+                if not tag:
+                    return _json({"error": "Say which tag to send (e.g. xero-price-check)."}, 400)
+                dry = bool(body.get("dryRun"))
+                if not dry and _team_level(who) < ROLE_LEVELS["admin"]:
+                    return _json({"error": "Only an admin can send documents to Xero."}, 403)
+                params = {"tag": tag}
+                if dry:
+                    params["dryRun"] = "1"
+                if body.get("force"):
+                    params["force"] = "1"
+                code, data = await _connector_call("POST", "/api/reimport-tag", params)
+                if not dry:
+                    _track(who, "connector", "sent tagged orders to Xero", tag)
+                return _json({"available": True, "data": data}, code if code >= 400 else 200)
             if op in ("send", "retry"):
                 # These write invoices and credit notes into Xero.
                 if _team_level(who) < ROLE_LEVELS["admin"]:

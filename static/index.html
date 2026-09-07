@@ -7102,6 +7102,8 @@ Projected Image UK"></textarea>
         /* The per-order equivalent: {order, data} from a check, and it arms
            only the order it names. */
         let connOneCheck = null;
+        let connTagCheck = null;    // the completed check for a tag, awaiting its send
+        let connTagBusy = '';
         let connOneBusy = '';
         let connPaySince = '';
         let connPayResult = null;
@@ -7372,6 +7374,42 @@ Projected Image UK"></textarea>
         function connOneArmed(order) {
             return !!(connOneCheck && connOneCheck.order
                       && connOneCheck.order === String(order || '').trim());
+        }
+        /* A tag's check arms exactly that tag, and a send spends it: the
+           results stay on screen to be read, but sending them again needs a
+           fresh check. */
+        /* One document's row: its outcome, its message, and the document
+           itself when the connector handed it back. Shared by the single
+           order and the tagged list, so a row reads the same in both. */
+        function connDocRow(d) {
+            const row = el('div', 'lbl-row loan-row');
+            row.append(el('span', 'mrule-tag', d.kind === 'creditnote' ? 'Credit note' : 'Invoice'));
+            const what = el('div', 'lr-what');
+            what.append(el('div', null, d.action || ''));
+            if (d.message) what.append(el('div', 'lbl-meta', d.message));
+            row.append(what);
+            /* The whole point of a dry run is to be READ. A preview
+               means the connector handed back the document itself, so
+               the row opens it rather than only naming its outcome. */
+            if (d.preview) {
+                const p = d.preview;
+                if (p.lines && p.lines.length) {
+                    row.append(el('span', 'lbl-meta',
+                        p.lines.length + (p.lines.length === 1 ? ' line' : ' lines')
+                        + ' \u00b7 ' + (p.currency ? p.currency + ' ' : '')
+                        + (typeof p.lineTotal === 'number' ? p.lineTotal.toFixed(2) : '')));
+                }
+                const open = el('button', 'btn btn-sm', 'See the document');
+                open.onclick = () => connDocModal(d);
+                row.append(open);
+                row.classList.add('conn-open');
+                row.onclick = e => { if (e.target === row || what.contains(e.target)) connDocModal(d); };
+            }
+            return row;
+        }
+        function connTagArmed(tag) {
+            return !!(connTagCheck && connTagCheck.tag && !connTagCheck.sent
+                      && connTagCheck.tag === String(tag || '').trim());
         }
         let connBusy = '';        // 'review' | 'send' | 'retry' while one is in flight
         let connWatch = 0;
@@ -8062,32 +8100,7 @@ Projected Image UK"></textarea>
                         'No order ' + connOneCheck.order + ' in Shopify.'));
                     return;
                 }
-                (c.docs || []).forEach(d => {
-                    const row = el('div', 'lbl-row loan-row');
-                    row.append(el('span', 'mrule-tag', d.kind === 'creditnote' ? 'Credit note' : 'Invoice'));
-                    const what = el('div', 'lr-what');
-                    what.append(el('div', null, d.action || ''));
-                    if (d.message) what.append(el('div', 'lbl-meta', d.message));
-                    row.append(what);
-                    /* The whole point of a dry run is to be READ. A preview
-                       means the connector handed back the document itself, so
-                       the row opens it rather than only naming its outcome. */
-                    if (d.preview) {
-                        const p = d.preview;
-                        if (p.lines && p.lines.length) {
-                            row.append(el('span', 'lbl-meta',
-                                p.lines.length + (p.lines.length === 1 ? ' line' : ' lines')
-                                + ' \u00b7 ' + (p.currency ? p.currency + ' ' : '')
-                                + (typeof p.lineTotal === 'number' ? p.lineTotal.toFixed(2) : '')));
-                        }
-                        const open = el('button', 'btn btn-sm', 'See the document');
-                        open.onclick = () => connDocModal(d);
-                        row.append(open);
-                        row.classList.add('conn-open');
-                        row.onclick = e => { if (e.target === row || what.contains(e.target)) connDocModal(d); };
-                    }
-                    oneOut.append(row);
-                });
+                (c.docs || []).forEach(d => oneOut.append(connDocRow(d)));
             }
             oneChk.onclick = async () => {
                 const order = oneIn.value.trim();
@@ -8144,6 +8157,96 @@ Projected Image UK"></textarea>
             rCard.append(oneWrap);
             paintOne();
             rCard.append(oneOut);
+
+            /* ---- every order with a tag ----
+               The same discipline over a list: check the tag, read what each
+               order would do, then send that tag. The tag is left on the
+               orders. It is a label, not a to-do, so the same tag can be sent
+               again and an order already in Xero and unchanged is a lookup,
+               not a write. The connector caps a tag at 100 orders. */
+            const tagWrap = el('div', 'lbl-row'); tagWrap.style.marginTop = 'var(--sp-4)';
+            const tagIn = crmText(connTagCheck ? connTagCheck.tag : '', 'xero-price-check');
+            tagIn.style.maxWidth = '220px';
+            tagIn.setAttribute('aria-label', 'Order tag');
+            const tagChk = el('button', 'btn btn-sm');
+            tagChk.append(ico(I.eye), document.createTextNode('Check tagged orders'));
+            const tagOut = el('div', 'conn-results');
+            const paintTag = () => {
+                tagOut.replaceChildren();
+                if (connTagBusy === 'check') { tagOut.append(el('div', 'sub', 'Checking every order with that tag\u2026')); return; }
+                if (connTagBusy === 'send') { tagOut.append(el('div', 'sub', 'Sending\u2026')); return; }
+                const c = connTagCheck && connTagCheck.data;
+                if (!c) return;
+                if (c.error) { tagOut.append(el('div', 'msg error', c.error)); return; }
+                const rows = c.details || [];
+                const n = rows.length;
+                const will = c.dryRun ? 'would be' : 'were';
+                tagOut.append(el('div', 'sub', n + (n === 1 ? ' order carries' : ' orders carry') + ' the tag "'
+                    + connTagCheck.tag + '"' + (n ? ': ' + (c.created || 0) + ' ' + will + ' created, ' + (c.updated || 0)
+                    + ' updated in place, ' + (c.unchanged || 0) + ' already in Xero and unchanged, ' + (c.blocked || 0)
+                    + ' blocked, ' + ((c.stillFailing || 0) + (c.errored || 0)) + ' failing.' : '.')));
+                rows.forEach(r => {
+                    const head = el('div', 'lbl-row');
+                    head.append(el('strong', null, r.order));
+                    if (!r.found) head.append(el('span', 'lbl-meta', 'not in Shopify'));
+                    else if (r.error) head.append(el('span', 'lbl-meta', r.error));
+                    tagOut.append(head);
+                    (r.docs || []).forEach(d => tagOut.append(connDocRow(d)));
+                });
+            };
+            tagChk.onclick = async () => {
+                const tag = tagIn.value.trim();
+                if (!tag) { toastError('Type the tag first, for example xero-price-check.'); return; }
+                tagChk.disabled = true; connTagBusy = 'check'; connTagCheck = null;
+                try {
+                    const r = await connOp({ op: 'reimport_tag', tag: tag, dryRun: true });
+                    connTagCheck = { tag: tag, data: (r && r.data) || {} };
+                } catch (e) { toastError(e.message); }
+                connTagBusy = ''; tagChk.disabled = false;
+                renderConnector();
+            };
+            tagWrap.append(tagIn, tagChk);
+            if (connIsAdmin()) {
+                const tagSend = el('button', 'btn btn-sm btn-primary');
+                tagSend.append(ico(I.send), document.createTextNode('Send tagged orders'));
+                const tagReady = () => connTagArmed(tagIn.value) && !((connTagCheck.data || {}).error);
+                const tagTitle = ok => ok ? 'Write every checked order into Xero'
+                    : 'Check the tag first: Send does what the check showed';
+                tagSend.disabled = running || connTagBusy || !tagReady();
+                tagSend.title = tagTitle(tagReady());
+                tagIn.oninput = () => {
+                    const now = tagReady();
+                    tagSend.disabled = running || connTagBusy || !now;
+                    tagSend.title = tagTitle(now);
+                };
+                tagSend.onclick = async () => {
+                    const tag = tagIn.value.trim();
+                    const c = ((connTagCheck || {}).data) || {};
+                    const n = (c.details || []).length;
+                    if (!await uiConfirm('Send every order tagged "' + tag + '" to Xero? The check found '
+                        + n + (n === 1 ? ' order' : ' orders') + ': ' + (c.created || 0) + ' to create and '
+                        + (c.updated || 0) + ' to update in place. The rest are already in Xero or blocked.',
+                        { title: 'Send tagged orders', okText: 'Send them' })) return;
+                    tagSend.disabled = true; connTagBusy = 'send';
+                    try {
+                        const r = await connOp({ op: 'reimport_tag', tag: tag });
+                        /* Spent: the results stay to be read, the send does not. */
+                        connTagCheck = { tag: tag, data: (r && r.data) || {}, sent: true };
+                        connTagBusy = '';
+                        toastOk('Sent the orders tagged "' + tag + '" to Xero.');
+                        connStartWatch(); renderConnector();
+                    } catch (e) { connTagBusy = ''; toastError(e.message); renderConnector(); }
+                };
+                tagWrap.append(tagSend);
+            }
+            rCard.append(el('div', 'section-title', 'Every order with a tag'));
+            rCard.append(el('p', 'field-help',
+                'Tag the orders in Shopify, check the tag here, read what each would write, then send. '
+                + 'The tag stays on the orders, so the same tag can be sent again: an order already in '
+                + 'Xero and unchanged is looked up, not written.'));
+            rCard.append(tagWrap);
+            paintTag();
+            rCard.append(tagOut);
 
             /* ---- payout notes ----
                A separate pass, because Shopify settles days after the order:

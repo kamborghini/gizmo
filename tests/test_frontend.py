@@ -4158,6 +4158,23 @@ def t_no_guard_is_stranded_below_the_runner():
 
 
 @test
+def t_a_tag_is_checked_before_it_is_sent():
+    """Bulk by tag is the single-order discipline over a list: a check arms
+    exactly the tag it ran for, retyping disarms it, a send spends it while
+    the results stay on screen, and the rows are the same rows."""
+    armed = fn_src("function connTagArmed(")
+    ok("connTagCheck.tag ===" in armed, "the check must be for the tag in the box")
+    ok("!connTagCheck.sent" in armed, "and a send spends it, though its results stay readable")
+    fn = fn_src("function renderConnector(")
+    ok("connTagArmed(" in fn, "the send button asks it rather than deciding for itself")
+    ok("op: 'reimport_tag', tag: tag, dryRun: true" in fn, "the check is a dry run, which writes nothing")
+    ok("sent: true" in fn, "and the live send marks the check spent")
+    ok(fn.count("connDocRow(d)") == 2, "one order and a tagged list paint a document with the same row")
+    ok("connIsAdmin()" in fn, "and only an admin sees the send")
+
+
+
+@test
 def t_one_order_is_checked_before_it_is_sent():
     """The same review-before-send discipline as the batch, per order: a check
     arms exactly the order it was run for, so retyping the box disarms the
@@ -4383,9 +4400,10 @@ def t_only_a_document_the_connector_returned_can_be_opened():
     fn = fn_src("function renderConnector(")
     i = fn.find("c.docs")
     ok(i > 0, "the check result still renders its docs")
-    seg = fn[i:i + 2000]
-    ok("if (d.preview)" in seg, "the opener is offered only when a document came back")
-    ok("connDocModal(d)" in seg, "and it opens that document")
+    ok("connDocRow(d)" in fn[i:i + 200], "through the one row both the order and the tag list use")
+    row = fn_src("function connDocRow(")
+    ok("if (d.preview)" in row, "the opener is offered only when a document came back")
+    ok("connDocModal(d)" in row, "and it opens that document")
 
 
 @test
