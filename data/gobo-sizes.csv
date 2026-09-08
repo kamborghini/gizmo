@@ -1808,7 +1808,7 @@
 "Standard Size","D Size","53.3","40","53.3","0","","Previously listed here as 43 mm image."
 "Standard Size","E Size","37.5","28","37.5","0","",""
 "Standard Size","G Size","66","45","66","0","","Metal holder size (Clay Paky / integral); glass holders take 51.8 mm. Previously listed here as 51.8 mm / 43 mm."
-"Standard Size","M Size","65.5","49.5","53.3","12.2","Nearest size is 12.2 mm under the holder","Some fixtures use 66 mm. Previously listed here as 66 mm / 54 mm."
+"Standard Size","M Size","66","48","66","0","","Nominal M size, cut at 66 as the merchant rules it (some metal holders measure 65.5). Previously listed here as 65.5 mm / 49.5 mm to 53.3, which put a D-size gobo in an M-size holder."
 "Standard Size","S Size","92","79","86","6","Nearest size is 6 mm under the holder","Metal only."
 "Standard Size","T Size","46.5","38","44","2.5","Nearest size is 2.5 mm under the holder",""
 "Standard Size","V Size","25","18","25","0","","Previously listed here as 22.5 mm / 22 mm."

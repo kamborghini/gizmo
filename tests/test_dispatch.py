@@ -12328,6 +12328,24 @@ def t_the_forecast_hook_takes_only_its_token_and_the_tab_reads_the_run():
         copilot.FORECAST_INGEST_TOKEN = saved
 
 @test
+def t_the_standard_holder_sizes_resolve_to_their_nominal_glass():
+    """Order 104335 (2026-09-08): the store's "Standard / M Size" printed 53.3,
+    a D-size gobo for an M-size holder. The sheet's own row had the M holder
+    at 65.5 mm and mapped it down to the next size the sheet makes, while the
+    same sheet already produces 66 for 44 models and the merchant's ruling
+    for the Source Four Junior M size is 66. The nominal sizes are the sheet's
+    now, and the M ruling also stands in the overrides, which survive a sheet
+    replacement."""
+    want = {"A Size": "100", "B Size": "86", "M Size": "66", "D Size": "53.3", "E Size": "37.5"}
+    for model, size in want.items():
+        for mfr in ("Standard", "Standard Size"):
+            hit, why = copilot._gobo_lookup(mfr, model)
+            ok(hit is not None and hit["production_size"] == size and not why,
+               f"{mfr} / {model} -> {hit and hit['production_size']} ({why})")
+    seed = open(os.path.join(HERE, "data", "gobo-overrides.csv"), encoding="utf-8").read()
+    ok("Standard Size,M Size,,66" in seed, "the M-size ruling is an override too, so a re-uploaded sheet cannot undo it")
+
+@test
 def t_recon_routes_enforce_their_rules():
     def go():
         ensure_auth()
