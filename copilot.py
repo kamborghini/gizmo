@@ -151,6 +151,9 @@ ALERTS_PATH        = os.environ.get("ALERTS_PATH", "/data/alerts.json")      # c
 FEEDBACK_PATH      = os.environ.get("FEEDBACK_PATH", "/data/feedback.json")  # feature requests from the desk
 # Reconciliation engine: exceptions + audit trail, system snapshots, extracted documents.
 RECON_PATH         = os.environ.get("RECON_PATH", "/data/recon.json")
+FORECAST_PATH      = os.environ.get("FORECAST_PATH", "/data/forecast.json")  # the nightly forecasting service's latest run, and the cash flow workbook an admin uploaded (base64), in one store
+FORECAST_INGEST_TOKEN = os.environ.get("FORECAST_INGEST_TOKEN", "").strip()  # shared secret the nightly forecasting service presents to /hooks/forecast/*; empty switches the hooks off
+FORECAST_MAX_BYTES = 8 * 1024 * 1024
 RECON_CACHE_PATH   = os.environ.get("RECON_CACHE_PATH", "/data/recon_cache.json")
 RECON_DOCS_PATH    = os.environ.get("RECON_DOCS_PATH", "/data/recon_docs.json")
 CHANGELOG_PATH     = os.environ.get("CHANGELOG_PATH",
@@ -12304,7 +12307,7 @@ def _master_reset_check(d: dict) -> None:
 # this path map, so hiding a tab in the page is never the only lock.
 TAB_KEYS = ("overview", "seo", "keywords", "products", "customers", "liability",
             "crm", "loans", "mail", "files", "labels", "memory", "skills", "chat",
-            "recon", "connector")
+            "recon", "forecast", "connector")
 # API routes that belong to no tab and are open to every signed-in account:
 # the sign-in flow, a person's own clock and profile, and the admin routes,
 # which refuse non-admins themselves. Anything else under /api/ that is not in
@@ -12316,6 +12319,7 @@ _OPEN_API = ("/api/auth/", "/api/team/", "/api/work/", "/api/google/status", "/a
 _TAB_ROUTES = (
     ("/api/overview", "overview"), ("/api/seo", "seo"), ("/api/keyword", "keywords"),
     ("/api/recon", "recon"),
+    ("/api/forecast", "forecast"),
     ("/api/eori/", "labels"),
     ("/api/connector", "connector"),
     ("/api/products", "products"), ("/api/product", "products"),
@@ -12346,7 +12350,9 @@ _TAB_ROUTES = (
 # hands it over deliberately, or not at all.
 # The connector WRITES to the accounting ledger, so like the books it is
 # handed over deliberately, never inherited with an account.
-OPT_IN_TABS = ("recon", "connector")
+# The forecast holds the cash flow plan and where the company stands against
+# it, which is the books' own kind of secret, so it is handed over the same way.
+OPT_IN_TABS = ("recon", "connector", "forecast")
 DEFAULT_TABS = tuple(k for k in TAB_KEYS if k not in OPT_IN_TABS)
 
 
@@ -13314,6 +13320,123 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if SHOPIFY_STORE and not shop.lower().startswith(SHOPIFY_STORE.split(".")[0].lower() + "."):
             return None, PlainTextResponse("Unauthorized", status_code=401)
         return raw, None
+
+    # ---- Forecast: the nightly forecasting service and the tab that reads it ----
+    def _forecast_state() -> dict:
+        d = _load_json_store(FORECAST_PATH, "forecast", None)
+        return d if isinstance(d, dict) else {}
+
+    def _forecast_token_ok(request: Request) -> bool:
+        return _secret_ok(str(request.headers.get("x-forecast-token") or ""), FORECAST_INGEST_TOKEN)
+
+    @mcp.custom_route("/hooks/forecast/results", methods=["POST"])
+    async def forecast_results_hook(request: Request):
+        """The nightly forecasting service (a second Railway service on this
+        repo, `python -m forecast nightly`) posts each run here. A shared secret
+        in the header is the whole authentication: the service has no account
+        and the token never leaves the two Railway environments. A run that
+        failed posts {"error": ...} so the tab can say so instead of showing a
+        stale forecast as if it were fresh."""
+        if not FORECAST_INGEST_TOKEN:
+            return _json({"error": "The forecast hook is switched off: set FORECAST_INGEST_TOKEN."}, 503)
+        if not _forecast_token_ok(request):
+            return _json({"error": "Unauthorized"}, 401)
+        # No session and no rate window, like the Shopify webhook receiver: the
+        # secret is the gate, and the reader caps what it will hold in memory.
+        body = await _read_json_capped(request, cap=FORECAST_MAX_BYTES)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        if not isinstance(body, dict):
+            return _json({"error": "A JSON object is required."}, 400)
+        state = _forecast_state()
+        now = datetime.now(timezone.utc).isoformat()
+        if body.get("error"):
+            state["last_error"] = {"at": now, "as_of": body.get("as_of"), "error": str(body["error"])[:2000]}
+        else:
+            missing = [k for k in ("as_of", "monthly", "scenarios") if k not in body]
+            if missing:
+                return _json({"error": "The run is missing " + ", ".join(missing) + "."}, 400)
+            body["received_at"] = now
+            state["latest"] = body
+            state.pop("last_error", None)
+            runs = [r for r in state.get("runs", []) if r.get("as_of") != body.get("as_of")]
+            runs.append({"as_of": body.get("as_of"), "received_at": now,
+                         "year_p50": (body.get("year") or {}).get("p50"), "alerts": len(body.get("alerts") or [])})
+            state["runs"] = runs[-60:]
+        _write_json_store(FORECAST_PATH, "forecast", state)
+        return _json({"ok": True})
+
+    @mcp.custom_route("/hooks/forecast/workbook", methods=["GET"])
+    async def forecast_workbook_hook(request: Request):
+        """The service fetches the workbook an admin uploaded in the tab, so the
+        plan lives in one place and a revised sheet reaches the next run."""
+        if not FORECAST_INGEST_TOKEN:
+            return _json({"error": "The forecast hook is switched off: set FORECAST_INGEST_TOKEN."}, 503)
+        if not _forecast_token_ok(request):
+            return _json({"error": "Unauthorized"}, 401)
+        wb = _forecast_state().get("workbook") or {}
+        if not wb.get("data_b64"):
+            return _json({"error": "No cash flow workbook has been uploaded yet."}, 404)
+        try:
+            raw = base64.b64decode(wb["data_b64"], validate=True)
+        except (ValueError, TypeError):
+            return _json({"error": "The stored workbook did not decode."}, 500)
+        return Response(raw, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={**_API_HEADERS, "Cache-Control": "no-store",
+                                 "Content-Disposition": 'attachment; filename="Cash Flow.xlsx"'})
+
+    @mcp.custom_route("/api/forecast", methods=["POST"])
+    async def forecast_route(request: Request):
+        """What the tab shows: the latest run, the last failure if the latest
+        attempt failed, the recent runs, the workbook on file and whether the
+        hook is configured at all."""
+        err, _body, who = await _guard(request)
+        if err:
+            return err
+        state = _forecast_state()
+        wb = {k: v for k, v in (state.get("workbook") or {}).items() if k != "data_b64"}
+        return _json({"latest": state.get("latest"), "last_error": state.get("last_error"),
+                      "runs": state.get("runs", [])[-14:], "workbook": wb,
+                      "hook_configured": bool(FORECAST_INGEST_TOKEN),
+                      "can_upload": _team_level(who) >= ROLE_LEVELS["admin"]})
+
+    @mcp.custom_route("/api/forecast/workbook", methods=["POST"])
+    async def forecast_workbook_upload_route(request: Request):
+        """An admin replaces the cash flow workbook. It is a real .xlsx or it is
+        refused: the app has no spreadsheet library of its own, but a workbook
+        is a zip with xl/workbook.xml in it, and that much can be checked. It
+        is kept inside the forecast store, base64, so the one writer writes it
+        and the backup carries it; a 70 KB sheet does not need a file of its own."""
+        cap = FORECAST_MAX_BYTES + 2 * 1024 * 1024   # base64 overhead
+        err, _b, who = await _guard(request, max_body=cap, body=False)
+        if err:
+            return err
+        if _team_level(who) < ROLE_LEVELS["admin"]:
+            return _json({"error": "Only an admin can replace the cash flow workbook."}, 403)
+        body = await _read_json_capped(request, cap=cap)
+        if body is None:
+            return _json({"error": "That file is too large (8 MB cap)."}, 413)
+        name = str(body.get("name") or "Cash Flow.xlsx")[:120]
+        try:
+            raw = base64.b64decode(str(body.get("data_b64") or ""), validate=True)
+        except (ValueError, TypeError):
+            return _json({"error": "The upload did not decode."}, 400)
+        if len(raw) > FORECAST_MAX_BYTES:
+            return _json({"error": "That file is too large (8 MB cap)."}, 413)
+        import io as _io
+        import zipfile as _zipfile
+        try:
+            names = _zipfile.ZipFile(_io.BytesIO(raw)).namelist()
+        except _zipfile.BadZipFile:
+            names = []
+        if "xl/workbook.xml" not in names:
+            return _json({"error": "That file is not an .xlsx workbook."}, 400)
+        state = _forecast_state()
+        meta = {"name": name, "size": len(raw), "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                "by": _team_name(who) or ""}
+        state["workbook"] = {**meta, "data_b64": base64.b64encode(raw).decode("ascii")}
+        _write_json_store(FORECAST_PATH, "forecast", state)
+        return _json({"ok": True, "workbook": meta})
 
     @mcp.custom_route("/webhooks/privacy", methods=["POST"])
     async def privacy_webhook(request: Request):

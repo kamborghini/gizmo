@@ -1,4 +1,4 @@
-import os, sys, json, time, asyncio, glob, re, tempfile
+import os, sys, json, time, asyncio, glob, re, tempfile, base64
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import xml.etree.ElementTree as ET
 SCRATCH = tempfile.mkdtemp(prefix="gizmo-dispatch-tests-")
@@ -17,6 +17,7 @@ os.environ.update({
     "WO_FAILURES_PATH": SCRATCH + "/wo_failures.json",
     "DISPATCH_LABELS_DIR": SCRATCH + "/labels",
     "PRODUCTION_STATE_PATH": SCRATCH + "/production_state.json",
+    "FORECAST_PATH": SCRATCH + "/forecast.json",
     "SCHEDULE_PATH": SCRATCH + "/schedule.json",
     "WATCH_PATH": SCRATCH + "/watch.json", "ALERTS_PATH": SCRATCH + "/alerts.json",
     "USAGE_PATH": SCRATCH + "/usage.json", "IMPACT_PATH": SCRATCH + "/impact.json",
@@ -12260,6 +12261,71 @@ def t_the_xero_client_is_read_only_by_construction():
         ok(verb not in src, verb + " must not appear in a read-only client")
     # The accounting API is reached through _get only, which is a GET.
     ok('resp = await client.get(url' in src, "the accounting fetcher is a GET")
+
+@test
+def t_the_forecast_hook_takes_only_its_token_and_the_tab_reads_the_run():
+    """The nightly forecasting service has no account: a shared secret in the
+    header is its whole authentication, and with no secret configured the
+    hooks are simply off. The tab reads back what was posted; an admin
+    uploads the workbook the service fetches; a failed run is recorded as a
+    failure rather than shown as a forecast."""
+    import io, zipfile
+    ensure_auth()
+    saved = copilot.FORECAST_INGEST_TOKEN
+    try:
+        copilot.FORECAST_INGEST_TOKEN = ""
+        r = client.post("/hooks/forecast/results", json={"as_of": "2026-09-08", "monthly": [], "scenarios": []})
+        eq(r.status_code, 503, "no secret configured: the hook is off")
+        copilot.FORECAST_INGEST_TOKEN = "forecast-secret-for-tests"
+        h = {"X-Forecast-Token": "wrong"}
+        r = client.post("/hooks/forecast/results", json={"as_of": "2026-09-08", "monthly": [], "scenarios": []}, headers=h)
+        eq(r.status_code, 401, "a wrong token is refused")
+        r = client.get("/hooks/forecast/workbook", headers=h)
+        eq(r.status_code, 401, "and cannot fetch the workbook")
+        h = {"X-Forecast-Token": "forecast-secret-for-tests"}
+        r = client.get("/hooks/forecast/workbook", headers=h)
+        eq(r.status_code, 404, "no workbook uploaded yet")
+        r = client.post("/hooks/forecast/results", json={"as_of": "2026-09-08"}, headers=h)
+        eq(r.status_code, 400, "a run without its month table is refused")
+        run = {"as_of": "2026-09-08", "scenarios": ["Algorithm 1"], "year": {"p50": 301060.0},
+               "monthly": [{"month": "2026-09", "method": "actual_to_date + forecast", "p50": 23190.0, "p10": 8892.0, "p90": 37629.0,
+                            "targets": {"Algorithm 1": 19698.0}, "gap_pct": {"Algorithm 1": 0.177},
+                            "verdict": {"Algorithm 1": "overrun"}, "risk": {"Algorithm 1": "watch"}}],
+               "alerts": [{"kind": "sales", "month": "2026-09", "scenario": "Algorithm 1", "verdict": "overrun"}]}
+        r = client.post("/hooks/forecast/results", json=run, headers=h)
+        eq(r.status_code, 200, r.text[:120])
+        r = post("/api/forecast", {})
+        eq(r.status_code, 200, r.text[:120])
+        j = r.json()
+        eq(j["latest"]["as_of"], "2026-09-08", "the tab reads the posted run")
+        ok(j["latest"].get("received_at"), "stamped when it arrived")
+        ok(j["hook_configured"] and j["can_upload"], "the master sees the hook as configured and may upload")
+        eq(len(j["runs"]), 1, "the run is in the history")
+        r = client.post("/hooks/forecast/results", json={"as_of": "2026-09-09", "error": "bulk operation FAILED"}, headers=h)
+        eq(r.status_code, 200)
+        j = post("/api/forecast", {}).json()
+        eq(j["latest"]["as_of"], "2026-09-08", "a failed run does not replace the last good one")
+        ok("bulk operation FAILED" in j["last_error"]["error"], "but is recorded as the last error")
+        # the workbook: an admin uploads an .xlsx, the service fetches it
+        r = post("/api/forecast/workbook", {"name": "notes.txt", "data_b64": base64.b64encode(b"hello").decode()})
+        eq(r.status_code, 400, "a file that is not a workbook is refused")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("xl/workbook.xml", "<workbook/>")
+        r = post("/api/forecast/workbook", {"name": "Cash Flow.xlsx", "data_b64": base64.b64encode(buf.getvalue()).decode()})
+        eq(r.status_code, 200, r.text[:120])
+        eq(r.json()["workbook"]["name"], "Cash Flow.xlsx")
+        r = client.get("/hooks/forecast/workbook", headers=h)
+        eq(r.status_code, 200, "the service fetches it")
+        eq(r.content, buf.getvalue(), "byte for byte")
+        j = post("/api/forecast", {}).json()
+        eq(j["workbook"]["name"], "Cash Flow.xlsx", "and the tab says which workbook is on file")
+        ok("data_b64" not in j["workbook"], "without the bytes themselves")
+        # the tab is a grant, opt-in like the books, and its routes are mapped to it
+        ok("forecast" in copilot.TAB_KEYS and "forecast" in copilot.OPT_IN_TABS, "the tab is a grant nobody inherits")
+        ok(any(p == "/api/forecast" and t == "forecast" for p, t in copilot._TAB_ROUTES), "its routes are claimed by it")
+    finally:
+        copilot.FORECAST_INGEST_TOKEN = saved
 
 @test
 def t_recon_routes_enforce_their_rules():

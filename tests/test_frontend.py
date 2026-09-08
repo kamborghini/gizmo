@@ -1836,6 +1836,27 @@ def t_the_reconciliation_tab_exists_and_is_gated():
 
 
 @test
+def t_the_forecast_tab_exists_and_is_gated():
+    """The Forecast tab draws what the nightly forecasting service posts. It
+    is a Finance tab, opt-in like the books, and it never runs a model."""
+    ok('id="view-forecast"' in HTML and 'data-view="forecast"' in HTML, "the view and its sidebar entry exist")
+    ok('class="ov-wrap" id="forecast-content"' in HTML, "and it uses the same page wrapper as every other tab")
+    keys = re.search(r"const TAB_KEYS = \[[^\]]+\]", SCRIPT).group(0)
+    ok("'forecast'" in keys, "the tab is in the permission list")
+    ok("'forecast'" in re.search(r"const OPT_IN_TABS = \[[^\]]+\]", SCRIPT).group(0),
+       "and nobody inherits it: it holds the cash flow plan")
+    ok("if (tabAllowed('forecast')) tab('forecast', 'Forecast');" in SCRIPT, "it sits in the Finance tab strip")
+    ok("if (v === 'forecast') showForecastView();" in SCRIPT, "and opening it loads the latest run")
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    ok("api('/api/forecast', {})" in SCRIPT.split("async function refreshForecast()")[1][:200], "it reads the posted run")
+    ok("forecastSetupCard(c)" in fn and "No forecast yet" in SCRIPT, "with no run it explains the setup instead of showing nothing")
+    ok("segControl(names.map(" in fn, "every scenario in the workbook can be chosen")
+    ok("metricsStrip(mets)" in fn and "trendChart({ title: 'Net sales, next '" in fn, "the KPI blocks and the chart are the house ones")
+    ok("'Verdict', 'Risk'" in fn and "'Working capital', 'Loan left'" in fn, "the month table and the cash table are there")
+    ok("data_b64: btoa(bin)" in SCRIPT and "inp.accept = '.xlsx'" in SCRIPT, "an admin uploads the workbook from the tab")
+    ok("c.can_upload ? forecastUploadButton() : null" in fn, "and only an admin sees the button")
+
+@test
 def t_ai_output_is_labelled_interpretation_never_fact():
     """Section 9 of the brief, and the whole point: a model's conclusion is
     displayed as interpretation with its confidence and citations, visually
@@ -1936,7 +1957,7 @@ def t_the_tab_picker_sends_what_it_shows():
 
 @test
 def t_reconciliation_is_not_ticked_by_default():
-    ok("const OPT_IN_TABS = ['recon']" in SCRIPT,
+    ok("const OPT_IN_TABS = ['recon', 'forecast']" in SCRIPT,
        "the tab is declared as one nobody inherits")
     ok("Array.isArray(u.tabs) ? u.tabs : DEFAULT_TABS" in SCRIPT,
        "so the team editor shows it unticked for an account with no list of its own")
@@ -1955,14 +1976,15 @@ def t_the_beta_tabs_say_so_everywhere_they_are_named():
     """CRM and Reconciliation are the two newest, least-proven tabs. A person
     should know that from the sidebar, from the page heading, and from the
     topbar title that survives scrolling - not just from one of the three."""
-    ok("BETA_TABS = ['recon', 'crm', 'connector']" in SCRIPT, "the beta tabs are declared once")
-    for nav in ("$('nav-recon')", "$('nav-crm')", "$('nav-connector')"):
+    ok("BETA_TABS = ['recon', 'forecast', 'crm', 'connector']" in SCRIPT, "the beta tabs are declared once")
+    for nav in ("$('nav-recon')", "$('nav-forecast')", "$('nav-crm')", "$('nav-connector')"):
         block = SCRIPT.split(nav)[1][:180]
         ok("beta-tag" in block, nav + " carries the badge in the sidebar")
     ok("rTitle.append(el('span', 'beta-tag'" in SCRIPT
        and "cTitle.append(el('span', 'beta-tag'" in SCRIPT
-       and "hTitle.append(el('span', 'beta-tag'" in SCRIPT,
-       "and all three page headings carry it")
+       and "hTitle.append(el('span', 'beta-tag'" in SCRIPT
+       and "title.append(el('span', 'beta-tag', 'Beta'));\n            ht.append(title, el('p', null, 'Where the next 90 days" in SCRIPT,
+       "and all four page headings carry it")
     ok("BETA_TABS.indexOf(v) >= 0" in SCRIPT, "and the topbar title does too")
     ok(".beta-tag {" in CSS, "the badge is styled")
 
@@ -2770,7 +2792,7 @@ def t_the_connector_tab_is_fully_plumbed():
     leaves a door painted on a wall."""
     ok('data-view="connector" id="nav-connector"' in HTML, "the nav button exists")
     ok('id="view-connector"' in HTML and 'id="connector-content"' in HTML, "and the view")
-    ok("'connector'];" in SCRIPT.split("const TAB_KEYS = [")[1][:220], "the grant key is known")
+    ok("'connector'];" in SCRIPT.split("const TAB_KEYS = [")[1][:320], "the grant key is known")
     ok("'connector']" in SCRIPT.split("const BETA_TABS = [")[1][:60], "it wears Beta")
     ok("connector: 'Xero sync'" in SCRIPT, "the topbar can name it")
     ok("if (v === 'connector') showConnectorView();" in SCRIPT, "and setView opens it")

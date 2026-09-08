@@ -150,6 +150,42 @@ python -m forecast run --orders synthetic/orders.json --products synthetic/produ
 Tests: `python tests/test_forecast.py` in the forecasting environment (it
 skips itself where pandas is absent, so the app's CI does not run it).
 
+## The Forecast tab in Reactor
+
+The app has a Forecast tab under Finance. It runs no model: a second
+Railway service on this repository runs the pipeline each night and posts
+one JSON document to the app, and the tab draws it. The workbook the
+service reads is the one an admin uploads in that tab, so a revised plan
+reaches the next run without a deploy.
+
+```
+  Reactor (the app)                              reactor-forecast (nightly service)
+  Forecast tab ---- upload workbook ---->        cron 03:00: python -m forecast nightly
+  /hooks/forecast/workbook  <---- GET ---------  fetch the workbook
+                                                 bulk-pull orders + products (read-only token)
+                                                 run the pipeline as of yesterday
+  /hooks/forecast/results   <---- POST --------  post the payload (or {"error": ...})
+  /api/forecast  ---- the tab reads it
+```
+
+Setting it up, once:
+
+1. **On Reactor** (the existing service): add `FORECAST_INGEST_TOKEN`, a long
+   random string. Nothing else changes; the routes are already there.
+2. **A second Railway service** on the same repository, named
+   `reactor-forecast`: Dockerfile path `forecast/Dockerfile`, cron schedule
+   `0 3 * * *`, and these variables:
+   `REACTOR_URL` (the app's https URL), `FORECAST_INGEST_TOKEN` (the same
+   value as Reactor's), `SHOP` (the myshopify domain), and
+   `SHOPIFY_FORECAST_TOKEN`: an Admin API access token from a custom app in
+   the store with `read_orders` and `read_products` only. Optional:
+   `FORECAST_SCENARIO`, `FORECAST_HISTORY_DAYS` (900), `FORECAST_HORIZON` (90).
+3. **In the Forecast tab**, as an admin, upload the cash flow workbook.
+
+The first run posts the morning after. A run that fails posts the failure,
+and the tab shows it beside the last good run. Grant the tab per person in
+Team: it is opt-in, like Reconciliation, because it holds the plan.
+
 ## Operational playbook
 
 ### Reading the backtest
@@ -228,6 +264,8 @@ stock-outs (a day a variant could not sell is not a zero-demand day; a
 
 ```
 forecast/
+  nightly.py     the Railway cron entry: fetch the workbook, pull, run, post
+  Dockerfile     the nightly service's image (requirements-service.txt, no torch)
   config.py      every knob: target, lags, buckets, folds, thresholds, tag maps
   calendar.py    UK bank holidays, Black Friday, paydays, year-end lull
   cashflow.py    the workbook reader, DayProfile, daily targets, cash mechanics

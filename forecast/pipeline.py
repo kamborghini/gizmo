@@ -23,7 +23,7 @@ import argparse
 import json
 import logging
 import time
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -311,6 +311,7 @@ class Runner:
         if self.importance is not None:
             self.importance.to_csv(self.out / "feature_importance.csv", header=["gain"])
         monthly, cash, alerts, summary = self.variance()
+        self.last = (monthly, cash, alerts, summary)
         if len(monthly):
             monthly.to_csv(self.out / "variance_monthly.csv", index=False)
             for name, path in cash.items():
@@ -319,6 +320,69 @@ class Runner:
         (self.out / "summary.txt").write_text(summary)
         log.info("done (%.0fs): %s", time.time() - t0, self.out)
         return summary
+
+
+    # ------------------------------------------------------------------ payload
+    def payload(self) -> dict:
+        """What the app's Forecast tab shows, as one JSON document: the month
+        table against every scenario, the cash paths, the alerts, the daily
+        total with its band, a monthly breakdown by category and segment, the
+        backtest scorecard and the blend weights. Tens of kilobytes, not the
+        forecast files."""
+        monthly, cash, alerts, summary = getattr(self, "last", (pd.DataFrame(), {}, [], ""))
+        names = self.cf.scenario_names if self.cf else []
+        fc = self.forecast_long
+        tot = fc[fc["level"] == "total"]
+        hist = self.total_daily.tail(120)
+
+        def f(x):
+            try:
+                v = float(x)
+            except (TypeError, ValueError):
+                return None
+            return None if np.isnan(v) else round(v, 2)
+
+        rows = []
+        for _, r in monthly.iterrows():
+            rows.append({"month": pd.Timestamp(r["month"]).strftime("%Y-%m"), "method": r["method"],
+                         "actual_to_date": f(r["actual_to_date"]), "p10": f(r["projected_p10"]),
+                         "p50": f(r["projected_p50"]), "p90": f(r["projected_p90"]),
+                         "targets": {n: f(r[f"target|{n}"]) for n in names},
+                         "gap": {n: f(r[f"gap|{n}"]) for n in names},
+                         "gap_pct": {n: f(r[f"gap_pct|{n}"]) for n in names},
+                         "verdict": {n: r[f"verdict|{n}"] for n in names},
+                         "risk": {n: r[f"risk|{n}"] for n in names}})
+        cash_out = {}
+        for n, path in cash.items():
+            cash_out[n] = [{"month": pd.Timestamp(r["month"]).strftime("%Y-%m"), "gross_sales": f(r["gross_sales"]),
+                            "repayment": f(r["repayment"]), "net_cash": f(r["net_cash"]),
+                            "working_capital": f(r["working_capital"]), "loan_end": f(r["loan_end"]),
+                            "below_buffer": bool(r["below_buffer"]), "negative": bool(r["negative"])} for _, r in path.iterrows()]
+        lv = fc[fc["level"].isin(["category", "segment"])].copy()
+        lv["month"] = lv["date"].dt.strftime("%Y-%m")
+        levels = {}
+        for (level, name, month), g in lv.groupby(["level", "name", "month"]):
+            levels.setdefault(level, []).append({"name": name, "month": month, "p50": f(g["p50"].sum())})
+        metrics = [{"model": r["model"], "level": r["level"], "wrmsse": f(r["wrmsse"]), "mae": f(r["mae"]),
+                    "bias_pct": f(r["bias_pct"])} for _, r in (self.metrics if self.metrics is not None else pd.DataFrame()).iterrows()]
+        top = []
+        if self.importance is not None:
+            tot_gain = float(self.importance.sum()) or 1.0
+            top = [{"feature": k, "share": round(float(v) / tot_gain, 4)} for k, v in self.importance.head(12).items()]
+        year_p50 = f(monthly["projected_p50"].sum()) if len(monthly) else None
+        return {
+            "as_of": self.cfg.as_of.isoformat(), "generated_at": datetime.now(timezone.utc).isoformat(),
+            "horizon_days": self.cfg.horizon_days, "scenario_feature": self.scenario, "scenarios": names,
+            "series": {"bottom": self.hier.n_bottom, "variants": len(self.hier.levels.get("variant", [])),
+                       "products": len(self.hier.levels.get("product", []))},
+            "summary": summary, "monthly": rows,
+            "year": {"p50": year_p50, "targets": {n: f(monthly[f"target|{n}"].sum()) for n in names} if len(monthly) else {}},
+            "cash": cash_out, "alerts": alerts,
+            "daily": {"history": [{"date": d.strftime("%Y-%m-%d"), "actual": f(v)} for d, v in hist.items()],
+                      "forecast": [{"date": pd.Timestamp(r["date"]).strftime("%Y-%m-%d"), "p10": f(r["p10"]), "p50": f(r["p50"]), "p90": f(r["p90"])}
+                                   for _, r in tot.iterrows()]},
+            "levels": levels, "metrics": metrics, "weights": self.weights, "top_features": top,
+        }
 
 
 # ---------------------------------------------------------------------- CLI
@@ -350,12 +414,16 @@ def main(argv=None) -> int:
     run.add_argument("--folds", type=int, default=5)
     run.add_argument("--no-lightgbm", action="store_true"); run.add_argument("--no-catboost", action="store_true")
     run.add_argument("--no-nbeats", action="store_true")
+    sub.add_parser("nightly", help="the Railway cron entry: pull, run, post to Reactor (see nightly.py)")
     syn = sub.add_parser("synth", help="write a synthetic store shaped by the workbook")
     syn.add_argument("--cashflow"); syn.add_argument("--as-of", required=True); syn.add_argument("--out", default="synthetic")
     syn.add_argument("--days", type=int, default=830); syn.add_argument("--scenario", default="Algorithm 3")
     syn.add_argument("--scale", type=float, default=0.93)
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    if args.cmd == "nightly":
+        from .nightly import main as nightly_main
+        return nightly_main()
     as_of = date.fromisoformat(args.as_of)
     cf = CashFlowModel.from_workbook(args.cashflow) if args.cashflow else None
     if args.cmd == "synth":

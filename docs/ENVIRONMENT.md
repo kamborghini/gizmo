@@ -3,7 +3,7 @@
 Generated from the code by `tools/env_reference.py`; do not edit by hand.
 `make env-doc` rewrites it, and CI fails when it is stale.
 
-206 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
+208 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
 
 ## server.py
 
@@ -56,6 +56,8 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `COPILOT_TOOL_RESULT_CAP` | `"50000"` | copilot |  |
 | `DAILY_COST_CAP` | `"25"` | copilot | hard $/day AI ceiling (0 disables) |
 | `FEEDBACK_PATH` | `"/data/feedback.json"` | copilot | feature requests from the desk |
+| `FORECAST_INGEST_TOKEN` | `""` | copilot | shared secret the nightly forecasting service presents to /hooks/forecast/*; empty switches the hooks off |
+| `FORECAST_PATH` | `"/data/forecast.json"` | copilot | the nightly forecasting service's latest run, and the cash flow workbook an admin uploaded (base64), in one store |
 | `GOBO_SIZES_PATH` | `os.path.join(os.path.dirname(__file__), "data", "gobo-siz...` | copilot |  |
 | `IMPACT_MAX` | `"100"` | copilot |  |
 | `IMPACT_PATH` | `"/data/impact.json"` | copilot | tracked-action impact log |

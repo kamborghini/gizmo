@@ -615,6 +615,8 @@
         .metrics-strip .stat .label { color: var(--text-primary); margin-bottom: var(--sp-4); }
         .metrics-strip .stat .value { font-size: var(--text-2xl); font-weight: var(--weight-regular); }
         .metrics-strip .stat-note { font-size: var(--text-xs); }
+        .fc-alert { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-2) 0; font-size: var(--text-sm); }
+        .fc-alert + .fc-alert { border-top: var(--bw-hairline) solid var(--border-default); }
         .metrics-finance .stat .label { font-size: var(--text-md); }
         .metrics-finance .stat .value { font-size: var(--text-3xl); }
         .metrics-strip .stat.stat-pick:is(.on, [aria-pressed="true"]) { box-shadow: var(--ring-action-2); }
@@ -3403,6 +3405,7 @@
                     <div class="nav-group">Finance</div>
                     <button class="nav-item" data-view="liability" id="nav-liability"></button>
                     <button class="nav-item" data-view="recon" id="nav-recon"></button>
+                    <button class="nav-item" data-view="forecast" id="nav-forecast"></button>
                     <button class="nav-item" data-view="connector" id="nav-connector"></button>
                     <div class="nav-group">Operations</div>
                     <button class="nav-item" data-view="labels" id="nav-labels"></button>
@@ -3493,6 +3496,9 @@
             </section>
             <section class="view" id="view-recon">
                 <div class="scroll"><div class="ov-wrap" id="recon-content"></div></div>
+            </section>
+            <section class="view" id="view-forecast">
+                <div class="scroll"><div class="ov-wrap" id="forecast-content"></div></div>
             </section>
             <section class="view" id="view-connector">
                 <div class="scroll"><div class="ov-wrap" id="connector-content"></div></div>
@@ -3806,6 +3812,8 @@ Projected Image UK"></textarea>
         $('nav-customers').append(ico(I.users), document.createTextNode('Customers'));
         $('nav-liability').append(ico(I.card), document.createTextNode('Liability'));
         $('nav-recon').append(ico(I.check), document.createTextNode('Reconciliation'),
+            el('span', 'beta-tag', 'Beta'));
+        $('nav-forecast').append(ico(I.insight), document.createTextNode('Forecast'),
             el('span', 'beta-tag', 'Beta'));
         $('nav-connector').append(ico(I.send), document.createTextNode('Xero sync'),
             el('span', 'beta-tag', 'Beta'));
@@ -6910,6 +6918,7 @@ Projected Image UK"></textarea>
             };
             tab('liability', 'Liability');
             if (tabAllowed('recon')) tab('recon', 'Reconciliation');
+            if (tabAllowed('forecast')) tab('forecast', 'Forecast');
             if (tabAllowed('connector')) tab('connector', 'Xero sync');
             row.append(seg, el('div', 'spacer'));
             /* The stamp and the page's buttons on the right of the strip, as
@@ -8859,6 +8868,193 @@ Projected Image UK"></textarea>
             cardifySections(box);
         }
 
+        /* ---------- Forecast tab ----------
+           The models do not run here. A second Railway service runs them each
+           night and posts one JSON document to /hooks/forecast/results; this
+           tab reads that document back through /api/forecast and draws it. */
+        let forecastCache = null, forecastScenario = '';
+        async function showForecastView() { renderForecast(); refreshForecast(); }
+        async function refreshForecast() {
+            try { forecastCache = await api('/api/forecast', {}); }
+            catch (e) { forecastCache = { error: e.message }; }
+            if (document.querySelector('#view-forecast.active')) renderForecast();
+        }
+        const fcMoney = (v) => (v == null || isNaN(v)) ? 'n/a' : money(v, 'GBP', 0);
+        const fcPct = (v) => (v == null || isNaN(v)) ? 'n/a' : ((v > 0 ? '+' : '') + (v * 100).toFixed(1) + '%');
+        const fcMonth = (m) => m ? (MONTH_ABBR[(+m.slice(5, 7)) - 1] + ' ' + m.slice(0, 4)) : '';
+        const fcDay = (iso) => { const d = new Date(iso); return d.getDate() + ' ' + MONTH_ABBR[d.getMonth()]; };
+        const fcChip = (kind, text) => el('span', 'lbl-chip ' + kind, text);
+        const FC_VERDICT = { 'on track': 'made', underrun: 'bad', overrun: 'note' };
+        const FC_RISK = { secure: 'made', watch: 'warn', high: 'bad', closed: 'note' };
+        function fcTable(head, rows, right) {
+            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
+            const thead = el('thead'); const hr = el('tr');
+            head.forEach((h, i) => { const th = el('th', null, h); if (right && right[i]) th.style.textAlign = 'right'; hr.append(th); });
+            thead.append(hr); tbl.append(thead);
+            const tb = el('tbody');
+            rows.forEach(cells => {
+                const tr = el('tr');
+                cells.forEach((c, i) => {
+                    const td = el('td');
+                    if (c instanceof Node) td.append(c); else td.textContent = c == null ? '' : String(c);
+                    if (right && right[i]) td.style.textAlign = 'right';
+                    tr.append(td);
+                });
+                tb.append(tr);
+            });
+            tbl.append(tb); wrap.append(tbl); return wrap;
+        }
+        function forecastUploadButton() {
+            const b = el('button', 'btn btn-sm', 'Upload cash flow workbook'); b.prepend(ico(I.upload));
+            const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.xlsx'; inp.style.display = 'none';
+            inp.onchange = async () => {
+                const f = inp.files && inp.files[0]; if (!f) return;
+                if (f.size > 8 * 1024 * 1024) { toastError('That workbook is over the 8 MB cap.'); return; }
+                setBusy(b, true);
+                try {
+                    const bytes = new Uint8Array(await f.arrayBuffer()); let bin = '';
+                    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+                    await api('/api/forecast/workbook', { name: f.name, data_b64: btoa(bin) });
+                    toast('Workbook uploaded. The next nightly run reads it.');
+                    await refreshForecast();
+                } catch (e) { toastError(e.message); }
+                finally { setBusy(b, false); inp.value = ''; }
+            };
+            b.onclick = () => inp.click(); b.append(inp); return b;
+        }
+        function forecastSetupCard(c) {
+            const card = el('div', 'card');
+            card.append(el('div', 'card-title', 'No forecast yet'));
+            card.append(el('p', 'card-sub', c.hook_configured
+                ? 'The hook is configured. The nightly service has not posted a run yet: it runs at 03:00 and needs the workbook below.'
+                : 'Set FORECAST_INGEST_TOKEN on Reactor and, with the same value, on the forecasting service; the service then posts here each night. The setup is in forecast/README.md.'));
+            if (c.last_error) card.append(el('p', 'card-sub', 'The last run failed on ' + fmtDate(c.last_error.at) + ': ' + c.last_error.error));
+            const wb = c.workbook || {};
+            card.append(el('p', 'card-sub', wb.name ? ('Workbook on file: ' + wb.name + ', uploaded ' + fmtDate(wb.uploaded_at) + (wb.by ? ' by ' + wb.by : '') + '.')
+                : 'No workbook uploaded yet. An admin uploads the cash flow workbook with the button above; the nightly run reads it.'));
+            return card;
+        }
+        function renderForecast() {
+            const box = $('forecast-content'); box.innerHTML = '';
+            const c = forecastCache; const painting = !!c && !c.error;
+            box.classList.toggle('no-intro', !(painting && firstPaint('forecast')));
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.insight;
+            const ht = el('div'); const title = el('h2', null, 'Finance'); title.append(el('span', 'beta-tag', 'Beta'));
+            ht.append(title, el('p', null, 'Where the next 90 days are heading, by variant, segment and in total, '
+                + 'against what Shopify has sold this month so far and against every scenario in the cash flow plan. '
+                + 'The models run each night beside the app and post the result here.'));
+            hero.append(badge, ht); box.append(hero);
+            const latest = c && c.latest;
+            const stamp = latest ? ('Run as of ' + fmtDate(latest.as_of)) : (c && !c.error ? 'No run yet' : '');
+            box.append(financeTabs('forecast', stamp, [c && c.can_upload ? forecastUploadButton() : null]));
+            if (!c) { box.append(el('div', 'empty', 'Loading…')); return; }
+            if (c.error) { box.append(loadFailure('The forecast could not be read. ' + c.error, refreshForecast)); return; }
+            if (!latest) { box.append(forecastSetupCard(c)); return; }
+            if (c.last_error) {
+                const warn = el('div', 'card');
+                warn.append(fcChip('bad', 'Last run failed'), document.createTextNode(' ' + fmtDate(c.last_error.at) + ': ' + c.last_error.error
+                    + ' Showing the run as of ' + fmtDate(latest.as_of) + '.'));
+                box.append(warn);
+            }
+            const names = latest.scenarios || [];
+            if (!forecastScenario || names.indexOf(forecastScenario) < 0) forecastScenario = names[0] || '';
+            const sc = forecastScenario;
+            const st = el('div', 'section-title', 'Against the plan');
+            if (names.length > 1) st.append(segControl(names.map(n => ({ label: n.replace('Algorithm ', 'Algo '), value: n })), sc, (v) => { forecastScenario = v; renderForecast(); }));
+            box.append(st);
+            const rows = latest.monthly || [];
+            const cur = rows.find(r => (r.method || '').indexOf('actual_to_date') === 0) || rows.find(r => r.method === 'forecast') || rows[0];
+            const year = latest.year || {}; const yt = (year.targets || {})[sc];
+            const bt = latest.metrics || [];
+            const blendTot = bt.find(m => m.model === 'blend+mint' && m.level === 'total') || bt.find(m => m.model === 'blend' && m.level === 'total');
+            const baseTot = bt.find(m => m.model === 'seasonal_level' && m.level === 'total');
+            const mets = [];
+            if (cur) {
+                mets.push({ label: 'This month, projected', value: fcMoney(cur.p50), note: 'P10 ' + fcMoney(cur.p10) + ' · P90 ' + fcMoney(cur.p90),
+                            tone: (cur.risk || {})[sc] === 'high' ? 'warn' : null });
+                mets.push({ label: 'Gap to ' + sc, value: fcPct((cur.gap_pct || {})[sc]), note: 'target ' + fcMoney((cur.targets || {})[sc]),
+                            tone: (cur.verdict || {})[sc] === 'underrun' ? 'warn' : null });
+            }
+            mets.push({ label: 'Year, projected', value: fcMoney(year.p50),
+                        note: yt != null ? ('vs ' + fcMoney(yt) + ' (' + fcPct((year.p50 - yt) / yt) + ')') : '',
+                        tone: (yt != null && year.p50 < yt * 0.9) ? 'warn' : null });
+            if (blendTot) mets.push({ label: 'Backtest accuracy (WRMSSE)', value: Number(blendTot.wrmsse).toFixed(2),
+                                      note: (baseTot ? 'seasonal baseline ' + Number(baseTot.wrmsse).toFixed(2) + ' · ' : '') + 'lower is better' });
+            box.append(metricsStrip(mets));
+            const daily = (latest.daily && latest.daily.forecast) || [];
+            if (daily.length) {
+                box.append(trendChart({ title: 'Net sales, next ' + daily.length + ' days', source: 'Reactor forecast', period: 'P50 with the P10 and P90 band',
+                    yUnit: 'GBP', value: money(daily.reduce((a, r) => a + (r.p50 || 0), 0), 'GBP', 0), labels: daily.map(r => fcDay(r.date)),
+                    series: [{ name: 'Forecast', color: CH[0], values: daily.map(r => r.p50 || 0) },
+                             { name: 'P90', color: CH[2], values: daily.map(r => r.p90 || 0) },
+                             { name: 'P10', color: CH[2], values: daily.map(r => r.p10 || 0) }],
+                    format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompact, height: 280, annotate: false }));
+            }
+            box.append(el('div', 'section-title', 'Month by month against ' + sc));
+            const mc = el('div', 'card');
+            mc.append(fcTable(['Month', 'Basis', 'Projected', 'P10', 'P90', 'Target', 'Gap', 'Verdict', 'Risk'],
+                rows.map(r => [fcMonth(r.month), (r.method || '').replace(/_/g, ' '), fcMoney(r.p50), fcMoney(r.p10), fcMoney(r.p90),
+                               fcMoney((r.targets || {})[sc]), fcPct((r.gap_pct || {})[sc]),
+                               fcChip(FC_VERDICT[(r.verdict || {})[sc]] || 'note', (r.verdict || {})[sc] || ''),
+                               fcChip(FC_RISK[(r.risk || {})[sc]] || 'note', (r.risk || {})[sc] || '')]),
+                [0, 0, 1, 1, 1, 1, 1, 0, 0]));
+            box.append(mc);
+            const cash = (latest.cash || {})[sc] || [];
+            if (cash.length) {
+                box.append(el('div', 'section-title', 'Cash under ' + sc));
+                const cc = el('div', 'card');
+                cc.append(el('p', 'card-sub', 'The projected sales pushed through the scenario’s own mechanics: its overheads and cost lines, the Shopify Capital remittance on gross, stopping when the loan is repaid.'));
+                cc.append(fcTable(['Month', 'Gross sales', 'Repayment', 'Net cash', 'Working capital', 'Loan left'],
+                    cash.map(r => { const wc = el('span'); wc.textContent = fcMoney(r.working_capital);
+                        if (r.negative) wc.append(' ', fcChip('bad', 'negative')); else if (r.below_buffer) wc.append(' ', fcChip('warn', 'below buffer'));
+                        return [fcMonth(r.month), fcMoney(r.gross_sales), fcMoney(r.repayment), fcMoney(r.net_cash), wc, fcMoney(r.loan_end)]; }),
+                    [0, 1, 1, 1, 1, 1]));
+                box.append(cc);
+            }
+            const al = (latest.alerts || []).filter(a => a.scenario === sc);
+            box.append(el('div', 'section-title', 'Alerts'));
+            const ac = el('div', 'card');
+            if (!al.length) ac.append(el('div', 'empty', 'Nothing to flag under ' + sc + '.'));
+            al.forEach(a => {
+                const row = el('div', 'fc-alert');
+                row.append(fcChip(a.kind === 'cash' || a.risk === 'high' ? 'bad' : 'warn', fcMonth(a.month)));
+                row.append(el('span', null, a.kind === 'cash'
+                    ? (a.verdict + ', working capital ' + fcMoney(a.working_capital))
+                    : (a.verdict + ' by ' + fcPct((a.gap_pct || 0) / 100) + ': projected ' + fcMoney(a.projected) + ' against ' + fcMoney(a.target) + (a.risk ? ', risk ' + a.risk : ''))));
+                ac.append(row);
+            });
+            box.append(ac);
+            const lv = latest.levels || {};
+            ['category', 'segment'].forEach(level => {
+                const items = lv[level] || []; if (!items.length) return;
+                const months = [...new Set(items.map(x => x.month))].sort().slice(0, 3);
+                const byName = {}; items.forEach(x => { (byName[x.name] = byName[x.name] || {})[x.month] = x.p50; });
+                box.append(el('div', 'section-title', 'By ' + level));
+                const lc = el('div', 'card');
+                lc.append(fcTable([level === 'category' ? 'Category' : 'Segment'].concat(months.map(fcMonth)),
+                    Object.keys(byName).sort((a, b) => (byName[b][months[0]] || 0) - (byName[a][months[0]] || 0))
+                        .map(n => [n].concat(months.map(m => fcMoney(byName[n][m])))), [0, 1, 1, 1]));
+                box.append(lc);
+            });
+            box.append(el('div', 'section-title', 'How much to trust it'));
+            const bc = el('div', 'card');
+            bc.append(el('p', 'card-sub', 'Five backtests of 28 days each, ending at the run date. WRMSSE is the M5 competition score: under 1 beats a naive forecast scaled to each series, and lower is better. Bias is how far the total ran hot or cold.'));
+            const levels = ['total', 'category', 'segment', 'product', 'variant', 'bottom'];
+            bc.append(fcTable(['Level', 'Blend', 'Seasonal baseline', 'Bias'],
+                levels.map(l => { const b = bt.find(m => (m.model === 'blend+mint' || m.model === 'blend') && m.level === l); const s = bt.find(m => m.model === 'seasonal_level' && m.level === l);
+                    return [l === 'bottom' ? 'variant x segment' : l, b ? Number(b.wrmsse).toFixed(2) : 'n/a', s ? Number(s.wrmsse).toFixed(2) : 'n/a', b ? fcPct(b.bias_pct) : 'n/a']; }),
+                [0, 1, 1, 1]));
+            const w = latest.weights && latest.weights.total;
+            if (w) bc.append(el('p', 'card-sub', 'Who earned the top line: ' + Object.keys(w).filter(k => w[k] > 0.005).map(k => k + ' ' + Math.round(w[k] * 100) + '%').join(', ') + '.'));
+            box.append(bc);
+            const wb = c.workbook || {};
+            const rc = el('div', 'card');
+            rc.append(el('div', 'card-title', 'Plan on file'));
+            rc.append(el('p', 'card-sub', wb.name ? (wb.name + ', uploaded ' + fmtDate(wb.uploaded_at) + (wb.by ? ' by ' + wb.by : '') + '. The baseline feature follows ' + (latest.scenario_feature || names[0] || '') + '; every scenario is reported against.')
+                : 'No workbook on file: the run used what the service had.'));
+            if (c.runs && c.runs.length) rc.append(el('p', 'card-sub', 'Recent runs: ' + c.runs.slice(-7).map(r => r.as_of).join(', ') + '.'));
+            box.append(rc);
+        }
         async function showReconView() { renderRecon(); refreshRecon(); }
         async function refreshRecon() {
             /* Two independent reads, fired together rather than one after the
@@ -19684,12 +19880,12 @@ Projected Image UK"></textarea>
         }
         const TAB_KEYS = ['overview', 'seo', 'keywords', 'products', 'customers', 'liability',
                           'crm', 'loans', 'mail', 'files', 'labels', 'memory', 'skills', 'chat', 'recon',
-                          'connector'];
+                          'forecast', 'connector'];
         /* Reconciliation is not part of the default grant: it holds the books,
            the bank line and the accounts mailbox, so it is handed over on
            purpose rather than inherited by having an account. Mirrors
            OPT_IN_TABS on the server, which is the side that actually decides. */
-        const OPT_IN_TABS = ['recon'];
+        const OPT_IN_TABS = ['recon', 'forecast'];
         const DEFAULT_TABS = TAB_KEYS.filter(k => OPT_IN_TABS.indexOf(k) < 0);
         function tabAllowed(v) {
             if (!teamMe || !Array.isArray(teamMe.tabs)) return true;
@@ -20111,7 +20307,7 @@ Projected Image UK"></textarea>
                         products: 'Products', customers: 'Customers', liability: 'Liability',
                         crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', labels: 'Production Manager',
                         memory: 'Memory', skills: 'Skills', chat: 'Chat',
-                        recon: 'Reconciliation' };
+                        recon: 'Reconciliation', forecast: 'Forecast' };
                     const chosen = new Set(Array.isArray(u.tabs) ? u.tabs : DEFAULT_TABS);
                     const boxes = [];
                     const group = el('div');
@@ -20395,14 +20591,14 @@ Projected Image UK"></textarea>
             const n = document.querySelector('.nav-item.active');
             return (n && n.dataset.view) || '';
         }
-        const BETA_TABS = ['recon', 'crm', 'connector'];
+        const BETA_TABS = ['recon', 'forecast', 'crm', 'connector'];
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => {
                 const on = n.dataset.view === v; n.classList.toggle('active', on);
                 if (on) n.setAttribute('aria-current', 'page'); else n.removeAttribute('aria-current');
             });
-            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'connector', 'crm', 'loans', 'mail', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', connector: 'Xero sync', crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
+            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'forecast', 'connector', 'crm', 'loans', 'mail', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', forecast: 'Forecast', connector: 'Xero sync', crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             setViewTitle(titles[v] || (active() ? (active().title || 'Chat') : 'Chat'));
             /* Beta rides the topbar title as well: it is the only label still
                on screen once the page is scrolled. */
@@ -20439,6 +20635,7 @@ Projected Image UK"></textarea>
             if (v === 'memory') loadMemory();
             if (v === 'skills') loadSkills();
             if (v === 'recon') showReconView();
+            if (v === 'forecast') showForecastView();
             if (v === 'connector') showConnectorView();
         }
 

@@ -73,7 +73,11 @@ def read_orders_json(path, cfg: Config, products: Optional[Mapping[str, dict]] =
     is how Shopify's own Net Sales report treats them."""
     with open(path, encoding="utf-8") as fh:
         raw = json.load(fh)
-    orders = raw.get("orders", raw) if isinstance(raw, dict) else raw
+    return orders_to_rows(raw.get("orders", raw) if isinstance(raw, dict) else raw, cfg, products)
+
+
+def orders_to_rows(orders: List[dict], cfg: Config, products: Optional[Mapping[str, dict]] = None) -> pd.DataFrame:
+    """The same, from orders already in memory (the nightly service's bulk pull)."""
     products = products or {}
     rows: List[dict] = []
     for o in orders:
@@ -209,6 +213,30 @@ def run_bulk_orders(shop: str, token: str, since: date, api_version: str = "2026
     with urllib.request.urlopen(url, timeout=300) as resp:
         lines = [json.loads(l) for l in resp.read().decode().splitlines() if l.strip()]
     return _assemble_bulk(lines)
+
+
+PRODUCTS_QUERY = """
+query($after: String) {
+  products(first: 250, after: $after) {
+    edges { node { id productType } }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+"""
+
+
+def fetch_products(shop: str, token: str, api_version: str = "2026-07") -> Dict[str, dict]:
+    """{product gid: {"product_type": ...}} for the category, paged 250 at a time."""
+    out: Dict[str, dict] = {}
+    after = None
+    while True:
+        data = _gql(shop, token, api_version, PRODUCTS_QUERY, {"after": after})["products"]
+        for e in data["edges"]:
+            n = e["node"]
+            out[n["id"]] = {"product_type": n.get("productType") or ""}
+        if not data["pageInfo"]["hasNextPage"]:
+            return out
+        after = data["pageInfo"]["endCursor"]
 
 
 def _money(node, key) -> float:
