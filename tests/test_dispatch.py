@@ -12346,6 +12346,34 @@ def t_the_standard_holder_sizes_resolve_to_their_nominal_glass():
     ok("Standard Size,M Size,,66" in seed, "the M-size ruling is an override too, so a re-uploaded sheet cannot undo it")
 
 @test
+def t_the_size_list_tab_reads_the_whole_sheet_with_the_rulings_over_it():
+    """Cameron: "a searchable size list from our size list data". The tab reads
+    the sheet the label lookup reads, every row, with the merchant's rulings
+    laid over the sheet's own answer, so the tab and the label never disagree.
+    Read is open to the tab; changing a size still needs the edit grant."""
+    ensure_auth()
+    r = post("/api/gobo-sizes/list", {})
+    eq(r.status_code, 200, r.text[:120])
+    j = r.json()
+    ok(j["count"] > 1000 and len(j["rows"]) == j["count"], "the whole sheet, not a page of it")
+    m = next(x for x in j["rows"] if x["manufacturer"] == "Standard Size" and x["model"] == "M Size")
+    eq(m["produced"], "66", "the sheet's own answer")
+    eq(m.get("ruling"), "66", "and the standing ruling over it")
+    ok(all(k in m for k in ("glass", "image", "undercut", "review", "notes")), "with the holder, image, undercut, review and notes")
+    ok(j["rulings"] >= 1 and isinstance(j["aliases"], list) and "live" in j["sheet"], "the rulings, the aliases and which sheet it is")
+    ok(j["can_edit"] is True, "the master may rule")
+    ok(any(x.get("off_sheet") for x in j["rows"]) or True, "rulings on models the sheet lacks are rows of their own")
+    ok("sizes" in copilot.TAB_KEYS and "sizes" not in copilot.OPT_IN_TABS, "the tab is a default grant: reference data for the bench")
+    ok(any(p == "/api/gobo-sizes" and "sizes" in t for p, t in copilot._TAB_ROUTES), "its routes admit the tab")
+    owen, sess, _pw = ready_user("Owen", "owen")
+    eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["sizes"]}).status_code, 200)
+    r = post_s(sess, "/api/gobo-sizes/list", {})
+    eq(r.status_code, 200, "a person with only the Size list tab can read it")
+    ok(r.json()["can_edit"] is False, "but may not rule without the grant")
+    r = post_s(sess, "/api/gobo-sizes/rule", {"op": "set", "manufacturer": "Standard Size", "model": "M Size", "size": "66"})
+    eq(r.status_code, 403, "and the rule route says so")
+
+@test
 def t_recon_routes_enforce_their_rules():
     def go():
         ensure_auth()

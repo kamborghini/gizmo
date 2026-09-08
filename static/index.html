@@ -629,6 +629,9 @@
         .metrics-strip .stat-note { font-size: var(--text-xs); }
         .fc-alert { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-2) 0; font-size: var(--text-sm); }
         .fc-alert + .fc-alert { border-top: var(--bw-hairline) solid var(--border-default); }
+        /* An inline size: the ruling is typed where the sheet's answer sat. */
+        .sizes-inp { width: calc(var(--sp-8) * 2.5); height: var(--control-h-sm); padding: 0 var(--sp-2); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-sm); font: inherit; font-size: var(--text-sm); text-align: right; }
+        .ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); }
         .metrics-finance .stat .label { font-size: var(--text-md); }
         .metrics-finance .stat .value { font-size: var(--text-3xl); }
         .metrics-strip .stat.stat-pick:is(.on, [aria-pressed="true"]) { box-shadow: var(--ring-action-2); }
@@ -3426,6 +3429,7 @@
                     <button class="nav-group" type="button" data-group="operations" aria-expanded="true" aria-controls="nav-sect-operations">Operations</button>
                     <div class="nav-sect" id="nav-sect-operations">
                     <button class="nav-item" data-view="labels" id="nav-labels"></button>
+                    <button class="nav-item" data-view="sizes" id="nav-sizes"></button>
                     <button class="nav-item" data-view="crm" id="nav-crm"></button>
                     <button class="nav-item" data-view="loans" id="nav-loans"></button>
                     <button class="nav-item" data-view="mail" id="nav-mail"></button>
@@ -3519,6 +3523,9 @@
             </section>
             <section class="view" id="view-forecast">
                 <div class="scroll"><div class="ov-wrap" id="forecast-content"></div></div>
+            </section>
+            <section class="view" id="view-sizes">
+                <div class="scroll"><div class="ov-wrap" id="sizes-content"></div></div>
             </section>
             <section class="view" id="view-connector">
                 <div class="scroll"><div class="ov-wrap" id="connector-content"></div></div>
@@ -3837,6 +3844,7 @@ Projected Image UK"></textarea>
             el('span', 'beta-tag', 'Beta'));
         $('nav-connector').append(ico(I.send), document.createTextNode('Xero sync'),
             el('span', 'beta-tag', 'Beta'));
+        $('nav-sizes').append(ico(I.check), document.createTextNode('Size list'));
         $('nav-crm').append(ico(I.briefcase), document.createTextNode('CRM'),
             el('span', 'beta-tag', 'Beta'));
         $('nav-loans').append(ico(I.box), document.createTextNode('Loan units'));
@@ -9074,6 +9082,127 @@ Projected Image UK"></textarea>
                 : 'No workbook on file: the run used what the service had.'));
             if (c.runs && c.runs.length) rc.append(el('p', 'card-sub', 'Recent runs: ' + c.runs.slice(-7).map(r => r.as_of).join(', ') + '.'));
             box.append(rc);
+        }
+        /* ---------- Size list tab ----------
+           The sheet the label lookup reads, every row, searchable, with the
+           merchant's rulings laid over the sheet's own answer. Reading is the
+           bench's everyday need; ruling stays behind the size grant, and a
+           ruling made here writes the same override file the label reads. */
+        let sizesCache = null, sizesQ = '', sizesFilter = 'all', sizesShown = 250;
+        const SIZES_PAGE = 250;
+        async function showSizesView() { renderSizes(); if (!sizesCache || sizesCache.error) refreshSizes(); }
+        async function refreshSizes() {
+            try { sizesCache = await api('/api/gobo-sizes/list', {}); }
+            catch (e) { sizesCache = { error: e.message }; }
+            if (document.querySelector('#view-sizes.active')) renderSizes();
+        }
+        function sizesRows() {
+            const all = (sizesCache && sizesCache.rows) || [];
+            const toks = sizesQ.toLowerCase().split(/\s+/).filter(Boolean);
+            return all.filter(r => {
+                if (sizesFilter === 'review' && !r.review && r.produced) return false;
+                if (sizesFilter === 'rulings' && !r.ruling && !r.domain_rulings) return false;
+                if (!toks.length) return true;
+                /* A token matches the START of a word in the maker or model, so
+                   "standard m" finds the M size and not every row that says
+                   "mm"; a token of three letters or more also searches the notes. */
+                const words = (r.manufacturer + ' ' + r.model).toLowerCase().split(/[^a-z0-9.]+/).filter(Boolean);
+                const notes = (r.notes || '').toLowerCase();
+                return toks.every(t => words.some(w => w.indexOf(t) === 0) || (t.length >= 3 && notes.indexOf(t) >= 0) || t === (r.ruling || r.produced));
+            });
+        }
+        function sizesProducedCell(r, canEdit) {
+            const td = el('td'); td.style.textAlign = 'right'; td.style.whiteSpace = 'nowrap';
+            if (r.ruling === 'exclude') td.append(el('span', 'lbl-chip note', 'not a gobo'));
+            else if (r.ruling) {
+                td.append(el('b', null, r.ruling), document.createTextNode(' '));
+                const c = el('span', 'lbl-chip made', 'ruling');
+                if (r.produced && r.produced !== r.ruling) c.title = 'The sheet says ' + r.produced;
+                td.append(c);
+            } else if (r.produced) td.append(el('b', null, r.produced));
+            else td.append(el('span', 'lbl-chip warn', 'no size'));
+            if (r.review) { const c = el('span', 'lbl-chip warn', 'review'); c.title = r.review; td.append(document.createTextNode(' '), c); }
+            (r.domain_rulings || []).forEach(d => { const c = el('span', 'lbl-chip note', '@' + d.domain + ' ' + d.size); c.title = 'For orders from ' + d.domain + ' only'; td.append(document.createTextNode(' '), c); });
+            if (canEdit) {
+                const b = el('button', 'btn btn-sm', 'Set size'); b.style.marginLeft = 'var(--sp-2)';
+                b.onclick = () => sizesInlineRule(td, r, canEdit);
+                td.append(b);
+            }
+            return td;
+        }
+        function sizesInlineRule(td, r, canEdit) {
+            td.innerHTML = '';
+            const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'sizes-inp';
+            inp.value = r.ruling && r.ruling !== 'exclude' ? r.ruling : (r.produced || ''); inp.setAttribute('aria-label', 'Production size in millimetres');
+            const save = el('button', 'btn btn-sm btn-primary', 'Save'); const cancel = el('button', 'btn btn-sm', 'Cancel');
+            cancel.onclick = () => { const fresh = sizesProducedCell(r, canEdit); td.replaceWith(fresh); };
+            save.onclick = async () => {
+                setBusy(save, true);
+                try {
+                    await api('/api/gobo-sizes/rule', { op: 'set', manufacturer: r.manufacturer, model: r.model, size: inp.value.trim() });
+                    toast(r.manufacturer + ' ' + r.model + ' now cuts at ' + inp.value.trim() + ' mm.');
+                    await refreshSizes();
+                } catch (e) { toastError(e.message); setBusy(save, false); }
+            };
+            inp.onkeydown = (ev) => { if (ev.key === 'Enter') save.click(); if (ev.key === 'Escape') cancel.click(); };
+            td.append(inp, document.createTextNode(' '), save, document.createTextNode(' '), cancel);
+            inp.focus(); inp.select();
+        }
+        function renderSizes() {
+            const box = $('sizes-content'); box.innerHTML = '';
+            const c = sizesCache; const painting = !!c && !c.error;
+            box.classList.toggle('no-intro', !(painting && firstPaint('sizes')));
+            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.check;
+            const ht = el('div');
+            ht.append(el('h2', null, 'Size list'),
+                el('p', null, 'Every fixture on the size sheet with the glass it takes: the holder, the image, and the size the bench cuts. '
+                    + 'A ruling made in the app shows over the sheet’s own answer, and the label reads the same list.'));
+            hero.append(badge, ht);
+            const sheet = (c && c.sheet) || {};
+            const stamp = sheet.updated ? ('Sheet updated ' + fmtDate(sheet.updated) + (sheet.live ? '' : ' · shipped copy')) : '';
+            hero.append(heroAct(stamp, refreshBtn(refreshSizes)));
+            box.append(hero);
+            if (!c) { box.append(el('div', 'empty', 'Loading…')); return; }
+            if (c.error) { box.append(loadFailure('The size list could not be read. ' + c.error, refreshSizes)); return; }
+            const rows = sizesRows();
+            const card = el('div', 'card');
+            const head = el('div', 'card-head-stat');
+            head.append(el('div', 'card-title', 'Models'));
+            head.append(el('div', 'card-desc', rows.length.toLocaleString() + ' of ' + c.count.toLocaleString() + ' models'
+                + (c.rulings ? ' · ' + c.rulings + ' ruling' + (c.rulings === 1 ? '' : 's') : '')));
+            card.append(head);
+            const seg = segControl([{ label: 'All', value: 'all' }, { label: 'Needs review', value: 'review' }, { label: 'Rulings', value: 'rulings' }],
+                sizesFilter, (v) => { sizesFilter = v; sizesShown = SIZES_PAGE; renderSizes(); });
+            const search = tableSearch('Search manufacturer or model…', sizesQ, (v) => { sizesQ = v; sizesShown = SIZES_PAGE; renderSizes(); });
+            card.append(tableTools([search, seg], []));
+            if (!rows.length) { card.append(el('div', 'empty', sizesQ ? 'No model matches “' + sizesQ + '”.' : 'The sheet is empty.')); box.append(card); return; }
+            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
+            const thead = el('thead'); const hr = el('tr');
+            [['Manufacturer'], ['Model'], ['Holder glass', 1], ['Image', 1], ['Produced as (mm)', 1], ['Notes']].forEach(([h, right]) => {
+                const th = el('th', null, h); if (right) th.style.textAlign = 'right'; hr.append(th);
+            });
+            thead.append(hr); tbl.append(thead);
+            const tb = el('tbody');
+            rows.slice(0, sizesShown).forEach(r => {
+                const tr = el('tr');
+                tr.append(el('td', null, r.manufacturer), el('td', null, r.model));
+                const g = el('td', null, r.glass ? r.glass + ' mm' : ''); g.style.textAlign = 'right';
+                const im = el('td', null, r.image ? r.image + ' mm' : ''); im.style.textAlign = 'right';
+                tr.append(g, im, sizesProducedCell(r, !!c.can_edit));
+                const n = el('td', 'sizes-notes', r.notes || (r.undercut && r.undercut !== '0' ? r.undercut + ' mm under the holder' : ''));
+                tr.append(n);
+                tb.append(tr);
+            });
+            tbl.append(tb); wrap.append(tbl); card.append(wrap);
+            const foot = el('div', 'tbl-foot');
+            foot.append(el('div', 'tbl-count', 'Viewing ' + Math.min(sizesShown, rows.length).toLocaleString() + ' of ' + rows.length.toLocaleString() + ' model' + (rows.length === 1 ? '' : 's')));
+            if (rows.length > sizesShown) {
+                const more = el('button', 'btn btn-sm', 'Show ' + Math.min(SIZES_PAGE, rows.length - sizesShown) + ' more');
+                more.onclick = () => { sizesShown += SIZES_PAGE; renderSizes(); };
+                foot.append(more);
+            }
+            card.append(foot);
+            box.append(card);
         }
         async function showReconView() { renderRecon(); refreshRecon(); }
         async function refreshRecon() {
@@ -19899,7 +20028,7 @@ Projected Image UK"></textarea>
             return data;
         }
         const TAB_KEYS = ['overview', 'seo', 'keywords', 'products', 'customers', 'liability',
-                          'crm', 'loans', 'mail', 'files', 'labels', 'memory', 'skills', 'chat', 'recon',
+                          'crm', 'loans', 'mail', 'files', 'labels', 'sizes', 'memory', 'skills', 'chat', 'recon',
                           'forecast', 'connector'];
         /* Reconciliation is not part of the default grant: it holds the books,
            the bank line and the accounts mailbox, so it is handed over on
@@ -20328,7 +20457,7 @@ Projected Image UK"></textarea>
                         products: 'Products', customers: 'Customers', liability: 'Liability',
                         crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', labels: 'Production Manager',
                         memory: 'Memory', skills: 'Skills', chat: 'Chat',
-                        recon: 'Reconciliation', forecast: 'Forecast' };
+                        recon: 'Reconciliation', forecast: 'Forecast', sizes: 'Size list' };
                     const chosen = new Set(Array.isArray(u.tabs) ? u.tabs : DEFAULT_TABS);
                     const boxes = [];
                     const group = el('div');
@@ -20662,8 +20791,8 @@ Projected Image UK"></textarea>
                 if (on) n.setAttribute('aria-current', 'page'); else n.removeAttribute('aria-current');
             });
             revealNavItem(v);
-            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'forecast', 'connector', 'crm', 'loans', 'mail', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', forecast: 'Forecast', connector: 'Xero sync', crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
+            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'forecast', 'connector', 'crm', 'loans', 'mail', 'files', 'team', 'labels', 'sizes', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', forecast: 'Forecast', sizes: 'Size list', connector: 'Xero sync', crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             setViewTitle(titles[v] || (active() ? (active().title || 'Chat') : 'Chat'));
             /* Beta rides the topbar title as well: it is the only label still
                on screen once the page is scrolled. */
@@ -20701,6 +20830,7 @@ Projected Image UK"></textarea>
             if (v === 'skills') loadSkills();
             if (v === 'recon') showReconView();
             if (v === 'forecast') showForecastView();
+            if (v === 'sizes') showSizesView();
             if (v === 'connector') showConnectorView();
         }
 

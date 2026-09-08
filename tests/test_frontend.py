@@ -1857,6 +1857,29 @@ def t_the_forecast_tab_exists_and_is_gated():
     ok("c.can_upload ? forecastUploadButton() : null" in fn, "and only an admin sees the button")
 
 @test
+def t_the_size_list_tab_is_searchable_and_reads_the_same_sheet_as_the_label():
+    """Cameron: "a searchable size list from our size list data". The tab reads
+    the whole sheet through the route the label lookup shares, searches it
+    by the start of a word in the maker or model, pages it 250 at a time,
+    shows a ruling over the sheet's own answer, and lets a person with the
+    size grant rule inline through the same rule route the Production
+    Manager uses. It is a default grant: reference data for the bench."""
+    ok('id="view-sizes"' in HTML and 'data-view="sizes"' in HTML and 'class="ov-wrap" id="sizes-content"' in HTML, "the view, its entry and the house wrapper")
+    keys = re.search(r"const TAB_KEYS = \[[^\]]+\]", SCRIPT).group(0)
+    ok("'sizes'" in keys and "'sizes'" not in re.search(r"const OPT_IN_TABS = \[[^\]]+\]", SCRIPT).group(0), "a default grant")
+    ok("if (v === 'sizes') showSizesView();" in SCRIPT, "opening it loads the sheet")
+    ok("api('/api/gobo-sizes/list', {})" in SCRIPT, "from the listing route")
+    fn = SCRIPT.split("function renderSizes()")[1].split("\n        async function showReconView")[0]
+    ok("tableSearch('Search manufacturer or model" in fn and "segControl([{ label: 'All', value: 'all' }, { label: 'Needs review', value: 'review' }, { label: 'Rulings', value: 'rulings' }]" in fn,
+       "a search box and the three filters in the house table tools")
+    ok("words.some(w => w.indexOf(t) === 0)" in SCRIPT, "a token matches the start of a word")
+    ok("rows.slice(0, sizesShown)" in fn and "'Show ' + Math.min(SIZES_PAGE" in fn, "paged, with a Show more")
+    ok("el('span', 'lbl-chip made', 'ruling')" in SCRIPT and "'not a gobo'" in SCRIPT, "a ruling and an exclusion read as chips over the sheet's answer")
+    ok("api('/api/gobo-sizes/rule', { op: 'set', manufacturer: r.manufacturer, model: r.model, size: inp.value.trim() })" in SCRIPT,
+       "ruling inline writes the same rule the label reads")
+    ok("if (canEdit) {" in SCRIPT.split("function sizesProducedCell")[1][:1400], "and only with the grant")
+
+@test
 def t_ai_output_is_labelled_interpretation_never_fact():
     """Section 9 of the brief, and the whole point: a model's conclusion is
     displayed as interpretation with its confidence and citations, visually
