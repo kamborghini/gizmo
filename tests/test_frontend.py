@@ -2868,6 +2868,30 @@ def t_the_sidebar_does_not_dim_where_you_are_not():
 
 
 @test
+def t_the_sidebar_groups_fold_and_remember_it():
+    """Cameron: "make the tab headings in the sidebar dropdowns, it's getting
+    crowded". Each heading is a toggle, as the reference's collapsible sidebar
+    groups are: a chevron that turns when the group opens, the section under
+    it hidden when folded, the choice remembered per group, and a page opened
+    inside a folded group unfolds it so the highlighted item is never out of
+    sight. A group with nothing an account may open is not shown at all."""
+    for name in ("dashboards", "finance", "operations", "workspace"):
+        ok('<button class="nav-group" type="button" data-group="%s" aria-expanded="true" aria-controls="nav-sect-%s">' % (name, name) in HTML,
+           name + " is a toggle that says what it controls")
+        ok('<div class="nav-sect" id="nav-sect-%s">' % name in HTML, "and its items sit in a section of their own")
+    ok("const LS_NAVGROUPS = 'sc_navgroups_v1';" in SCRIPT, "the fold is remembered")
+    ok("btn.onclick = () => setNavGroup(btn.dataset.group, btn.getAttribute('aria-expanded') !== 'true', true);" in SCRIPT,
+       "a click flips it and remembers")
+    ok("revealNavItem(v);" in SCRIPT.split("function setView(v) {")[1][:400], "opening a page unfolds its group")
+    ok("document.querySelectorAll('.nav .nav-group, .nav .nav-item')" in SCRIPT, "the search still lists items inside a folded group")
+    ok("syncNavGroups();" in SCRIPT.split("function applyRoleChrome()")[1].split("\n        function ")[0],
+       "a group an account cannot open at all is hidden, heading included")
+    ok('.nav-group[aria-expanded="true"] .nav-caret { transform: rotate(90deg); }' in CSS, "the chevron turns when the group is open")
+    ok(".nav-sect[hidden] { display: none; }" in CSS, "and a folded section takes no room")
+    grp = CSS.split(".nav-group {")[1].split("}")[0]
+    ok("cursor: pointer" in grp and "width: 100%" in grp and "font-family: inherit" in grp, "the heading is a full-width button in the group's own type")
+
+@test
 def t_a_chip_is_exactly_twenty_pixels():
     """It inherited its height from a line box plus padding, which gave 21.5 -
     a hair taller than the reference's badge everywhere one appeared."""

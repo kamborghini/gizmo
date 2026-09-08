@@ -257,8 +257,20 @@
         .nav-group { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-secondary);
             height: var(--control-h); display: flex; align-items: center; padding: 0 var(--sp-2);
             /* Two groups' 8px paddings meet between them in the reference: 16. */
-            margin-top: var(--sp-4); }
+            margin-top: var(--sp-4);
+            /* A toggle, as the reference's collapsible group label is: the
+               whole row, the group's own type, a muted pill under the pointer. */
+            width: 100%; background: none; border: 0; border-radius: var(--radius-sm); text-align: left;
+            font-family: inherit; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
+        .nav-group:hover { background: var(--surface-tertiary); color: var(--text-primary); }
         .nav-group:first-child { margin-top: 0; }
+        /* The chevron points right when the group is folded and turns to
+           point down when it is open, the reference's own cue. */
+        .nav-group .nav-caret { margin-left: auto; display: grid; place-items: center; color: var(--text-tertiary);
+            transition: transform var(--dur) var(--ease); }
+        .nav-group .nav-caret svg { width: var(--sp-4); height: var(--sp-4); display: block; }
+        .nav-group[aria-expanded="true"] .nav-caret { transform: rotate(90deg); }
+        .nav-sect[hidden] { display: none; }
         /* 32px, and an INACTIVE item is full-strength ink at normal weight -
            the reference does not dim the places you are not. Position is marked
            by the pill and the weight, not by greying everything else out, which
@@ -3396,29 +3408,37 @@
                          over each set. It also settles where Reconciliation lives -
                          next to Liability under Finance, rather than as its own
                          island halfway down a flat list of sixteen. -->
-                    <div class="nav-group">Dashboards</div>
+                    <button class="nav-group" type="button" data-group="dashboards" aria-expanded="true" aria-controls="nav-sect-dashboards">Dashboards</button>
+                    <div class="nav-sect" id="nav-sect-dashboards">
                     <button class="nav-item active" data-view="overview" id="nav-overview"></button>
                     <button class="nav-item" data-view="seo" id="nav-seo"></button>
                     <button class="nav-item" data-view="keywords" id="nav-keywords"></button>
                     <button class="nav-item" data-view="products" id="nav-products"></button>
                     <button class="nav-item" data-view="customers" id="nav-customers"></button>
-                    <div class="nav-group">Finance</div>
+                    </div>
+                    <button class="nav-group" type="button" data-group="finance" aria-expanded="true" aria-controls="nav-sect-finance">Finance</button>
+                    <div class="nav-sect" id="nav-sect-finance">
                     <button class="nav-item" data-view="liability" id="nav-liability"></button>
                     <button class="nav-item" data-view="recon" id="nav-recon"></button>
                     <button class="nav-item" data-view="forecast" id="nav-forecast"></button>
                     <button class="nav-item" data-view="connector" id="nav-connector"></button>
-                    <div class="nav-group">Operations</div>
+                    </div>
+                    <button class="nav-group" type="button" data-group="operations" aria-expanded="true" aria-controls="nav-sect-operations">Operations</button>
+                    <div class="nav-sect" id="nav-sect-operations">
                     <button class="nav-item" data-view="labels" id="nav-labels"></button>
                     <button class="nav-item" data-view="crm" id="nav-crm"></button>
                     <button class="nav-item" data-view="loans" id="nav-loans"></button>
                     <button class="nav-item" data-view="mail" id="nav-mail"></button>
                     <button class="nav-item" data-view="files" id="nav-files"></button>
-                    <div class="nav-group">Workspace</div>
+                    </div>
+                    <button class="nav-group" type="button" data-group="workspace" aria-expanded="true" aria-controls="nav-sect-workspace">Workspace</button>
+                    <div class="nav-sect" id="nav-sect-workspace">
                     <button class="nav-item" data-view="team" id="nav-team" style="display:none"></button>
                     <button class="nav-item" data-view="memory" id="nav-memory"></button>
                     <button class="nav-item" data-view="skills" id="nav-skills"></button>
                     <button class="nav-item" data-view="chat" id="nav-chat"></button>
                     <button class="nav-item" data-view="guide" id="nav-guide"></button>
+                    </div>
                 </div>
                 <div class="convo-head"><span>Conversations</span>
                     <button class="icon-btn" id="new-convo" title="New chat" aria-label="New chat"></button></div>
@@ -19906,6 +19926,7 @@ Projected Image UK"></textarea>
                 const n = $('nav-' + v);
                 if (n) n.style.display = tabAllowed(v) ? '' : 'none';
             });
+            syncNavGroups();
             const av = document.querySelector('.view.active');
             const cur = av ? av.id.replace('view-', '') : '';
             if (cur && !tabAllowed(cur)) {
@@ -20591,12 +20612,56 @@ Projected Image UK"></textarea>
             const n = document.querySelector('.nav-item.active');
             return (n && n.dataset.view) || '';
         }
+        /* ---------- sidebar groups fold ----------
+           Each group heading is a toggle, as the reference's collapsible
+           sidebar groups are: the chevron on its right turns to point down
+           when the group is open, the section under it hides when it is not,
+           and the choice is remembered per group. Opening a page inside a
+           folded group unfolds it, so a search or a link never lands on a
+           highlighted item you cannot see. */
+        const LS_NAVGROUPS = 'sc_navgroups_v1';
+        function navGroupState() { try { return JSON.parse(localStorage.getItem(LS_NAVGROUPS)) || {}; } catch (e) { return {}; } }
+        function setNavGroup(name, open, remember) {
+            const btn = document.querySelector('.nav-group[data-group="' + name + '"]');
+            const sect = $('nav-sect-' + name);
+            if (!btn || !sect) return;
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            sect.hidden = !open;
+            if (remember) { const st = navGroupState(); st[name] = open; try { localStorage.setItem(LS_NAVGROUPS, JSON.stringify(st)); } catch (e) {} }
+        }
+        function syncNavGroups() {
+            /* A group with nothing an account may open is not shown at all,
+               heading included; otherwise the heading shows and the section
+               follows the remembered choice, open by default. */
+            const st = navGroupState();
+            document.querySelectorAll('.nav-group[data-group]').forEach(btn => {
+                const name = btn.dataset.group, sect = $('nav-sect-' + name);
+                if (!sect) return;
+                const any = [...sect.querySelectorAll('.nav-item')].some(n => n.style.display !== 'none');
+                btn.style.display = any ? '' : 'none';
+                setNavGroup(name, any && st[name] !== false, false);
+                if (!any) sect.hidden = true;
+            });
+        }
+        function initNavGroups() {
+            document.querySelectorAll('.nav-group[data-group]').forEach(btn => {
+                const caret = el('span', 'nav-caret'); caret.innerHTML = I.chev; caret.setAttribute('aria-hidden', 'true');
+                btn.append(caret);
+                btn.onclick = () => setNavGroup(btn.dataset.group, btn.getAttribute('aria-expanded') !== 'true', true);
+            });
+            syncNavGroups();
+        }
+        function revealNavItem(v) {
+            const n = $('nav-' + v); const sect = n && n.closest('.nav-sect');
+            if (sect && sect.hidden) setNavGroup(sect.id.replace('nav-sect-', ''), true, true);
+        }
         const BETA_TABS = ['recon', 'forecast', 'crm', 'connector'];
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => {
                 const on = n.dataset.view === v; n.classList.toggle('active', on);
                 if (on) n.setAttribute('aria-current', 'page'); else n.removeAttribute('aria-current');
             });
+            revealNavItem(v);
             ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'forecast', 'connector', 'crm', 'loans', 'mail', 'files', 'team', 'labels', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
             const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', forecast: 'Forecast', connector: 'Xero sync', crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             setViewTitle(titles[v] || (active() ? (active().title || 'Chat') : 'Chat'));
@@ -20695,8 +20760,8 @@ Projected Image UK"></textarea>
            the sidebar itself so a tab hidden by its permission stays hidden here. */
         function navEntries() {
             const out = []; let group = '';
-            [...document.querySelectorAll('.nav > *')].forEach(n => {
-                if (n.classList.contains('nav-group')) { group = n.textContent.trim(); return; }
+            [...document.querySelectorAll('.nav .nav-group, .nav .nav-item')].forEach(n => {
+                if (n.classList.contains('nav-group')) { group = [...n.childNodes].filter(c => c.nodeType === 3).map(c => c.textContent).join('').trim(); return; }
                 if (!n.classList.contains('nav-item') || n.style.display === 'none') return;
                 const label = [...n.childNodes].filter(c => c.nodeType === 3).map(c => c.textContent).join('').trim();
                 out.push({ view: n.dataset.view, label, group, icon: n.querySelector('.ic') });
@@ -21287,6 +21352,7 @@ Projected Image UK"></textarea>
 
         /* ---------- wire up ---------- */
         document.querySelectorAll('.nav-item').forEach(n => n.onclick = () => setView(n.dataset.view));
+        initNavGroups();
         $('new-convo').onclick = () => newConvo();
         $('send').onclick = () => send();
         $('deep-toggle').onclick = function () { deep = !deep; this.classList.toggle('on', deep); };
