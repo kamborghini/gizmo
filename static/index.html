@@ -3328,7 +3328,16 @@
            carried onto every printed page: "Skip to content" in the corner of
            each production label. */
         body.printing-label .skip-link { display: none !important; }
-        @media print { .skip-link { display: none !important; } }
+        /* Nothing pinned to the viewport prints, in either mode. Label mode
+           hides #app, but a fixed element outside it, or one that happens to
+           be open when the print starts (a toast, a menu, the update bar, the
+           sign-in scrim, a modal, a drag bar), is carried onto every page. The
+           list is every position:fixed selector in this stylesheet; the guard
+           keeps them in step. */
+        @media print {
+            .skip-link, .build-bar, #toast-host, .modal-overlay, .auth-overlay, .backdrop,
+            .dmenu, .crm-dropbar, .sidebar { display: none !important; }
+        }
         .confirm-overlay { z-index: 60; }
         .confirm-modal { max-width: 460px; width: 92vw; }
         .confirm-msg { font-size: var(--text-sm); line-height: var(--lh-body); color: var(--text-primary); margin: 0; }

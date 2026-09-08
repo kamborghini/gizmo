@@ -834,15 +834,31 @@ def t_a_switch_reports_its_state():
 
 
 @test
-def t_the_skip_link_never_prints():
+def t_nothing_pinned_to_the_viewport_prints():
     """Cameron, after a bulk print: "Skip to content" sat in the corner of the
     production labels. The link lives outside #app, so label mode's hiding of
     the app did not reach it, and a position:fixed element is carried onto
-    every printed page. It is for a keyboard on a screen and nowhere else."""
+    every printed page. Then: "ensure this bug does not appear on any other
+    printables". So every selector that pins itself to the viewport - the
+    link, the update bar, toasts, modals, the sign-in scrim, the drawer
+    backdrop, menus, the drag bar, the phone sidebar - prints as nothing,
+    in label mode and in a report alike, and the rule is checked against the
+    stylesheet so a new fixed element cannot slip past it."""
     ok("body.printing-label .skip-link { display: none !important; }" in CSS,
        "label mode hides the skip link, on screen and on paper")
-    ok("@media print { .skip-link { display: none !important; } }" in CSS,
-       "and no print of any page carries it")
+    rule = re.search(r"@media print \{\s*(\.skip-link,[^}]*)\{ display: none !important; \}\s*\}", CSS)
+    ok(rule, "and no print of any page carries it: one rule hides everything pinned to the viewport")
+    hidden = {x.strip() for x in rule.group(1).split(",")} if rule else set()
+    # every selector in the stylesheet that pins itself to the viewport must be in that rule
+    pinned = set()
+    bare = re.sub(r"/\*.*?\*/", "", CSS, flags=re.S)  # comments carry no selectors
+    for m in re.finditer(r"([^{}]+)\{[^{}]*position: fixed", bare):
+        for sel in m.group(1).split(","):
+            sel = sel.strip().split("\n")[-1].strip()
+            if sel.startswith("@"): continue
+            pinned.add(sel.split(".show")[0].split(":")[0].strip())
+    missing = sorted(p for p in pinned if p and p not in hidden)
+    ok(not missing, "every position:fixed selector prints as nothing (missing: %s)" % ", ".join(missing))
     ok(HTML.index('<a class="skip-link"') < HTML.index('id="app"'),
        "it still comes first in the document, which is the point of it")
 
