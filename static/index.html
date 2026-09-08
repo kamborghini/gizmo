@@ -3323,6 +3323,12 @@
         .build-bar span { flex: 1 1 100%; }
         @media print { .build-bar { display: none !important; } }
         body.printing-label #toast-host { display: none !important; }
+        /* The skip link is for a keyboard on a screen. It sits OUTSIDE #app, so
+           label mode's "hide the app" did not reach it, and a fixed element
+           carried onto every printed page: "Skip to content" in the corner of
+           each production label. */
+        body.printing-label .skip-link { display: none !important; }
+        @media print { .skip-link { display: none !important; } }
         .confirm-overlay { z-index: 60; }
         .confirm-modal { max-width: 460px; width: 92vw; }
         .confirm-msg { font-size: var(--text-sm); line-height: var(--lh-body); color: var(--text-primary); margin: 0; }

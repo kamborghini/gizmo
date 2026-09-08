@@ -834,6 +834,19 @@ def t_a_switch_reports_its_state():
 
 
 @test
+def t_the_skip_link_never_prints():
+    """Cameron, after a bulk print: "Skip to content" sat in the corner of the
+    production labels. The link lives outside #app, so label mode's hiding of
+    the app did not reach it, and a position:fixed element is carried onto
+    every printed page. It is for a keyboard on a screen and nowhere else."""
+    ok("body.printing-label .skip-link { display: none !important; }" in CSS,
+       "label mode hides the skip link, on screen and on paper")
+    ok("@media print { .skip-link { display: none !important; } }" in CSS,
+       "and no print of any page carries it")
+    ok(HTML.index('<a class="skip-link"') < HTML.index('id="app"'),
+       "it still comes first in the document, which is the point of it")
+
+@test
 def t_the_print_sheet_fits_its_own_page_box():
     """The sheet was pinned to 186mm: 4mm wider than A4 portrait's print box, so
     the right edge clipped, and only 68% of A4 landscape, so the manifest wasted
