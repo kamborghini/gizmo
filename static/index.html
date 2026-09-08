@@ -1275,7 +1275,21 @@
            inherits drew a box within the tile, and its grid kept a tile from
            shrinking below the sum of its box and both buttons. */
         .cx-tile { min-width: 0; }
-        .cx-tile .cx-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+        /* One shape for every tile: the box across the top of its row, the
+           buttons on the row beneath, every control 32px, and the controls
+           sitting at the same height across the three because the tiles
+           stretch and the row hangs at the bottom. */
+        .cx-grid { align-items: stretch; }
+        .cx-tile .cx-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); margin-top: auto; }
+        .cx-tile .cx-row input, .cx-tile .cx-row select { grid-column: 1 / -1; width: auto; max-width: none; height: var(--control-h); }
+        .cx-tile .cx-row .btn { width: 100%; justify-content: center; }
+        /* The card's own notice about the last run: full width, its own
+           colour, one line and then the reasons. */
+        .cx-health { border-radius: var(--radius-md); padding: var(--sp-3) var(--sp-4); margin: var(--sp-3) 0 0; font-size: var(--text-sm); }
+        .cx-health.bad { background: var(--error-bg); color: var(--error); }
+        .cx-health.ok { background: var(--success-bg); color: var(--success); }
+        .cx-health-line { font-weight: var(--weight-medium); }
+        .cx-health-item { font-size: var(--text-xs); margin-top: var(--sp-1); opacity: .9; }
         .cx-auto { display: flex; align-items: center; gap: var(--sp-3); padding-top: var(--sp-3); border-top: var(--bw-hairline) solid var(--border-default); }
         .cx-chips { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
         .conn-doc { width: 100%; border-collapse: collapse; margin-top: var(--sp-3); }
@@ -8430,8 +8444,7 @@ Projected Image UK"></textarea>
                 }
                 ar.append(w);
                 if (connIsAdmin()) {
-                    const t = el('button', 'btn btn-sm' + (on ? '' : ' btn-primary'),
-                                 on ? 'Turn Auto Run off' : 'Turn Auto Run on');
+                    const t = el('button', 'btn btn-sm', on ? 'Turn Auto Run off' : 'Turn Auto Run on');
                     t.onclick = async () => {
                         if (!on && !await uiConfirm(
                             'Turn Auto Run on? Every 10 minutes the connector will check for new '
@@ -8452,14 +8465,16 @@ Projected Image UK"></textarea>
             }
             /* ---- what the last run left behind ---- */
             if (connHealth && connHealth.needsAttention) {
-                const h = el('div', 'msg error');
-                h.append(el('div', null, connHealth.line || 'The last run needs attention.'));
+                const h = el('div', 'cx-health bad');
+                h.append(el('div', 'cx-health-line', connHealth.line || 'The last run needs attention.'));
                 (connHealth.problems || []).slice(0, 8).forEach(p2 => {
-                    h.append(el('div', 'lbl-meta', '\u00b7 ' + p2));
+                    h.append(el('div', 'cx-health-item', p2));
                 });
                 sCard.append(h);
             } else if (connHealth && connHealth.line) {
-                sCard.append(el('div', 'disp-ok-line', connHealth.line));
+                const h = el('div', 'cx-health ok');
+                h.append(el('div', 'cx-health-line', connHealth.line));
+                sCard.append(h);
             }
             const chipRow = el('div', 'cx-chips');
             if (st.quarantineCount) chipRow.append(el('span', 'lbl-chip warn', st.quarantineCount + ' in quarantine'));
@@ -8525,10 +8540,8 @@ Projected Image UK"></textarea>
                read what it would do, then send THAT order. */
             const oneWrap = el('div', 'cx-row');
             const oneIn = crmText(connOneCheck ? connOneCheck.order : '', '#104300');
-            oneIn.style.maxWidth = '180px';
             oneIn.setAttribute('aria-label', 'Order number');
-            const oneChk = el('button', 'btn btn-sm');
-            oneChk.append(ico(I.eye), document.createTextNode('Check this order'));
+            const oneChk = el('button', 'btn', 'Check this order');
             /* NOT setting-sub: that carries the 52ch prose measure, which
                squeezed a row of results to 382px inside a 1558px card and
                collapsed its flexible column to 26px. */
@@ -8558,8 +8571,7 @@ Projected Image UK"></textarea>
             };
             oneWrap.append(oneIn, oneChk);
             if (connIsAdmin()) {
-                const oneSend = el('button', 'btn btn-sm btn-primary');
-                oneSend.append(ico(I.send), document.createTextNode('Send this order'));
+                const oneSend = el('button', 'btn btn-primary', 'Send this order');
                 const armed = connOneArmed(oneIn.value);
                 oneSend.disabled = running || connOneBusy || !armed;
                 oneSend.title = armed ? 'Write just this order into Xero'
@@ -8603,10 +8615,8 @@ Projected Image UK"></textarea>
                not a write. The connector caps a tag at 100 orders. */
             const tagWrap = el('div', 'cx-row');
             const tagIn = crmText(connTagCheck ? connTagCheck.tag : '', 'xero-price-check');
-            tagIn.style.maxWidth = '220px';
             tagIn.setAttribute('aria-label', 'Order tag');
-            const tagChk = el('button', 'btn btn-sm');
-            tagChk.append(ico(I.eye), document.createTextNode('Check tagged orders'));
+            const tagChk = el('button', 'btn', 'Check tagged orders');
             const tagOut = el('div', 'conn-results');
             const paintTag = () => {
                 tagOut.replaceChildren();
@@ -8648,8 +8658,7 @@ Projected Image UK"></textarea>
             };
             tagWrap.append(tagIn, tagChk);
             if (connIsAdmin()) {
-                const tagSend = el('button', 'btn btn-sm btn-primary');
-                tagSend.append(ico(I.send), document.createTextNode('Send tagged orders'));
+                const tagSend = el('button', 'btn btn-primary', 'Send tagged orders');
                 const tagReady = () => connTagArmed(tagIn.value) && !((connTagCheck.data || {}).error);
                 const tagTitle = ok => ok ? 'Write every checked order into Xero'
                     : 'Check the tag first: Send does what the check showed';
@@ -8694,11 +8703,9 @@ Projected Image UK"></textarea>
                 + 'Xero invoice which payout paid it, with the order\u2019s share and the Shopify fee. A note only: no amount changes.';
             const payWrap = el('div', 'cx-row');
             const paySince = crmText(connPaySince, '2026-08-01');
-            paySince.style.maxWidth = '160px';
             paySince.setAttribute('aria-label', 'Payouts issued since');
             paySince.addEventListener('input', () => { connPaySince = paySince.value.trim(); });
-            const payChk = el('button', 'btn btn-sm');
-            payChk.append(ico(I.eye), document.createTextNode('Check payouts'));
+            const payChk = el('button', 'btn', 'Check payouts');
             const payOut = el('div', 'conn-results');
             function paintPay() {
                 payOut.innerHTML = '';
@@ -8734,7 +8741,7 @@ Projected Image UK"></textarea>
             };
             payWrap.append(paySince, payChk);
             if (connIsAdmin()) {
-                const payGo = el('button', 'btn btn-sm btn-primary', 'Write the notes');
+                const payGo = el('button', 'btn btn-primary', 'Write the notes');
                 /* Armed by a check, the same rule the one-order send follows:
                    nothing is written that nobody has looked at first. */
                 payGo.disabled = !(connPayResult && connPayResult.dryRun
