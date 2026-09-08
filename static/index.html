@@ -7569,8 +7569,14 @@ Projected Image UK"></textarea>
         function connDocModal(d) {
             const p = d.preview || {};
             const credit = d.kind === 'creditnote';
-            const money2 = n => (typeof n === 'number' ? n.toFixed(2)
-                                 : (n === undefined || n === null || n === '') ? '' : String(n));
+            /* Shopify sends money as strings, and "175.0" was reaching the
+               page as written. A number in any form is shown to two places;
+               a string that is not one is shown as it came. */
+            const money2 = n => {
+                if (n === undefined || n === null || n === '') return '';
+                const v = typeof n === 'number' ? n : Number(n);
+                return Number.isFinite(v) ? v.toFixed(2) : String(n);
+            };
             const m = sheetModal((credit ? 'Credit note ' : 'Invoice ')
                                  + (p.number || d.key || ''));
             /* Three outcomes, not two: an invoice the previous feed raised
