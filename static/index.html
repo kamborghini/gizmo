@@ -617,21 +617,6 @@
                last row's, so a row that does not fill leaves white, not lines. */
             border-right: var(--bw-hairline) solid var(--border-default); border-bottom: var(--bw-hairline) solid var(--border-default);
             margin-right: calc(-1 * var(--bw-hairline)); margin-bottom: calc(-1 * var(--bw-hairline)); }
-        /* Balanced rows. The reference fixes each KPI grid by its count (four
-           across on Default, five on Analytics, two by three on E-commerce)
-           rather than letting a fit strand one cell on a second row, which
-           is what eight SEO checks did inside the 1536px page. */
-        @media (min-width: 901px) {
-            .metrics-strip:has(> :nth-child(7):last-child),
-            .metrics-strip:has(> :nth-child(8):last-child) { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-        }
-        @media (min-width: 641px) and (max-width: 900px) {
-            .metrics-strip:has(> :nth-child(7):last-child),
-            .metrics-strip:has(> :nth-child(8):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        }
-        @media (min-width: 641px) and (max-width: 1500px) {
-            .metrics-strip:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-        }
         .metrics-strip .stat-ic { display: none; }
         .metrics-strip .stat .label { color: var(--text-primary); margin-bottom: var(--sp-4); }
         .metrics-strip .stat .value { font-size: var(--text-2xl); font-weight: var(--weight-regular); }
@@ -649,6 +634,30 @@
            row read as a layout that had run out of data. Under 1100 the shared
            breakpoints take it to two and then one, which divide six as well. */
         @media (min-width: 1101px) { .metrics.metrics-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        /* One frame, every row of it full. The strip is sixty tracks so any
+           count divides: four across by default, five or six across when there
+           are five or six (three across for six on a narrower page), and a
+           short last row shares the width - seven is four then three, nine is
+           four, four, then one across - instead of a boxed hole at the end,
+           which is what seven SEO checks left in a fixed four-column grid. */
+        .metrics.metrics-strip { grid-template-columns: repeat(60, minmax(0, 1fr)); }
+        @media (min-width: 901px) {
+            .metrics-strip > .stat { grid-column: span 15; }
+            .metrics-strip > .stat:nth-child(4n+1):last-child { grid-column: span 60; }
+            .metrics-strip > .stat:nth-child(4n+1):nth-last-child(2),
+            .metrics-strip > .stat:nth-child(4n+2):last-child { grid-column: span 30; }
+            .metrics-strip > .stat:nth-child(4n+1):nth-last-child(3),
+            .metrics-strip > .stat:nth-child(4n+2):nth-last-child(2),
+            .metrics-strip > .stat:nth-child(4n+3):last-child { grid-column: span 20; }
+            .metrics-strip:has(> :nth-child(5):last-child) > .stat { grid-column: span 12; }
+            .metrics-strip:has(> :nth-child(6):last-child) > .stat { grid-column: span 20; }
+        }
+        @media (min-width: 1500px) { .metrics-strip:has(> :nth-child(6):last-child) > .stat { grid-column: span 10; } }
+        /* Two across on a narrow page, an odd last cell taking the row. */
+        @media (max-width: 900px) {
+            .metrics-strip > .stat { grid-column: span 30; }
+            .metrics-strip > .stat:nth-child(odd):last-child { grid-column: span 60; }
+        }
         /* A KPI card that is also a filter has to answer the click that set
            it, with an inset hairline in the accent: no lift is ADDED, because a
            card does not float, and the base lift is not taken away either -
