@@ -3331,6 +3331,38 @@ def t_no_borderless_strip_is_sliced_by_someone_elses_border():
        "it wraps, so every person is whole and nothing meets an edge it should not")
 
 
+@test
+def t_a_box_painted_inside_a_card_sits_inside_its_gutter():
+    """The card hands its 16px gutter to every child as PADDING. That is right
+    for prose and for a table that meets the card's edge, and wrong for
+    anything that paints its own box: padding sits inside the box, so the box
+    still spans the full card and its colour lands on the card's border. The
+    Xero sync last-run notice went out that way twice - red touching the frame
+    on both sides - and each time the measurement was read as "inside the
+    padding" because 1px from the border IS the padded child's edge.
+
+    The CSS keeps one list of the boxed classes the script puts straight into
+    a card; those take the gutter as MARGIN. Every class that paints a box in
+    a card must be on it, and the notice must still be one of them."""
+    m = re.search(r"\.card > :is\(([^)]*)\),\s*\.card-bleed > \.empty \{([^}]*)\}", CSS)
+    ok(m is not None, "the margin-inset list for boxed children of a card is still one rule")
+    listed = {c.strip() for c in m.group(1).split(",")}
+    body = m.group(2)
+    ok("margin-left: var(--sp-4)" in body and "margin-right: var(--sp-4)" in body
+       and "width: auto" in body,
+       "the listed classes take the gutter as margin and let auto width fill it")
+    for cls in (".cx-health", ".msg", ".mail-sendwarn", ".disp-warn", ".empty", ".mail-empty",
+                ".lbl-row", ".lia-bar", ".ktable-wrap"):
+        ok(cls in listed, cls + " is inset by margin, not welded to the card's border")
+    notice = CSS.split(".cx-health {")[1].split("}")[0]
+    ok("padding:" in notice, "the notice keeps its own padding inside its box")
+    ok(".cx-health.bad { background:" in CSS and ".cx-health.ok { background:" in CSS,
+       "the notice paints a box, which is why it has to be on the list")
+    ok("el('div', 'cx-health bad')" in SCRIPT and "el('div', 'cx-health ok')" in SCRIPT
+       and "sCard.append(h)" in SCRIPT,
+       "the script still puts the notice straight into the Connection card")
+
+
 # --- Web Interface Guidelines pass ------------------------------------------
 
 @test
