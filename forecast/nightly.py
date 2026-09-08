@@ -13,6 +13,9 @@ service on this repo with a cron schedule.
   FORECAST_HISTORY_DAYS   optional, default 900
   FORECAST_HORIZON        optional, default 90
   FORECAST_NBEATS         optional, "1" to train N-BEATS (needs torch in the image)
+  FORECAST_MAX_MINUTES    optional, default 120: the whole run's ceiling. Past it
+                          the run posts a failure instead of hanging until someone
+                          notices a container still going at lunchtime.
 
 It fetches the workbook an admin uploaded in the Forecast tab, pulls the
 orders and products, runs the pipeline as of yesterday (London), and posts
@@ -23,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import signal
 import sys
 import tempfile
 import traceback
@@ -71,6 +75,18 @@ def main() -> int:
         return 2
     as_of = (datetime.now(ZoneInfo("Europe/London")) - timedelta(days=1)).date()
     results_url = base + "/hooks/forecast/results"
+    # A nightly job with no ceiling is how a container is still running at
+    # lunchtime, looking identical to one that is merely slow. The alarm raises
+    # in the main thread, so the failure travels the ordinary path and reaches
+    # the tab. Cancelled before the result is posted, so a post is never cut.
+    budget_min = int(env.get("FORECAST_MAX_MINUTES", "120"))
+    if budget_min > 0 and hasattr(signal, "SIGALRM"):
+        def _out_of_time(_sig, _frame):
+            raise TimeoutError(f"the run passed its {budget_min} minute ceiling "
+                               "(raise FORECAST_MAX_MINUTES, or ask for less history)")
+        signal.signal(signal.SIGALRM, _out_of_time)
+        signal.alarm(budget_min * 60)
+        log.info("ceiling: %d minutes", budget_min)
     try:
         from .cashflow import CashFlowModel
         from .config import Config
@@ -98,6 +114,8 @@ def main() -> int:
                 raise RuntimeError("no orders came back from Shopify")
             runner = Runner(cfg, panel, cf, Path(tmp) / "out", scenario=env.get("FORECAST_SCENARIO") or None)
             runner.run()
+            if hasattr(signal, "SIGALRM"):
+                signal.alarm(0)
             _post(results_url, token, runner.payload())
             log.info("posted the run as of %s", as_of)
             return 0

@@ -12263,6 +12263,49 @@ def t_the_xero_client_is_read_only_by_construction():
     ok('resp = await client.get(url' in src, "the accounting fetcher is a GET")
 
 @test
+def t_a_nightly_run_can_be_watched_and_cannot_hang():
+    """Cameron ran the cron by hand and had to ask how to kill it, because a
+    run that is working and a run that is wedged look identical: the order
+    pull said nothing for up to thirty minutes and the training had no ceiling
+    at all.
+
+    Two things follow. The poll reports every tick, so the log is a progress
+    bar. And the whole run carries a wall-clock ceiling that raises in the main
+    thread, so the failure travels the ordinary path and reaches the tab
+    instead of a container still going at lunchtime.
+
+    The poll also watches the operation it STARTED. Shopify has allowed five
+    concurrent bulk queries per app since the 2026-01 version, so
+    `currentBulkOperation` is both deprecated and ambiguous: a run whose
+    container was killed leaves its operation running, and the next run
+    polling "current" could download a different date range believing it was
+    its own."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ingest = open(os.path.join(root, "forecast", "ingest.py"), encoding="utf-8").read()
+    nightly = open(os.path.join(root, "forecast", "nightly.py"), encoding="utf-8").read()
+
+    bulk = ingest.split("def run_bulk_orders(", 1)[1].split("\ndef ", 1)[0]
+    # Comments stripped: the function explains in prose WHY it does not use the
+    # deprecated field, and that explanation must not read as a use of it.
+    code = "\n".join(l for l in bulk.splitlines() if not l.strip().startswith("#"))
+    ok("currentBulkOperation" not in code,
+       "the deprecated, ambiguous field is not how a run watches its own operation")
+    ok("currentBulkOperation" in bulk, "and the comment says why, so nobody puts it back")
+    ok('op_id = started["bulkOperationRunQuery"]["bulkOperation"]["id"]' in bulk,
+       "the id of the operation this run started is captured")
+    ok('{"id": op_id}' in bulk, "and it is what the poll asks about")
+    ok(bulk.count("log.info(") >= 3,
+       "the poll speaks each tick, so silence means stopped rather than working")
+
+    ok('env.get("FORECAST_MAX_MINUTES", "120")' in nightly, "the run has a ceiling, defaulting to two hours")
+    ok("signal.alarm(budget_min * 60)" in nightly, "the ceiling is armed before the work starts")
+    ok("raise TimeoutError(" in nightly, "reaching it raises, so the except posts it to the tab")
+    run_then_post = nightly.split("runner.run()", 1)[1].split("_post(results_url", 1)[0]
+    ok("signal.alarm(0)" in run_then_post,
+       "and it is cancelled once the work is done, so posting the result is never cut short")
+
+
+@test
 def t_the_nightly_service_takes_either_shopify_credential():
     """Reactor holds NO static Shopify token. It holds SHOPIFY_CLIENT_ID and
     SHOPIFY_CLIENT_SECRET and mints a short-lived one, which is why a

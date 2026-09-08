@@ -10,6 +10,7 @@ lags and rolling windows need every day present, sold or not.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 import urllib.error
@@ -22,6 +23,8 @@ import numpy as np
 import pandas as pd
 
 from .config import Config
+
+log = logging.getLogger("forecast.ingest")
 
 PANEL_COLUMNS = ["date", "variant_id", "sku", "product_id", "product", "category", "segment",
                  "units", "net_sales", "gross_sales", "discount", "price"]
@@ -243,17 +246,30 @@ def run_bulk_orders(shop: str, token: str, since: date, api_version: str = "2026
     errs = started["bulkOperationRunQuery"]["userErrors"]
     if errs:
         raise RuntimeError(str(errs))
+    op_id = started["bulkOperationRunQuery"]["bulkOperation"]["id"]
+    log.info("bulk operation %s started, polling every %ss", op_id, poll_seconds)
+    # BY ID, not `currentBulkOperation`. Shopify has allowed five concurrent
+    # bulk queries per app since 2026-01, and that field is both deprecated and
+    # ambiguous once more than one exists: a run whose container was killed
+    # leaves its operation going, and the next run polling "current" can watch
+    # the wrong one and download a different date range believing it is its own.
+    watch = """query($id: ID!) { node(id: $id) { ... on BulkOperation {
+        status url errorCode objectCount } } }"""
     url = None
     deadline = time.time() + timeout_s
     while time.time() < deadline:
-        cur = _gql(shop, token, api_version, "{ currentBulkOperation { status url errorCode objectCount } }")["currentBulkOperation"]
+        cur = _gql(shop, token, api_version, watch, {"id": op_id})["node"]
         if cur["status"] == "COMPLETED":
+            log.info("bulk operation completed: %s objects", cur.get("objectCount"))
             url = cur["url"]; break
         if cur["status"] in ("FAILED", "CANCELED", "EXPIRED"):
             raise RuntimeError(f"bulk operation {cur['status']}: {cur.get('errorCode')}")
+        # Silence for up to half an hour is indistinguishable from a hang, and
+        # that is exactly what it looked like the first time it was run.
+        log.info("bulk operation %s: %s objects so far", cur["status"], cur.get("objectCount") or 0)
         time.sleep(poll_seconds)
     if not url:
-        raise TimeoutError("bulk operation did not finish")
+        raise TimeoutError(f"bulk operation did not finish within {timeout_s}s")
     with urllib.request.urlopen(url, timeout=300) as resp:
         lines = [json.loads(l) for l in resp.read().decode().splitlines() if l.strip()]
     return _assemble_bulk(lines)
