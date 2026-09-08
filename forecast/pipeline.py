@@ -163,12 +163,21 @@ class Runner:
             t0 = time.time()
             sub = self.panel[self.panel["date"] <= f.valid_end]
             for lo, hi in buckets:
+                tb = time.time()
                 feats, cols = self._features(sub, hi, f.train_end)
+                log.info("fold %d, days %d-%d: features in %.0fs (%d rows)",
+                         f.k, lo, hi, time.time() - tb, len(feats))
                 train = feats[(feats["date"] <= f.train_end) & feats["roll_mean_28"].notna()]
                 tr, es = self._split_es(train, f.train_end)
                 h = (feats["date"] - f.train_end).dt.days
                 valid = feats[(h >= lo) & (h <= hi) & (feats["date"] <= f.valid_end)]
+                tm = time.time()
                 models = self._fit_models(tr, es, cols)
+                # A fold is minutes long and used to say nothing until it ended,
+                # so a run that was working and a run that was wedged read the
+                # same. Every fit reports, and silence now means stopped.
+                log.info("fold %d, days %d-%d: %s in %.0fs", f.k, lo, hi,
+                         "+".join(sorted(models)), time.time() - tm)
                 for name, m in models.items():
                     oof.append(pd.DataFrame({"date": valid["date"].values, "variant_id": valid["variant_id"].values,
                                              "segment": valid["segment"].values, "model": name, "fold": f.k,

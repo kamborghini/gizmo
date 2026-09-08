@@ -13,6 +13,8 @@ service on this repo with a cron schedule.
   FORECAST_HISTORY_DAYS   optional, default 900
   FORECAST_HORIZON        optional, default 90
   FORECAST_NBEATS         optional, "1" to train N-BEATS (needs torch in the image)
+  FORECAST_CATBOOST       optional, "0" to train LightGBM alone, which roughly
+                          halves a run: CatBoost is forty fits of up to 1200 rounds
   FORECAST_MAX_MINUTES    optional, default 120: the whole run's ceiling. Past it
                           the run posts a failure instead of hanging until someone
                           notices a container still going at lunchtime.
@@ -107,8 +109,14 @@ def main() -> int:
             log.info("pulling orders since %s", since)
             orders = run_bulk_orders(shop, api_token, since)
             products = fetch_products(shop, api_token)
+            # CatBoost runs up to 1200 rounds a fit and there are forty fits in a
+            # run, so it is the long pole by a distance. Off, the run is roughly
+            # halved: worth it for a first forecast, or on a small container.
             cfg = Config(as_of=as_of, horizon_days=int(env.get("FORECAST_HORIZON", "90")),
-                         use_nbeats=env.get("FORECAST_NBEATS", "0") == "1")
+                         use_nbeats=env.get("FORECAST_NBEATS", "0") == "1",
+                         use_catboost=env.get("FORECAST_CATBOOST", "1") != "0")
+            log.info("models: lightgbm%s%s", "+catboost" if cfg.use_catboost else "",
+                     "+nbeats" if cfg.use_nbeats else "")
             panel = to_daily_panel(orders_to_rows(orders, cfg, products), as_of)
             if panel.empty:
                 raise RuntimeError("no orders came back from Shopify")

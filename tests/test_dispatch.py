@@ -12334,6 +12334,18 @@ def t_a_nightly_run_can_be_watched_and_cannot_hang():
        "the poll speaks each tick, so silence means stopped rather than working")
 
     ok('env.get("FORECAST_MAX_MINUTES", "120")' in nightly, "the run has a ceiling, defaulting to two hours")
+    # A fold is minutes long. It used to report only when it ENDED, so "still
+    # running" was the only thing anyone could say about it for ten minutes at
+    # a time. Every feature build and every fit now reports its own seconds.
+    root2 = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    pipe = open(os.path.join(root2, "forecast", "pipeline.py"), encoding="utf-8").read()
+    ok('log.info("fold %d, days %d-%d: features in %.0fs (%d rows)"' in pipe,
+       "each feature build says how long it took")
+    ok('log.info("fold %d, days %d-%d: %s in %.0fs"' in pipe,
+       "and so does each set of model fits, naming the models")
+    ok('env.get("FORECAST_CATBOOST", "1") != "0"' in nightly,
+       "CatBoost can be switched off: forty fits of up to 1200 rounds is the long pole")
+    ok('use_catboost=' in nightly, "and the switch actually reaches the config")
     ok("signal.alarm(budget_min * 60)" in nightly, "the ceiling is armed before the work starts")
     ok("raise TimeoutError(" in nightly, "reaching it raises, so the except posts it to the tab")
     run_then_post = nightly.split("runner.run()", 1)[1].split("_post(results_url", 1)[0]
