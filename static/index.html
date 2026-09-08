@@ -1264,6 +1264,20 @@
             font-size: var(--text-xs); margin: var(--sp-3) 0; }
         .conn-pairs dt { color: var(--text-tertiary); }
         .conn-pairs dd { margin: 0; }
+        /* The Xero sync page: the ways in as tiles, the Auto Run state as one
+           row, the state chips as one row. */
+        .cx-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(var(--sp-8) * 8), 1fr)); gap: var(--sp-4); align-items: start; margin-top: var(--sp-4); }
+        .cx-tile { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+        .cx-tile-title { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+        .cx-tile-hint { font-size: var(--text-xs); color: var(--text-tertiary); line-height: var(--lh-body); margin: 0; }
+        .cx-tile .conn-results:empty { display: none; }
+        /* Inside a tile the row is a plain flex row: the label-row frame it
+           inherits drew a box within the tile, and its grid kept a tile from
+           shrinking below the sum of its box and both buttons. */
+        .cx-tile { min-width: 0; }
+        .cx-tile .cx-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+        .cx-auto { display: flex; align-items: center; gap: var(--sp-3); padding-top: var(--sp-3); border-top: var(--bw-hairline) solid var(--border-default); }
+        .cx-chips { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
         .conn-doc { width: 100%; border-collapse: collapse; margin-top: var(--sp-3); }
         .conn-doc th { text-align: left; font-size: var(--text-xs); color: var(--text-tertiary);
             font-weight: var(--weight-semibold); padding: var(--sp-1-5) var(--sp-2); border-bottom: var(--bw-hairline) solid var(--border-default); }
@@ -8356,11 +8370,27 @@ Projected Image UK"></textarea>
             const running = !!st.running;
             if (running) connStartWatch();
 
+            /* ---- the ledger at a glance ---- */
+            const led0 = st.ledger || {};
+            const kpis = [];
+            const kpi = (label, key, note, warnWhen) => {
+                if (led0[key] == null) return;
+                kpis.push({ label: label, value: String(led0[key]), note: note, tone: (warnWhen && led0[key] > 0) ? 'warn' : null });
+            };
+            kpi('Synced', 'synced', 'invoices, credit notes and contacts in Xero');
+            kpi('Failed', 'failed', 'did not write; retry once the cause is fixed', true);
+            kpi('Quarantined', 'quarantined', 'held back rather than written with bad data', true);
+            kpi('Blocked', 'blocked', 'kept out on purpose');
+            if (kpis.length) box.append(metricsStrip(kpis));
+
             /* ---- status ---- */
             const sCard = el('div', 'card');
-            const sHead = el('div', 'card-head');
-            sHead.append(el('h3', 'card-title', 'Connections'));
-            sHead.append(el('p', 'card-desc', 'What the service is linked to, and the state of its ledger.'));
+            const sHead = el('div', 'card-head card-head-stat');
+            sHead.append(el('div', 'card-title', 'Connection'));
+            sHead.append(el('div', 'card-desc', cfg.dryOnly ? 'Reviews only' : (cfg.shop ? 'Xero linked' : 'Not configured')));
+            sHead.append(el('div', 'card-sub', [cfg.shop ? 'Shopify ' + cfg.shop : 'Shopify not configured',
+                cfg.reconcileMode ? 'totals checked: ' + cfg.reconcileMode + (cfg.reconcileTolerance != null ? ' within ' + cfg.reconcileTolerance : '') : null,
+                cfg.dryOnly ? 'credentials incomplete on the service' : 'credentials and mapping live on the connector service'].filter(Boolean).join(' · ')));
             const sAct = el('div', 'card-act');
             const rf = el('button', 'btn btn-sm'); rf.append(ico(I.refresh), document.createTextNode('Refresh'));
             rf.onclick = () => { rf.disabled = true; refreshConnector().finally(() => { rf.disabled = false; }); };
@@ -8373,11 +8403,10 @@ Projected Image UK"></textarea>
                over unattended writing into the accounts must not tell. */
             if (connAuto) {
                 const on = !!connAuto.enabled;
-                const ar = el('div', 'lbl-row loan-row' + (on ? ' is-due' : ''));
+                const ar = el('div', 'cx-auto');
                 const w = el('div', 'lr-what');
                 const line = el('div');
-                line.append(el('span', 'mrule-tag' + (on ? ' made' : ''),
-                               on ? 'Auto Run ON' : 'Auto Run OFF'));
+                line.append(el('span', 'lbl-chip ' + (on ? 'made' : 'note'), on ? 'Auto Run ON' : 'Auto Run OFF'));
                 line.append(document.createTextNode('  ' + (on
                     ? 'Checking for new orders every '
                       + (connAuto.intervalMinutes || 10) + ' minutes and sending them to Xero.'
@@ -8417,7 +8446,7 @@ Projected Image UK"></textarea>
                             await refreshConnector();
                         } catch (e) { t.disabled = false; toastError(e.message); }
                     };
-                    ar.append(t);
+                    sAct.append(t);
                 }
                 sCard.append(ar);
             }
@@ -8432,22 +8461,11 @@ Projected Image UK"></textarea>
             } else if (connHealth && connHealth.line) {
                 sCard.append(el('div', 'disp-ok-line', connHealth.line));
             }
-            const chipRow = el('div'); chipRow.style.cssText = 'display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap';
-            chipRow.append(el('span', 'lbl-chip ' + (cfg.shop ? 'made' : 'warn'),
-                cfg.shop ? ('Shopify \u00b7 ' + cfg.shop) : 'Shopify not configured'));
-            chipRow.append(el('span', 'lbl-chip ' + (cfg.dryOnly ? 'warn' : 'made'),
-                cfg.dryOnly ? 'Credentials incomplete \u00b7 reviews only' : 'Xero linked'));
-            if (cfg.reconcileMode) chipRow.append(el('span', 'lbl-chip note', 'Totals check: ' + cfg.reconcileMode));
+            const chipRow = el('div', 'cx-chips');
             if (st.quarantineCount) chipRow.append(el('span', 'lbl-chip warn', st.quarantineCount + ' in quarantine'));
             if (running) chipRow.append(el('span', 'lbl-chip note', 'A run is in progress\u2026'));
             if (st.lastError) chipRow.append(el('span', 'lbl-chip bad', 'Last run failed'));
-            sCard.append(chipRow);
-            const led = st.ledger || {};
-            const ledBits = Object.keys(led).map(k => led[k] + ' ' + k).join(' \u00b7 ');
-            if (ledBits) sCard.append(el('div', 'sub', 'Ledger: ' + ledBits + '.'));
-            sCard.append(el('p', 'field-help',
-                'Credentials and mapping rules live on the connector service itself, '
-                + 'not in gizmo, and are set there.'));
+            if (chipRow.childNodes.length) sCard.append(chipRow);
             box.append(sCard);
 
             /* ---- review and send ---- */
@@ -8492,11 +8510,20 @@ Projected Image UK"></textarea>
                 rAct.append(send);
             }
             rHead.append(rAct); rCard.append(rHead);
+            /* The three narrower ways in sit side by side as tiles, each with
+               its one-line hint, its box and its buttons, and its own result
+               under it; they used to be a column of prose at half width. */
+            const grid = el('div', 'cx-grid');
+            const cxTile = (title, hint, row, out) => {
+                const tile = el('div', 'cx-tile');
+                tile.append(el('div', 'cx-tile-title', title), el('p', 'cx-tile-hint', hint), row, out);
+                return tile;
+            };
             /* ---- one order at a time ----
                Sending the whole queue is the wrong first act against real
                books. This is the same discipline as above, per order: check,
                read what it would do, then send THAT order. */
-            const oneWrap = el('div', 'lbl-row'); oneWrap.style.marginTop = 'var(--sp-4)';
+            const oneWrap = el('div', 'cx-row');
             const oneIn = crmText(connOneCheck ? connOneCheck.order : '', '#104300');
             oneIn.style.maxWidth = '180px';
             oneIn.setAttribute('aria-label', 'Order number');
@@ -8565,14 +8592,8 @@ Projected Image UK"></textarea>
                 };
                 oneWrap.append(oneSend);
             }
-            rCard.append(el('div', 'section-title', 'One order at a time'));
-            rCard.append(el('p', 'field-help',
-                'For testing, or for a single order that needs to go now. Check it, read what '
-                + 'it would write, then send that order. The connector keeps a ledger, so an '
-                + 'order already sent is not sent twice.'));
-            rCard.append(oneWrap);
+            grid.append(cxTile('One order', 'Check it, read what it would write, then send that order. One already sent is never sent twice.', oneWrap, oneOut));
             paintOne();
-            rCard.append(oneOut);
 
             /* ---- every order with a tag ----
                The same discipline over a list: check the tag, read what each
@@ -8580,7 +8601,7 @@ Projected Image UK"></textarea>
                orders. It is a label, not a to-do, so the same tag can be sent
                again and an order already in Xero and unchanged is a lookup,
                not a write. The connector caps a tag at 100 orders. */
-            const tagWrap = el('div', 'lbl-row'); tagWrap.style.marginTop = 'var(--sp-4)';
+            const tagWrap = el('div', 'cx-row');
             const tagIn = crmText(connTagCheck ? connTagCheck.tag : '', 'xero-price-check');
             tagIn.style.maxWidth = '220px';
             tagIn.setAttribute('aria-label', 'Order tag');
@@ -8660,28 +8681,18 @@ Projected Image UK"></textarea>
                 };
                 tagWrap.append(tagSend);
             }
-            rCard.append(el('div', 'section-title', 'Every order with a tag'));
-            rCard.append(el('p', 'field-help',
-                'Tag the orders in Shopify, check the tag here, read what each would write, then send. '
-                + 'The tag stays on the orders, so the same tag can be sent again: an order already in '
-                + 'Xero and unchanged is looked up, not written.'));
-            rCard.append(tagWrap);
+            grid.append(cxTile('Every order with a tag', 'Tag the orders in Shopify, check the tag, read what each would write, then send. The tag stays on; an order already in Xero and unchanged is looked up, not written.', tagWrap, tagOut));
             if (connTagBusy) connStartWatch();   /* a tab left and come back to still collects */
             paintTag();
-            rCard.append(tagOut);
 
-            /* ---- payout notes ----
+            /* ---- payout notes: "Which payout paid it" ----
                A separate pass, because Shopify settles days after the order:
                at the moment an invoice is written the payout it will arrive in
                does not exist yet. It only ADDS A NOTE to invoices already in
                Xero, which cannot change a figure on one. */
-            rCard.append(el('div', 'section-title', 'Which payout paid it'));
-            rCard.append(el('p', 'field-help',
-                'A Shopify payout arrives in the bank as one figure covering many orders. '
-                + 'This writes onto each Xero invoice which payout paid it, with that '
-                + 'order\u2019s share and the Shopify fee, so a bank line can be traced '
-                + 'to its invoices. It adds a note and changes no amount.'));
-            const payWrap = el('div', 'lbl-row'); payWrap.style.marginTop = 'var(--sp-4)';
+            const payHint = 'A Shopify payout arrives in the bank as one figure covering many orders. This notes on each '
+                + 'Xero invoice which payout paid it, with the order\u2019s share and the Shopify fee. A note only: no amount changes.';
+            const payWrap = el('div', 'cx-row');
             const paySince = crmText(connPaySince, '2026-08-01');
             paySince.style.maxWidth = '160px';
             paySince.setAttribute('aria-label', 'Payouts issued since');
@@ -8743,25 +8754,40 @@ Projected Image UK"></textarea>
                 };
                 payWrap.append(payGo);
             }
-            rCard.append(payWrap);
+            grid.append(cxTile('Which payout paid it', payHint, payWrap, payOut));
             paintPay();
-            rCard.append(payOut);
+            rCard.append(grid);
 
             /* ---- settings ----
                Operational knobs only. The shop, the Xero organisation and every
                credential stay environment variables on the service, where a
                browser cannot reach them; the server refuses anything not on
                its own list rather than trusting this form. */
+            const xCard = el('div', 'card');
             if (connSettings && connIsAdmin()) {
-                rCard.append(el('div', 'section-title', 'How it behaves'));
+                const xHead = el('div', 'card-head');
+                xHead.append(el('h3', 'card-title', 'Settings'));
+                xHead.append(el('p', 'card-desc',
+                    'How it behaves. Credentials are not on this form: they stay on the '
+                    + 'service, and the server will not accept them from here.'));
                 const toggle = el('button', 'btn btn-sm',
                                   connSettingsOpen ? 'Hide settings' : 'Change settings');
                 toggle.onclick = () => { connSettingsOpen = !connSettingsOpen; renderConnector(); };
-                const tb = el('div', 'mail-statebar'); tb.append(toggle);
-                rCard.append(el('p', 'field-help',
-                    'These used to mean a Railway variable and a redeploy. Credentials still do: '
-                    + 'they are not on this form and the server will not accept them from it.'));
-                rCard.append(tb);
+                const xAct = el('div', 'card-act'); xAct.append(toggle); xHead.append(xAct); xCard.append(xHead);
+                if (!connSettingsOpen) {
+                    /* The values as they stand, read before anything is opened. */
+                    const dl = el('dl', 'conn-pairs');
+                    [['RECONCILE_MODE', 'When a total disagrees'], ['RECONCILE_TOLERANCE', 'Tolerance'],
+                     ['MAX_DOCS_PER_RUN', 'Most documents in one run'], ['RUNAWAY_ABORT_ABOVE', 'Stop entirely above'],
+                     ['ORDERS_SINCE', 'Only orders since'], ['SHOP_TIMEZONE', 'Shop timezone'],
+                     ['XERO_SALES_ACCOUNT_CODE', 'Sales account'], ['XERO_TAX_TYPE_STANDARD', 'Standard tax type'],
+                     ['XERO_TAX_TYPE_ZERO', 'Zero-rated tax type'],
+                     ['CUSTOMER_REF_METAFIELD_NAMESPACE', 'Customer reference namespace'], ['CUSTOMER_REF_METAFIELD_KEY', 'Customer reference key']].forEach(([k, lab]) => {
+                        if (connSettings[k] == null || connSettings[k] === '') return;
+                        dl.append(el('dt', null, lab), el('dd', null, String(connSettings[k])));
+                    });
+                    if (dl.childNodes.length) xCard.append(dl);
+                }
                 if (connSettingsOpen) {
                     const grid = el('div', 'disp-addr-grid');
                     const fields = {};
@@ -8802,7 +8828,7 @@ Projected Image UK"></textarea>
                     add('CUSTOMER_REF_METAFIELD_NAMESPACE', 'Customer reference namespace', '');
                     add('CUSTOMER_REF_METAFIELD_KEY', 'Customer reference key',
                         'Where the reference on the document view is read from.');
-                    rCard.append(grid);
+                    xCard.append(grid);
                     const save = el('button', 'btn btn-primary', 'Save settings');
                     save.onclick = async () => {
                         const out = {};
@@ -8816,18 +8842,24 @@ Projected Image UK"></textarea>
                         } catch (e) { save.disabled = false; toastError(e.message); }
                     };
                     const sb = el('div', 'mail-statebar'); sb.append(save);
-                    rCard.append(sb);
+                    xCard.append(sb);
                 }
             }
+            /* ---- the latest review, a card of its own ---- */
+            const vCard = el('div', 'card');
+            const vHead = el('div', 'card-head');
+            vHead.append(el('h3', 'card-title', 'Latest review'));
+            vHead.append(el('p', 'card-desc', 'What Send will do, from the last review. Nothing here was written.'));
+            vCard.append(vHead);
             if (running) {
                 const t = el('div', 'thinking'); t.append(loader(),
                     el('span', null, connBusy === 'send' ? 'Sending to Xero\u2026'
                         : connBusy === 'retry' ? 'Retrying failed documents\u2026'
                         : 'Reviewing\u2026 this reads every eligible order and writes nothing.'));
-                rCard.append(t);
+                vCard.append(t);
             } else if (connReview && connReview.result) {
                 const r = connReview.result;
-                rCard.append(el('div', 'disp-ok-line', 'Reviewed ' + (r.ordersFetched || 0)
+                vCard.append(el('div', 'disp-ok-line', 'Reviewed ' + (r.ordersFetched || 0)
                     + (r.ordersFetched === 1 ? ' order' : ' orders') + ' \u00b7 nothing was written. '
                     + 'This is what Send will do:'));
                 const wrapT = el('div', 'ktable-wrap');
@@ -8846,25 +8878,26 @@ Projected Image UK"></textarea>
                         el('td', 'num', String(c.skipped)));
                     tbody.append(tr);
                 });
-                tb.append(tbody); wrapT.append(tb); rCard.append(wrapT);
-                if (r.aborted) rCard.append(el('div', 'msg error',
+                tb.append(tbody); wrapT.append(tb); vCard.append(wrapT);
+                if (r.aborted) vCard.append(el('div', 'msg error',
                     'The review stopped itself: ' + r.aborted + ' Nothing should be sent until that is resolved.'));
-                (r.warnings || []).slice(0, 8).forEach(w => rCard.append(el('div', 'disp-warn', w)));
-                if ((r.warnings || []).length > 8) rCard.append(el('div', 'sub',
+                (r.warnings || []).slice(0, 8).forEach(w => vCard.append(el('div', 'disp-warn', w)));
+                if ((r.warnings || []).length > 8) vCard.append(el('div', 'sub',
                     (r.warnings.length - 8) + ' more warnings in the run record below.'));
             } else if (lastRun && !lastRun.dryRun) {
                 const r = lastRun.result || {};
                 const inv = connCounts(r, 'invoices'), cn = connCounts(r, 'creditNotes');
-                rCard.append(el('div', lastRun.ok ? 'disp-ok-line' : 'msg error',
+                vCard.append(el('div', lastRun.ok ? 'disp-ok-line' : 'msg error',
                     (lastRun.ok ? 'Last send: ' : 'Last send had failures: ')
                     + inv.created + (inv.created === 1 ? ' invoice' : ' invoices')
                     + ' and ' + cn.created + (cn.created === 1 ? ' credit note' : ' credit notes')
                     + ' written \u00b7 ' + fmtDate(lastRun.finishedAt) + '.'));
-                rCard.append(el('div', 'sub', 'Run a review to see what a new send would do.'));
+                vCard.append(el('div', 'sub', 'Run a review to see what a new send would do.'));
             } else {
-                rCard.append(el('div', 'sub', 'Run a review to see what would be sent.'));
+                vCard.append(el('div', 'sub', 'Run a review to see what would be sent.'));
             }
             box.append(rCard);
+            box.append(vCard);
 
             /* ---- recent runs ---- */
             if ((connRuns || []).length) {
@@ -8942,6 +8975,7 @@ Projected Image UK"></textarea>
                 })();
                 box.append(qCard);
             }
+            if (xCard.childNodes.length) box.append(xCard);
             cardifySections(box);
         }
 
@@ -9291,8 +9325,12 @@ Projected Image UK"></textarea>
             const card = el('div', 'card');
             const head = el('div', 'card-head-stat');
             head.append(el('div', 'card-title', 'Models'));
-            head.append(el('div', 'card-desc', rows.length.toLocaleString() + ' of ' + all.length.toLocaleString() + ' models · '
-                + nMakers + ' maker' + (nMakers === 1 ? '' : 's') + (c.rulings ? ' · ' + c.rulings + ' ruling' + (c.rulings === 1 ? '' : 's') : '')
+            /* The figure is the count alone; the rest is the quiet line under
+               it, as the Products card sets its revenue and units. A sentence
+               set at figure size read as one crushed line. */
+            head.append(el('div', 'card-desc', (rows.length === all.length ? all.length.toLocaleString() : rows.length.toLocaleString() + ' of ' + all.length.toLocaleString()) + ' models'));
+            head.append(el('div', 'card-sub', nMakers + ' maker' + (nMakers === 1 ? '' : 's')
+                + (c.rulings ? ' · ' + c.rulings + ' ruling' + (c.rulings === 1 ? '' : 's') + ' made in the app' : '')
                 + (nReview ? ' · ' + nReview + ' to review' : '')));
             card.append(head);
             const search = tableSearch('Search maker or model…', st.q, (v) => { st.q = v; st.page = 1; renderSizes(); });
