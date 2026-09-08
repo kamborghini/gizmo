@@ -423,15 +423,16 @@
            actually notices - tabs that do not line up as you move between them.
            The ladder is min-width only, deliberately: a print page is never
            1500px, so paper keeps the 1120 measure it was designed against. */
-        /* The reference does not centre its content and has no max width: the
-           page is the sidebar plus a full-bleed column with 24px of padding,
-           and the cards inside grow to fill it. The earlier ladder here
-           (1120/1800/2040/2160, centred) was a different answer to the same
-           question, and this app now follows the reference. --wrap survives as
-           the one page-width token because print and a handful of narrow
-           panels still read it. */
-        :root { --wrap: none; --wrap-pad: 24px; }
-        .ov-wrap { max-width: var(--wrap); margin: 0; width: 100%;
+        /* The reference's default content layout is CENTERED: the dashboard
+           layout gives every page max-w-screen-2xl (1536px) and mx-auto, with
+           24px of padding inside it, and the cards grow to fill that column.
+           (Its "Full width" preference drops the cap; the default is what a
+           merchant sees.) An earlier reading of a demo had it full bleed, and
+           on a 2000px screen that stretched a KPI strip and a pair of charts
+           past anything the reference draws. --wrap is the one page-width
+           token; print and a handful of narrow panels also read it. */
+        :root { --wrap: 1536px; --wrap-pad: 24px; }
+        .ov-wrap { max-width: var(--wrap); margin: 0 auto; width: 100%;
             /* 24px, the reference's content inset, on the two edges you
                see on load. The bottom keeps 40 so a long scroll does not
                end flush against the viewport. */
@@ -616,6 +617,21 @@
                last row's, so a row that does not fill leaves white, not lines. */
             border-right: var(--bw-hairline) solid var(--border-default); border-bottom: var(--bw-hairline) solid var(--border-default);
             margin-right: calc(-1 * var(--bw-hairline)); margin-bottom: calc(-1 * var(--bw-hairline)); }
+        /* Balanced rows. The reference fixes each KPI grid by its count (four
+           across on Default, five on Analytics, two by three on E-commerce)
+           rather than letting a fit strand one cell on a second row, which
+           is what eight SEO checks did inside the 1536px page. */
+        @media (min-width: 901px) {
+            .metrics-strip:has(> :nth-child(7):last-child),
+            .metrics-strip:has(> :nth-child(8):last-child) { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        }
+        @media (min-width: 641px) and (max-width: 900px) {
+            .metrics-strip:has(> :nth-child(7):last-child),
+            .metrics-strip:has(> :nth-child(8):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (min-width: 641px) and (max-width: 1500px) {
+            .metrics-strip:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
         .metrics-strip .stat-ic { display: none; }
         .metrics-strip .stat .label { color: var(--text-primary); margin-bottom: var(--sp-4); }
         .metrics-strip .stat .value { font-size: var(--text-2xl); font-weight: var(--weight-regular); }
@@ -1618,10 +1634,12 @@
            measure, so every other segment caps itself back to it. */
         .crm-seg { margin-top: var(--sp-3); }
         /* Independent cards of similar size: let them sit side by side when
-           there is room. auto-fill with a real floor means this needs no
-           breakpoint and collapses to one column on a phone and on paper. */
+           there is room. auto-FIT with a real floor means this needs no
+           breakpoint and collapses to one column on a phone and on paper;
+           a fill kept its empty tracks, so two cards in the 1536px page sat
+           beside a third of nothing. */
         .card-grid { display: grid; gap: var(--sp-3); align-items: start;
-            grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); }
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); }
         /* A column of cards at the page's own rhythm, for a page that lists
            sections one under another (the Guide). */
         .card-stack { display: grid; gap: var(--sp-4); }
@@ -2853,8 +2871,8 @@
         /* On the card's own 16px padding grid, so its top edge lands on the
            title's line box rather than 3px above it, and at full opacity: a
            dimmed control reads as a disabled one. */
-        .chart-expand { position: absolute; top: var(--sp-4); right: var(--sp-4); z-index: 2; border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-tertiary); color: var(--text-tertiary); width: 28px; height: 28px; border-radius: var(--radius-sm); display: grid; place-items: center; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); opacity: 1; }
-        .chart-expand:hover { color: var(--text-primary); border-color: var(--border-emphasis); opacity: 1; }
+        .chart-expand { position: absolute; top: var(--sp-4); right: var(--sp-4); z-index: 2; border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); color: var(--text-primary); width: 28px; height: 28px; border-radius: var(--radius-sm); display: grid; place-items: center; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); opacity: 1; }
+        .chart-expand:hover { background: var(--surface-secondary); border-color: var(--border-default); opacity: 1; }
         .chart-expand svg { width: 14px; height: 14px; display: block; }
         /* .modal's own 520px cap is declared 100 lines further down, so a
            single-class .cmodal lost to it on source order and the expand button
