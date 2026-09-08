@@ -37,7 +37,7 @@ def new_secret() -> str:
     return base64.b32encode(os.urandom(20)).decode("ascii").rstrip("=")
 
 
-def provisioning_uri(secret: str, account: str, issuer: str = "gizmo") -> str:
+def provisioning_uri(secret: str, account: str, issuer: str = "Reactor") -> str:
     """The otpauth:// URI behind the QR code."""
     from urllib.parse import quote
     label = quote(f"{issuer}:{account}")

@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "905f58c94fa45623150800822a26a48a"
-name = "Gizmo"
+name = "Reactor"
 application_url = "https://gizmo-production-c8c1.up.railway.app/"
 embedded = true
 

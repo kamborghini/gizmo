@@ -1,6 +1,16 @@
 {
  "releases": [
   {
+   "date": "2026-09-08",
+   "title": "The app is called Reactor",
+   "items": [
+    {
+     "kind": "improved",
+     "text": "Store Copilot is now Reactor: the tab title, the sidebar, the printed sheets, the assistant's own name in chat, the alert emails and the sign-in return pages all say so. Gmail keeps the Copilot/ labels it already has, and the Shopify admin shows the new name once the app configuration is deployed."
+    }
+   ]
+  },
+  {
    "date": "2026-08-26",
    "title": "Reconciliation reads the accounts mailbox, not the sales inbox",
    "items": [

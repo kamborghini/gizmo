@@ -219,7 +219,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
-| `ALERT_EMAIL_FROM` | `"Store Copilot <onboarding@resend.dev>"` | copilot |  |
+| `ALERT_EMAIL_FROM` | `"Reactor <onboarding@resend.dev>"` | copilot |  |
 | `ALERT_EMAIL_TO` | `""` | copilot |  |
 | `MAIL_LOOP_SECS` | `"60"` | copilot |  |
 | `RESEND_API_KEY` | `""` | copilot |  |

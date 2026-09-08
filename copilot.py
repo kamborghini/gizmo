@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Store Copilot — an embedded Shopify admin chat backed by Claude.
+Reactor — an embedded Shopify admin chat backed by Claude.
 
 This module adds an in-admin chat experience to the existing MCP server:
   GET  /            -> serves the chat page (App Bridge when embedded)
@@ -181,7 +181,7 @@ WRITING_STYLE = ("Write in clear, plain text. Never use em dashes or en dashes a
                  "Use commas, periods, or parentheses instead, and 'to' or a hyphen for ranges "
                  "(for example '1 to 2 sentences', 'position 5-15'). Be concise and scannable.")
 
-SYSTEM_PROMPT = """You are Store Copilot, a senior e-commerce analyst and growth strategist embedded in \
+SYSTEM_PROMPT = """You are Reactor, a senior e-commerce analyst and growth strategist embedded in \
 the admin of a Shopify store. Your job is to help the merchant make more money with specific, \
 evidence-backed analysis, never generic advice.
 
@@ -2626,7 +2626,7 @@ async def _http_get(url: str, allowed_hosts: Optional[set] = None) -> tuple[Opti
         if allowed_hosts is not None and urlparse(url).netloc.lower() not in allowed_hosts:
             return None, ""
         async with httpx.AsyncClient(follow_redirects=False, timeout=15.0,
-                                     headers={"User-Agent": "StoreCopilot-SEO/1.0"}) as c:
+                                     headers={"User-Agent": "Reactor-SEO/1.0"}) as c:
             for _ in range(4):
                 r = await c.get(url)
                 if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
@@ -2721,7 +2721,7 @@ async def _fetch_external(url: str) -> tuple[Optional[int], str, str]:
         if not await asyncio.to_thread(_host_is_public, p.hostname):
             raise RuntimeError("That address is not allowed (only public websites can be scanned).")
         async with httpx.AsyncClient(follow_redirects=False, timeout=12.0,
-                                     headers={"User-Agent": "StoreCopilot-SEO/1.0"}) as c:
+                                     headers={"User-Agent": "Reactor-SEO/1.0"}) as c:
             r = await c.get(url)
         if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
             url = urljoin(url, r.headers["location"])
@@ -8529,7 +8529,7 @@ def _add_alerts(items: list) -> list:
 
 RESEND_API_KEY   = os.environ.get("RESEND_API_KEY", "")
 ALERT_EMAIL_TO   = os.environ.get("ALERT_EMAIL_TO", "")
-ALERT_EMAIL_FROM = os.environ.get("ALERT_EMAIL_FROM", "Store Copilot <onboarding@resend.dev>")
+ALERT_EMAIL_FROM = os.environ.get("ALERT_EMAIL_FROM", "Reactor <onboarding@resend.dev>")
 WATCH_PATH       = os.environ.get("WATCH_PATH", "/data/watch.json")
 
 
@@ -8638,7 +8638,7 @@ async def _run_scheduled_audits(registry: dict) -> list:
     if found:
         _add_alerts(found)
         await _send_alert_email(
-            "Store Copilot: " + str(len(found)) + (" change alert" if len(found) == 1 else " change alerts"),
+            "Reactor: " + str(len(found)) + (" change alert" if len(found) == 1 else " change alerts"),
             [f"{a['tab_label']}: {a['metric']} moved {a['pct']}% ({a['prev']} -> {a['cur']})" for a in found]
             + ["", "Open the app for details."])
     logger.info("scheduler: ran audits, %d alert(s)", len(found))
@@ -8669,14 +8669,14 @@ async def _watchdog_tick(registry: dict) -> bool:
             state["shopify_down"] = datetime.now(timezone.utc).isoformat()
             _add_alerts([{"tab": "settings", "tab_label": "Connections",
                           "metric": "Shopify connection is failing; data may be stale", "pct": None}])
-            await _send_alert_email("Store Copilot: Shopify connection is failing",
+            await _send_alert_email("Reactor: Shopify connection is failing",
                                     ["The app has not been able to read your store for 3 hours.",
                                      "Data and labels may be stale, and scheduled audits are paused",
                                      "until the connection recovers (this usually means the access",
                                      "token was rotated or Shopify had an outage)."])
         if up and state.get("shopify_down"):
             state.pop("shopify_down", None)
-            await _send_alert_email("Store Copilot: Shopify connection recovered",
+            await _send_alert_email("Reactor: Shopify connection recovered",
                                     ["Reads are working again; scheduled audits resume."])
         # Weekly size-list coverage: catch a new model going unmatched before a
         # CHECK label surprises the workbench.
@@ -8700,7 +8700,7 @@ async def _watchdog_tick(registry: dict) -> bool:
                     _add_alerts([{"tab": "labels", "tab_label": "Labels",
                                   "metric": "New model not matching the size list: " + k.split("|")[1], "pct": None}
                                  for k in fresh[:5]])
-                    await _send_alert_email("Store Copilot: new models missing from the size list",
+                    await _send_alert_email("Reactor: new models missing from the size list",
                                             [k.replace("|", " / ") for k in fresh]
                                             + ["", "Open Production Manager and run Size check: each "
                                                "model there can be given a size, pointed at a model "
@@ -8739,7 +8739,7 @@ async def _watchdog_tick(registry: dict) -> bool:
                     _add_alerts([{"tab": "settings", "tab_label": "Team",
                                   "metric": "The user accounts were lost: the app is asking to be "
                                             "set up again", "pct": None}])
-                    await _send_alert_email("Store Copilot: the user accounts were lost",
+                    await _send_alert_email("Reactor: the user accounts were lost",
                                             ["The list of accounts is empty even though it was set up "
                                              "before (a corrupt file or a missing data volume).",
                                              "The app will show its first-run setup screen; recreate the "
@@ -8828,7 +8828,7 @@ async def _connector_watch() -> None:
     lines += ["- " + p for p in problems]
     lines += ["", "Auto Run is " + ("ON, so this will be retried on the next pass."
                                     if auto else "off; nothing further will happen until someone runs it."),
-              "Open gizmo, Finance, Xero sync."]
+              "Open Reactor, Finance, Xero sync."]
     # The banner draws tab_label, metric and pct. I gave it kind/title/detail,
     # none of which it reads, so the alert rendered as a bare dot and a tilde -
     # a row that told the reader something was wrong and refused to say what.
@@ -8896,7 +8896,7 @@ async def _scheduler_loop(registry: dict) -> None:
                 if stale:   # at most one failure email a day, not one per tick
                     state["error_email_at"] = datetime.now(timezone.utc).isoformat()
                     _save_watch(state)
-                    await _send_alert_email("Store Copilot: background scheduler hit an error",
+                    await _send_alert_email("Reactor: background scheduler hit an error",
                                             ["The automatic refresh loop errored; it will keep retrying.",
                                              "If alerts go quiet for days, check the Railway logs."])
             except Exception:
@@ -13661,7 +13661,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # no lid. Never blocks the save.
                 try:
                     await _send_alert_email(
-                        "gizmo: " + (_team_name(who) or "someone") + " asked for a feature",
+                        "Reactor: " + (_team_name(who) or "someone") + " asked for a feature",
                         [title, detail or "(no detail given)"])
                 except Exception:
                     pass
@@ -14924,7 +14924,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 t.pop(k, None)
             t["state"], t["state_at"], t["done_at"] = "waiting", now, ""
             t["unread"] = False        # answering an email is reading it
-            _mail_log(t, who, "sent a reply from gizmo", "to " + to_addr)
+            _mail_log(t, who, "sent a reply from Reactor", "to " + to_addr)
             warn = ""
             try:
                 _write_mail(_load_mail())
@@ -15055,7 +15055,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # our own mailbox. Re-derive it now the row can say who it went to.
         name, whom = _mail_sender(t, addr)
         t["from_name"], t["from_email"] = str(name)[:120], str(whom)[:200]
-        _mail_log(t, who, "started this conversation from gizmo", "to " + to_addr)
+        _mail_log(t, who, "started this conversation from Reactor", "to " + to_addr)
         _mail_outbound_drop(store, stamp)
         warn = ""
         try:
@@ -18547,13 +18547,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if not may_manage():
                     return _json({"error": "You cannot manage that account."}, 403)
                 if ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"]:
-                    return _json({"error": "Admins can already send email from gizmo; "
+                    return _json({"error": "Admins can already send email from Reactor; "
                                   "the grant is for members and part-timers."}, 400)
                 grant = bool(body.get("can_send"))
                 u["can_send"] = grant
                 _write_users(d)
-                detail = (f"{label} can send email from gizmo" if grant
-                          else f"{label} can no longer send email from gizmo")
+                detail = (f"{label} can send email from Reactor" if grant
+                          else f"{label} can no longer send email from Reactor")
                 _track(who, "team", "changed email-sending access", detail)
             elif op == "tabs":
                 if not may_manage():
@@ -18674,7 +18674,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             fails.append(time.monotonic())
         if code:
             return Response(status_code=code, headers={**hdrs,
-                "WWW-Authenticate": 'Basic realm="Store Copilot Files"'} if code == 401 else hdrs)
+                "WWW-Authenticate": 'Basic realm="Reactor Files"'} if code == 401 else hdrs)
         d = _load_files()
         kind, kid = _dav_resolve(d, path)
 
@@ -20845,7 +20845,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _oauth_page("Connection failed", "Couldn't complete the Xero connection. Please try again.")
         return _oauth_page("Connected to Xero",
                            "The reconciliation engine can now read your accounts (read-only). "
-                           "Close this tab and return to Store Copilot.")
+                           "Close this tab and return to Reactor.")
 
     # ------------------------------------------------------------------
     # Shopify -> Xero connector: a separate, audited Node service that turns
@@ -21345,7 +21345,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not ok:
             return _oauth_page("Connection failed", "Couldn't complete the connection. Please try again.")
         return _oauth_page("✅ Connected to Google", "Search Console & Analytics are now linked. "
-                           "You can close this tab and return to Store Copilot.")
+                           "You can close this tab and return to Reactor.")
 
 
     # ----- Gmail connect: same shape as the Google one, its own token -----

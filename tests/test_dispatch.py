@@ -8723,7 +8723,7 @@ def t_a_sent_reply_goes_to_the_customer_and_lands_waiting():
             eq(t.get("draft_text"), None)
             eq(gone, ["d1"], "the leftover Gmail draft is cleaned up")
             eq(t["unread"], False)
-            ok(any(a["action"] == "sent a reply from gizmo" for a in t["activity"]),
+            ok(any(a["action"] == "sent a reply from Reactor" for a in t["activity"]),
                str(t["activity"]))
         finally:
             _gm.read_thread, _gm.send_message, _gm.draft_body, _gm.delete_draft = saved

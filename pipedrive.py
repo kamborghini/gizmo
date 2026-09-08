@@ -267,23 +267,23 @@ async def survey() -> dict:
         out["warnings"].append(
             str(len(live_pipes)) + " pipelines are in use ("
             + ", ".join(p["name"] for p in live_pipes)
-            + "). gizmo has ONE flat list of stages, so either it learns pipelines "
+            + "). Reactor has ONE flat list of stages, so either it learns pipelines "
               "or all of these collapse onto one board.")
     if len([c for c in currencies if c and c != me.get("currency")]) > 0:
         out["warnings"].append(
             "Deals exist in more than one currency (" + ", ".join(sorted(c for c in currencies if c))
-            + "). gizmo treats every value as pounds, so these would import as the "
+            + "). Reactor treats every value as pounds, so these would import as the "
               "wrong number.")
     used_fields = [f for f in out["custom_fields"]["deals"] if f["used_on"]]
     if used_fields:
         out["warnings"].append(
             str(len(used_fields)) + " custom deal fields carry data, the busiest being "
             + ", ".join(f["name"] for f in used_fields[:5])
-            + ". gizmo has no custom fields at all yet.")
+            + ". Reactor has no custom fields at all yet.")
     if len([u for u in out["users"] if u["deals"]]) > 1:
         out["warnings"].append(
             "Deals are spread across " + str(len([u for u in out['users'] if u['deals']]))
-            + " owners. gizmo's CRM has no owner on anything, so 'my deals' would not exist.")
+            + " owners. Reactor's CRM has no owner on anything, so 'my deals' would not exist.")
     for k, label in (("deals", "deals"), ("persons", "people"), ("organizations", "organisations"),
                      ("activities", "activities")):
         if not out["counts"].get(k + "_complete", True) and k != "organizations":

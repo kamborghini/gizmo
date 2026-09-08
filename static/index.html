@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#ffffff" />
     <!--APPBRIDGE-->
-    <title>Store Copilot</title>
+    <title>Reactor</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -3367,7 +3367,7 @@
             <!-- Header, scrolling body, footer: the three parts of the reference's
                  sidebar. The brand is a button like its logo row, and it goes home. -->
             <div class="side-head">
-                <button class="brand" id="brand-home" type="button"><span class="logo" id="ic-logo"></span><span class="brand-name">Store Copilot</span></button>
+                <button class="brand" id="brand-home" type="button"><span class="logo" id="ic-logo"></span><span class="brand-name">Reactor</span></button>
             </div>
             <div class="side-body">
                 <!-- The reference's first group is one primary button above the
@@ -3445,7 +3445,7 @@
                 <button class="icon-btn" id="print-btn" title="Download as PDF" aria-label="Download as PDF"></button>
                 <button class="btn" id="topbar-action"></button>
             </div>
-            <div class="print-head" id="print-head"><span class="ph-brand">Store Copilot</span><span class="ph-meta" id="print-meta"></span></div>
+            <div class="print-head" id="print-head"><span class="ph-brand">Reactor</span><span class="ph-meta" id="print-meta"></span></div>
 
             <!-- Overview -->
             <section class="view active" id="view-overview">
@@ -3970,7 +3970,7 @@ Projected Image UK"></textarea>
         /* ---------- auth (Shopify session token only; embedded-only) ---------- */
         async function authHeaders() {
             if (typeof shopify === 'undefined' || !shopify.idToken) {
-                throw new Error('Open Store Copilot from inside your Shopify admin.');
+                throw new Error('Open Reactor from inside your Shopify admin.');
             }
             const token = await shopify.idToken();
             return { 'Authorization': 'Bearer ' + token };
@@ -5217,7 +5217,7 @@ Projected Image UK"></textarea>
             const m = el('div', 'msg assistant');
             const head = el('div', 'resp-head');
             const av = el('span', 'av'); av.innerHTML = I.spark;
-            head.append(av, el('span', 'who', 'Copilot'));
+            head.append(av, el('span', 'who', 'Reactor'));
             if (model && /opus/i.test(model)) head.append(el('span', 'tag', 'Deep analysis'));
             m.append(head);
             renderStructured(m, structured || {});
@@ -5397,7 +5397,7 @@ Projected Image UK"></textarea>
         function pageAssistant(page, t, data) {
             const m = el('div', 'msg assistant');
             const head = el('div', 'resp-head'); const av = el('span', 'av'); av.innerHTML = I.spark;
-            head.append(av, el('span', 'who', 'Copilot'));
+            head.append(av, el('span', 'who', 'Reactor'));
             if (t.model && /opus/i.test(t.model)) head.append(el('span', 'tag', 'Deep analysis'));
             m.append(head);
             renderStructured(m, t.structured || {}, { noFollowups: true });
@@ -13811,12 +13811,12 @@ Projected Image UK"></textarea>
             ]},
             { h: 'Files', body: [
                 ['What it is', 'A shared file store for the whole team, reachable from anywhere the app is. The folder tree lives with the app; the files themselves live in a Cloudflare R2 bucket, which is durable storage costing well under a pound a month for 50 GB. Uploads and downloads travel straight between your browser and Cloudflare, so big files move at full speed.'],
-                ['Setting it up', 'In the Cloudflare dashboard open R2 Object Storage and press Continue to enable it (the free tier covers the first 10 GB). Then go to R2, then Manage API tokens, and press Create Account API token. Name it Store Copilot and set Permissions to Admin Read and Write. This level is needed because the app creates its own bucket and grants your browser permission to upload to it; an Object-only token is refused for both. It covers R2 alone, never the rest of the Cloudflare account. Press Create and copy the three values it shows: the Access Key ID, the Secret Access Key, and your Account ID (shown on the R2 overview page, right-hand side).'],
+                ['Setting it up', 'In the Cloudflare dashboard open R2 Object Storage and press Continue to enable it (the free tier covers the first 10 GB). Then go to R2, then Manage API tokens, and press Create Account API token. Name it Reactor and set Permissions to Admin Read and Write. This level is needed because the app creates its own bucket and grants your browser permission to upload to it; an Object-only token is refused for both. It covers R2 alone, never the rest of the Cloudflare account. Press Create and copy the three values it shows: the Access Key ID, the Secret Access Key, and your Account ID (shown on the R2 overview page, right-hand side).'],
                 ['Connecting it', 'In Railway open the gizmo service, then Variables, and add R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY with those values. The app creates its own bucket and settings on first use; nothing else to click.'],
                 ['Using it', 'Drag files, or whole folders, onto the list to upload them where you stand: a dropped folder is recreated here, structure and all. Click a picture or PDF to preview it on the spot; other types download. Hover a file and tick the box over its icon to select several, then move or trash them together; the Move button works everywhere a drag cannot, including phones. Uploading a name that already exists replaces it, with the old version kept in the trash. Deleting sends a file to the trash, where it waits 30 days before it is really gone.'],
                 ['What it costs', 'Cloudflare bills about 1p per 10 GB per month past the free tier, and downloads are free. At the full 50 GB that is roughly 60p a month.'],
                 ['Files in Finder', 'On a Mac, the whole file store mounts as a network drive: in Finder press Command K, enter https://gizmo-production-c8c1.up.railway.app/dav and sign in with your OWN app username and password. Save proofs straight into it from any program; everything lands in the same folders the Files tab shows, under your name, and deleting there is the same 30-day trash. Each person must use their own login: the drive records who did what.'],
-                ['If Finder keeps asking for the password', 'The drive only opens once you have chosen your OWN password in the app, so a brand-new account, or one whose password an admin just reset, must sign into Store Copilot first. Admins can see exactly why someone was refused: Team, then Activity, filtered to that person.'],
+                ['If Finder keeps asking for the password', 'The drive only opens once you have chosen your OWN password in the app, so a brand-new account, or one whose password an admin just reset, must sign into Reactor first. Admins can see exactly why someone was refused: Team, then Activity, filtered to that person.'],
             ]},
             { h: 'The team', body: [
                 ['Your own accounts', 'The app keeps its own accounts: a username and password each, nothing to do with Shopify logins. Opening the app shows its sign-in screen; the very first open ever shows setup instead, where the master admin account is created. Passwords are stored scrambled and are never shown to anyone, including admins.'],
@@ -14029,7 +14029,7 @@ Projected Image UK"></textarea>
         function printGuide() {
             const host = $('label-print'); host.innerHTML = '';
             const ds = el('div', 'day-sheet');
-            ds.append(el('h1', null, 'Store Copilot: desk guide'));
+            ds.append(el('h1', null, 'Reactor: desk guide'));
             ds.append(el('div', 'ds-meta', 'Printed ' + new Date().toLocaleDateString('en-GB',
                 { day: 'numeric', month: 'long', year: 'numeric' })));
             GUIDE.forEach(sec => {
@@ -19779,7 +19779,7 @@ Projected Image UK"></textarea>
                 if (pend) (pend.dispatch ? dispatchFromAdminLink : printFromAdminLink)(pend.id);
             }
             if (mode === 'setup') {
-                card.append(el('h2', null, 'Set up Store Copilot'),
+                card.append(el('h2', null, 'Set up Reactor'),
                     el('p', 'auth-sub', 'The app keeps its own accounts. Create the master '
                         + 'admin account first: it controls everything, including the other accounts.'));
                 const [fn, inName] = authField('Your name', 'text', 'au-name');

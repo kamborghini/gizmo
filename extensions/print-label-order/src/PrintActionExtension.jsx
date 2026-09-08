@@ -61,7 +61,7 @@ function Extension() {
             design. Saying so beats letting the order sit in Unprocessed. */}
         {status === "ready" ? (
           <s-text tone="subdued">
-            This order still needs Ready to make in gizmo to move into production
+            This order still needs Ready to make in Reactor to move into production
             and, on an account order, to start the 30-day payment terms.
           </s-text>
         ) : null}

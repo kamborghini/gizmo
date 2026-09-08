@@ -1293,7 +1293,7 @@ async def shopify_create_webhook(params: CreateWebhookInput) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Store Copilot — embedded Claude chat UI (adds GET / and POST /api/chat)
+# Reactor — embedded Claude chat UI (adds GET / and POST /api/chat)
 # ---------------------------------------------------------------------------
 # Curated READ-ONLY tools exposed to the in-admin chat assistant. Write tools
 # are intentionally excluded so the copilot can analyze and suggest, never
@@ -1938,7 +1938,7 @@ try:
                        tax_id_reader=shopify_order_tax_id,
                        order_writer=update_order_fields)
 except Exception as e:
-    logger.error(f"Store Copilot disabled (chat UI unavailable): {e}")
+    logger.error(f"Reactor disabled (chat UI unavailable): {e}")
 
 
 # ---------------------------------------------------------------------------

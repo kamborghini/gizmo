@@ -1,4 +1,6 @@
-# gizmo
+# Reactor
+
+(The repository and the Railway service are still called gizmo.)
 
 The back office for Projected Image UK's Shopify store: the dispatch desk,
 production labels, the sales records, the shared inbox, the file drive, the
