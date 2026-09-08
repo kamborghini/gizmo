@@ -160,6 +160,12 @@ def read_shopify_export_csv(path, cfg: Config) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------- Admin GraphQL bulk pull
+# NO refunds here. `Order.refunds` is a LIST and `refundLineItems` is a
+# CONNECTION, and a bulk query rejects "a connection field within a list
+# field" outright - which is how the first run that reached Shopify died.
+# Refunds come from REFUNDED_ORDERS_QUERY below, an ordinary paged query where
+# that nesting is allowed. It costs a couple of calls: 31 of the last 3,255
+# orders carry a refund.
 BULK_ORDERS_QUERY = """
 {
   orders(query: "created_at:>=%s") {
@@ -172,13 +178,63 @@ BULK_ORDERS_QUERY = """
         totalDiscountSet { shopMoney { amount } }
         variant { id product { id productType } }
       } } }
-      refunds { createdAt refundLineItems { edges { node {
-        quantity subtotalSet { shopMoney { amount } } lineItem { id }
-      } } } }
     } }
   }
 }
 """
+
+
+REFUNDED_ORDERS_QUERY = """
+query($q: String!, $after: String) {
+  orders(first: 50, after: $after, query: $q) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      id
+      refunds {
+        id createdAt
+        refundLineItems(first: 100) {
+          nodes { quantity subtotalSet { shopMoney { amount } } lineItem { id } }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def fetch_refunds(shop: str, token: str, since: date, api_version: str = "2026-07") -> Dict[str, list]:
+    """{order gid: [refund, ...]} for the orders that have any.
+
+    A refund is a negative row on the day it was raised, keyed to the line it
+    came off, so the forecast sees a return as demand going away rather than a
+    sale that never happened. Bulk cannot carry that shape, and searching for
+    the orders that HAVE refunds keeps this to a page or two instead of
+    re-reading the whole history."""
+    q = (f"created_at:>={since.isoformat()} AND "
+         "(financial_status:refunded OR financial_status:partially_refunded)")
+    out: Dict[str, list] = {}
+    after = None
+    pages = 0
+    while True:
+        data = _gql(shop, token, api_version, REFUNDED_ORDERS_QUERY, {"q": q, "after": after})["orders"]
+        for n in data["nodes"]:
+            refunds = []
+            for rf in n.get("refunds") or []:
+                refunds.append({
+                    "id": rf.get("id"), "created_at": rf.get("createdAt"),
+                    "refund_line_items": [
+                        {"quantity": rl.get("quantity"), "subtotal": _money(rl, "subtotalSet"),
+                         "line_item": {"id": (rl.get("lineItem") or {}).get("id")}}
+                        for rl in ((rf.get("refundLineItems") or {}).get("nodes") or [])],
+                })
+            if refunds:
+                out[n["id"]] = refunds
+        pages += 1
+        if not data["pageInfo"]["hasNextPage"]:
+            break
+        after = data["pageInfo"]["endCursor"]
+    log.info("refunds: %d orders carry one (%d page%s)", len(out), pages, "" if pages == 1 else "s")
+    return out
 
 
 def shop_host(shop: str) -> str:
@@ -272,7 +328,13 @@ def run_bulk_orders(shop: str, token: str, since: date, api_version: str = "2026
         raise TimeoutError(f"bulk operation did not finish within {timeout_s}s")
     with urllib.request.urlopen(url, timeout=300) as resp:
         lines = [json.loads(l) for l in resp.read().decode().splitlines() if l.strip()]
-    return _assemble_bulk(lines)
+    orders = _assemble_bulk(lines)
+    log.info("assembled %d orders", len(orders))
+    # The half the bulk query is not allowed to carry.
+    refunds = fetch_refunds(shop, token, since, api_version)
+    for o in orders:
+        o["refunds"] = refunds.get(o["id"], [])
+    return orders
 
 
 PRODUCTS_QUERY = """
@@ -327,14 +389,8 @@ def _assemble_bulk(lines: List[dict]) -> List[dict]:
                     "total_discount": _money(n, "totalDiscountSet"), "variant_id": v.get("id"), "product_id": p.get("id"),
                     "product_type": p.get("productType")}
             orders[parent]["line_items"].append(item); items[gid] = item
-        elif gid.startswith("gid://shopify/Refund/") and parent in orders:
-            orders[parent]["refunds"].append({"id": gid, "created_at": n.get("createdAt"), "refund_line_items": []})
-        elif gid.startswith("gid://shopify/RefundLineItem/") or ("lineItem" in n and parent):
-            for o in orders.values():
-                for rf in o["refunds"]:
-                    if rf["id"] == parent:
-                        rf["refund_line_items"].append({"quantity": n.get("quantity"), "subtotal": _money(n, "subtotalSet"),
-                                                        "line_item": {"id": (n.get("lineItem") or {}).get("id")}})
+    # No Refund rows arrive here: the bulk query cannot carry them (see
+    # BULK_ORDERS_QUERY) and `fetch_refunds` fills them in afterwards.
     return list(orders.values())
 
 

@@ -12263,6 +12263,42 @@ def t_the_xero_client_is_read_only_by_construction():
     ok('resp = await client.get(url' in src, "the accounting fetcher is a GET")
 
 @test
+def t_the_bulk_query_carries_no_connection_inside_a_list():
+    """The first run that got as far as Shopify died on this, immediately:
+
+        Queries that contain a connection field within a list field are not
+        currently supported.
+
+    `Order.refunds` is a LIST and `Refund.refundLineItems` is a CONNECTION, and
+    a bulk operation refuses that shape outright. An ordinary query allows it,
+    so refunds are fetched separately, searched by financial status so the
+    second pass reads the few orders that have one rather than the history
+    again: 31 of the last 3,255 orders carry a refund, one page.
+
+    They cannot simply be dropped. A refund is a negative row on the day it was
+    raised, keyed to the line it came off, which is how the model sees a return
+    as demand going away rather than a sale that never happened."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ingest = open(os.path.join(root, "forecast", "ingest.py"), encoding="utf-8").read()
+    bulk = ingest.split('BULK_ORDERS_QUERY = """', 1)[1].split('"""', 1)[0]
+    ok("refund" not in bulk.lower(),
+       "the bulk query asks for no refunds at all, which is the only shape it may take")
+    ok("lineItems { edges { node {" in bulk,
+       "line items stay: a connection on a NODE is what bulk is for")
+    ok("REFUNDED_ORDERS_QUERY" in ingest and "def fetch_refunds(" in ingest,
+       "refunds have their own ordinary query")
+    ref = ingest.split('REFUNDED_ORDERS_QUERY = """', 1)[1].split('"""', 1)[0]
+    ok("refundLineItems(first:" in ref, "which does carry the nesting bulk refused")
+    ok("financial_status:refunded" in ingest and "financial_status:partially_refunded" in ingest,
+       "and reads only the orders that have a refund")
+    run = ingest.split("def run_bulk_orders(", 1)[1].split("\ndef ", 1)[0]
+    ok("fetch_refunds(shop, token, since, api_version)" in run,
+       "a run stitches the two halves together before anyone sees the orders")
+    ok('o["refunds"] = refunds.get(o["id"], [])' in run,
+       "every order ends up with the refunds field the panel builder reads")
+
+
+@test
 def t_a_nightly_run_can_be_watched_and_cannot_hang():
     """Cameron ran the cron by hand and had to ask how to kill it, because a
     run that is working and a run that is wedged look identical: the order
