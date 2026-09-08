@@ -1871,10 +1871,19 @@ def t_the_size_list_tab_is_searchable_and_reads_the_same_sheet_as_the_label():
     ok("if (v === 'sizes') showSizesView();" in SCRIPT, "opening it loads the sheet")
     ok("api('/api/gobo-sizes/list', {})" in SCRIPT, "from the listing route")
     fn = SCRIPT.split("function renderSizes()")[1].split("\n        async function showReconView")[0]
-    ok("tableSearch('Search manufacturer or model" in fn and "segControl([{ label: 'All', value: 'all' }, { label: 'Needs review', value: 'review' }, { label: 'Rulings', value: 'rulings' }]" in fn,
-       "a search box and the three filters in the house table tools")
+    ok("tableSearch('Search maker or model" in fn and "sizesSelect('Maker'" in fn and "sizesSelect('Produced size'" in fn
+       and "sizesSelect('Status', SIZES_STATUS" in fn, "a search box and maker, size and status filters in the house table tools")
+    ok("sizesSelect('Sort', SIZES_SORTS" in fn and "gbtn.textContent = 'Group by maker';" in fn, "a sort and a grouping toggle")
+    ok("const chips = sizesChips(); if (chips) card.append(chips);" in fn, "the active filters read as chips, each removable")
     ok("words.some(w => w.indexOf(t) === 0)" in SCRIPT, "a token matches the start of a word")
-    ok("rows.slice(0, sizesShown)" in fn and "'Show ' + Math.min(SIZES_PAGE" in fn, "paged, with a Show more")
+    ok("el('tr', 'ktable-grp')" in fn and "st.folded[it.head] = !folded;" in fn, "rows sit under their maker, and a maker folds")
+    ok("az.setAttribute('aria-label', 'Jump to a maker by initial');" in fn, "with an A to Z strip to jump by")
+    ok("list.slice(start, start + st.pageSize)" in fn and "'Page ' + st.page + ' of ' + pages" in fn and "sizesSelect('Rows per page'" in fn,
+       "paged, with previous, next and a page size")
+    ok("['Holder glass, mm', 1], ['Image, mm', 1], ['Produced as, mm', 1], ['Under, mm', 1]" in fn and ".ktable th.num, .ktable td.num { text-align: right; font-variant-numeric: tabular-nums; }" in CSS,
+       "numbers sit in tabular columns with the unit in the heading")
+    ok("text-overflow: ellipsis" in CSS.split(".ktable td.sizes-notes {")[1].split("}")[0] and "n.title = r.notes;" in fn, "a note is one line, the whole of it on hover")
+    ok("xbtn.onclick = () => sizesExport(rows);" in fn and "a.download = 'size-list.csv';" in SCRIPT, "and the filtered list exports as CSV")
     ok("el('span', 'lbl-chip made', 'ruling')" in SCRIPT and "'not a gobo'" in SCRIPT, "a ruling and an exclusion read as chips over the sheet's answer")
     ok("api('/api/gobo-sizes/rule', { op: 'set', manufacturer: r.manufacturer, model: r.model, size: inp.value.trim() })" in SCRIPT,
        "ruling inline writes the same rule the label reads")

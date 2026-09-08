@@ -631,7 +631,24 @@
         .fc-alert + .fc-alert { border-top: var(--bw-hairline) solid var(--border-default); }
         /* An inline size: the ruling is typed where the sheet's answer sat. */
         .sizes-inp { width: calc(var(--sp-8) * 2.5); height: var(--control-h-sm); padding: 0 var(--sp-2); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-sm); font: inherit; font-size: var(--text-sm); text-align: right; }
-        .ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); }
+        /* The size list as a data table: numbers in tabular columns, the unit in
+           the heading, notes on one line, makers as foldable group rows, an A to
+           Z strip to jump by, and a paging rail in the footer. */
+        .ktable th.num, .ktable td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .ktable td.sizes-model { font-weight: var(--weight-medium); min-width: calc(var(--sp-8) * 6); }
+        .ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); max-width: calc(var(--sp-8) * 11); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ktable tr.ktable-grp th { background: var(--surface-secondary); color: var(--text-primary); font-weight: var(--weight-medium); font-size: var(--text-sm); padding: var(--sp-2) var(--sp-4); cursor: pointer; }
+        .ktable tr.ktable-grp:hover th { background: var(--surface-tertiary); }
+        .ktable tr.ktable-grp .grp-n { color: var(--text-tertiary); font-weight: var(--weight-regular); margin-left: var(--sp-2); }
+        .ktable tr.ktable-grp .grp-caret { display: inline-grid; place-items: center; vertical-align: middle; margin-right: var(--sp-2); color: var(--text-tertiary); transition: transform var(--dur) var(--ease); }
+        .ktable tr.ktable-grp .grp-caret svg { width: var(--sp-4); height: var(--sp-4); display: block; }
+        .ktable tr.ktable-grp[aria-expanded="true"] .grp-caret { transform: rotate(90deg); }
+        .az { display: flex; flex-wrap: wrap; gap: var(--sp-1); padding: 0 0 var(--sp-3); }
+        .az button { height: var(--control-h-sm); min-width: var(--control-h-sm); padding: 0 var(--sp-1-5); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-primary); color: var(--text-primary); font: inherit; font-size: var(--text-xs); font-weight: var(--weight-medium); cursor: pointer; transition: background var(--dur) var(--ease); }
+        .az button:hover { background: var(--surface-tertiary); }
+        .az button:disabled { color: var(--text-disabled); cursor: default; background: transparent; }
+        .tbl-pages { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .tbl-page { font-size: var(--text-sm); color: var(--text-tertiary); }
         .metrics-finance .stat .label { font-size: var(--text-md); }
         .metrics-finance .stat .value { font-size: var(--text-3xl); }
         .metrics-strip .stat.stat-pick:is(.on, [aria-pressed="true"]) { box-shadow: var(--ring-action-2); }
@@ -9116,24 +9133,45 @@ Projected Image UK"></textarea>
             box.append(rc);
         }
         /* ---------- Size list tab ----------
-           The sheet the label lookup reads, every row, searchable, with the
-           merchant's rulings laid over the sheet's own answer. Reading is the
-           bench's everyday need; ruling stays behind the size grant, and a
-           ruling made here writes the same override file the label reads. */
-        let sizesCache = null, sizesQ = '', sizesFilter = 'all', sizesShown = 250;
-        const SIZES_PAGE = 250;
+           The sheet the label lookup reads, every row, as a data table the
+           reference would draw: a toolbar of search and faceted filters with
+           the active ones shown as chips, rows grouped under their maker with
+           each group foldable and an A to Z strip to jump by, numbers in
+           tabular columns with the unit in the heading, notes on one line,
+           paging a hundred at a time, and the filtered list exportable. A
+           ruling made in the app shows over the sheet's own answer, and a
+           person with the size grant rules inline through the same rule route
+           the Production Manager uses. */
+        let sizesCache = null;
+        const SIZES_STATUS = [['all', 'All models'], ['review', 'Needs review'], ['ruled', 'Ruled in the app'], ['nosize', 'No size'], ['excluded', 'Not a gobo']];
+        const SIZES_SORTS = [['maker', 'Maker A to Z'], ['model', 'Model A to Z'], ['size_desc', 'Produced size, large first'], ['size_asc', 'Produced size, small first'], ['glass_desc', 'Holder glass, large first']];
+        const sizesState = { q: '', maker: '', size: '', status: 'all', sort: 'maker', group: true, page: 1, pageSize: 100, folded: {} };
         async function showSizesView() { renderSizes(); if (!sizesCache || sizesCache.error) refreshSizes(); }
         async function refreshSizes() {
             try { sizesCache = await api('/api/gobo-sizes/list', {}); }
             catch (e) { sizesCache = { error: e.message }; }
             if (document.querySelector('#view-sizes.active')) renderSizes();
         }
+        const sizesNum = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+        function sizesStatusOf(r) {
+            if (r.ruling === 'exclude') return 'excluded';
+            if (r.ruling || (r.domain_rulings && r.domain_rulings.length)) return 'ruled';
+            if (!r.produced) return 'nosize';
+            if (r.review) return 'review';
+            return 'ok';
+        }
         function sizesRows() {
+            const st = sizesState;
             const all = (sizesCache && sizesCache.rows) || [];
-            const toks = sizesQ.toLowerCase().split(/\s+/).filter(Boolean);
-            return all.filter(r => {
-                if (sizesFilter === 'review' && !r.review && r.produced) return false;
-                if (sizesFilter === 'rulings' && !r.ruling && !r.domain_rulings) return false;
+            const toks = st.q.toLowerCase().split(/\s+/).filter(Boolean);
+            let rows = all.filter(r => {
+                if (st.maker && r.manufacturer !== st.maker) return false;
+                if (st.size && (r.ruling && r.ruling !== 'exclude' ? r.ruling : r.produced) !== st.size) return false;
+                const s = sizesStatusOf(r);
+                if (st.status === 'review' && s !== 'review' && s !== 'nosize') return false;
+                if (st.status === 'ruled' && s !== 'ruled' && s !== 'excluded') return false;
+                if (st.status === 'nosize' && s !== 'nosize') return false;
+                if (st.status === 'excluded' && s !== 'excluded') return false;
                 if (!toks.length) return true;
                 /* A token matches the START of a word in the maker or model, so
                    "standard m" finds the M size and not every row that says
@@ -9142,9 +9180,53 @@ Projected Image UK"></textarea>
                 const notes = (r.notes || '').toLowerCase();
                 return toks.every(t => words.some(w => w.indexOf(t) === 0) || (t.length >= 3 && notes.indexOf(t) >= 0) || t === (r.ruling || r.produced));
             });
+            const eff = (r) => sizesNum(r.ruling && r.ruling !== 'exclude' ? r.ruling : r.produced);
+            const byName = (a, b) => a.manufacturer.localeCompare(b.manufacturer) || a.model.localeCompare(b.model, undefined, { numeric: true });
+            const sorters = {
+                maker: byName,
+                model: (a, b) => a.model.localeCompare(b.model, undefined, { numeric: true }) || a.manufacturer.localeCompare(b.manufacturer),
+                size_desc: (a, b) => ((eff(b) == null ? -1 : eff(b)) - (eff(a) == null ? -1 : eff(a))) || byName(a, b),
+                size_asc: (a, b) => ((eff(a) == null ? 1e9 : eff(a)) - (eff(b) == null ? 1e9 : eff(b))) || byName(a, b),
+                glass_desc: (a, b) => ((sizesNum(b.glass) == null ? -1 : sizesNum(b.glass)) - (sizesNum(a.glass) == null ? -1 : sizesNum(a.glass))) || byName(a, b),
+            };
+            rows = rows.slice().sort(sorters[st.sort] || byName);
+            return rows;
+        }
+        function sizesChips() {
+            const st = sizesState; const defs = [];
+            if (st.q) defs.push(['Search: ' + st.q, () => { st.q = ''; }]);
+            if (st.maker) defs.push([st.maker, () => { st.maker = ''; }]);
+            if (st.size) defs.push(['Produced ' + st.size + ' mm', () => { st.size = ''; }]);
+            if (st.status !== 'all') defs.push([SIZES_STATUS.find(x => x[0] === st.status)[1], () => { st.status = 'all'; }]);
+            if (!defs.length) return null;
+            const wrap = el('div', 'fchips');
+            defs.forEach(([label, clear]) => {
+                const c = el('span', 'fchip', label); const b = el('button'); b.title = 'Remove'; b.innerHTML = I.x;
+                b.onclick = () => { clear(); st.page = 1; renderSizes(); }; c.append(b); wrap.append(c);
+            });
+            const all = el('span', 'fchip'); all.style.cursor = 'pointer'; all.textContent = 'Clear all';
+            all.onclick = () => { Object.assign(st, { q: '', maker: '', size: '', status: 'all', page: 1 }); renderSizes(); };
+            wrap.append(all);
+            return wrap;
+        }
+        function sizesSelect(label, options, current, onPick) {
+            const s = el('select', 'psel'); s.setAttribute('aria-label', label);
+            options.forEach(([v, text]) => { const o = el('option', null, text); o.value = v; if (v === current) o.selected = true; s.append(o); });
+            s.onchange = () => onPick(s.value);
+            return s;
+        }
+        function sizesExport(rows) {
+            const head = ['Manufacturer', 'Model', 'Holder glass (mm)', 'Image (mm)', 'Sheet size (mm)', 'Ruling (mm)', 'Undercut (mm)', 'Production review', 'Notes'];
+            const esc = (v) => { v = (v == null ? '' : String(v)); if (/^[=+\-@\t\r]/.test(v)) v = "'" + v; return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+            const lines = [head.join(',')];
+            rows.forEach(r => lines.push([r.manufacturer, r.model, r.glass, r.image, r.produced, r.ruling || '', r.undercut, r.review, r.notes].map(esc).join(',')));
+            const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+            const url = URL.createObjectURL(blob), a = document.createElement('a');
+            a.href = url; a.download = 'size-list.csv'; document.body.append(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
         function sizesProducedCell(r, canEdit) {
-            const td = el('td'); td.style.textAlign = 'right'; td.style.whiteSpace = 'nowrap';
+            const td = el('td', 'num'); td.style.whiteSpace = 'nowrap';
             if (r.ruling === 'exclude') td.append(el('span', 'lbl-chip note', 'not a gobo'));
             else if (r.ruling) {
                 td.append(el('b', null, r.ruling), document.createTextNode(' '));
@@ -9182,7 +9264,7 @@ Projected Image UK"></textarea>
         }
         function renderSizes() {
             const box = $('sizes-content'); box.innerHTML = '';
-            const c = sizesCache; const painting = !!c && !c.error;
+            const c = sizesCache; const st = sizesState; const painting = !!c && !c.error;
             box.classList.toggle('no-intro', !(painting && firstPaint('sizes')));
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.check;
             const ht = el('div');
@@ -9195,44 +9277,107 @@ Projected Image UK"></textarea>
             hero.append(heroAct(stamp, refreshBtn(refreshSizes)));
             box.append(hero);
             if (!c) { box.append(el('div', 'empty', 'Loading…')); return; }
-            if (c.error) { box.append(loadFailure('The size list could not be read. ' + c.error, refreshSizes)); return; }
+            if (c.error) { box.append(loadFailure('The size list could not be read. ' + c.error, refreshSizes), null); return; }
+            const all = c.rows || [];
             const rows = sizesRows();
+            const grouped = st.group && st.sort === 'maker';
+            /* facets from the whole sheet, so a filter never hides its own options */
+            const makerCounts = {}; all.forEach(r => { makerCounts[r.manufacturer] = (makerCounts[r.manufacturer] || 0) + 1; });
+            const makers = Object.keys(makerCounts).sort((a, b) => a.localeCompare(b));
+            const sizeSet = {}; all.forEach(r => { const v = r.ruling && r.ruling !== 'exclude' ? r.ruling : r.produced; if (v) sizeSet[v] = (sizeSet[v] || 0) + 1; });
+            const sizes = Object.keys(sizeSet).sort((a, b) => parseFloat(a) - parseFloat(b));
+            const nMakers = new Set(rows.map(r => r.manufacturer)).size;
+            const nReview = rows.filter(r => { const s = sizesStatusOf(r); return s === 'review' || s === 'nosize'; }).length;
             const card = el('div', 'card');
             const head = el('div', 'card-head-stat');
             head.append(el('div', 'card-title', 'Models'));
-            head.append(el('div', 'card-desc', rows.length.toLocaleString() + ' of ' + c.count.toLocaleString() + ' models'
-                + (c.rulings ? ' · ' + c.rulings + ' ruling' + (c.rulings === 1 ? '' : 's') : '')));
+            head.append(el('div', 'card-desc', rows.length.toLocaleString() + ' of ' + all.length.toLocaleString() + ' models · '
+                + nMakers + ' maker' + (nMakers === 1 ? '' : 's') + (c.rulings ? ' · ' + c.rulings + ' ruling' + (c.rulings === 1 ? '' : 's') : '')
+                + (nReview ? ' · ' + nReview + ' to review' : '')));
             card.append(head);
-            const seg = segControl([{ label: 'All', value: 'all' }, { label: 'Needs review', value: 'review' }, { label: 'Rulings', value: 'rulings' }],
-                sizesFilter, (v) => { sizesFilter = v; sizesShown = SIZES_PAGE; renderSizes(); });
-            const search = tableSearch('Search manufacturer or model…', sizesQ, (v) => { sizesQ = v; sizesShown = SIZES_PAGE; renderSizes(); });
-            card.append(tableTools([search, seg], []));
-            if (!rows.length) { card.append(el('div', 'empty', sizesQ ? 'No model matches “' + sizesQ + '”.' : 'The sheet is empty.')); box.append(card); return; }
-            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
-            const thead = el('thead'); const hr = el('tr');
-            [['Manufacturer'], ['Model'], ['Holder glass', 1], ['Image', 1], ['Produced as (mm)', 1], ['Notes']].forEach(([h, right]) => {
-                const th = el('th', null, h); if (right) th.style.textAlign = 'right'; hr.append(th);
+            const search = tableSearch('Search maker or model…', st.q, (v) => { st.q = v; st.page = 1; renderSizes(); });
+            const makerSel = sizesSelect('Maker', [['', 'All makers']].concat(makers.map(m => [m, m + ' (' + makerCounts[m] + ')'])), st.maker, (v) => { st.maker = v; st.page = 1; renderSizes(); });
+            const sizeSel = sizesSelect('Produced size', [['', 'All sizes']].concat(sizes.map(s => [s, s + ' mm (' + sizeSet[s] + ')'])), st.size, (v) => { st.size = v; st.page = 1; renderSizes(); });
+            const statusSel = sizesSelect('Status', SIZES_STATUS, st.status, (v) => { st.status = v; st.page = 1; renderSizes(); });
+            const sortSel = sizesSelect('Sort', SIZES_SORTS, st.sort, (v) => { st.sort = v; st.page = 1; renderSizes(); });
+            const gbtn = el('button', 'btn btn-sm' + (grouped ? ' on' : '')); gbtn.textContent = 'Group by maker';
+            gbtn.setAttribute('aria-pressed', grouped ? 'true' : 'false');
+            gbtn.disabled = st.sort !== 'maker'; if (gbtn.disabled) gbtn.title = 'Grouping follows the maker sort';
+            gbtn.onclick = () => { st.group = !st.group; st.page = 1; renderSizes(); };
+            const xbtn = el('button', 'btn btn-sm'); xbtn.append(ico(I.download), document.createTextNode('Export CSV'));
+            xbtn.onclick = () => sizesExport(rows);
+            card.append(tableTools([search, makerSel, sizeSel, statusSel], [sortSel, gbtn, xbtn]));
+            const chips = sizesChips(); if (chips) card.append(chips);
+            if (!rows.length) { card.append(el('div', 'empty', st.q ? 'No model matches “' + st.q + '”.' : 'Nothing matches those filters.')); box.append(card); return; }
+            /* the list to page: a folded maker keeps one line, its heading */
+            const list = [];
+            let prevMaker = null;
+            rows.forEach(r => {
+                if (grouped && r.manufacturer !== prevMaker) { list.push({ head: r.manufacturer, n: rows.filter(x => x.manufacturer === r.manufacturer).length }); prevMaker = r.manufacturer; }
+                if (!(grouped && st.folded[r.manufacturer])) list.push({ row: r });
             });
+            const pages = Math.max(1, Math.ceil(list.length / st.pageSize));
+            if (st.page > pages) st.page = pages;
+            const start = (st.page - 1) * st.pageSize, slice = list.slice(start, start + st.pageSize);
+            if (grouped && !st.maker && !st.q) {
+                /* A to Z: the page where each initial's first maker starts */
+                const az = el('div', 'az'); az.setAttribute('aria-label', 'Jump to a maker by initial');
+                const firstAt = {};
+                list.forEach((it, i) => { if (it.head) { const L = it.head[0].toUpperCase(); const k = /[A-Z]/.test(L) ? L : '#'; if (!(k in firstAt)) firstAt[k] = i; } });
+                ['#'].concat('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')).forEach(L => {
+                    const b = el('button', null, L); b.type = 'button';
+                    if (!(L in firstAt)) b.disabled = true;
+                    else b.onclick = () => { st.page = Math.floor(firstAt[L] / st.pageSize) + 1; renderSizes(); requestAnimationFrame(() => { const t = box.querySelector('tr[data-letter="' + L + '"]'); if (t) t.scrollIntoView({ block: 'start' }); }); };
+                    az.append(b);
+                });
+                card.append(az);
+            }
+            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable sizes-table');
+            const thead = el('thead'); const hr = el('tr');
+            const cols = (grouped ? [] : [['Maker']]).concat([['Model'], ['Holder glass, mm', 1], ['Image, mm', 1], ['Produced as, mm', 1], ['Under, mm', 1], ['Notes']]);
+            cols.forEach(([h, num]) => { const th = el('th', num ? 'num' : null, h); hr.append(th); });
             thead.append(hr); tbl.append(thead);
             const tb = el('tbody');
-            rows.slice(0, sizesShown).forEach(r => {
-                const tr = el('tr');
-                tr.append(el('td', null, r.manufacturer), el('td', null, r.model));
-                const g = el('td', null, r.glass ? r.glass + ' mm' : ''); g.style.textAlign = 'right';
-                const im = el('td', null, r.image ? r.image + ' mm' : ''); im.style.textAlign = 'right';
+            const continued = grouped && start > 0 && !slice[0].head;
+            let firstHeadSeen = false;
+            slice.forEach((it, i) => {
+                if (it.head) {
+                    firstHeadSeen = true;
+                    const tr = el('tr', 'ktable-grp'); const th = el('th'); th.colSpan = cols.length;
+                    const L = it.head[0].toUpperCase(); tr.dataset.letter = /[A-Z]/.test(L) ? L : '#';
+                    const folded = !!st.folded[it.head];
+                    const caret = el('span', 'grp-caret'); caret.innerHTML = I.chev; caret.setAttribute('aria-hidden', 'true');
+                    th.append(caret, document.createTextNode(it.head), el('span', 'grp-n', it.n + ' model' + (it.n === 1 ? '' : 's') + (folded ? ' · folded' : '')));
+                    tr.append(th);
+                    tr.setAttribute('aria-expanded', folded ? 'false' : 'true'); tr.tabIndex = 0; tr.setAttribute('role', 'button');
+                    tr.onclick = () => { st.folded[it.head] = !folded; renderSizes(); };
+                    tr.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); tr.click(); } };
+                    tb.append(tr); return;
+                }
+                if (i === 0 && continued) {
+                    const tr = el('tr', 'ktable-grp'); const th = el('th'); th.colSpan = cols.length;
+                    th.append(document.createTextNode(it.row.manufacturer), el('span', 'grp-n', 'continued')); tr.append(th); tb.append(tr);
+                }
+                const r = it.row; const tr = el('tr');
+                if (!grouped) tr.append(el('td', null, r.manufacturer));
+                tr.append(el('td', 'sizes-model', r.model));
+                const g = el('td', 'num', r.glass || ''); const im = el('td', 'num', r.image || '');
                 tr.append(g, im, sizesProducedCell(r, !!c.can_edit));
-                const n = el('td', 'sizes-notes', r.notes || (r.undercut && r.undercut !== '0' ? r.undercut + ' mm under the holder' : ''));
+                tr.append(el('td', 'num', r.undercut && r.undercut !== '0' ? r.undercut : ''));
+                const n = el('td', 'sizes-notes', r.notes || ''); if (r.notes) n.title = r.notes;
                 tr.append(n);
                 tb.append(tr);
             });
             tbl.append(tb); wrap.append(tbl); card.append(wrap);
             const foot = el('div', 'tbl-foot');
-            foot.append(el('div', 'tbl-count', 'Viewing ' + Math.min(sizesShown, rows.length).toLocaleString() + ' of ' + rows.length.toLocaleString() + ' model' + (rows.length === 1 ? '' : 's')));
-            if (rows.length > sizesShown) {
-                const more = el('button', 'btn btn-sm', 'Show ' + Math.min(SIZES_PAGE, rows.length - sizesShown) + ' more');
-                more.onclick = () => { sizesShown += SIZES_PAGE; renderSizes(); };
-                foot.append(more);
-            }
+            const shownRows = slice.filter(it => it.row).length;
+            foot.append(el('div', 'tbl-count', 'Viewing ' + (rows.length ? ((start + 1).toLocaleString() + ' to ' + Math.min(start + st.pageSize, list.length).toLocaleString()) : '0') + ' of ' + list.length.toLocaleString() + ' lines · ' + shownRows + ' model' + (shownRows === 1 ? '' : 's') + ' on this page'));
+            const nav = el('div', 'tbl-pages');
+            const per = sizesSelect('Rows per page', [['100', '100 a page'], ['250', '250 a page'], ['500', '500 a page']], String(st.pageSize), (v) => { st.pageSize = +v; st.page = 1; renderSizes(); });
+            const prevBtn = el('button', 'btn btn-sm', 'Previous'); prevBtn.disabled = st.page <= 1; prevBtn.onclick = () => { st.page -= 1; renderSizes(); };
+            const nextBtn = el('button', 'btn btn-sm', 'Next'); nextBtn.disabled = st.page >= pages; nextBtn.onclick = () => { st.page += 1; renderSizes(); };
+            nav.append(per, el('span', 'tbl-page', 'Page ' + st.page + ' of ' + pages), prevBtn, nextBtn);
+            foot.append(nav);
             card.append(foot);
             box.append(card);
         }
