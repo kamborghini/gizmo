@@ -426,7 +426,8 @@ def t_the_app_has_its_own_front_door():
     ok("'/api/auth/setup'" in SCRIPT, "and the first-run setup screen")
     ok("X-App-Session" in SCRIPT, "the session rides on every api call")
     ok(re.search(r"setAppSession\(''\);\s*\n\s*clearLocalCache\(\);\s*\n\s*"
-                 r"/\*[^/]*?\*/\s*\n\s*location\.reload\(\)", SCRIPT, re.S),
+                 r"/\*[^/]*?\*/\s*\n(?:\s*(?:let last = 0;|try \{[^\n]*sc_auth_reload[^\n]*|if \(Date\.now\(\) - last > 60000\) \{|"
+                 r"try \{ sessionStorage\.setItem\('sc_auth_reload'[^\n]*)\n)*\s*location\.reload\(\)", SCRIPT, re.S),
        "a 401 clears the session AND the cached work, then reloads: showing a "
        "login screen over the last person's data is not signing them out")
     ok("authField('Password" in SCRIPT and "'password', 'au-pw'" in SCRIPT,
@@ -1878,6 +1879,25 @@ def t_the_size_list_tab_is_searchable_and_reads_the_same_sheet_as_the_label():
     ok("api('/api/gobo-sizes/rule', { op: 'set', manufacturer: r.manufacturer, model: r.model, size: inp.value.trim() })" in SCRIPT,
        "ruling inline writes the same rule the label reads")
     ok("if (canEdit) {" in SCRIPT.split("function sizesProducedCell")[1][:1400], "and only with the grant")
+
+@test
+def t_a_rejected_embed_token_is_retried_once_and_a_dead_session_never_loops():
+    """A colleague's desk: a flashing login screen and "asked for too much".
+    Every 401 used to clear the session and reload; a stale Shopify embed
+    token (a PC clock a minute out) therefore reloaded on every request, and
+    the reloads tripped the rate window. The page now reads the door's
+    reason: a bad token is fetched fresh and retried once, a second rejection
+    is shown on the login screen and never reloads, and a dead session
+    reloads at most once a minute. The login screen says why."""
+    fn = SCRIPT.split("async function api(path, payload, opts) {")[1].split("\n        }\n")[0]
+    ok("const reason = (why && why.reason) || 'session';" in fn, "the reason is read off the 401")
+    ok("if (reason === 'token' && !opts.retried) {" in fn and "return api(path, payload, { retried: true });" in fn,
+       "a rejected embed token is retried once with a fresh one")
+    ok("if (reason === 'token') {\n                        authShow('login');\n                        throw new Error(text);" in fn,
+       "a second rejection is shown, never reloaded")
+    ok("if (Date.now() - last > 60000) {" in fn and "sessionStorage.setItem('sc_auth_reload'" in fn, "a dead session reloads at most once a minute")
+    ok("sessionStorage.setItem('sc_auth_reason'" in fn, "and the reason is kept for the login screen")
+    ok("const why = takeAuthReason();\n                if (why && why.text) err.textContent = why.text;" in SCRIPT, "which says why you were signed out")
 
 @test
 def t_ai_output_is_labelled_interpretation_never_fact():

@@ -12374,6 +12374,29 @@ def t_the_size_list_tab_reads_the_whole_sheet_with_the_rulings_over_it():
     eq(r.status_code, 403, "and the rule route says so")
 
 @test
+def t_a_refused_request_says_why_so_the_page_can_answer_it():
+    """A colleague saw a flashing login screen and "asked for too much": a
+    stale Shopify embed token (his PC clock) drew a bare 401, the page took
+    every 401 as a dead session and reloaded, and the reloads tripped the rate
+    window. The door now names the refusal, so the page can fetch a fresh
+    token and retry once for a bad token, and only sign out for a dead session."""
+    ensure_auth()
+    copilot._rl_hits.clear(); copilot._rl_global.clear()
+    r = client.post("/api/status", json={}, headers={"Authorization": "Bearer not-a-token",
+                                                      "X-App-Session": APP_AUTH["session"]})
+    eq(r.status_code, 401)
+    eq(r.json()["reason"], "token", "a rejected embed token says so")
+    ok("clock" in r.json()["error"], "and points at the one cause a person can fix at the desk")
+    copilot._rl_hits.clear(); copilot._rl_global.clear()
+    r = client.post("/api/status", json={}, headers={"Authorization": "Bearer " + tok()})
+    eq(r.status_code, 401)
+    eq(r.json()["reason"], "session", "a good token with no app session is a sign-in")
+    copilot._rl_hits.clear(); copilot._rl_global.clear()
+    r = client.post("/api/status", json={}, headers={"Authorization": "Bearer " + tok(), "X-App-Session": "stale-session"})
+    eq(r.json()["reason"], "session", "and so is a session the app no longer holds")
+    ok(set(copilot.AUTH_REFUSALS) == {"token", "session", "inactive", "must_change"}, "four reasons, each with its own words")
+
+@test
 def t_recon_routes_enforce_their_rules():
     def go():
         ensure_auth()

@@ -7933,36 +7933,51 @@ def _verify_session_token(token: str) -> dict:
     return claims
 
 
-def _authorize(request: Request) -> tuple[bool, Optional[str]]:
-    """Return (ok, who). The only accepted credential is a verified Shopify
-    session token (Bearer JWT from App Bridge) — the app is embedded-only.
-    `who` is the staff member's own Shopify id, so every action is theirs.
-    A verified id still gets refused when an admin has switched them off."""
+AUTH_REFUSALS = {
+    # reason -> what the door says. The reason travels with the 401 so the page
+    # can tell a stale embed token (retry with a fresh one, never reload) from
+    # a dead app session (sign in again), and the login screen can say which.
+    "token": "Shopify rejected this browser's session token. If it keeps happening on one "
+             "computer, check that its clock is set automatically: a clock a minute out makes "
+             "every token look expired.",
+    "session": "Your sign-in has expired. Please log in again.",
+    "inactive": "This account is switched off.",
+    "must_change": "Choose your own password first.",
+}
+
+
+def _authorize(request: Request) -> tuple[bool, Optional[str], str]:
+    """Return (ok, who, reason). The only accepted credential is a verified
+    Shopify session token (Bearer JWT from App Bridge) — the app is
+    embedded-only. `who` is the staff member's own Shopify id, so every action
+    is theirs. A verified id still gets refused when an admin has switched
+    them off. `reason` names the refusal (a key of AUTH_REFUSALS) so the page
+    can answer it correctly instead of treating every 401 as a dead session."""
     auth = request.headers.get("authorization", "")
     if auth.startswith("Bearer ") and SHOPIFY_API_SECRET:
         try:
             _verify_session_token(auth[7:])
         except Exception as e:
             logger.warning(f"session token rejected: {e}")
-            return False, None
+            return False, None, "token"
         # The embed token is only the perimeter. WHO you are is the app's own
         # session, minted at its login screen; no session, no entry. The one
         # exception is first-run setup, when no accounts exist yet: the
         # /api/auth routes handle that themselves and never come through here.
         uid = _session_uid(request.headers.get("x-app-session"))
         if not uid:
-            return False, None
+            return False, None, "session"
         u = _team_user(uid)
         if not u or not u.get("active", True):
             if u is not None:
                 logger.warning("switched-off account %s was refused", uid)
-            return False, None
+            return False, None, "inactive"
         # A starter password unlocks nothing but the choose-your-own screen:
         # until the account owns its password, every other route is closed.
         if u.get("must_change") and not request.url.path.startswith("/api/auth/"):
-            return False, None
-        return True, uid
-    return False, None
+            return False, None, "must_change"
+        return True, uid, ""
+    return False, None, "token"
 
 
 # ---------------------------------------------------------------------------
@@ -8485,9 +8500,9 @@ async def _guard(request: Request, *, ai: bool = False, min_level: int = 0,
     pre = _pre_checks(request, max_body=max_body)
     if pre:
         return pre, None, ""
-    ok, who = _authorize(request)
+    ok, who, reason = _authorize(request)
     if not ok:
-        return _json({"error": "Unauthorized"}, 401), None, ""
+        return _json({"error": AUTH_REFUSALS.get(reason, "Unauthorized"), "reason": reason or "session"}, 401), None, ""
     uid = str(who or "")
     if min_level and _team_level(uid) < min_level:
         return _json({"error": "Only an admin can do that."}, 403), None, ""

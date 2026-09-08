@@ -4055,7 +4055,13 @@ Projected Image UK"></textarea>
             buildBar.append(go, later);
             document.body.append(buildBar);
         }
-        async function api(path, payload) {
+        /* Why the last sign-out happened, for the login screen to say. */
+        function takeAuthReason() {
+            try { const r = sessionStorage.getItem('sc_auth_reason'); sessionStorage.removeItem('sc_auth_reason'); return r ? JSON.parse(r) : null; }
+            catch (e) { return null; }
+        }
+        async function api(path, payload, opts) {
+            opts = opts || {};
             const hdrs = Object.assign({ 'Content-Type': 'application/json' }, await authHeaders());
             const sess = appSession();
             if (sess) hdrs['X-App-Session'] = sess;
@@ -4066,17 +4072,43 @@ Projected Image UK"></textarea>
             });
             try { noteBuild(res.headers.get('X-App-Build')); } catch (e) {}
             if (res.status === 401) {
-                // The embed token was fine, so this is the app's own door: the
-                // session is missing or expired. Show the login screen.
+                /* The door says WHY. A stale Shopify embed token is not a dead
+                   session: App Bridge refreshes tokens by the browser's clock,
+                   so a PC a minute out sends tokens the server sees as expired.
+                   Fetch a fresh one and try once more; only a second rejection
+                   is shown, and it is never a reload, because a fault that
+                   survives a reload becomes a reload loop that trips the rate
+                   window - which is exactly how this read at one desk. */
+                let why = null;
+                try { why = await res.clone().json(); } catch (e) { why = null; }
+                const reason = (why && why.reason) || 'session';
+                const text = (why && why.error) || 'Please log in.';
+                if (reason === 'token' && !opts.retried) {
+                    await new Promise(r => setTimeout(r, 1200));
+                    return api(path, payload, { retried: true });
+                }
                 if (!path.startsWith('/api/auth/')) {
+                    try { sessionStorage.setItem('sc_auth_reason', JSON.stringify({ reason, text })); } catch (e) {}
+                    if (reason === 'token') {
+                        authShow('login');
+                        throw new Error(text);
+                    }
                     setAppSession('');
                     clearLocalCache();
                     /* An expired session on an unattended machine leaves the
                        same residue a sign-out did. Reload rather than paint a
-                       login screen over the last person's work. */
-                    location.reload();
+                       login screen over the last person's work - but once a
+                       minute at most. */
+                    let last = 0;
+                    try { last = +sessionStorage.getItem('sc_auth_reload') || 0; } catch (e) {}
+                    if (Date.now() - last > 60000) {
+                        try { sessionStorage.setItem('sc_auth_reload', String(Date.now())); } catch (e) {}
+                        location.reload();
+                    } else {
+                        authShow('login');
+                    }
                 }
-                throw new Error('Please log in.');
+                throw new Error(text);
             }
             if (res.status === 429) {
                 /* A rate limit really does clear in seconds, but the daily AI
@@ -20095,6 +20127,10 @@ Projected Image UK"></textarea>
             card.append(brand);
             const err = el('div', 'auth-error');
             err.setAttribute('role', 'alert');
+            if (mode === 'login') {
+                const why = takeAuthReason();
+                if (why && why.text) err.textContent = why.text;
+            }
             function authShowMfa(ticket) {
                 const card = ov.querySelector('.auth-card');
                 if (!card) return;
