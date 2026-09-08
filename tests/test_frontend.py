@@ -1769,6 +1769,34 @@ def t_independent_cards_use_the_width():
 
 
 @test
+def t_a_kpi_with_a_list_behind_it_opens_it():
+    """Cameron: "the sections don't look like you can interact with them". A
+    KPI that carries the pages or products behind its number is a button that
+    opens them, and says so with the reference's ArrowUpRight in its corner;
+    the Finance and Reconciliation cards, which filter the list under them,
+    carry a ring that fills with a tick when set. Nothing that does nothing
+    gets a cue."""
+    ok("if (m.detail && typeof m.detail === 'object') statOpens(c, m);" in SCRIPT,
+       "a metric with a detail becomes an opener; one without stays a plain card")
+    fn = re.search(r"function statOpens\(c, m\) \{(.*?)\n        \}", SCRIPT, re.S).group(1)
+    for need in ("stat-open", "setAttribute('role', 'button')", "tabIndex = 0", "aria-haspopup",
+                 "ev.key === 'Enter' || ev.key === ' '", "I.arrowUpRight", "openStatDetail(m, c)"):
+        ok(need in fn, "the opener carries %s" % need)
+    ok("arrowUpRight: SV(" in SCRIPT, "the icon exists")
+    md = re.search(r"function openStatDetail\(m, opener\) \{(.*?)\n        \}", SCRIPT, re.S).group(1)
+    ok("name.target = '_blank'; name.rel = 'noopener'" in md, "an item with a url opens the page in a new tab, safely")
+    ok("d.empty || 'Nothing to list.'" in md, "an empty list says so instead of showing nothing")
+    ok("opener.focus()" in md, "closing hands focus back to the card")
+    ok("stat.append(statAct(I.check));" in SCRIPT and SCRIPT.count("stat.append(statAct(I.check));") == 2,
+       "both filter strips carry the ring")
+    ok(".stat.stat-open { cursor: pointer; }" in CSS, "an opener shows a pointer")
+    ok(".stat.stat-open:hover, .stat.stat-pick:hover { border-color: var(--border-strong); background: var(--surface-secondary); }" in CSS,
+       "and the reference's row hover")
+    ok(".stat-pick:is(.on, [aria-pressed=\"true\"]) > .stat-act { background: var(--action-primary);" in CSS,
+       "a set filter fills its ring")
+    ok(".chart-expand, .stat-act, .ov-customize" in CSS, "the cue is screen furniture, hidden in print")
+
+@test
 def t_the_reconciliation_tab_exists_and_is_gated():
     ok('id="view-recon"' in HTML, "the view exists")
     ok('data-view="recon"' in HTML, "and its sidebar entry")

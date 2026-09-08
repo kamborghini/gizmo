@@ -2546,6 +2546,7 @@ async def _overview_trends(registry: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 SEO_SAMPLE_PAGES = int(os.environ.get("SEO_SAMPLE_PAGES", "5"))
+SEO_DETAIL_CAP = 80  # products or pages listed behind a KPI; the card shows the count
 
 SEO_KNOWLEDGE = """## Technical SEO + revenue-optimization expertise (apply this model)
 You are the store's optimization intelligence layer. Your job is to help the merchant make more
@@ -2785,30 +2786,52 @@ async def _seo_product_signals(registry: dict) -> dict:
     data = await _tool_json(registry, "shopify_list_products",
                             {"limit": 250, "fields": "id,title,handle,body_html,images"})
     products = data.get("products", [])
-    titles: dict = {}
+    by_title: dict[str, list[dict]] = {}
     thin = no_desc = total_imgs = missing_alt = 0
+    # The products behind each count, so a KPI can open the list it counted
+    # (capped: the card shows the count, the list shows where to start).
+    thin_items: list[dict] = []
+    missing_items: list[dict] = []
+    alt_items: list[dict] = []
     for p in products:
         t = (p.get("title") or "").strip().lower()
-        titles[t] = titles.get(t, 0) + 1
+        ident = {"title": p.get("title") or p.get("handle") or "", "handle": p.get("handle")}
+        by_title.setdefault(t, []).append(ident)
         wc = len(re.sub("<[^>]+>", " ", p.get("body_html") or "").split())
         if wc == 0:
             no_desc += 1
+            missing_items.append({**ident, "words": 0})
         elif wc < 50:
             thin += 1
+            thin_items.append({**ident, "words": wc})
+        n_imgs = n_missing = 0
         for img in p.get("images", []):
             total_imgs += 1
+            n_imgs += 1
             if not (img.get("alt") or "").strip():
                 missing_alt += 1
+                n_missing += 1
+        if n_missing:
+            alt_items.append({**ident, "missing": n_missing, "images": n_imgs})
+    dup_groups = [{"title": items[0]["title"], "count": len(items), "handles": [i["handle"] for i in items]}
+                  for items in by_title.values() if len(items) > 1]
     return {
         "products_sampled": len(products),
         "thin_descriptions": thin, "missing_descriptions": no_desc,
-        "duplicate_titles": sum(1 for c in titles.values() if c > 1),
+        "duplicate_titles": len(dup_groups),
         "images": total_imgs, "images_missing_alt": missing_alt,
         "alt_coverage_pct": round(100 * (total_imgs - missing_alt) / total_imgs) if total_imgs else None,
+        "thin_items": sorted(thin_items, key=lambda i: i["words"])[:SEO_DETAIL_CAP],
+        "missing_items": missing_items[:SEO_DETAIL_CAP],
+        "alt_items": sorted(alt_items, key=lambda i: -i["missing"])[:SEO_DETAIL_CAP],
+        "duplicate_groups": sorted(dup_groups, key=lambda g: -g["count"])[:SEO_DETAIL_CAP],
     }
 
 
-def _seo_scorecard(signals: dict, rs, ss, pages: list[dict]) -> tuple[int, list[dict]]:
+def _seo_scorecard(signals: dict, rs, ss, pages: list[dict], domain: str | None = None,
+                   sitemap_locs: int | None = None) -> tuple[int, list[dict]]:
+    """The score, and one KPI per check. Every KPI carries a `detail`: the
+    pages or products behind its number, so the card can open them."""
     score = 100
     any_noindex = any(p.get("noindex") for p in pages)
     has_product_schema = any("Product" in (p.get("jsonld_types") or []) for p in pages)
@@ -2818,28 +2841,73 @@ def _seo_scorecard(signals: dict, rs, ss, pages: list[dict]) -> tuple[int, list[
     thin = signals.get("thin_descriptions", 0)
     dup = signals.get("duplicate_titles", 0)
 
-    if any_noindex:        score -= 25
-    if not sitemap_ok:     score -= 10
-    if not robots_ok:      score -= 5
-    if not has_product_schema: score -= 12
-    if alt is not None and alt < 90:   score -= min(15, (90 - alt) // 5 * 2)
-    if md_pct < 90:        score -= min(12, (90 - md_pct) // 10 * 3)
-    if thin:               score -= min(10, thin)
-    if dup:                score -= min(10, dup)
+    deductions: list[dict] = []
+    if any_noindex:        score -= 25; deductions.append({"label": "noindex found on a sampled page", "note": "-25"})
+    if not sitemap_ok:     score -= 10; deductions.append({"label": "sitemap.xml missing", "note": "-10"})
+    if not robots_ok:      score -= 5;  deductions.append({"label": "robots.txt missing", "note": "-5"})
+    if not has_product_schema: score -= 12; deductions.append({"label": "no Product JSON-LD on the sampled pages", "note": "-12"})
+    if alt is not None and alt < 90:
+        d = min(15, (90 - alt) // 5 * 2); score -= d; deductions.append({"label": f"image alt coverage {alt}%", "note": f"-{d}"})
+    if md_pct < 90:
+        d = min(12, (90 - md_pct) // 10 * 3); score -= d; deductions.append({"label": f"meta descriptions on {md_pct}% of pages", "note": f"-{d}"})
+    if thin:
+        d = min(10, thin); score -= d; deductions.append({"label": f"{thin} thin product descriptions", "note": f"-{d}"})
+    if dup:
+        d = min(10, dup); score -= d; deductions.append({"label": f"{dup} duplicated product titles", "note": f"-{d}"})
     score = max(0, min(100, score))
 
+    def purl(handle):
+        return f"https://{domain}/products/{handle}" if (domain and handle) else None
+
+    def detail(title, items, empty, total=None):
+        return {"title": title, "items": items, "empty": empty, "total": total if total is not None else len(items)}
+
+    noindex_pages = [{"label": p.get("url"), "note": p.get("meta_robots") or "noindex", "url": p.get("url")}
+                     for p in pages if p.get("noindex")]
+    schema_pages = [{"label": p.get("url"), "note": ", ".join(p.get("jsonld_types") or []) or "no JSON-LD", "url": p.get("url")}
+                    for p in pages]
+    no_meta_pages = [{"label": p.get("url"), "note": "no meta description", "url": p.get("url")}
+                     for p in pages if not p.get("meta_description")]
+    thin_items = [{"label": i["title"], "note": (f"{i['words']} words" if i.get("words") else "no description"),
+                   "url": purl(i.get("handle"))}
+                  for i in (signals.get("missing_items") or []) + (signals.get("thin_items") or [])]
+    alt_items = [{"label": i["title"], "note": f"{i['missing']} of {i['images']} images without alt", "url": purl(i.get("handle"))}
+                 for i in signals.get("alt_items") or []]
+    dup_items = [{"label": g["title"], "note": f"{g['count']} products", "url": purl((g.get("handles") or [None])[0])}
+                 for g in signals.get("duplicate_groups") or []]
+    site_items = [{"label": f"https://{domain}/sitemap.xml" if domain else "sitemap.xml",
+                   "note": (f"HTTP {ss}" + (f" · {sitemap_locs} locations" if sitemap_ok and sitemap_locs else "")),
+                   "url": f"https://{domain}/sitemap.xml" if domain else None},
+                  {"label": f"https://{domain}/robots.txt" if domain else "robots.txt", "note": f"HTTP {rs}",
+                   "url": f"https://{domain}/robots.txt" if domain else None}]
+    n_pages = len(pages)
+
     metrics = [
-        {"label": "SEO score", "value": f"{score}/100", "tone": "warn" if score < 70 else None},
+        {"label": "SEO score", "value": f"{score}/100", "tone": "warn" if score < 70 else None,
+         "detail": detail("How the score is made", deductions, "No deductions: every check passed.")},
         {"label": "Indexable", "value": "noindex found" if any_noindex else "Yes",
-         "tone": "warn" if any_noindex else None},
-        {"label": "Sitemap", "value": "OK" if sitemap_ok else "Missing", "tone": None if sitemap_ok else "warn"},
+         "tone": "warn" if any_noindex else None,
+         "detail": detail("Sampled pages blocked from the index", noindex_pages,
+                          f"All {n_pages} sampled pages are indexable.")},
+        {"label": "Sitemap", "value": "OK" if sitemap_ok else "Missing", "tone": None if sitemap_ok else "warn",
+         "detail": detail("Crawl files", site_items, "")},
         {"label": "Product schema", "value": "Present" if has_product_schema else "Missing",
-         "tone": None if has_product_schema else "warn"},
-        {"label": "Meta descriptions", "value": f"{md_pct}% of sampled", "tone": "warn" if md_pct < 90 else None},
+         "tone": None if has_product_schema else "warn",
+         "detail": detail("Structured data on the sampled pages", schema_pages, "No pages were sampled.")},
+        {"label": "Meta descriptions", "value": f"{md_pct}% of sampled", "tone": "warn" if md_pct < 90 else None,
+         "detail": detail("Sampled pages without a meta description", no_meta_pages,
+                          f"Every one of the {n_pages} sampled pages has a meta description.")},
         {"label": "Image alt", "value": f"{alt}%" if alt is not None else "n/a",
-         "tone": "warn" if (alt is not None and alt < 90) else None},
-        {"label": "Thin descriptions", "value": str(thin), "tone": "warn" if thin else None},
-        {"label": "Duplicate titles", "value": str(dup), "tone": "warn" if dup else None},
+         "tone": "warn" if (alt is not None and alt < 90) else None,
+         "detail": detail("Products with images missing alt text", alt_items,
+                          "Every product image has alt text.", total=len(signals.get("alt_items") or []))},
+        {"label": "Thin descriptions", "value": str(thin), "tone": "warn" if thin else None,
+         "detail": detail("Products with under 50 words of description", thin_items,
+                          "Every product has at least 50 words.",
+                          total=thin + signals.get("missing_descriptions", 0))},
+        {"label": "Duplicate titles", "value": str(dup), "tone": "warn" if dup else None,
+         "detail": detail("Titles shared by more than one product", dup_items,
+                          "Every product title is unique.", total=dup)},
     ]
     return score, metrics
 
@@ -2961,9 +3029,12 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
     fetched = await asyncio.gather(*[_http_get(u, allowed_hosts=hosts) for u in urls])
     pages = [{"url": u, "status": st, **_parse_seo(html)} for u, (st, html) in zip(urls, fetched) if st]
 
-    score, metrics = _seo_scorecard(signals, rs, ss, pages)
+    score, metrics = _seo_scorecard(signals, rs, ss, pages, domain=primary,
+                                    sitemap_locs=(stext or "").count("<loc>"))
     context = {
-        "domain": primary, "computed_seo_score": score, "product_signals": signals,
+        "domain": primary, "computed_seo_score": score,
+        # the counts only: the item lists are for the cards, not the model
+        "product_signals": {k: v for k, v in signals.items() if not isinstance(v, list)},
         "robots_txt": {"status": rs, "found": rs == 200, "sample": (rtext or "")[:1000]},
         "sitemap_xml": {"status": ss, "found": ss == 200, "child_locs": (stext or "").count("<loc>")},
         "sampled_pages": pages,

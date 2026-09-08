@@ -252,6 +252,50 @@ def post_s(session, path, body):
 
 # =========================== unit: envelope construction ====================
 @test
+def t_every_seo_kpi_carries_the_list_behind_its_number():
+    """The SEO checks used to be counts a card could only show. Each KPI now
+    carries a `detail`: the sampled pages or products that made the number,
+    with a storefront url per item, so the card can open them. The model's
+    context keeps the counts only (the handler strips the lists)."""
+    signals = {"products_sampled": 4, "thin_descriptions": 2, "missing_descriptions": 1,
+               "duplicate_titles": 1, "images": 6, "images_missing_alt": 3, "alt_coverage_pct": 50,
+               "thin_items": [{"title": "Holder", "handle": "holder", "words": 12},
+                              {"title": "Lens", "handle": "lens", "words": 40}],
+               "missing_items": [{"title": "Frame", "handle": "frame", "words": 0}],
+               "alt_items": [{"title": "Gobo", "handle": "gobo", "missing": 3, "images": 4}],
+               "duplicate_groups": [{"title": "Gobo", "count": 2, "handles": ["gobo", "gobo-2"]}]}
+    pages = [{"url": "https://shop.test/", "noindex": False, "meta_description": "x", "jsonld_types": ["Organization"]},
+             {"url": "https://shop.test/products/gobo", "noindex": True, "meta_robots": "noindex, follow",
+              "meta_description": "", "jsonld_types": ["Product"]}]
+    score, metrics = copilot._seo_scorecard(signals, 200, 200, pages, domain="shop.test", sitemap_locs=3)
+    by = {m["label"]: m for m in metrics}
+    ok(all(isinstance(m.get("detail"), dict) and "items" in m["detail"] for m in metrics),
+       "every KPI carries a detail with items")
+    ok([i["label"] for i in by["Thin descriptions"]["detail"]["items"]] == ["Frame", "Holder", "Lens"],
+       "thin descriptions list the missing ones first, then the thin ones")
+    ok(by["Thin descriptions"]["detail"]["items"][0]["note"] == "no description"
+       and by["Thin descriptions"]["detail"]["items"][1]["note"] == "12 words", "each with why it is listed")
+    ok(by["Thin descriptions"]["detail"]["items"][1]["url"] == "https://shop.test/products/holder",
+       "and the storefront page to fix")
+    ok(by["Thin descriptions"]["detail"]["total"] == 3, "the total is the count, not the capped list")
+    ok(by["Indexable"]["detail"]["items"] == [{"label": "https://shop.test/products/gobo", "note": "noindex, follow",
+                                               "url": "https://shop.test/products/gobo"}],
+       "indexable lists the blocked pages with their robots directive")
+    ok(by["Duplicate titles"]["detail"]["items"][0]["note"] == "2 products", "duplicates list the group size")
+    ok(by["Image alt"]["detail"]["items"][0]["note"] == "3 of 4 images without alt", "alt lists the gap per product")
+    ok(by["Sitemap"]["detail"]["items"][0]["note"] == "HTTP 200 · 3 locations", "the sitemap row carries its size")
+    ok(by["Meta descriptions"]["detail"]["items"][0]["url"] == "https://shop.test/products/gobo",
+       "meta descriptions list the pages without one")
+    ok(any(i["note"] == "-25" for i in by["SEO score"]["detail"]["items"]), "the score explains its deductions")
+    _, m2 = copilot._seo_scorecard({"alt_coverage_pct": 100}, 200, 200,
+                                   [{"url": "u", "meta_description": "x", "jsonld_types": ["Product"]}])
+    by2 = {m["label"]: m for m in m2}
+    ok(by2["Indexable"]["detail"]["items"] == [] and by2["Indexable"]["detail"]["empty"].startswith("All 1 sampled"),
+       "a clean check lists nothing and says so")
+    ok(by2["Thin descriptions"]["detail"]["items"][0:0] == [] and by2["Thin descriptions"]["detail"]["items"][0]["url"] is None
+       if by2["Thin descriptions"]["detail"]["items"] else True, "no domain, no url")
+
+@test
 def t_envelope_wellformed_and_ordered():
     worldoptions.set_credentials(meter="M1", key="K1", password="P1", plugin="Web_Service")
     # capture the real envelope by temporarily using the real builder path
