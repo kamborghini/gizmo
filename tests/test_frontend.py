@@ -3363,6 +3363,85 @@ def t_a_box_painted_inside_a_card_sits_inside_its_gutter():
        "the script still puts the notice straight into the Connection card")
 
 
+def _names_the_script_calls_but_never_binds(script):
+    """Bare function calls with no binding anywhere in the script.
+
+    Comments and every kind of string literal are stripped first, or the prose
+    in this file (which is full of "the desk (a place)") reads as a call. What
+    counts as a binding: a named function, a parameter of any function or
+    arrow, a const/let/var including destructured ones, a catch binding, and
+    an object-literal method."""
+    s = re.sub(r"/\*.*?\*/", " ", script, flags=re.S)
+    s = re.sub(r"(?<![:\w])//[^\n]*", " ", s)
+    s = re.sub(r"'(?:\\.|[^'\\\n])*'", "''", s)
+    s = re.sub(r'"(?:\\.|[^"\\\n])*"', '""', s)
+    s = re.sub(r"`(?:\\.|[^`\\])*`", "``", s, flags=re.S)
+
+    bound = set()
+
+    def take(blob):
+        for n in re.split(r"[,\s]+", blob or ""):
+            n = re.sub(r"=.*$", "", n.strip().split(":")[-1].strip().lstrip(".")).strip()
+            if re.fullmatch(r"[A-Za-z_$][\w$]*", n or ""):
+                bound.add(n)
+
+    for m in re.finditer(r"function\s*([A-Za-z_$][\w$]*)?\s*\(([^)]*)\)", s):
+        if m.group(1):
+            bound.add(m.group(1))
+        take(m.group(2))
+    for m in re.finditer(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)", s):
+        bound.add(m.group(1))
+    for m in re.finditer(r"(?:const|let|var)\s*[\{\[]([^\}\]]*)[\}\]]", s):
+        take(m.group(1))
+    for m in re.finditer(r"\(([^()]*)\)\s*=>", s):
+        take(m.group(1))
+    for m in re.finditer(r"(?<![.\w$])([A-Za-z_$][\w$]*)\s*=>", s):
+        bound.add(m.group(1))
+    for m in re.finditer(r"catch\s*\(\s*([A-Za-z_$][\w$]*)", s):
+        bound.add(m.group(1))
+    for m in re.finditer(r"([A-Za-z_$][\w$]*)\s*:\s*(?:function|\()", s):
+        bound.add(m.group(1))
+
+    called = set(re.findall(r"(?<![.\w$])([a-z][A-Za-z0-9_$]*)\s*\(", s))
+    keyword = {"if", "for", "while", "switch", "catch", "return", "typeof", "function", "await",
+               "new", "do", "else", "delete", "void", "in", "of", "case", "throw", "var", "let",
+               "const", "yield", "instanceof", "async"}
+    builtin = {"parseInt", "parseFloat", "isNaN", "isFinite", "encodeURIComponent",
+               "decodeURIComponent", "setTimeout", "clearTimeout", "setInterval",
+               "clearInterval", "fetch", "alert", "confirm", "prompt", "btoa", "atob",
+               "getComputedStyle", "queueMicrotask", "structuredClone",
+               "requestAnimationFrame", "cancelAnimationFrame", "eval", "escape",
+               "unescape", "print"}
+    return sorted(called - bound - keyword - builtin)
+
+
+@test
+def t_every_function_the_page_calls_is_one_that_exists():
+    """A call to a name that was never defined is a ReferenceError at the
+    moment the person clicks, and nothing before that moment says so. Three
+    shipped in one session and each looked like a different fault:
+
+      toast(...)      the cash flow workbook uploaded, the server stored it,
+                      and the page then reported "Can't find variable: toast"
+                      as if the upload had failed;
+      toast(...)      the same, ruling a gobo size inline on the Size list;
+      showView(...)   every tab on the Finance strip (Liability,
+                      Reconciliation, Forecast, Xero sync) did nothing at all.
+
+    In each the write had already happened, so the tests, the server and the
+    ledger all agreed the feature worked. The helpers are toastOk/toastError
+    and setView. The page has one script, so the whole binding set is
+    knowable: anything called and never bound is either a typo or something
+    another file puts on window, and the second kind has to be named here."""
+    external = set(re.findall(r"window\.([A-Za-z_$][\w$]*)\s*=", COMPOSER))
+    ok("mountComposer" in external,
+       "composer.js still publishes what index.html calls across the file boundary")
+    stray = [n for n in _names_the_script_calls_but_never_binds(SCRIPT) if n not in external]
+    ok(not stray, "every function the page calls exists: " + (", ".join(stray) or "none missing"))
+    ok("toastOk(" in SCRIPT and "toastError(" in SCRIPT,
+       "the toast helpers are still called by their real names")
+
+
 # --- Web Interface Guidelines pass ------------------------------------------
 
 @test

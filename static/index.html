@@ -7018,7 +7018,7 @@ Projected Image UK"></textarea>
             const tab = (key, label) => {
                 const b = el('button', 'ptab' + (key === active ? ' on' : ''), label);
                 b.setAttribute('aria-current', key === active ? 'page' : 'false');
-                if (key !== active) b.onclick = () => showView(key);
+                if (key !== active) b.onclick = () => setView(key);
                 seg.append(b);
             };
             tab('liability', 'Liability');
@@ -9039,7 +9039,7 @@ Projected Image UK"></textarea>
                     const bytes = new Uint8Array(await f.arrayBuffer()); let bin = '';
                     for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
                     await api('/api/forecast/workbook', { name: f.name, data_b64: btoa(bin) });
-                    toast('Workbook uploaded. The next nightly run reads it.');
+                    toastOk('Workbook uploaded. The next nightly run reads it.');
                     await refreshForecast();
                 } catch (e) { toastError(e.message); }
                 finally { setBusy(b, false); inp.value = ''; }
@@ -9301,7 +9301,7 @@ Projected Image UK"></textarea>
                 setBusy(save, true);
                 try {
                     await api('/api/gobo-sizes/rule', { op: 'set', manufacturer: r.manufacturer, model: r.model, size: inp.value.trim() });
-                    toast(r.manufacturer + ' ' + r.model + ' now cuts at ' + inp.value.trim() + ' mm.');
+                    toastOk(r.manufacturer + ' ' + r.model + ' now cuts at ' + inp.value.trim() + ' mm.');
                     await refreshSizes();
                 } catch (e) { toastError(e.message); setBusy(save, false); }
             };
