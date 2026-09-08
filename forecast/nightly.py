@@ -4,7 +4,11 @@ service on this repo with a cron schedule.
   REACTOR_URL             https://<the app's domain>
   FORECAST_INGEST_TOKEN   the shared secret, the same value Reactor holds
   SHOP                    <store>.myshopify.com
-  SHOPIFY_FORECAST_TOKEN  an Admin API access token with read_orders and read_products
+  and ONE Shopify credential, the second preferred because it is the app's own
+  and there is then one thing to rotate rather than two:
+  SHOPIFY_FORECAST_TOKEN  a static Admin API token with read_all_orders + read_products
+  SHOPIFY_CLIENT_ID       Reactor's client id and secret, exchanged for a
+  SHOPIFY_CLIENT_SECRET   short-lived token that carries the app's own scopes
   FORECAST_SCENARIO       optional: which scenario feeds the baseline feature
   FORECAST_HISTORY_DAYS   optional, default 900
   FORECAST_HORIZON        optional, default 90
@@ -56,8 +60,12 @@ def main() -> int:
     base = env.get("REACTOR_URL", "").rstrip("/")
     token = env.get("FORECAST_INGEST_TOKEN", "")
     shop, stoken = env.get("SHOP", ""), env.get("SHOPIFY_FORECAST_TOKEN", "")
-    missing = [k for k, v in (("REACTOR_URL", base), ("FORECAST_INGEST_TOKEN", token), ("SHOP", shop),
-                              ("SHOPIFY_FORECAST_TOKEN", stoken)) if not v]
+    cid, csec = env.get("SHOPIFY_CLIENT_ID", ""), env.get("SHOPIFY_CLIENT_SECRET", "")
+    missing = [k for k, v in (("REACTOR_URL", base), ("FORECAST_INGEST_TOKEN", token),
+                              ("SHOP", shop)) if not v]
+    # Either credential shape will do, so neither name alone is missing.
+    if not stoken and not (cid and csec):
+        missing.append("SHOPIFY_FORECAST_TOKEN, or SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET")
     if missing:
         log.error("missing: %s", ", ".join(missing))
         return 2
@@ -66,7 +74,8 @@ def main() -> int:
     try:
         from .cashflow import CashFlowModel
         from .config import Config
-        from .ingest import fetch_products, orders_to_rows, run_bulk_orders, to_daily_panel
+        from .ingest import (access_token, fetch_products, orders_to_rows, run_bulk_orders,
+                             to_daily_panel)
         from .pipeline import Runner
         with tempfile.TemporaryDirectory() as tmp:
             wb = _fetch_workbook(base + "/hooks/forecast/workbook", token, Path(tmp))
@@ -75,10 +84,13 @@ def main() -> int:
                                            "error": "No cash flow workbook has been uploaded in the Forecast tab yet."})
                 return 0
             cf = CashFlowModel.from_workbook(wb)
+            # Inside the try: a refused grant is a run that failed, and the tab
+            # should say so rather than the service exiting quietly.
+            api_token = access_token(shop, stoken, cid, csec)
             since = as_of - timedelta(days=int(env.get("FORECAST_HISTORY_DAYS", "900")))
             log.info("pulling orders since %s", since)
-            orders = run_bulk_orders(shop, stoken, since)
-            products = fetch_products(shop, stoken)
+            orders = run_bulk_orders(shop, api_token, since)
+            products = fetch_products(shop, api_token)
             cfg = Config(as_of=as_of, horizon_days=int(env.get("FORECAST_HORIZON", "90")),
                          use_nbeats=env.get("FORECAST_NBEATS", "0") == "1")
             panel = to_daily_panel(orders_to_rows(orders, cfg, products), as_of)

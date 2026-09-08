@@ -12263,6 +12263,39 @@ def t_the_xero_client_is_read_only_by_construction():
     ok('resp = await client.get(url' in src, "the accounting fetcher is a GET")
 
 @test
+def t_the_nightly_service_takes_either_shopify_credential():
+    """Reactor holds NO static Shopify token. It holds SHOPIFY_CLIENT_ID and
+    SHOPIFY_CLIENT_SECRET and mints a short-lived one, which is why a
+    forecast service pointed at `${{gizmo.SHOPIFY_ACCESS_TOKEN}}` came up
+    empty and the first real run stopped at `missing: SHOPIFY_FORECAST_TOKEN`
+    after Cameron had done everything right.
+
+    So the nightly job takes either shape, a static token winning when both
+    are set, exactly as the Xero connector does: one credential for the shop,
+    one thing to rotate. This lives in the CI suite rather than beside the
+    other forecast guards because those need pandas and skip themselves."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    nightly = open(os.path.join(root, "forecast", "nightly.py"), encoding="utf-8").read()
+    ingest = open(os.path.join(root, "forecast", "ingest.py"), encoding="utf-8").read()
+    ok("SHOPIFY_FORECAST_TOKEN, or SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET" in nightly,
+       "a run with no credential names BOTH shapes, not just the one that is absent")
+    ok('env.get("SHOPIFY_CLIENT_ID", "")' in nightly and 'env.get("SHOPIFY_CLIENT_SECRET", "")' in nightly,
+       "the pair is read from the environment")
+    body = nightly.split("try:", 1)[1]
+    ok("access_token(shop, stoken, cid, csec)" in body,
+       "the grant runs inside the try, so a refusal reaches the tab as a failed run")
+    ok("run_bulk_orders(shop, api_token, since)" in nightly
+       and "fetch_products(shop, api_token)" in nightly,
+       "both Shopify reads use the minted token, never the raw variable")
+    ok('"grant_type": "client_credentials"' in ingest,
+       "the exchange is the client_credentials grant the app itself uses")
+    ok("if token:\n        return token" in ingest,
+       "a static token still wins, so adding the pair to a working service changes nothing")
+    ok("def shop_host(" in ingest and 'shop if "." in shop else shop + ".myshopify.com"' in ingest,
+       "either spelling of the shop reaches Shopify at the same address")
+
+
+@test
 def t_the_forecast_hook_takes_only_its_token_and_the_tab_reads_the_run():
     """The nightly forecasting service has no account: a shared secret in the
     header is its whole authentication, and with no secret configured the

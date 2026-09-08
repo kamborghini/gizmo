@@ -227,6 +227,50 @@ def t_intervals_widen_from_the_backtest_and_a_young_series_leans_on_its_category
     ok((out.loc[out["variant_id"] == "v1", "p50"] == 0).all(), "an established one is left to the model")
 
 
+@test
+def t_the_shop_is_named_the_same_either_way():
+    """`projectedimage` and `projectedimage.myshopify.com` are one shop. The
+    app's own server holds the bare handle and appends the domain; this package
+    holds the full domain. Both spellings reach the nightly service through
+    SHOP, and a Shopify call built from the wrong one goes nowhere."""
+    from forecast.ingest import shop_host
+    for given in ("projectedimage", "projectedimage.myshopify.com",
+                  "https://projectedimage.myshopify.com", "projectedimage.myshopify.com/"):
+        assert shop_host(given) == "projectedimage.myshopify.com", given
+
+
+@test
+def t_a_run_takes_either_shopify_credential_and_prefers_the_static_one():
+    """Reactor holds no static token: it holds a client id and secret and mints
+    a short-lived one, so `${{gizmo.SHOPIFY_ACCESS_TOKEN}}` resolved to nothing
+    and the first real run stopped at `missing: SHOPIFY_FORECAST_TOKEN`. The
+    service now takes either shape. A static token wins when set, so adding the
+    pair to a working deployment changes nothing, which is the same rule the
+    connector follows."""
+    from forecast.ingest import access_token
+    assert access_token("projectedimage.myshopify.com", "shpat_static", "id", "secret") == "shpat_static"
+    try:
+        access_token("projectedimage.myshopify.com", "", "", "")
+    except RuntimeError as e:
+        assert "SHOPIFY_CLIENT_ID" in str(e)
+    else:
+        raise AssertionError("no credential at all has to be an error, not a silent empty token")
+
+
+@test
+def t_the_nightly_job_names_both_credential_shapes_when_it_has_neither():
+    """The message a person reads at 03:00. Naming only one of the two shapes
+    is what sent this session looking for a variable that does not exist."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "forecast", "nightly.py"), encoding="utf-8").read()
+    assert "SHOPIFY_FORECAST_TOKEN, or SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET" in src
+    # The grant runs inside the try, so a refusal is posted to the tab.
+    body = src.split("try:", 1)[1]
+    assert "access_token(shop, stoken, cid, csec)" in body
+    assert "run_bulk_orders(shop, api_token, since)" in src
+    assert "fetch_products(shop, api_token)" in src
+
+
 if __name__ == "__main__":
     passed = 0
     for fn in TESTS:

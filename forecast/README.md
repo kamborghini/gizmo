@@ -176,9 +176,20 @@ Setting it up, once:
    `reactor-forecast`: Dockerfile path `forecast/Dockerfile`, cron schedule
    `0 3 * * *`, and these variables:
    `REACTOR_URL` (the app's https URL), `FORECAST_INGEST_TOKEN` (the same
-   value as Reactor's), `SHOP` (the myshopify domain), and
-   `SHOPIFY_FORECAST_TOKEN`: an Admin API access token from a custom app in
-   the store with `read_orders` and `read_products` only. Optional:
+   value as Reactor's), `SHOP` (the myshopify domain, e.g.
+   `projectedimage.myshopify.com`), and ONE Shopify credential.
+
+   Prefer the app's own, because Reactor holds NO static token to lend and a
+   second Shopify app would be a second thing to rotate:
+
+       SHOPIFY_CLIENT_ID=${{gizmo.SHOPIFY_CLIENT_ID}}
+       SHOPIFY_CLIENT_SECRET=${{gizmo.SHOPIFY_CLIENT_SECRET}}
+
+   The service exchanges those for a short-lived token that carries the app's
+   own scopes, `read_all_orders` among them. That scope is what lets a run
+   read past the sixty days a plain `read_orders` token can see, and 900 days
+   is the default history. A static `SHOPIFY_FORECAST_TOKEN` still wins if it
+   is set, so adding the pair to a working service changes nothing. Optional:
    `FORECAST_SCENARIO`, `FORECAST_HISTORY_DAYS` (900), `FORECAST_HORIZON` (90).
 3. **In the Forecast tab**, as an admin, upload the cash flow workbook.
 

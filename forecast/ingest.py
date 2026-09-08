@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import re
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta
 from typing import Dict, Iterable, List, Mapping, Optional
@@ -176,9 +178,51 @@ BULK_ORDERS_QUERY = """
 """
 
 
+def shop_host(shop: str) -> str:
+    """`projectedimage.myshopify.com` and `projectedimage` both name one shop.
+    The app's own server holds the bare handle and builds the domain; this
+    package holds the domain and uses it as given. Both spellings arrive here."""
+    shop = shop.strip().rstrip("/")
+    shop = shop.split("://")[-1]
+    return shop if "." in shop else shop + ".myshopify.com"
+
+
+def access_token(shop: str, token: str = "", client_id: str = "", client_secret: str = "") -> str:
+    """The Admin API credential, however this deployment holds one.
+
+    A static token wins when it is set. Otherwise the client id and secret are
+    exchanged for a short-lived one through the client_credentials grant, which
+    is what Reactor itself does: the app has no static token to lend, so a
+    second Shopify app would be a second credential to rotate for no gain. The
+    token that comes back carries the app's own scopes, `read_all_orders`
+    included, which is what lets a run reach past the sixty days a plain
+    `read_orders` token can see."""
+    if token:
+        return token
+    if not (client_id and client_secret):
+        raise RuntimeError("no Shopify credential: set SHOPIFY_FORECAST_TOKEN, "
+                           "or SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET")
+    body = urllib.parse.urlencode({"grant_type": "client_credentials",
+                                   "client_id": client_id,
+                                   "client_secret": client_secret}).encode()
+    req = urllib.request.Request(
+        f"https://{shop_host(shop)}/admin/oauth/access_token", data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"the client_credentials grant was refused ({e.code}): "
+                           "check SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET") from None
+    tok = data.get("access_token")
+    if not tok:
+        raise RuntimeError("the client_credentials grant returned no access_token")
+    return tok
+
+
 def _gql(shop: str, token: str, api_version: str, query: str, variables: Optional[dict] = None) -> dict:
     req = urllib.request.Request(
-        f"https://{shop}/admin/api/{api_version}/graphql.json",
+        f"https://{shop_host(shop)}/admin/api/{api_version}/graphql.json",
         data=json.dumps({"query": query, "variables": variables or {}}).encode(),
         headers={"Content-Type": "application/json", "X-Shopify-Access-Token": token})
     with urllib.request.urlopen(req, timeout=60) as resp:
