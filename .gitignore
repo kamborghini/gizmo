@@ -39,3 +39,8 @@ feather/
 # Committing it shipped 30MB of unreviewed code into the repo and, via the
 # Dockerfile COPY, into the production image.
 node_modules/
+
+# forecasting package outputs
+forecast_out/
+synthetic/
+catboost_info/
