@@ -12263,6 +12263,62 @@ def t_the_xero_client_is_read_only_by_construction():
     ok('resp = await client.get(url' in src, "the accounting fetcher is a GET")
 
 @test
+def t_the_forecast_pins_its_threads_to_the_cpu_it_actually_has():
+    """One LightGBM fit took 2318 seconds on the container. The same fit, on
+    the same 185,788 training rows, costs 13.7s on eight cores and 22.8s on
+    ONE. The work was never the problem: `num_threads=0` starts a thread per
+    core the HOST reports, while a container is allowed a slice of one, and
+    the threads spend their lives contending for it.
+
+    So the budget is read from the cgroup quota, and every maths library is
+    pinned to it before it loads - each reads its variable once, at import, so
+    setting them later does nothing. That is why `apply_thread_limits()` has
+    to run in `__main__` ahead of the pipeline import, which pulls in numpy.
+
+    The fallback is deliberately timid. The whole span between one thread and
+    eight is under 2x; oversubscribing cost 100x. Guess low."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    main_py = open(os.path.join(root, "forecast", "__main__.py"), encoding="utf-8").read()
+    gbdt = open(os.path.join(root, "forecast", "models", "gbdt.py"), encoding="utf-8").read()
+
+    ok(main_py.index("apply_thread_limits()") < main_py.index("from .pipeline import main"),
+       "the libraries are pinned BEFORE the import that loads numpy")
+    ok("num_threads=cpu_budget()" in gbdt and "num_threads=0" not in gbdt,
+       "LightGBM asks for the budget, never for every core it can see")
+    ok('"thread_count": cpu_budget()' in gbdt and '"thread_count": -1' not in gbdt,
+       "and so does CatBoost")
+
+    sys.path.insert(0, root)
+    from forecast.cpu import _quota, cpu_budget, FALLBACK_MAX
+    import tempfile
+    d = tempfile.mkdtemp()
+    with open(os.path.join(d, "cpu.max"), "w") as fh:
+        fh.write("50000 100000")
+    eq(_quota(d), 0.5, "cgroup v2: half a core is read as half a core")
+    with open(os.path.join(d, "cpu.max"), "w") as fh:
+        fh.write("max 100000")
+    eq(_quota(d), None, "cgroup v2: no limit is no quota, not a number")
+    os.remove(os.path.join(d, "cpu.max"))
+    os.makedirs(os.path.join(d, "cpu"), exist_ok=True)
+    for name, val in (("cpu.cfs_quota_us", "25000"), ("cpu.cfs_period_us", "100000")):
+        with open(os.path.join(d, "cpu", name), "w") as fh:
+            fh.write(val)
+    eq(_quota(d), 0.25, "cgroup v1 is read too")
+    eq(_quota(d + "/nope"), None, "and a host with no cgroup files is no quota")
+
+    saved = os.environ.get("FORECAST_THREADS")
+    try:
+        os.environ["FORECAST_THREADS"] = "3"
+        eq(cpu_budget(), 3, "an operator who knows better can say so")
+    finally:
+        os.environ.pop("FORECAST_THREADS", None)
+        if saved is not None:
+            os.environ["FORECAST_THREADS"] = saved
+    ok(1 <= cpu_budget() <= max(FALLBACK_MAX, 1),
+       "and with no quota the answer is capped, never the whole host")
+
+
+@test
 def t_the_bulk_query_carries_no_connection_inside_a_list():
     """The first run that got as far as Shopify died on this, immediately:
 

@@ -89,6 +89,8 @@ def main() -> int:
         signal.signal(signal.SIGALRM, _out_of_time)
         signal.alarm(budget_min * 60)
         log.info("ceiling: %d minutes", budget_min)
+    from .cpu import cpu_budget
+    log.info("cpu budget: %d thread(s)", cpu_budget())
     try:
         from .cashflow import CashFlowModel
         from .config import Config

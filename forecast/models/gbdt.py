@@ -28,6 +28,9 @@ except Exception:  # pragma: no cover
     _HAS_CB = False
 
 
+from ..cpu import cpu_budget
+
+
 def available() -> dict:
     return {"lightgbm": _HAS_LGB, "catboost": _HAS_CB}
 
@@ -36,7 +39,7 @@ LGB_PARAMS = dict(
     objective="tweedie", tweedie_variance_power=1.1, metric="rmse",
     learning_rate=0.03, num_leaves=63, min_data_in_leaf=40, feature_fraction=0.7,
     bagging_fraction=0.8, bagging_freq=1, lambda_l2=1.0, max_bin=255,
-    cat_smooth=20, cat_l2=10, verbosity=-1, num_threads=0,
+    cat_smooth=20, cat_l2=10, verbosity=-1, num_threads=cpu_budget(),
 )
 
 
@@ -77,7 +80,7 @@ class CatBoostForecaster(Forecaster):
             raise RuntimeError("catboost is not installed")
         self.params = {"loss_function": "Tweedie:variance_power=1.2", "depth": 6, "learning_rate": 0.05,
                        "l2_leaf_reg": 3.0, "iterations": iterations, "random_seed": seed, "verbose": False,
-                       "allow_writing_files": False, "thread_count": -1, **(params or {})}
+                       "allow_writing_files": False, "thread_count": cpu_budget(), **(params or {})}
         self.model = None
         self.columns: List[str] = []
         self.cat_cols: List[str] = []
