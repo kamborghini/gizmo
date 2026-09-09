@@ -1047,6 +1047,40 @@ def t_a_thumb_inside_a_track_takes_the_track_radius_minus_the_gap():
 
 
 @test
+def t_beating_the_plan_is_not_something_worth_looking_at():
+    """"Worth looking at" shows the two most serious alerts of however many
+    there are, so what it ranks by decides what a director sees first.
+
+    It ranked on the ABSOLUTE gap, so a month coming in 71.5% OVER plan
+    outscored a month 20% under it, and the section led with the best news on
+    the page while a real shortfall sat in a closed drawer. Over plan is not a
+    miss: it scores nothing and surfaces only when there is nothing worse. The
+    tone comes from the same FC_VERDICT map the month table uses, so an overrun
+    reads as a note rather than arriving in warning amber."""
+    fn = SCRIPT.split("function fcAlertWeight(", 1)[1].split("\n        }", 1)[0]
+    ok("if (gap > 0) return 0;" in fn, "a month over its plan carries no weight")
+    ok("a.risk === 'watch' ? 50" in fn, "and a watch still outranks a quiet shortfall")
+    row = SCRIPT.split("function fcAlertRow(", 1)[1].split("\n        }", 1)[0]
+    ok("FC_VERDICT[a.verdict]" in row,
+       "the alert tone comes from the map the month table uses, not a second opinion")
+    ok("'warn'" not in row, "so nothing that beat its plan arrives in warning amber")
+
+    # The ranking itself, on the two rows that exposed it plus the shortfall
+    # they were burying.
+    import re as _re
+    def weight(kind, gap, risk):
+        if kind == "cash":
+            return 1000 + abs(gap)
+        if gap > 0:
+            return 0
+        return (100 if risk == "high" else 50 if risk == "watch" else 0) + abs(gap)
+    rows = [("sales", -11.2, "high"), ("sales", 71.5, "secure"), ("sales", -20.0, "secure")]
+    order = sorted(rows, key=lambda r: weight(*r), reverse=True)
+    ok(order[-1][1] == 71.5, "the month that beat its plan ranks last, not second")
+    ok(order[0][1] == -11.2, "the high-risk shortfall still leads")
+
+
+@test
 def t_a_write_that_failed_is_never_shown_as_a_write_that_worked():
     """A control that changes something on the server must not move until the
     server says it moved. The nightly schedule switch flipped its own class

@@ -9486,17 +9486,31 @@ Projected Image UK"></textarea>
         /* One alert, said as a fact and then a reason. */
         function fcAlertRow(a) {
             const row = el('div', 'fc-alert');
-            row.append(fcChip(a.kind === 'cash' || a.risk === 'high' ? 'bad' : 'warn', fcMonth(a.month)));
+            /* The tone comes from the SAME map the month table uses, not from a
+               second opinion invented here. The bespoke version painted
+               anything that was not cash or high-risk amber, so a month
+               beating its plan by 71% arrived wearing a warning. An overrun is
+               'note' in this app, and has been all along. */
+            row.append(fcChip(a.kind === 'cash' ? 'bad' : (FC_VERDICT[a.verdict] || 'note'),
+                              fcMonth(a.month)));
             row.append(el('span', null, a.kind === 'cash'
                 ? (a.verdict + ', working capital ' + fcMoney(a.working_capital))
                 : (a.verdict + ' by ' + fcPct((a.gap_pct || 0) / 100) + ': projected ' + fcMoney(a.projected)
                    + ' against ' + fcMoney(a.target) + (a.risk ? ', risk ' + a.risk : ''))));
             return row;
         }
-        /* Which two matter most: cash before sales, high risk before low, and
-           the biggest miss before the smallest. */
+        /* Which two matter most: cash before sales, then the size of the
+           SHORTFALL. Not the size of the gap - Math.abs made a month that beat
+           its plan by 71% outrank a month that missed by 20, so the section
+           headed "worth looking at" led with the best news on the page. Coming
+           in over plan is not a miss, so it scores nothing and only appears
+           when there is nothing worse to show. */
         function fcAlertWeight(a) {
-            return (a.kind === 'cash' ? 1000 : 0) + (a.risk === 'high' ? 100 : 0) + Math.abs(a.gap_pct || 0);
+            if (a.kind === 'cash') return 1000 + Math.abs(a.gap_pct || 0);
+            const gap = a.gap_pct || 0;
+            if (gap > 0) return 0;                       // over plan: not a problem
+            const risk = a.risk === 'high' ? 100 : a.risk === 'watch' ? 50 : 0;
+            return risk + Math.abs(gap);
         }
 
         /* ---------- 1. OVERVIEW: understood in about five seconds ----------
