@@ -13300,6 +13300,890 @@ _CONNECTOR_SETTABLE = {
 }
 
 
+# ---- helpers add_routes kept to itself -------------------------------------
+# Forty-two functions were defined inside add_routes, so nothing outside that
+# one 8,700-line call could reach them: no test could exercise them directly,
+# no other part of the file could reuse them, and reading any of them meant
+# scrolling through the route table to find where it was hidden. None of them
+# closes over anything add_routes builds - they were nested by habit, not by
+# need - so they are plain module functions, checkable as copilot.<name>.
+# The six that genuinely do close over the injected tool registry stayed put.
+
+
+async def _webhook_body(request: Request):
+    """(raw_bytes, error_response). The whole authentication for any Shopify
+    webhook, in one place rather than copied per topic - the checks here are
+    the only thing standing between a POST and a redaction.
+
+    Streamed with a hard cap rather than request.body(): the signature can
+    only be checked after the body is read, so this read happens for anyone,
+    and a chunked upload with no Content-Length would otherwise buffer
+    without limit on an endpoint that deliberately has no rate limiter."""
+    if not SHOPIFY_API_SECRET:
+        return None, PlainTextResponse("Unauthorized", status_code=401)
+    total, chunks = 0, []
+    try:
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > WEBHOOK_MAX_BYTES:
+                return None, PlainTextResponse("Too large", status_code=413)
+            chunks.append(chunk)
+    except Exception:
+        return None, PlainTextResponse("Bad request", status_code=400)
+    raw = b"".join(chunks)
+    sent = request.headers.get("x-shopify-hmac-sha256", "")
+    want = base64.b64encode(hmac.new(SHOPIFY_API_SECRET.encode("utf-8"),
+                                     raw, hashlib.sha256).digest()).decode("ascii")
+    if not sent or not hmac.compare_digest(want, sent):
+        return None, PlainTextResponse("Unauthorized", status_code=401)
+    shop = str(request.headers.get("x-shopify-shop-domain") or "")
+    if SHOPIFY_STORE and not shop.lower().startswith(SHOPIFY_STORE.split(".")[0].lower() + "."):
+        return None, PlainTextResponse("Unauthorized", status_code=401)
+    return raw, None
+
+# ---- Forecast: the nightly forecasting service and the tab that reads it ----
+def _forecast_state() -> dict:
+    d = _load_json_store(FORECAST_PATH, "forecast", None)
+    return d if isinstance(d, dict) else {}
+
+def _forecast_token_ok(request: Request) -> bool:
+    return _secret_ok(str(request.headers.get("x-forecast-token") or ""), FORECAST_INGEST_TOKEN)
+
+def _forecast_ledger(state: dict, body: dict) -> dict:
+    """The standing record of who was right, kept across runs.
+
+    The backtest each run computes is retrospective: it refits a model to
+    old months and marks it, which is useful but forgiving, because the
+    model is being asked about a period the code already knows the shape
+    of. This is the other kind, and the honest one: what each source
+    ACTUALLY said about September, written down in September while
+    September was still unknown, then marked when September closed.
+
+    Predictions are recorded once and never revised. A later run may have
+    a better opinion about a month, but overwriting the earlier one would
+    turn a forecast into a hindcast and every source would look excellent."""
+    import math
+    led = state.get("ledger") if isinstance(state.get("ledger"), dict) else {}
+    predicted = led.get("predicted") if isinstance(led.get("predicted"), dict) else {}
+    results = led.get("results") if isinstance(led.get("results"), list) else []
+
+    preds = body.get("predictions")
+    if isinstance(preds, dict):
+        for month, by_source in list(preds.items())[:24]:
+            if not isinstance(month, str) or not isinstance(by_source, dict):
+                continue
+            month = month[:7]
+            slot = predicted.setdefault(month, {})
+            for name, value in list(by_source.items())[:FORECAST_LEDGER_SOURCES]:
+                try:
+                    v = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if not math.isfinite(v) or name in slot:
+                    continue                      # first word only: never revised
+                slot[str(name)[:80]] = {"value": round(v, 2), "made": body.get("as_of")}
+
+    actuals = body.get("actuals")
+    scored = {r.get("month") for r in results if isinstance(r, dict)}
+    if isinstance(actuals, dict):
+        for month, value in list(actuals.items())[:24]:
+            month = str(month)[:7]
+            if month in scored or month not in predicted:
+                continue
+            try:
+                actual = float(value)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(actual) or actual <= 0:
+                continue
+            by = {}
+            for name, rec in predicted[month].items():
+                v = rec.get("value")
+                if not isinstance(v, (int, float)):
+                    continue
+                by[name] = {"predicted": v, "error": round((v - actual) / actual, 4),
+                            "made": rec.get("made")}
+            if not by:
+                continue
+            winner = min(by.items(), key=lambda kv: abs(kv[1]["error"]))
+            results.append({"month": month, "actual": round(actual, 2), "by_source": by,
+                            "winner": winner[0], "winner_error": winner[1]["error"],
+                            "closed_at": datetime.now(timezone.utc).isoformat()})
+            scored.add(month)
+
+    results.sort(key=lambda r: r.get("month") or "")
+    results = results[-FORECAST_LEDGER_MONTHS:]
+    keep = {r["month"] for r in results}
+    # A month still ahead keeps its predictions; one long closed does not.
+    predicted = {m: v for m, v in predicted.items()
+                 if m in keep or m >= min(keep, default=m)}
+    return {"predicted": predicted, "results": results}
+
+# ----- Shared inbox: who owns which email ----------------------------
+async def _mail_guard(request: Request):
+    """(error_response, body, actor_uid): the one door, for the inbox."""
+    return await _guard(request)
+
+def _mail_thread_or_404(body: dict):
+    t = _load_mail().get("threads", {}).get(str(body.get("id") or ""))
+    return (t, None) if t else (None, _json({"error": "That thread is not on the board. "
+                                                      "Refresh and try again."}, 404))
+
+def _mail_store_sick():
+    """Refuse a mutation BEFORE it happens when the store cannot be
+    persisted: a claim the whole team can see until a restart silently
+    reverts it is worse than a clean refusal."""
+    if _store_writable(MAILBOX_PATH):
+        return None
+    return _json({"error": "The inbox store cannot be written right now. "
+                           "Check Settings, Connections."}, 503)
+
+def _mail_lead(uid: str) -> bool:
+    return _team_level(uid) >= 2
+
+def _mail_not_yours(t: dict, who: str):
+    """The single-owner rule for WRITING into a conversation, shared by
+    the draft and the send. Putting words into somebody else's live
+    customer thread is a bigger act than moving its state, which is
+    already owner-or-lead."""
+    if not _mail_lead(who) and t.get("owner") and t.get("owner") != who:
+        return _json({"error": (_team_name(t["owner"]) or "Someone") + " is dealing with "
+                               "this one. Ask them, or ask a lead to reassign it."}, 403)
+    return None
+
+def _mail_reply_refusal(to_addr: str, addr: str):
+    """The two ways a reply address is unusable, refused in the same words
+    wherever a reply is written. Both look like success and neither
+    reaches the customer, which is exactly why they are refusals rather
+    than a best effort."""
+    if "@" not in (to_addr or ""):
+        return _json({"error": "There is no address to reply to on this "
+                               "conversation. Reply in Gmail instead."}, 400)
+    if addr and to_addr.lower() == addr:
+        return _json({"error": "The only address on this conversation is the "
+                               "mailbox itself, so a reply would go in a circle. "
+                               "Reply in Gmail instead."}, 400)
+    return None
+
+async def _mail_leftover_draft(t: dict) -> tuple:
+    """(draft we may delete, whether theirs was kept).
+
+    Only replace a draft we can prove is still ours. If somebody opened it
+    in Gmail and rewrote it, keeping both is the honest outcome; silently
+    deleting their work is not - and a Gmail hiccup that stops us reading
+    it counts as "cannot prove", never as permission."""
+    replaces = t.get("draft_id") or ""
+    if not replaces:
+        return "", False
+    try:
+        live = await google_mail.draft_body(replaces)
+        if live and live != (t.get("draft_text") or "").strip():
+            return "", True
+    except Exception as e:
+        logger.warning("mail: could not read the previous draft: %s", e)
+        return "", True
+    return replaces, False
+
+def _mail_reply_target(msgs: list, addr: str) -> dict:
+    """The message a reply would actually go to, and the address it would
+    go to. Everything downstream (order facts, the draft, the card) has to
+    agree with THIS, or the app looks up one person's orders and writes
+    them to another."""
+    from email.utils import parseaddr as _pa
+    parent = next((m for m in reversed(msgs) if m.get("from_email") != addr),
+                  msgs[-1] if msgs else None)
+    if not parent:
+        return {}
+    to = _pa(parent.get("reply_to") or parent.get("from_email") or "")[1].strip().lower()
+    return {"msg": parent, "to": to,
+            "from_email": (parent.get("from_email") or "").strip().lower()}
+
+def _mail_extra_addresses(body: dict, addr: str) -> tuple:
+    """(cc, bcc, refusal). The same anchored parsing the To field gets,
+    because these become headers on real outbound mail too, and the two
+    together are capped: a reply is not a mailing list."""
+    got = []
+    for field in ("cc", "bcc"):
+        raw = str(body.get(field) or "").strip()
+        if not raw:
+            got.append([])
+            continue
+        addrs, bad = _mail_clean_addresses(raw, addr)
+        if bad:
+            return [], [], field.upper() + ": " + bad
+        got.append(addrs)
+    if len(got[0]) + len(got[1]) > MAIL_SEND_MAX_CC:
+        return [], [], (f"That is {len(got[0]) + len(got[1])} addresses on cc and bcc. "
+                        f"Copy at most {MAIL_SEND_MAX_CC} people.")
+    return got[0], got[1], ""
+
+def _mail_parts_from(body: dict, who: str) -> tuple:
+    """(files, inline, refusal): the two attachment lists as the browser
+    sent them, with every key checked against what this person may attach
+    BEFORE a byte is read. A key outside their own uploads and the shop's
+    Files is refused, or "attach this key" would read the whole bucket."""
+    files, inline = [], []
+    for a in (body.get("attachments") or [])[:MAIL_ATTACH_COUNT]:
+        if isinstance(a, dict):
+            files.append({"key": str(a.get("key") or ""),
+                          "name": str(a.get("name") or ""),
+                          "size": a.get("size") or 0,
+                          "type": str(a.get("type") or "")})
+    for a in (body.get("inline") or [])[:MAIL_ATTACH_COUNT]:
+        if isinstance(a, dict):
+            inline.append({"key": str(a.get("key") or ""),
+                           "cid": str(a.get("cid") or ""),
+                           "type": str(a.get("type") or "")})
+    for a in files + inline:
+        if not _mail_attachment_ok(a["key"], who):
+            return [], [], ((_mail_part_name(a["key"]) or "That file")
+                            + " is not one of your uploads.")
+    return files, inline, ""
+
+async def _mail_parts_size(files: list, inline: list) -> tuple:
+    """(total, refusal) from HEAD alone: what a dry run can say about a set
+    of attachments without reading a single byte."""
+    total = 0
+    for a in list(files) + list(inline):
+        try:
+            size = await asyncio.to_thread(_files_head, a["key"])
+        except Exception:
+            return 0, "Storage did not answer, so the files could not be checked."
+        if not size:
+            return 0, _mail_part_name(a["key"]) + " is missing from storage."
+        total += int(size)
+    if total > MAIL_ATTACH_MAX:
+        return total, "Attachments come to more than 25MB in total."
+    return total, ""
+
+async def _mail_outgoing(body: dict, who: str, parent: dict, quote_ok: bool) -> tuple:
+    """(html, text, inline_logo, footer_used) for one outgoing message.
+
+    One assembler behind the send and the draft: the person's words, their
+    sign-off, the shop footer and the quoted original, in that order in
+    both twins. Two copies of this would mean the draft somebody finishes
+    in Gmail says something different from the reply sent from here."""
+    block = _mail_email_block(_load_mail(), who)
+    slots = block["footer_slots"]
+    logo = await _mail_logo_part(slots.get("logo_key") or "")
+    footer_html, footer_text = mailmime.render_footer(slots, "logo" if logo else "")
+    quote = (mailmime.quote_original(parent)
+             if (quote_ok and parent and bool(body.get("quote", True))) else None)
+    html_body, text_body = _mail_compose_body(
+        str(body.get("html") or ""), str(body.get("text") or ""),
+        block["sign_off"], footer_html, footer_text, quote)
+    return html_body, text_body, logo
+
+def _mail_order_sentence(o: dict) -> str:
+    """One order, as a line a person could paste into a reply.
+
+    Every branch has to be something the shop can stand behind, because
+    the model is told to use these verbatim. "Shipped" therefore means
+    FULFILLED, not "a label was booked": booking happens before the gobo
+    is made, and telling a customer it shipped when it is still on the
+    floor sends them chasing a courier that has nothing."""
+    name = o.get("name") or "your order"
+    if o.get("cancelled_at"):
+        return name + ", cancelled " + (o["cancelled_at"] or "")[:10]
+    bits = [name]
+    shipped = o.get("fulfilled") or str(o.get("fulfillment") or "").lower() == "fulfilled"
+    if shipped and o.get("tracking"):
+        bits.append("shipped " + ((o.get("dispatched_at") or "")[:10] or "already")
+                    + " on " + (o.get("carrier") or "the courier")
+                    + ", tracking " + o["tracking"])
+    elif shipped:
+        bits.append("shipped")
+    elif o.get("tracking"):
+        bits.append("label booked with " + (o.get("carrier") or "the courier")
+                    + " (tracking " + o["tracking"] + "), not handed over yet")
+    elif o.get("made_at"):
+        bits.append("made " + (o["made_at"] or "")[:10] + ", not yet shipped")
+    elif o.get("printed_at"):
+        bits.append("in production")
+    elif str(o.get("fulfillment") or "").lower() in ("partial", "partially_fulfilled"):
+        bits.append("part shipped")
+    else:
+        bits.append("with us, not yet shipped")
+    return ", ".join(bits)
+
+def _mail_folder_path(d: dict, segs: list, who: str) -> str:
+    """Resolve a folder path, making any part of it that does not exist.
+    Returns the folder id. Used so artwork can land in Artwork/#1201
+    without anybody creating folders by hand first."""
+    parent = ""
+    for seg in segs:
+        name = _files_clean_name(seg)
+        if not name:
+            continue
+        nxt = next((fid for fid, f in d["folders"].items()
+                    if str(f.get("parent_id") or "") == parent
+                    and f.get("name", "").lower() == name.lower()), None)
+        if nxt is None:
+            nxt = _files_id(d, "d")
+            d["folders"][nxt] = {"name": name, "parent_id": parent,
+                                 "created_at": datetime.now(timezone.utc).isoformat()}
+        parent = nxt
+    return parent
+
+# ---- CRM routes -------------------------------------------------------
+async def _crm_guard(request: Request):
+    """(error_response, body, who). The CRM is buttons in the app's own UI,
+    so it uses the same session auth as everything else; the AI never sees
+    it. Shaped like _guard, which is what every other door here returns.
+
+    The caller used to be stashed in a dict shared by every CRM route and
+    read back further down the handler. That held only while no `await`
+    ever appeared between the guard and the read - true when it was
+    written, and by the end one route was reading it 101 lines later with
+    nothing enforcing the rule. Returning it makes the guarantee
+    structural: a handler can only use the caller it was handed."""
+    err, body, who = await _guard(request)
+    if err:
+        return err, None, ""
+    return None, body, who
+
+def _crm_ok(d: dict, extra: Optional[dict] = None, action: str = "",
+            detail: str = "", who: str = "") -> JSONResponse:
+    _crm_purge(d)
+    _write_crm(d)
+    if action:
+        _track(who, "crm", action, detail)
+    out = {"ok": True, "crm": _crm_shape(d)}
+    if extra:
+        out.update(extra)
+    return _json(out)
+
+def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
+    """Merge a Pipedrive export into the CRM store.
+
+    Idempotent by construction: every imported record keeps its Pipedrive
+    id, and a second run finds that id and UPDATES rather than making a
+    second copy. Anything typed into gizmo by hand has no Pipedrive id and
+    is never touched.
+
+    With dry=True nothing is written and the counts describe exactly what
+    a real run would do."""
+    report = {"stages": {"new": 0, "updated": 0}, "orgs": {"new": 0, "updated": 0},
+              "persons": {"new": 0, "updated": 0}, "deals": {"new": 0, "updated": 0},
+              "activities": {"new": 0, "updated": 0}, "notes": {"added": 0},
+              "custom_values": 0,
+              "kept": {"deals": 0, "persons": 0, "orgs": 0},
+              "kept_edited": {"deals": 0, "persons": 0, "orgs": 0, "activities": 0,
+                              "stages": 0},
+              "problems": []}
+
+    def index(coll):
+        # A merge absorbs the loser's Pipedrive identity: its rows must
+        # keep resolving to the winner, or the next import would recreate
+        # the duplicate and re-point every deal back at it.
+        ix = {}
+        for k, v in d[coll].items():
+            if v.get("pd_id"):
+                ix[str(v["pd_id"])] = k
+            for m in (v.get("pd_merged_ids") or []):
+                ix[str(m)] = k
+        return ix
+
+    # Records with no pd_id were typed in here; they survive untouched.
+    for coll, key in (("deals", "deals"), ("persons", "persons"), ("orgs", "orgs")):
+        report["kept"][key] = len([1 for v in d[coll].values() if not v.get("pd_id")])
+
+    # A record EDITED IN GIZMO also survives untouched: without this rule,
+    # pressing Import reverts every stage move, every won, and every
+    # ticked task back to whatever Pipedrive last knew — months of work
+    # undone by one button. The flag is set by every gizmo write and never
+    # cleared: once worked on here, a record is gizmo's. The timestamp
+    # fallback covers edits made before the flag existed.
+    last_import = str(d.get("pd_imported_at") or "")
+
+    def edited_here(rec) -> bool:
+        if rec is None:
+            return False
+        if rec.get("edited_here"):
+            return True
+        return bool(last_import and str(rec.get("updated_at") or "") > last_import)
+
+    # --- stages: the imported pipeline replaces the imported stages, in
+    # Pipedrive's order. Stages MADE IN GIZMO (no pd_id) are kept, after
+    # the imported ones: dropping them would orphan every deal that had
+    # been moved into them, silently, off the board.
+    by_pd = {str(s.get("pd_id")): s for s in (d.get("stages") or []) if s.get("pd_id")}
+    new_stages, seen_stage = [], {}
+    for i, st in enumerate(data.get("stages") or []):
+        prev = by_pd.get(st["pd_id"])
+        sid = prev["id"] if prev else ("s_pd" + st["pd_id"])
+        seen_stage[st["pd_id"]] = sid
+        if prev and prev.get("edited_here"):
+            # The import's whole promise is that gizmo-side work survives.
+            # Stages were the one exception: a renamed stage, a retuned
+            # probability or a rot timer set at the desk was rebuilt from
+            # Pipedrive on every run, silently.
+            new_stages.append(dict(prev))
+            report["kept_edited"]["stages"] = report["kept_edited"].get("stages", 0) + 1
+            continue
+        new_stages.append({"id": sid, "name": st["name"] or ("Stage " + str(i + 1)),
+                           "probability": st.get("probability") if st.get("probability") is not None else 100,
+                           "rot_on": bool(st.get("rot_on")),
+                           "rot_days": int(st.get("rot_days") or 0),
+                           "rot_days_stored": int(st.get("rot_days_stored") or 0),
+                           "pd_id": st["pd_id"]})
+        report["stages"]["updated" if prev else "new"] += 1
+    # Any old stage still holding deals rides along — gizmo-made stages,
+    # and stages Pipedrive itself deleted. Binned deals count too: a deal
+    # restored inside its 30-day window must land back in a real column.
+    if new_stages:
+        final_ids = {s["id"] for s in new_stages}
+        holdovers = [s for s in (d.get("stages") or [])
+                     if s["id"] not in final_ids
+                     and any(v.get("stage_id") == s["id"] for v in d["deals"].values())]
+        new_stages = new_stages + holdovers
+    if len(new_stages) > 12:
+        report["problems"].append(
+            "Pipedrive has " + str(len(new_stages)) + " stages and this board holds 12. "
+            "The extra ones would have nowhere to go.")
+    if not dry and new_stages:
+        d["stages"] = new_stages
+
+    org_ix, person_ix, deal_ix = index("orgs"), index("persons"), index("deals")
+    org_of, person_of, deal_of = {}, {}, {}
+    # Contacts deleted here are tombstoned: a later import must not
+    # resurrect them, the way it already refuses deleted notes/activities.
+    dead_orgs = set(d.get("pd_deleted_orgs") or [])
+    dead_persons = set(d.get("pd_deleted_persons") or [])
+
+    # --- organisations, then people, then deals, then their activities and
+    # notes: each one links to the one before, so the order is the order.
+    for o in data.get("orgs") or []:
+        if o["pd_id"] in dead_orgs:
+            continue
+        gid = org_ix.get(o["pd_id"])
+        rec = d["orgs"].get(gid) if gid else None
+        if rec is not None and edited_here(rec):
+            report["kept_edited"]["orgs"] = report["kept_edited"].get("orgs", 0) + 1
+            org_of[o["pd_id"]] = gid
+            continue
+        if rec is None:
+            gid = "o_pd" + o["pd_id"]
+            rec = {"id": gid, "notes": []}
+            report["orgs"]["new"] += 1
+        else:
+            report["orgs"]["updated"] += 1
+        report["custom_values"] += len(o.get("custom") or {})
+        rec.update({"name": o["name"], "address": o["address"],
+                    "website": o.get("website", ""),
+                    "label": o.get("label") or rec.get("label", ""),
+                    "custom": o.get("custom") or rec.get("custom") or {},
+                    "created_at": o["created_at"] or rec.get("created_at") or _crm_now(),
+                    "updated_at": o["updated_at"] or _crm_now(), "pd_id": o["pd_id"]})
+        rec.setdefault("notes", [])
+        org_of[o["pd_id"]] = gid
+        if not dry:
+            d["orgs"][gid] = rec
+
+    for p in data.get("persons") or []:
+        if p["pd_id"] in dead_persons:
+            continue
+        gid = person_ix.get(p["pd_id"])
+        rec = d["persons"].get(gid) if gid else None
+        if rec is not None and edited_here(rec):
+            report["kept_edited"]["persons"] += 1
+            person_of[p["pd_id"]] = gid
+            continue
+        if rec is None:
+            gid = "p_pd" + p["pd_id"]
+            rec = {"id": gid, "notes": [], "shopify_customer_id": None}
+            report["persons"]["new"] += 1
+        else:
+            report["persons"]["updated"] += 1
+        report["custom_values"] += len(p.get("custom") or {})
+        rec.update({"name": p["name"], "emails": p["emails"], "phones": p["phones"],
+                    "email_labels": p.get("email_labels") or [],
+                    "phone_labels": p.get("phone_labels") or [],
+                    "job_title": p.get("job_title", ""),
+                    "org_id": org_of.get(p["org_pd_id"], rec.get("org_id", "")),
+                    "label": p.get("label") or rec.get("label", ""),
+                    "custom": p.get("custom") or rec.get("custom") or {},
+                    "created_at": p["created_at"] or rec.get("created_at") or _crm_now(),
+                    "updated_at": p["updated_at"] or _crm_now(), "pd_id": p["pd_id"]})
+        rec.setdefault("notes", [])
+        rec.setdefault("shopify_customer_id", None)
+        person_of[p["pd_id"]] = gid
+        if not dry:
+            d["persons"][gid] = rec
+
+    lost_reasons = set(d.get("lost_reasons") or [])
+    dead_deals = set(d.get("pd_deleted_deals") or [])
+    for dl in data.get("deals") or []:
+        if dl["pd_id"] in dead_deals:
+            continue          # deleted here means deleted, not "until next import"
+        gid = deal_ix.get(dl["pd_id"])
+        rec = d["deals"].get(gid) if gid else None
+        if rec is not None and edited_here(rec):
+            report["kept_edited"]["deals"] += 1
+            deal_of[dl["pd_id"]] = gid
+            continue
+        if rec is None:
+            gid = "d_pd" + dl["pd_id"]
+            rec = {"id": gid, "notes": [], "changelog": []}
+            report["deals"]["new"] += 1
+        else:
+            report["deals"]["updated"] += 1
+        report["custom_values"] += len(dl.get("custom") or {})
+        closed = dl.get("won_at") if dl["status"] == "won" else dl.get("lost_at")
+        # won_at is what the Insights tab reads. Folding it into closed_at
+        # made an imported sales history report "no wins yet".
+        rec.update({
+            "title": dl["title"], "value": dl["value"], "currency": dl["currency"],
+            "stage_id": seen_stage.get(dl["stage_pd_id"])
+                        or (d["stages"][0]["id"] if d.get("stages") else ""),
+            "person_id": person_of.get(dl["person_pd_id"], ""),
+            "org_id": org_of.get(dl["org_pd_id"], ""),
+            "status": dl["status"], "probability": dl.get("probability"),
+            "expected_close": dl["expected_close"],
+            "lost_reason": dl["lost_reason"], "source": dl["source"],
+            "archived": dl["archived"],
+            "created_at": dl["created_at"] or _crm_now(),
+            "updated_at": dl["updated_at"] or _crm_now(),
+            "stage_entered_at": dl["stage_entered_at"] or dl["created_at"] or _crm_now(),
+            "closed_at": closed or "",
+            "won_at": dl.get("won_at") or "", "lost_at": dl.get("lost_at") or "",
+            "label": dl.get("label", rec.get("label", "")),
+            "custom": dl.get("custom") or rec.get("custom") or {},
+            "touched_at": dl["updated_at"] or dl["created_at"] or _crm_now(),
+            "pd_id": dl["pd_id"],
+        })
+        rec.setdefault("notes", [])
+        rec.setdefault("changelog", [])
+        if dl["lost_reason"]:
+            lost_reasons.add(dl["lost_reason"][:60])
+        deal_of[dl["pd_id"]] = gid
+        if not dry:
+            d["deals"][gid] = rec
+    if not dry:
+        d["lost_reasons"] = sorted(lost_reasons)[:40]
+        # Their label names and colours, not the three this app shipped with:
+        # a label the board cannot colour renders as a grey dot. Deal labels
+        # feed the deal picker; person and org label colours join the map so
+        # every chip paints, whichever entity it sits on.
+        labs = [v.get("name") for v in (data.get("labels") or {}).values() if v.get("name")]
+        if labs:
+            d["labels"] = labs[:20]
+        colors = dict(d.get("label_colors") or {})
+        colors.update({k: v for k, v in (data.get("label_colors") or {}).items() if k and v})
+        colors.update({v["name"]: v.get("color", "")
+                       for v in (data.get("labels") or {}).values() if v.get("name")})
+        if colors:
+            d["label_colors"] = colors
+
+    act_ix = index("activities")
+    dead_acts = set(d.get("pd_deleted_activities") or [])
+    for a in data.get("activities") or []:
+        if a["pd_id"] in dead_acts:
+            continue
+        gid = act_ix.get(a["pd_id"])
+        rec = d["activities"].get(gid) if gid else None
+        if rec is not None and edited_here(rec):
+            report["kept_edited"]["activities"] += 1
+            continue
+        if rec is None:
+            gid = "a_pd" + a["pd_id"]
+            rec = {"id": gid}
+            report["activities"]["new"] += 1
+        else:
+            report["activities"]["updated"] += 1
+        rec.update({
+            "type": a["type"], "subject": a["subject"],
+            "deal_id": deal_of.get(a["deal_pd_id"], ""),
+            "person_id": person_of.get(a["person_pd_id"], ""),
+            "org_id": org_of.get(a["org_pd_id"], ""),
+            # An activity with no due date stays undated. Giving it one
+            # makes the app invent a job: either overdue today, or a task
+            # that was never scheduled appearing in somebody's week.
+            "due_date": a["due_date"] or "",
+            "due_time": a["due_time"], "note": a["note"][:CRM_NOTE_CAP],
+            "location": a["location"], "priority": "",
+            # Likewise a done date: stamping today would drop years of
+            # completed work into "activities completed, last 30 days".
+            "done": a["done"], "done_at": a["done_at"] or "",
+            "duration": a.get("duration", ""),
+            "created_at": a["created_at"] or _crm_now(), "pd_id": a["pd_id"],
+        })
+        if not dry:
+            d["activities"][gid] = rec
+
+    for n in data.get("notes") or []:
+        if not n["text"]:
+            continue
+        target = None
+        if n["deal_pd_id"] and deal_of.get(n["deal_pd_id"]):
+            target = d["deals"].get(deal_of[n["deal_pd_id"]]) if not dry else True
+        elif n["person_pd_id"] and person_of.get(n["person_pd_id"]):
+            target = d["persons"].get(person_of[n["person_pd_id"]]) if not dry else True
+        elif n["org_pd_id"] and org_of.get(n["org_pd_id"]):
+            target = d["orgs"].get(org_of[n["org_pd_id"]]) if not dry else True
+        if target is None:
+            continue
+        report["notes"]["added"] += 1
+        if dry or target is True:
+            continue
+        notes = target.setdefault("notes", [])
+        if any(str(x.get("pd_id")) == n["pd_id"] for x in notes):
+            continue
+        # Deleted here means deleted: the tombstone stops every later
+        # import from quietly resurrecting a note somebody removed.
+        if n["pd_id"] in set(target.get("pd_deleted_notes") or []):
+            continue
+        notes.append({"id": _crm_id(d, "n"), "at": n["at"] or _crm_now(), "by": "",
+                      "text": n["text"][:CRM_NOTE_CAP], "pinned": bool(n.get("pinned")),
+                      "pd_id": n["pd_id"]})
+
+    after = {"deals": len(d["deals"]) + (report["deals"]["new"] if dry else 0),
+             "activities": len(d["activities"]) + (report["activities"]["new"] if dry else 0)}
+    if after["deals"] > CRM_DEALS_MAX or after["activities"] > CRM_ACTIVITIES_MAX:
+        report["problems"].append(
+            "This would put the CRM over its size guard. Nothing would be deleted, "
+            "but the limits should be raised first.")
+    report["totals"] = after
+    if not dry:
+        d["pd_imported_at"] = _crm_now()
+    return report
+
+# ---- Files routes -----------------------------------------------------
+# The office file server, minus the office. These routes only ever handle
+# names and signed URLs; the bytes go browser-to-bucket directly.
+async def _files_guard(request: Request):
+    return await _guard(request)
+
+def _files_ok(d: dict, extra: Optional[dict] = None, action: str = "",
+              detail: str = "", who: str = "") -> JSONResponse:
+    _write_files(d)
+    if action:
+        _track(who, "files", action, detail)
+    out = {"ok": True, "store": _files_shape(d)}
+    if extra:
+        out.update(extra)
+    return _json(out)
+
+# ---- Auth + Team routes -----------------------------------------------
+# The app's own front door. Every route here still demands the Shopify
+# embed token first (the perimeter: requests must come from inside the
+# shop's admin), and then deals in the app's own accounts and sessions.
+def _shop_gate(request: Request) -> bool:
+    auth = request.headers.get("authorization", "")
+    if not (auth.startswith("Bearer ") and SHOPIFY_API_SECRET):
+        return False
+    try:
+        _verify_session_token(auth[7:])
+        return True
+    except Exception:
+        return False
+
+async def _auth_guard(request: Request):
+    pre = _pre_checks(request)
+    if pre:
+        return pre, None
+    if not _shop_gate(request):
+        return _json({"error": "Unauthorized"}, 401), None
+    body = await _read_json_capped(request)
+    if body is None:
+        return _json({"error": "Request too large."}, 413), None
+    return None, body
+
+def _clean_username(v) -> str:
+    return re.sub(r"[^a-z0-9@._-]", "", str(v or "").strip().lower())[:80]
+
+def _find_username(d: dict, username: str) -> Optional[str]:
+    for uid, u in d["users"].items():
+        if not u.get("deleted") and u.get("username") == username:
+            return uid
+    return None
+
+def _starter_password() -> str:
+    return secrets.token_urlsafe(9)
+
+def _auth_me(uid: str, u: dict) -> dict:
+    """The account as the BROWSER needs it the moment somebody is in: who
+    they are, what they may open, and the grants the UI must not draw a
+    button for without. One shape, written once - three hand-copied
+    versions of it is exactly how the login reply and the state reply come
+    to disagree about what a person is allowed to do."""
+    return {"id": uid, "name": u.get("name"), "role": u.get("role"),
+            "must_change": bool(u.get("must_change")),
+            "tabs": _user_tabs(uid),
+            # Sending email out as the shop is a per-person grant, and an
+            # admin holds it by rank. Both, separately, because the page
+            # must not offer a switch that would revoke nothing.
+            "can_send": bool(u.get("can_send")),
+            "send_by_rank": (ROLE_LEVELS.get(u.get("role") or "member", 0)
+                             >= ROLE_LEVELS["admin"])}
+
+# ---- Team management --------------------------------------------------
+async def _team_guard(request: Request, min_level: int):
+    err, body, who = await _guard(request, min_level=min_level)
+    if err:
+        return err, None
+    return None, (who, body)
+
+def _team_public_list(d: dict) -> list:
+    users = [_user_public(uid, u) for uid, u in d["users"].items() if not u.get("deleted")]
+    users.sort(key=lambda u: (-ROLE_LEVELS.get(u["role"], 0), u["name"] or "~"))
+    return users
+
+def _day_starts():
+    now = datetime.now(timezone.utc)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week = today - timedelta(days=today.weekday())
+    month = today.replace(day=1)
+    return today.isoformat(), week.isoformat(), month.isoformat()
+
+# -----------------------------------------------------------------------
+# Shipping settings + Dispatch (World Options). The courier API key and
+# write actions live entirely outside the AI tool registry.
+# -----------------------------------------------------------------------
+def _shipping_public(cfg: dict) -> dict:
+    """Config for the UI: everything EXCEPT the credentials (never echoed)."""
+    return {
+        "origin": cfg.get("origin") or {},
+        "boxes": cfg.get("boxes") or [],
+        "default_box_id": cfg.get("default_box_id") or "",
+        "notify_customer": bool(cfg.get("notify_customer", True)),
+        "currency": cfg.get("currency") or "GBP",
+        "plugin_code": cfg.get("plugin_code") or "Web_Service",
+        "plugin_codes": (worldoptions.PLUGIN_CODES if worldoptions else []),
+        "ready_time": cfg.get("ready_time") or "",
+        "close_time": cfg.get("close_time") or "",
+        "collection_option": cfg.get("collection_option") or "I_Need_To_Book_A_Collection",
+        "show_parcelshop": bool(cfg.get("show_parcelshop", False)),
+        "collection_options": (worldoptions.COLLECTION_OPTIONS if worldoptions else []),
+        "collection_by_carrier": (cfg.get("collection_by_carrier")
+                                  if isinstance(cfg.get("collection_by_carrier"), dict) else {}),
+        "collection_messages": COLLECTION_MESSAGES,
+        "carriers": (worldoptions.carrier_choices() if worldoptions else []),
+        "label_size_production": cfg.get("label_size_production") or "4x4",
+        "label_size_shipping": cfg.get("label_size_shipping") or "4x6",
+        "label_stock": list(LABEL_STOCK),
+        "eori": cfg.get("eori") or "",
+        "vat_number": cfg.get("vat_number") or "",
+        "default_hs_code": cfg.get("default_hs_code") or "",
+        "export_reason": cfg.get("export_reason") or "Sale",
+        "export_reasons": (worldoptions.EXPORT_REASONS if worldoptions else []),
+        "duties_payor": cfg.get("duties_payor") or "Duties_To_Be_Paid_By_Receiver",
+        "duties_payors": (worldoptions.DUTIES_PAYORS if worldoptions else []),
+        "trade_term": cfg.get("trade_term") or "",
+        "signature_options": (worldoptions.SIGNATURE_OPTIONS if worldoptions else {}),
+        "base_url": cfg.get("base_url") or "",
+        "connected": bool(worldoptions and worldoptions.configured()),
+        "meter_last4": (worldoptions.meter_last4() if worldoptions else ""),
+        "has_key": bool(worldoptions and worldoptions.has_key()),
+        "has_password": bool(worldoptions and worldoptions.has_password()),
+        "creds_from_env": _wo_creds_from_env(),
+        "available": bool(worldoptions),
+    }
+
+def _finite(v, places: int = 2) -> float:
+    """A real number or nothing. float("nan") and float("Infinity") both
+    parse, survive round(), and save; the file reads back fine, but every
+    later GET of the config dies inside JSONResponse (allow_nan=False) and
+    the shipping panel cannot be opened again without hand-editing the
+    volume."""
+    n = round(float(v or 0), places)
+    if n != n or n in (float("inf"), float("-inf")):
+        raise ValueError("not a finite measurement")
+    return n
+
+def _clean_boxes(raw) -> list:
+    out = []
+    for b in (raw or [])[:24]:
+        if not isinstance(b, dict):
+            continue
+        try:
+            box = {
+                "id": str(b.get("id") or "")[:40] or ("box%d" % (len(out) + 1)),
+                "name": str(b.get("name") or "Box")[:60],
+                "width": _finite(b.get("width")),
+                "length": _finite(b.get("length")),
+                "depth": _finite(b.get("depth")),
+                "weight": _finite(b.get("weight"), 3),
+            }
+        except (TypeError, ValueError):
+            continue
+        out.append(box)
+    return out
+
+def _clean_origin(raw) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    keys = ("name", "company", "firstname", "lastname", "street",
+            "postcode", "city", "state", "country", "phone", "email")
+    return {k: str(raw.get(k) or "").strip()[:120] for k in keys}
+
+def _print_cors(request: Request) -> dict:
+    origin = request.headers.get("origin") or ""
+    base = {"Access-Control-Allow-Headers": "Authorization, Content-Type",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Max-Age": "600"}
+    own_shop = f"https://{SHOPIFY_STORE}.myshopify.com" if SHOPIFY_STORE else ""
+    if origin in _PRINT_ORIGINS or (own_shop and origin == own_shop):
+        return {**base, "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Credentials": "true", "Vary": "Origin"}
+    # Vary here too: without it a shared cache could store this wildcard
+    # reply and serve it back to an allowlisted origin, breaking the
+    # credentialed print action until the cache expired.
+    return {**base, "Access-Control-Allow-Origin": "*", "Vary": "Origin"}
+
+# ----- Google OAuth connect flow (one-time, secret-gated) -------------
+def _redirect_uri(request: Request) -> str:
+    # Prefer a configured public base URL (must match the URI registered in
+    # Google Cloud) over the attacker-controllable Host header.
+    if APP_BASE_URL:
+        return APP_BASE_URL.rstrip("/") + "/oauth/google/callback"
+    host = request.headers.get("host", "")
+    return f"https://{host}/oauth/google/callback"
+
+def _oauth_page(title: str, msg: str) -> HTMLResponse:
+    # Escape both inputs (any reflected query value is neutralized) and ship a
+    # locked-down CSP: no scripts at all, only inline styles. Defense in depth.
+    t, m = html.escape(str(title)), html.escape(str(msg))
+    body = (f"<!doctype html><meta charset=utf-8><title>{t}</title>"
+            "<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f7f7f8;"
+            "color:#16161a;display:grid;place-items:center;height:100vh;margin:0}"
+            ".c{background:#fff;border:1px solid #e7e7ea;border-radius:14px;padding:28px 32px;"
+            "max-width:420px;text-align:center;box-shadow:0 6px 24px -6px rgba(20,20,40,.1)}"
+            "h1{font-size:17px;margin:0 0 8px}p{color:#5c5f66;font-size:14px;margin:0}</style>"
+            f"<div class=c><h1>{t}</h1><p>{m}</p></div>")
+    headers = {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
+               "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+               **_API_HEADERS}
+    return HTMLResponse(body, headers=headers)
+
+# ----- Xero connect: the accounts side of the reconciliation engine -----
+def _xero_redirect_uri(request: Request) -> str:
+    if APP_BASE_URL:
+        return APP_BASE_URL.rstrip("/") + "/oauth/xero/callback"
+    host = request.headers.get("host", "")
+    return f"https://{host}/oauth/xero/callback"
+
+# ----- Gmail connect: same shape as the Google one, its own token -----
+# The mailbox is a DIFFERENT Google account from the analytics one (the
+# shared address, not the merchant's own), so it gets its own consent
+# walk and its own token file. The connect URL is gated by the same
+# server secret; whoever opens it signs in AS the shared mailbox.
+def _gmail_redirect_uri(request: Request) -> str:
+    if APP_BASE_URL:
+        return APP_BASE_URL.rstrip("/") + "/oauth/gmail/callback"
+    host = request.headers.get("host", "")
+    return f"https://{host}/oauth/gmail/callback"
+
+# ----- the ACCOUNTS mailbox: a second Google account, for reconciliation -
+# Same OAuth client and scope as the sales inbox, its own refresh token,
+# its own consent walk, its own state namespace. The two can never
+# complete each other's flow, and neither can reach the other's mail.
+def _gmail_fin_redirect_uri(request: Request) -> str:
+    if APP_BASE_URL:
+        return APP_BASE_URL.rstrip("/") + "/oauth/gmail-finance/callback"
+    host = request.headers.get("host", "")
+    return f"https://{host}/oauth/gmail-finance/callback"
+
+
 def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=None,
                fulfillment_canceler=None, webhook_ensurer=None,
                payment_terms_writer=None, order_writer=None,
@@ -13462,115 +14346,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             pass   # the webhook's ack must never hinge on enrichment
         return PlainTextResponse("ok", status_code=200)
 
-    async def _webhook_body(request: Request):
-        """(raw_bytes, error_response). The whole authentication for any Shopify
-        webhook, in one place rather than copied per topic - the checks here are
-        the only thing standing between a POST and a redaction.
-
-        Streamed with a hard cap rather than request.body(): the signature can
-        only be checked after the body is read, so this read happens for anyone,
-        and a chunked upload with no Content-Length would otherwise buffer
-        without limit on an endpoint that deliberately has no rate limiter."""
-        if not SHOPIFY_API_SECRET:
-            return None, PlainTextResponse("Unauthorized", status_code=401)
-        total, chunks = 0, []
-        try:
-            async for chunk in request.stream():
-                total += len(chunk)
-                if total > WEBHOOK_MAX_BYTES:
-                    return None, PlainTextResponse("Too large", status_code=413)
-                chunks.append(chunk)
-        except Exception:
-            return None, PlainTextResponse("Bad request", status_code=400)
-        raw = b"".join(chunks)
-        sent = request.headers.get("x-shopify-hmac-sha256", "")
-        want = base64.b64encode(hmac.new(SHOPIFY_API_SECRET.encode("utf-8"),
-                                         raw, hashlib.sha256).digest()).decode("ascii")
-        if not sent or not hmac.compare_digest(want, sent):
-            return None, PlainTextResponse("Unauthorized", status_code=401)
-        shop = str(request.headers.get("x-shopify-shop-domain") or "")
-        if SHOPIFY_STORE and not shop.lower().startswith(SHOPIFY_STORE.split(".")[0].lower() + "."):
-            return None, PlainTextResponse("Unauthorized", status_code=401)
-        return raw, None
-
-    # ---- Forecast: the nightly forecasting service and the tab that reads it ----
-    def _forecast_state() -> dict:
-        d = _load_json_store(FORECAST_PATH, "forecast", None)
-        return d if isinstance(d, dict) else {}
-
-    def _forecast_token_ok(request: Request) -> bool:
-        return _secret_ok(str(request.headers.get("x-forecast-token") or ""), FORECAST_INGEST_TOKEN)
 
 
-    def _forecast_ledger(state: dict, body: dict) -> dict:
-        """The standing record of who was right, kept across runs.
 
-        The backtest each run computes is retrospective: it refits a model to
-        old months and marks it, which is useful but forgiving, because the
-        model is being asked about a period the code already knows the shape
-        of. This is the other kind, and the honest one: what each source
-        ACTUALLY said about September, written down in September while
-        September was still unknown, then marked when September closed.
 
-        Predictions are recorded once and never revised. A later run may have
-        a better opinion about a month, but overwriting the earlier one would
-        turn a forecast into a hindcast and every source would look excellent."""
-        import math
-        led = state.get("ledger") if isinstance(state.get("ledger"), dict) else {}
-        predicted = led.get("predicted") if isinstance(led.get("predicted"), dict) else {}
-        results = led.get("results") if isinstance(led.get("results"), list) else []
-
-        preds = body.get("predictions")
-        if isinstance(preds, dict):
-            for month, by_source in list(preds.items())[:24]:
-                if not isinstance(month, str) or not isinstance(by_source, dict):
-                    continue
-                month = month[:7]
-                slot = predicted.setdefault(month, {})
-                for name, value in list(by_source.items())[:FORECAST_LEDGER_SOURCES]:
-                    try:
-                        v = float(value)
-                    except (TypeError, ValueError):
-                        continue
-                    if not math.isfinite(v) or name in slot:
-                        continue                      # first word only: never revised
-                    slot[str(name)[:80]] = {"value": round(v, 2), "made": body.get("as_of")}
-
-        actuals = body.get("actuals")
-        scored = {r.get("month") for r in results if isinstance(r, dict)}
-        if isinstance(actuals, dict):
-            for month, value in list(actuals.items())[:24]:
-                month = str(month)[:7]
-                if month in scored or month not in predicted:
-                    continue
-                try:
-                    actual = float(value)
-                except (TypeError, ValueError):
-                    continue
-                if not math.isfinite(actual) or actual <= 0:
-                    continue
-                by = {}
-                for name, rec in predicted[month].items():
-                    v = rec.get("value")
-                    if not isinstance(v, (int, float)):
-                        continue
-                    by[name] = {"predicted": v, "error": round((v - actual) / actual, 4),
-                                "made": rec.get("made")}
-                if not by:
-                    continue
-                winner = min(by.items(), key=lambda kv: abs(kv[1]["error"]))
-                results.append({"month": month, "actual": round(actual, 2), "by_source": by,
-                                "winner": winner[0], "winner_error": winner[1]["error"],
-                                "closed_at": datetime.now(timezone.utc).isoformat()})
-                scored.add(month)
-
-        results.sort(key=lambda r: r.get("month") or "")
-        results = results[-FORECAST_LEDGER_MONTHS:]
-        keep = {r["month"] for r in results}
-        # A month still ahead keeps its predictions; one long closed does not.
-        predicted = {m: v for m, v in predicted.items()
-                     if m in keep or m >= min(keep, default=m)}
-        return {"predicted": predicted, "results": results}
 
     @mcp.custom_route("/hooks/forecast/results", methods=["POST"])
     async def forecast_results_hook(request: Request):
@@ -14506,70 +15285,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             logger.exception("Customer history failed")
             return _json({"error": "Couldn't read customer history."}, 500)
 
-    # ----- Shared inbox: who owns which email ----------------------------
-    async def _mail_guard(request: Request):
-        """(error_response, body, actor_uid): the one door, for the inbox."""
-        return await _guard(request)
 
-    def _mail_thread_or_404(body: dict):
-        t = _load_mail().get("threads", {}).get(str(body.get("id") or ""))
-        return (t, None) if t else (None, _json({"error": "That thread is not on the board. "
-                                                          "Refresh and try again."}, 404))
 
-    def _mail_store_sick():
-        """Refuse a mutation BEFORE it happens when the store cannot be
-        persisted: a claim the whole team can see until a restart silently
-        reverts it is worse than a clean refusal."""
-        if _store_writable(MAILBOX_PATH):
-            return None
-        return _json({"error": "The inbox store cannot be written right now. "
-                               "Check Settings, Connections."}, 503)
 
-    def _mail_lead(uid: str) -> bool:
-        return _team_level(uid) >= 2
 
-    def _mail_not_yours(t: dict, who: str):
-        """The single-owner rule for WRITING into a conversation, shared by
-        the draft and the send. Putting words into somebody else's live
-        customer thread is a bigger act than moving its state, which is
-        already owner-or-lead."""
-        if not _mail_lead(who) and t.get("owner") and t.get("owner") != who:
-            return _json({"error": (_team_name(t["owner"]) or "Someone") + " is dealing with "
-                                   "this one. Ask them, or ask a lead to reassign it."}, 403)
-        return None
 
-    def _mail_reply_refusal(to_addr: str, addr: str):
-        """The two ways a reply address is unusable, refused in the same words
-        wherever a reply is written. Both look like success and neither
-        reaches the customer, which is exactly why they are refusals rather
-        than a best effort."""
-        if "@" not in (to_addr or ""):
-            return _json({"error": "There is no address to reply to on this "
-                                   "conversation. Reply in Gmail instead."}, 400)
-        if addr and to_addr.lower() == addr:
-            return _json({"error": "The only address on this conversation is the "
-                                   "mailbox itself, so a reply would go in a circle. "
-                                   "Reply in Gmail instead."}, 400)
-        return None
 
-    async def _mail_leftover_draft(t: dict) -> tuple:
-        """(draft we may delete, whether theirs was kept).
-
-        Only replace a draft we can prove is still ours. If somebody opened it
-        in Gmail and rewrote it, keeping both is the honest outcome; silently
-        deleting their work is not - and a Gmail hiccup that stops us reading
-        it counts as "cannot prove", never as permission."""
-        replaces = t.get("draft_id") or ""
-        if not replaces:
-            return "", False
-        try:
-            live = await google_mail.draft_body(replaces)
-            if live and live != (t.get("draft_text") or "").strip():
-                return "", True
-        except Exception as e:
-            logger.warning("mail: could not read the previous draft: %s", e)
-            return "", True
-        return replaces, False
 
 
     @mcp.custom_route("/api/mail/board", methods=["POST"])
@@ -15490,146 +16211,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                              "spent": cust.get("total_spent")},
                 "orders": out}
 
-    def _mail_reply_target(msgs: list, addr: str) -> dict:
-        """The message a reply would actually go to, and the address it would
-        go to. Everything downstream (order facts, the draft, the card) has to
-        agree with THIS, or the app looks up one person's orders and writes
-        them to another."""
-        from email.utils import parseaddr as _pa
-        parent = next((m for m in reversed(msgs) if m.get("from_email") != addr),
-                      msgs[-1] if msgs else None)
-        if not parent:
-            return {}
-        to = _pa(parent.get("reply_to") or parent.get("from_email") or "")[1].strip().lower()
-        return {"msg": parent, "to": to,
-                "from_email": (parent.get("from_email") or "").strip().lower()}
 
-    def _mail_extra_addresses(body: dict, addr: str) -> tuple:
-        """(cc, bcc, refusal). The same anchored parsing the To field gets,
-        because these become headers on real outbound mail too, and the two
-        together are capped: a reply is not a mailing list."""
-        got = []
-        for field in ("cc", "bcc"):
-            raw = str(body.get(field) or "").strip()
-            if not raw:
-                got.append([])
-                continue
-            addrs, bad = _mail_clean_addresses(raw, addr)
-            if bad:
-                return [], [], field.upper() + ": " + bad
-            got.append(addrs)
-        if len(got[0]) + len(got[1]) > MAIL_SEND_MAX_CC:
-            return [], [], (f"That is {len(got[0]) + len(got[1])} addresses on cc and bcc. "
-                            f"Copy at most {MAIL_SEND_MAX_CC} people.")
-        return got[0], got[1], ""
 
-    def _mail_parts_from(body: dict, who: str) -> tuple:
-        """(files, inline, refusal): the two attachment lists as the browser
-        sent them, with every key checked against what this person may attach
-        BEFORE a byte is read. A key outside their own uploads and the shop's
-        Files is refused, or "attach this key" would read the whole bucket."""
-        files, inline = [], []
-        for a in (body.get("attachments") or [])[:MAIL_ATTACH_COUNT]:
-            if isinstance(a, dict):
-                files.append({"key": str(a.get("key") or ""),
-                              "name": str(a.get("name") or ""),
-                              "size": a.get("size") or 0,
-                              "type": str(a.get("type") or "")})
-        for a in (body.get("inline") or [])[:MAIL_ATTACH_COUNT]:
-            if isinstance(a, dict):
-                inline.append({"key": str(a.get("key") or ""),
-                               "cid": str(a.get("cid") or ""),
-                               "type": str(a.get("type") or "")})
-        for a in files + inline:
-            if not _mail_attachment_ok(a["key"], who):
-                return [], [], ((_mail_part_name(a["key"]) or "That file")
-                                + " is not one of your uploads.")
-        return files, inline, ""
 
-    async def _mail_parts_size(files: list, inline: list) -> tuple:
-        """(total, refusal) from HEAD alone: what a dry run can say about a set
-        of attachments without reading a single byte."""
-        total = 0
-        for a in list(files) + list(inline):
-            try:
-                size = await asyncio.to_thread(_files_head, a["key"])
-            except Exception:
-                return 0, "Storage did not answer, so the files could not be checked."
-            if not size:
-                return 0, _mail_part_name(a["key"]) + " is missing from storage."
-            total += int(size)
-        if total > MAIL_ATTACH_MAX:
-            return total, "Attachments come to more than 25MB in total."
-        return total, ""
 
-    async def _mail_outgoing(body: dict, who: str, parent: dict, quote_ok: bool) -> tuple:
-        """(html, text, inline_logo, footer_used) for one outgoing message.
 
-        One assembler behind the send and the draft: the person's words, their
-        sign-off, the shop footer and the quoted original, in that order in
-        both twins. Two copies of this would mean the draft somebody finishes
-        in Gmail says something different from the reply sent from here."""
-        block = _mail_email_block(_load_mail(), who)
-        slots = block["footer_slots"]
-        logo = await _mail_logo_part(slots.get("logo_key") or "")
-        footer_html, footer_text = mailmime.render_footer(slots, "logo" if logo else "")
-        quote = (mailmime.quote_original(parent)
-                 if (quote_ok and parent and bool(body.get("quote", True))) else None)
-        html_body, text_body = _mail_compose_body(
-            str(body.get("html") or ""), str(body.get("text") or ""),
-            block["sign_off"], footer_html, footer_text, quote)
-        return html_body, text_body, logo
 
-    def _mail_order_sentence(o: dict) -> str:
-        """One order, as a line a person could paste into a reply.
-
-        Every branch has to be something the shop can stand behind, because
-        the model is told to use these verbatim. "Shipped" therefore means
-        FULFILLED, not "a label was booked": booking happens before the gobo
-        is made, and telling a customer it shipped when it is still on the
-        floor sends them chasing a courier that has nothing."""
-        name = o.get("name") or "your order"
-        if o.get("cancelled_at"):
-            return name + ", cancelled " + (o["cancelled_at"] or "")[:10]
-        bits = [name]
-        shipped = o.get("fulfilled") or str(o.get("fulfillment") or "").lower() == "fulfilled"
-        if shipped and o.get("tracking"):
-            bits.append("shipped " + ((o.get("dispatched_at") or "")[:10] or "already")
-                        + " on " + (o.get("carrier") or "the courier")
-                        + ", tracking " + o["tracking"])
-        elif shipped:
-            bits.append("shipped")
-        elif o.get("tracking"):
-            bits.append("label booked with " + (o.get("carrier") or "the courier")
-                        + " (tracking " + o["tracking"] + "), not handed over yet")
-        elif o.get("made_at"):
-            bits.append("made " + (o["made_at"] or "")[:10] + ", not yet shipped")
-        elif o.get("printed_at"):
-            bits.append("in production")
-        elif str(o.get("fulfillment") or "").lower() in ("partial", "partially_fulfilled"):
-            bits.append("part shipped")
-        else:
-            bits.append("with us, not yet shipped")
-        return ", ".join(bits)
-
-    def _mail_folder_path(d: dict, segs: list, who: str) -> str:
-        """Resolve a folder path, making any part of it that does not exist.
-        Returns the folder id. Used so artwork can land in Artwork/#1201
-        without anybody creating folders by hand first."""
-        parent = ""
-        for seg in segs:
-            name = _files_clean_name(seg)
-            if not name:
-                continue
-            nxt = next((fid for fid, f in d["folders"].items()
-                        if str(f.get("parent_id") or "") == parent
-                        and f.get("name", "").lower() == name.lower()), None)
-            if nxt is None:
-                nxt = _files_id(d, "d")
-                d["folders"][nxt] = {"name": name, "parent_id": parent,
-                                     "created_at": datetime.now(timezone.utc).isoformat()}
-            parent = nxt
-        return parent
 
     @mcp.custom_route("/api/mail/attachment", methods=["POST"])
     async def mail_attachment_route(request: Request):
@@ -16824,328 +17411,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "The chase could not be recorded. The data volume may be "
                                    "unwritable; check Settings, Connections."}, 500)
 
-    # ---- CRM routes -------------------------------------------------------
-    async def _crm_guard(request: Request):
-        """(error_response, body, who). The CRM is buttons in the app's own UI,
-        so it uses the same session auth as everything else; the AI never sees
-        it. Shaped like _guard, which is what every other door here returns.
 
-        The caller used to be stashed in a dict shared by every CRM route and
-        read back further down the handler. That held only while no `await`
-        ever appeared between the guard and the read - true when it was
-        written, and by the end one route was reading it 101 lines later with
-        nothing enforcing the rule. Returning it makes the guarantee
-        structural: a handler can only use the caller it was handed."""
-        err, body, who = await _guard(request)
-        if err:
-            return err, None, ""
-        return None, body, who
 
-    def _crm_ok(d: dict, extra: Optional[dict] = None, action: str = "",
-                detail: str = "", who: str = "") -> JSONResponse:
-        _crm_purge(d)
-        _write_crm(d)
-        if action:
-            _track(who, "crm", action, detail)
-        out = {"ok": True, "crm": _crm_shape(d)}
-        if extra:
-            out.update(extra)
-        return _json(out)
-
-    def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
-        """Merge a Pipedrive export into the CRM store.
-
-        Idempotent by construction: every imported record keeps its Pipedrive
-        id, and a second run finds that id and UPDATES rather than making a
-        second copy. Anything typed into gizmo by hand has no Pipedrive id and
-        is never touched.
-
-        With dry=True nothing is written and the counts describe exactly what
-        a real run would do."""
-        report = {"stages": {"new": 0, "updated": 0}, "orgs": {"new": 0, "updated": 0},
-                  "persons": {"new": 0, "updated": 0}, "deals": {"new": 0, "updated": 0},
-                  "activities": {"new": 0, "updated": 0}, "notes": {"added": 0},
-                  "custom_values": 0,
-                  "kept": {"deals": 0, "persons": 0, "orgs": 0},
-                  "kept_edited": {"deals": 0, "persons": 0, "orgs": 0, "activities": 0,
-                                  "stages": 0},
-                  "problems": []}
-
-        def index(coll):
-            # A merge absorbs the loser's Pipedrive identity: its rows must
-            # keep resolving to the winner, or the next import would recreate
-            # the duplicate and re-point every deal back at it.
-            ix = {}
-            for k, v in d[coll].items():
-                if v.get("pd_id"):
-                    ix[str(v["pd_id"])] = k
-                for m in (v.get("pd_merged_ids") or []):
-                    ix[str(m)] = k
-            return ix
-
-        # Records with no pd_id were typed in here; they survive untouched.
-        for coll, key in (("deals", "deals"), ("persons", "persons"), ("orgs", "orgs")):
-            report["kept"][key] = len([1 for v in d[coll].values() if not v.get("pd_id")])
-
-        # A record EDITED IN GIZMO also survives untouched: without this rule,
-        # pressing Import reverts every stage move, every won, and every
-        # ticked task back to whatever Pipedrive last knew — months of work
-        # undone by one button. The flag is set by every gizmo write and never
-        # cleared: once worked on here, a record is gizmo's. The timestamp
-        # fallback covers edits made before the flag existed.
-        last_import = str(d.get("pd_imported_at") or "")
-
-        def edited_here(rec) -> bool:
-            if rec is None:
-                return False
-            if rec.get("edited_here"):
-                return True
-            return bool(last_import and str(rec.get("updated_at") or "") > last_import)
-
-        # --- stages: the imported pipeline replaces the imported stages, in
-        # Pipedrive's order. Stages MADE IN GIZMO (no pd_id) are kept, after
-        # the imported ones: dropping them would orphan every deal that had
-        # been moved into them, silently, off the board.
-        by_pd = {str(s.get("pd_id")): s for s in (d.get("stages") or []) if s.get("pd_id")}
-        new_stages, seen_stage = [], {}
-        for i, st in enumerate(data.get("stages") or []):
-            prev = by_pd.get(st["pd_id"])
-            sid = prev["id"] if prev else ("s_pd" + st["pd_id"])
-            seen_stage[st["pd_id"]] = sid
-            if prev and prev.get("edited_here"):
-                # The import's whole promise is that gizmo-side work survives.
-                # Stages were the one exception: a renamed stage, a retuned
-                # probability or a rot timer set at the desk was rebuilt from
-                # Pipedrive on every run, silently.
-                new_stages.append(dict(prev))
-                report["kept_edited"]["stages"] = report["kept_edited"].get("stages", 0) + 1
-                continue
-            new_stages.append({"id": sid, "name": st["name"] or ("Stage " + str(i + 1)),
-                               "probability": st.get("probability") if st.get("probability") is not None else 100,
-                               "rot_on": bool(st.get("rot_on")),
-                               "rot_days": int(st.get("rot_days") or 0),
-                               "rot_days_stored": int(st.get("rot_days_stored") or 0),
-                               "pd_id": st["pd_id"]})
-            report["stages"]["updated" if prev else "new"] += 1
-        # Any old stage still holding deals rides along — gizmo-made stages,
-        # and stages Pipedrive itself deleted. Binned deals count too: a deal
-        # restored inside its 30-day window must land back in a real column.
-        if new_stages:
-            final_ids = {s["id"] for s in new_stages}
-            holdovers = [s for s in (d.get("stages") or [])
-                         if s["id"] not in final_ids
-                         and any(v.get("stage_id") == s["id"] for v in d["deals"].values())]
-            new_stages = new_stages + holdovers
-        if len(new_stages) > 12:
-            report["problems"].append(
-                "Pipedrive has " + str(len(new_stages)) + " stages and this board holds 12. "
-                "The extra ones would have nowhere to go.")
-        if not dry and new_stages:
-            d["stages"] = new_stages
-
-        org_ix, person_ix, deal_ix = index("orgs"), index("persons"), index("deals")
-        org_of, person_of, deal_of = {}, {}, {}
-        # Contacts deleted here are tombstoned: a later import must not
-        # resurrect them, the way it already refuses deleted notes/activities.
-        dead_orgs = set(d.get("pd_deleted_orgs") or [])
-        dead_persons = set(d.get("pd_deleted_persons") or [])
-
-        # --- organisations, then people, then deals, then their activities and
-        # notes: each one links to the one before, so the order is the order.
-        for o in data.get("orgs") or []:
-            if o["pd_id"] in dead_orgs:
-                continue
-            gid = org_ix.get(o["pd_id"])
-            rec = d["orgs"].get(gid) if gid else None
-            if rec is not None and edited_here(rec):
-                report["kept_edited"]["orgs"] = report["kept_edited"].get("orgs", 0) + 1
-                org_of[o["pd_id"]] = gid
-                continue
-            if rec is None:
-                gid = "o_pd" + o["pd_id"]
-                rec = {"id": gid, "notes": []}
-                report["orgs"]["new"] += 1
-            else:
-                report["orgs"]["updated"] += 1
-            report["custom_values"] += len(o.get("custom") or {})
-            rec.update({"name": o["name"], "address": o["address"],
-                        "website": o.get("website", ""),
-                        "label": o.get("label") or rec.get("label", ""),
-                        "custom": o.get("custom") or rec.get("custom") or {},
-                        "created_at": o["created_at"] or rec.get("created_at") or _crm_now(),
-                        "updated_at": o["updated_at"] or _crm_now(), "pd_id": o["pd_id"]})
-            rec.setdefault("notes", [])
-            org_of[o["pd_id"]] = gid
-            if not dry:
-                d["orgs"][gid] = rec
-
-        for p in data.get("persons") or []:
-            if p["pd_id"] in dead_persons:
-                continue
-            gid = person_ix.get(p["pd_id"])
-            rec = d["persons"].get(gid) if gid else None
-            if rec is not None and edited_here(rec):
-                report["kept_edited"]["persons"] += 1
-                person_of[p["pd_id"]] = gid
-                continue
-            if rec is None:
-                gid = "p_pd" + p["pd_id"]
-                rec = {"id": gid, "notes": [], "shopify_customer_id": None}
-                report["persons"]["new"] += 1
-            else:
-                report["persons"]["updated"] += 1
-            report["custom_values"] += len(p.get("custom") or {})
-            rec.update({"name": p["name"], "emails": p["emails"], "phones": p["phones"],
-                        "email_labels": p.get("email_labels") or [],
-                        "phone_labels": p.get("phone_labels") or [],
-                        "job_title": p.get("job_title", ""),
-                        "org_id": org_of.get(p["org_pd_id"], rec.get("org_id", "")),
-                        "label": p.get("label") or rec.get("label", ""),
-                        "custom": p.get("custom") or rec.get("custom") or {},
-                        "created_at": p["created_at"] or rec.get("created_at") or _crm_now(),
-                        "updated_at": p["updated_at"] or _crm_now(), "pd_id": p["pd_id"]})
-            rec.setdefault("notes", [])
-            rec.setdefault("shopify_customer_id", None)
-            person_of[p["pd_id"]] = gid
-            if not dry:
-                d["persons"][gid] = rec
-
-        lost_reasons = set(d.get("lost_reasons") or [])
-        dead_deals = set(d.get("pd_deleted_deals") or [])
-        for dl in data.get("deals") or []:
-            if dl["pd_id"] in dead_deals:
-                continue          # deleted here means deleted, not "until next import"
-            gid = deal_ix.get(dl["pd_id"])
-            rec = d["deals"].get(gid) if gid else None
-            if rec is not None and edited_here(rec):
-                report["kept_edited"]["deals"] += 1
-                deal_of[dl["pd_id"]] = gid
-                continue
-            if rec is None:
-                gid = "d_pd" + dl["pd_id"]
-                rec = {"id": gid, "notes": [], "changelog": []}
-                report["deals"]["new"] += 1
-            else:
-                report["deals"]["updated"] += 1
-            report["custom_values"] += len(dl.get("custom") or {})
-            closed = dl.get("won_at") if dl["status"] == "won" else dl.get("lost_at")
-            # won_at is what the Insights tab reads. Folding it into closed_at
-            # made an imported sales history report "no wins yet".
-            rec.update({
-                "title": dl["title"], "value": dl["value"], "currency": dl["currency"],
-                "stage_id": seen_stage.get(dl["stage_pd_id"])
-                            or (d["stages"][0]["id"] if d.get("stages") else ""),
-                "person_id": person_of.get(dl["person_pd_id"], ""),
-                "org_id": org_of.get(dl["org_pd_id"], ""),
-                "status": dl["status"], "probability": dl.get("probability"),
-                "expected_close": dl["expected_close"],
-                "lost_reason": dl["lost_reason"], "source": dl["source"],
-                "archived": dl["archived"],
-                "created_at": dl["created_at"] or _crm_now(),
-                "updated_at": dl["updated_at"] or _crm_now(),
-                "stage_entered_at": dl["stage_entered_at"] or dl["created_at"] or _crm_now(),
-                "closed_at": closed or "",
-                "won_at": dl.get("won_at") or "", "lost_at": dl.get("lost_at") or "",
-                "label": dl.get("label", rec.get("label", "")),
-                "custom": dl.get("custom") or rec.get("custom") or {},
-                "touched_at": dl["updated_at"] or dl["created_at"] or _crm_now(),
-                "pd_id": dl["pd_id"],
-            })
-            rec.setdefault("notes", [])
-            rec.setdefault("changelog", [])
-            if dl["lost_reason"]:
-                lost_reasons.add(dl["lost_reason"][:60])
-            deal_of[dl["pd_id"]] = gid
-            if not dry:
-                d["deals"][gid] = rec
-        if not dry:
-            d["lost_reasons"] = sorted(lost_reasons)[:40]
-            # Their label names and colours, not the three this app shipped with:
-            # a label the board cannot colour renders as a grey dot. Deal labels
-            # feed the deal picker; person and org label colours join the map so
-            # every chip paints, whichever entity it sits on.
-            labs = [v.get("name") for v in (data.get("labels") or {}).values() if v.get("name")]
-            if labs:
-                d["labels"] = labs[:20]
-            colors = dict(d.get("label_colors") or {})
-            colors.update({k: v for k, v in (data.get("label_colors") or {}).items() if k and v})
-            colors.update({v["name"]: v.get("color", "")
-                           for v in (data.get("labels") or {}).values() if v.get("name")})
-            if colors:
-                d["label_colors"] = colors
-
-        act_ix = index("activities")
-        dead_acts = set(d.get("pd_deleted_activities") or [])
-        for a in data.get("activities") or []:
-            if a["pd_id"] in dead_acts:
-                continue
-            gid = act_ix.get(a["pd_id"])
-            rec = d["activities"].get(gid) if gid else None
-            if rec is not None and edited_here(rec):
-                report["kept_edited"]["activities"] += 1
-                continue
-            if rec is None:
-                gid = "a_pd" + a["pd_id"]
-                rec = {"id": gid}
-                report["activities"]["new"] += 1
-            else:
-                report["activities"]["updated"] += 1
-            rec.update({
-                "type": a["type"], "subject": a["subject"],
-                "deal_id": deal_of.get(a["deal_pd_id"], ""),
-                "person_id": person_of.get(a["person_pd_id"], ""),
-                "org_id": org_of.get(a["org_pd_id"], ""),
-                # An activity with no due date stays undated. Giving it one
-                # makes the app invent a job: either overdue today, or a task
-                # that was never scheduled appearing in somebody's week.
-                "due_date": a["due_date"] or "",
-                "due_time": a["due_time"], "note": a["note"][:CRM_NOTE_CAP],
-                "location": a["location"], "priority": "",
-                # Likewise a done date: stamping today would drop years of
-                # completed work into "activities completed, last 30 days".
-                "done": a["done"], "done_at": a["done_at"] or "",
-                "duration": a.get("duration", ""),
-                "created_at": a["created_at"] or _crm_now(), "pd_id": a["pd_id"],
-            })
-            if not dry:
-                d["activities"][gid] = rec
-
-        for n in data.get("notes") or []:
-            if not n["text"]:
-                continue
-            target = None
-            if n["deal_pd_id"] and deal_of.get(n["deal_pd_id"]):
-                target = d["deals"].get(deal_of[n["deal_pd_id"]]) if not dry else True
-            elif n["person_pd_id"] and person_of.get(n["person_pd_id"]):
-                target = d["persons"].get(person_of[n["person_pd_id"]]) if not dry else True
-            elif n["org_pd_id"] and org_of.get(n["org_pd_id"]):
-                target = d["orgs"].get(org_of[n["org_pd_id"]]) if not dry else True
-            if target is None:
-                continue
-            report["notes"]["added"] += 1
-            if dry or target is True:
-                continue
-            notes = target.setdefault("notes", [])
-            if any(str(x.get("pd_id")) == n["pd_id"] for x in notes):
-                continue
-            # Deleted here means deleted: the tombstone stops every later
-            # import from quietly resurrecting a note somebody removed.
-            if n["pd_id"] in set(target.get("pd_deleted_notes") or []):
-                continue
-            notes.append({"id": _crm_id(d, "n"), "at": n["at"] or _crm_now(), "by": "",
-                          "text": n["text"][:CRM_NOTE_CAP], "pinned": bool(n.get("pinned")),
-                          "pd_id": n["pd_id"]})
-
-        after = {"deals": len(d["deals"]) + (report["deals"]["new"] if dry else 0),
-                 "activities": len(d["activities"]) + (report["activities"]["new"] if dry else 0)}
-        if after["deals"] > CRM_DEALS_MAX or after["activities"] > CRM_ACTIVITIES_MAX:
-            report["problems"].append(
-                "This would put the CRM over its size guard. Nothing would be deleted, "
-                "but the limits should be raised first.")
-        report["totals"] = after
-        if not dry:
-            d["pd_imported_at"] = _crm_now()
-        return report
 
     @mcp.custom_route("/api/crm/import", methods=["POST"])
     async def crm_import_route(request: Request):
@@ -17973,21 +18240,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             _forget_store(CRM_PATH)   # a half-made change must not be served
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
-    # ---- Files routes -----------------------------------------------------
-    # The office file server, minus the office. These routes only ever handle
-    # names and signed URLs; the bytes go browser-to-bucket directly.
-    async def _files_guard(request: Request):
-        return await _guard(request)
 
-    def _files_ok(d: dict, extra: Optional[dict] = None, action: str = "",
-                  detail: str = "", who: str = "") -> JSONResponse:
-        _write_files(d)
-        if action:
-            _track(who, "files", action, detail)
-        out = {"ok": True, "store": _files_shape(d)}
-        if extra:
-            out.update(extra)
-        return _json(out)
 
 
     @mcp.custom_route("/api/files/tree", methods=["POST"])
@@ -18314,58 +18567,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             logger.exception("files file op failed")
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
-    # ---- Auth + Team routes -----------------------------------------------
-    # The app's own front door. Every route here still demands the Shopify
-    # embed token first (the perimeter: requests must come from inside the
-    # shop's admin), and then deals in the app's own accounts and sessions.
-    def _shop_gate(request: Request) -> bool:
-        auth = request.headers.get("authorization", "")
-        if not (auth.startswith("Bearer ") and SHOPIFY_API_SECRET):
-            return False
-        try:
-            _verify_session_token(auth[7:])
-            return True
-        except Exception:
-            return False
 
-    async def _auth_guard(request: Request):
-        pre = _pre_checks(request)
-        if pre:
-            return pre, None
-        if not _shop_gate(request):
-            return _json({"error": "Unauthorized"}, 401), None
-        body = await _read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413), None
-        return None, body
 
-    def _clean_username(v) -> str:
-        return re.sub(r"[^a-z0-9@._-]", "", str(v or "").strip().lower())[:80]
 
-    def _find_username(d: dict, username: str) -> Optional[str]:
-        for uid, u in d["users"].items():
-            if not u.get("deleted") and u.get("username") == username:
-                return uid
-        return None
 
-    def _starter_password() -> str:
-        return secrets.token_urlsafe(9)
 
-    def _auth_me(uid: str, u: dict) -> dict:
-        """The account as the BROWSER needs it the moment somebody is in: who
-        they are, what they may open, and the grants the UI must not draw a
-        button for without. One shape, written once - three hand-copied
-        versions of it is exactly how the login reply and the state reply come
-        to disagree about what a person is allowed to do."""
-        return {"id": uid, "name": u.get("name"), "role": u.get("role"),
-                "must_change": bool(u.get("must_change")),
-                "tabs": _user_tabs(uid),
-                # Sending email out as the shop is a per-person grant, and an
-                # admin holds it by rank. Both, separately, because the page
-                # must not offer a switch that would revoke nothing.
-                "can_send": bool(u.get("can_send")),
-                "send_by_rank": (ROLE_LEVELS.get(u.get("role") or "member", 0)
-                                 >= ROLE_LEVELS["admin"])}
 
     @mcp.custom_route("/api/auth/state", methods=["POST"])
     async def auth_state_route(request: Request):
@@ -18692,12 +18898,6 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _track(uid, "auth", "changed their password")
         return _json({"ok": True, "session": token})
 
-    # ---- Team management --------------------------------------------------
-    async def _team_guard(request: Request, min_level: int):
-        err, body, who = await _guard(request, min_level=min_level)
-        if err:
-            return err, None
-        return None, (who, body)
 
     @mcp.custom_route("/api/team/me", methods=["POST"])
     async def team_me_route(request: Request):
@@ -18990,10 +19190,6 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             logger.exception("team user op failed")
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
-    def _team_public_list(d: dict) -> list:
-        users = [_user_public(uid, u) for uid, u in d["users"].items() if not u.get("deleted")]
-        users.sort(key=lambda u: (-ROLE_LEVELS.get(u["role"], 0), u["name"] or "~"))
-        return users
 
     # ---- WebDAV route -----------------------------------------------------
     @mcp.custom_route("/dav{sub_path:path}", methods=["OPTIONS", "PROPFIND", "GET", "HEAD",
@@ -19656,12 +19852,6 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         return _json({"monitored": True, "clocked_in": bool(ws),
                       "session": ({**ws, "secs": secs} if ws else None)})
 
-    def _day_starts():
-        now = datetime.now(timezone.utc)
-        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        week = today - timedelta(days=today.weekday())
-        month = today.replace(day=1)
-        return today.isoformat(), week.isoformat(), month.isoformat()
 
     @mcp.custom_route("/api/work/board", methods=["POST"])
     async def work_board_route(request: Request):
@@ -19909,85 +20099,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             logger.exception("Queue tagging failed")
             return _json({"error": "Couldn't tag the order."}, 500)
 
-    # -----------------------------------------------------------------------
-    # Shipping settings + Dispatch (World Options). The courier API key and
-    # write actions live entirely outside the AI tool registry.
-    # -----------------------------------------------------------------------
-    def _shipping_public(cfg: dict) -> dict:
-        """Config for the UI: everything EXCEPT the credentials (never echoed)."""
-        return {
-            "origin": cfg.get("origin") or {},
-            "boxes": cfg.get("boxes") or [],
-            "default_box_id": cfg.get("default_box_id") or "",
-            "notify_customer": bool(cfg.get("notify_customer", True)),
-            "currency": cfg.get("currency") or "GBP",
-            "plugin_code": cfg.get("plugin_code") or "Web_Service",
-            "plugin_codes": (worldoptions.PLUGIN_CODES if worldoptions else []),
-            "ready_time": cfg.get("ready_time") or "",
-            "close_time": cfg.get("close_time") or "",
-            "collection_option": cfg.get("collection_option") or "I_Need_To_Book_A_Collection",
-            "show_parcelshop": bool(cfg.get("show_parcelshop", False)),
-            "collection_options": (worldoptions.COLLECTION_OPTIONS if worldoptions else []),
-            "collection_by_carrier": (cfg.get("collection_by_carrier")
-                                      if isinstance(cfg.get("collection_by_carrier"), dict) else {}),
-            "collection_messages": COLLECTION_MESSAGES,
-            "carriers": (worldoptions.carrier_choices() if worldoptions else []),
-            "label_size_production": cfg.get("label_size_production") or "4x4",
-            "label_size_shipping": cfg.get("label_size_shipping") or "4x6",
-            "label_stock": list(LABEL_STOCK),
-            "eori": cfg.get("eori") or "",
-            "vat_number": cfg.get("vat_number") or "",
-            "default_hs_code": cfg.get("default_hs_code") or "",
-            "export_reason": cfg.get("export_reason") or "Sale",
-            "export_reasons": (worldoptions.EXPORT_REASONS if worldoptions else []),
-            "duties_payor": cfg.get("duties_payor") or "Duties_To_Be_Paid_By_Receiver",
-            "duties_payors": (worldoptions.DUTIES_PAYORS if worldoptions else []),
-            "trade_term": cfg.get("trade_term") or "",
-            "signature_options": (worldoptions.SIGNATURE_OPTIONS if worldoptions else {}),
-            "base_url": cfg.get("base_url") or "",
-            "connected": bool(worldoptions and worldoptions.configured()),
-            "meter_last4": (worldoptions.meter_last4() if worldoptions else ""),
-            "has_key": bool(worldoptions and worldoptions.has_key()),
-            "has_password": bool(worldoptions and worldoptions.has_password()),
-            "creds_from_env": _wo_creds_from_env(),
-            "available": bool(worldoptions),
-        }
 
-    def _finite(v, places: int = 2) -> float:
-        """A real number or nothing. float("nan") and float("Infinity") both
-        parse, survive round(), and save; the file reads back fine, but every
-        later GET of the config dies inside JSONResponse (allow_nan=False) and
-        the shipping panel cannot be opened again without hand-editing the
-        volume."""
-        n = round(float(v or 0), places)
-        if n != n or n in (float("inf"), float("-inf")):
-            raise ValueError("not a finite measurement")
-        return n
 
-    def _clean_boxes(raw) -> list:
-        out = []
-        for b in (raw or [])[:24]:
-            if not isinstance(b, dict):
-                continue
-            try:
-                box = {
-                    "id": str(b.get("id") or "")[:40] or ("box%d" % (len(out) + 1)),
-                    "name": str(b.get("name") or "Box")[:60],
-                    "width": _finite(b.get("width")),
-                    "length": _finite(b.get("length")),
-                    "depth": _finite(b.get("depth")),
-                    "weight": _finite(b.get("weight"), 3),
-                }
-            except (TypeError, ValueError):
-                continue
-            out.append(box)
-        return out
 
-    def _clean_origin(raw) -> dict:
-        raw = raw if isinstance(raw, dict) else {}
-        keys = ("name", "company", "firstname", "lastname", "street",
-                "postcode", "city", "state", "country", "phone", "email")
-        return {k: str(raw.get(k) or "").strip()[:120] for k in keys}
 
     @mcp.custom_route("/api/shipping/config", methods=["POST"])
     async def shipping_config_route(request: Request):
@@ -20705,19 +20819,6 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         headers={**_API_HEADERS, "Cache-Control": "public, max-age=31536000, immutable"})
 
 
-    def _print_cors(request: Request) -> dict:
-        origin = request.headers.get("origin") or ""
-        base = {"Access-Control-Allow-Headers": "Authorization, Content-Type",
-                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-                "Access-Control-Max-Age": "600"}
-        own_shop = f"https://{SHOPIFY_STORE}.myshopify.com" if SHOPIFY_STORE else ""
-        if origin in _PRINT_ORIGINS or (own_shop and origin == own_shop):
-            return {**base, "Access-Control-Allow-Origin": origin,
-                    "Access-Control-Allow-Credentials": "true", "Vary": "Origin"}
-        # Vary here too: without it a shared cache could store this wildcard
-        # reply and serve it back to an allowlisted origin, breaking the
-        # credentialed print action until the cache expired.
-        return {**base, "Access-Control-Allow-Origin": "*", "Vary": "Origin"}
 
     @mcp.custom_route("/print/production-labels/sign", methods=["POST", "OPTIONS"])
     async def sign_label_doc(request: Request):
@@ -21117,37 +21218,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             logger.exception("Product audit failed")
             return _json({"error": "Couldn't analyze this product. Check the server logs."}, 500)
 
-    # ----- Google OAuth connect flow (one-time, secret-gated) -------------
-    def _redirect_uri(request: Request) -> str:
-        # Prefer a configured public base URL (must match the URI registered in
-        # Google Cloud) over the attacker-controllable Host header.
-        if APP_BASE_URL:
-            return APP_BASE_URL.rstrip("/") + "/oauth/google/callback"
-        host = request.headers.get("host", "")
-        return f"https://{host}/oauth/google/callback"
 
-    def _oauth_page(title: str, msg: str) -> HTMLResponse:
-        # Escape both inputs (any reflected query value is neutralized) and ship a
-        # locked-down CSP: no scripts at all, only inline styles. Defense in depth.
-        t, m = html.escape(str(title)), html.escape(str(msg))
-        body = (f"<!doctype html><meta charset=utf-8><title>{t}</title>"
-                "<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f7f7f8;"
-                "color:#16161a;display:grid;place-items:center;height:100vh;margin:0}"
-                ".c{background:#fff;border:1px solid #e7e7ea;border-radius:14px;padding:28px 32px;"
-                "max-width:420px;text-align:center;box-shadow:0 6px 24px -6px rgba(20,20,40,.1)}"
-                "h1{font-size:17px;margin:0 0 8px}p{color:#5c5f66;font-size:14px;margin:0}</style>"
-                f"<div class=c><h1>{t}</h1><p>{m}</p></div>")
-        headers = {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
-                   "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-                   **_API_HEADERS}
-        return HTMLResponse(body, headers=headers)
 
-    # ----- Xero connect: the accounts side of the reconciliation engine -----
-    def _xero_redirect_uri(request: Request) -> str:
-        if APP_BASE_URL:
-            return APP_BASE_URL.rstrip("/") + "/oauth/xero/callback"
-        host = request.headers.get("host", "")
-        return f"https://{host}/oauth/xero/callback"
 
 
     @mcp.custom_route("/oauth/xero/start", methods=["GET"])
@@ -21672,16 +21744,6 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                            "You can close this tab and return to Reactor.")
 
 
-    # ----- Gmail connect: same shape as the Google one, its own token -----
-    # The mailbox is a DIFFERENT Google account from the analytics one (the
-    # shared address, not the merchant's own), so it gets its own consent
-    # walk and its own token file. The connect URL is gated by the same
-    # server secret; whoever opens it signs in AS the shared mailbox.
-    def _gmail_redirect_uri(request: Request) -> str:
-        if APP_BASE_URL:
-            return APP_BASE_URL.rstrip("/") + "/oauth/gmail/callback"
-        host = request.headers.get("host", "")
-        return f"https://{host}/oauth/gmail/callback"
 
     @mcp.custom_route("/oauth/gmail/start", methods=["GET"])
     async def gmail_start(request: Request):
@@ -21742,15 +21804,6 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         return _oauth_page("✅ Mailbox connected", f"{addr} is now linked. The Inbox tab will "
                            "fill on its next refresh. You can close this tab.")
 
-    # ----- the ACCOUNTS mailbox: a second Google account, for reconciliation -
-    # Same OAuth client and scope as the sales inbox, its own refresh token,
-    # its own consent walk, its own state namespace. The two can never
-    # complete each other's flow, and neither can reach the other's mail.
-    def _gmail_fin_redirect_uri(request: Request) -> str:
-        if APP_BASE_URL:
-            return APP_BASE_URL.rstrip("/") + "/oauth/gmail-finance/callback"
-        host = request.headers.get("host", "")
-        return f"https://{host}/oauth/gmail-finance/callback"
 
     @mcp.custom_route("/oauth/gmail-finance/start", methods=["GET"])
     async def gmail_finance_start(request: Request):

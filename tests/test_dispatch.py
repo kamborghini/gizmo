@@ -18166,6 +18166,76 @@ def t_the_one_writer_refuses_nan_a_poisoned_store_and_keeps_secrets_private():
 
 
 @test
+def t_add_routes_holds_routes_and_nothing_it_could_have_shared():
+    """add_routes was 8,700 lines because forty-two ordinary helpers had been
+    written inside it. None of them touched anything the function builds, so
+    none of them had to be there - and being there meant no test could call
+    them, nothing else in the file could reuse them, and finding one meant
+    reading the route table.
+
+    This recomputes the question rather than pinning a list: any nested
+    function whose free names all resolve at module level could be a module
+    function, so it should be one. The exceptions are the handful that close
+    over the tool registry add_routes is handed, which genuinely cannot."""
+    import ast as _ast, builtins as _bi
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    tree = _ast.parse(src)
+    ar = next(n for n in tree.body if getattr(n, "name", "") == "add_routes")
+
+    module_names = set()
+    for n in tree.body:
+        if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef, _ast.ClassDef)):
+            module_names.add(n.name)
+        elif isinstance(n, (_ast.Import, _ast.ImportFrom)):
+            for a in n.names: module_names.add((a.asname or a.name).split(".")[0])
+        elif isinstance(n, _ast.Assign):
+            for t in _ast.walk(n):
+                if isinstance(t, _ast.Name) and isinstance(t.ctx, _ast.Store): module_names.add(t.id)
+        elif isinstance(n, _ast.AnnAssign) and isinstance(n.target, _ast.Name):
+            module_names.add(n.target.id)
+
+    local_names = {a.arg for a in ar.args.args}
+    for n in ar.body:
+        if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef, _ast.ClassDef)):
+            local_names.add(n.name)
+        elif isinstance(n, (_ast.Assign, _ast.AnnAssign, _ast.For, _ast.With)):
+            for t in _ast.walk(n):
+                if isinstance(t, _ast.Name) and isinstance(t.ctx, _ast.Store): local_names.add(t.id)
+
+    builtin = set(dir(_bi))
+    def free(fn):
+        bound, used = set(), set()
+        for a in _ast.walk(fn):
+            if isinstance(a, _ast.arg): bound.add(a.arg)
+            elif isinstance(a, _ast.Name):
+                (bound if isinstance(a.ctx, _ast.Store) else used).add(a.id)
+            elif isinstance(a, (_ast.FunctionDef, _ast.AsyncFunctionDef, _ast.ClassDef)): bound.add(a.name)
+            elif isinstance(a, (_ast.Import, _ast.ImportFrom)):
+                for al in a.names: bound.add((al.asname or al.name).split(".")[0])
+        return used - bound - builtin
+
+    helpers = [n for n in ar.body if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+               and not any("route" in _ast.unparse(d) for d in n.decorator_list)]
+    liftable, changed = set(), True
+    while changed:
+        changed = False
+        for h in helpers:
+            if h.name in liftable: continue
+            if not ((free(h) & local_names) - module_names - liftable):
+                liftable.add(h.name); changed = True
+    eq(liftable, set(), "these need nothing from add_routes, so they belong at module level")
+
+    # The ones that stay say why: each closes over the registry add_routes is
+    # handed, or over a value built from it.
+    eq({h.name for h in helpers},
+       {"_finish_cancel", "_mail_orders_for", "dispatch_for", "_fin_search", "_fin_thread", "_fin_bytes"},
+       "a nested helper appeared that is not one of the registry-bound six")
+
+    # And it is a route table, not a module in disguise.
+    ok(len(helpers) < 10, "add_routes is holding helpers again")
+
+
+@test
 def t_a_handler_uses_the_caller_it_was_handed_not_one_left_in_a_box():
     """Who is asking is request state, so it travels with the request. The CRM
     doors stashed the caller in one dict shared by every CRM route and read it

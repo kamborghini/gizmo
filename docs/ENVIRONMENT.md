@@ -251,7 +251,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `WO_FAILURES_PATH` | `"/data/wo_failures.json"` | copilot |  |
 | `WO_SECRET_PATH` | `"/data/wo_secret.json"` | copilot |  |
 
-## copilot.py - Shopify -> Xero connector: a separate, audited Node service 
+## copilot.py - Shipping settings + Dispatch (World Options). The courier AP
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
