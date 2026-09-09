@@ -3462,6 +3462,12 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
     ok("(latest.monthly || []).find" in fn and "targets" in fn,
        "the plan's own target sits beside them for comparison")
     ok(".sort(" in fn and "mape" in fn, "ordered by what each scored, best first")
+    # Directors read this table, and none of these names explains itself.
+    ok("name.title = m.about" in fn and "has-help" in fn and "name.tabIndex = 0" in fn,
+       "every source says on hover what it does, what it assumes and when it misleads")
+    ok("helpHead('Typical error'" in fn and "helpHead('Bias'" in fn,
+       "and so do the two columns nobody can be expected to read cold")
+    ok("'Source'" in fn, "the column is what it is: a source, not a model")
     ok("!sn || !sn.available" in fn and "sn.reason" in fn,
        "a run with too little history says so instead of drawing an empty table")
     ok("fcSanityCard(latest, sc)" in SCRIPT, "and the tab actually calls it")

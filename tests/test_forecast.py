@@ -299,13 +299,18 @@ def t_the_plain_models_beat_the_big_one_on_this_shops_history():
     # Every row that produced numbers is in the same ballpark as an October
     # has ever been. AutoETS and AutoTheta come in low (they find no
     # seasonality in 29 points) but nowhere near the 16,436 the old model gave.
+    # Every source and every combination explains itself in plain words.
+    for m in r["models"]:
+        assert m.get("about") and len(m["about"]) > 60, m["name"]
     for m in r["models"]:
         oct_ = (m.get("months") or {}).get("2026-10")
         if oct_ is None:
             continue
         assert 25_000 <= oct_ <= 80_000, f"{m['name']} put October at {oct_}"
     # The simplest model is the best on this history, and it is nearly unbiased.
-    assert r["best"] == "Last year x run rate", r["best"]
+    # Renamed for the people who read this in a board pack: the names on the
+    # page say what a source DOES, and the method is explained on hover.
+    assert r["best"] == "Last year, adjusted for this year", r["best"]
     best = [m for m in r["models"] if m["name"] == r["best"]][0]
     assert best["score"]["mape"] < 0.30, best["score"]
     assert abs(best["score"]["bias"]) < 0.05, best["score"]

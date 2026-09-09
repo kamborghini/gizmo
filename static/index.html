@@ -744,6 +744,12 @@
            turned the metric row into a row of links, and it was promising an
            explanation to a pointer only, so the element takes focus too and
            the underline answers that as well. */
+        /* Anywhere a word needs a sentence behind it: a dotted underline that
+           only appears on hover or focus, so the page is not speckled, and
+           focusable so a keyboard reaches the same explanation a pointer does. */
+        .has-help { cursor: help; text-decoration: underline dotted transparent;
+            text-underline-offset: 3px; transition: text-decoration-color var(--dur) var(--ease); }
+        .has-help:hover, .has-help:focus-visible { text-decoration-color: var(--border-emphasis); }
         .stat .label.has-help { cursor: help; text-decoration: underline dotted transparent;
             text-underline-offset: 3px; transition: text-decoration-color var(--dur) var(--ease); }
         .stat .label.has-help:hover, .stat .label.has-help:focus-visible { text-decoration-color: var(--border-emphasis); }
@@ -9013,7 +9019,11 @@ Projected Image UK"></textarea>
         function fcTable(head, rows, right) {
             const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
             const thead = el('thead'); const hr = el('tr');
-            head.forEach((h, i) => { const th = el('th', null, h); if (right && right[i]) th.style.textAlign = 'right'; hr.append(th); });
+            head.forEach((h, i) => {
+                const th = el('th');
+                if (h instanceof Node) th.append(h); else th.textContent = h == null ? '' : String(h);
+                if (right && right[i]) th.style.textAlign = 'right'; hr.append(th);
+            });
             thead.append(hr); tbl.append(thead);
             const tb = el('tbody');
             rows.forEach(cells => {
@@ -9100,6 +9110,10 @@ Projected Image UK"></textarea>
                    ranked like one, but it is worth being able to see at a
                    glance which rows are combinations rather than sources. */
                 if (m.kind === 'combination') name.append(document.createTextNode(' '), fcChip('', 'average'));
+                /* Directors read this table. Every source carries a sentence
+                   saying what it does, what it assumes and when it misleads,
+                   on hover and on keyboard focus. */
+                if (m.about) { name.title = m.about; name.classList.add('has-help'); name.tabIndex = 0; }
                 const sc2 = m.score || {};
                 return [name].concat(months.map(k => m.error ? 'n/a' : fcMoney((m.months || {})[k])))
                     .concat([sc2.mape == null ? 'n/a' : (sc2.mape * 100).toFixed(0) + '%',
@@ -9112,7 +9126,18 @@ Projected Image UK"></textarea>
                 const r = (latest.monthly || []).find(x => x.month === k);
                 return fcMoney(r ? (r.targets || {})[sc] : null);
             })).concat(['', '', '']);
-            card.append(fcTable(['Model'].concat(months.map(fcMonth)).concat(['Typical error', 'Bias', 'How it works']),
+            const helpHead = (text, about) => {
+                const sp = el('span', 'has-help', text); sp.title = about; sp.tabIndex = 0; return sp;
+            };
+            card.append(fcTable(['Source'].concat(months.map(fcMonth)).concat([
+                    helpHead('Typical error', 'How far out this source usually was. Each was fitted to '
+                        + 'earlier months and marked against what actually happened, three times over. '
+                        + 'Lower is better. Around a quarter is close to the floor for this business, '
+                        + 'because a single large order can be a tenth of a month.'),
+                    helpHead('Bias', 'Whether it leaned high or low on average, rather than how far out it was. '
+                        + 'This matters more than the error: a source that leans high every single month '
+                        + 'quietly makes a plan look safer than it is.'),
+                    'How it works']),
                 rows.concat([plan]),
                 [0].concat(months.map(() => 1)).concat([1, 1, 0])));
             box.append(card);

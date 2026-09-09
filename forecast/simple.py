@@ -135,31 +135,51 @@ def statsforecast_models() -> List[Tuple[str, object]]:
         import statsforecast  # noqa: F401
     except Exception:
         return []
-    return [("AutoETS", _sf("AutoETS", "error, trend and season, auto-chosen")),
-            ("AutoARIMA", _sf("AutoARIMA", "auto-chosen ARIMA")),
-            ("AutoTheta", _sf("AutoTheta", "auto-chosen Theta")),
-            ("AutoCES", _sf("AutoCES", "complex exponential smoothing"))]
+    return [
+        ("Auto-fitted level, trend and season", _sf("AutoETS", "AutoETS"),
+         "Tries every combination of level, trend and season, additive or multiplicative, and "
+         "keeps whichever fits your history best. With only a few years it often concludes "
+         "there is no season at all, which is why it can return the same figure every month."),
+        ("Auto-fitted ARIMA", _sf("AutoARIMA", "AutoARIMA"),
+         "The textbook statistical family: it predicts each month from the months before it and "
+         "from its own past mistakes, choosing the form automatically. Powerful on long "
+         "histories and unstable on short ones."),
+        ("Auto-fitted trend and smoothing", _sf("AutoTheta", "AutoTheta"),
+         "The Theta method again, with its settings chosen automatically rather than fixed."),
+        ("Auto-fitted complex smoothing", _sf("AutoCES", "AutoCES"),
+         "A newer relative of exponential smoothing, built to cope with seasonal patterns that "
+         "change shape from year to year."),
+    ]
 
 
+# name -> (function, what it is in plain words). The blurb is written for
+# someone reading a board pack, not for someone who already knows the method:
+# what it does, what it assumes, and when it misleads. It reaches the page as
+# the hover text on the source's name.
 MODELS = (
-    ("Last year x run rate", last_year_times_run_rate),
-    ("Seasonal share of year", seasonal_share),
-    ("Holt-Winters, flat", holt_winters_flat),
-    ("Holt-Winters, trend", holt_winters_trend),
-    ("Theta", theta),
+    ("Last year, adjusted for this year", last_year_times_run_rate,
+     "Takes the same month last year and scales it by how this year has been trading against "
+     "last. It assumes the shape of your year repeats and that the change in level continues. "
+     "It misleads when last year's month was itself unusual."),
+    ("A typical month, shared out", seasonal_share,
+     "Takes an average month from the last year and shares the year out by each month's usual "
+     "portion of trade. It assumes a steady business with a repeating season. It misleads when "
+     "the level of trading has shifted, because it averages the old level back in."),
+    ("Smoothed level and season", holt_winters_flat,
+     "Exponential smoothing: a level that updates as each month arrives, plus a repeating "
+     "seasonal pattern, and no trend. A standard method since the 1960s. It needs several years "
+     "of history to learn a season properly."),
+    ("Smoothed level, season and trend", holt_winters_trend,
+     "The same, but also allowed a trend that flattens off rather than running away. More "
+     "responsive when direction changes, and more likely to over-read a short run of good or "
+     "bad months."),
+    ("Trend and smoothing, averaged", theta,
+     "The Theta method. It strips the season out, averages a straight-line trend with a simple "
+     "smoothing of the same history, then puts the season back. It won the M3 forecasting "
+     "competition by being exactly this simple."),
 )
 
 
-# --- combining them ---------------------------------------------------------
-# Averaging several forecasts usually beats the best single one; that is the
-# oldest reliable finding in the field. It is not guaranteed, and on this shop
-# it may well not, because most of the models lean HIGH by 15-57% and an
-# average of biased forecasts is a biased average. So the combinations are
-# scored exactly like the models are, on the same folds, and take their place
-# in the same table. If the average wins it wins on the evidence.
-#
-# All three are leakage-free: none of them needs to know which model scored
-# best, so none of them is quietly reading the answer sheet.
 def _median(m: np.ndarray) -> np.ndarray:
     return np.nanmedian(m, axis=0)
 
@@ -180,9 +200,18 @@ def _trimmed(m: np.ndarray) -> np.ndarray:
     return np.array(out)
 
 
-COMBINERS = (("Average of all", _mean, "the plain mean of every model above"),
-             ("Median of all", _median, "the middle one, so an outlier cannot carry it"),
-             ("Average, trimmed", _trimmed, "highest and lowest dropped, then averaged"))
+COMBINERS = (
+    ("Average of every source", _mean, "the plain mean of every source above",
+     "The straight average of every source above. Averaging several forecasts usually beats "
+     "most single ones, because their individual mistakes partly cancel out. It cannot correct "
+     "a mistake they all share, which is why it is scored here rather than trusted."),
+    ("Middle of every source", _median, "the middle one, so an outlier cannot carry it",
+     "The middle value of all the sources. It ignores how far out the extremes are, so a single "
+     "wild forecast cannot pull the answer towards it."),
+    ("Average, extremes removed", _trimmed, "highest and lowest dropped, then averaged",
+     "Drops the highest and the lowest source, then averages what is left. Keeps most of the "
+     "benefit of averaging while stopping one outlier from carrying the answer."),
+)
 
 
 def _folds(y: pd.Series, folds: int = 3, h: int = 3) -> List[Tuple[int, int]]:
@@ -206,12 +235,12 @@ def _errors_to_score(errs: List[float]) -> Dict[str, Optional[float]]:
 def _backtest_all(y: pd.Series, models: List[Tuple[str, object]], folds: int, h: int):
     """Every model on every fold, once, so the models AND the combinations of
     them are scored on exactly the same months."""
-    per_model: Dict[str, List[float]] = {n: [] for n, _ in models}
-    per_combo: Dict[str, List[float]] = {n: [] for n, _, _ in COMBINERS}
+    per_model: Dict[str, List[float]] = {m[0]: [] for m in models}
+    per_combo: Dict[str, List[float]] = {c[0]: [] for c in COMBINERS}
     for cut, hh in _folds(y, folds, h):
         act = y.iloc[cut:cut + hh]
         preds, order = {}, []
-        for name, fn in models:
+        for name, fn, _blurb in models:
             try:
                 f, _ = fn(y.iloc[:cut], hh)
             except Exception:
@@ -228,7 +257,7 @@ def _backtest_all(y: pd.Series, models: List[Tuple[str, object]], folds: int, h:
         for name in order:
             per_model[name] += [v for v in (preds[name] - a) / safe if np.isfinite(v)]
         stack = np.vstack([preds[n] for n in order])
-        for cname, fn, _ in COMBINERS:
+        for cname, fn, _n, _b in COMBINERS:
             per_combo[cname] += [v for v in (fn(stack) - a) / safe if np.isfinite(v)]
     return ({n: _errors_to_score(e) for n, e in per_model.items()},
             {n: _errors_to_score(e) for n, e in per_combo.items()})
@@ -259,24 +288,25 @@ def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
 
     months = [str(p) for p in _future_index(monthly, horizon)]
     out, live = [], {}
-    for name, fn in models:
+    for name, fn, blurb in models:
         try:
             f, note = fn(monthly, horizon)
         except Exception as e:          # one source failing must not lose the rest
-            out.append({"name": name, "kind": "model", "error": f"{type(e).__name__}: {e}"[:200],
+            out.append({"name": name, "kind": "model", "about": blurb,
+                        "error": f"{type(e).__name__}: {e}"[:200],
                         "score": mscore.get(name, _errors_to_score([]))})
             continue
         vals = {str(p): (None if not np.isfinite(v) else round(float(v), 2)) for p, v in f.items()}
         live[name] = [vals.get(k) for k in months]
-        out.append({"name": name, "kind": "model", "note": note, "months": vals,
+        out.append({"name": name, "kind": "model", "note": note, "about": blurb, "months": vals,
                     "score": mscore.get(name, _errors_to_score([]))})
 
     stack = None
     if live:
         stack = np.array([[np.nan if v is None else v for v in live[n]] for n in live], dtype=float)
-        for cname, fn, note in COMBINERS:
+        for cname, fn, note, blurb in COMBINERS:
             vals = fn(stack)
-            out.append({"name": cname, "kind": "combination", "note": note,
+            out.append({"name": cname, "kind": "combination", "note": note, "about": blurb,
                         "months": {k: (None if not np.isfinite(v) else round(float(v), 2))
                                    for k, v in zip(months, vals)},
                         "score": cscore.get(cname, _errors_to_score([]))})

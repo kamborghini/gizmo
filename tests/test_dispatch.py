@@ -12304,6 +12304,27 @@ def t_the_forecast_is_many_sources_ranked_by_what_each_was_worth():
 
     for fn in ("last_year_times_run_rate", "seasonal_share", "holt_winters_flat",
                "holt_winters_trend", "theta"):
+        ok("def " + fn + "(" in simple, fn + " is one of the sources")
+    ok("def statsforecast_models(" in simple and "AutoETS" in simple and "AutoARIMA" in simple,
+       "the statsforecast family joins as more voices")
+    ok("except Exception:\n        return []" in simple,
+       "and is OPTIONAL at runtime: an image built without it must still forecast")
+    ok("COMBINERS = (" in simple and '"Average of every source"' in simple
+       and '"Middle of every source"' in simple and '"Average, extremes removed"' in simple,
+       "combinations of the sources are offered, including a plain average")
+    ok('"kind": "combination"' in simple and '"kind": "model"' in simple,
+       "and a combination is marked as one, so the reader knows what they are reading")
+    bt = simple.split("def _backtest_all(", 1)[1].split("\ndef ", 1)[0]
+    ok("per_combo[cname] += " in bt,
+       "combinations are scored on the SAME folds as the sources, not assumed better: "
+       "an average of forecasts that all lean high leans high")
+    ok('"about": blurb' in simple,
+       "every source carries a plain-English explanation for whoever reads the board pack")
+    ok("Last year, adjusted for this year" in simple and "Average, extremes removed" in simple,
+       "and is NAMED for what it does, not for the paper it came from")
+
+    for fn in ("last_year_times_run_rate", "seasonal_share", "holt_winters_flat",
+               "holt_winters_trend", "theta"):
         ok("def " + fn + "(" in simple, fn + " is one of the five")
     ok("MIN_MONTHS = 24" in simple, "two full years before a seasonal model may speak")
     ok('"score": mscore.get(' in simple and '"score": cscore.get(' in simple,
