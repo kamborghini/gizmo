@@ -1010,6 +1010,33 @@ def t_the_deal_board_can_be_worked_without_a_mouse():
 
 
 @test
+def t_a_thumb_inside_a_track_takes_the_track_radius_minus_the_gap():
+    """Concentric corners. A rounded thumb inside a rounded track has to take
+    the track's radius MINUS the gap, or the two curves are not parallel and
+    the thumb reads as a slightly wrong shape rattling in its slot.
+
+    Picking the inner radius off the token scale by eye is what goes stale:
+    these two tracks used the SAME 8px thumb with different padding, so .seg
+    was concentric by luck (10 - 2 = 8) and .lbl-seg was 2px out (10 - 4 wants
+    6). Deriving it means the thumb follows the track, so changing either the
+    radius or the padding cannot silently break the corner. SwiftUI ships a
+    shape for this (ConcentricRectangle); on the web it is one subtraction, as
+    long as it is written down instead of guessed."""
+    # Anchored at the start of the rule: ".seg {" is also a substring of
+    # ".lbl-seg {", which silently matched the wrong control.
+    for track, thumb in ((r"\.lbl-seg \{", r"\.lbl-segbtn \{"), (r"\.seg \{", r"\.seg button \{")):
+        tm = re.search(r"(?m)^\s*" + track + r"([^}]*)\}", CSS)
+        bm = re.search(r"(?m)^\s*" + thumb + r"([^}]*)\}", CSS)
+        ok(tm and bm, "both halves of the control are still one rule each")
+        ok("--track-r:" in tm.group(1) and "--track-pad:" in tm.group(1),
+           "the track names its own radius and gap: " + track)
+        ok("border-radius: var(--track-r)" in tm.group(1),
+           "and rounds itself with them: " + track)
+        ok("calc(var(--track-r) - var(--track-pad))" in bm.group(1),
+           "the thumb derives its radius from the track rather than picking one: " + thumb)
+
+
+@test
 def t_a_write_that_failed_is_never_shown_as_a_write_that_worked():
     """A control that changes something on the server must not move until the
     server says it moved. The nightly schedule switch flipped its own class

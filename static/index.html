@@ -1659,12 +1659,24 @@
            the CRM's Insights and the Production Manager's Custom Shipments
            were unreachable on a phone. Wrapping keeps every segment tappable
            inside the same track. */
+        /* CONCENTRIC CORNERS. A rounded thumb sitting inside a rounded track
+           has to take the track's radius MINUS the gap between them, or the
+           two curves are not parallel and the thumb reads as a slightly wrong
+           shape rattling inside its slot. Picking the inner radius from the
+           token scale by eye is what goes stale: these two tracks used the
+           same 8px thumb with DIFFERENT padding, so one was concentric by luck
+           (10 - 2 = 8) and this one was 2px out (10 - 4 wants 6, it had 8).
+           Deriving it means the thumb follows the track: change either the
+           radius or the padding and the corner stays parallel by itself.
+           SwiftUI has a shape for this, ConcentricRectangle; on the web it is
+           one subtraction, as long as it is written down rather than guessed. */
         .lbl-seg { display: inline-flex; flex-wrap: wrap; gap: 0; background: var(--surface-tertiary);
             border: 0; max-width: 100%;
-            border-radius: var(--radius-md); padding: var(--sp-1); margin-bottom: var(--sp-3); }
+            --track-r: var(--radius-md); --track-pad: var(--sp-1);
+            border-radius: var(--track-r); padding: var(--track-pad); margin-bottom: var(--sp-3); }
         .lbl-segbtn { background: transparent; border: 0; color: var(--text-tertiary); font: inherit; font-size: var(--text-sm);
             font-weight: var(--weight-medium); line-height: var(--lh-control); padding: var(--sp-0-5) var(--sp-1-5);
-            border-radius: var(--radius-sm); cursor: pointer; }
+            border-radius: calc(var(--track-r) - var(--track-pad)); cursor: pointer; }
         .lbl-segbtn:is(.on, [aria-pressed="true"]) { background: var(--surface-primary); color: var(--text-primary); box-shadow: var(--ring-default); }
         .lbl-segbtn:hover { color: var(--text-primary); }
         .lbl-segbtn:active { background: var(--surface-sunken); }
@@ -3167,12 +3179,17 @@
            every button and field in the app is, and the reference's own tab
            strip measures the same 32. At 4px it stood 4px proud of the toolbar
            it sits in. */
-        .seg { display: inline-flex; background: var(--surface-tertiary); border: 0; border-radius: var(--radius-md); padding: var(--sp-0-5); gap: 0; }
+        /* Concentric, the same way. This one already happened to be right;
+           writing the relation down is what keeps it right when somebody
+           changes the padding. */
+        .seg { display: inline-flex; background: var(--surface-tertiary); border: 0;
+            --track-r: var(--radius-md); --track-pad: var(--sp-0-5);
+            border-radius: var(--track-r); padding: var(--track-pad); gap: 0; }
         /* Its own leading, or the control is as tall as whatever it is dropped
            into: with no line-height of its own it inherited the 28px line box
            of a section heading and rendered 44px there against 34px in a
            toolbar. 20 + 4 + 4 is the 28px every small control in the app is. */
-        .seg button { border: 0; background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); line-height: var(--lh-control); padding: var(--sp-0-5) var(--sp-1-5); border-radius: var(--radius-sm); transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+        .seg button { border: 0; background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); line-height: var(--lh-control); padding: var(--sp-0-5) var(--sp-1-5); border-radius: calc(var(--track-r) - var(--track-pad)); transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
         .seg button:hover { color: var(--text-primary); }        .seg button:is(.on, [aria-pressed="true"]) { background: var(--surface-primary); color: var(--text-primary); box-shadow: var(--ring-default); font-weight: var(--weight-medium); }
         .seg button:active { background: var(--surface-sunken); }
 
