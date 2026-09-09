@@ -157,6 +157,36 @@
                year of one-off edits leaves behind. One 2px scale, and the
                nearest step wins. These size the GLYPH; the box around it is a
                control height, which is a different token. */
+            /* Square boxes and status dots. Forty-eight rules set an equal width
+               and height between them, in twenty-one different sizes - 22, 26,
+               30, 34 and 42 all appeared once or twice each, which is drift,
+               not intent. Boxes step by four, dots by two, and the nearest
+               step wins. A 1px rule and the scrollbar's own 11px are not boxes
+               and keep their values. */
+            --box-xs: 16px; --box-sm: 20px; --box-md: 24px; --box-lg: 28px;
+            --box-xl: 36px; --box-2xl: 40px;
+            --dot-sm: 6px; --dot-md: 8px; --dot-lg: 10px;
+            /* A switch is a track with a knob derived from it. */
+            --switch-w: 32px; --switch-h: 18px; --switch-inset: 2px;
+            /* Field widths. An input sized to what it holds is a real need - a
+               two-letter country code should not be as wide as a description -
+               but it was being met by writing a pixel into eight screens, in
+               six different values. One 8px-grid scale, named by what fits. */
+            --field-w-xs: 56px;    /* a 2 to 3 character code */
+            --field-w-sm: 96px;    /* a short code or a small number */
+            --field-w-md: 112px;   /* a count, a date part */
+            --field-w-lg: 176px;   /* a picker */
+            --field-w-xl: 416px;   /* a sentence */
+            /* A scroller inside a modal that must not grow past the fold. */
+            --scroll-max: 360px;
+            /* Chart geometry. The plot frame was four numbers written out twice,
+               once in trendChart and once in barChart, with two DIFFERENT
+               default heights (220 and 230) - so "change the chart spacing"
+               meant finding both and hoping. The dot radius and the line weight
+               were a third and fourth place. One definition, read by both. */
+            --chart-pad-l: 40px; --chart-pad-r: 0px; --chart-pad-t: 14px; --chart-pad-b: 30px;
+            --chart-h: 220px; --chart-h-tall: 300px;
+            --chart-dot-r: 3.5px; --chart-stroke: 1.4px;
             --icon-xs: 12px; --icon-sm: 14px; --icon-md: 16px; --icon-lg: 18px; --icon-xl: 20px;
             /* The content column, moved here from a second :root block that sat
                three hundred lines further down: a global value must have one
@@ -226,7 +256,7 @@
             transition: background var(--dur) var(--ease); }
         .brand:hover { background: var(--surface-tertiary); }
         .brand:active { background: var(--surface-sunken); }
-        .brand .logo { width: 16px; height: 16px; display: grid; place-items: center; color: var(--text-primary); flex: none; }
+        .brand .logo { width: var(--box-xs); height: var(--box-xs); display: grid; place-items: center; color: var(--text-primary); flex: none; }
         .brand .logo svg { width: var(--icon-md); height: var(--icon-md); }
         /* The reference's first group: one primary button, full width, with
            the same 8px inset as everything else in the column. */
@@ -512,7 +542,7 @@
         .ov-hero:has(+ .page-tabs) p { min-height: 60px; }
         /* No icon beside a page title: the reference does not have one on any
            of its pages, and at 30px the title carries the page on its own. */
-        .ov-hero .badge { width: 36px; height: 36px; border-radius: var(--radius-sm); background: var(--surface-tertiary); color: var(--text-secondary);
+        .ov-hero .badge { width: var(--box-xl); height: var(--box-xl); border-radius: var(--radius-sm); background: var(--surface-tertiary); color: var(--text-secondary);
             display: grid; place-items: center; flex-shrink: 0; box-shadow: var(--ring-line); }
         .ov-hero .badge svg { width: var(--icon-lg); height: var(--icon-lg); }
         /* No icon beside a page title. The reference does not have one on any
@@ -583,7 +613,7 @@
            is the reference's own icon-to-label step, so the tile sets no margin
            of its own. --surface-tertiary under --text-tertiary keeps it quieter than anything
            it introduces. */
-        .stat-ic { width: 28px; height: 28px; flex: none; border-radius: var(--radius-md);
+        .stat-ic { width: var(--box-lg); height: var(--box-lg); flex: none; border-radius: var(--radius-md);
             border: var(--bw-hairline) solid var(--border-default); background: var(--surface-tertiary); color: var(--text-tertiary);
             display: grid; place-items: center; }
         .stat-ic svg { width: var(--icon-md); height: var(--icon-md); display: block; }
@@ -720,7 +750,7 @@
            carries a ring that fills with a tick when it is the filter set. */
         .stat.stat-open { cursor: pointer; }
         .stat.stat-open:hover, .stat.stat-pick:hover { border-color: var(--border-strong); background: var(--surface-secondary); }
-        .stat-act { position: absolute; top: var(--sp-4); right: var(--sp-4); width: 16px; height: 16px; display: grid; place-items: center; color: var(--text-tertiary); transition: color var(--dur) var(--ease), background var(--dur) var(--ease); }
+        .stat-act { position: absolute; top: var(--sp-4); right: var(--sp-4); width: var(--box-xs); height: var(--box-xs); display: grid; place-items: center; color: var(--text-tertiary); transition: color var(--dur) var(--ease), background var(--dur) var(--ease); }
         .stat-act svg { width: var(--icon-md); height: var(--icon-md); display: block; }
         .stat:hover > .stat-act, .stat:focus-visible > .stat-act { color: var(--text-primary); }
         .stat:has(> .stat-act) > .label { padding-right: var(--sp-6); }
@@ -730,6 +760,12 @@
         .stat-pick:is(.on, [aria-pressed="true"]) > .stat-act { background: var(--action-primary); border-color: var(--action-primary); color: var(--white); }
         /* The list behind a KPI: the figure, what the list is, then the rows. */
         .modal.smodal { max-width: 640px; }
+        /* Reading an email is prose, so it takes a narrower measure than the
+           dispatch form the mail modal is otherwise shaped like. A variant,
+           because three screens were each writing their own pixel into an
+           inline style - which is the one thing a component must not let its
+           callers do. */
+        .modal.mreader { max-width: 680px; }
         .stat-detail-sum { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); margin-bottom: var(--sp-4); }
         .stat-detail-sum .value { font-size: var(--text-2xl); letter-spacing: -.025em; line-height: var(--lh-snug); }
         .stat-detail-sum.warn .value { color: var(--warning); }
@@ -748,12 +784,12 @@
         .stat-edit { cursor: grab; outline: var(--bw-hairline) dashed var(--border-emphasis); outline-offset: -1px; }
         .stat-edit.dragging { opacity: .45; }
         .stat-hidden { opacity: .4; }
-        .stat-hide { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; border-radius: var(--radius-xs); border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-tertiary); color: var(--text-tertiary); display: grid; place-items: center; cursor: pointer; z-index: 3; padding: 0; }
+        .stat-hide { position: absolute; top: 8px; right: 8px; width: var(--box-md); height: var(--box-md); border-radius: var(--radius-xs); border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-tertiary); color: var(--text-tertiary); display: grid; place-items: center; cursor: pointer; z-index: 3; padding: 0; }
         .stat-hide:hover { color: var(--text-primary); border-color: var(--border-emphasis); }
         .stat-hide:active { background: var(--surface-sunken); }
         .stat-hide svg, .stat-move svg { width: var(--icon-xs); height: var(--icon-xs); }
         /* HTML5 drag never fires from touch, so reordering needs a button path too. */
-        .stat-move { position: absolute; top: 8px; width: 22px; height: 22px; border-radius: var(--radius-xs); border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-tertiary); color: var(--text-tertiary); display: grid; place-items: center; cursor: pointer; z-index: 3; padding: 0; }
+        .stat-move { position: absolute; top: 8px; width: var(--box-md); height: var(--box-md); border-radius: var(--radius-xs); border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-tertiary); color: var(--text-tertiary); display: grid; place-items: center; cursor: pointer; z-index: 3; padding: 0; }
         .stat-move:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-emphasis); }
         .stat-move:disabled { color: var(--text-disabled); border-color: var(--border-default); cursor: not-allowed; }
         .stat-move.fwd { right: 34px; }
@@ -867,7 +903,7 @@
         /* Store-knowledge card */
         .know { padding: var(--sp-4) var(--sp-5); margin-bottom: var(--sp-5); }
         .know-head { display: flex; align-items: flex-start; gap: var(--sp-3); }
-        .know-ic { width: 34px; height: 34px; border-radius: var(--radius-md); background: var(--action-soft); color: var(--action-primary); display: grid; place-items: center; flex-shrink: 0; box-shadow: var(--ring-line); }
+        .know-ic { width: var(--box-xl); height: var(--box-xl); border-radius: var(--radius-md); background: var(--action-soft); color: var(--action-primary); display: grid; place-items: center; flex-shrink: 0; box-shadow: var(--ring-line); }
         .know-ic svg { width: var(--icon-lg); height: var(--icon-lg); }
         .know-title { font-weight: var(--weight-medium); font-size: var(--text-sm); letter-spacing: -.01em; }
         .know-sub { color: var(--text-secondary); font-size: var(--text-xs); margin-top: var(--sp-1); line-height: var(--lh-body); }
@@ -887,7 +923,7 @@
         .prod-row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2-5) var(--sp-3); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md);
             background: var(--surface-primary); box-shadow: var(--shadow-sm); margin-bottom: var(--sp-2); cursor: pointer; text-align: left; width: 100%; font: inherit; color: var(--text-primary); transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
         .prod-row:hover { border-color: var(--action-line); background: var(--surface-tertiary); }
-        .prod-thumb { width: 42px; height: 42px; border-radius: var(--radius-sm); object-fit: cover; background: var(--surface-sunken); flex-shrink: 0; }
+        .prod-thumb { width: var(--box-2xl); height: var(--box-2xl); border-radius: var(--radius-sm); object-fit: cover; background: var(--surface-sunken); flex-shrink: 0; }
         .prod-main { flex: 1; min-width: 0; }
         .prod-name { font-weight: var(--weight-medium); font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .prod-sub { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--sp-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -956,7 +992,7 @@
         .insights { display: flex; flex-direction: column; gap: var(--sp-2); }
         .insight { display: flex; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-lg); border: var(--bw-hairline) solid var(--border-default);
             background: var(--surface-primary); box-shadow: var(--shadow-sm); animation: fadeUp .4s ease backwards; }
-        .insight .ico { width: 26px; height: 26px; border-radius: var(--radius-sm); display: grid; place-items: center; flex-shrink: 0; margin-top: 0; }
+        .insight .ico { width: var(--box-lg); height: var(--box-lg); border-radius: var(--radius-sm); display: grid; place-items: center; flex-shrink: 0; margin-top: 0; }
         .insight .ico svg { width: var(--icon-sm); height: var(--icon-sm); }
         .insight .t { font-weight: var(--weight-medium); font-size: var(--text-sm); margin: var(--sp-px) 0 var(--sp-1); letter-spacing: -.01em; }
         .insight .d { color: var(--text-secondary); font-size: var(--text-sm); line-height: var(--lh-body); }
@@ -1183,7 +1219,7 @@
            radio button; the radius ladder simply bottoms out above what a small
            square control needs. The 2px top margin keeps it optically centred
            on the 21px first line of .action .text. */
-        .action .check { width: 16px; height: 16px; border-radius: var(--radius-2xs); border: var(--bw-hairline) solid var(--border-emphasis); flex-shrink: 0; margin-top: var(--sp-0-5);
+        .action .check { width: var(--box-xs); height: var(--box-xs); border-radius: var(--radius-2xs); border: var(--bw-hairline) solid var(--border-emphasis); flex-shrink: 0; margin-top: var(--sp-0-5);
             display: grid; place-items: center; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
         .action .check svg { width: var(--icon-xs); height: var(--icon-xs); opacity: 0; color: var(--text-on-action); }
         .action.done .check { background: var(--success); border-color: var(--success); }
@@ -1289,7 +1325,7 @@
         .pchat-send { flex-shrink: 0; padding: 0; width: var(--control-h); height: var(--control-h); min-height: var(--control-h); display: grid; place-items: center; }
         .pchat-send svg { width: var(--icon-md); height: var(--icon-md); }
         /* customer sector selector */
-        .lbl-segbtn .cdot { display: inline-block; margin-left: var(--sp-1-5); vertical-align: middle; width: 6px; height: 6px; border-radius: var(--radius-circle); background: var(--success); }
+        .lbl-segbtn .cdot { display: inline-block; margin-left: var(--sp-1-5); vertical-align: middle; width: var(--dot-sm); height: var(--dot-sm); border-radius: var(--radius-circle); background: var(--success); }
         .seclink { background: transparent; border: 0; color: var(--action-primary); font: inherit; font-weight: var(--weight-medium); cursor: pointer; padding: 0; text-align: left; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
         .seclink:hover { text-decoration: underline; }
         /* what-changed digest */
@@ -1303,7 +1339,7 @@
         .alerts-clear { margin-left: auto; background: transparent; border: 0; color: var(--text-tertiary); font: inherit; font-size: var(--text-xs); font-weight: var(--weight-medium); cursor: pointer; }
         .alerts-clear:hover { color: var(--text-primary); }
         .alert-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; border-top: var(--bw-hairline) solid var(--border-default); font-size: var(--text-sm); }
-        .alert-row .adot { width: 7px; height: 7px; border-radius: var(--radius-circle); flex-shrink: 0; }
+        .alert-row .adot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex-shrink: 0; }
         .alert-row .adot.up { background: var(--success); } .alert-row .adot.down { background: var(--error); } .alert-row .adot.flat { background: var(--text-tertiary); }
         .alert-row .a-tab { font-size: var(--text-xs); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); }
         .alert-row .a-metric { flex: 1; color: var(--text-primary); }
@@ -1702,8 +1738,8 @@
         .disp-boxedit { display: flex; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-2); }
         .disp-boxedit > select, .disp-boxedit > input { height: 36px; box-sizing: border-box; }
         .disp-boxedit > select.psel { min-width: 168px; padding: var(--sp-2) var(--sp-2); font-size: var(--text-sm); }
-        .disp-boxedit .icon-btn { width: 30px; height: 30px; flex: none; }
-        .disp-boxedit > input.disp-boxdef { width: 17px; height: 17px; flex: none;
+        .disp-boxedit .icon-btn { width: var(--box-lg); height: var(--box-lg); flex: none; }
+        .disp-boxedit > input.disp-boxdef { width: var(--box-xs); height: var(--box-xs); flex: none;
             accent-color: var(--action-primary); cursor: pointer; margin: 0; }
         .disp-addbox { margin-top: var(--sp-2); }
         .disp-insure { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-5) 0 0;
@@ -1758,7 +1794,7 @@
         /* Updates: release notes and the request box. */
         /* The sidebar's one inset, 12px from each edge, is kept by .nav,
            .convos and both buttons above. */
-        .nav-new-dot { width: 7px; height: 7px; border-radius: var(--radius-circle); background: var(--action-primary);
+        .nav-new-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); background: var(--action-primary);
             flex: none; margin-left: auto; }
         /* Beta: quieter than a warning, louder than nothing. It sits where the
            unread dot sits, so the nav keeps one right-hand column. */
@@ -1767,7 +1803,7 @@
            at once invites filling in the one you did not pick. */
         .sr-opt { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-2) 0;
             font-size: var(--text-sm); cursor: pointer; }
-        .sr-opt input { margin-top: var(--sp-1); flex: none; width: 16px; height: 16px;
+        .sr-opt input { margin-top: var(--sp-1); flex: none; width: var(--box-xs); height: var(--box-xs);
             accent-color: var(--action-primary); cursor: pointer; }
         .sr-pane { padding: 0 0 var(--sp-3) var(--sp-6); }
         .sr-hits { display: flex; flex-direction: column; gap: var(--sp-1); max-height: 190px;
@@ -1877,8 +1913,8 @@
         .crm-card-who { font-size: var(--text-sm); color: var(--text-tertiary); margin-top: var(--sp-px); }
         .crm-card-bot { display: flex; align-items: center; gap: var(--sp-1-5); margin-top: var(--sp-2); font-size: var(--text-sm); }
         .crm-card-val { font-weight: var(--weight-medium); }
-        .crm-dot { width: 8px; height: 8px; border-radius: var(--radius-circle); flex: none; }
-        .crm-av { width: 20px; height: 20px; border-radius: var(--radius-circle); background: var(--surface-sunken);
+        .crm-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex: none; }
+        .crm-av { width: var(--box-sm); height: var(--box-sm); border-radius: var(--radius-circle); background: var(--surface-sunken);
             color: var(--text-secondary); font-size: var(--text-xs); font-weight: var(--weight-medium); display: grid;
             place-items: center; flex: none; }
         .crm-ai { margin-left: auto; display: inline-flex; }
@@ -1917,7 +1953,7 @@
            (orange against amber was the same near-miss). One solid dot per
            card is the colour key; presence is the ring beside it, so the pair
            reads as two facts rather than one repeated. */
-        .mail-presence { width: 8px; height: 8px; border-radius: var(--radius-circle); flex: none;
+        .mail-presence { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex: none;
             background: transparent; box-shadow: inset 0 0 0 var(--bw-strong) var(--border-emphasis); }
         .mail-presence.office { box-shadow: inset 0 0 0 var(--bw-strong) var(--success); }
         .mail-presence.home { box-shadow: inset 0 0 0 var(--bw-strong) var(--warning); }
@@ -2005,11 +2041,11 @@
         /* 16, the size every other tick in the app is drawn at (.fslot input,
            .tm-tabpick input, .sr-opt input). Two areas were a pixel either
            side of it for the same gesture. */
-        .mail-check { width: 16px; height: 16px; flex: none; margin: 0; accent-color: var(--action-primary); cursor: pointer; }
+        .mail-check { width: var(--box-xs); height: var(--box-xs); flex: none; margin: 0; accent-color: var(--action-primary); cursor: pointer; }
         /* A 15px tick is a miss under a finger, and this one selects the email
            a bulk action is about to run on. */
-        @media (hover: none) { .mail-check { width: 24px; height: 24px; } }
-        .mdot { width: 7px; height: 7px; border-radius: var(--radius-circle); flex: none; background: var(--border-emphasis); }
+        @media (hover: none) { .mail-check { width: var(--box-md); height: var(--box-md); } }
+        .mdot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex: none; background: var(--border-emphasis); }
         .mdot.unassigned { background: var(--warning); }
         .mdot.assigned { background: var(--action-primary); }
         .mdot.progress { background: var(--success); }
@@ -2039,7 +2075,7 @@
            a Pipedrive label coloured url(//evil.co/a) beaconed every render. */
         /* The dot is the key to the code, so it takes the SOLID colour: a 10%
            wash is invisible at 8px. Same names, different strength. */
-        .who-dot { width: 8px; height: 8px; border-radius: var(--radius-circle); flex: none;
+        .who-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex: none;
             display: inline-block; margin-right: var(--sp-0-5); background: var(--text-tertiary); }
         .who-dot.own-red    { background: var(--owner-red); }
         .who-dot.own-orange { background: var(--owner-orange); }
@@ -2250,7 +2286,7 @@
         .crm-zone.dragover { background: var(--surface-sunken); }
         .crm-badge { background: var(--error); color: var(--text-on-action); border-radius: var(--radius-xs); font-size: var(--text-xs);
             font-weight: var(--weight-medium); padding: 0 var(--sp-1-5); margin-left: var(--sp-1-5); }
-        .crm-new-dot { width: 8px; height: 8px; border-radius: var(--radius-circle); background: var(--action-primary); flex: none; }
+        .crm-new-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); background: var(--action-primary); flex: none; }
         .crm-chev { display: flex; gap: var(--sp-0-5); margin: var(--sp-2) 0 var(--sp-1); }
         .crm-chev-s { flex: 1; padding: var(--sp-2) var(--sp-0-5); background: var(--surface-sunken); cursor: pointer;
             font-size: var(--text-xs); text-align: center; color: var(--text-secondary); white-space: nowrap;
@@ -2296,7 +2332,7 @@
            reason the selects and the segmented track are: one control carrying
            its own height sets the height of the whole row. */
         .crm-types { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
-        .tbl-tools .crm-ticon { width: 28px; height: 28px; }
+        .tbl-tools .crm-ticon { width: var(--box-lg); height: var(--box-lg); }
         .crm-ticon { width: var(--control-h); height: var(--control-h); border-radius: var(--radius-sm); border: var(--bw-hairline) solid var(--border-strong);
             background: var(--surface-primary); cursor: pointer; display: inline-flex; align-items: center;
             justify-content: center; color: var(--text-tertiary); }
@@ -2382,7 +2418,7 @@
            as a black disc with a tick in it - the pick-ONE control. */
         .crm-act-row input[type=checkbox], .crm-contact-table .tick input[type=checkbox] {
             appearance: none; -webkit-appearance: none; display: block;
-            width: 16px; height: 16px; margin: 0; flex: none; cursor: pointer;
+            width: var(--box-xs); height: var(--box-xs); margin: 0; flex: none; cursor: pointer;
             background: var(--surface-primary);
             border: var(--bw-hairline) solid var(--border-emphasis); border-radius: var(--radius-2xs);
             transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease); }
@@ -2627,7 +2663,7 @@
         .lia-seg, .lia-dot { box-shadow: var(--ring-edge); }
         .lia-legend { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); font-size: var(--text-xs); color: var(--text-secondary); margin-bottom: var(--sp-4); }
         .lia-leg-item { display: inline-flex; align-items: center; gap: var(--sp-1); }
-        .lia-dot { width: 9px; height: 9px; border-radius: var(--radius-xs); display: inline-block; }
+        .lia-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-xs); display: inline-block; }
         /* Legend swatches use the FOREGROUND tokens: the -bg tints were almost
            the page colour, so the key read as blank space. */
         .lia-dot.within { background: var(--success); }
@@ -2812,7 +2848,7 @@
         .tbl-search input::-webkit-search-decoration {
             -webkit-appearance: none; appearance: none; }
         .tbl-search .tbl-clear { position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
-            width: 20px; height: 20px; min-height: 0; padding: 0; border: 0; background: none;
+            width: var(--box-sm); height: var(--box-sm); min-height: 0; padding: 0; border: 0; background: none;
             border-radius: var(--radius-xs); color: var(--text-tertiary); display: grid; place-items: center; }
         .tbl-search .tbl-clear:hover { color: var(--text-primary); background: var(--surface-sunken); }
         .tbl-search .tbl-clear svg { width: var(--icon-sm); height: var(--icon-sm); }
@@ -3005,7 +3041,7 @@
             font-size: var(--text-xs); color: var(--text-primary); }
         /* An 8px square with a 2px corner, not a 9px lozenge: at the app's small
            radius a 9px chip reads as a rounded blob rather than a key. */
-        .chart-legend .sw { width: 8px; height: 8px; border-radius: var(--radius-3xs); flex: none; }
+        .chart-legend .sw { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-3xs); flex: none; }
         .chart-wrap { position: relative; }
         /* No height:auto. The svg carries its own height attribute and a viewBox
            whose width is the wrap's measured pixel width, so the plot draws at
@@ -3025,7 +3061,7 @@
         .chart-wrap .axis-x text, .chart-wrap .axis-y text { fill: var(--text-tertiary); font-size: var(--text-xs); font-family: var(--font-sans); }
         /* 1.4, measured off the reference's own line. 2.25 read as a marker
            pen next to it. */
-        .chart-line { fill: none; stroke-width: 1.4; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
+        .chart-line { fill: none; stroke-width: var(--chart-stroke); vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
         .chart-line.compare { stroke-dasharray: 4 4; opacity: .7; }
         /* A forecast is not a comparison line: it is the SAME series continuing
            past today, so it keeps the lead line's weight and colour and says
@@ -3088,7 +3124,7 @@
         .fc-split-seg.due { background: var(--chart-1); opacity: .3; }
         .fc-drive { display: flex; flex-direction: column; gap: var(--sp-2-5); }
         .fc-drive-row { display: flex; align-items: baseline; gap: var(--sp-3); }
-        .fc-drive-key { flex: none; width: 10px; height: 10px; border-radius: var(--radius-xs);
+        .fc-drive-key { flex: none; width: var(--dot-lg); height: var(--dot-lg); border-radius: var(--radius-xs);
             background: var(--chart-1); align-self: center; }
         .fc-drive-key.due { opacity: .3; }
         .fc-drive-key.blank { background: none; }
@@ -3105,7 +3141,7 @@
         .chart-tip { position: absolute; pointer-events: none; background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-2); font-size: var(--text-xs); box-shadow: var(--shadow-lg); transform: translate(-50%, calc(-100% - 12px)); white-space: nowrap; opacity: 0; transition: opacity var(--dur) var(--ease); z-index: 4; }
         .chart-tip .tl { color: var(--text-tertiary); font-size: var(--text-xs); text-transform: none; letter-spacing: normal; margin-bottom: var(--sp-1); }
         .chart-tip .tr { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-secondary); } .chart-tip .tr + .tr { margin-top: var(--sp-1); }
-        .chart-tip .sw { width: 8px; height: 8px; border-radius: var(--radius-xs); flex: none; } .chart-tip b { font-weight: var(--weight-semibold); color: var(--text-primary); margin-left: var(--sp-0-5); }
+        .chart-tip .sw { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-xs); flex: none; } .chart-tip b { font-weight: var(--weight-semibold); color: var(--text-primary); margin-left: var(--sp-0-5); }
         /* 14, like every other card description on the page: at 12 the header
            read 16 -> 20 -> 12 and the line that says where a number came from
            was the smallest type on the page outside the axis. */
@@ -3115,7 +3151,7 @@
            line breaks after the separator instead, which is where a reader
            expects a meta line to fold. */
         .chart-head .cs .cs-period { white-space: nowrap; }
-        .chart-head .cs .src-dot { width: 7px; height: 7px; border-radius: var(--radius-xs); flex: none; }
+        .chart-head .cs .src-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-xs); flex: none; }
         .chart-wrap .axis-title { fill: var(--text-tertiary); font-size: var(--text-xs); font-family: var(--font-sans); text-transform: none; letter-spacing: normal; }
         .chart-avg { stroke: var(--text-secondary); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; opacity: .5; }
         .chart-avg-label, .chart-peak-label { fill: var(--text-tertiary); font-size: var(--text-xs); font-family: var(--font-sans); font-weight: var(--weight-medium); }
@@ -3126,7 +3162,7 @@
         /* On the card's own 16px padding grid, so its top edge lands on the
            title's line box rather than 3px above it, and at full opacity: a
            dimmed control reads as a disabled one. */
-        .chart-expand { position: absolute; top: var(--sp-4); right: var(--sp-4); z-index: 2; border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); color: var(--text-primary); width: 28px; height: 28px; border-radius: var(--radius-sm); display: grid; place-items: center; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); opacity: 1; }
+        .chart-expand { position: absolute; top: var(--sp-4); right: var(--sp-4); z-index: 2; border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); color: var(--text-primary); width: var(--box-lg); height: var(--box-lg); border-radius: var(--radius-sm); display: grid; place-items: center; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); opacity: 1; }
         .chart-expand:hover { background: var(--surface-secondary); border-color: var(--border-default); opacity: 1; }
         .chart-expand svg { width: var(--icon-sm); height: var(--icon-sm); display: block; }
         /* .modal's own 520px cap is declared 100 lines further down, so a
@@ -3215,7 +3251,7 @@
         .msg.user .bubble { background: var(--action-primary); color: var(--text-on-action); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-lg); font-size: var(--text-sm); line-height: var(--lh-prose); white-space: pre-wrap; }
         .msg.assistant { align-self: stretch; }
         .resp-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-3); }
-        .resp-head .av { width: 24px; height: 24px; border-radius: var(--radius-circle); background: var(--surface-tertiary); color: var(--text-primary); display: grid; place-items: center; }
+        .resp-head .av { width: var(--box-md); height: var(--box-md); border-radius: var(--radius-circle); background: var(--surface-tertiary); color: var(--text-primary); display: grid; place-items: center; }
         .resp-head .av svg { width: var(--icon-sm); height: var(--icon-sm); }
         .resp-head .who { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-primary); }
         .resp-head .tag { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--action-primary); background: var(--action-soft); border: var(--bw-hairline) solid var(--action-line); border-radius: var(--radius-xs); padding: 0 var(--sp-2); text-transform: none; letter-spacing: normal; }
@@ -3232,10 +3268,10 @@
             gap: var(--sp-3); flex-wrap: wrap; margin: var(--sp-1) 0 0; }
         .thinking { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-secondary); font-size: var(--text-sm); }
         .thinking .spinner { flex: none; }
-        .spinner { display: inline-grid; place-items: center; width: 16px; height: 16px; color: var(--text-tertiary); }
+        .spinner { display: inline-grid; place-items: center; width: var(--box-xs); height: var(--box-xs); color: var(--text-tertiary); }
         .spinner svg { width: var(--icon-md); height: var(--icon-md); animation: navspin 1s linear infinite; }
         .empty-chat { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: var(--sp-7); }
-        .empty-chat .big { width: 40px; height: 40px; border-radius: var(--radius-md); background: var(--surface-tertiary); color: var(--text-primary); display: grid; place-items: center; margin-bottom: var(--sp-4); }
+        .empty-chat .big { width: var(--box-2xl); height: var(--box-2xl); border-radius: var(--radius-md); background: var(--surface-tertiary); color: var(--text-primary); display: grid; place-items: center; margin-bottom: var(--sp-4); }
         .empty-chat .big svg { width: var(--icon-xl); height: var(--icon-xl); }
         .empty-chat h2 { font-size: var(--text-xl); margin: 0 0 var(--sp-2); font-weight: var(--weight-medium); letter-spacing: -.025em; line-height: var(--lh-tight); }
         .empty-chat p { color: var(--text-secondary); margin: 0 0 var(--sp-6); max-width: 430px; line-height: var(--lh-prose); }
@@ -3248,14 +3284,22 @@
             display: flex; align-items: flex-end; gap: var(--sp-2); box-shadow: var(--shadow-sm); transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
         .composer .box:focus-within { border-color: var(--action-primary); box-shadow: var(--focus-ring); }
         #input { flex: 1; border: 0; outline: 0; resize: none; font: inherit; font-size: var(--text-sm); max-height: 160px; padding: var(--sp-2) 0; background: transparent; color: var(--text-primary); }
-        .send { width: 36px; height: 36px; border-radius: var(--radius-sm); border: 0; background: var(--action-primary); color: var(--text-on-action); display: grid; place-items: center; flex-shrink: 0; transition: background var(--dur) var(--ease); }
+        .send { width: var(--box-xl); height: var(--box-xl); border-radius: var(--radius-sm); border: 0; background: var(--action-primary); color: var(--text-on-action); display: grid; place-items: center; flex-shrink: 0; transition: background var(--dur) var(--ease); }
         .send:hover { background: var(--action-hover); } .send:active { background: var(--action-active); } .send:disabled { background: var(--surface-tertiary); color: var(--text-disabled); cursor: not-allowed; }
         .send svg { width: var(--icon-lg); height: var(--icon-lg); }
         .composer .row { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); padding: 0 var(--sp-1); }
         .toggle { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); color: var(--text-secondary); cursor: pointer; user-select: none; }
-        .toggle .sw { width: 32px; height: 18px; border-radius: var(--radius-full); background: var(--border-default); position: relative; transition: background var(--dur) var(--ease); }
-        .toggle .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: var(--radius-circle); background: var(--surface-primary); transition: transform .18s; }
-        .toggle:is(.on, [aria-checked="true"]) .sw { background: var(--action-primary); } .toggle:is(.on, [aria-checked="true"]) .sw::after { transform: translateX(14px); background: var(--surface-primary); }
+        /* The knob is not a box on the box scale: its size is DECIDED by the
+           track it slides in (track height, less the inset on each side). It
+           was written as a raw 14px, which happened to be right, and snapping
+           it to the nearest box step made it 16 inside an 18px track - two
+           pixels of knob hanging out of the slot. Derived, it cannot drift:
+           change the track and the knob follows. */
+        .toggle .sw { width: var(--switch-w); height: var(--switch-h); border-radius: var(--radius-full); background: var(--border-default); position: relative; transition: background var(--dur) var(--ease); }
+        .toggle .sw::after { content: ""; position: absolute; top: var(--switch-inset); left: var(--switch-inset);
+            width: calc(var(--switch-h) - 2 * var(--switch-inset)); height: calc(var(--switch-h) - 2 * var(--switch-inset));
+            border-radius: var(--radius-circle); background: var(--surface-primary); transition: transform .18s; }
+        .toggle:is(.on, [aria-checked="true"]) .sw { background: var(--action-primary); } .toggle:is(.on, [aria-checked="true"]) .sw::after { transform: translateX(calc(var(--switch-w) - var(--switch-h))); background: var(--surface-primary); }
         .composer .hint { margin-left: auto; font-size: var(--text-xs); color: var(--text-tertiary); }
 
         @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
@@ -3293,11 +3337,11 @@
         /* One 24px box for whatever marks a row: a file's glyph (which doubles
            as its tick), a folder's chip, a trashed file's glyph. The same box
            on every kind of row is what starts every name at the same x. */
-        .fslot, .files-chip, .files-ic { width: 24px; height: 24px; flex: none;
+        .fslot, .files-chip, .files-ic { width: var(--box-md); height: var(--box-md); flex: none;
             display: grid; place-items: center; }
         .fslot { position: relative; }
         .fslot svg { width: var(--icon-md); height: var(--icon-md); color: var(--text-tertiary); display: block; }
-        .fslot input { position: absolute; inset: 4px; width: 16px; height: 16px; margin: 0;
+        .fslot input { position: absolute; inset: 4px; width: var(--box-xs); height: var(--box-xs); margin: 0;
             accent-color: var(--action-primary); cursor: pointer; opacity: 0; }
         /* The swap belongs to the row, not to the list: keyed to the list, one
            tick anywhere stripped the type glyph off all twelve file rows and
@@ -3311,7 +3355,7 @@
            tick is a miss. It takes the whole slot instead, which is where the
            finger lands anyway. A mouse keeps the small one. */
         @media (hover: none) {
-            .fslot input { opacity: 1; inset: 0; width: 24px; height: 24px; }
+            .fslot input { opacity: 1; inset: 0; width: var(--box-md); height: var(--box-md); }
             .fslot svg { opacity: 0; }
         }
         /* A folder is not a file, and the reference says so with a chip behind
@@ -3338,7 +3382,7 @@
             justify-content: center; background: var(--surface-primary); }
         .auth-card { width: min(380px, calc(100vw - 48px)); background: var(--surface-primary);
             border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); padding: var(--sp-7); box-shadow: var(--shadow-sm); }
-        .auth-brand { width: 40px; height: 40px; border-radius: var(--radius-md); margin-bottom: var(--sp-4);
+        .auth-brand { width: var(--box-2xl); height: var(--box-2xl); border-radius: var(--radius-md); margin-bottom: var(--sp-4);
             background: var(--action-primary); color: var(--text-on-action);
             display: flex; align-items: center; justify-content: center; }
         .auth-brand svg { width: var(--icon-xl); height: var(--icon-xl); }
@@ -3502,7 +3546,7 @@
             border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); }
         .tm-tabpick { display: inline-flex; align-items: center; gap: var(--sp-1-5); margin: 0 var(--sp-2-5) var(--sp-2) 0;
             cursor: pointer; font-size: var(--text-sm); color: var(--text-secondary); min-height: var(--control-h); }
-        .tm-tabpick input { width: 16px; height: 16px; accent-color: var(--action-primary); cursor: pointer; }
+        .tm-tabpick input { width: var(--box-xs); height: var(--box-xs); accent-color: var(--action-primary); cursor: pointer; }
         /* On a phone the name owns the first line; size and date step down a line
            rather than crushing the name to a letter. */
         @media (max-width: 640px) {
@@ -3901,6 +3945,18 @@ Projected Image UK"></textarea>
            this runs, and a custom property's computed value already has
            its var() chain substituted, so what comes back is the hex. */
         function tokenValue(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+        /* The same door for a LENGTH. Geometry the script has to compute with
+           (a plot's padding, a dot's radius) still belongs in :root, so it is
+           read from there rather than written twice in JavaScript. */
+        function tokenNum(name) { return parseFloat(tokenValue(name)) || 0; }
+        /* Read once at boot: these do not change without a reload, and a
+           getComputedStyle per chart redraw is a layout read in a hot path. */
+        const CHART = {
+            padL: tokenNum('--chart-pad-l'), padR: tokenNum('--chart-pad-r'),
+            padT: tokenNum('--chart-pad-t'), padB: tokenNum('--chart-pad-b'),
+            h: tokenNum('--chart-h'), hTall: tokenNum('--chart-h-tall'),
+            dotR: tokenNum('--chart-dot-r'),
+        };
 
         /* ---------- icons (constant SVG; safe to inject) ---------- */
         // Feather Icons (https://feathericons.com), inlined so there are no extra requests.
@@ -5138,7 +5194,7 @@ Projected Image UK"></textarea>
         }
         function trendChart(opts) {
             opts = opts || {};
-            const H = opts.height || 220;
+            const H = opts.height || CHART.h;
             const multi = (opts.series || []).filter(function (x) { return x && x.values && x.values.length; }).length > 1;
             /* 40 at the left for the y-axis numbers and nothing at the right, so
                the line still reaches the card edge; 14 at the top for the
@@ -5146,7 +5202,7 @@ Projected Image UK"></textarea>
                used to reserve 48 for a legend that was drawn in the card header
                instead, so a multi-series chart carried a band of nothing across
                the top of its own plot. */
-            const padL = 40, padR = 0, padT = 14, padB = 30;
+            const padL = CHART.padL, padR = CHART.padR, padT = CHART.padT, padB = CHART.padB;
             const labels = opts.labels || [];
             const series = (opts.series || []).filter(s => s && Array.isArray(s.values) && s.values.length);
             const fmt = opts.format || fmtCompact;
@@ -5249,7 +5305,7 @@ Projected Image UK"></textarea>
                    circles at rest and every text node in it is an x-axis date. The
                    numbers live in the tooltip, on hover. */
                 const hoverLine = svgEl('line', { class: 'chart-hover-line', x1: 0, y1: padT, x2: 0, y2: H - padB, opacity: 0 }); svg.append(hoverLine);
-                const dots = series.map(s => { const c = svgEl('circle', { class: 'chart-dot', r: 3.5, fill: s.color || CH[0], opacity: 0 }); svg.append(c); return c; });
+                const dots = series.map(s => { const c = svgEl('circle', { class: 'chart-dot', r: CHART.dotR, fill: s.color || CH[0], opacity: 0 }); svg.append(c); return c; });
                 const tip = el('div', 'chart-tip'); wrap.append(tip);
                 const overlay = svgEl('rect', { x: padL, y: padT, width: (W - padL - padR), height: (H - padT - padB), fill: 'transparent' }); svg.append(overlay);
                 const move = (clientX) => {
@@ -5307,7 +5363,8 @@ Projected Image UK"></textarea>
         }
         function barChart(opts) {
             opts = opts || {};
-            const H = opts.height || 230, padL = 40, padR = 0, padT = 14, padB = 30;
+            const H = opts.height || CHART.h, padL = CHART.padL, padR = CHART.padR,
+                  padT = CHART.padT, padB = CHART.padB;
             const labels = opts.labels || [], vals = (opts.values || []).map(v => +v || 0);
             const fmt = opts.format || fmtCompact;
             /* Bars sit one step lighter than a line does, which is how the
@@ -7457,7 +7514,7 @@ Projected Image UK"></textarea>
                 const minRow = el('label', 'dpanel-row');
                 minRow.append(el('span', null, 'Owing at least'));
                 const minIn = document.createElement('input');
-                minIn.type = 'number'; minIn.min = '0'; minIn.step = '50'; minIn.style.width = '96px';
+                minIn.type = 'number'; minIn.min = '0'; minIn.step = '50'; minIn.style.width = 'var(--field-w-sm)';
                 minIn.value = liaF.min;
                 minIn.oninput = () => { liaF.min = minIn.value; paint(); };
                 minRow.append(minIn);
@@ -8586,7 +8643,7 @@ Projected Image UK"></textarea>
                 const wrap = el('div', 'lbl-row');
                 const days = document.createElement('input');
                 days.type = 'number'; days.min = '1'; days.max = '365'; days.className = 'disp-text';
-                days.style.maxWidth = '110px';
+                days.style.maxWidth = 'var(--field-w-md)';
                 days.value = String((d.settings || {}).chase_days || 28);
                 days.setAttribute('aria-label', 'Chase after this many days');
                 const save = el('button', 'btn btn-sm', 'Save');
@@ -11117,7 +11174,7 @@ Projected Image UK"></textarea>
             reasonRow.style.display = 'none';
             const reasonIn = el('input', 'mail-search');
             reasonIn.placeholder = 'Why is this being ignored? (required)'; reasonIn.setAttribute('aria-label', 'Reason for ignoring');
-            reasonIn.style.maxWidth = '420px';
+            reasonIn.style.maxWidth = 'var(--field-w-xl)';
             const reasonGo = el('button', 'btn', 'Ignore with this reason');
             reasonGo.onclick = async () => {
                 if (!reasonIn.value.trim()) { markInvalid(reasonIn, true); reasonIn.focus(); return; }
@@ -13612,7 +13669,7 @@ Projected Image UK"></textarea>
             const boxRows = [];
             function addBoxRow(preset) {
                 const rowb = el('div', 'disp-boxedit');
-                const sel = el('select', 'psel'); sel.style.maxWidth = '170px'; sel.setAttribute('aria-label', 'Box preset');
+                const sel = el('select', 'psel'); sel.style.maxWidth = 'var(--field-w-lg)'; sel.setAttribute('aria-label', 'Box preset');
                 presets.forEach(b => { const opt = el('option', null, b.name); opt.value = b.id; sel.append(opt); });
                 const cust = el('option', null, 'Custom'); cust.value = '__custom'; sel.append(cust);
                 const ins = {};
@@ -13756,10 +13813,10 @@ Projected Image UK"></textarea>
                     const dIn = document.createElement('input'); dIn.type = 'text'; dIn.className = 'disp-num'; dIn.placeholder = 'Description'; dIn.style.flex = '2 1 auto';
                     const qIn = document.createElement('input'); qIn.type = 'number'; qIn.min = '1'; qIn.step = '1'; qIn.className = 'disp-num disp-boxdim'; qIn.placeholder = 'Qty';
                     const pIn = document.createElement('input'); pIn.type = 'number'; pIn.min = '0'; pIn.step = '0.01'; pIn.className = 'disp-num disp-boxdim'; pIn.placeholder = 'Unit £';
-                    const hIn = document.createElement('input'); hIn.type = 'text'; hIn.spellcheck = false; hIn.setAttribute('aria-label', 'HS code'); hIn.className = 'disp-num disp-boxdim'; hIn.placeholder = 'HS code'; hIn.style.width = '90px';
+                    const hIn = document.createElement('input'); hIn.type = 'text'; hIn.spellcheck = false; hIn.setAttribute('aria-label', 'HS code'); hIn.className = 'disp-num disp-boxdim'; hIn.placeholder = 'HS code'; hIn.style.width = 'var(--field-w-sm)';
                     // Origin is ON the card: the commercial invoice needs it, and an
                     // invisible wrong value is worse than a visible editable one.
-                    const oIn = document.createElement('input'); oIn.type = 'text'; oIn.spellcheck = false; oIn.setAttribute('aria-label', 'Country of origin'); oIn.className = 'disp-num disp-boxdim'; oIn.placeholder = 'Origin'; oIn.maxLength = 2; oIn.style.width = '58px';
+                    const oIn = document.createElement('input'); oIn.type = 'text'; oIn.spellcheck = false; oIn.setAttribute('aria-label', 'Country of origin'); oIn.className = 'disp-num disp-boxdim'; oIn.placeholder = 'Origin'; oIn.maxLength = 2; oIn.style.width = 'var(--field-w-xs)';
                     oIn.title = 'Country of origin (2 letters), where the item was MADE, for the commercial invoice';
                     if (pre) { dIn.value = pre.description || ''; qIn.value = pre.quantity || 1; pIn.value = pre.unit_price || ''; hIn.value = pre.hs || ''; oIn.value = pre.origin || 'GB'; }
                     else { oIn.value = 'GB'; }
@@ -18085,7 +18142,7 @@ Projected Image UK"></textarea>
                     const name = crmText(l.name, 'Label'); name.oninput = () => { l.name = name.value; };
                     const col = el('select', 'disp-text');
                     col.setAttribute('aria-label', 'Label colour');
-                    col.style.maxWidth = '110px';
+                    col.style.maxWidth = 'var(--field-w-md)';
                     COLOR_OPTS.forEach(c => col.append(new Option(c, c)));
                     col.value = COLOR_OPTS.includes(l.color) ? l.color : 'gray';
                     col.onchange = () => { l.color = col.value; paintLabs(); };
@@ -19106,7 +19163,7 @@ Projected Image UK"></textarea>
             try { data = await api('/api/mail/rules', { op: 'list' }); }
             catch (e) { toastError(e.message); return; }
             const m = mailModal('Filters');
-            m.overlay.querySelector('.modal').style.maxWidth = '640px';
+            m.overlay.querySelector('.modal').classList.add('smodal');
             paintMailRules(m, data);
         }
         function paintMailRules(m, data) {
@@ -20061,7 +20118,7 @@ Projected Image UK"></textarea>
             /* Older than the board keeps. Readable, and nothing else: it is not
                on the board, so it has no owner, no state and no actions. */
             const m = mailModal('Email (from the archive)');
-            m.overlay.querySelector('.modal').style.maxWidth = '680px';
+            m.overlay.querySelector('.modal').classList.add('mreader');
             m.body.append(el('div', 'crm-card-t', t.subject));
             m.body.append(el('div', 'setting-sub',
                 (t.from_name || '') + (t.from_email ? ' <' + t.from_email + '>' : '')
@@ -20113,7 +20170,7 @@ Projected Image UK"></textarea>
             try { r = await api('/api/mail/thread', { id: id }); }
             catch (e) { toastError(e.message); return; }
             const m = mailModal('Email');
-            m.overlay.querySelector('.modal').style.maxWidth = '680px';
+            m.overlay.querySelector('.modal').classList.add('mreader');
             paintMailThread(m, r);
             m.overlay._timer = setInterval(async () => {
                 try {
@@ -20378,7 +20435,7 @@ Projected Image UK"></textarea>
                     msgs.append(box);
                 });
                 full.remove();
-                msgs.style.maxHeight = '360px';
+                msgs.style.maxHeight = 'var(--scroll-max)';
             };
             m.body.append(full);
             m.body.append(msgs);

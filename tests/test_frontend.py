@@ -904,6 +904,15 @@ def t_losing_money_is_said_in_words_not_only_in_red():
        "and the colour-only inline style is gone")
 
 
+def _token_raw(name):
+    """A token's literal value, whatever kind it is. _token below follows var()
+    chains down to a HEX and asserts colour-ness, which is right for a palette
+    and wrong for a length."""
+    m = re.search(r"--" + re.escape(name) + r":\s*([^;]+);", CSS)
+    assert m, "token --%s not found" % name
+    return m.group(1).strip()
+
+
 def _token(name):
     """A token's value with var() chains followed down to the primitive, so a
     semantic name (--text-tertiary) answers with the hex it paints."""
@@ -977,11 +986,12 @@ def t_the_targets_a_finger_has_to_hit_are_big_enough():
        "the folder name's hit box is padded out, and the row keeps its height")
     touch = re.search(r"@media \(hover: none\) \{\s*\.fslot input.*?\n        \}", HTML, re.S)
     ok(touch, "there is a touch-only rule for the file tick")
-    ok("width: 24px; height: 24px" in touch.group(0), "and it reaches 24px there")
-    ok(re.search(r"@media \(hover: none\) \{ \.mail-check \{ width: 24px; height: 24px; \} \}", HTML),
+    ok("width: var(--box-md); height: var(--box-md)" in touch.group(0)
+       and _token_raw("box-md") == "24px", "and it reaches 24px there")
+    ok(re.search(r"@media \(hover: none\) \{ \.mail-check \{ width: var\(--box-md\); height: var\(--box-md\); \} \}", HTML),
        "the Inbox tick reaches 24px under a finger too")
     base = re.search(r"\.fslot input \{[^}]*\}", HTML).group(0)
-    ok("width: 16px; height: 16px" in base,
+    ok("width: var(--box-xs); height: var(--box-xs)" in base and _token_raw("box-xs") == "16px",
        "a mouse still gets the small one, so the list is not covered in boxes")
 
 
@@ -1470,7 +1480,10 @@ def t_the_charts_are_drawn_to_the_reference_spec():
     ok(_token("border-default") == "#e5e5e5", "and that token still resolves to #e5e5e5")
     ok("dasharray" not in grid, "and solid, not dashed")
     line = re.search(r"\.chart-line \{[^}]*\}", css).group(0)
-    ok("stroke-width: 1.4" in line, "lines are 1.4, not a marker pen: " + line)
+    # The weight is a token now, so check the token resolves to the reference
+    # value rather than checking the rule spells it out.
+    ok("stroke-width: var(--chart-stroke)" in line, "the line weight comes from the token: " + line)
+    ok(_token_raw("chart-stroke") == "1.4px", "and that token is still 1.4, not a marker pen")
     axis = re.search(r"\.chart-wrap \.axis-x text[^{]*\{[^}]*\}", css).group(0)
     # Same requirement, re-anchored: the dates are the app's muted grey rather
     # than the near-black body ink. It used to be the #666666 literal measured
@@ -2690,17 +2703,25 @@ def t_the_chart_legend_belongs_to_the_plot():
        "drawn between the header and the plot, and only when there are lines to tell apart")
     ok("chart-legend" not in SCRIPT.split("function chartHead(")[1][:1400],
        "and no longer inside the card header")
-    ok("const padL = 40, padR = 0, padT = 14, padB = 30;" in SCRIPT,
-       "so the plot reserves 14 at the top for the topmost stroke and nothing "
-       "for a legend drawn elsewhere; the 40 on the left is the y-axis numbers, "
-       "which ARE inside the plot")
+    # The frame is one definition in :root, read by BOTH charts. It used to be
+    # written out twice, with two different default heights, so "change the
+    # chart spacing" meant finding both.
+    ok("padL: tokenNum('--chart-pad-l')" in SCRIPT, "the plot frame is read from the tokens")
+    for tok, want, why in (("chart-pad-t", "14px", "reserves 14 at the top for the topmost stroke"),
+                           ("chart-pad-r", "0px", "and nothing for a legend drawn elsewhere"),
+                           ("chart-pad-l", "40px", "the 40 on the left is the y-axis numbers, inside the plot"),
+                           ("chart-pad-b", "30px", "and 30 at the foot for the dates")):
+        ok(_token_raw(tok) == want, why + " (--%s is %s)" % (tok, _token_raw(tok)))
+    ok(SCRIPT.count("opts.height || CHART.h") == 2,
+       "both charts default to the same height instead of 220 in one and 230 in the other")
     lg = CSS.split(".chart-legend {")[1].split("}")[0]
     ok("justify-content: flex-end" in lg, "right-aligned, as the reference aligns it")
     ok("gap: var(--sp-4)" in lg, "16px between keys")
     ok("padding-bottom: var(--sp-3)" in lg and "margin-bottom: var(--sp-5)" in lg,
        "12 then 20 before the first gridline")
     sw = CSS.split(".chart-legend .sw {")[1].split("}")[0]
-    ok("width: 8px" in sw and "height: 8px" in sw, "the key is an 8px square")
+    ok("width: var(--dot-md)" in sw and "height: var(--dot-md)" in sw
+       and _token_raw("dot-md") == "8px", "the key is an 8px square")
     ok("border-radius: var(--radius-3xs)" in sw, "with a 2px corner, not the app's own radius")
     item = CSS.split(".chart-legend .lg {")[1].split("}")[0]
     ok("gap: var(--sp-1-5)" in item, "6px between a key and its name")
@@ -3983,7 +4004,7 @@ def t_the_colour_code_has_a_key_above_the_list_it_explains():
     ok(".who-dot" in CSS, "the presence cards carry a dot")
     ok("ownClass(m.colour)" in SCRIPT, "in that person's colour")
     dot = CSS.split(".who-dot {")[1].split("}")[0]
-    ok("width: 8px" in dot, "small")
+    ok("width: var(--dot-md)" in dot and _token_raw("dot-md") == "8px", "small")
     ok(".who-dot.own-red    { background: var(--owner-red); }" in CSS and _token("owner-red") == "#b91c1c",
        "and SOLID, not the row tint: a 10% wash is invisible at 8px")
 
@@ -5378,6 +5399,39 @@ def t_an_icon_size_comes_from_the_scale_and_not_from_the_rule():
     ok(not icons, "%d icon sizes bypass the scale: %s" % (len(icons), icons[:5]))
     for t in ("--icon-xs", "--icon-sm", "--icon-md", "--icon-lg", "--icon-xl"):
         ok(t + ":" in CSS, "the icon scale still defines " + t)
+
+    # Square boxes and status dots, the same way. Forty-eight rules set an
+    # equal width and height in TWENTY-ONE different sizes; 22, 26, 30, 34 and
+    # 42 each appeared once or twice, which is drift rather than intent.
+    boxes = []
+    for sel, body in _rules(CSS):
+        s2 = " ".join(sel.split())
+        if re.search(r"label-sheet|day-sheet|loan-sticker|@page|@font-face|scrollbar", s2): continue
+        if "svg" in s2: continue
+        w = re.search(r"(?<![\w-])width\s*:\s*(\d+(?:\.\d+)?)px", body)
+        h = re.search(r"(?<![\w-])height\s*:\s*(\d+(?:\.\d+)?)px", body)
+        if not (w and h) or w.group(1) != h.group(1): continue
+        v = float(w.group(1))
+        # A 1px square is a hairline or a screen-reader trick, and .rg-ic is an
+        # illustration rather than an interface box. Both are deliberate.
+        if v <= 1 or "rg-ic" in s2: continue
+        boxes.append(s2[:44] + " { %spx }" % int(v))
+    ok(not boxes, "%d square boxes bypass the scale: %s" % (len(boxes), boxes[:5]))
+    for t in ("--box-xs", "--box-sm", "--box-md", "--box-lg", "--box-xl", "--box-2xl",
+              "--dot-sm", "--dot-md", "--dot-lg"):
+        ok(t + ":" in CSS, "the box and dot scales still define " + t)
+
+    # A knob inside a switch is DERIVED from its track, like a thumb in a
+    # segmented control: snapping it to the nearest box step put 16px of knob
+    # in an 18px track, hanging two pixels out of the slot.
+    knob = re.search(r"\.toggle \.sw::after \{([^}]*)\}", CSS)
+    ok(knob and "calc(var(--switch-h) - 2 * var(--switch-inset))" in knob.group(1),
+       "the switch knob is derived from its track, not sized by hand")
+
+    # No inline pixel length written from JavaScript: a screen must not set a
+    # component's size, it must pick a token.
+    inline = re.findall(r"\.style\.[A-Za-z]+ = '\d+(?:\.\d+)?px'", SCRIPT)
+    ok(not inline, "a screen writes its own pixel size: %s" % inline[:4])
     # One :root, or a global value has two places to be looked up.
     # Exactly one place DEFINES the system. Overriding a token inside an
     # @media block is the opposite of drift - it is the single source being
