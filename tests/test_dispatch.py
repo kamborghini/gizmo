@@ -12263,6 +12263,34 @@ def t_the_xero_client_is_read_only_by_construction():
     ok('resp = await client.get(url' in src, "the accounting fetcher is a GET")
 
 @test
+def t_the_panel_counts_a_discount_code_as_a_discount():
+    """The forecast was learning GROSS sales and calling them net.
+
+    `totalDiscountSet` is a LINE's own discount and nothing else. A discount
+    CODE is an ORDER-level discount that Shopify spreads across the lines, and
+    it appears ONLY in `discountAllocations`. On #104335 the first line reads
+    a total discount of 0.00 beside an allocation of 49.50, and nearly every
+    discounted line in this store looks the same.
+
+    The bulk query always asked for the allocations. `_assemble_bulk` dropped
+    them, so `orders_to_rows` fell through to the line discount, found zero,
+    and billed the customer's discount as revenue. Across nineteen months that
+    is 61,694 of discount on 588,292 of gross - a tenth of the business, and
+    on a heavily discounted order like #104335 it was 43 percent."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ingest = open(os.path.join(root, "forecast", "ingest.py"), encoding="utf-8").read()
+    asm = ingest.split("def _assemble_bulk(", 1)[1].split("\ndef ", 1)[0]
+    ok('"discount_allocations":' in asm,
+       "the assembler carries the allocations, not just the line's own discount")
+    ok('_money(a, "allocatedAmountSet")' in asm, "reading each allocation's amount")
+    rows = ingest.split("def orders_to_rows(", 1)[1].split("\ndef ", 1)[0]
+    ok('li.get("discount_allocations")' in rows and 'li.get("total_discount")' in rows,
+       "and the row builder still prefers the allocations, falling back to the line")
+    bulk = ingest.split('BULK_ORDERS_QUERY = """', 1)[1].split('"""', 1)[0]
+    ok("discountAllocations" in bulk, "the query asks for them, as it always did")
+
+
+@test
 def t_the_forecast_pins_its_threads_to_the_cpu_it_actually_has():
     """One LightGBM fit took 2318 seconds on the container. The same fit, on
     the same 185,788 training rows, costs 13.7s on eight cores and 22.8s on

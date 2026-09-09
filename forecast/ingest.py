@@ -176,6 +176,7 @@ BULK_ORDERS_QUERY = """
         id sku quantity title variantTitle
         originalUnitPriceSet { shopMoney { amount } }
         totalDiscountSet { shopMoney { amount } }
+        discountAllocations { allocatedAmountSet { shopMoney { amount } } }
         variant { id product { id productType } }
       } } }
     } }
@@ -386,7 +387,20 @@ def _assemble_bulk(lines: List[dict]) -> List[dict]:
             p = v.get("product") or {}
             item = {"id": gid, "sku": n.get("sku"), "quantity": n.get("quantity"), "title": n.get("title"),
                     "variant_title": n.get("variantTitle"), "price": _money(n, "originalUnitPriceSet"),
-                    "total_discount": _money(n, "totalDiscountSet"), "variant_id": v.get("id"), "product_id": p.get("id"),
+                    "total_discount": _money(n, "totalDiscountSet"),
+                    # `totalDiscountSet` is the LINE's own discount and nothing
+                    # else. A discount CODE is an ORDER-level discount that
+                    # Shopify spreads across the lines, and it lands ONLY in
+                    # discountAllocations: on #104335 the line reads a total
+                    # discount of 0.00 beside an allocation of 49.50. The bulk
+                    # query never asked for them and this assembler had nowhere
+                    # to read them from, so the panel counted the discount
+                    # as revenue and the model learned to forecast GROSS sales.
+                    # Across the last 19 months that is a tenth of the business:
+                    # discounts of 61,694 against gross of 588,292.
+                    "discount_allocations": [{"amount": _money(a, "allocatedAmountSet")}
+                                             for a in (n.get("discountAllocations") or [])],
+                    "variant_id": v.get("id"), "product_id": p.get("id"),
                     "product_type": p.get("productType")}
             orders[parent]["line_items"].append(item); items[gid] = item
     # No Refund rows arrive here: the bulk query cannot carry them (see
