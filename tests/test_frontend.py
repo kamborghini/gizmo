@@ -1853,9 +1853,14 @@ def t_the_forecast_tab_exists_and_is_gated():
     ok("forecastSetupCard(c)" in fn and "No forecast yet" in SCRIPT, "with no run it explains the setup instead of showing nothing")
     ok("segControl(names.map(" in fn, "every scenario in the workbook can be chosen")
     # "Cash in", not "Net sales": the forecast is denominated in the order
-    # total now, because that is what the cash flow plan and Shopify's own
-    # forecast are both written in. Net sales ran 24% below both.
-    ok("metricsStrip(mets)" in fn and "trendChart({ title: 'Cash in, next '" in fn, "the KPI blocks and the chart are the house ones")
+    # total, because that is what the cash flow plan and Shopify's own forecast
+    # are both written in. And MONTH by month, not day by day: the daily line
+    # was a spike and a trough for every weekend and said nothing a month does
+    # not, while the plan is written in months and judged in months.
+    ok("metricsStrip(mets)" in fn and "trendChart({ title: 'Cash in, month by month'" in fn,
+       "the KPI blocks and the chart are the house ones")
+    ok("latest.months || []" in fn and "m.actual == null" in fn,
+       "the chart reads the monthly series, taken then forecast")
     ok("'Verdict', 'Risk'" in fn and "'Working capital', 'Loan left'" in fn, "the month table and the cash table are there")
     ok("data_b64: btoa(bin)" in SCRIPT and "inp.accept = '.xlsx'" in SCRIPT, "an admin uploads the workbook from the tab")
     ok("c.can_upload ? forecastUploadButton() : null" in fn, "and only an admin sees the button")
@@ -3484,13 +3489,20 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
     ok("fcMoney(planYear)" in fn, "the plan's own year sits in the same column to compare against")
     ok("allMonths.slice(0, 6)" in fn,
        "only six month columns, or the year and the scores are pushed off the side")
+    # No algorithm selector. Asking a person to choose one is asking them to
+    # guess at something the machine can measure, so the machine measures it.
     strip = SCRIPT.split("function renderForecast()")[1].split("box.append(metricsStrip(mets))")[0]
-    ok("sel.onchange = () => setFcSourceName(sel.value)" in strip,
-       "the headline boxes can be asked to speak for a chosen source")
-    ok("if (!srcs.some(m => m.name === pick)) pick = ''" in strip,
-       "a source that is no longer in the run falls back to the leader rather than blanking the page")
-    ok("chosen.year != null" in strip and "banked plus its share of the rest" in strip,
-       "and the note says which source and on what basis, rather than implying the page moved")
+    ok("setFcSourceName" not in strip and "psel" not in strip,
+       "the page does not ask anyone to pick an algorithm")
+    rec = SCRIPT.split("function fcRecordCard(", 1)[1].split("\n        function ", 1)[0]
+    ok("c.ledger" in rec and "r.by_source" in rec,
+       "the standing record is drawn from what each source said before the month began")
+    ok("r.winner === n" in rec and "'closest'" in rec, "and the closest each month is marked")
+    ok("sn.ranked_on === 'record'" in rec,
+       "the card says whether the forecast is now ranked on the record or still on the backtest")
+    ok("Nothing has closed yet" in rec,
+       "and says plainly what will happen at month end when there is nothing yet")
+    ok("box.append(fcRecordCard(c));" in SCRIPT, "the tab draws it")
     ok("!sn || !sn.available" in fn and "sn.reason" in fn,
        "a run with too little history says so instead of drawing an empty table")
     ok("fcSanityCard(latest, sc)" in SCRIPT, "and the tab actually calls it")

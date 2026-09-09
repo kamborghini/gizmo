@@ -48,6 +48,18 @@ def _post(url: str, token: str, payload: dict) -> None:
         resp.read()
 
 
+def _fetch_ledger(url: str, token: str) -> list:
+    """What each source has actually been worth on months that have closed.
+    A run that cannot read it forecasts anyway, on the backtest alone."""
+    req = urllib.request.Request(url, headers={"X-Forecast-Token": token})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return (json.loads(resp.read()) or {}).get("results") or []
+    except Exception as e:
+        log.warning("could not read the track record (%s); ranking on the backtest alone", e)
+        return []
+
+
 def _fetch_workbook(url: str, token: str, into: Path) -> Path | None:
     req = urllib.request.Request(url, headers={"X-Forecast-Token": token})
     try:
@@ -124,7 +136,24 @@ def _payload(cfg, cf, sanity, opinions, monthly, cash, alerts, summary, actual_d
                         "working_capital": f(r["working_capital"]), "loan_end": f(r["loan_end"]),
                         "below_buffer": bool(r["below_buffer"]), "negative": bool(r["negative"])}
                        for _, r in path.iterrows()]
-    hist = actual_daily.tail(120)
+    # The monthly series the page draws: what has been taken, then what the
+    # leading source expects, with its band.
+    months_series = []
+    for _, r in monthly.iterrows():
+        m = pd.Timestamp(r["month"]).strftime("%Y-%m")
+        actual = str(r.get("method", "")).startswith("actual") and "forecast" not in str(r.get("method", ""))
+        months_series.append({"month": m, "basis": r.get("method"),
+                              "actual": f(r["projected_p50"]) if actual else None,
+                              "p50": None if actual else f(r["projected_p50"]),
+                              "p10": None if actual else f(r["projected_p10"]),
+                              "p90": None if actual else f(r["projected_p90"])})
+    future = {x["month"] for x in months_series if x["actual"] is None}
+    predictions = {}
+    for entry in (sanity.get("models") or []):
+        for m, v in (entry.get("months") or {}).items():
+            if m in future and v is not None:
+                predictions.setdefault(m, {})[entry["name"]] = f(v)
+    actuals_by_month = {x["month"]: x["actual"] for x in months_series if x["actual"] is not None}
     return {
         "as_of": cfg.as_of.isoformat(), "generated_at": datetime.now(timezone.utc).isoformat(),
         "scenarios": names, "scenario_feature": None,
@@ -135,10 +164,14 @@ def _payload(cfg, cf, sanity, opinions, monthly, cash, alerts, summary, actual_d
         "year": {"p50": f(monthly["projected_p50"].sum()) if len(monthly) else None,
                  "targets": {n: f(monthly[f"target|{n}"].sum()) for n in names} if len(monthly) else {}},
         "cash": cash_out, "alerts": alerts, "sanity": sanity,
-        "daily": {"history": [{"date": pd.Timestamp(d).strftime("%Y-%m-%d"), "actual": f(v)}
-                              for d, v in hist.items()],
-                  "forecast": [{"date": pd.Timestamp(r["date"]).strftime("%Y-%m-%d"), "p10": f(r["p10"]),
-                                "p50": f(r["p50"]), "p90": f(r["p90"])} for _, r in fdaily.iterrows()]},
+        # Month by month, because that is the grain the plan is written in and
+        # the grain a month-end verdict is passed at. The daily line was a
+        # spike-and-trough for every weekend and said nothing a month does not.
+        "months": months_series,
+        # What every source said, and what actually happened, so the app can
+        # keep the standing record. Predictions are written once and never
+        # revised: the whole point is that they were made before the outcome.
+        "predictions": predictions, "actuals": actuals_by_month,
     }
 
 
@@ -219,7 +252,10 @@ def main() -> int:
             _need = max(1, (_last.year - _first.year) * 12 + (_last.month - _first.month) + 1)
             horizon_months = int(env.get("FORECAST_MONTHS", "0")) or min(_need, 18)
             log.info("forecasting %d month(s), to %s", horizon_months, _last)
-            sanity = sanity_forecasts(months, horizon=horizon_months)
+            record = _fetch_ledger(base + "/hooks/forecast/ledger", token)
+            sanity = sanity_forecasts(months, horizon=horizon_months, results=record)
+            log.info("ranked on the %s (%d closed month(s) on record)",
+                     sanity.get("ranked_on"), sanity.get("closed_months") or 0)
             if not sanity.get("available"):
                 raise RuntimeError(sanity.get("reason") or "not enough history to forecast")
             opinions = pick_opinions(sanity)

@@ -13418,6 +13418,79 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     def _forecast_token_ok(request: Request) -> bool:
         return _secret_ok(str(request.headers.get("x-forecast-token") or ""), FORECAST_INGEST_TOKEN)
 
+    FORECAST_LEDGER_MONTHS = 36
+    FORECAST_LEDGER_SOURCES = 40
+
+    def _forecast_ledger(state: dict, body: dict) -> dict:
+        """The standing record of who was right, kept across runs.
+
+        The backtest each run computes is retrospective: it refits a model to
+        old months and marks it, which is useful but forgiving, because the
+        model is being asked about a period the code already knows the shape
+        of. This is the other kind, and the honest one: what each source
+        ACTUALLY said about September, written down in September while
+        September was still unknown, then marked when September closed.
+
+        Predictions are recorded once and never revised. A later run may have
+        a better opinion about a month, but overwriting the earlier one would
+        turn a forecast into a hindcast and every source would look excellent."""
+        import math
+        led = state.get("ledger") if isinstance(state.get("ledger"), dict) else {}
+        predicted = led.get("predicted") if isinstance(led.get("predicted"), dict) else {}
+        results = led.get("results") if isinstance(led.get("results"), list) else []
+
+        preds = body.get("predictions")
+        if isinstance(preds, dict):
+            for month, by_source in list(preds.items())[:24]:
+                if not isinstance(month, str) or not isinstance(by_source, dict):
+                    continue
+                month = month[:7]
+                slot = predicted.setdefault(month, {})
+                for name, value in list(by_source.items())[:FORECAST_LEDGER_SOURCES]:
+                    try:
+                        v = float(value)
+                    except (TypeError, ValueError):
+                        continue
+                    if not math.isfinite(v) or name in slot:
+                        continue                      # first word only: never revised
+                    slot[str(name)[:80]] = {"value": round(v, 2), "made": body.get("as_of")}
+
+        actuals = body.get("actuals")
+        scored = {r.get("month") for r in results if isinstance(r, dict)}
+        if isinstance(actuals, dict):
+            for month, value in list(actuals.items())[:24]:
+                month = str(month)[:7]
+                if month in scored or month not in predicted:
+                    continue
+                try:
+                    actual = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if not math.isfinite(actual) or actual <= 0:
+                    continue
+                by = {}
+                for name, rec in predicted[month].items():
+                    v = rec.get("value")
+                    if not isinstance(v, (int, float)):
+                        continue
+                    by[name] = {"predicted": v, "error": round((v - actual) / actual, 4),
+                                "made": rec.get("made")}
+                if not by:
+                    continue
+                winner = min(by.items(), key=lambda kv: abs(kv[1]["error"]))
+                results.append({"month": month, "actual": round(actual, 2), "by_source": by,
+                                "winner": winner[0], "winner_error": winner[1]["error"],
+                                "closed_at": datetime.now(timezone.utc).isoformat()})
+                scored.add(month)
+
+        results.sort(key=lambda r: r.get("month") or "")
+        results = results[-FORECAST_LEDGER_MONTHS:]
+        keep = {r["month"] for r in results}
+        # A month still ahead keeps its predictions; one long closed does not.
+        predicted = {m: v for m, v in predicted.items()
+                     if m in keep or m >= min(keep, default=m)}
+        return {"predicted": predicted, "results": results}
+
     @mcp.custom_route("/hooks/forecast/results", methods=["POST"])
     async def forecast_results_hook(request: Request):
         """The nightly forecasting service (a second Railway service on this
@@ -13452,6 +13525,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             runs.append({"as_of": body.get("as_of"), "received_at": now,
                          "year_p50": (body.get("year") or {}).get("p50"), "alerts": len(body.get("alerts") or [])})
             state["runs"] = runs[-60:]
+            # Who said what, and who turned out to be right. Kept here rather
+            # than in the service, because the service is stateless by design
+            # and this is the one thing that has to outlive a run.
+            state["ledger"] = _forecast_ledger(state, body)
         _write_json_store(FORECAST_PATH, "forecast", state)
         return _json({"ok": True})
 
@@ -13474,6 +13551,19 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         headers={**_API_HEADERS, "Cache-Control": "no-store",
                                  "Content-Disposition": 'attachment; filename="Cash Flow.xlsx"'})
 
+    @mcp.custom_route("/hooks/forecast/ledger", methods=["GET"])
+    async def forecast_ledger_hook(request: Request):
+        """The service reads back who has actually been right, so a run can
+        weigh its sources on their record rather than only on a backtest it
+        computed itself a moment earlier."""
+        if not FORECAST_INGEST_TOKEN:
+            return _json({"error": "The forecast hook is switched off: set FORECAST_INGEST_TOKEN."}, 503)
+        if not _forecast_token_ok(request):
+            return _json({"error": "Unauthorized"}, 401)
+        led = _forecast_state().get("ledger")
+        led = led if isinstance(led, dict) else {}
+        return _json({"results": (led.get("results") or [])[-36:]})
+
     @mcp.custom_route("/api/forecast", methods=["POST"])
     async def forecast_route(request: Request):
         """What the tab shows: the latest run, the last failure if the latest
@@ -13484,8 +13574,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return err
         state = _forecast_state()
         wb = {k: v for k, v in (state.get("workbook") or {}).items() if k != "data_b64"}
+        led = state.get("ledger") if isinstance(state.get("ledger"), dict) else {}
         return _json({"latest": state.get("latest"), "last_error": state.get("last_error"),
                       "runs": state.get("runs", [])[-14:], "workbook": wb,
+                      "ledger": {"results": (led.get("results") or [])[-24:],
+                                 "open": sorted(led.get("predicted") or {})[-6:]},
                       "hook_configured": bool(FORECAST_INGEST_TOKEN),
                       "can_upload": _team_level(who) >= ROLE_LEVELS["admin"]})
 

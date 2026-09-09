@@ -9103,6 +9103,59 @@ Projected Image UK"></textarea>
            history, best first, and the one that earned it is marked. Where
            they spread widely, that spread IS the answer - two Decembers of
            53,648 and 15,444 cannot produce a confident December. */
+        /* ---------- the standing record ----------
+           What every source SAID about a month while that month was still
+           ahead, marked when the month closed. It is the honest test, and the
+           one the system now ranks on once there are three closed months: a
+           backtest refits a model to a period the code already knows the shape
+           of, and forgives it accordingly.
+
+           Nobody chooses an algorithm here. The table is the reason to trust
+           the choice that was made. */
+        function fcRecordCard(c) {
+            const led = (c && c.ledger) || {};
+            const res = (led.results || []).slice(-12);
+            const sn = (c.latest || {}).sanity || {};
+            const box = el('div');
+            box.append(el('div', 'section-title', 'What has actually been right'));
+            const card = el('div', 'card');
+            if (!res.length) {
+                card.append(el('p', 'card-sub',
+                    'Nothing has closed yet. From the end of this month, every source\u2019s prediction is '
+                    + 'marked against what actually came in, and the one that keeps coming closest starts '
+                    + 'leading the forecast. Until then the ranking is the backtest above.'
+                    + ((led.open || []).length ? ' Months being watched: ' + led.open.join(', ') + '.' : '')));
+                box.append(card); return box;
+            }
+            const tally = {};
+            res.forEach(r => {
+                Object.entries(r.by_source || {}).forEach(([n, v]) => {
+                    const t = tally[n] = tally[n] || { n: 0, abs: 0, wins: 0 };
+                    t.n++; t.abs += Math.abs(v.error || 0); if (r.winner === n) t.wins++;
+                });
+            });
+            const names = Object.keys(tally).sort((a, b) => (tally[a].abs / tally[a].n) - (tally[b].abs / tally[b].n));
+            card.append(el('p', 'card-sub',
+                'Each month, what every source predicted before the month began, against what came in. '
+                + (sn.ranked_on === 'record'
+                    ? 'With ' + (sn.closed_months || res.length) + ' closed months on record, this is what the '
+                      + 'forecast is now ranked on rather than the backtest.'
+                    : 'Three closed months are needed before this outranks the backtest; there are '
+                      + (sn.closed_months || 0) + ' so far.')));
+            card.append(fcTable(['Month', 'Came in'].concat(names.map(n => n.length > 22 ? n.slice(0, 21) + '\u2026' : n)),
+                res.map(r => [fcMonth(r.month), fcMoney(r.actual)].concat(names.map(n => {
+                    const v = (r.by_source || {})[n];
+                    if (!v) return 'n/a';
+                    const cell = el('span', null, fcPct(v.error));
+                    if (r.winner === n) { cell.append(document.createTextNode(' ')); cell.append(fcChip('made', 'closest')); }
+                    return cell;
+                }))), [0, 1].concat(names.map(() => 1))));
+            card.append(fcTable(['Source', 'Months', 'Average error', 'Closest'],
+                names.map(n => [n, tally[n].n, (tally[n].abs / tally[n].n * 100).toFixed(0) + '%',
+                                tally[n].wins + ' of ' + tally[n].n]), [0, 1, 1, 1]));
+            box.append(card);
+            return box;
+        }
         function fcSanityCard(latest, sc) {
             const sn = latest.sanity;
             const box = el('div');
@@ -9217,25 +9270,11 @@ Projected Image UK"></textarea>
             if (!forecastScenario || names.indexOf(forecastScenario) < 0) forecastScenario = names[0] || '';
             const sc = forecastScenario;
             const st = el('div', 'section-title', 'Against the plan');
-            /* Which source the boxes answer for. The leader is the default and
-               is what everything below is built from; any other is answering a
-               "what would this one say" question, and the note says so. */
+            /* No source picker. The system picks, on evidence: the backtest at
+               first, and the standing record of closed months as soon as there
+               is enough of it. Asking a person to choose an algorithm is
+               asking them to guess at something the machine can measure. */
             const sn0 = latest.sanity || {};
-            const srcs = (sn0.models || []).filter(m => m.months && (m.score || {}).mape != null)
-                .sort((a, b) => a.score.mape - b.score.mape);
-            let pick = fcSourceName();
-            if (!srcs.some(m => m.name === pick)) pick = '';
-            const chosen = pick ? srcs.find(m => m.name === pick) : (srcs[0] || null);
-            if (srcs.length > 1) {
-                const sel = el('select', 'psel');
-                sel.setAttribute('aria-label', 'Which source the headline figures speak for');
-                [['', 'Leading source' + (srcs[0] ? ' (' + srcs[0].name + ')' : '')]]
-                    .concat(srcs.map(m => [m.name, m.name])).forEach(([v, label]) => {
-                        const o = el('option', null, label); o.value = v; if (v === pick) o.selected = true; sel.append(o);
-                    });
-                sel.onchange = () => setFcSourceName(sel.value);
-                st.append(sel);
-            }
             if (names.length > 1) st.append(segControl(names.map(n => ({ label: n.replace('Algorithm ', 'Algo '), value: n })), sc, (v) => { forecastScenario = v; renderForecast(); }));
             box.append(st);
             const rows = latest.monthly || [];
@@ -9250,26 +9289,10 @@ Projected Image UK"></textarea>
                what has been banked plus the share of its month-figure that has
                not happened yet - the same uniform split, said plainly in the
                note rather than presented as if the whole page had moved. */
-            const isLead = !pick;
-            const srcLabel = chosen ? chosen.name : '';
-            let monthVal = cur ? cur.p50 : null, monthNote = cur ? ('P10 ' + fcMoney(cur.p10) + ' · P90 ' + fcMoney(cur.p90)) : '';
-            let yearVal = year.p50, yearNote = yt != null ? ('vs ' + fcMoney(yt) + ' (' + fcPct((year.p50 - yt) / yt) + ')') : '';
-            if (!isLead && chosen) {
-                const cm = cur ? cur.month : null;
-                const whole = cm ? (chosen.months || {})[cm] : null;
-                if (whole != null && cur) {
-                    const d = new Date(latest.as_of + 'T00:00:00');
-                    const days = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-                    const left = Math.max(0, days - d.getDate());
-                    monthVal = (cur.actual_to_date || 0) + whole * (left / days);
-                    monthNote = srcLabel + ' · ' + fcMoney(cur.actual_to_date) + ' banked plus its share of the rest';
-                }
-                if (chosen.year != null) {
-                    yearVal = chosen.year;
-                    yearNote = (yt != null ? 'vs ' + fcMoney(yt) + ' (' + fcPct((yearVal - yt) / yt) + ') · ' : '')
-                        + srcLabel + (chosen.year_partial ? ', part year only' : '');
-                }
-            }
+            const monthVal = cur ? cur.p50 : null;
+            const monthNote = cur ? ('P10 ' + fcMoney(cur.p10) + ' · P90 ' + fcMoney(cur.p90)) : '';
+            const yearVal = year.p50;
+            const yearNote = yt != null ? ('vs ' + fcMoney(yt) + ' (' + fcPct((year.p50 - yt) / yt) + ')') : '';
             const mets = [];
             if (cur) {
                 mets.push({ label: 'This month, projected', value: fcMoney(monthVal), note: monthNote,
@@ -9282,16 +9305,24 @@ Projected Image UK"></textarea>
             if (blendTot) mets.push({ label: 'Backtest accuracy (WRMSSE)', value: Number(blendTot.wrmsse).toFixed(2),
                                       note: (baseTot ? 'seasonal baseline ' + Number(baseTot.wrmsse).toFixed(2) + ' · ' : '') + 'lower is better' });
             box.append(metricsStrip(mets));
-            const daily = (latest.daily && latest.daily.forecast) || [];
-            if (daily.length) {
-                box.append(trendChart({ title: 'Cash in, next ' + daily.length + ' days', source: 'Reactor forecast', period: 'the leading model, with its own measured error as the band',
-                    yUnit: 'GBP', value: money(daily.reduce((a, r) => a + (r.p50 || 0), 0), 'GBP', 0), labels: daily.map(r => fcDay(r.date)),
-                    series: [{ name: 'Forecast', color: CH[0], values: daily.map(r => r.p50 || 0) },
-                             { name: 'P90', color: CH[2], values: daily.map(r => r.p90 || 0) },
-                             { name: 'P10', color: CH[2], values: daily.map(r => r.p10 || 0) }],
+            /* Month by month, not day by day. The daily line was a spike and a
+               trough for every weekend and said nothing a month does not; the
+               plan is written in months and the verdict is passed in months. */
+            const ms = latest.months || [];
+            if (ms.length) {
+                const fut = ms.filter(m => m.actual == null);
+                box.append(trendChart({ title: 'Cash in, month by month', source: 'Reactor forecast',
+                    period: 'taken so far, then the leading source with its own measured error as the band',
+                    yUnit: 'GBP', value: money(fut.reduce((a, r) => a + (r.p50 || 0), 0), 'GBP', 0),
+                    labels: ms.map(m => fcMonth(m.month)),
+                    series: [{ name: 'Taken', color: CH[0], values: ms.map(m => m.actual) },
+                             { name: 'Forecast', color: CH[1], values: ms.map(m => m.p50) },
+                             { name: 'P90', color: CH[2], values: ms.map(m => m.p90) },
+                             { name: 'P10', color: CH[2], values: ms.map(m => m.p10) }],
                     format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompact, height: 280, annotate: false }));
             }
             box.append(fcSanityCard(latest, sc));
+            box.append(fcRecordCard(c));
             box.append(el('div', 'section-title', 'Month by month against ' + sc));
             const mc = el('div', 'card');
             mc.append(fcTable(['Month', 'Basis', 'Projected', 'P10', 'P90', 'Target', 'Gap', 'Verdict', 'Risk'],

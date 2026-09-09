@@ -264,8 +264,54 @@ def _backtest_all(y: pd.Series, models: List[Tuple[str, object]], folds: int, h:
 
 
 
+MIN_LIVE_MONTHS = 3          # before a track record outranks a backtest
+
+
+def track_record(results: Optional[List[dict]]) -> Dict[str, Dict[str, float]]:
+    """What each source has actually been worth on months it could not see.
+
+    The backtest each run computes is retrospective and forgiving: a model is
+    refitted to old months and marked on them. This is the standing record -
+    what a source SAID about a month while that month was still ahead, marked
+    when it closed. It is the harder test and the one worth trusting, once
+    there is enough of it."""
+    out: Dict[str, Dict[str, float]] = {}
+    for r in results or []:
+        for name, rec in (r.get("by_source") or {}).items():
+            e = rec.get("error")
+            if not isinstance(e, (int, float)) or not np.isfinite(e):
+                continue
+            d = out.setdefault(name, {"n": 0, "abs": 0.0, "sum": 0.0, "wins": 0})
+            d["n"] += 1
+            d["abs"] += abs(float(e))
+            d["sum"] += float(e)
+            if r.get("winner") == name:
+                d["wins"] += 1
+    for name, d in out.items():
+        n = d["n"] or 1
+        d["mape"] = d["abs"] / n
+        d["bias"] = d["sum"] / n
+        d["win_rate"] = d["wins"] / n
+    return out
+
+
+def _live_weights(live: Dict[str, Dict[str, float]], names: List[str]) -> Dict[str, float]:
+    """Weight by how right each source has actually been: inverse error,
+    normalised. A source with no record gets no weight rather than an average
+    one, because pretending to know is worse than saying nothing."""
+    w = {}
+    for n in names:
+        d = live.get(n)
+        if not d or d.get("n", 0) < MIN_LIVE_MONTHS:
+            continue
+        w[n] = 1.0 / max(float(d["mape"]), 0.02)
+    total = sum(w.values())
+    return {k: v / total for k, v in w.items()} if total > 0 else {}
+
+
 def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
-                     folds: int = 3, fold_h: int = 3) -> dict:
+                     folds: int = 3, fold_h: int = 3,
+                     results: Optional[List[dict]] = None) -> dict:
     """Every source's next `horizon` months, plus combinations of them, each
     carrying the score it earned on this shop's own months.
 
@@ -287,7 +333,7 @@ def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
     mscore, cscore = _backtest_all(monthly, models, folds, fold_h)
 
     months = [str(p) for p in _future_index(monthly, horizon)]
-    out, live = [], {}
+    out, live_fc = [], {}
     for name, fn, blurb in models:
         try:
             f, note = fn(monthly, horizon)
@@ -297,13 +343,13 @@ def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
                         "score": mscore.get(name, _errors_to_score([]))})
             continue
         vals = {str(p): (None if not np.isfinite(v) else round(float(v), 2)) for p, v in f.items()}
-        live[name] = [vals.get(k) for k in months]
+        live_fc[name] = [vals.get(k) for k in months]
         out.append({"name": name, "kind": "model", "note": note, "about": blurb, "months": vals,
                     "score": mscore.get(name, _errors_to_score([]))})
 
-    stack = None
-    if live:
-        stack = np.array([[np.nan if v is None else v for v in live[n]] for n in live], dtype=float)
+    stack, live_names = None, list(live_fc.keys())
+    if live_fc:
+        stack = np.array([[np.nan if v is None else v for v in live_fc[n]] for n in live_names], dtype=float)
         for cname, fn, note, blurb in COMBINERS:
             vals = fn(stack)
             out.append({"name": cname, "kind": "combination", "note": note, "about": blurb,
@@ -311,14 +357,56 @@ def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
                                    for k, v in zip(months, vals)},
                         "score": cscore.get(cname, _errors_to_score([]))})
 
-    ranked = [m for m in out if (m.get("score") or {}).get("mape") is not None and m.get("months")]
-    ranked.sort(key=lambda m: m["score"]["mape"])
+    # A source weighted by what it has ACTUALLY been worth, month by closed
+    # month. It only appears once there is a record to weigh with, and it is
+    # scored on the same folds as everything else rather than trusted.
+    live = track_record(results)
+    lw = _live_weights(live, list(live.keys()))
+    if stack is not None and lw:
+        idx = {n: i for i, n in enumerate(live_names)}
+        usable = {n: w for n, w in lw.items() if n in idx}
+        tot = sum(usable.values())
+        if tot > 0:
+            vals = sum(stack[idx[n]] * (w / tot) for n, w in usable.items())
+            out.append({"name": "Weighted by track record", "kind": "combination",
+                        "note": "each source weighted by how right it has been",
+                        "about": "Weights every source by how close it has actually come on the months "
+                                 "that have closed since this started running, not by a backtest. The "
+                                 "more months there are, the more this reflects what works for this "
+                                 "business rather than what works in general.",
+                        "months": {k: (None if not np.isfinite(v) else round(float(v), 2))
+                                   for k, v in zip(months, vals)},
+                        "score": {"mape": None, "bias": None, "worst": None, "folds": 0},
+                        "weights": {n: round(w / tot, 3) for n, w in usable.items()}})
+
+    # Attach the standing record to each source, and rank on it once there is
+    # enough of it: a month a source could not see is worth more than a fold
+    # it was refitted to.
+    closed = max((int(d.get("n", 0)) for d in live.values()), default=0)
+    for entry in out:
+        d = live.get(entry["name"])
+        if d:
+            entry["live"] = {"months": int(d["n"]), "mape": round(d["mape"], 4),
+                             "bias": round(d["bias"], 4), "wins": int(d["wins"]),
+                             "win_rate": round(d["win_rate"], 3)}
+
+    def rank_key(m):
+        if closed >= MIN_LIVE_MONTHS and (m.get("live") or {}).get("mape") is not None:
+            return (0, m["live"]["mape"])
+        sc = (m.get("score") or {}).get("mape")
+        return (1, sc if sc is not None else 9.9)
+
+    ranked = [m for m in out if m.get("months")
+              and ((m.get("score") or {}).get("mape") is not None or (m.get("live") or {}).get("mape") is not None)]
+    ranked.sort(key=rank_key)
     best = ranked[0]["name"] if ranked else None
+    ranked_on = "record" if closed >= MIN_LIVE_MONTHS else "backtest"
     median = ({k: (None if not np.isfinite(v) else round(float(v), 2))
                for k, v in zip(months, _median(stack))} if stack is not None else {})
     return {"available": True, "months": months, "models": out, "median": median, "best": best,
-            "sources": len(live), "history": [{"month": str(p), "value": round(float(v), 2)}
-                                              for p, v in monthly.tail(24).items()]}
+            "ranked_on": ranked_on, "closed_months": closed, "sources": len(live_fc),
+            "history": [{"month": str(p), "value": round(float(v), 2)}
+                        for p, v in monthly.tail(24).items()]}
 
 
 def pick_opinions(result: dict, n: int = 3) -> List[dict]:

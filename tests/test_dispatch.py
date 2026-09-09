@@ -12263,6 +12263,52 @@ def t_the_xero_client_is_read_only_by_construction():
     ok('resp = await client.get(url' in src, "the accounting fetcher is a GET")
 
 @test
+def t_the_system_learns_which_source_is_right_from_closed_months():
+    """Nobody picks the algorithm. Every run writes down what each source says
+    about the months ahead; when a month closes, each of those predictions is
+    marked against what actually came in, the closest is recorded, and once
+    three months have closed the forecast is ranked on that record rather than
+    on a backtest.
+
+    The distinction matters. A backtest refits a model to a period the code
+    already knows the shape of and forgives it accordingly. The record is what
+    a source SAID while the month was still ahead. So a prediction is written
+    ONCE and never revised: a later run may have a better opinion about
+    September, but overwriting September's original entry would turn a forecast
+    into a hindcast and make every source look excellent."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    simple = open(os.path.join(root, "forecast", "simple.py"), encoding="utf-8").read()
+    nightly = open(os.path.join(root, "forecast", "nightly.py"), encoding="utf-8").read()
+    src = open(os.path.join(root, "copilot.py"), encoding="utf-8").read()
+
+    led = src.split("def _forecast_ledger(", 1)[1].split("\n    @mcp", 1)[0]
+    ok("if not math.isfinite(v) or name in slot:" in led,
+       "a prediction is written once and never revised, or the record flatters everyone")
+    ok('winner = min(by.items(), key=lambda kv: abs(kv[1]["error"]))' in led,
+       "the closest source each month is recorded")
+    ok("if month in scored or month not in predicted:" in led,
+       "a month is marked once, and only if something was predicted for it")
+    ok('state["ledger"] = _forecast_ledger(state, body)' in src, "the hook keeps it")
+    ok('"/hooks/forecast/ledger"' in src, "and the service can read it back")
+
+    ok("def track_record(" in simple and "MIN_LIVE_MONTHS = 3" in simple,
+       "the record becomes a score per source, after three closed months")
+    ok('ranked_on = "record" if closed >= MIN_LIVE_MONTHS else "backtest"' in simple,
+       "and outranks the backtest at that point")
+    ok('return (0, m["live"]["mape"])' in simple,
+       "ranking prefers what a source did on months it could not see")
+    ok('"Weighted by track record"' in simple and "_live_weights(" in simple,
+       "and the accumulated pattern becomes a source of its own, weighted by who has been right")
+
+    ok("_fetch_ledger(base + \"/hooks/forecast/ledger\", token)" in nightly, "the run reads it")
+    ok("results=record" in nightly, "and forecasts with it")
+    ok('"predictions": predictions, "actuals": actuals_by_month' in nightly,
+       "then writes down what every source said, and what actually came in")
+    ok('"months": months_series' in nightly and '"daily":' not in nightly,
+       "month by month, not day by day")
+
+
+@test
 def t_the_forecast_is_many_sources_ranked_by_what_each_was_worth():
     """The big model forecast October - Projected Image's best month, over 60k
     two years running - at 16,436, because it predicts each product on each
