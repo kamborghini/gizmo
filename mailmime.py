@@ -18,6 +18,11 @@ _VOID = {"br", "img"}
 # unwrapping it into the body would hand the customer's mail client the very
 # string the tag was dropped for.
 _DROP = ("script", "style", "iframe", "object", "embed", "svg", "math", "template")
+# Of those, the ones that never open a subtree: <embed> is void, so no end tag
+# is coming, and anything written <svg/> closes itself. Counting either as the
+# start of a dropped subtree leaves the counter stuck above zero and swallows
+# the whole rest of the message - see the note on handle_startendtag.
+_DROP_VOID = {"embed"}
 _STYLE_OK = ("font-family", "font-size", "color", "text-align")
 _STYLE_VAL = re.compile(r"^[a-zA-Z0-9 ,#%.'\"-]+$")   # no url(), no expression(), no escapes
 _CID_RX = re.compile(r"^cid:[A-Za-z0-9._@-]+$")
@@ -56,7 +61,11 @@ class _Sanitiser(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         if tag in _DROP:
-            self.skip += 1
+            # A void dropped tag has no subtree to skip: dropping the tag IS
+            # the whole job. Incrementing here would wait forever for an end
+            # tag the parser is never going to emit.
+            if tag not in _DROP_VOID:
+                self.skip += 1
             return
         if self.skip or tag not in self.allowed:
             return
@@ -86,6 +95,17 @@ class _Sanitiser(HTMLParser):
         self.out.append(f"<{tag}{attr}>")
 
     def handle_startendtag(self, tag, attrs):
+        """<svg/>, <embed/> and friends: opened and closed in one token.
+
+        This used to delegate straight to handle_starttag, which counted the
+        tag as the START of a dropped subtree. No handle_endtag ever follows a
+        self-closing tag, so the counter never came back down and every
+        remaining character of the message was discarded - silently, and after
+        the sanitiser is the last thing that touches an outgoing email. An
+        inline <svg/> in a quoted signature was enough to send a reply that
+        stopped mid-sentence."""
+        if tag in _DROP:
+            return
         self.handle_starttag(tag, attrs)
 
     def handle_endtag(self, tag):

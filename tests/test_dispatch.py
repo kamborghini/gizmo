@@ -15905,6 +15905,68 @@ def t_claude_is_told_not_to_sign_off_because_the_send_does_it():
 
 
 @test
+def t_nothing_changed_is_not_reported_as_a_half_finished_crawl():
+    """A 304 from Xero means "nothing has changed since you last asked", which
+    is what an incremental sync gets on most sweeps. It was falling through to
+    the page-cap branch, so every quiet sweep logged four PARTIAL warnings and
+    appended four notes claiming the results were incomplete. The report keeps
+    only twelve notes, so a permanent falsehood was pushing out the warnings
+    that matter, like Xero not being connected at all."""
+    import asyncio as _a, xero as _x
+    saved = _x._get
+    try:
+        async def not_modified(path, params=None, if_modified_since=None):
+            return {"_not_modified": True}
+        _x._get = not_modified
+        eq(_a.run(_x._paged("Invoices", "Invoices")), [],
+           "a 304 returns what was collected, with no truncation marker")
+
+        async def always_full(path, params=None, if_modified_since=None):
+            return {"Invoices": [{"i": i} for i in range(100)]}
+        _x._get = always_full
+        out = _a.run(_x._paged("Invoices", "Invoices", max_pages=2))
+        ok(any("_truncated" in r for r in out),
+           "a crawl that genuinely hits the cap still says so")
+    finally:
+        _x._get = saved
+
+
+@test
+def t_a_dropped_tag_takes_its_subtree_and_not_the_rest_of_the_email():
+    """The sanitiser is the last thing that touches an outgoing message, so a
+    bug here is invisible: nobody sees the email that was sent.
+
+    <embed> is void and <svg/> closes itself, so no end tag ever follows them.
+    Both were being counted as the START of a dropped subtree, the skip counter
+    never came back to zero, and every character after them was discarded. One
+    inline SVG in a quoted signature - which is ordinary in marketing mail and
+    in half the signatures in circulation - sent a reply that stopped
+    mid-sentence, with no error anywhere."""
+    import mailmime
+    # The shapes that were broken: a void tag, and anything written self-closing.
+    # Neither opens a subtree, so neither may consume what follows it.
+    shapes = ["<embed>"] + ["<%s/>" % t for t in ("embed", "svg", "math", "template", "object", "iframe")]
+    # A properly closed pair must also leave the text after it alone.
+    shapes += ["<%s></%s>" % (t, t) for t in ("svg", "math", "template", "object", "iframe")]
+    for shape in shapes:
+        out = mailmime.sanitize_html("<p>before</p>" + shape + "<p>AFTER</p>")
+        ok("AFTER" in out, "%s swallowed the rest of the message: %r" % (shape, out))
+        ok("<svg" not in out and "<embed" not in out and "<object" not in out,
+           "%s was not dropped: %r" % (shape, out))
+    # An UNCLOSED pair is different, and dropping the remainder is correct: the
+    # parser cannot know where the subtree ends, and unwrapping it would put the
+    # contents of a <script> or an <svg> into the customer's mail client. Safety
+    # wins over the text here, and this pins that it is a decision, not a lapse.
+    out = mailmime.sanitize_html("<p>before</p><svg><p>AFTER</p>")
+    ok("AFTER" not in out, "an unclosed dropped tag must keep swallowing: " + repr(out))
+    # And the subtree is still taken, which is the whole reason these are dropped.
+    out = mailmime.sanitize_html("<p>a</p><script>alert(1)</script><p>b</p>")
+    ok("alert(1)" not in out and "a" in out and "b" in out, out)
+    out = mailmime.sanitize_html("<p>a</p><svg><desc>HIDDEN</desc></svg><p>b</p>")
+    ok("HIDDEN" not in out and "b" in out, out)
+
+
+@test
 def t_the_sanitiser_strips_every_known_injection_and_keeps_formatting():
     import mailmime
     keep = '<p>Hi <b>Jo</b>, <i>thanks</i> <u>again</u>.</p><ul><li>one</li></ul>' \

@@ -458,7 +458,13 @@ async def _paged(path: str, key: str, params: Optional[dict] = None,
         params["page"] = page
         d = await _get(path, params=params, if_modified_since=if_modified_since)
         if d.get("_not_modified"):
-            break
+            # Nothing changed since the last sweep, which is the ordinary
+            # steady state of an incremental sync - NOT a crawl that ran out of
+            # pages. `break` fell through to the cap branch below, so every
+            # quiet sweep logged four PARTIAL warnings and appended four notes
+            # saying the results were incomplete, crowding the real warnings
+            # out of the twelve the report keeps.
+            return out
         rows = d.get(key) or []
         out.extend(rows)
         if len(rows) < 100:
