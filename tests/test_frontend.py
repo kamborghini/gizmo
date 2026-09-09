@@ -1863,9 +1863,16 @@ def t_the_forecast_tab_exists_and_is_gated():
     # where am I expected to be, is that good - and the tables that used to be
     # dealt onto the screen all at once now wait behind drawers.
     ov = SCRIPT.split("function fcOverviewCard(", 1)[1].split("\n        function ", 1)[0]
-    for q in ("'Where am I now'", "'Where am I expected to be'", "'Is that good or bad'"):
+    for q in ("'Where I am now'", "'Where I am expected to be'", "'Where the year lands'"):
         ok(q in ov, "the overview asks " + q)
-    ok("Full year:" in ov, "and still carries the year, which is the figure asked for next")
+    # Each answer is its OWN block. The joined multi-column frame was retired
+    # on purpose and must not come back, here or anywhere.
+    ok("metricsStrip(mets)" in ov and "fc-now" not in SCRIPT,
+       "each answer is a house KPI block, not three columns welded into one card")
+    # Good or bad is the change pill ON the number it judges, which is where
+    # the reference puts it, not a fourth abstract box.
+    ok("delta:" in ov and "trend:" in ov,
+       "the verdict rides on the figure it qualifies")
     ok("8 times out of 10" in ov and "not a commitment" in ov,
        "and says how wide the range is, in money, rather than printing P10 and P90")
     order = [fn.index("fcOverviewCard(latest, sc)"), fn.index("fcChartCard("),
@@ -3402,7 +3409,7 @@ def t_a_box_painted_inside_a_card_sits_inside_its_gutter():
                 # prose and both ends of every divider 1px from the card's
                 # border, because its padding shorthand's 0 had quietly
                 # overridden the card's 16px gutter.
-                ".fc-algo", ".fc-alert", ".know-body", ".fc-drive-tot"):
+                ".fc-algo", ".fc-alert", ".know-body", ".fc-drive-tot", ".fc-split-bar"):
         ok(cls in listed, cls + " is inset by margin, not welded to the card's border")
     # The inset must not be taken TWICE. A child that paints a filled box keeps
     # its own padding, because that padding sits inside the box it draws. A
