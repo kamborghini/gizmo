@@ -9068,6 +9068,21 @@ Projected Image UK"></textarea>
                 : 'No workbook uploaded yet. An admin uploads the cash flow workbook with the button above; the nightly run reads it.'));
             return card;
         }
+        /* How much of the source table to put on screen. Twelve rows of models
+           is a lot to land on someone who opened the page to read one number,
+           so the default is the three that are quoted, and the choice is
+           remembered per person. "Just the headline" is a single row: the
+           source that leads, with the plan beside it. */
+        const LS_FCROWS = 'sc_fc_rows_v1';
+        const FC_ROWS = [['one', 'Just the headline'], ['three', 'The three quoted'], ['all', 'Every source']];
+        function fcRowsMode() {
+            try { const v = localStorage.getItem(LS_FCROWS); return FC_ROWS.some(r => r[0] === v) ? v : 'three'; }
+            catch (e) { return 'three'; }
+        }
+        function setFcRowsMode(v) {
+            try { localStorage.setItem(LS_FCROWS, v); } catch (e) {}
+            renderForecast();
+        }
         /* ---------- the sanity panel ----------
            Five plain forecasts of the monthly total, beside the big model.
            They exist because the big one forecast October, the best month of
@@ -9088,12 +9103,17 @@ Projected Image UK"></textarea>
                     || 'The nightly run has not posted the plain models yet. They arrive with the next run.'));
                 box.append(card); return box;
             }
+            const mode = fcRowsMode();
+            card.append(filterTabs(FC_ROWS, mode, setFcRowsMode));
             card.append(el('p', 'card-sub',
-                'The top one drives the month table, the cash path and the alerts below; the next two '
-                + 'stand beside it so you can see whether they agree. Rows marked as an average '
-                + 'combine the others: averaging several forecasts usually beats most single ones, '
-                + 'and here it is put to the same test rather than assumed. '
-                + 'Each reads only the monthly total, so each can be checked by eye. '
+                mode === 'one'
+                ? 'The source that has been most right on this shop\u2019s own history, with what '
+                  + 'the plan expects beside it. Show more above to see whether the others agree. '
+                : 'The top one drives the month table, the cash path and the alerts below; the next two '
+                  + 'stand beside it so you can see whether they agree. Rows marked as an average '
+                  + 'combine the others: averaging several forecasts usually beats most single ones, '
+                  + 'and here it is put to the same test rather than assumed. '
+                  + 'Each reads only the monthly total, so each can be checked by eye. '
                 + 'They are scored on this shop\u2019s own history: fitted to earlier months, '
                 + 'then marked against what actually happened. Lower error is better, and a '
                 + 'bias that leans one way every month matters more than the size of it.'));
@@ -9103,7 +9123,9 @@ Projected Image UK"></textarea>
                 if (x == null) return 1; if (y == null) return -1; return x - y;
             });
             const RANK = ['leads the forecast', 'second opinion', 'third opinion'];
-            const rows = ranked.map((m, i) => {
+            const shown = mode === 'one' ? ranked.slice(0, 1)
+                : mode === 'three' ? ranked.slice(0, 3) : ranked;
+            const rows = shown.map((m, i) => {
                 const name = el('span', null, m.name);
                 if (RANK[i]) name.append(document.createTextNode(' '), fcChip(i ? 'note' : 'made', RANK[i]));
                 /* An average of the others is a row like any other and is

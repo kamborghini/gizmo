@@ -3468,6 +3468,15 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
     ok("helpHead('Typical error'" in fn and "helpHead('Bias'" in fn,
        "and so do the two columns nobody can be expected to read cold")
     ok("'Source'" in fn, "the column is what it is: a source, not a model")
+    # Twelve rows is a lot to land on someone who opened the page to read one
+    # number. The choice of how much to show is remembered per person.
+    ok("filterTabs(FC_ROWS, mode, setFcRowsMode)" in fn, "the reader chooses how much to see")
+    ok("mode === 'one' ? ranked.slice(0, 1)" in fn and "ranked.slice(0, 3)" in fn,
+       "one row, three rows, or all of them")
+    ok("'Just the headline'" in SCRIPT and "'The three quoted'" in SCRIPT and "'Every source'" in SCRIPT,
+       "named so the choice explains itself")
+    ok("localStorage.setItem(LS_FCROWS" in SCRIPT and "return FC_ROWS.some(r => r[0] === v) ? v : 'three'" in SCRIPT,
+       "remembered, defaulting to the three that are quoted, and a junk value falls back rather than breaking")
     ok("!sn || !sn.available" in fn and "sn.reason" in fn,
        "a run with too little history says so instead of drawing an empty table")
     ok("fcSanityCard(latest, sc)" in SCRIPT, "and the tab actually calls it")
