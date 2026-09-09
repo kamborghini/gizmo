@@ -12263,16 +12263,15 @@ def t_the_xero_client_is_read_only_by_construction():
     ok('resp = await client.get(url' in src, "the accounting fetcher is a GET")
 
 @test
-def t_the_nightly_run_posts_five_plain_models_beside_the_big_one():
+def t_the_forecast_is_many_sources_ranked_by_what_each_was_worth():
     """The big model forecast October - Projected Image's best month, over 60k
     two years running - at 16,436, because it predicts each product on each
     day and adds them up, and half their revenue is quoted projector work
     where one order is a tenth of the month.
 
-    So the run also posts five plain forecasts of the MONTHLY TOTAL, each
-    checkable by eye, each scored on the shop's own history. They cost
-    milliseconds and they cannot lose the expensive part of the run: the call
-    is wrapped, and a failure posts a reason instead of no forecast at all.
+    So the forecast is now many plain sources of the MONTHLY TOTAL, each
+    checkable by eye, plus combinations of them, each scored on the shop's own
+    history and ranked by it. Nothing leads because of what it is called.
 
     The series they read is the ORDER TOTAL, not the panel's line-item net,
     because the cash flow plan is written in cash-in terms ("Gross Sales"
@@ -12307,13 +12306,15 @@ def t_the_nightly_run_posts_five_plain_models_beside_the_big_one():
                "holt_winters_trend", "theta"):
         ok("def " + fn + "(" in simple, fn + " is one of the five")
     ok("MIN_MONTHS = 24" in simple, "two full years before a seasonal model may speak")
-    ok('"score": _score(' in simple, "every model carries its backtest, so the reader can rank them")
+    ok('"score": mscore.get(' in simple and '"score": cscore.get(' in simple,
+       "every source AND every combination carries its backtest, so the reader can rank them")
     ok("def pick_opinions(" in simple and "def daily_frame(" in simple,
        "the ranking and the monthly-to-daily spread live beside the models")
     df = simple.split("def daily_frame(", 1)[1].split("\ndef ", 1)[0]
     ok('(model.get("score") or {}).get("mape")' in df,
        "the band is the model's OWN measured error, not a number chosen to look confident")
-    ok("statsmodels" in reqs, "the service image can actually import them")
+    ok("statsmodels" in reqs and "statsforecast" in reqs,
+       "the service image can actually import them")
 
 
 @test

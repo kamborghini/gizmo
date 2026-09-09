@@ -10,3 +10,8 @@ catboost>=1.2
 # Holt-Winters and the simple exponential smoothing behind Theta, for the
 # five plain models in simple.py. Small, pure-Python over numpy/scipy.
 statsmodels>=0.14
+# More voices for the sanity panel: AutoETS, AutoARIMA, AutoTheta, AutoCES.
+# Optional at runtime - simple.py skips them when the import fails - but
+# shipped, because a combination of many forecasts is worth more than any
+# one of them and needs several to average.
+statsforecast>=2.0

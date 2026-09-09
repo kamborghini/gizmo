@@ -9080,7 +9080,9 @@ Projected Image UK"></textarea>
             }
             card.append(el('p', 'card-sub',
                 'The top one drives the month table, the cash path and the alerts below; the next two '
-                + 'stand beside it so you can see whether they agree. '
+                + 'stand beside it so you can see whether they agree. Rows marked as an average '
+                + 'combine the others: averaging several forecasts usually beats most single ones, '
+                + 'and here it is put to the same test rather than assumed. '
                 + 'Each reads only the monthly total, so each can be checked by eye. '
                 + 'They are scored on this shop\u2019s own history: fitted to earlier months, '
                 + 'then marked against what actually happened. Lower error is better, and a '
@@ -9094,18 +9096,24 @@ Projected Image UK"></textarea>
             const rows = ranked.map((m, i) => {
                 const name = el('span', null, m.name);
                 if (RANK[i]) name.append(document.createTextNode(' '), fcChip(i ? 'note' : 'made', RANK[i]));
+                /* An average of the others is a row like any other and is
+                   ranked like one, but it is worth being able to see at a
+                   glance which rows are combinations rather than sources. */
+                if (m.kind === 'combination') name.append(document.createTextNode(' '), fcChip('', 'average'));
                 const sc2 = m.score || {};
                 return [name].concat(months.map(k => m.error ? 'n/a' : fcMoney((m.months || {})[k])))
                     .concat([sc2.mape == null ? 'n/a' : (sc2.mape * 100).toFixed(0) + '%',
                              sc2.bias == null ? 'n/a' : fcPct(sc2.bias), m.note || m.error || '']);
             });
-            const med = ['Median of the five'].concat(months.map(k => fcMoney((sn.median || {})[k]))).concat(['', '', '']);
+            /* No separate median footer: "Median of all" is a ranked row in the
+               table now, scored like everything else, so a second unranked
+               copy of it below would be the same number twice. */
             const plan = ['Your plan (' + sc + ')'].concat(months.map(k => {
                 const r = (latest.monthly || []).find(x => x.month === k);
                 return fcMoney(r ? (r.targets || {})[sc] : null);
             })).concat(['', '', '']);
             card.append(fcTable(['Model'].concat(months.map(fcMonth)).concat(['Typical error', 'Bias', 'How it works']),
-                rows.concat([med, plan]),
+                rows.concat([plan]),
                 [0].concat(months.map(() => 1)).concat([1, 1, 0])));
             box.append(card);
             return box;

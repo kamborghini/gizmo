@@ -3457,7 +3457,8 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
     ok("Typical error" in fn and "Bias" in fn, "both scores are shown, not just the error")
     ok("RANK[i]" in fn and "leads the forecast" in fn and "second opinion" in fn and "third opinion" in fn,
        "the three being quoted are named in order, and the leader is marked as leading")
-    ok("Median of the five" in fn, "and the middle of the five is on the table")
+    ok("Median of the five" not in fn,
+       "no unranked median footer: the median is a scored row in the table itself")
     ok("(latest.monthly || []).find" in fn and "targets" in fn,
        "the plan's own target sits beside them for comparison")
     ok(".sort(" in fn and "mape" in fn, "ordered by what each scored, best first")

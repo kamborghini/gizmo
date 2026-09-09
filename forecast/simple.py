@@ -106,6 +106,41 @@ def theta(y: pd.Series, h: int) -> Tuple[pd.Series, str]:
     return pd.Series(out, index=idx, dtype=float), f"trend {b:+,.0f} a month"
 
 
+# --- statsforecast, when the image carries it -------------------------------
+# Measured on this shop's own months before being let in, and NONE of them beat
+# "last year x run rate": AutoETS returned a flat 27,725 for every month (it
+# found no seasonality in 29 points), AutoARIMA swung 70,707 in October to
+# 21,712 in December. They are here because more voices are worth having and
+# because the ranking is honest about where they come: they earn their place
+# from the backtest or they sit at the bottom of the table where the reader can
+# see them lose.
+def _sf(model_name: str, label: str):
+    def run(y: pd.Series, h: int) -> Tuple[pd.Series, str]:
+        import statsforecast.models as M
+        m = getattr(M, model_name)(season_length=12)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            out = m.forecast(y=y.values.astype(float), h=h)["mean"]
+        return pd.Series(np.asarray(out, dtype=float), index=_future_index(y, h)), label
+    run.__name__ = "sf_" + model_name.lower()
+    run.__doc__ = f"statsforecast {model_name}: {label}."
+    return run
+
+
+def statsforecast_models() -> List[Tuple[str, object]]:
+    """The family, or nothing at all when the package is absent. It is an
+    optional dependency: the panel must not fail because an image was built
+    without it."""
+    try:
+        import statsforecast  # noqa: F401
+    except Exception:
+        return []
+    return [("AutoETS", _sf("AutoETS", "error, trend and season, auto-chosen")),
+            ("AutoARIMA", _sf("AutoARIMA", "auto-chosen ARIMA")),
+            ("AutoTheta", _sf("AutoTheta", "auto-chosen Theta")),
+            ("AutoCES", _sf("AutoCES", "complex exponential smoothing"))]
+
+
 MODELS = (
     ("Last year x run rate", last_year_times_run_rate),
     ("Seasonal share of year", seasonal_share),
@@ -115,66 +150,146 @@ MODELS = (
 )
 
 
-def _score(y: pd.Series, fn, folds: int = 3, h: int = 3) -> Dict[str, Optional[float]]:
-    """Fit to each of the last few cut-offs and score the months that followed.
+# --- combining them ---------------------------------------------------------
+# Averaging several forecasts usually beats the best single one; that is the
+# oldest reliable finding in the field. It is not guaranteed, and on this shop
+# it may well not, because most of the models lean HIGH by 15-57% and an
+# average of biased forecasts is a biased average. So the combinations are
+# scored exactly like the models are, on the same folds, and take their place
+# in the same table. If the average wins it wins on the evidence.
+#
+# All three are leakage-free: none of them needs to know which model scored
+# best, so none of them is quietly reading the answer sheet.
+def _median(m: np.ndarray) -> np.ndarray:
+    return np.nanmedian(m, axis=0)
 
-    Typical error AND bias, because they say different things: a model can be
-    close on average and still lean high every single month, which is what
-    quietly turns a plan green."""
-    errs: List[float] = []
+
+def _mean(m: np.ndarray) -> np.ndarray:
+    return np.nanmean(m, axis=0)
+
+
+def _trimmed(m: np.ndarray) -> np.ndarray:
+    """Drop the highest and the lowest, average the rest: one wild model
+    (AutoARIMA put October at 70,707) cannot then carry the answer."""
+    if m.shape[0] < 4:
+        return np.nanmedian(m, axis=0)
+    out = []
+    for col in range(m.shape[1]):
+        v = np.sort(m[~np.isnan(m[:, col]), col])
+        out.append(np.mean(v[1:-1]) if len(v) >= 3 else (np.mean(v) if len(v) else np.nan))
+    return np.array(out)
+
+
+COMBINERS = (("Average of all", _mean, "the plain mean of every model above"),
+             ("Median of all", _median, "the middle one, so an outlier cannot carry it"),
+             ("Average, trimmed", _trimmed, "highest and lowest dropped, then averaged"))
+
+
+def _folds(y: pd.Series, folds: int = 3, h: int = 3) -> List[Tuple[int, int]]:
+    """Cut-offs with enough history behind them and enough months in front."""
+    out = []
     for k in range(folds, 0, -1):
         cut = len(y) - h - k + 1
-        if cut < MIN_MONTHS:
-            continue
-        try:
-            f, _ = fn(y.iloc[:cut], h)
-        except Exception:
-            continue
-        act = y.iloc[cut:cut + h]
-        common = f.index.intersection(act.index)
-        a = act[common].values
-        e = (f[common].values - a) / np.where(a == 0, np.nan, a)
-        errs += [v for v in e if np.isfinite(v)]
+        if cut >= MIN_MONTHS:
+            out.append((cut, h))
+    return out
+
+
+def _errors_to_score(errs: List[float]) -> Dict[str, Optional[float]]:
     if not errs:
         return {"mape": None, "bias": None, "worst": None, "folds": 0}
-    arr = np.array(errs)
+    arr = np.array(errs, dtype=float)
     return {"mape": float(np.mean(np.abs(arr))), "bias": float(np.mean(arr)),
             "worst": float(np.max(np.abs(arr))), "folds": len(errs)}
 
 
-def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON) -> dict:
-    """Every model's next `horizon` months, each with its backtest score.
+def _backtest_all(y: pd.Series, models: List[Tuple[str, object]], folds: int, h: int):
+    """Every model on every fold, once, so the models AND the combinations of
+    them are scored on exactly the same months."""
+    per_model: Dict[str, List[float]] = {n: [] for n, _ in models}
+    per_combo: Dict[str, List[float]] = {n: [] for n, _, _ in COMBINERS}
+    for cut, hh in _folds(y, folds, h):
+        act = y.iloc[cut:cut + hh]
+        preds, order = {}, []
+        for name, fn in models:
+            try:
+                f, _ = fn(y.iloc[:cut], hh)
+            except Exception:
+                continue
+            common = f.index.intersection(act.index)
+            if len(common) != len(act):
+                continue
+            preds[name] = f[act.index].values.astype(float)
+            order.append(name)
+        if not preds:
+            continue
+        a = act.values.astype(float)
+        safe = np.where(a == 0, np.nan, a)
+        for name in order:
+            per_model[name] += [v for v in (preds[name] - a) / safe if np.isfinite(v)]
+        stack = np.vstack([preds[n] for n in order])
+        for cname, fn, _ in COMBINERS:
+            per_combo[cname] += [v for v in (fn(stack) - a) / safe if np.isfinite(v)]
+    return ({n: _errors_to_score(e) for n, e in per_model.items()},
+            {n: _errors_to_score(e) for n, e in per_combo.items()})
+
+
+
+def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
+                     folds: int = 3, fold_h: int = 3) -> dict:
+    """Every source's next `horizon` months, plus combinations of them, each
+    carrying the score it earned on this shop's own months.
 
     `monthly` must hold COMPLETE months only: the month in progress would drag
     every model down by however much of it has not happened yet, which is the
-    single easiest way to make a forecast look like a collapse."""
+    single easiest way to make a forecast look like a collapse.
+
+    Combinations are rows like any other. They are not assumed to be better -
+    an average of forecasts that all lean high leans high - so they are marked
+    against the same folds and ranked with everyone else."""
     monthly = monthly.dropna().sort_index()
     if len(monthly) < MIN_MONTHS:
         return {"available": False,
                 "reason": f"{len(monthly)} complete months of history; {MIN_MONTHS} are needed "
                           "before a seasonal model can say anything.",
                 "history": [], "models": []}
-    out = []
-    for name, fn in MODELS:
+
+    models = list(MODELS) + statsforecast_models()
+    mscore, cscore = _backtest_all(monthly, models, folds, fold_h)
+
+    months = [str(p) for p in _future_index(monthly, horizon)]
+    out, live = [], {}
+    for name, fn in models:
         try:
             f, note = fn(monthly, horizon)
-        except Exception as e:            # one model failing must not lose the rest
-            out.append({"name": name, "error": f"{type(e).__name__}: {e}"[:200]})
+        except Exception as e:          # one source failing must not lose the rest
+            out.append({"name": name, "kind": "model", "error": f"{type(e).__name__}: {e}"[:200],
+                        "score": mscore.get(name, _errors_to_score([]))})
             continue
-        out.append({"name": name, "note": note,
-                    "months": {str(p): (None if not np.isfinite(v) else round(float(v), 2))
-                               for p, v in f.items()},
-                    "score": _score(monthly, fn)})
-    months = [str(p) for p in _future_index(monthly, horizon)]
-    stack = np.array([[m["months"].get(k) for k in months]
-                      for m in out if m.get("months")], dtype=float)
-    median = {k: (None if np.all(np.isnan(stack[:, i])) else round(float(np.nanmedian(stack[:, i])), 2))
-              for i, k in enumerate(months)} if len(stack) else {}
-    ranked = [m for m in out if (m.get("score") or {}).get("mape") is not None]
-    best = min(ranked, key=lambda m: m["score"]["mape"])["name"] if ranked else None
+        vals = {str(p): (None if not np.isfinite(v) else round(float(v), 2)) for p, v in f.items()}
+        live[name] = [vals.get(k) for k in months]
+        out.append({"name": name, "kind": "model", "note": note, "months": vals,
+                    "score": mscore.get(name, _errors_to_score([]))})
+
+    stack = None
+    if live:
+        stack = np.array([[np.nan if v is None else v for v in live[n]] for n in live], dtype=float)
+        for cname, fn, note in COMBINERS:
+            vals = fn(stack)
+            out.append({"name": cname, "kind": "combination", "note": note,
+                        "months": {k: (None if not np.isfinite(v) else round(float(v), 2))
+                                   for k, v in zip(months, vals)},
+                        "score": cscore.get(cname, _errors_to_score([]))})
+
+    ranked = [m for m in out if (m.get("score") or {}).get("mape") is not None and m.get("months")]
+    ranked.sort(key=lambda m: m["score"]["mape"])
+    best = ranked[0]["name"] if ranked else None
+    median = ({k: (None if not np.isfinite(v) else round(float(v), 2))
+               for k, v in zip(months, _median(stack))} if stack is not None else {})
     return {"available": True, "months": months, "models": out, "median": median, "best": best,
-            "history": [{"month": str(p), "value": round(float(v), 2)}
-                        for p, v in monthly.tail(24).items()]}
+            "sources": len(live), "history": [{"month": str(p), "value": round(float(v), 2)}
+                                              for p, v in monthly.tail(24).items()]}
+
 
 def pick_opinions(result: dict, n: int = 3) -> List[dict]:
     """The models worth showing, best on this shop's own history first.
