@@ -997,12 +997,24 @@
            boxes inside a box is the thing the card rules exist to prevent. */
         .fc-algo { padding: var(--sp-3) 0; border-top: var(--bw-hairline) solid var(--border-default); }
         .fc-algo:first-of-type { border-top: 0; padding-top: 0; }
+        /* The head is a row: what it is on the left, what it has been worth on
+           the right, so the figures line up down the page and the sources can
+           be read against each other. It wraps rather than squeezes. */
+        .fc-algo-head { display: flex; align-items: baseline; justify-content: space-between;
+            gap: var(--sp-3); flex-wrap: wrap; }
         .fc-algo-name { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-primary);
             display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .fc-algo-nums { display: flex; align-items: baseline; gap: var(--sp-3); flex-wrap: wrap;
+            font-size: var(--text-xs); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        .fc-algo-num { white-space: nowrap; }
         .fc-algo-text { margin: var(--sp-1-5) 0 0; font-size: var(--text-sm); color: var(--text-secondary);
             line-height: var(--lh-prose); max-width: 68ch; }
-        .fc-algo-acc { margin: var(--sp-1-5) 0 0; font-size: var(--text-xs); color: var(--text-tertiary);
-            line-height: var(--lh-prose); }
+        /* The comparison row on the chart: a chip per source, obvious rather
+           than buried, wrapping onto as many lines as it needs. */
+        .fc-cmp-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+        .fc-cmp-label { font-size: var(--text-sm); color: var(--text-secondary); }
+        .fc-cmp { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2-5); }
+        .fc-cmp .ftab[disabled] { opacity: .45; cursor: not-allowed; }
         /* A notice is prose: at 1900px a one-line warning is a ribbon. */
         .card > :is(.msg, .mail-sendwarn, .disp-warn) { max-width: 56rem; }
         /* A LIST THAT IS ALREADY IN A CARD IS A LIST OF ROWS, NOT A STACK OF
@@ -9122,6 +9134,23 @@ Projected Image UK"></textarea>
            also carries what was PREDICTED for each closed month, so the gap
            between what was expected and what came in is on the same picture
            rather than in a different table. */
+        /* Which sources to draw against each other. Removing the manual
+           algorithm SELECTOR was right - nobody should have to pick which one
+           runs. Removing the ability to COMPARE them was not: seeing four
+           lines diverge over the autumn is the whole argument for trusting the
+           one that leads. Empty means just the leader. */
+        const LS_FCCMP = 'sc_fc_compare_v1';
+        function fcCompare() {
+            try { return JSON.parse(localStorage.getItem(LS_FCCMP)) || []; } catch (e) { return []; }
+        }
+        function toggleFcCompare(name) {
+            const set = fcCompare();
+            const i = set.indexOf(name);
+            if (i >= 0) set.splice(i, 1); else set.push(name);
+            try { localStorage.setItem(LS_FCCMP, JSON.stringify(set.slice(0, 6))); } catch (e) {}
+            renderForecast();
+        }
+        function clearFcCompare() { try { localStorage.removeItem(LS_FCCMP); } catch (e) {} renderForecast(); }
         const LS_FCRANGE = 'sc_fc_range_v1';
         const LS_FCFROM = 'sc_fc_from_v1', LS_FCTO = 'sc_fc_to_v1';
         const FC_RANGES = [['today', 'Today'], ['week', 'This week'], ['month', 'This month'],
@@ -9141,7 +9170,7 @@ Projected Image UK"></textarea>
             renderForecast();
         }
         const fcISO = (d) => d.toISOString().slice(0, 10);
-        function fcChartCard(latest, ledger) {
+        function fcChartCard(latest, ledger, sanity) {
             const range = fcRange();
             const asOf = new Date((latest.as_of || fcISO(new Date())) + 'T00:00:00');
             const days = (latest.daily || {});
@@ -9200,10 +9229,52 @@ Projected Image UK"></textarea>
                                           values: rows.map(r => said[r.month] == null ? null : said[r.month]) });
                 }
             }
+            /* Every source the reader has asked to see, drawn against the
+               leader and against what actually came in. Monthly grain only:
+               a source forecasts a MONTH, and spreading it over days here
+               would be inventing a shape it never claimed. */
+            const cmp = fcCompare();
+            if (grain === 'month' && cmp.length) {
+                const by = {};
+                ((sanity || {}).models || []).forEach(m => { if (cmp.indexOf(m.name) >= 0) by[m.name] = m.months || {}; });
+                cmp.forEach((n, i) => {
+                    if (!by[n]) return;
+                    series.push({ name: n.length > 26 ? n.slice(0, 25) + '\u2026' : n,
+                                  color: CH[(i + 4) % CH.length],
+                                  values: rows.map(r => (by[n][r.month] == null ? null : by[n][r.month])) });
+                });
+            }
             const total = rows.reduce((a, r) => a + (r.actual || r.p50 || 0), 0);
             card.append(trendChart({ title: title, source: 'Reactor forecast', period: period,
                 yUnit: 'GBP', value: money(total, 'GBP', 0), labels: labels, series: series,
                 format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompact, height: 280, annotate: false }));
+            /* The comparison row. Obvious, not buried: a chip per source, tap to
+               add its line. Capped at six, because a chart with fourteen lines
+               is a chart nobody reads. */
+            const srcs = ((sanity || {}).models || []).filter(m => m.months);
+            if (srcs.length) {
+                const c3 = el('div', 'card');
+                const h3 = el('div', 'fc-cmp-head');
+                h3.append(el('span', 'fc-cmp-label', grain === 'month'
+                    ? 'Compare sources on the chart' : 'Comparing sources needs a monthly range'));
+                if (cmp.length) {
+                    const clr = el('button', 'btn btn-sm', 'Clear'); clr.onclick = clearFcCompare; h3.append(clr);
+                }
+                c3.append(h3);
+                const chips = el('div', 'fc-cmp');
+                srcs.forEach(m => {
+                    const on = cmp.indexOf(m.name) >= 0;
+                    const b = el('button', 'ftab' + (on ? ' on' : ''), m.name);
+                    b.type = 'button';
+                    b.disabled = grain !== 'month' || (!on && cmp.length >= 6);
+                    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+                    if (m.name === (sanity || {}).best) b.append(document.createTextNode(' '), fcChip('made', 'in use'));
+                    b.onclick = () => toggleFcCompare(m.name);
+                    chips.append(b);
+                });
+                c3.append(chips);
+                card.append(c3);
+            }
             if (range === 'custom') {
                 const row = el('div', 'lbl-row');
                 const mk = (val, label, on) => {
@@ -9295,25 +9366,31 @@ Projected Image UK"></textarea>
                 return ax - bx;
             });
             rows.forEach(m => {
+                /* Name and the numbers on ONE line, so the column of figures
+                   reads down the page and the sources can be compared at a
+                   glance. The prose sits under it, quiet, for whoever wants
+                   it. Thirteen stacked essays is not a comparison. */
                 const item = el('div', 'fc-algo');
+                const head = el('div', 'fc-algo-head');
                 const t = el('div', 'fc-algo-name', m.name);
                 if (m.name === sn.best) t.append(document.createTextNode(' '), fcChip('made', 'in use'));
                 if (m.kind === 'combination') t.append(document.createTextNode(' '), fcChip('', 'combines the others'));
-                item.append(t);
-                item.append(el('p', 'fc-algo-text', m.about));
-                if (m.best_at) item.append(el('p', 'fc-algo-text', m.best_at));
-                const acc = [];
+                head.append(t);
+                const nums = el('div', 'fc-algo-nums');
                 if ((m.live || {}).mape != null) {
-                    acc.push('On ' + m.live.months + ' closed months: out by '
-                        + (m.live.mape * 100).toFixed(0) + '% on average, closest ' + m.live.wins + ' time'
-                        + (m.live.wins === 1 ? '' : 's') + '.');
+                    nums.append(el('span', 'fc-algo-num', (m.live.mape * 100).toFixed(0) + '% on '
+                        + m.live.months + ' closed month' + (m.live.months === 1 ? '' : 's')));
+                    nums.append(el('span', 'fc-algo-num', 'closest ' + m.live.wins + ' of ' + m.live.months));
                 }
                 if ((m.score || {}).mape != null) {
-                    acc.push('In the backtest: out by ' + (m.score.mape * 100).toFixed(0) + '%, leaning '
-                        + (m.score.bias >= 0 ? 'high' : 'low') + ' by ' + Math.abs(m.score.bias * 100).toFixed(0) + '%.');
+                    nums.append(el('span', 'fc-algo-num', (m.score.mape * 100).toFixed(0) + '% in the backtest'));
+                    nums.append(el('span', 'fc-algo-num', 'leans '
+                        + (m.score.bias >= 0 ? 'high ' : 'low ') + Math.abs(m.score.bias * 100).toFixed(0) + '%'));
                 }
-                if (!acc.length) acc.push('Not yet scored: it needs closed months before it can be judged.');
-                item.append(el('p', 'fc-algo-acc', acc.join(' ')));
+                if (!nums.childNodes.length) nums.append(el('span', 'fc-algo-num', 'not yet scored'));
+                head.append(nums);
+                item.append(head);
+                item.append(el('p', 'fc-algo-text', m.about + (m.best_at ? ' ' + m.best_at : '')));
                 card.append(item);
             });
             box.append(card);
@@ -9522,7 +9599,7 @@ Projected Image UK"></textarea>
             if (blendTot) mets.push({ label: 'Backtest accuracy (WRMSSE)', value: Number(blendTot.wrmsse).toFixed(2),
                                       note: (baseTot ? 'seasonal baseline ' + Number(baseTot.wrmsse).toFixed(2) + ' · ' : '') + 'lower is better' });
             box.append(metricsStrip(mets));
-            box.append(fcChartCard(latest, c.ledger));
+            box.append(fcChartCard(latest, c.ledger, latest.sanity));
             box.append(fcSanityCard(latest, sc));
             box.append(fcOptimisedCard(latest));
             box.append(fcRecordCard(c));

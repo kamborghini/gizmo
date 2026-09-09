@@ -1857,7 +1857,7 @@ def t_the_forecast_tab_exists_and_is_gated():
     # are both written in. And MONTH by month, not day by day: the daily line
     # was a spike and a trough for every weekend and said nothing a month does
     # not, while the plan is written in months and judged in months.
-    ok("metricsStrip(mets)" in fn and "fcChartCard(latest, c.ledger)" in fn,
+    ok("metricsStrip(mets)" in fn and "fcChartCard(latest, c.ledger, latest.sanity)" in fn,
        "the KPI blocks and the chart are the house ones")
     # The graph is back, and the reader chooses the scale rather than being
     # locked into one: a day question and a year question are different questions.
@@ -1870,6 +1870,15 @@ def t_the_forecast_tab_exists_and_is_gated():
     ok("i.type = 'date'" in chart, "and a custom range takes two dates")
     ok("'Was predicted'" in chart,
        "the monthly view carries what was predicted at the time, so the gap is on the same picture")
+    # Removing the manual SELECTOR was right; removing the ability to COMPARE
+    # was not. Seeing four lines diverge over the autumn is the argument for
+    # trusting the one that leads.
+    ok("fcCompare()" in chart and "toggleFcCompare" in chart,
+       "sources can be drawn against each other on the chart")
+    ok("cmp.length >= 6" in chart, "capped, because a chart of fourteen lines is unreadable")
+    ok("grain === 'month' && cmp.length" in chart,
+       "monthly only: a source forecasts a month, and spreading it over days invents a shape")
+    ok("clearFcCompare" in chart, "and the comparison can be cleared in one press")
     ok("'Verdict', 'Risk'" in fn and "'Working capital', 'Loan left'" in fn, "the month table and the cash table are there")
     ok("data_b64: btoa(bin)" in SCRIPT and "inp.accept = '.xlsx'" in SCRIPT, "an admin uploads the workbook from the tab")
     ok("c.can_upload ? forecastUploadButton() : null" in fn, "and only an admin sees the button")
@@ -3528,8 +3537,12 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
     ok("'How each one works'" in alg, "there is a section explaining them")
     ok("m.about" in alg and "m.best_at" in alg,
        "each carries a plain description and what shape of business it suits")
-    ok("On ' + m.live.months + ' closed months" in alg and "In the backtest" in alg,
+    ok("closed month'" in alg and "in the backtest'" in alg,
        "and how accurate it has actually been, live and in the backtest")
+    # Thirteen stacked essays is not a comparison. Name on the left, the
+    # numbers on the right, so the figures read down the page.
+    ok("fc-algo-head" in alg and "fc-algo-nums" in alg,
+       "the figures line up down the page so sources can be read against each other")
     ok("m.name === sn.best" in alg, "with the one in use marked here too")
     ok("box.append(fcOptimisedCard(latest));" in SCRIPT and "box.append(fcAlgorithmsCard(latest));" in SCRIPT,
        "the tab draws both")
