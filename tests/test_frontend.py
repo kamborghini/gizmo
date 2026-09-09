@@ -5354,6 +5354,45 @@ def t_screen_css_carries_no_arbitrary_lengths():
 
 
 @test
+def t_an_icon_size_comes_from_the_scale_and_not_from_the_rule():
+    """Icons are on the design system's list and had no token, so fifty-four
+    svg rules carried a raw pixel size between them in TWELVE different values
+    - 13, 14, 15, 16 and 17 all appeared. That is not a design decision, it is
+    what a year of one-off edits leaves behind, and it is exactly the drift a
+    single source of truth exists to stop.
+
+    One 2px scale. This guards the glyph only: the control box around an icon
+    is a height, which is a different token."""
+    icons = []
+    for sel, body in _rules(CSS):
+        s2 = " ".join(sel.split())
+        if re.search(r"label-sheet|day-sheet|loan-sticker|@page|@font-face", s2): continue
+        if "svg" not in s2: continue
+        for prop in ("width", "height"):
+            m = re.search(r"(?<![\w-])" + prop + r"\s*:\s*([^;}]+)", body)
+            if m and re.search(r"\d+(px|rem|em)", re.sub(r"var\([^)]*\)", "", m.group(1))):
+                icons.append(s2[:50] + " { " + prop + ": " + m.group(1).strip() + " }")
+    # .run-gate .rg-ic is the one deliberate outlier: a 26px badge glyph that
+    # is a piece of illustration, not an interface icon on the scale.
+    icons = [i for i in icons if "rg-ic" not in i]
+    ok(not icons, "%d icon sizes bypass the scale: %s" % (len(icons), icons[:5]))
+    for t in ("--icon-xs", "--icon-sm", "--icon-md", "--icon-lg", "--icon-xl"):
+        ok(t + ":" in CSS, "the icon scale still defines " + t)
+    # One :root, or a global value has two places to be looked up.
+    # Exactly one place DEFINES the system. Overriding a token inside an
+    # @media block is the opposite of drift - it is the single source being
+    # re-pointed for a medium - so a nested :root is allowed and a second
+    # top-level one is not. Indentation tells them apart: the definition sits
+    # at the stylesheet's own level, an override sits inside its block.
+    tops = [l for l in CSS.splitlines() if re.match(r"^ {0,8}:root\s*\{", l)]
+    nested = [l for l in CSS.splitlines() if re.match(r"^ {9,}:root\s*\{", l)]
+    ok(len(tops) == 1,
+       "the design system must be defined in exactly one top-level :root, found %d" % len(tops))
+    for l in nested:
+        ok("--" in l, "a nested :root may only re-point tokens: " + l.strip()[:70])
+
+
+@test
 def t_every_breakpoint_is_on_the_scale():
     """Seven stops, each with a job: 640 phone, 760 the sidebar collapses, 900
     tablet, 1100 the KPI row goes to four columns, 1200 the dispatch row goes

@@ -151,6 +151,17 @@
             --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 40px;
             /* Radii from one 10px base: a card is that plus 4, a control minus 2. */
             --radius-3xs: 2px; --radius-2xs: 4px; --radius-xs: 6px; --radius-sm: 8px; --radius-md: 10px; --radius-lg: 14px;
+            /* Icon glyph sizes. Fifty-four svg rules carried a raw pixel size
+               between them, in TWELVE different values - 13, 14, 15, 16 and 17
+               all appeared, which is nobody's design decision, it is what a
+               year of one-off edits leaves behind. One 2px scale, and the
+               nearest step wins. These size the GLYPH; the box around it is a
+               control height, which is a different token. */
+            --icon-xs: 12px; --icon-sm: 14px; --icon-md: 16px; --icon-lg: 18px; --icon-xl: 20px;
+            /* The content column, moved here from a second :root block that sat
+               three hundred lines further down: a global value must have one
+               place to be looked up. */
+            --wrap: 1536px; --wrap-pad: 24px;
             --radius-full: 999px;    /* a pill: any height, capsule ends */
             --radius-circle: 50%;    /* a dot or avatar: a square made round */
             --bw-hairline: 1px; --bw-strong: 2px; --bw-marker: 3px;
@@ -216,7 +227,7 @@
         .brand:hover { background: var(--surface-tertiary); }
         .brand:active { background: var(--surface-sunken); }
         .brand .logo { width: 16px; height: 16px; display: grid; place-items: center; color: var(--text-primary); flex: none; }
-        .brand .logo svg { width: 16px; height: 16px; }
+        .brand .logo svg { width: var(--icon-md); height: var(--icon-md); }
         /* The reference's first group: one primary button, full width, with
            the same 8px inset as everything else in the column. */
         .nav-quick { padding: var(--sp-2) var(--sp-2) 0; }
@@ -282,7 +293,7 @@
         .nav-item:hover { background: var(--surface-tertiary); color: var(--text-primary); }
         .nav-item:active { background: var(--surface-sunken); }
         .nav-item:is(.active, [aria-current="page"]) { background: var(--surface-tertiary); color: var(--action-primary); font-weight: var(--weight-medium); box-shadow: none; }
-        .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; opacity: 1; }
+        .nav-item svg { width: var(--icon-md); height: var(--icon-md); flex-shrink: 0; opacity: 1; }
         .nav-item:is(.active, [aria-current="page"]) svg { color: var(--action-primary); }
         .convo-head { display: flex; align-items: center; justify-content: space-between; height: var(--control-h); padding: 0 var(--sp-2); margin: var(--sp-4) var(--sp-2) 0; }
         .convo-head span { font-size: var(--text-xs); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-secondary); }
@@ -291,7 +302,7 @@
         .icon-btn:hover { background: var(--surface-tertiary); color: var(--text-primary); }
         .icon-btn:active { background: var(--surface-sunken); }
         .icon-btn[aria-disabled="true"], .icon-btn:disabled { background: transparent; color: var(--text-disabled); cursor: not-allowed; }
-        .icon-btn svg { width: 16px; height: 16px; }
+        .icon-btn svg { width: var(--icon-md); height: var(--icon-md); }
         .convos { flex: none; padding: 0 var(--sp-2) var(--sp-2); display: flex; flex-direction: column; gap: 0; }
         .convo { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-2); border-radius: var(--radius-sm); color: var(--text-secondary);
             font-size: var(--text-sm); cursor: pointer; border: 0; background: transparent; width: 100%; text-align: left; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
@@ -305,7 +316,7 @@
             padding: var(--sp-2); margin: calc(-1 * var(--sp-2)) 0 calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)); }
         .convo .del { opacity: 0; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-xs); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease);
             border: 0; background: transparent; min-width: var(--control-h-sm); min-height: var(--control-h-sm); }
-        .convo .del svg { width: 14px; height: 14px; }
+        .convo .del svg { width: var(--icon-sm); height: var(--icon-sm); }
         .convo:hover .del, .convo:focus-within .del { opacity: .65; }
         /* Hover-reveal alone leaves the trash invisible but still tappable. */
         @media (hover: none) { .convo .del { opacity: .65; } }
@@ -335,7 +346,7 @@
         .side-user-name { font-size: var(--text-sm); font-weight: var(--weight-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .side-user-role { font-size: var(--text-xs); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .side-user-more { margin-left: auto; color: var(--text-tertiary); display: grid; place-items: center; flex: none; }
-        .side-user-more svg { width: 16px; height: 16px; }
+        .side-user-more svg { width: var(--icon-md); height: var(--icon-md); }
 
         /* ---------- Main ---------- */
         .main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
@@ -358,7 +369,7 @@
             cursor: pointer; transition: color var(--dur) var(--ease), background var(--dur) var(--ease); }
         .topbar-search:hover { color: var(--text-primary); }
         .topbar-search:active { background: var(--surface-tertiary); }
-        .topbar-search svg { width: 16px; height: 16px; }
+        .topbar-search svg { width: var(--icon-md); height: var(--icon-md); }
         .topbar-search kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 var(--sp-1-5);
             border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-2xs); background: var(--surface-tertiary);
             font-family: inherit; font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-tertiary); }
@@ -378,7 +389,7 @@
             transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease); min-height: var(--control-h); }
         /* An icon that leads a label sits 8px in, as the source's inline-start icon does. */
         .btn:not(.btn-sm):has(> .ic:first-child) { padding-left: var(--sp-2); }
-        .btn svg { width: 16px; height: 16px; }
+        .btn svg { width: var(--icon-md); height: var(--icon-md); }
         .btn:hover { background: var(--surface-tertiary); }
         .btn:active { background: var(--surface-sunken); transform: translateY(var(--sp-px)); }
         /* ---- Disabled. One recipe for a control (muted fill, disabled ink,
@@ -443,7 +454,6 @@
            on a 2000px screen that stretched a KPI strip and a pair of charts
            past anything the reference draws. --wrap is the one page-width
            token; print and a handful of narrow panels also read it. */
-        :root { --wrap: 1536px; --wrap-pad: 24px; }
         .ov-wrap { max-width: var(--wrap); margin: 0 auto; width: 100%;
             /* 24px, the reference's content inset, on the two edges you
                see on load. The bottom keeps 40 so a long scroll does not
@@ -504,7 +514,7 @@
            of its pages, and at 30px the title carries the page on its own. */
         .ov-hero .badge { width: 36px; height: 36px; border-radius: var(--radius-sm); background: var(--surface-tertiary); color: var(--text-secondary);
             display: grid; place-items: center; flex-shrink: 0; box-shadow: var(--ring-line); }
-        .ov-hero .badge svg { width: 18px; height: 18px; }
+        .ov-hero .badge svg { width: var(--icon-lg); height: var(--icon-lg); }
         /* No icon beside a page title. The reference does not have one on any
            of its pages, and at 30px the title carries the page by itself. The
            rule above is left intact so the treatment is one edit away if it is
@@ -576,7 +586,7 @@
         .stat-ic { width: 28px; height: 28px; flex: none; border-radius: var(--radius-md);
             border: var(--bw-hairline) solid var(--border-default); background: var(--surface-tertiary); color: var(--text-tertiary);
             display: grid; place-items: center; }
-        .stat-ic svg { width: 16px; height: 16px; display: block; }
+        .stat-ic svg { width: var(--icon-md); height: var(--icon-md); display: block; }
         .stat .label { font-size: var(--text-sm); color: var(--text-tertiary); font-weight: var(--weight-regular); text-transform: none; letter-spacing: normal; margin-bottom: var(--sp-3); position: relative; }
         /* Number and change sit on ONE line in the reference, aligned, rather
            than the change dropping to a row of its own beneath. */
@@ -589,7 +599,7 @@
            not body copy, and at 14 it competed with the label above. */
         .stat .stat-note { margin-top: 0; }
         .stat-note { margin: var(--sp-2) 0 0; font-size: var(--text-sm); line-height: var(--lh-control); color: var(--text-tertiary); }
-        .stat .delta svg { width: 12px; height: 12px; }
+        .stat .delta svg { width: var(--icon-xs); height: var(--icon-xs); }
         /* The reference's positive delta is a solid #171717 pill with
            near-white text - it never spends green on "up". Only the
            negative badge is tinted. That is also the truer reading here,
@@ -711,11 +721,11 @@
         .stat.stat-open { cursor: pointer; }
         .stat.stat-open:hover, .stat.stat-pick:hover { border-color: var(--border-strong); background: var(--surface-secondary); }
         .stat-act { position: absolute; top: var(--sp-4); right: var(--sp-4); width: 16px; height: 16px; display: grid; place-items: center; color: var(--text-tertiary); transition: color var(--dur) var(--ease), background var(--dur) var(--ease); }
-        .stat-act svg { width: 16px; height: 16px; display: block; }
+        .stat-act svg { width: var(--icon-md); height: var(--icon-md); display: block; }
         .stat:hover > .stat-act, .stat:focus-visible > .stat-act { color: var(--text-primary); }
         .stat:has(> .stat-act) > .label { padding-right: var(--sp-6); }
         .stat-pick > .stat-act { border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-circle); color: transparent; background: var(--surface-primary); }
-        .stat-pick > .stat-act svg { width: 10px; height: 10px; }
+        .stat-pick > .stat-act svg { width: var(--icon-xs); height: var(--icon-xs); }
         .stat-pick:hover > .stat-act { color: var(--text-tertiary); }
         .stat-pick:is(.on, [aria-pressed="true"]) > .stat-act { background: var(--action-primary); border-color: var(--action-primary); color: var(--white); }
         /* The list behind a KPI: the figure, what the list is, then the rows. */
@@ -741,7 +751,7 @@
         .stat-hide { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; border-radius: var(--radius-xs); border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-tertiary); color: var(--text-tertiary); display: grid; place-items: center; cursor: pointer; z-index: 3; padding: 0; }
         .stat-hide:hover { color: var(--text-primary); border-color: var(--border-emphasis); }
         .stat-hide:active { background: var(--surface-sunken); }
-        .stat-hide svg, .stat-move svg { width: 12px; height: 12px; }
+        .stat-hide svg, .stat-move svg { width: var(--icon-xs); height: var(--icon-xs); }
         /* HTML5 drag never fires from touch, so reordering needs a button path too. */
         .stat-move { position: absolute; top: 8px; width: 22px; height: 22px; border-radius: var(--radius-xs); border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-tertiary); color: var(--text-tertiary); display: grid; place-items: center; cursor: pointer; z-index: 3; padding: 0; }
         .stat-move:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-emphasis); }
@@ -767,7 +777,7 @@
         .data-drill { margin-top: var(--sp-3); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); background: var(--surface-primary); overflow: hidden; }
         .data-drill summary { padding: var(--sp-3) var(--sp-3); cursor: pointer; list-style: none; display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); color: var(--text-secondary); font-weight: var(--weight-medium); }
         .data-drill summary::-webkit-details-marker { display: none; }
-        .data-drill summary > span { display: grid; place-items: center; } .data-drill summary svg { width: 13px; height: 13px; opacity: .6; }
+        .data-drill summary > span { display: grid; place-items: center; } .data-drill summary svg { width: var(--icon-sm); height: var(--icon-sm); opacity: .6; }
         .data-drill[open] summary { border-bottom: var(--bw-hairline) solid var(--border-default); }
         .data-drill-body { padding: var(--sp-1) var(--sp-3) var(--sp-3); max-height: 320px; overflow: auto; }
         .data-src { margin-top: var(--sp-3); }
@@ -849,7 +859,7 @@
         .mem-tag.insight { background: var(--action-soft); color: var(--action-primary); }
         .mem-acts { display: flex; gap: var(--sp-1); flex-shrink: 0; }
         .mem-btn { border: 0; background: transparent; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-sm); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
-        .mem-btn svg { width: 15px; height: 15px; }
+        .mem-btn svg { width: var(--icon-md); height: var(--icon-md); }
         .mem-btn:hover { background: var(--surface-tertiary); color: var(--text-primary); }
         .mem-btn:active { background: var(--surface-sunken); }
         .mem-btn.ok:hover { color: var(--success); background: var(--success-bg); }
@@ -858,7 +868,7 @@
         .know { padding: var(--sp-4) var(--sp-5); margin-bottom: var(--sp-5); }
         .know-head { display: flex; align-items: flex-start; gap: var(--sp-3); }
         .know-ic { width: 34px; height: 34px; border-radius: var(--radius-md); background: var(--action-soft); color: var(--action-primary); display: grid; place-items: center; flex-shrink: 0; box-shadow: var(--ring-line); }
-        .know-ic svg { width: 17px; height: 17px; }
+        .know-ic svg { width: var(--icon-lg); height: var(--icon-lg); }
         .know-title { font-weight: var(--weight-medium); font-size: var(--text-sm); letter-spacing: -.01em; }
         .know-sub { color: var(--text-secondary); font-size: var(--text-xs); margin-top: var(--sp-1); line-height: var(--lh-body); }
         .know-acts { margin-left: auto; display: flex; gap: var(--sp-2); flex-shrink: 0; }
@@ -883,7 +893,7 @@
         .prod-sub { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--sp-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .prod-chips { display: flex; gap: var(--sp-5); flex-shrink: 0; }
         .prod-chip { text-align: right; } .prod-chip .n { font-weight: var(--weight-semibold); font-size: var(--text-sm); } .prod-chip .l { font-size: var(--text-xs); color: var(--text-tertiary); text-transform: none; letter-spacing: normal; margin-top: 0; }
-        .prod-go { color: var(--text-tertiary); display: grid; flex-shrink: 0; } .prod-go svg { width: 18px; height: 18px; transform: rotate(180deg); }
+        .prod-go { color: var(--text-tertiary); display: grid; flex-shrink: 0; } .prod-go svg { width: var(--icon-lg); height: var(--icon-lg); transform: rotate(180deg); }
         /* Inside the products card the rows run edge to edge with a hairline
            between them, the way the reference's orders table does. */
         .card-bleed.prod-rows > .prod-row { border: 0; border-radius: 0; box-shadow: none; margin: 0;
@@ -931,7 +941,7 @@
            negative margin keeps the chip the height it was. */
         .fchip button { border: 0; background: transparent; color: inherit; display: grid; place-items: center; padding: 0; border-radius: var(--radius-circle); cursor: pointer;
             min-width: var(--control-h-sm); min-height: var(--control-h-sm); margin: calc(-1 * var(--sp-1)) calc(-1 * var(--sp-1)); }
-        .fchip button:hover { background: var(--surface-sunken); } .fchip button:active { background: var(--border-strong); } .fchip button svg { width: 12px; height: 12px; display: block; }
+        .fchip button:hover { background: var(--surface-sunken); } .fchip button:active { background: var(--border-strong); } .fchip button svg { width: var(--icon-xs); height: var(--icon-xs); display: block; }
         .prod-chip .cmp { font-size: var(--text-xs); font-weight: var(--weight-medium); padding: var(--sp-0-5) var(--sp-2); border-radius: var(--radius-full); margin-top: var(--sp-1); display: inline-block; flex: none; }
         .prod-chip .cmp.up { color: var(--surface-secondary); background: var(--action-primary); } .prod-chip .cmp.down { color: var(--error); background: var(--error-bg); } .prod-chip .cmp.flat { color: var(--text-tertiary); background: var(--surface-sunken); }
         .barlist { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-2); }
@@ -947,7 +957,7 @@
         .insight { display: flex; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-lg); border: var(--bw-hairline) solid var(--border-default);
             background: var(--surface-primary); box-shadow: var(--shadow-sm); animation: fadeUp .4s ease backwards; }
         .insight .ico { width: 26px; height: 26px; border-radius: var(--radius-sm); display: grid; place-items: center; flex-shrink: 0; margin-top: 0; }
-        .insight .ico svg { width: 14px; height: 14px; }
+        .insight .ico svg { width: var(--icon-sm); height: var(--icon-sm); }
         .insight .t { font-weight: var(--weight-medium); font-size: var(--text-sm); margin: var(--sp-px) 0 var(--sp-1); letter-spacing: -.01em; }
         .insight .d { color: var(--text-secondary); font-size: var(--text-sm); line-height: var(--lh-body); }
         .insight:hover { border-color: var(--border-strong); }
@@ -1147,7 +1157,7 @@
            the chevron measured 0x0 and an expandable row's only cue was the
            pointer cursor. 16px, like the caret on a select. */
         details.sect summary .chev { margin-left: auto; transition: transform var(--dur) var(--ease); color: var(--text-tertiary); display: grid; }
-        details.sect summary .chev svg { width: 16px; height: 16px; display: block; }
+        details.sect summary .chev svg { width: var(--icon-md); height: var(--icon-md); display: block; }
         details.sect[open] summary .chev { transform: rotate(90deg); }
         details.sect[open] summary { border-bottom: var(--bw-hairline) solid var(--border-default); }
         details.sect .body { padding: var(--sp-3) var(--sp-4) var(--sp-4); color: var(--text-secondary); font-size: var(--text-sm); line-height: var(--lh-prose); }
@@ -1175,7 +1185,7 @@
            on the 21px first line of .action .text. */
         .action .check { width: 16px; height: 16px; border-radius: var(--radius-2xs); border: var(--bw-hairline) solid var(--border-emphasis); flex-shrink: 0; margin-top: var(--sp-0-5);
             display: grid; place-items: center; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
-        .action .check svg { width: 10px; height: 10px; opacity: 0; color: var(--text-on-action); }
+        .action .check svg { width: var(--icon-xs); height: var(--icon-xs); opacity: 0; color: var(--text-on-action); }
         .action.done .check { background: var(--success); border-color: var(--success); }
         .action.done .check svg { opacity: 1; }
         .action.done .text { color: var(--text-tertiary); text-decoration: line-through; }
@@ -1208,7 +1218,7 @@
         .chip:hover { background: var(--surface-tertiary); border-color: var(--border-default); color: var(--text-primary); }
         .chip:active { background: var(--surface-sunken); }
         .chip > span { display: grid; place-items: center; flex: none; }
-        .chip svg { width: 13px; height: 13px; opacity: .6; display: block; }
+        .chip svg { width: var(--icon-sm); height: var(--icon-sm); opacity: .6; display: block; }
         /* Solid, on the card edge. A dashed rule is the convention for a
            DROP TARGET - somewhere to put something - and the reference uses
            none anywhere. These panels are just saying there is nothing here
@@ -1228,7 +1238,7 @@
         /* skills */
         .skill-form { padding: var(--sp-4) var(--sp-4) var(--sp-3); margin-bottom: var(--sp-5); }
         .sk-form-title { font-size: var(--text-sm); font-weight: var(--weight-medium); margin: 0 0 var(--sp-3); display: flex; align-items: center; gap: var(--sp-2); }
-        .sk-form-title svg { width: 15px; height: 15px; color: var(--action-primary); }
+        .sk-form-title svg { width: var(--icon-md); height: var(--icon-md); color: var(--action-primary); }
         .sk-field { display: block; margin-bottom: var(--sp-3); }
         .sk-field > span { display: block; font-size: var(--text-sm); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-primary); margin-bottom: var(--sp-1-5); }
         .sk-input, .sk-textarea { width: 100%; background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-2-5); min-height: var(--control-h); line-height: var(--lh-control); transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
@@ -1263,7 +1273,7 @@
         .nav-refresh:hover { background: var(--action-hover); border-color: var(--action-hover); color: var(--text-on-action); }
         .nav-refresh:active { background: var(--action-active); border-color: var(--action-active); }
         .nav-refresh:disabled { cursor: progress; color: var(--text-on-action); }
-        .nav-refresh svg { width: 15px; height: 15px; flex-shrink: 0; }
+        .nav-refresh svg { width: var(--icon-md); height: var(--icon-md); flex-shrink: 0; }
         .nav-refresh:is(.spin, [aria-busy="true"]) svg { animation: navspin 1s linear infinite; }
         @keyframes navspin { to { transform: rotate(360deg); } }
         /* per-page ask panel */
@@ -1277,7 +1287,7 @@
         .pchat-input { display: flex; gap: var(--sp-2); align-items: flex-end; padding: var(--sp-3) var(--sp-3); border-top: var(--bw-hairline) solid var(--border-default); background: var(--surface-tertiary); }
         .pchat-ta { flex: 1; resize: none; max-height: 140px; background: var(--surface-secondary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--sp-2) var(--sp-3); line-height: var(--lh-body); outline: none; transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
         .pchat-send { flex-shrink: 0; padding: 0; width: var(--control-h); height: var(--control-h); min-height: var(--control-h); display: grid; place-items: center; }
-        .pchat-send svg { width: 16px; height: 16px; }
+        .pchat-send svg { width: var(--icon-md); height: var(--icon-md); }
         /* customer sector selector */
         .lbl-segbtn .cdot { display: inline-block; margin-left: var(--sp-1-5); vertical-align: middle; width: 6px; height: 6px; border-radius: var(--radius-circle); background: var(--success); }
         .seclink { background: transparent; border: 0; color: var(--action-primary); font: inherit; font-weight: var(--weight-medium); cursor: pointer; padding: 0; text-align: left; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
@@ -1285,11 +1295,11 @@
         /* what-changed digest */
         .changes-strip { margin: var(--sp-0-5) 0 var(--sp-6); }
         .changes-head { font-size: var(--text-xs); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
-        .changes-head svg { width: 13px; height: 13px; }
+        .changes-head svg { width: var(--icon-sm); height: var(--icon-sm); }
         /* scheduled-change alerts */
         .alerts-banner { background: var(--warning-bg); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-5); }
         .alerts-head { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--warning); margin-bottom: var(--sp-2); }
-        .alerts-head svg { width: 15px; height: 15px; }
+        .alerts-head svg { width: var(--icon-md); height: var(--icon-md); }
         .alerts-clear { margin-left: auto; background: transparent; border: 0; color: var(--text-tertiary); font: inherit; font-size: var(--text-xs); font-weight: var(--weight-medium); cursor: pointer; }
         .alerts-clear:hover { color: var(--text-primary); }
         .alert-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; border-top: var(--bw-hairline) solid var(--border-default); font-size: var(--text-sm); }
@@ -1300,7 +1310,7 @@
         .alert-row .a-pct { font-weight: var(--weight-medium); font-variant-numeric: tabular-nums; }
         .alert-row .a-pct.up { color: var(--success); } .alert-row .a-pct.down { color: var(--error); }
         .alert-x { background: transparent; border: 0; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-xs); display: grid; place-items: center; cursor: pointer; }
-        .alert-x:hover { color: var(--text-primary); background: var(--surface-tertiary); } .alert-x svg { width: 14px; height: 14px; }
+        .alert-x:hover { color: var(--text-primary); background: var(--surface-tertiary); } .alert-x svg { width: var(--icon-sm); height: var(--icon-sm); }
         /* production labels */
         .lbl-toolbar { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); flex-wrap: wrap; }
         /* Reports and setup: reachable in one click, but visibly subordinate to the
@@ -1872,7 +1882,7 @@
             color: var(--text-secondary); font-size: var(--text-xs); font-weight: var(--weight-medium); display: grid;
             place-items: center; flex: none; }
         .crm-ai { margin-left: auto; display: inline-flex; }
-        .crm-ai svg { width: 15px; height: 15px; }
+        .crm-ai svg { width: var(--icon-md); height: var(--icon-md); }
         .crm-ai.overdue { color: var(--error); }
         .crm-ai.today { color: var(--success); }
         .crm-ai.none { color: var(--warning); }
@@ -2090,7 +2100,7 @@
         .mcount { flex: none; font-size: var(--text-xs); color: var(--text-tertiary); background: var(--surface-sunken);
             border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-full); padding: 0 var(--sp-1); }
         .mnote { flex: none; display: inline-flex; color: var(--text-tertiary); }
-        .mnote svg { width: 13px; height: 13px; }
+        .mnote svg { width: var(--icon-sm); height: var(--icon-sm); }
         /* The owner column, pinned the way .mage below it already is. The chip
            and the Claim button are different widths and a row carries one or
            neither, so the last thing before the age wandered down the list and
@@ -2290,7 +2300,7 @@
         .crm-ticon { width: var(--control-h); height: var(--control-h); border-radius: var(--radius-sm); border: var(--bw-hairline) solid var(--border-strong);
             background: var(--surface-primary); cursor: pointer; display: inline-flex; align-items: center;
             justify-content: center; color: var(--text-tertiary); }
-        .crm-ticon svg { width: 15px; height: 15px; }
+        .crm-ticon svg { width: var(--icon-md); height: var(--icon-md); }
         .crm-ticon:is(.on, [aria-pressed="true"]) { color: var(--action-primary); border-color: var(--action-primary); background: var(--action-soft); }
         /* One chip geometry for the whole tab: the lbl-chip recipe, height set
            rather than inherited from a line box. Left to inherit, the same
@@ -2343,7 +2353,7 @@
         .crm-ta-drop button:hover, .crm-ta-drop button.hot, .crm-ta-drop button.on { background: var(--surface-tertiary); }
         .crm-ta-sub { font-size: var(--text-xs); color: var(--text-tertiary); }
         .crm-cline { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1-5) 0; font-size: var(--text-sm); }
-        .crm-cline svg { width: 15px; height: 15px; color: var(--text-tertiary); flex: none; }
+        .crm-cline svg { width: var(--icon-md); height: var(--icon-md); color: var(--text-tertiary); flex: none; }
         .crm-cline a { color: var(--action-primary); text-decoration: underline; word-break: break-all; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
         .crm-cf { display: grid; grid-template-columns: minmax(90px, 150px) 1fr; gap: var(--sp-1) var(--sp-2-5);
             font-size: var(--text-sm); }
@@ -2518,7 +2528,7 @@
         .disp-charge { font-size: var(--text-xs); color: var(--warning); margin: var(--sp-1) 0 var(--sp-2-5); }
         .disp-book { width: 100%; justify-content: center; }
         .disp-result-head { display: flex; align-items: center; gap: var(--sp-2); font-weight: var(--weight-medium); font-size: var(--text-sm); margin-bottom: var(--sp-2); }
-        .disp-result-head svg { width: 18px; height: 18px; color: var(--success); flex: none; }
+        .disp-result-head svg { width: var(--icon-lg); height: var(--icon-lg); color: var(--success); flex: none; }
         .disp-track { font-size: var(--text-sm); margin-bottom: var(--sp-1); }
         .disp-track b { font-family: var(--font-mono); }
         .disp-warn { font-size: var(--text-xs); color: var(--warning); background: var(--warning-bg);
@@ -2552,7 +2562,7 @@
         .miss-strip { border: var(--bw-hairline) solid var(--border-default); background: var(--warning-bg);
             border-radius: var(--radius-sm); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-3); }
         .miss-head { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-sm); }
-        .miss-head svg { width: 15px; height: 15px; color: var(--warning); flex: none; }
+        .miss-head svg { width: var(--icon-md); height: var(--icon-md); color: var(--warning); flex: none; }
         .miss-sub { color: var(--text-secondary); font-size: var(--text-xs); }
         .miss-row { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--text-xs); color: var(--text-secondary);
             padding: var(--sp-1-5) 0 0 var(--sp-6); }
@@ -2721,7 +2731,7 @@
            primary action loud by filling it, never by growing it. */
         /* The reference's lg button keeps the 10px inset of every other size. */
         .run-gate .rg-btn { font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-2-5); }
-        .run-gate .rg-btn svg { width: 15px; height: 15px; }
+        .run-gate .rg-btn svg { width: var(--icon-md); height: var(--icon-md); }
         .run-gate .rg-note { margin-top: var(--sp-3); font-size: var(--text-xs); color: var(--text-tertiary); }
         /* ---------- Keywords tab ---------- */
         /* A table in the reference always sits inside a card, under a header,
@@ -2791,7 +2801,7 @@
             font-size: var(--text-sm); line-height: var(--lh-control); }
         .tbl-search .ic { position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
             color: var(--text-tertiary); pointer-events: none; }
-        .tbl-search .ic svg { width: 16px; height: 16px; }
+        .tbl-search .ic svg { width: var(--icon-md); height: var(--icon-md); }
         /* Chromium paints its own saturated-blue x inside a type=search field.
            It was the only chromatic accent on either finance tab, on a palette
            that is otherwise ink, CH greys and the three status tones - and it
@@ -2805,7 +2815,7 @@
             width: 20px; height: 20px; min-height: 0; padding: 0; border: 0; background: none;
             border-radius: var(--radius-xs); color: var(--text-tertiary); display: grid; place-items: center; }
         .tbl-search .tbl-clear:hover { color: var(--text-primary); background: var(--surface-sunken); }
-        .tbl-search .tbl-clear svg { width: 14px; height: 14px; }
+        .tbl-search .tbl-clear svg { width: var(--icon-sm); height: var(--icon-sm); }
         /* Only while there is something to clear, so the field keeps its full
            measure the rest of the time. */
         .tbl-search.has-q input { padding-right: var(--sp-6); }
@@ -2818,12 +2828,16 @@
            `right 9px center`, so a symmetric padding put the label under it. */
         .tbl-tools select { height: 28px; min-height: 28px; padding: var(--sp-1) var(--chevron-room) var(--sp-1) var(--sp-2-5);
             border-radius: var(--radius-sm); font-size: var(--text-sm); line-height: var(--lh-control); }
-        .tbl-tools .lbl-seg { margin-bottom: 0; padding: var(--sp-0-5); }
+        /* A variant that changes the gap must change the TOKEN, not the raw
+           padding: the thumb's radius is derived from it, so setting padding
+           directly left the thumb rounded for a 4px gap while sitting in a 2px
+           one. Setting the token keeps the corner concentric for free. */
+        .tbl-tools .lbl-seg { margin-bottom: 0; --track-pad: var(--sp-0-5); padding: var(--track-pad); }
         .tbl-tools .lbl-segbtn { padding: var(--sp-0-5) var(--sp-1-5); line-height: var(--lh-control); }
         /* The small button. The reference builds its card actions, its table
            filters and its pager from this one size, which is why they line up. */
         .btn-sm { min-height: 28px; padding: 0 var(--sp-2-5); font-size: var(--text-xs); gap: var(--sp-1); border-radius: var(--radius-sm); }
-        .btn-sm svg { width: 14px; height: 14px; }
+        .btn-sm svg { width: var(--icon-sm); height: var(--icon-sm); }
         .tbl-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
         /* The pager is a sibling of the table inside a plain host div, so the
            card's own 16px gap never reaches between them and the steps sat on
@@ -2841,7 +2855,7 @@
         /* Square, and at the base radius rather than the control radius: the
            reference's pager steps are 32px boxes, not small buttons. */
         .tbl-step { width: var(--control-h); height: var(--control-h); min-height: var(--control-h); padding: 0; border-radius: var(--radius-md); }
-        .tbl-step svg { width: 16px; height: 16px; }
+        .tbl-step svg { width: var(--icon-md); height: var(--icon-md); }
         @media (max-width: 900px) {
             .tbl-foot { flex-wrap: wrap; }
             .tbl-count { flex: 1 1 100%; order: 2; }
@@ -2874,13 +2888,13 @@
             outline: var(--focus-outline); outline-offset: -2px; }
         .dmenu-item[aria-disabled="true"], .dmenu-item[disabled] { color: var(--text-disabled); cursor: not-allowed; background: none; }
         .lbl-segbtn:disabled, .seg button:disabled, .chip:disabled { color: var(--text-disabled); cursor: not-allowed; }
-        .dmenu-item svg { width: 15px; height: 15px; flex: none; }
+        .dmenu-item svg { width: var(--icon-md); height: var(--icon-md); flex: none; }
         .dmenu-item .ic { color: var(--text-tertiary); }
         .dmenu-sep { height: 1px; background: var(--border-default); margin: var(--sp-1) var(--sp-1-5); }
         .dmenu-label { padding: var(--sp-1-5) var(--sp-1-5) var(--sp-0-5); font-size: var(--text-xs); color: var(--text-tertiary); }
         .dmenu-tick { margin-left: auto; margin-right: calc(-1 * var(--sp-6)); color: var(--text-tertiary);
             display: inline-flex; }
-        .dmenu-tick svg { width: 14px; height: 14px; }
+        .dmenu-tick svg { width: var(--icon-sm); height: var(--icon-sm); }
         /* A panel hung off a button rather than a list of items: the same box
            and the same way out, holding a small form instead. */
         .dpanel { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3);
@@ -2941,7 +2955,7 @@
         .track-btn:hover { color: var(--text-primary); border-color: var(--border-emphasis); }
         .track-btn:active { background: var(--surface-tertiary); }
         .track-btn:is(.on, [aria-pressed="true"]) { background: var(--success-bg); color: var(--success); border-color: transparent; cursor: default; }
-        .track-btn > span { display: grid; place-items: center; } .track-btn svg { width: 12px; height: 12px; display: block; }
+        .track-btn > span { display: grid; place-items: center; } .track-btn svg { width: var(--icon-xs); height: var(--icon-xs); display: block; }
         .impact-card { padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-2); }
         .impact-card.done { opacity: .72; }
         .impact-top { display: flex; align-items: flex-start; gap: var(--sp-3); }
@@ -2978,7 +2992,7 @@
            headline number under the name of the system it came from. */
         .chart-head .cv { font-size: var(--text-2xl); font-weight: var(--weight-regular); letter-spacing: -.025em; line-height: var(--lh-snug); margin-top: var(--sp-1); display: flex; align-items: center; color: var(--text-primary); }
         .chart-head .cd { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--text-xs); font-weight: var(--weight-medium); padding: var(--sp-0-5) var(--sp-2); border-radius: var(--radius-full); margin-left: var(--sp-2); flex: none; line-height: var(--lh-snug); }
-        .chart-head .cd > span { display: grid; place-items: center; } .chart-head .cd svg { width: 12px; height: 12px; display: block; }
+        .chart-head .cd > span { display: grid; place-items: center; } .chart-head .cd svg { width: var(--icon-xs); height: var(--icon-xs); display: block; }
         .cd.up { color: var(--success); background: var(--success-bg); } .cd.down { color: var(--error); background: var(--error-bg); } .cd.flat { color: var(--text-tertiary); background: var(--surface-sunken); }
         /* The legend belongs to the PLOT, not to the card header: the reference
            puts it at the top of the chart area, right-aligned, and leaves 12
@@ -3114,7 +3128,7 @@
            dimmed control reads as a disabled one. */
         .chart-expand { position: absolute; top: var(--sp-4); right: var(--sp-4); z-index: 2; border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); color: var(--text-primary); width: 28px; height: 28px; border-radius: var(--radius-sm); display: grid; place-items: center; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); opacity: 1; }
         .chart-expand:hover { background: var(--surface-secondary); border-color: var(--border-default); opacity: 1; }
-        .chart-expand svg { width: 14px; height: 14px; display: block; }
+        .chart-expand svg { width: var(--icon-sm); height: var(--icon-sm); display: block; }
         /* .modal's own 520px cap is declared 100 lines further down, so a
            single-class .cmodal lost to it on source order and the expand button
            opened the chart at the SAME width it already had. */
@@ -3202,7 +3216,7 @@
         .msg.assistant { align-self: stretch; }
         .resp-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-3); }
         .resp-head .av { width: 24px; height: 24px; border-radius: var(--radius-circle); background: var(--surface-tertiary); color: var(--text-primary); display: grid; place-items: center; }
-        .resp-head .av svg { width: 13px; height: 13px; }
+        .resp-head .av svg { width: var(--icon-sm); height: var(--icon-sm); }
         .resp-head .who { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-primary); }
         .resp-head .tag { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--action-primary); background: var(--action-soft); border: var(--bw-hairline) solid var(--action-line); border-radius: var(--radius-xs); padding: 0 var(--sp-2); text-transform: none; letter-spacing: normal; }
         .summary { font-size: var(--text-md); font-weight: var(--weight-medium); line-height: var(--lh-body); letter-spacing: -.012em; margin-bottom: var(--sp-4); color: var(--text-primary); }
@@ -3219,10 +3233,10 @@
         .thinking { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-secondary); font-size: var(--text-sm); }
         .thinking .spinner { flex: none; }
         .spinner { display: inline-grid; place-items: center; width: 16px; height: 16px; color: var(--text-tertiary); }
-        .spinner svg { width: 16px; height: 16px; animation: navspin 1s linear infinite; }
+        .spinner svg { width: var(--icon-md); height: var(--icon-md); animation: navspin 1s linear infinite; }
         .empty-chat { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: var(--sp-7); }
         .empty-chat .big { width: 40px; height: 40px; border-radius: var(--radius-md); background: var(--surface-tertiary); color: var(--text-primary); display: grid; place-items: center; margin-bottom: var(--sp-4); }
-        .empty-chat .big svg { width: 20px; height: 20px; }
+        .empty-chat .big svg { width: var(--icon-xl); height: var(--icon-xl); }
         .empty-chat h2 { font-size: var(--text-xl); margin: 0 0 var(--sp-2); font-weight: var(--weight-medium); letter-spacing: -.025em; line-height: var(--lh-tight); }
         .empty-chat p { color: var(--text-secondary); margin: 0 0 var(--sp-6); max-width: 430px; line-height: var(--lh-prose); }
         .starters { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: center; max-width: 580px; }
@@ -3236,7 +3250,7 @@
         #input { flex: 1; border: 0; outline: 0; resize: none; font: inherit; font-size: var(--text-sm); max-height: 160px; padding: var(--sp-2) 0; background: transparent; color: var(--text-primary); }
         .send { width: 36px; height: 36px; border-radius: var(--radius-sm); border: 0; background: var(--action-primary); color: var(--text-on-action); display: grid; place-items: center; flex-shrink: 0; transition: background var(--dur) var(--ease); }
         .send:hover { background: var(--action-hover); } .send:active { background: var(--action-active); } .send:disabled { background: var(--surface-tertiary); color: var(--text-disabled); cursor: not-allowed; }
-        .send svg { width: 17px; height: 17px; }
+        .send svg { width: var(--icon-lg); height: var(--icon-lg); }
         .composer .row { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); padding: 0 var(--sp-1); }
         .toggle { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); color: var(--text-secondary); cursor: pointer; user-select: none; }
         .toggle .sw { width: 32px; height: 18px; border-radius: var(--radius-full); background: var(--border-default); position: relative; transition: background var(--dur) var(--ease); }
@@ -3282,7 +3296,7 @@
         .fslot, .files-chip, .files-ic { width: 24px; height: 24px; flex: none;
             display: grid; place-items: center; }
         .fslot { position: relative; }
-        .fslot svg { width: 16px; height: 16px; color: var(--text-tertiary); display: block; }
+        .fslot svg { width: var(--icon-md); height: var(--icon-md); color: var(--text-tertiary); display: block; }
         .fslot input { position: absolute; inset: 4px; width: 16px; height: 16px; margin: 0;
             accent-color: var(--action-primary); cursor: pointer; opacity: 0; }
         /* The swap belongs to the row, not to the list: keyed to the list, one
@@ -3317,7 +3331,7 @@
             padding: var(--sp-2) var(--sp-2-5); border-radius: var(--radius-xs); cursor: pointer; }
         .fpick-row:hover { background: var(--surface-tertiary); }
         .fpick-row span { display: flex; flex: none; }
-        .fpick-row svg { width: 15px; height: 15px; color: var(--action-primary); }
+        .fpick-row svg { width: var(--icon-md); height: var(--icon-md); color: var(--action-primary); }
 
         /* Auth: the app's own front door */
         .auth-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center;
@@ -3327,7 +3341,7 @@
         .auth-brand { width: 40px; height: 40px; border-radius: var(--radius-md); margin-bottom: var(--sp-4);
             background: var(--action-primary); color: var(--text-on-action);
             display: flex; align-items: center; justify-content: center; }
-        .auth-brand svg { width: 20px; height: 20px; }
+        .auth-brand svg { width: var(--icon-xl); height: var(--icon-xl); }
         .auth-card h2 { margin: 0 0 var(--sp-1-5); font-size: var(--text-xl); font-weight: var(--weight-semibold); letter-spacing: -.02em; }
         .auth-sub { margin: 0 0 var(--sp-4); font-size: var(--text-sm); color: var(--text-secondary); line-height: var(--lh-body); }
         .auth-field { margin-bottom: var(--sp-3); }
@@ -3356,7 +3370,7 @@
         .files-crumb:hover { background: var(--surface-tertiary); color: var(--text-primary); }
         .files-crumb.here { color: var(--text-primary); font-weight: var(--weight-medium); cursor: default; background: transparent; }
         .files-crumb.dropok { background: var(--action-soft); color: var(--action-primary); }
-        .files-crumbs svg { width: 13px; height: 13px; }
+        .files-crumbs svg { width: var(--icon-sm); height: var(--icon-sm); }
         /* The crumbs and the upload queue are always-present hosts, and an
            empty one still took a 16px gap from the card either side of it. */
         .files-slot:empty { display: none; }
@@ -3375,7 +3389,7 @@
         .files-row:first-child { border-top: 0; }
         .files-row:hover { background: var(--surface-secondary); }
         .files-row.dropok { background: var(--action-soft); }
-        .files-row > svg, .files-row > span:first-child svg { width: 16px; height: 16px; color: var(--text-tertiary); flex: none; display: block; }
+        .files-row > svg, .files-row > span:first-child svg { width: var(--icon-md); height: var(--icon-md); color: var(--text-tertiary); flex: none; display: block; }
         .files-row.is-folder > span:first-child svg { color: var(--action-primary); }
         .files-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
             border: 0; background: transparent; font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium);
@@ -3521,7 +3535,7 @@
         .toast-msg { flex: 1 1 auto; line-height: var(--lh-snug); }
         .toast-x { background: none; border: 0; color: var(--text-tertiary); cursor: pointer; padding: 0; line-height: var(--lh-none); flex: none; }
         .toast-x { min-width: var(--control-h-sm); min-height: var(--control-h-sm); display: grid; place-items: center; }
-        .toast-x svg { width: 14px; height: 14px; }
+        .toast-x svg { width: var(--icon-sm); height: var(--icon-sm); }
         /* Not on the colour token: this fade is paired with the 320ms
            removal timer in toast(), so the two have to say the same number. */
         .toast.out { opacity: 0; transition: opacity .32s var(--ease); }
