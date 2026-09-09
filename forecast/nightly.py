@@ -34,7 +34,7 @@ import tempfile
 import traceback
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -59,6 +59,58 @@ def _fetch_workbook(url: str, token: str, into: Path) -> Path | None:
         if e.code == 404:
             return None
         raise
+
+
+def _payload(cfg, cf, sanity, opinions, monthly, cash, alerts, summary, actual_daily, fdaily) -> dict:
+    """What the Forecast tab draws, as one JSON document.
+
+    The same shape the tab has always read - as_of, scenarios, monthly, cash,
+    alerts, daily - so nothing on the page had to be re-plumbed, plus the five
+    models and which three are being quoted. Tens of kilobytes."""
+    import numpy as np
+    import pandas as pd
+
+    def f(x):
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            return None
+        return None if np.isnan(v) else round(v, 2)
+
+    names = cf.scenario_names if cf else []
+    rows = []
+    for _, r in monthly.iterrows():
+        rows.append({"month": pd.Timestamp(r["month"]).strftime("%Y-%m"), "method": r["method"],
+                     "actual_to_date": f(r["actual_to_date"]), "p10": f(r["projected_p10"]),
+                     "p50": f(r["projected_p50"]), "p90": f(r["projected_p90"]),
+                     "targets": {n: f(r[f"target|{n}"]) for n in names},
+                     "gap": {n: f(r[f"gap|{n}"]) for n in names},
+                     "gap_pct": {n: f(r[f"gap_pct|{n}"]) for n in names},
+                     "verdict": {n: r[f"verdict|{n}"] for n in names},
+                     "risk": {n: r[f"risk|{n}"] for n in names}})
+    cash_out = {}
+    for n, path in cash.items():
+        cash_out[n] = [{"month": pd.Timestamp(r["month"]).strftime("%Y-%m"), "gross_sales": f(r["gross_sales"]),
+                        "repayment": f(r["repayment"]), "net_cash": f(r["net_cash"]),
+                        "working_capital": f(r["working_capital"]), "loan_end": f(r["loan_end"]),
+                        "below_buffer": bool(r["below_buffer"]), "negative": bool(r["negative"])}
+                       for _, r in path.iterrows()]
+    hist = actual_daily.tail(120)
+    return {
+        "as_of": cfg.as_of.isoformat(), "generated_at": datetime.now(timezone.utc).isoformat(),
+        "scenarios": names, "scenario_feature": None,
+        "basis": "order total (cash in), the units the plan and Shopify both use",
+        "forecast_by": [{"name": m["name"], "note": m.get("note"),
+                         "mape": f(m["score"]["mape"]), "bias": f(m["score"]["bias"])} for m in opinions],
+        "summary": summary, "monthly": rows,
+        "year": {"p50": f(monthly["projected_p50"].sum()) if len(monthly) else None,
+                 "targets": {n: f(monthly[f"target|{n}"].sum()) for n in names} if len(monthly) else {}},
+        "cash": cash_out, "alerts": alerts, "sanity": sanity,
+        "daily": {"history": [{"date": pd.Timestamp(d).strftime("%Y-%m-%d"), "actual": f(v)}
+                              for d, v in hist.items()],
+                  "forecast": [{"date": pd.Timestamp(r["date"]).strftime("%Y-%m-%d"), "p10": f(r["p10"]),
+                                "p50": f(r["p50"]), "p90": f(r["p90"])} for _, r in fdaily.iterrows()]},
+    }
 
 
 def main() -> int:
@@ -94,10 +146,10 @@ def main() -> int:
     try:
         from .cashflow import CashFlowModel
         from .config import Config
-        from .ingest import (access_token, fetch_products, monthly_cash, orders_to_rows,
-                             run_bulk_orders, to_daily_panel)
-        from .pipeline import Runner
-        from .simple import sanity_forecasts
+        from .ingest import (access_token, daily_cash, fetch_products, monthly_cash,
+                             orders_to_rows, run_bulk_orders, to_daily_panel)
+        from .simple import daily_frame, pick_opinions, sanity_forecasts
+        from .variance import VarianceEngine
         with tempfile.TemporaryDirectory() as tmp:
             wb = _fetch_workbook(base + "/hooks/forecast/workbook", token, Path(tmp))
             if wb is None:
@@ -111,37 +163,67 @@ def main() -> int:
             since = as_of - timedelta(days=int(env.get("FORECAST_HISTORY_DAYS", "900")))
             log.info("pulling orders since %s", since)
             orders = run_bulk_orders(shop, api_token, since)
-            products = fetch_products(shop, api_token)
-            # CatBoost runs up to 1200 rounds a fit and there are forty fits in a
-            # run, so it is the long pole by a distance. Off, the run is roughly
-            # halved: worth it for a first forecast, or on a small container.
-            cfg = Config(as_of=as_of, horizon_days=int(env.get("FORECAST_HORIZON", "90")),
-                         use_nbeats=env.get("FORECAST_NBEATS", "0") == "1",
-                         use_catboost=env.get("FORECAST_CATBOOST", "1") != "0")
-            log.info("models: lightgbm%s%s", "+catboost" if cfg.use_catboost else "",
-                     "+nbeats" if cfg.use_nbeats else "")
-            panel = to_daily_panel(orders_to_rows(orders, cfg, products), as_of)
-            if panel.empty:
+            cfg = Config(as_of=as_of, horizon_days=int(env.get("FORECAST_HORIZON", "90")))
+
+            # THE FORECAST. Five plain models on the monthly total, ranked by
+            # what each scored on this shop's own history; the best one drives
+            # the month table, the cash path and the alerts, and the next two
+            # stand beside it as second and third opinions.
+            #
+            # The per-product daily model that used to do this job is off by
+            # default (FORECAST_M5=1 brings it back). It forecast October -
+            # the best month of the year, over 60k twice - at 16,436, because
+            # it predicts every product on every day and adds them up, and
+            # half this revenue is quoted projector work where one order is a
+            # tenth of the month.
+            months = monthly_cash(orders, as_of)
+            actual_daily = daily_cash(orders, as_of)
+            if months.empty:
                 raise RuntimeError("no orders came back from Shopify")
-            runner = Runner(cfg, panel, cf, Path(tmp) / "out", scenario=env.get("FORECAST_SCENARIO") or None)
-            runner.run()
+            sanity = sanity_forecasts(months, horizon=int(env.get("FORECAST_MONTHS", "6")))
+            if not sanity.get("available"):
+                raise RuntimeError(sanity.get("reason") or "not enough history to forecast")
+            opinions = pick_opinions(sanity)
+            primary = opinions[0]
+            log.info("forecast: %s (typical error %.0f%%, bias %+.0f%%); second %s, third %s",
+                     primary["name"], primary["score"]["mape"] * 100, primary["score"]["bias"] * 100,
+                     opinions[1]["name"] if len(opinions) > 1 else "-",
+                     opinions[2]["name"] if len(opinions) > 2 else "-")
+
+            eng = VarianceEngine(cfg, cf)
+            # The month is spread over its days by the shop's OWN weekday and
+            # intra-month shape rather than evenly, so the daily line looks like
+            # trading rather than a staircase. It still sums back to the month
+            # exactly, so nothing about the monthly figure changes.
+            from .cashflow import DayProfile
+            fdaily = daily_frame(primary, as_of, DayProfile.fit(actual_daily))
+            monthly_view = eng.monthly_view(actual_daily, fdaily)
+            cash_view = {n: eng.cash_view(monthly_view, n) for n in cf.scenario_names if n in cf.flows}
+            alerts = eng.alerts(monthly_view, cash_view)
+            payload = _payload(cfg, cf, sanity, opinions, monthly_view, cash_view, alerts,
+                               eng.summary(monthly_view, cash_view, alerts), actual_daily, fdaily)
+
+            if env.get("FORECAST_M5", "0") == "1":
+                # Kept, not deleted: it is a lot of careful work and it may yet
+                # earn its place on a business with denser per-product history.
+                from .pipeline import Runner
+                # CatBoost runs up to 1200 rounds a fit and there are forty fits
+                # in a run, so it is the long pole by a distance when this path
+                # is switched back on.
+                m5cfg = Config(as_of=as_of, horizon_days=cfg.horizon_days,
+                               use_nbeats=env.get("FORECAST_NBEATS", "0") == "1",
+                               use_catboost=env.get("FORECAST_CATBOOST", "1") != "0")
+                log.info("m5 models: lightgbm%s%s", "+catboost" if m5cfg.use_catboost else "",
+                         "+nbeats" if m5cfg.use_nbeats else "")
+                products = fetch_products(shop, api_token)
+                panel = to_daily_panel(orders_to_rows(orders, m5cfg, products), as_of)
+                runner = Runner(m5cfg, panel, cf, Path(tmp) / "out",
+                                scenario=env.get("FORECAST_SCENARIO") or None)
+                runner.run()
+                payload["m5"] = runner.payload()
+
             if hasattr(signal, "SIGALRM"):
                 signal.alarm(0)
-            payload = runner.payload()
-            # Five plain models on the monthly total, beside the big one. They
-            # cost milliseconds, they can be checked by eye, and where they
-            # disagree is itself worth reading. A failure here must not lose a
-            # run that has already done the expensive part.
-            try:
-                cash = monthly_cash(orders, as_of)
-                payload["sanity"] = sanity_forecasts(cash)
-                log.info("sanity: %d complete months, best by backtest: %s",
-                         len(cash), (payload["sanity"] or {}).get("best"))
-            except Exception as e:
-                log.error("sanity models failed: %s", e)
-                payload["sanity"] = {"available": False,
-                                     "reason": f"{type(e).__name__}: {e}"[:300],
-                                     "history": [], "models": []}
             _post(results_url, token, payload)
             log.info("posted the run as of %s", as_of)
             return 0

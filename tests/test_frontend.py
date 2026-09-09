@@ -1852,7 +1852,10 @@ def t_the_forecast_tab_exists_and_is_gated():
     ok("api('/api/forecast', {})" in SCRIPT.split("async function refreshForecast()")[1][:200], "it reads the posted run")
     ok("forecastSetupCard(c)" in fn and "No forecast yet" in SCRIPT, "with no run it explains the setup instead of showing nothing")
     ok("segControl(names.map(" in fn, "every scenario in the workbook can be chosen")
-    ok("metricsStrip(mets)" in fn and "trendChart({ title: 'Net sales, next '" in fn, "the KPI blocks and the chart are the house ones")
+    # "Cash in", not "Net sales": the forecast is denominated in the order
+    # total now, because that is what the cash flow plan and Shopify's own
+    # forecast are both written in. Net sales ran 24% below both.
+    ok("metricsStrip(mets)" in fn and "trendChart({ title: 'Cash in, next '" in fn, "the KPI blocks and the chart are the house ones")
     ok("'Verdict', 'Risk'" in fn and "'Working capital', 'Loan left'" in fn, "the month table and the cash table are there")
     ok("data_b64: btoa(bin)" in SCRIPT and "inp.accept = '.xlsx'" in SCRIPT, "an admin uploads the workbook from the tab")
     ok("c.can_upload ? forecastUploadButton() : null" in fn, "and only an admin sees the button")
@@ -2035,7 +2038,7 @@ def t_the_beta_tabs_say_so_everywhere_they_are_named():
     ok("rTitle.append(el('span', 'beta-tag'" in SCRIPT
        and "cTitle.append(el('span', 'beta-tag'" in SCRIPT
        and "hTitle.append(el('span', 'beta-tag'" in SCRIPT
-       and "title.append(el('span', 'beta-tag', 'Beta'));\n            ht.append(title, el('p', null, 'Where the next 90 days" in SCRIPT,
+       and "title.append(el('span', 'beta-tag', 'Beta'));\n            ht.append(title, el('p', null, 'Where the next few months" in SCRIPT,
        "and all four page headings carry it")
     ok("BETA_TABS.indexOf(v) >= 0" in SCRIPT, "and the topbar title does too")
     ok(".beta-tag {" in CSS, "the badge is styled")
@@ -3452,8 +3455,8 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
     fn = SCRIPT.split("function fcSanityCard(", 1)[1].split("\n        function ", 1)[0]
     ok("latest.sanity" in fn, "it reads what the nightly run posted")
     ok("Typical error" in fn and "Bias" in fn, "both scores are shown, not just the error")
-    ok("m.name === sn.best" in fn and "best on your data" in fn,
-       "the model that earned it is marked")
+    ok("RANK[i]" in fn and "leads the forecast" in fn and "second opinion" in fn and "third opinion" in fn,
+       "the three being quoted are named in order, and the leader is marked as leading")
     ok("Median of the five" in fn, "and the middle of the five is on the table")
     ok("(latest.monthly || []).find" in fn and "targets" in fn,
        "the plan's own target sits beside them for comparison")

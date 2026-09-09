@@ -9071,7 +9071,7 @@ Projected Image UK"></textarea>
         function fcSanityCard(latest, sc) {
             const sn = latest.sanity;
             const box = el('div');
-            box.append(el('div', 'section-title', 'Sanity check: five plain models'));
+            box.append(el('div', 'section-title', 'The models, and what each has been worth'));
             const card = el('div', 'card');
             if (!sn || !sn.available) {
                 card.append(el('p', 'card-sub', (sn && sn.reason)
@@ -9079,7 +9079,9 @@ Projected Image UK"></textarea>
                 box.append(card); return box;
             }
             card.append(el('p', 'card-sub',
-                'Each one reads only the monthly total, so each can be checked by eye. '
+                'The top one drives the month table, the cash path and the alerts below; the next two '
+                + 'stand beside it so you can see whether they agree. '
+                + 'Each reads only the monthly total, so each can be checked by eye. '
                 + 'They are scored on this shop\u2019s own history: fitted to earlier months, '
                 + 'then marked against what actually happened. Lower error is better, and a '
                 + 'bias that leans one way every month matters more than the size of it.'));
@@ -9088,9 +9090,10 @@ Projected Image UK"></textarea>
                 const x = (a.score || {}).mape, y = (b.score || {}).mape;
                 if (x == null) return 1; if (y == null) return -1; return x - y;
             });
-            const rows = ranked.map(m => {
+            const RANK = ['leads the forecast', 'second opinion', 'third opinion'];
+            const rows = ranked.map((m, i) => {
                 const name = el('span', null, m.name);
-                if (m.name === sn.best) name.append(document.createTextNode(' '), fcChip('made', 'best on your data'));
+                if (RANK[i]) name.append(document.createTextNode(' '), fcChip(i ? 'note' : 'made', RANK[i]));
                 const sc2 = m.score || {};
                 return [name].concat(months.map(k => m.error ? 'n/a' : fcMoney((m.months || {})[k])))
                     .concat([sc2.mape == null ? 'n/a' : (sc2.mape * 100).toFixed(0) + '%',
@@ -9113,9 +9116,10 @@ Projected Image UK"></textarea>
             box.classList.toggle('no-intro', !(painting && firstPaint('forecast')));
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.insight;
             const ht = el('div'); const title = el('h2', null, 'Finance'); title.append(el('span', 'beta-tag', 'Beta'));
-            ht.append(title, el('p', null, 'Where the next 90 days are heading, by variant, segment and in total, '
-                + 'against what Shopify has sold this month so far and against every scenario in the cash flow plan. '
-                + 'The models run each night beside the app and post the result here.'));
+            ht.append(title, el('p', null, 'Where the next few months are heading, against what Shopify has taken '
+                + 'so far and against every scenario in the cash flow plan. Several plain models run each night '
+                + 'beside the app; the one that has been most right on this shop\u2019s own history leads, and the '
+                + 'next two stand beside it. Figures are cash in, the same money the plan is written in.'));
             hero.append(badge, ht); box.append(hero);
             const latest = c && c.latest;
             const stamp = latest ? ('Run as of ' + fmtDate(latest.as_of)) : (c && !c.error ? 'No run yet' : '');
@@ -9156,7 +9160,7 @@ Projected Image UK"></textarea>
             box.append(metricsStrip(mets));
             const daily = (latest.daily && latest.daily.forecast) || [];
             if (daily.length) {
-                box.append(trendChart({ title: 'Net sales, next ' + daily.length + ' days', source: 'Reactor forecast', period: 'P50 with the P10 and P90 band',
+                box.append(trendChart({ title: 'Cash in, next ' + daily.length + ' days', source: 'Reactor forecast', period: 'the leading model, with its own measured error as the band',
                     yUnit: 'GBP', value: money(daily.reduce((a, r) => a + (r.p50 || 0), 0), 'GBP', 0), labels: daily.map(r => fcDay(r.date)),
                     series: [{ name: 'Forecast', color: CH[0], values: daily.map(r => r.p50 || 0) },
                              { name: 'P90', color: CH[2], values: daily.map(r => r.p90 || 0) },
@@ -9198,6 +9202,10 @@ Projected Image UK"></textarea>
                 ac.append(row);
             });
             box.append(ac);
+            /* The by-category and by-segment tables came from the per-variant
+               model, which no longer runs: it forecast October at a quarter of
+               what October has ever been. They stay guarded rather than
+               deleted, so an M5 run (FORECAST_M5=1) still draws them. */
             const lv = latest.levels || {};
             ['category', 'segment'].forEach(level => {
                 const items = lv[level] || []; if (!items.length) return;
@@ -9212,6 +9220,15 @@ Projected Image UK"></textarea>
             });
             box.append(el('div', 'section-title', 'How much to trust it'));
             const bc = el('div', 'card');
+            if (!bt.length) {
+                bc.append(el('p', 'card-sub', 'Each model above was fitted to earlier months and marked against '
+                    + 'what actually happened, three times over. Typical error is how far out it usually was; '
+                    + 'bias is whether it leaned high or low every month, which matters more, because a model '
+                    + 'that leans high quietly turns a plan green. The leading model\u2019s own error is the '
+                    + 'band on the chart, so the forecast never claims to be more certain than it has earned.'));
+                if (latest.basis) bc.append(el('p', 'card-sub', 'Figures are ' + latest.basis + '.'));
+                box.append(bc);
+            } else {
             bc.append(el('p', 'card-sub', 'Five backtests of 28 days each, ending at the run date. WRMSSE is the M5 competition score: under 1 beats a naive forecast scaled to each series, and lower is better. Bias is how far the total ran hot or cold.'));
             const levels = ['total', 'category', 'segment', 'product', 'variant', 'bottom'];
             bc.append(fcTable(['Level', 'Blend', 'Seasonal baseline', 'Bias'],
@@ -9221,6 +9238,7 @@ Projected Image UK"></textarea>
             const w = latest.weights && latest.weights.total;
             if (w) bc.append(el('p', 'card-sub', 'Who earned the top line: ' + Object.keys(w).filter(k => w[k] > 0.005).map(k => k + ' ' + Math.round(w[k] * 100) + '%').join(', ') + '.'));
             box.append(bc);
+            }
             const wb = c.workbook || {};
             const rc = el('div', 'card');
             rc.append(el('div', 'card-title', 'Plan on file'));

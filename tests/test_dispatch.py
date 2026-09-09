@@ -12283,12 +12283,18 @@ def t_the_nightly_run_posts_five_plain_models_beside_the_big_one():
     simple = open(os.path.join(root, "forecast", "simple.py"), encoding="utf-8").read()
     reqs = open(os.path.join(root, "forecast", "requirements-service.txt"), encoding="utf-8").read()
 
-    ok('payload["sanity"] = sanity_forecasts(cash)' in nightly, "the run posts them")
-    body = nightly.split("runner.run()", 1)[1]
-    ok("try:" in body.split('payload["sanity"]', 1)[0].rsplit("\n", 6)[-1] or "except Exception" in body,
-       "wrapped, so a failure here cannot lose a run that already did the hard part")
-    ok('"available": False' in nightly, "and a failure posts a reason rather than silence")
-    ok("monthly_cash(orders, as_of)" in nightly, "fed from the order totals")
+    ok("sanity_forecasts(months, horizon=" in nightly, "the run computes them")
+    ok("opinions = pick_opinions(sanity)" in nightly and "primary = opinions[0]" in nightly,
+       "and the BEST one drives the forecast, rather than sitting beside a worse one")
+    ok("daily_frame(primary, as_of" in nightly and "eng.monthly_view(actual_daily, fdaily)" in nightly,
+       "the month table, the cash path and the alerts all come from it")
+    ok("DayProfile.fit(actual_daily)" in nightly,
+       "spread over the days by the shop's own trading shape, not evenly")
+    ok('env.get("FORECAST_M5", "0") == "1"' in nightly,
+       "the per-variant model is OFF by default: it forecast October at a quarter of "
+       "what October has ever been. Kept behind a switch, not deleted.")
+    ok("monthly_cash(orders, as_of)" in nightly and "daily_cash(orders, as_of)" in nightly,
+       "both the history and the month-to-date are the order total, so they are the same money")
 
     mc = ingest.split("def monthly_cash(", 1)[1].split("\ndef ", 1)[0]
     ok('ser.index < pd.Period(as_of, freq="M")' in mc,
@@ -12302,6 +12308,11 @@ def t_the_nightly_run_posts_five_plain_models_beside_the_big_one():
         ok("def " + fn + "(" in simple, fn + " is one of the five")
     ok("MIN_MONTHS = 24" in simple, "two full years before a seasonal model may speak")
     ok('"score": _score(' in simple, "every model carries its backtest, so the reader can rank them")
+    ok("def pick_opinions(" in simple and "def daily_frame(" in simple,
+       "the ranking and the monthly-to-daily spread live beside the models")
+    df = simple.split("def daily_frame(", 1)[1].split("\ndef ", 1)[0]
+    ok('(model.get("score") or {}).get("mape")' in df,
+       "the band is the model's OWN measured error, not a number chosen to look confident")
     ok("statsmodels" in reqs, "the service image can actually import them")
 
 
@@ -12471,7 +12482,8 @@ def t_a_nightly_run_can_be_watched_and_cannot_hang():
     ok('log.info("fold %d, days %d-%d: %s in %.0fs"' in pipe,
        "and so does each set of model fits, naming the models")
     ok('env.get("FORECAST_CATBOOST", "1") != "0"' in nightly,
-       "CatBoost can be switched off: forty fits of up to 1200 rounds is the long pole")
+       "and if the per-variant model is ever switched back on, CatBoost can still be "
+       "switched off within it: forty fits of up to 1200 rounds is the long pole there")
     ok('use_catboost=' in nightly, "and the switch actually reaches the config")
     ok("signal.alarm(budget_min * 60)" in nightly, "the ceiling is armed before the work starts")
     ok("raise TimeoutError(" in nightly, "reaching it raises, so the except posts it to the tab")

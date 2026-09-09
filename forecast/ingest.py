@@ -441,6 +441,30 @@ def monthly_cash(orders: List[dict], as_of: date) -> "pd.Series":
     return ser[ser.index < pd.Period(as_of, freq="M")]
 
 
+
+def daily_cash(orders: List[dict], as_of: date) -> "pd.Series":
+    """Cash in by day, up to and including as_of.
+
+    The month-to-date figure the variance table shows comes from here, so it
+    has to be the same money as the forecast it is compared with: the order
+    total, not the panel's line-item net."""
+    rows = []
+    for o in orders:
+        if o.get("test") or o.get("cancelled_at"):
+            continue
+        if str(o.get("financial_status") or "").lower() in ("voided",):
+            continue
+        d = _day(o.get("created_at"))
+        if d is None or d > as_of:
+            continue
+        rows.append((pd.Timestamp(d), float(o.get("order_total") or 0)))
+    if not rows:
+        return pd.Series(dtype=float)
+    ser = pd.DataFrame(rows, columns=["date", "total"]).groupby("date")["total"].sum().sort_index()
+    full = pd.date_range(ser.index.min(), pd.Timestamp(as_of), freq="D")
+    return ser.reindex(full, fill_value=0.0)
+
+
 # ---------------------------------------------------------------- the panel
 def to_daily_panel(rows: pd.DataFrame, as_of: date, start: Optional[date] = None) -> pd.DataFrame:
     """Sum line rows to variant x segment x day and complete the calendar with

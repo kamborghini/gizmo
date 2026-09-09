@@ -175,3 +175,38 @@ def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON) -> dict
     return {"available": True, "months": months, "models": out, "median": median, "best": best,
             "history": [{"month": str(p), "value": round(float(v), 2)}
                         for p, v in monthly.tail(24).items()]}
+
+def pick_opinions(result: dict, n: int = 3) -> List[dict]:
+    """The models worth showing, best on this shop's own history first.
+
+    Ranked by the error each earned in the backtest, not by how sophisticated
+    it is. On Projected Image the order comes out simplest-first, and that is
+    the point: a model is trusted here because it was right, not because of
+    what it is called."""
+    scored = [m for m in (result.get("models") or []) if (m.get("score") or {}).get("mape") is not None]
+    return sorted(scored, key=lambda m: m["score"]["mape"])[:n]
+
+
+def daily_frame(model: dict, as_of, profile=None) -> "pd.DataFrame":
+    """One model's months spread over their days, with a band.
+
+    The variance engine reads a daily line, so a monthly forecast has to
+    become one. The spread sums back to the month exactly. The band is the
+    model's OWN measured error on this shop's history rather than a number
+    chosen to look confident: if it was typically 29% out, the band is 29%
+    wide, and December's disagreement between models is a separate signal
+    shown beside it."""
+    from .cashflow import DayProfile, daily_from_monthly
+    months = [(k, v) for k, v in (model.get("months") or {}).items() if v is not None]
+    if not months:
+        return pd.DataFrame(columns=["date", "p10", "p50", "p90"])
+    mdf = pd.DataFrame({"month": [pd.Period(k, freq="M").to_timestamp() for k, _ in months],
+                        "p50": [float(v) for _, v in months]}).sort_values("month")
+    spread = daily_from_monthly(mdf, profile or DayProfile.uniform(), columns=("p50",))
+    spread = spread.rename(columns={"p50_target": "p50"})
+    err = float((model.get("score") or {}).get("mape") or 0.3)
+    err = min(max(err, 0.10), 0.75)
+    spread["p10"] = spread["p50"] * (1 - err)
+    spread["p90"] = spread["p50"] * (1 + err)
+    start = pd.Timestamp(as_of) + pd.Timedelta(days=1)
+    return spread[spread["date"] >= start][["date", "p10", "p50", "p90"]].reset_index(drop=True)
