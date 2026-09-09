@@ -271,6 +271,65 @@ def t_the_nightly_job_names_both_credential_shapes_when_it_has_neither():
     assert "fetch_products(shop, api_token)" in src
 
 
+@test
+def t_the_plain_models_beat_the_big_one_on_this_shops_history():
+    """The five sanity models, on Projected Image's real monthly totals.
+
+    The M5-style model forecast October - their best month, twice over 60k -
+    at 16,436. Every one of these lands between 41k and 68k, against Shopify's
+    own 50,500 and the plan's 43,715. That is the whole reason they exist."""
+    from forecast.simple import sanity_forecasts
+    H = [("2024-04",17156.75),("2024-05",45564.36),("2024-06",51515.19),("2024-07",26859.66),
+         ("2024-08",24939.21),("2024-09",50974.34),("2024-10",72761.85),("2024-11",77934.11),
+         ("2024-12",53647.74),("2025-01",61479.34),("2025-02",38593.05),("2025-03",46374.12),
+         ("2025-04",33759.42),("2025-05",65915.05),("2025-06",67172.92),("2025-07",18448.50),
+         ("2025-08",21084.64),("2025-09",37922.64),("2025-10",64439.49),("2025-11",53035.69),
+         ("2025-12",15444.05),("2026-01",27218.29),("2026-02",33217.03),("2026-03",30689.37),
+         ("2026-04",28077.26),("2026-05",30736.02),("2026-06",36912.73),("2026-07",15391.59),
+         ("2026-08",27352.36)]
+    s = pd.Series([v for _, v in H], index=pd.PeriodIndex([m for m, _ in H], freq="M"), dtype=float)
+    r = sanity_forecasts(s, 4)
+    assert r["available"] and len(r["models"]) == 5, r
+    assert r["months"] == ["2026-09", "2026-10", "2026-11", "2026-12"], r["months"]
+    for m in r["models"]:
+        oct_ = m["months"]["2026-10"]
+        assert 35_000 <= oct_ <= 80_000, f"{m['name']} put October at {oct_}"
+    # The simplest model is the best on this history, and it is nearly unbiased.
+    assert r["best"] == "Last year x run rate", r["best"]
+    best = [m for m in r["models"] if m["name"] == r["best"]][0]
+    assert best["score"]["mape"] < 0.30, best["score"]
+    assert abs(best["score"]["bias"]) < 0.05, best["score"]
+    # Every model is scored, and the median is a real number.
+    assert all(m["score"]["mape"] is not None for m in r["models"])
+    assert 35_000 <= r["median"]["2026-10"] <= 80_000
+
+
+@test
+def t_a_sanity_model_refuses_rather_than_guesses_without_two_years():
+    """A seasonal model given one year has nothing to learn a season from, and
+    a number produced anyway would be read as if it meant something."""
+    from forecast.simple import sanity_forecasts, MIN_MONTHS
+    idx = pd.period_range("2025-09", periods=12, freq="M")
+    r = sanity_forecasts(pd.Series(range(12), index=idx, dtype=float))
+    assert r["available"] is False and str(MIN_MONTHS) in r["reason"], r
+    assert r["models"] == [] and r["history"] == []
+
+
+@test
+def t_the_month_in_progress_never_reaches_a_model():
+    """Half a September looks like a collapse. Handed one, every model would
+    forecast the rest of the year down from it."""
+    from forecast.ingest import monthly_cash
+    orders = [{"created_at": "2026-08-05T10:00:00Z", "order_total": "1000"},
+              {"created_at": "2026-09-03T10:00:00Z", "order_total": "5"},
+              {"created_at": "2026-07-05T10:00:00Z", "order_total": "900"},
+              {"created_at": "2026-06-05T10:00:00Z", "order_total": "800", "test": True},
+              {"created_at": "2026-05-05T10:00:00Z", "order_total": "700", "cancelled_at": "x"}]
+    ser = monthly_cash(orders, date(2026, 9, 8))
+    got = {str(p): float(v) for p, v in ser.items()}
+    assert got == {"2026-07": 900.0, "2026-08": 1000.0}, got
+
+
 if __name__ == "__main__":
     passed = 0
     for fn in TESTS:

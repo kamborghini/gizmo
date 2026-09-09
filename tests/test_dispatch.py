@@ -12263,6 +12263,49 @@ def t_the_xero_client_is_read_only_by_construction():
     ok('resp = await client.get(url' in src, "the accounting fetcher is a GET")
 
 @test
+def t_the_nightly_run_posts_five_plain_models_beside_the_big_one():
+    """The big model forecast October - Projected Image's best month, over 60k
+    two years running - at 16,436, because it predicts each product on each
+    day and adds them up, and half their revenue is quoted projector work
+    where one order is a tenth of the month.
+
+    So the run also posts five plain forecasts of the MONTHLY TOTAL, each
+    checkable by eye, each scored on the shop's own history. They cost
+    milliseconds and they cannot lose the expensive part of the run: the call
+    is wrapped, and a failure posts a reason instead of no forecast at all.
+
+    The series they read is the ORDER TOTAL, not the panel's line-item net,
+    because the cash flow plan is written in cash-in terms ("Gross Sales"
+    feeding "Total Cash In") and so is Shopify's own forecast."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    nightly = open(os.path.join(root, "forecast", "nightly.py"), encoding="utf-8").read()
+    ingest = open(os.path.join(root, "forecast", "ingest.py"), encoding="utf-8").read()
+    simple = open(os.path.join(root, "forecast", "simple.py"), encoding="utf-8").read()
+    reqs = open(os.path.join(root, "forecast", "requirements-service.txt"), encoding="utf-8").read()
+
+    ok('payload["sanity"] = sanity_forecasts(cash)' in nightly, "the run posts them")
+    body = nightly.split("runner.run()", 1)[1]
+    ok("try:" in body.split('payload["sanity"]', 1)[0].rsplit("\n", 6)[-1] or "except Exception" in body,
+       "wrapped, so a failure here cannot lose a run that already did the hard part")
+    ok('"available": False' in nightly, "and a failure posts a reason rather than silence")
+    ok("monthly_cash(orders, as_of)" in nightly, "fed from the order totals")
+
+    mc = ingest.split("def monthly_cash(", 1)[1].split("\ndef ", 1)[0]
+    ok('ser.index < pd.Period(as_of, freq="M")' in mc,
+       "the month in progress is dropped: half a month reads as a collapse to every model")
+    ok('_money(n, "currentTotalPriceSet")' in ingest and '"order_total"' in ingest,
+       "cash in per order, the units the plan and Shopify both use")
+    ok("currentTotalPriceSet { shopMoney { amount } }" in ingest, "and the bulk query asks for it")
+
+    for fn in ("last_year_times_run_rate", "seasonal_share", "holt_winters_flat",
+               "holt_winters_trend", "theta"):
+        ok("def " + fn + "(" in simple, fn + " is one of the five")
+    ok("MIN_MONTHS = 24" in simple, "two full years before a seasonal model may speak")
+    ok('"score": _score(' in simple, "every model carries its backtest, so the reader can rank them")
+    ok("statsmodels" in reqs, "the service image can actually import them")
+
+
+@test
 def t_the_panel_counts_a_discount_code_as_a_discount():
     """The forecast was learning GROSS sales and calling them net.
 

@@ -3442,6 +3442,31 @@ def t_every_function_the_page_calls_is_one_that_exists():
        "the toast helpers are still called by their real names")
 
 
+@test
+def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
+    """One number nobody can check is worth less than five that disagree in
+    the open. The card carries every model's next four months, the error and
+    the lean each earned on this shop's own history, the plan's target on the
+    same row scale, and a mark on whichever did best - so the reader can see
+    which has earned trust rather than being told."""
+    fn = SCRIPT.split("function fcSanityCard(", 1)[1].split("\n        function ", 1)[0]
+    ok("latest.sanity" in fn, "it reads what the nightly run posted")
+    ok("Typical error" in fn and "Bias" in fn, "both scores are shown, not just the error")
+    ok("m.name === sn.best" in fn and "best on your data" in fn,
+       "the model that earned it is marked")
+    ok("Median of the five" in fn, "and the middle of the five is on the table")
+    ok("(latest.monthly || []).find" in fn and "targets" in fn,
+       "the plan's own target sits beside them for comparison")
+    ok(".sort(" in fn and "mape" in fn, "ordered by what each scored, best first")
+    ok("!sn || !sn.available" in fn and "sn.reason" in fn,
+       "a run with too little history says so instead of drawing an empty table")
+    ok("fcSanityCard(latest, sc)" in SCRIPT, "and the tab actually calls it")
+    # It is a sanity CHECK: it belongs above the month table it is checking.
+    ok(SCRIPT.index("fcSanityCard(latest, sc)")
+       < SCRIPT.index("'Month by month against ' + sc"),
+       "the check is read before the thing it checks")
+
+
 # --- Web Interface Guidelines pass ------------------------------------------
 
 @test

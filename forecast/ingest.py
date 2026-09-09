@@ -171,6 +171,7 @@ BULK_ORDERS_QUERY = """
   orders(query: "created_at:>=%s") {
     edges { node {
       id name createdAt cancelledAt displayFinancialStatus test tags
+      currentTotalPriceSet { shopMoney { amount } }
       customer { tags }
       lineItems { edges { node {
         id sku quantity title variantTitle
@@ -381,6 +382,13 @@ def _assemble_bulk(lines: List[dict]) -> List[dict]:
             orders[gid] = {"id": gid, "name": n.get("name"), "created_at": n.get("createdAt"),
                            "cancelled_at": n.get("cancelledAt"), "financial_status": (n.get("displayFinancialStatus") or "").lower(),
                            "test": n.get("test"), "tags": n.get("tags") or [], "customer": n.get("customer") or {},
+                           # What the customer actually pays: line items less
+                           # discounts, plus carriage and VAT. The cash flow plan
+                           # is written in these terms ("Gross Sales" feeding
+                           # "Total Cash In"), and so is Shopify's own forecast.
+                           # `current` rather than the plain total, so a line an
+                           # edit removed is not still being counted.
+                           "order_total": _money(n, "currentTotalPriceSet"),
                            "line_items": [], "refunds": []}
         elif gid.startswith("gid://shopify/LineItem/") and parent in orders:
             v = n.get("variant") or {}
@@ -406,6 +414,31 @@ def _assemble_bulk(lines: List[dict]) -> List[dict]:
     # No Refund rows arrive here: the bulk query cannot carry them (see
     # BULK_ORDERS_QUERY) and `fetch_refunds` fills them in afterwards.
     return list(orders.values())
+
+
+
+def monthly_cash(orders: List[dict], as_of: date) -> "pd.Series":
+    """Cash in by calendar month, COMPLETE months only.
+
+    The month in progress is dropped on purpose. Half a September looks like a
+    collapse to any model that is handed it, and every one of them would then
+    forecast the rest of the year down from that. The panel's own target is
+    line-item NET sales; this is the order total, because it is what the plan
+    and Shopify's forecast are both denominated in."""
+    rows = []
+    for o in orders:
+        if o.get("test") or o.get("cancelled_at"):
+            continue
+        if str(o.get("financial_status") or "").lower() in ("voided",):
+            continue
+        d = _day(o.get("created_at"))
+        if d is None:
+            continue
+        rows.append((pd.Period(d, freq="M"), float(o.get("order_total") or 0)))
+    if not rows:
+        return pd.Series(dtype=float)
+    ser = pd.DataFrame(rows, columns=["month", "total"]).groupby("month")["total"].sum().sort_index()
+    return ser[ser.index < pd.Period(as_of, freq="M")]
 
 
 # ---------------------------------------------------------------- the panel

@@ -9058,6 +9058,55 @@ Projected Image UK"></textarea>
                 : 'No workbook uploaded yet. An admin uploads the cash flow workbook with the button above; the nightly run reads it.'));
             return card;
         }
+        /* ---------- the sanity panel ----------
+           Five plain forecasts of the monthly total, beside the big model.
+           They exist because the big one forecast October, the best month of
+           the year, at a quarter of what October has ever been: one number
+           nobody can check is worth less than five that disagree in the open.
+
+           The table is ordered by what each model scored on this shop's own
+           history, best first, and the one that earned it is marked. Where
+           they spread widely, that spread IS the answer - two Decembers of
+           53,648 and 15,444 cannot produce a confident December. */
+        function fcSanityCard(latest, sc) {
+            const sn = latest.sanity;
+            const box = el('div');
+            box.append(el('div', 'section-title', 'Sanity check: five plain models'));
+            const card = el('div', 'card');
+            if (!sn || !sn.available) {
+                card.append(el('p', 'card-sub', (sn && sn.reason)
+                    || 'The nightly run has not posted the plain models yet. They arrive with the next run.'));
+                box.append(card); return box;
+            }
+            card.append(el('p', 'card-sub',
+                'Each one reads only the monthly total, so each can be checked by eye. '
+                + 'They are scored on this shop\u2019s own history: fitted to earlier months, '
+                + 'then marked against what actually happened. Lower error is better, and a '
+                + 'bias that leans one way every month matters more than the size of it.'));
+            const months = sn.months || [];
+            const ranked = (sn.models || []).slice().sort((a, b) => {
+                const x = (a.score || {}).mape, y = (b.score || {}).mape;
+                if (x == null) return 1; if (y == null) return -1; return x - y;
+            });
+            const rows = ranked.map(m => {
+                const name = el('span', null, m.name);
+                if (m.name === sn.best) name.append(document.createTextNode(' '), fcChip('made', 'best on your data'));
+                const sc2 = m.score || {};
+                return [name].concat(months.map(k => m.error ? 'n/a' : fcMoney((m.months || {})[k])))
+                    .concat([sc2.mape == null ? 'n/a' : (sc2.mape * 100).toFixed(0) + '%',
+                             sc2.bias == null ? 'n/a' : fcPct(sc2.bias), m.note || m.error || '']);
+            });
+            const med = ['Median of the five'].concat(months.map(k => fcMoney((sn.median || {})[k]))).concat(['', '', '']);
+            const plan = ['Your plan (' + sc + ')'].concat(months.map(k => {
+                const r = (latest.monthly || []).find(x => x.month === k);
+                return fcMoney(r ? (r.targets || {})[sc] : null);
+            })).concat(['', '', '']);
+            card.append(fcTable(['Model'].concat(months.map(fcMonth)).concat(['Typical error', 'Bias', 'How it works']),
+                rows.concat([med, plan]),
+                [0].concat(months.map(() => 1)).concat([1, 1, 0])));
+            box.append(card);
+            return box;
+        }
         function renderForecast() {
             const box = $('forecast-content'); box.innerHTML = '';
             const c = forecastCache; const painting = !!c && !c.error;
@@ -9114,6 +9163,7 @@ Projected Image UK"></textarea>
                              { name: 'P10', color: CH[2], values: daily.map(r => r.p10 || 0) }],
                     format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompact, height: 280, annotate: false }));
             }
+            box.append(fcSanityCard(latest, sc));
             box.append(el('div', 'section-title', 'Month by month against ' + sc));
             const mc = el('div', 'card');
             mc.append(fcTable(['Month', 'Basis', 'Projected', 'P10', 'P90', 'Target', 'Gap', 'Verdict', 'Risk'],

@@ -94,9 +94,10 @@ def main() -> int:
     try:
         from .cashflow import CashFlowModel
         from .config import Config
-        from .ingest import (access_token, fetch_products, orders_to_rows, run_bulk_orders,
-                             to_daily_panel)
+        from .ingest import (access_token, fetch_products, monthly_cash, orders_to_rows,
+                             run_bulk_orders, to_daily_panel)
         from .pipeline import Runner
+        from .simple import sanity_forecasts
         with tempfile.TemporaryDirectory() as tmp:
             wb = _fetch_workbook(base + "/hooks/forecast/workbook", token, Path(tmp))
             if wb is None:
@@ -126,7 +127,22 @@ def main() -> int:
             runner.run()
             if hasattr(signal, "SIGALRM"):
                 signal.alarm(0)
-            _post(results_url, token, runner.payload())
+            payload = runner.payload()
+            # Five plain models on the monthly total, beside the big one. They
+            # cost milliseconds, they can be checked by eye, and where they
+            # disagree is itself worth reading. A failure here must not lose a
+            # run that has already done the expensive part.
+            try:
+                cash = monthly_cash(orders, as_of)
+                payload["sanity"] = sanity_forecasts(cash)
+                log.info("sanity: %d complete months, best by backtest: %s",
+                         len(cash), (payload["sanity"] or {}).get("best"))
+            except Exception as e:
+                log.error("sanity models failed: %s", e)
+                payload["sanity"] = {"available": False,
+                                     "reason": f"{type(e).__name__}: {e}"[:300],
+                                     "history": [], "models": []}
+            _post(results_url, token, payload)
             log.info("posted the run as of %s", as_of)
             return 0
     except Exception as e:
