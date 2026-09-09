@@ -3535,10 +3535,29 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
     # And what each one actually does, for someone signing off a number.
     alg = SCRIPT.split("function fcAlgorithmsCard(", 1)[1].split("\n        function ", 1)[0]
     ok("'How each one works'" in alg, "there is a section explaining them")
-    ok("m.about" in alg and "m.best_at" in alg,
+    ok("m.about" in alg and "fcBestAt(m)" in alg,
        "each carries a plain description and what shape of business it suits")
+    # It reached the page as the tail of a three-line paragraph, where it was
+    # present and unfindable. It gets its own line.
+    ok("'fc-algo-fit'" in alg and "'Best at'" in alg,
+       "what it suits is its own line, not the last clause of a paragraph")
+    # And the page carries the strings itself. The field arrives from the
+    # forecast SERVICE, which was still posting payloads written before the
+    # field existed, so a reader saw nothing at all until the next night's run.
+    ok("const FC_BEST_AT = {" in SCRIPT and "m.best_at || FC_BEST_AT[m.name]" in SCRIPT,
+       "a payload written before the field existed still explains its sources")
+    for nm in ("Trend and smoothing, averaged", "Auto-fitted ARIMA", "Average, extremes removed"):
+        ok("'" + nm + "':" in SCRIPT, "the fallback covers " + nm)
     ok("closed month'" in alg and "in the backtest'" in alg,
        "and how accurate it has actually been, live and in the backtest")
+    # Measured in the rig at 1600px: space-between put the name's last letter
+    # at x=265 and the first figure at x=838, a 573px hole across a 1269px
+    # card. The figures were rendering and were still invisible - they sat off
+    # the side of the screenshot the reader took of the section. A row that
+    # pairs a label with its numbers keeps them adjacent.
+    head_css = CSS.split(".fc-algo-head {", 1)[1].split("}", 1)[0]
+    ok("space-between" not in head_css,
+       "the figures sit beside the name they describe, not at the far edge")
     # Thirteen stacked essays is not a comparison. Name on the left, the
     # numbers on the right, so the figures read down the page.
     ok("fc-algo-head" in alg and "fc-algo-nums" in alg,

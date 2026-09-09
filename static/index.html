@@ -667,7 +667,16 @@
            short last row shares the width - seven is four then three, nine is
            four, four, then one across - instead of a boxed hole at the end,
            which is what seven SEO checks left in a fixed four-column grid. */
-        .metrics.metrics-strip { grid-template-columns: repeat(60, minmax(0, 1fr)); }
+        .metrics.metrics-strip { grid-template-columns: repeat(60, minmax(0, 1fr));
+            /* Sixty tracks means fifty-nine gaps, and at 16px each that is
+               944px of gap before a single card gets a pixel. On a page
+               narrower than that the tracks resolved to 0 and every card fell
+               out of the grid at its own min-content width - measured 464px
+               cards spilling 624px past a 568px strip. The gap gives way
+               first: it is never wider than one track's share of the strip,
+               which always leaves the sixty tracks something to divide,
+               however narrow the page gets. */
+            column-gap: min(var(--sp-4), calc(100% / 60)); }
         @media (min-width: 901px) {
             .metrics-strip > .stat { grid-column: span 15; }
             .metrics-strip > .stat:nth-child(4n+1):last-child { grid-column: span 60; }
@@ -997,18 +1006,31 @@
            boxes inside a box is the thing the card rules exist to prevent. */
         .fc-algo { padding: var(--sp-3) 0; border-top: var(--bw-hairline) solid var(--border-default); }
         .fc-algo:first-of-type { border-top: 0; padding-top: 0; }
-        /* The head is a row: what it is on the left, what it has been worth on
-           the right, so the figures line up down the page and the sources can
-           be read against each other. It wraps rather than squeezes. */
-        .fc-algo-head { display: flex; align-items: baseline; justify-content: space-between;
-            gap: var(--sp-3); flex-wrap: wrap; }
+        /* The head is a row: what it is, then what it has been worth. The
+           figures are NOT pushed to the far edge - space-between across a
+           1269px card left a 573px hole between a name and the numbers that
+           describe it, so on a wide screen they read as two unrelated columns
+           and the second one falls off the side of a screenshot. The name
+           takes a fixed column instead, so the figures start at the same place
+           on every row, close enough to belong to the name beside them. */
+        .fc-algo-head { display: flex; align-items: baseline; gap: var(--sp-4); flex-wrap: wrap; }
         .fc-algo-name { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-primary);
-            display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+            display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+            flex: 0 0 auto; min-width: calc(var(--sp-8) * 9); }
         .fc-algo-nums { display: flex; align-items: baseline; gap: var(--sp-3); flex-wrap: wrap;
             font-size: var(--text-xs); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
         .fc-algo-num { white-space: nowrap; }
         .fc-algo-text { margin: var(--sp-1-5) 0 0; font-size: var(--text-sm); color: var(--text-secondary);
             line-height: var(--lh-prose); max-width: 68ch; }
+        /* What the source suits, on its own line under the prose, so it can be
+           found by scanning the left edge instead of read for. The label is
+           the quiet part; the shape of month it fits is the part being
+           compared, so that carries the weight. */
+        .fc-algo-fit { margin-top: var(--sp-1-5); display: flex; align-items: baseline;
+            gap: var(--sp-2); flex-wrap: wrap; max-width: 68ch; }
+        .fc-algo-fit-lbl { font-size: var(--text-xs); color: var(--text-tertiary);
+            flex: 0 0 auto; min-width: calc(var(--sp-8) * 1.75); }
+        .fc-algo-fit-txt { font-size: var(--text-sm); color: var(--text-primary); }
         /* The comparison row on the chart: a chip per source, obvious rather
            than buried, wrapping onto as many lines as it needs. */
         .fc-cmp-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
@@ -9346,6 +9368,31 @@ Projected Image UK"></textarea>
            somebody who already knows what ARIMA stands for. Name, how it
            works, what shape of business it suits, how right it has been, and
            whether it is the one running. */
+        /* What each source suits, keyed by its name. The service sends this
+           as best_at, but the field was added after the run that produced the
+           payload now on screen, so a page fed by an older run showed nothing.
+           The strings are the service's own, copied; a payload that carries
+           best_at wins over this map. */
+        const FC_BEST_AT = {
+            'Last year, adjusted for this year': 'a repeating yearly shape whose overall level has moved up or down',
+            'A typical month, shared out': 'a steady business with a strong season and little underlying trend',
+            'Smoothed level and season': 'a level that drifts gradually, with the same season each year',
+            'Smoothed level, season and trend': 'a business steadily growing or shrinking underneath its season',
+            'Trend and smoothing, averaged': 'a clear underlying direction with seasonal movement on top of it',
+            'Auto-fitted level, trend and season': 'letting the data decide the shape when nobody is sure what it is',
+            'Auto-fitted ARIMA': 'months that depend closely on the months immediately before them',
+            'Auto-fitted trend and smoothing': 'a steady direction of travel, found without being told what to look for',
+            'Auto-fitted complex smoothing': 'a season whose shape shifts from one year to the next',
+            'Average of every source': 'when no single approach is clearly right for the period ahead',
+            'Middle of every source': 'when one source is prone to extreme answers',
+            'Average, extremes removed': 'when most sources agree and one or two are far out',
+        };
+
+        function fcBestAt(m) {
+            const raw = m.best_at || FC_BEST_AT[m.name] || '';
+            return raw.replace(/^Best at:\s*/i, '').replace(/\.\s*$/, '');
+        }
+
         function fcAlgorithmsCard(latest) {
             const sn = latest.sanity || {};
             const list = (sn.models || []).filter(m => m.about);
@@ -9390,7 +9437,18 @@ Projected Image UK"></textarea>
                 if (!nums.childNodes.length) nums.append(el('span', 'fc-algo-num', 'not yet scored'));
                 head.append(nums);
                 item.append(head);
-                item.append(el('p', 'fc-algo-text', m.about + (m.best_at ? ' ' + m.best_at : '')));
+                item.append(el('p', 'fc-algo-text', m.about));
+                /* On its own line. Appended to the end of a three-line
+                   paragraph it was there and unfindable, which is the same as
+                   missing when somebody is scanning for which source suits
+                   which shape of month. */
+                const ba = fcBestAt(m);
+                if (ba) {
+                    const line = el('div', 'fc-algo-fit');
+                    line.append(el('span', 'fc-algo-fit-lbl', 'Best at'));
+                    line.append(el('span', 'fc-algo-fit-txt', ba));
+                    item.append(line);
+                }
                 card.append(item);
             });
             box.append(card);
