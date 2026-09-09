@@ -3378,8 +3378,29 @@ def t_a_box_painted_inside_a_card_sits_inside_its_gutter():
        and "width: auto" in body,
        "the listed classes take the gutter as margin and let auto width fill it")
     for cls in (".cx-health", ".msg", ".mail-sendwarn", ".disp-warn", ".empty", ".mail-empty",
-                ".lbl-row", ".lia-bar", ".ktable-wrap"):
+                ".lbl-row", ".lia-bar", ".ktable-wrap",
+                # A RULE between rows is an edge too, and these three shipped
+                # without it. .fc-algo put every source name, every line of
+                # prose and both ends of every divider 1px from the card's
+                # border, because its padding shorthand's 0 had quietly
+                # overridden the card's 16px gutter.
+                ".fc-algo", ".fc-alert", ".know-body"):
         ok(cls in listed, cls + " is inset by margin, not welded to the card's border")
+    # The inset must not be taken TWICE. A child that paints a filled box keeps
+    # its own padding, because that padding sits inside the box it draws. A
+    # child that only draws a RULE has no box to pad, so the card's gutter
+    # lands on top of the margin and pushes its text 32px in against a
+    # card-sub at 16px - which is what happened the moment .fc-algo was first
+    # moved onto this list.
+    _ZEROED_BY_THE_CARD_RULE = (".lia-bar", ".ktable-wrap")
+    for cls in sorted(listed):
+        own = " ".join(re.findall(r"(?:^|\})\s*" + re.escape(cls) + r"\s*\{([^}]*)\}", CSS, re.M))
+        paints_fill = re.search(re.escape(cls) + r"[^{]*\{[^}]*background", CSS) is not None
+        draws_rule = "border-top:" in own or "border-bottom:" in own
+        if draws_rule and not paints_fill:
+            ok("padding-inline: 0" in own or cls in _ZEROED_BY_THE_CARD_RULE,
+               cls + " draws a rule, so its horizontal padding is 0 and the margin "
+                     "alone insets it, or its text sits 32px in from a 16px card")
     notice = CSS.split(".cx-health {")[1].split("}")[0]
     ok("padding:" in notice, "the notice keeps its own padding inside its box")
     ok(".cx-health.bad { background:" in CSS and ".cx-health.ok { background:" in CSS,
