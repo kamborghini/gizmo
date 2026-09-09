@@ -1,17 +1,16 @@
-# The nightly service's image: the GBDTs without PyTorch, so the image stays
-# a few hundred megabytes. Add torch and set FORECAST_NBEATS=1 to train N-BEATS.
+# The nightly service's image. Deliberately WITHOUT the gradient boosters: the
+# per-product model they serve has been off by default since it forecast
+# October, the best month of the year, at a quarter of what October has ever
+# been. They were two thirds of the image and were being imported on every run
+# for nothing. Switching FORECAST_M5 back on needs requirements-m5.txt as well.
 numpy>=1.26
 pandas>=2.1
 openpyxl>=3.1
+# scipy: the non-negative least squares behind the blend weights, and the floor
+# statsmodels and statsforecast both stand on.
 scipy>=1.11
-scikit-learn>=1.3
-lightgbm>=4.3
-catboost>=1.2
-# Holt-Winters and the simple exponential smoothing behind Theta, for the
-# five plain models in simple.py. Small, pure-Python over numpy/scipy.
+# Holt-Winters and the simple exponential smoothing behind Theta.
 statsmodels>=0.14
-# More voices for the sanity panel: AutoETS, AutoARIMA, AutoTheta, AutoCES.
-# Optional at runtime - simple.py skips them when the import fails - but
-# shipped, because a combination of many forecasts is worth more than any
-# one of them and needs several to average.
+# More voices for the panel: AutoETS, AutoARIMA, AutoTheta, AutoCES. Optional
+# at runtime - simple.py skips them when the import fails.
 statsforecast>=2.0

@@ -36,8 +36,13 @@ from .coldstart import apply_cold_start
 from .config import Config
 from .features import CATEGORICALS, Encodings, FeatureBuilder, extend_for_forecast
 from .ingest import KEY, read_orders_json, read_shopify_export_csv, series_keys, to_daily_panel
-from .models import (CatBoostForecaster, LightGBMForecaster, SeasonalLevel, blend, blend_weights,
-                     gbdt_available, nbeats_available)
+# NOT at module level. `.models` is lazy by design, but naming LightGBM here
+# still resolves it on import, which pulled LightGBM (and, through it,
+# scikit-learn) into every single run - including the ordinary one, which has
+# not used a gradient booster since the plain models took over. They are
+# imported where they are used, and they are no longer in the service image at
+# all: see requirements-m5.txt.
+from .models import blend, blend_weights
 from .reconcile import Hierarchy
 from .variance import VarianceEngine
 
@@ -124,6 +129,7 @@ class Runner:
         # Refunds net off the actuals (and the scorecard) but a demand model
         # learns from what sold: Tweedie needs a non-negative label.
         y_tr, y_es = tr[self.cfg.target].clip(lower=0), es[self.cfg.target].clip(lower=0)
+        from .models import CatBoostForecaster, LightGBMForecaster, SeasonalLevel, gbdt_available
         models: Dict[str, object] = {"seasonal_level": SeasonalLevel().fit(tr[cols], y_tr, CAT_COLS)}
         avail = gbdt_available()
         if self.cfg.use_lightgbm and avail["lightgbm"]:
@@ -138,6 +144,7 @@ class Runner:
         return train[train["date"] <= cut], train[train["date"] > cut]
 
     def _nbeats(self, upto: pd.Timestamp, horizon: int) -> Optional[Tuple[List[int], np.ndarray]]:
+        from .models import nbeats_available
         if not (self.cfg.use_nbeats and nbeats_available()):
             return None
         dates, hist = self._history_rows(upto)

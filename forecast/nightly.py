@@ -297,6 +297,15 @@ def main() -> int:
             if env.get("FORECAST_M5", "0") == "1":
                 # Kept, not deleted: it is a lot of careful work and it may yet
                 # earn its place on a business with denser per-product history.
+                # The boosters are not in the service image any more. Say so
+                # plainly rather than running a "model" that is one seasonal
+                # baseline in a trenchcoat and posting it as a forecast.
+                from .models import gbdt_available
+                if not any(gbdt_available().values()):
+                    raise RuntimeError(
+                        "FORECAST_M5=1 but no gradient booster is installed. The image ships "
+                        "without them: add `-r forecast/requirements-m5.txt` to the pip install "
+                        "in forecast/Dockerfile, or unset FORECAST_M5.")
                 from .pipeline import Runner
                 # CatBoost runs up to 1200 rounds a fit and there are forty fits
                 # in a run, so it is the long pole by a distance when this path

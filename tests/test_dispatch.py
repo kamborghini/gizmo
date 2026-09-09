@@ -12401,6 +12401,21 @@ def t_the_forecast_is_many_sources_ranked_by_what_each_was_worth():
        "the band is the model's OWN measured error, not a number chosen to look confident")
     ok("statsmodels" in reqs and "statsforecast" in reqs,
        "the service image can actually import them")
+    # The gradient boosters serve a model that has been off by default since it
+    # forecast October at a quarter of what October has ever been. They were
+    # two thirds of the image and were imported on EVERY run for nothing.
+    m5 = open(os.path.join(root, "forecast", "requirements-m5.txt"), encoding="utf-8").read()
+    for heavy in ("lightgbm", "catboost", "scikit-learn"):
+        ok(heavy not in reqs, heavy + " is not in the image every run installs")
+        ok(heavy in m5, heavy + " is in the optional list, so the old model can still be run")
+    pipe = open(os.path.join(root, "forecast", "pipeline.py"), encoding="utf-8").read()
+    head = pipe.split("class ", 1)[0]
+    ok("from .models import blend, blend_weights" in head
+       and "LightGBMForecaster" not in head and "gbdt_available" not in head,
+       "and naming them at module level is what dragged them in, so it does not happen")
+    ok("if not any(gbdt_available().values()):" in nightly,
+       "switching the old model back on without them fails loudly rather than "
+       "posting a seasonal baseline dressed as a forecast")
 
 
 @test
