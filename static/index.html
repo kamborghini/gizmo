@@ -991,6 +991,18 @@
                wider than the card, hanging its right border out past the
                frame. Filling is what auto already does for a block. */
             width: auto; }
+        /* One algorithm explained: a name, what it does, what it suits and how
+           right it has been. A list of these is reference material, so it is
+           quiet - separated by a hairline rather than boxed, because a stack of
+           boxes inside a box is the thing the card rules exist to prevent. */
+        .fc-algo { padding: var(--sp-3) 0; border-top: var(--bw-hairline) solid var(--border-default); }
+        .fc-algo:first-of-type { border-top: 0; padding-top: 0; }
+        .fc-algo-name { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-primary);
+            display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .fc-algo-text { margin: var(--sp-1-5) 0 0; font-size: var(--text-sm); color: var(--text-secondary);
+            line-height: var(--lh-prose); max-width: 68ch; }
+        .fc-algo-acc { margin: var(--sp-1-5) 0 0; font-size: var(--text-xs); color: var(--text-tertiary);
+            line-height: var(--lh-prose); }
         /* A notice is prose: at 1900px a one-line warning is a ribbon. */
         .card > :is(.msg, .mail-sendwarn, .disp-warn) { max-width: 56rem; }
         /* A LIST THAT IS ALREADY IN A CARD IS A LIST OF ROWS, NOT A STACK OF
@@ -9103,6 +9115,211 @@ Projected Image UK"></textarea>
            history, best first, and the one that earned it is marked. Where
            they spread widely, that spread IS the answer - two Decembers of
            53,648 and 15,444 cannot produce a confident December. */
+        /* ---------- the graph, at whatever scale is being asked for ----------
+           One chart, six ranges. Short ranges are drawn day by day, because
+           "how is this week going" is a daily question; long ones month by
+           month, because a year of days is a picket fence. The monthly view
+           also carries what was PREDICTED for each closed month, so the gap
+           between what was expected and what came in is on the same picture
+           rather than in a different table. */
+        const LS_FCRANGE = 'sc_fc_range_v1';
+        const LS_FCFROM = 'sc_fc_from_v1', LS_FCTO = 'sc_fc_to_v1';
+        const FC_RANGES = [['today', 'Today'], ['week', 'This week'], ['month', 'This month'],
+                           ['q', 'Last 3 months'], ['year', 'Last 12 months'],
+                           ['ahead', 'The months ahead'], ['custom', 'Custom range']];
+        function fcRange() {
+            try { const v = localStorage.getItem(LS_FCRANGE); return FC_RANGES.some(r => r[0] === v) ? v : 'month'; }
+            catch (e) { return 'month'; }
+        }
+        function setFcRange(v) { try { localStorage.setItem(LS_FCRANGE, v); } catch (e) {} renderForecast(); }
+        function fcCustom() {
+            try { return [localStorage.getItem(LS_FCFROM) || '', localStorage.getItem(LS_FCTO) || '']; }
+            catch (e) { return ['', '']; }
+        }
+        function setFcCustom(from, to) {
+            try { localStorage.setItem(LS_FCFROM, from); localStorage.setItem(LS_FCTO, to); } catch (e) {}
+            renderForecast();
+        }
+        const fcISO = (d) => d.toISOString().slice(0, 10);
+        function fcChartCard(latest, ledger) {
+            const range = fcRange();
+            const asOf = new Date((latest.as_of || fcISO(new Date())) + 'T00:00:00');
+            const days = (latest.daily || {});
+            const dayRows = (days.history || []).map(r => ({ date: r.date, actual: r.actual, p50: null, p10: null, p90: null }))
+                .concat((days.forecast || []).map(r => ({ date: r.date, actual: null, p50: r.p50, p10: r.p10, p90: r.p90 })));
+            const months = latest.months || [];
+            const shift = (n) => { const d = new Date(asOf); d.setDate(d.getDate() - n); return fcISO(d); };
+            let grain = 'day', from = '', to = '', title = '', period = '';
+            const [cf, ct] = fcCustom();
+            if (range === 'today') { from = fcISO(asOf); to = fcISO(asOf); title = 'Cash in today'; period = 'the day so far, against the six days before it'; from = shift(6); }
+            else if (range === 'week') { from = shift(6); to = fcISO(asOf); title = 'Cash in, this week'; period = 'the last seven days'; }
+            else if (range === 'month') { from = fcISO(asOf).slice(0, 8) + '01'; to = ''; title = 'Cash in, this month'; period = 'taken so far, then the rest of the month forecast'; }
+            else if (range === 'q') { from = shift(91); to = ''; title = 'Cash in, last 3 months'; period = 'day by day, taken then forecast'; }
+            else if (range === 'year') { grain = 'month'; from = ''; to = ''; title = 'Cash in, last 12 months'; period = 'month by month, with what was predicted at the time'; }
+            else if (range === 'ahead') { grain = 'month'; from = fcISO(asOf).slice(0, 7); to = ''; title = 'Cash in, the months ahead'; period = 'the leading source, with its own measured error as the band'; }
+            else { from = cf; to = ct; title = 'Cash in, chosen range'; period = 'day by day'; }
+
+            let rows;
+            if (grain === 'month' || (range === 'custom' && from && to && (new Date(to) - new Date(from)) / 864e5 > 120)) {
+                grain = 'month';
+                const f = from ? from.slice(0, 7) : '', t = to ? to.slice(0, 7) : '';
+                rows = months.filter(m => (!f || m.month >= f) && (!t || m.month <= t));
+                if (range === 'year') rows = rows.filter(m => m.actual != null).slice(-12);
+                if (range === 'ahead') rows = rows.slice(0, 12);
+            } else {
+                rows = dayRows.filter(r => (!from || r.date >= from) && (!to || r.date <= to));
+                if (range === 'month') rows = rows.filter(r => r.date.slice(0, 7) === fcISO(asOf).slice(0, 7));
+            }
+            /* The range strip rides in the section title, where this page already
+               puts the scenario control, rather than inside the chart card,
+               which takes no header of its own. */
+            const card = el('div');
+            const head = el('div', 'section-title', 'Cash in');
+            head.append(filterTabs(FC_RANGES, range, setFcRange));
+            card.append(head);
+            if (!rows.length) {
+                const c = el('div', 'card');
+                c.append(el('p', 'card-sub', 'Nothing to draw for that range yet. Pick another above.'));
+                card.append(c); return card;
+            }
+            const labels = rows.map(r => grain === 'month' ? fcMonth(r.month) : fcDay(r.date));
+            const series = [{ name: 'Taken', color: CH[0], values: rows.map(r => r.actual) },
+                            { name: 'Forecast', color: CH[1], values: rows.map(r => r.p50) },
+                            { name: 'P90', color: CH[2], values: rows.map(r => r.p90) },
+                            { name: 'P10', color: CH[2], values: rows.map(r => r.p10) }];
+            if (grain === 'month') {
+                /* What was said BEFORE each of those months began, so the gap
+                   between expectation and outcome is on the same picture. */
+                const said = {};
+                ((ledger || {}).results || []).forEach(r => {
+                    const w = (r.by_source || {})[r.winner];
+                    if (w) said[r.month] = w.predicted;
+                });
+                if (Object.keys(said).length) {
+                    series.splice(1, 0, { name: 'Was predicted', color: CH[3] || CH[2],
+                                          values: rows.map(r => said[r.month] == null ? null : said[r.month]) });
+                }
+            }
+            const total = rows.reduce((a, r) => a + (r.actual || r.p50 || 0), 0);
+            card.append(trendChart({ title: title, source: 'Reactor forecast', period: period,
+                yUnit: 'GBP', value: money(total, 'GBP', 0), labels: labels, series: series,
+                format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompact, height: 280, annotate: false }));
+            if (range === 'custom') {
+                const row = el('div', 'lbl-row');
+                const mk = (val, label, on) => {
+                    const w = el('label', 'pfield'); w.append(el('span', null, label));
+                    const i = document.createElement('input'); i.type = 'date'; i.className = 'sizes-inp'; i.value = val;
+                    i.onchange = on; w.append(i); return w;
+                };
+                let a = cf, b = ct;
+                row.append(mk(cf, 'From', (e) => { a = e.target.value; setFcCustom(a, b); }));
+                row.append(mk(ct, 'To', (e) => { b = e.target.value; setFcCustom(a, b); }));
+                const c2 = el('div', 'card'); c2.append(row); card.append(c2);
+            }
+            return card;
+        }
+        /* ---------- which one is in use, and why ----------
+           Nobody picks the algorithm here, so the page owes the reader a
+           straight answer to the question they would otherwise ask: which one
+           is running, why that one, and how much better is it than the next.
+           Never make somebody guess whether the optimised choice is actually
+           being used. */
+        function fcOptimisedCard(latest) {
+            const sn = latest.sanity || {};
+            const box = el('div');
+            box.append(el('div', 'section-title', 'The algorithm in use'));
+            const card = el('div', 'card');
+            const ranked = (sn.models || []).filter(m => m.months)
+                .map(m => ({ m: m, live: (m.live || {}).mape, back: (m.score || {}).mape }))
+                .filter(x => x.live != null || x.back != null);
+            const onRecord = sn.ranked_on === 'record';
+            ranked.sort((a, b) => (onRecord && a.live != null && b.live != null)
+                ? a.live - b.live : ((a.back == null ? 9 : a.back) - (b.back == null ? 9 : b.back)));
+            const lead = ranked[0], next = ranked[1];
+            if (!lead) {
+                card.append(el('p', 'card-sub', 'No source has been scored yet.'));
+                box.append(card); return box;
+            }
+            const head = el('div', 'card-head card-head-stat');
+            head.append(el('div', 'card-title', 'Running now, chosen automatically'));
+            head.append(el('div', 'card-desc', lead.m.name));
+            const err = onRecord ? lead.live : lead.back;
+            const bits = [];
+            bits.push(onRecord
+                ? 'Chosen on its record: closest on ' + ((lead.m.live || {}).wins || 0) + ' of '
+                  + ((lead.m.live || {}).months || 0) + ' months that have closed since this started running'
+                : 'Chosen on the backtest: fitted to earlier months and marked against what happened, '
+                  + 'because not enough months have closed yet to judge it live');
+            if (err != null) bits.push('typically out by ' + (err * 100).toFixed(0) + '%');
+            if (next) {
+                const ne = onRecord ? next.live : next.back;
+                if (ne != null) bits.push('the next best, ' + next.m.name + ', is out by ' + (ne * 100).toFixed(0) + '%');
+            }
+            head.append(el('div', 'card-sub', bits.join(' \u00b7 ')));
+            const act = el('div', 'card-act');
+            act.append(fcChip('made', 'in use'));
+            head.append(act);
+            card.append(head);
+            card.append(el('p', 'card-sub', onRecord
+                ? 'It is judged on months it could not see: what it said before each month began, against '
+                  + 'what came in. At the end of every month every source is marked again, and if another '
+                  + 'starts coming closer, it takes over without anyone changing a setting.'
+                : 'Once three months have closed, the choice moves onto that record instead, which is the '
+                  + 'harder test: a backtest refits a model to a period the code already knows the shape of.'));
+            box.append(card);
+            return box;
+        }
+
+        /* ---------- what each one actually does ----------
+           Written for somebody who has to sign off on a number, not for
+           somebody who already knows what ARIMA stands for. Name, how it
+           works, what shape of business it suits, how right it has been, and
+           whether it is the one running. */
+        function fcAlgorithmsCard(latest) {
+            const sn = latest.sanity || {};
+            const list = (sn.models || []).filter(m => m.about);
+            const box = el('div');
+            box.append(el('div', 'section-title', 'How each one works'));
+            const card = el('div', 'card');
+            if (!list.length) {
+                card.append(el('p', 'card-sub', 'The sources arrive with the next run.'));
+                box.append(card); return box;
+            }
+            card.append(el('p', 'card-sub',
+                'Every approach the system runs each night. It tries all of them, marks all of them, '
+                + 'and uses whichever has been closest. Nothing here needs choosing.'));
+            const onRecord = sn.ranked_on === 'record';
+            const rows = list.slice().sort((a, b) => {
+                const ax = onRecord && (a.live || {}).mape != null ? a.live.mape : ((a.score || {}).mape ?? 9);
+                const bx = onRecord && (b.live || {}).mape != null ? b.live.mape : ((b.score || {}).mape ?? 9);
+                return ax - bx;
+            });
+            rows.forEach(m => {
+                const item = el('div', 'fc-algo');
+                const t = el('div', 'fc-algo-name', m.name);
+                if (m.name === sn.best) t.append(document.createTextNode(' '), fcChip('made', 'in use'));
+                if (m.kind === 'combination') t.append(document.createTextNode(' '), fcChip('', 'combines the others'));
+                item.append(t);
+                item.append(el('p', 'fc-algo-text', m.about));
+                if (m.best_at) item.append(el('p', 'fc-algo-text', m.best_at));
+                const acc = [];
+                if ((m.live || {}).mape != null) {
+                    acc.push('On ' + m.live.months + ' closed months: out by '
+                        + (m.live.mape * 100).toFixed(0) + '% on average, closest ' + m.live.wins + ' time'
+                        + (m.live.wins === 1 ? '' : 's') + '.');
+                }
+                if ((m.score || {}).mape != null) {
+                    acc.push('In the backtest: out by ' + (m.score.mape * 100).toFixed(0) + '%, leaning '
+                        + (m.score.bias >= 0 ? 'high' : 'low') + ' by ' + Math.abs(m.score.bias * 100).toFixed(0) + '%.');
+                }
+                if (!acc.length) acc.push('Not yet scored: it needs closed months before it can be judged.');
+                item.append(el('p', 'fc-algo-acc', acc.join(' ')));
+                card.append(item);
+            });
+            box.append(card);
+            return box;
+        }
+
         /* ---------- the standing record ----------
            What every source SAID about a month while that month was still
            ahead, marked when the month closed. It is the honest test, and the
@@ -9305,24 +9522,11 @@ Projected Image UK"></textarea>
             if (blendTot) mets.push({ label: 'Backtest accuracy (WRMSSE)', value: Number(blendTot.wrmsse).toFixed(2),
                                       note: (baseTot ? 'seasonal baseline ' + Number(baseTot.wrmsse).toFixed(2) + ' · ' : '') + 'lower is better' });
             box.append(metricsStrip(mets));
-            /* Month by month, not day by day. The daily line was a spike and a
-               trough for every weekend and said nothing a month does not; the
-               plan is written in months and the verdict is passed in months. */
-            const ms = latest.months || [];
-            if (ms.length) {
-                const fut = ms.filter(m => m.actual == null);
-                box.append(trendChart({ title: 'Cash in, month by month', source: 'Reactor forecast',
-                    period: 'taken so far, then the leading source with its own measured error as the band',
-                    yUnit: 'GBP', value: money(fut.reduce((a, r) => a + (r.p50 || 0), 0), 'GBP', 0),
-                    labels: ms.map(m => fcMonth(m.month)),
-                    series: [{ name: 'Taken', color: CH[0], values: ms.map(m => m.actual) },
-                             { name: 'Forecast', color: CH[1], values: ms.map(m => m.p50) },
-                             { name: 'P90', color: CH[2], values: ms.map(m => m.p90) },
-                             { name: 'P10', color: CH[2], values: ms.map(m => m.p10) }],
-                    format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompact, height: 280, annotate: false }));
-            }
+            box.append(fcChartCard(latest, c.ledger));
             box.append(fcSanityCard(latest, sc));
+            box.append(fcOptimisedCard(latest));
             box.append(fcRecordCard(c));
+            box.append(fcAlgorithmsCard(latest));
             box.append(el('div', 'section-title', 'Month by month against ' + sc));
             const mc = el('div', 'card');
             mc.append(fcTable(['Month', 'Basis', 'Projected', 'P10', 'P90', 'Target', 'Gap', 'Verdict', 'Risk'],

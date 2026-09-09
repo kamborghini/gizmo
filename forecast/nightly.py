@@ -136,17 +136,22 @@ def _payload(cfg, cf, sanity, opinions, monthly, cash, alerts, summary, actual_d
                         "working_capital": f(r["working_capital"]), "loan_end": f(r["loan_end"]),
                         "below_buffer": bool(r["below_buffer"]), "negative": bool(r["negative"])}
                        for _, r in path.iterrows()]
-    # The monthly series the page draws: what has been taken, then what the
-    # leading source expects, with its band.
-    months_series = []
+    # The monthly series the page draws. It reaches back through EVERY month of
+    # history the run has, not just the plan's window, because "last 12 months"
+    # is a view a person asks for and the plan starts in May.
+    by_month = {}
+    for h in (sanity.get("history") or []):
+        by_month[h["month"]] = {"month": h["month"], "basis": "actual", "actual": f(h["value"]),
+                                "p50": None, "p10": None, "p90": None}
     for _, r in monthly.iterrows():
         m = pd.Timestamp(r["month"]).strftime("%Y-%m")
         actual = str(r.get("method", "")).startswith("actual") and "forecast" not in str(r.get("method", ""))
-        months_series.append({"month": m, "basis": r.get("method"),
-                              "actual": f(r["projected_p50"]) if actual else None,
-                              "p50": None if actual else f(r["projected_p50"]),
-                              "p10": None if actual else f(r["projected_p10"]),
-                              "p90": None if actual else f(r["projected_p90"])})
+        by_month[m] = {"month": m, "basis": r.get("method"),
+                       "actual": f(r["projected_p50"]) if actual else by_month.get(m, {}).get("actual"),
+                       "p50": None if actual else f(r["projected_p50"]),
+                       "p10": None if actual else f(r["projected_p10"]),
+                       "p90": None if actual else f(r["projected_p90"])}
+    months_series = [by_month[k] for k in sorted(by_month)]
     future = {x["month"] for x in months_series if x["actual"] is None}
     predictions = {}
     for entry in (sanity.get("models") or []):
@@ -164,10 +169,15 @@ def _payload(cfg, cf, sanity, opinions, monthly, cash, alerts, summary, actual_d
         "year": {"p50": f(monthly["projected_p50"].sum()) if len(monthly) else None,
                  "targets": {n: f(monthly[f"target|{n}"].sum()) for n in names} if len(monthly) else {}},
         "cash": cash_out, "alerts": alerts, "sanity": sanity,
-        # Month by month, because that is the grain the plan is written in and
-        # the grain a month-end verdict is passed at. The daily line was a
-        # spike-and-trough for every weekend and said nothing a month does not.
+        # Both grains. The month is what the plan is written in and what a
+        # month-end verdict is passed at; the day is what somebody asks for
+        # when the question is "how is this week going". The page decides
+        # which to draw from the range the reader picked.
         "months": months_series,
+        "daily": {"history": [{"date": pd.Timestamp(d).strftime("%Y-%m-%d"), "actual": f(v)}
+                              for d, v in actual_daily.tail(420).items()],
+                  "forecast": [{"date": pd.Timestamp(r["date"]).strftime("%Y-%m-%d"), "p10": f(r["p10"]),
+                                "p50": f(r["p50"]), "p90": f(r["p90"])} for _, r in fdaily.iterrows()]},
         # What every source said, and what actually happened, so the app can
         # keep the standing record. Predictions are written once and never
         # revised: the whole point is that they were made before the outcome.

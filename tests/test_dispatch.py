@@ -12304,8 +12304,14 @@ def t_the_system_learns_which_source_is_right_from_closed_months():
     ok("results=record" in nightly, "and forecasts with it")
     ok('"predictions": predictions, "actuals": actuals_by_month' in nightly,
        "then writes down what every source said, and what actually came in")
-    ok('"months": months_series' in nightly and '"daily":' not in nightly,
-       "month by month, not day by day")
+    # BOTH grains, and the page picks. The month is what the plan is written
+    # in and what a month-end verdict is passed at; the day is what somebody
+    # asks for when the question is "how is this week going". Shipping only
+    # months took a chart away that people were using.
+    ok('"months": months_series' in nightly and '"daily":' in nightly,
+       "months for the plan and days for the week, so the reader can choose the scale")
+    ok("actual_daily.tail(420)" in nightly,
+       "with enough daily history behind it for a three-month view")
 
 
 @test

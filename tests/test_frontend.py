@@ -1857,10 +1857,19 @@ def t_the_forecast_tab_exists_and_is_gated():
     # are both written in. And MONTH by month, not day by day: the daily line
     # was a spike and a trough for every weekend and said nothing a month does
     # not, while the plan is written in months and judged in months.
-    ok("metricsStrip(mets)" in fn and "trendChart({ title: 'Cash in, month by month'" in fn,
+    ok("metricsStrip(mets)" in fn and "fcChartCard(latest, c.ledger)" in fn,
        "the KPI blocks and the chart are the house ones")
-    ok("latest.months || []" in fn and "m.actual == null" in fn,
-       "the chart reads the monthly series, taken then forecast")
+    # The graph is back, and the reader chooses the scale rather than being
+    # locked into one: a day question and a year question are different questions.
+    chart = SCRIPT.split("function fcChartCard(", 1)[1].split("\n        function ", 1)[0]
+    ok("filterTabs(FC_RANGES, range, setFcRange)" in chart, "the range is the reader's to pick")
+    for key in ("'today'", "'week'", "'month'", "'q'", "'year'", "'ahead'", "'custom'"):
+        ok(key in SCRIPT, "range " + key + " is offered")
+    ok("grain = 'month'" in chart and "dayRows" in chart,
+       "short ranges are drawn day by day and long ones month by month")
+    ok("i.type = 'date'" in chart, "and a custom range takes two dates")
+    ok("'Was predicted'" in chart,
+       "the monthly view carries what was predicted at the time, so the gap is on the same picture")
     ok("'Verdict', 'Risk'" in fn and "'Working capital', 'Loan left'" in fn, "the month table and the cash table are there")
     ok("data_b64: btoa(bin)" in SCRIPT and "inp.accept = '.xlsx'" in SCRIPT, "an admin uploads the workbook from the tab")
     ok("c.can_upload ? forecastUploadButton() : null" in fn, "and only an admin sees the button")
@@ -3503,6 +3512,27 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
     ok("Nothing has closed yet" in rec,
        "and says plainly what will happen at month end when there is nothing yet")
     ok("box.append(fcRecordCard(c));" in SCRIPT, "the tab draws it")
+
+    # Nobody should have to guess whether the optimised choice is running.
+    opt = SCRIPT.split("function fcOptimisedCard(", 1)[1].split("\n        function ", 1)[0]
+    ok("'The algorithm in use'" in opt, "the page says which one is running")
+    ok("fcChip('made', 'in use')" in opt, "and marks it as in use")
+    ok("Chosen on its record" in opt and "Chosen on the backtest" in opt,
+       "it says WHY that one, and on which kind of evidence")
+    ok("the next best, " in opt, "and how much better it is than the alternative")
+    ok("takes over without anyone changing a setting" in opt,
+       "and that the choice moves on its own when another starts winning")
+
+    # And what each one actually does, for someone signing off a number.
+    alg = SCRIPT.split("function fcAlgorithmsCard(", 1)[1].split("\n        function ", 1)[0]
+    ok("'How each one works'" in alg, "there is a section explaining them")
+    ok("m.about" in alg and "m.best_at" in alg,
+       "each carries a plain description and what shape of business it suits")
+    ok("On ' + m.live.months + ' closed months" in alg and "In the backtest" in alg,
+       "and how accurate it has actually been, live and in the backtest")
+    ok("m.name === sn.best" in alg, "with the one in use marked here too")
+    ok("box.append(fcOptimisedCard(latest));" in SCRIPT and "box.append(fcAlgorithmsCard(latest));" in SCRIPT,
+       "the tab draws both")
     ok("!sn || !sn.available" in fn and "sn.reason" in fn,
        "a run with too little history says so instead of drawing an empty table")
     ok("fcSanityCard(latest, sc)" in SCRIPT, "and the tab actually calls it")
