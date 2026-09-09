@@ -15888,11 +15888,10 @@ def t_a_saved_draft_carries_the_signoff_and_footer_into_gmail():
 def t_claude_is_told_not_to_sign_off_because_the_send_does_it():
     """Two sign-offs on one email is what happens if the model keeps writing
     one and the send appends another. The prompt has to give the job up."""
-    import inspect as _i
-    src = _i.getsource(copilot)
-    i = src.index("MAIL_DRAFT_SYSTEM = (")
-    j = src.index("@mcp.custom_route(\"/api/mail/draft\"", i)
-    prompt = src[i:j]
+    # The prompt itself, not a slice of the file between two landmarks. That
+    # slice only held while the constant sat directly above the route; it is a
+    # module constant now, so the test can read the value it is about.
+    prompt = copilot.MAIL_DRAFT_SYSTEM
     ok("appended automatically" in prompt, "the prompt says the send adds them")
     ok("no sign-off, name or signature" in prompt, prompt[-900:])
     ok("Sign off with the staff member's first name" not in prompt,
@@ -18164,6 +18163,24 @@ def t_the_one_writer_refuses_nan_a_poisoned_store_and_keeps_secrets_private():
        "even one that existed at 0644")
     eq(json.load(open(p)), {"secret": "x"}, "None writes the object itself")
     os.remove(p)
+
+
+@test
+def t_a_handler_uses_the_caller_it_was_handed_not_one_left_in_a_box():
+    """Who is asking is request state, so it travels with the request. The CRM
+    doors stashed the caller in one dict shared by every CRM route and read it
+    back further down the handler; that is only correct while no `await` ever
+    lands between the two, which nothing enforced, and the last route to be
+    written was reading it 101 lines after its guard. Every door here returns
+    (err, body, who) instead."""
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    ok("_crm_actor" not in src, "no shared dict holds the current caller")
+    ok("return None, body, who" in src.split("async def _crm_guard", 1)[1][:900],
+       "the CRM door hands the caller back, the same shape as _guard")
+    for line in src.splitlines():
+        t = line.strip()
+        if t.startswith("err, ") and "_crm_guard(request)" in t:
+            ok(t.count(",") == 2, "a CRM route unpacks three values from its door: " + t)
 
 
 @test

@@ -205,12 +205,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `ANTHROPIC_MODEL_RECON` | `None` | copilot |  |
 
-## copilot.py - Route registration (mounted onto the existing FastMCP app)
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `DAV_TRACE` | `None` | copilot |  |
-
 ## copilot.py - SEO — knowledge layer + live technical audit
 
 | Variable | Default | Read by | Notes |
@@ -256,6 +250,12 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SHIPPING_PATH` | `"/data/shipping.json"` | copilot |  |
 | `WO_FAILURES_PATH` | `"/data/wo_failures.json"` | copilot |  |
 | `WO_SECRET_PATH` | `"/data/wo_secret.json"` | copilot |  |
+
+## copilot.py - Shopify -> Xero connector: a separate, audited Node service 
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `DAV_TRACE` | `None` | copilot |  |
 
 ## copilot.py - Stock bridge: the glass a Mark made consumes flows into the 
 
