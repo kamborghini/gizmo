@@ -994,7 +994,7 @@
            Those are inset by margin instead. The list is every boxed class the
            script puts straight into a card; the rig sweep finds new ones. */
         .card > :is(.lia-bar, .lbl-row, .ktable-wrap, .empty, .msg, .mail-sendwarn, .disp-warn, .mail-empty,
-                    .cx-health, .fc-algo, .fc-alert, .know-body),
+                    .cx-health, .fc-algo, .fc-alert, .know-body, .fc-drive-tot),
         .card-bleed > .empty {
             margin-left: var(--sp-4); margin-right: var(--sp-4);
             /* The inset is a MARGIN, so the width must not also be 100%:
@@ -3001,6 +3001,69 @@
            pen next to it. */
         .chart-line { fill: none; stroke-width: 1.4; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
         .chart-line.compare { stroke-dasharray: 4 4; opacity: .7; }
+        /* A forecast is not a comparison line: it is the SAME series continuing
+           past today, so it keeps the lead line's weight and colour and says
+           "not yet certain" with the dash alone. A dimmed forecast reads as a
+           secondary opinion when it is the answer. */
+        .chart-line.dash { stroke-dasharray: 5 4; }
+        /* The range the outcome is expected to fall in. Deliberately faint: it
+           is context for the line, and a heavy band buries the number the
+           reader came for. Two p10/p90 STROKES were the old picture, and three
+           lines read as three competing predictions rather than one range. */
+        .chart-band { stroke: none; opacity: .16; }
+        /* Where what happened stops and what is expected begins. */
+        .chart-split { stroke: var(--border-emphasis); stroke-width: 1; stroke-dasharray: 3 3;
+            vector-effect: non-scaling-stroke; }
+        .chart-tip .sw.band { border-radius: var(--radius-xs); opacity: .45; }
+        /* What the three treatments on the plot mean, said in words under it.
+           A shaded band only explains itself to somebody who already reads
+           forecast charts, and this page is read by directors who do not. */
+        .fc-key { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4);
+            padding: var(--sp-3) var(--sp-4) 0; font-size: var(--text-xs); color: var(--text-tertiary); }
+        .fc-key-item { display: inline-flex; align-items: center; gap: var(--sp-2); }
+        /* The marks are painted, not bordered. A DASHED BORDER is this app's
+           one signal for a drop target, so a dashed key swatch would be
+           claiming something can be dragged onto it; the gap pattern is a
+           background instead. */
+        .fc-key-mark { width: 18px; height: 3px; flex: none; border-radius: var(--radius-xs);
+            background: var(--chart-1); }
+        .fc-key-mark.dash { background: repeating-linear-gradient(90deg,
+            var(--chart-1) 0 5px, transparent 5px 9px); }
+        .fc-key-mark.band { height: 10px; opacity: .16; }
+
+        /* ---- the overview: where am I, where am I going, is that good ----
+           Three statements, not a wall of numbers. Each is a sentence a person
+           can finish out loud, because the point of the top of this page is to
+           be understood in about five seconds. */
+        .fc-now { display: grid; gap: var(--sp-4); grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        @media (max-width: 900px) { .fc-now { grid-template-columns: minmax(0, 1fr); } }
+        .fc-now-cell { display: flex; flex-direction: column; gap: var(--sp-1); }
+        .fc-now-q { font-size: var(--text-xs); color: var(--text-tertiary); }
+        .fc-now-v { font-size: var(--text-2xl); font-weight: var(--weight-regular); color: var(--text-primary);
+            font-variant-numeric: tabular-nums; line-height: var(--lh-tight); }
+        .fc-now-v.warn { color: var(--text-danger); }
+        .fc-now-n { font-size: var(--text-sm); color: var(--text-secondary); }
+        /* How certain the middle number is, said as a width rather than as a
+           statistic. The Bank of England's finding that carries over here is
+           that a range is understood and a point estimate is believed. */
+        .fc-conf { margin-top: var(--sp-4); font-size: var(--text-sm); color: var(--text-secondary); }
+        .fc-conf b { font-weight: var(--weight-medium); color: var(--text-primary); }
+
+        /* ---- what is driving the number ---- */
+        .fc-drive { display: flex; flex-direction: column; gap: var(--sp-2-5); }
+        .fc-drive-row { display: flex; align-items: baseline; gap: var(--sp-3); }
+        .fc-drive-bar { flex: none; width: 96px; height: 8px; border-radius: var(--radius-xs);
+            background: var(--surface-secondary); overflow: hidden; align-self: center; }
+        .fc-drive-fill { height: 100%; background: var(--chart-1); border-radius: var(--radius-xs); }
+        .fc-drive-fill.soft { opacity: .45; }
+        .fc-drive-amt { flex: none; min-width: calc(var(--sp-8) * 3); font-size: var(--text-sm);
+            font-variant-numeric: tabular-nums; color: var(--text-primary); }
+        .fc-drive-lbl { font-size: var(--text-sm); color: var(--text-secondary); }
+        /* Draws a rule across the card, so it takes the gutter as MARGIN and
+           its own horizontal padding is 0 - the same rule .fc-algo needed. */
+        .fc-drive-tot { display: flex; align-items: baseline; gap: var(--sp-3);
+            margin-top: var(--sp-1); padding-block-start: var(--sp-3); padding-inline: 0;
+            border-top: var(--bw-hairline) solid var(--border-default); }
         .chart-dot { stroke: var(--surface-primary); stroke-width: 2; }
         .chart-hover-line { stroke: var(--border-emphasis); stroke-width: 1; vector-effect: non-scaling-stroke; }
         .chart-tip { position: absolute; pointer-events: none; background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-2); font-size: var(--text-xs); box-shadow: var(--shadow-lg); transform: translate(-50%, calc(-100% - 12px)); white-space: nowrap; opacity: 0; transition: opacity var(--dur) var(--ease); z-index: 4; }
@@ -5056,7 +5119,13 @@ Projected Image UK"></textarea>
             const wrap = el('div', 'chart-wrap'); card.append(wrap);
             if (!series.length || labels.length < 2) { wrap.append(el('div', 'empty', 'Not enough data in this range to chart yet.')); return card; }
             const n = labels.length;
-            const all = series.flatMap(s => s.values).map(v => Number(v) || 0);
+            /* An uncertainty band is DATA: p90 is routinely the highest thing
+               on the plot, so its values set the domain alongside the lines.
+               Left out, the band is drawn and then clipped by the frame. */
+            const bandOpt = opts.band && Array.isArray(opts.band.lo) && Array.isArray(opts.band.hi) ? opts.band : null;
+            const all = series.flatMap(s => s.values)
+                .concat(bandOpt ? bandOpt.lo.concat(bandOpt.hi) : [])
+                .filter(v => v != null).map(v => Number(v) || 0);
             const fit = opts.fitY ? fitDomain(Math.min.apply(null, all), Math.max.apply(null, all)) : null;
             const minV = fit ? fit.lo : 0;
             const maxV = fit ? fit.hi : axisTop(Math.max.apply(null, all.concat([0])));
@@ -5072,13 +5141,68 @@ Projected Image UK"></textarea>
                 grad.append(svgEl('stop', { offset: '5%', 'stop-color': CH[4], 'stop-opacity': '0.36' }));
                 grad.append(svgEl('stop', { offset: '95%', 'stop-color': CH[4], 'stop-opacity': '0.04' }));
                 defs.append(grad); svg.append(defs);
-                const line = (vals) => smoothPath(vals.map((v, i) => [X(i), Y(v)]));
+                /* A gap in a series is a GAP, not a zero. Y(null) is Y(0), so
+                   every series used to be drawn down to the floor wherever it
+                   had no value - which on a forecast chart meant the actual
+                   line ran along the bottom through the whole forecast and the
+                   forecast line ran along the bottom through the whole of
+                   history, crossing in a V that means nothing. Contiguous runs
+                   are drawn as separate subpaths and the gaps stay empty. */
+                const runsOf = (vals) => {
+                    const out = []; let run = [];
+                    for (let i = 0; i <= vals.length; i++) {
+                        const v = i < vals.length ? vals[i] : null;
+                        if (v != null && isFinite(v)) { run.push([X(i), Y(v)]); continue; }
+                        if (run.length) out.push(run);
+                        run = [];
+                    }
+                    return out;
+                };
+                const line = (vals) => runsOf(vals).map(r => r.length > 1 ? smoothPath(r)
+                    : 'M' + r[0][0].toFixed(1) + ' ' + r[0][1].toFixed(1) + ' l0 0').join(' ');
                 // The wash closes on the FLOOR of the domain, not on zero: with a
                 // floated floor, zero is off the plot and the fill would spill out
                 // of the card, which draws nothing an overflow:visible svg would clip.
-                if (opts.area !== false) { const a = line(series[0].values) + ' L ' + X(n - 1).toFixed(1) + ' ' + Y(minV).toFixed(1) + ' L ' + X(0).toFixed(1) + ' ' + Y(minV).toFixed(1) + ' Z'; svg.append(svgEl('path', { d: a, fill: 'url(#' + uid + ')' })); }
+                if (opts.area !== false) {
+                    runsOf(series[0].values).forEach(r => {
+                        if (r.length < 2) return;
+                        const head = smoothPath(r);
+                        const a = head + ' L ' + r[r.length - 1][0].toFixed(1) + ' ' + Y(minV).toFixed(1)
+                            + ' L ' + r[0][0].toFixed(1) + ' ' + Y(minV).toFixed(1) + ' Z';
+                        svg.append(svgEl('path', { d: a, fill: 'url(#' + uid + ')' }));
+                    });
+                }
                 let drawPath = null;
-                series.forEach((s, si) => { const p = svgEl('path', { class: 'chart-line' + (si > 0 ? ' compare' : ''), d: line(s.values), stroke: s.color || (si ? CH[3] : CH[0]) }); if (!REDUCE_MOTION && si === 0) drawPath = p; svg.append(p); });
+                /* The uncertainty band, under the lines. Two p10 and p90 LINES
+                   is the wrong picture: three strokes read as three competing
+                   predictions, and the reader has to work out which one is the
+                   answer. One shaded region reads as what it is - a range the
+                   outcome is expected to fall in. Drawn as contiguous runs, so
+                   the band starts where the forecast starts and does not reach
+                   back across the months that already happened. */
+                if (bandOpt) {
+                    const run = [];
+                    for (let i = 0; i <= n; i++) {
+                        const ok = i < n && bandOpt.lo[i] != null && bandOpt.hi[i] != null;
+                        if (ok) { run.push(i); continue; }
+                        if (run.length > 1) {
+                            const hi = smoothPath(run.map(k => [X(k), Y(bandOpt.hi[k])]));
+                            const lo = smoothPath(run.slice().reverse().map(k => [X(k), Y(bandOpt.lo[k])]));
+                            svg.append(svgEl('path', { class: 'chart-band', d: hi + ' L' + lo.slice(1) + ' Z',
+                                fill: bandOpt.color || CH[2] }));
+                        }
+                        run.length = 0;
+                    }
+                }
+                /* Where what happened stops and what is expected begins. The
+                   single most important line on a forecast chart: without it a
+                   reader cannot tell which part of the curve is money that
+                   arrived and which part is an estimate. */
+                if (opts.splitAt != null && opts.splitAt >= 0 && opts.splitAt < n) {
+                    svg.append(svgEl('line', { class: 'chart-split', x1: X(opts.splitAt), x2: X(opts.splitAt),
+                        y1: padT, y2: H - padB }));
+                }
+                series.forEach((s, si) => { const p = svgEl('path', { class: 'chart-line' + (si > 0 && !s.lead ? ' compare' : '') + (s.dash ? ' dash' : ''), d: line(s.values), stroke: s.color || (si ? CH[3] : CH[0]) }); if (!REDUCE_MOTION && si === 0) drawPath = p; svg.append(p); });
                 /* No average rule, no peak label, no dot at the end of the line.
                    The reference chart has none of them: its <svg> contains zero
                    circles at rest and every text node in it is an x-axis date. The
@@ -5091,9 +5215,19 @@ Projected Image UK"></textarea>
                     const rect = svg.getBoundingClientRect(); if (!rect.width) return;
                     let i = Math.round(((clientX - rect.left) / rect.width * W - padL) / (W - padL - padR) * (n - 1)); i = Math.max(0, Math.min(n - 1, i));
                     hoverLine.setAttribute('x1', X(i)); hoverLine.setAttribute('x2', X(i)); hoverLine.setAttribute('opacity', 1);
-                    dots.forEach((c, si) => { c.setAttribute('cx', X(i)); c.setAttribute('cy', Y(series[si].values[i])); c.setAttribute('opacity', 1); });
+                    dots.forEach((c, si) => { const v = series[si].values[i];
+                        if (v == null) { c.setAttribute('opacity', 0); return; }
+                        c.setAttribute('cx', X(i)); c.setAttribute('cy', Y(v)); c.setAttribute('opacity', 1); });
                     tip.innerHTML = ''; tip.append(el('div', 'tl', labels[i]));
-                    series.forEach(s => { const r = el('div', 'tr'); const sw = el('span', 'sw'); sw.style.background = s.color || CH[0]; r.append(sw); if (series.length > 1) r.append(document.createTextNode(s.name || '')); r.append(el('b', null, fmt(s.values[i]))); tip.append(r); });
+                    series.forEach(s => { if (s.values[i] == null) return; const r = el('div', 'tr'); const sw = el('span', 'sw'); sw.style.background = s.color || CH[0]; r.append(sw); if (series.length > 1) r.append(document.createTextNode(s.name || '')); r.append(el('b', null, fmt(s.values[i]))); tip.append(r); });
+                    /* The band is one fact - a range - so it is one line of the
+                       tooltip, not two more series competing with the answer. */
+                    if (bandOpt && bandOpt.lo[i] != null && bandOpt.hi[i] != null) {
+                        const r = el('div', 'tr'); const sw = el('span', 'sw band'); sw.style.background = bandOpt.color || CH[2];
+                        r.append(sw, document.createTextNode(bandOpt.name || 'Range'));
+                        r.append(el('b', null, fmt(bandOpt.lo[i]) + ' to ' + fmt(bandOpt.hi[i])));
+                        tip.append(r);
+                    }
                     /* Drawn centred on the point and 12px clear above it, so at
                        the last point half of it hung 13.6px past the card's own
                        border and over the next column, and on a high datum it
@@ -5101,7 +5235,8 @@ Projected Image UK"></textarea>
                        wrap IS the card's padding box: clamp to it on both axes,
                        measuring the tip after its contents are in. */
                     const tw = tip.offsetWidth, th = tip.offsetHeight;
-                    const px = X(i) / W * rect.width, py = Math.min.apply(null, series.map(s => Y(s.values[i]))) / H * rect.height;
+                    const ys = series.map(s => s.values[i]).filter(v => v != null).map(v => Y(v));
+                    const px = X(i) / W * rect.width, py = (ys.length ? Math.min.apply(null, ys) : padT) / H * rect.height;
                     tip.style.left = Math.max(tw / 2, Math.min(rect.width - tw / 2, px)) + 'px';
                     tip.style.top = Math.max(th + 12, py) + 'px'; tip.style.opacity = 1;
                 };
@@ -9204,6 +9339,202 @@ Projected Image UK"></textarea>
             renderForecast();
         }
         const fcISO = (d) => d.toISOString().slice(0, 10);
+        /* Details on demand, remembered per person. Shut by default: the whole
+           point of the layer below the picture is that a reader who does not
+           want it never has to scroll past it, and a reader who does opens one
+           and finds everything. The body is built LAZILY, on first open, so
+           five closed drawers cost five summaries rather than five tables. */
+        const LS_FCOPEN = 'sc_fcopen_v1';
+        function fcOpenSet() {
+            try { const v = JSON.parse(localStorage.getItem(LS_FCOPEN) || '[]'); return Array.isArray(v) ? v : []; }
+            catch (e) { return []; }
+        }
+        function setFcOpen(key, on) {
+            try {
+                const set = fcOpenSet().filter(k => k !== key);
+                if (on) set.push(key);
+                localStorage.setItem(LS_FCOPEN, JSON.stringify(set.slice(-12)));
+            } catch (e) {}
+        }
+        function fcDrawer(title, build) {
+            const key = title.replace(/\s*\(\d+\)\s*$/, '');
+            const d = el('details', 'sect');
+            const sum = el('summary'); sum.append(document.createTextNode(title));
+            const chev = el('span', 'chev'); chev.innerHTML = I.chev; sum.append(chev);
+            const body = el('div', 'body');
+            d.append(sum, body);
+            let built = false;
+            const fill = () => { if (built) return; built = true; body.append(build()); };
+            if (fcOpenSet().indexOf(key) >= 0) { d.open = true; fill(); }
+            d.addEventListener('toggle', () => { if (d.open) fill(); setFcOpen(key, d.open); });
+            return d;
+        }
+        /* These cards each carry their own section title, which is right when
+           they sit on the page and wrong inside a drawer whose summary already
+           says it. Reuse the card, drop the duplicated heading. */
+        function fcUntitled(node) {
+            const t = node.querySelector(':scope > .section-title');
+            if (t) t.remove();
+            return node;
+        }
+        /* One alert, said as a fact and then a reason. */
+        function fcAlertRow(a) {
+            const row = el('div', 'fc-alert');
+            row.append(fcChip(a.kind === 'cash' || a.risk === 'high' ? 'bad' : 'warn', fcMonth(a.month)));
+            row.append(el('span', null, a.kind === 'cash'
+                ? (a.verdict + ', working capital ' + fcMoney(a.working_capital))
+                : (a.verdict + ' by ' + fcPct((a.gap_pct || 0) / 100) + ': projected ' + fcMoney(a.projected)
+                   + ' against ' + fcMoney(a.target) + (a.risk ? ', risk ' + a.risk : ''))));
+            return row;
+        }
+        /* Which two matter most: cash before sales, high risk before low, and
+           the biggest miss before the smallest. */
+        function fcAlertWeight(a) {
+            return (a.kind === 'cash' ? 1000 : 0) + (a.risk === 'high' ? 100 : 0) + Math.abs(a.gap_pct || 0);
+        }
+
+        /* ---------- 1. OVERVIEW: understood in about five seconds ----------
+           Shneiderman's overview comes first and answers three questions in
+           the reader's own words: where am I now, where am I expected to end
+           up, and is that good or bad. Everything else on this page is a way
+           of interrogating these three sentences, which is why they carry no
+           method, no algorithm and no statistics. */
+        function fcOverviewCard(latest, sc) {
+            const rows = latest.monthly || [];
+            const cur = rows.find(r => (r.method || '').indexOf('actual_to_date') === 0)
+                || rows.find(r => r.method === 'forecast') || rows[0];
+            const box = el('div');
+            box.append(el('div', 'section-title', 'Where things stand'));
+            const card = el('div', 'card');
+            if (!cur) { card.append(el('div', 'empty', 'No run to summarise yet.')); box.append(card); return box; }
+            const banked = fcBankedThisMonth(latest);
+            const p50 = cur.p50, p10 = cur.p10, p90 = cur.p90;
+            const target = (cur.targets || {})[sc];
+            const gap = (cur.gap_pct || {})[sc];
+            const verdict = (cur.verdict || {})[sc];
+            const grid = el('div', 'fc-now');
+            const cell = (q, v, note, warn) => {
+                const c = el('div', 'fc-now-cell');
+                c.append(el('div', 'fc-now-q', q));
+                c.append(el('div', 'fc-now-v' + (warn ? ' warn' : ''), v));
+                if (note) c.append(el('div', 'fc-now-n', note));
+                return c;
+            };
+            grid.append(cell('Where am I now', fcMoney(banked),
+                'taken so far in ' + fcMonth(cur.month)));
+            grid.append(cell('Where am I expected to be', fcMoney(p50),
+                (p10 != null && p90 != null) ? ('likely ' + fcMoney(p10) + ' to ' + fcMoney(p90)) : 'by the end of the month'));
+            if (target != null) {
+                const under = verdict === 'underrun' || (gap != null && gap < 0);
+                grid.append(cell('Is that good or bad',
+                    (gap != null ? fcPct(gap) : '\u2014'),
+                    (under ? 'below ' : 'above ') + sc + ', ' + fcMoney(target), under));
+            } else {
+                grid.append(cell('Is that good or bad', '\u2014', 'no plan target for this month'));
+            }
+            card.append(grid);
+            /* The year, quieter than the three questions but never dropped: it
+               is the figure a director asks for straight after the month, and
+               the one number the old KPI strip carried that the three
+               questions do not. */
+            const year = latest.year || {}; const yt2 = (year.targets || {})[sc];
+            if (year.p50 != null) {
+                const yr = el('div', 'fc-conf');
+                yr.append(document.createTextNode('Full year: '));
+                yr.append(el('b', null, fcMoney(year.p50)));
+                if (yt2 != null) yr.append(document.createTextNode(' against ' + sc + '\u2019s ' + fcMoney(yt2)
+                    + ' (' + fcPct((year.p50 - yt2) / yt2) + ').'));
+                card.append(yr);
+            }
+            /* The width of the range, said as money and as a share, because
+               "P10 28,513 / P90 32,921" is a statistic and "could be 4,400
+               either side" is a fact somebody can act on. */
+            if (p10 != null && p90 != null && p50) {
+                const half = Math.round((p90 - p10) / 2);
+                const conf = el('div', 'fc-conf');
+                conf.append(document.createTextNode('How certain is that? The month should land within about '));
+                conf.append(el('b', null, fcMoney(half)));
+                conf.append(document.createTextNode(' either side of ' + fcMoney(p50)
+                    + ' (' + fcPct(half / p50) + '), 8 times out of 10. It is an expectation, not a commitment.'));
+                card.append(conf);
+            }
+            box.append(card);
+            return box;
+        }
+
+        /* Money already in the till this month. The run marks the current month
+           actual_to_date, and the daily history is the same money day by day,
+           so either answers it; the daily sum is preferred because it is what
+           the chart draws. */
+        function fcBankedThisMonth(latest) {
+            const asOf = (latest.as_of || '').slice(0, 7);
+            const days = ((latest.daily || {}).history || []).filter(d => (d.date || '').slice(0, 7) === asOf);
+            if (days.length) return days.reduce((a, d) => a + (Number(d.actual) || 0), 0);
+            const m = (latest.monthly || []).find(r => (r.month || '') === asOf);
+            return m && m.actual_to_date != null ? m.actual_to_date : 0;
+        }
+
+        /* ---------- 5. WHY: what is driving the number ----------
+           The honest decomposition, which is not the same as the one a cash
+           flow tool gives. This model forecasts the shop's own takings from
+           the shop's own history: it has no invoice ledger, so it cannot say
+           "12,600 of expected invoices". What it CAN say, and what actually
+           drives the figure, is how much is already banked, how much is still
+           expected, and what the leading source keyed that expectation off. */
+        function fcDriversCard(latest, sc) {
+            const rows = latest.monthly || [];
+            const cur = rows.find(r => (r.method || '').indexOf('actual_to_date') === 0)
+                || rows.find(r => r.method === 'forecast') || rows[0];
+            if (!cur || cur.p50 == null) return null;
+            const box = el('div');
+            box.append(el('div', 'section-title', 'Why the forecast is what it is'));
+            const card = el('div', 'card');
+            const banked = fcBankedThisMonth(latest);
+            const rest = Math.max(0, cur.p50 - banked);
+            card.append(el('p', 'card-sub', 'The figure for ' + fcMonth(cur.month) + ' is money already taken plus '
+                + 'what the leading source expects for the days left. Nothing else is added to it.'));
+            const list = el('div', 'fc-drive');
+            const top = Math.max(banked, rest) || 1;
+            const row = (amt, label, soft) => {
+                const r = el('div', 'fc-drive-row');
+                const bar = el('div', 'fc-drive-bar');
+                const fill = el('div', 'fc-drive-fill' + (soft ? ' soft' : ''));
+                fill.style.width = Math.max(2, Math.round(Math.abs(amt) / top * 100)) + '%';
+                bar.append(fill); r.append(bar);
+                r.append(el('span', 'fc-drive-amt', fcMoney(amt)));
+                r.append(el('span', 'fc-drive-lbl', label));
+                return r;
+            };
+            list.append(row(banked, 'already taken, ' + fcDaysSoFar(latest) + ' of ' + fcDaysInMonth(latest) + ' days in'));
+            list.append(row(rest, 'still expected over the rest of the month', true));
+            card.append(list);
+            const tot = el('div', 'fc-drive-tot');
+            tot.append(el('span', 'fc-drive-amt', fcMoney(cur.p50)));
+            tot.append(el('span', 'fc-drive-lbl', 'expected for the month'));
+            card.append(tot);
+            /* And WHY that remainder: name the mechanism, in the words the
+               source's own description uses, with no method name in sight. */
+            const sn = latest.sanity || {};
+            const best = (sn.models || []).find(m => m.name === sn.best);
+            if (best) {
+                const p = el('p', 'fc-algo-text');
+                p.append(document.createTextNode('The rest of the month is worked out by ' + fcLower(best.name)
+                    + '. ' + (best.about || '')));
+                card.append(p);
+            }
+            box.append(card);
+            return box;
+        }
+        function fcLower(n) { return n ? n.charAt(0).toLowerCase() + n.slice(1) : n; }
+        function fcDaysSoFar(latest) {
+            const d = new Date((latest.as_of || fcISO(new Date())) + 'T00:00:00');
+            return d.getDate();
+        }
+        function fcDaysInMonth(latest) {
+            const d = new Date((latest.as_of || fcISO(new Date())) + 'T00:00:00');
+            return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+        }
+
         function fcChartCard(latest, ledger, sanity) {
             const range = fcRange();
             const asOf = new Date((latest.as_of || fcISO(new Date())) + 'T00:00:00');
@@ -9246,10 +9577,28 @@ Projected Image UK"></textarea>
                 card.append(c); return card;
             }
             const labels = rows.map(r => grain === 'month' ? fcMonth(r.month) : fcDay(r.date));
-            const series = [{ name: 'Taken', color: CH[0], values: rows.map(r => r.actual) },
-                            { name: 'Forecast', color: CH[1], values: rows.map(r => r.p50) },
-                            { name: 'P90', color: CH[2], values: rows.map(r => r.p90) },
-                            { name: 'P10', color: CH[2], values: rows.map(r => r.p10) }];
+            /* ACTUAL -> FORECAST -> UNCERTAINTY, in that visual order.
+               The old picture drew four equal lines: taken, forecast, P90, P10.
+               Four strokes of the same weight read as four competing answers,
+               and nothing on the plot said which part had already happened.
+               Now there is ONE line that changes character at today - solid
+               where the money arrived, dashed where it is expected - and ONE
+               shaded region for the range. The forecast series repeats the last
+               actual value so the two halves join rather than floating apart,
+               and the band pinches to nothing at that same point, because at
+               today there is no uncertainty left: it widens as it goes out. */
+            const actualVals = rows.map(r => r.actual);
+            let handover = -1;
+            actualVals.forEach((v, i) => { if (v != null) handover = i; });
+            const joins = (i, v) => (i === handover ? rows[i].actual : v);
+            const series = [{ name: 'Taken', color: CH[0], values: actualVals },
+                            { name: 'Forecast', color: CH[0], dash: true, lead: true,
+                              values: rows.map((r, i) => joins(i, r.p50)) }];
+            const band = rows.some(r => r.p10 != null && r.p90 != null)
+                ? { name: 'Range', color: CH[0],
+                    lo: rows.map((r, i) => joins(i, r.p10)),
+                    hi: rows.map((r, i) => joins(i, r.p90)) }
+                : null;
             if (grain === 'month') {
                 /* What was said BEFORE each of those months began, so the gap
                    between expectation and outcome is on the same picture. */
@@ -9259,8 +9608,8 @@ Projected Image UK"></textarea>
                     if (w) said[r.month] = w.predicted;
                 });
                 if (Object.keys(said).length) {
-                    series.splice(1, 0, { name: 'Was predicted', color: CH[3] || CH[2],
-                                          values: rows.map(r => said[r.month] == null ? null : said[r.month]) });
+                    series.push({ name: 'Was predicted', color: CH[3] || CH[2],
+                                  values: rows.map(r => said[r.month] == null ? null : said[r.month]) });
                 }
             }
             /* Every source the reader has asked to see, drawn against the
@@ -9278,10 +9627,23 @@ Projected Image UK"></textarea>
                                   values: rows.map(r => (by[n][r.month] == null ? null : by[n][r.month])) });
                 });
             }
-            const total = rows.reduce((a, r) => a + (r.actual || r.p50 || 0), 0);
-            card.append(trendChart({ title: title, source: 'Reactor forecast', period: period,
+            const total = rows.reduce((a, r) => a + (r.actual != null ? r.actual : (r.p50 || 0)), 0);
+            const chart = trendChart({ title: title, source: 'Reactor forecast', period: period,
                 yUnit: 'GBP', value: money(total, 'GBP', 0), labels: labels, series: series,
-                format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompact, height: 280, annotate: false }));
+                band: band, splitAt: handover > 0 && handover < rows.length - 1 ? handover : null,
+                format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompact, height: 300, annotate: false });
+            /* Say in words what the picture is doing. A shaded band is only
+               self-explanatory to somebody who already reads forecast charts. */
+            if (band && handover < rows.length - 1) {
+                const k = el('div', 'fc-key');
+                const item = (cls, text) => { const w = el('span', 'fc-key-item');
+                    w.append(el('span', 'fc-key-mark ' + cls)); w.append(document.createTextNode(text)); return w; };
+                k.append(item('solid', 'Solid: money already taken'));
+                k.append(item('dash', 'Dashed: expected, not yet certain'));
+                k.append(item('band', 'Shaded: the range it should land in, 8 times out of 10'));
+                chart.append(k);
+            }
+            card.append(chart);
             /* The comparison row. Obvious, not buried: a chip per source, tap to
                add its line. Capped at six, because a chart with fourteen lines
                is a chart nobody reads. */
@@ -9613,10 +9975,15 @@ Projected Image UK"></textarea>
             box.classList.toggle('no-intro', !(painting && firstPaint('forecast')));
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.insight;
             const ht = el('div'); const title = el('h2', null, 'Finance'); title.append(el('span', 'beta-tag', 'Beta'));
-            ht.append(title, el('p', null, 'Where the next few months are heading, against what Shopify has taken '
-                + 'so far and against every scenario in the cash flow plan. Several plain models run each night '
-                + 'beside the app; the one that has been most right on this shop\u2019s own history leads, and the '
-                + 'next two stand beside it. Figures are cash in, the same money the plan is written in.'));
+            /* The top of the page is about MONEY, not about method. How the
+               forecast is produced used to be the second sentence a reader
+               met, before they had been told where the business stands; it is
+               a good answer to a question nobody has asked yet, and it now
+               lives at the bottom under How this forecast works. */
+            ht.append(title, el('p', null, 'What the shop has taken so far, where the next few months are heading, '
+                + 'and how that sits against the cash flow plan. Figures are cash in, the same money the plan '
+                + 'is written in. Anything still to come is an expectation with a range around it, never a '
+                + 'promise.'));
             hero.append(badge, ht); box.append(hero);
             const latest = c && c.latest;
             const stamp = latest ? ('Run as of ' + fmtDate(latest.as_of)) : (c && !c.error ? 'No run yet' : '');
@@ -9633,81 +10000,105 @@ Projected Image UK"></textarea>
             const names = latest.scenarios || [];
             if (!forecastScenario || names.indexOf(forecastScenario) < 0) forecastScenario = names[0] || '';
             const sc = forecastScenario;
-            const st = el('div', 'section-title', 'Against the plan');
-            /* No source picker. The system picks, on evidence: the backtest at
-               first, and the standing record of closed months as soon as there
-               is enough of it. Asking a person to choose an algorithm is
-               asking them to guess at something the machine can measure. */
-            const sn0 = latest.sanity || {};
-            if (names.length > 1) st.append(segControl(names.map(n => ({ label: n.replace('Algorithm ', 'Algo '), value: n })), sc, (v) => { forecastScenario = v; renderForecast(); }));
-            box.append(st);
             const rows = latest.monthly || [];
             const cur = rows.find(r => (r.method || '').indexOf('actual_to_date') === 0) || rows.find(r => r.method === 'forecast') || rows[0];
             const year = latest.year || {}; const yt = (year.targets || {})[sc];
-            const bt = latest.metrics || [];
-            const blendTot = bt.find(m => m.model === 'blend+mint' && m.level === 'total') || bt.find(m => m.model === 'blend' && m.level === 'total');
-            const baseTot = bt.find(m => m.model === 'seasonal_level' && m.level === 'total');
-            /* The boxes answer for whichever source is picked. For the leader
-               that is the run's own arithmetic. For any other, the year is
-               that source's plan-year total from the service, and the month is
-               what has been banked plus the share of its month-figure that has
-               not happened yet - the same uniform split, said plainly in the
-               note rather than presented as if the whole page had moved. */
-            const monthVal = cur ? cur.p50 : null;
-            const monthNote = cur ? ('P10 ' + fcMoney(cur.p10) + ' · P90 ' + fcMoney(cur.p90)) : '';
-            const yearVal = year.p50;
-            const yearNote = yt != null ? ('vs ' + fcMoney(yt) + ' (' + fcPct((year.p50 - yt) / yt) + ')') : '';
-            const mets = [];
-            if (cur) {
-                mets.push({ label: 'This month, projected', value: fcMoney(monthVal), note: monthNote,
-                            tone: (cur.risk || {})[sc] === 'high' ? 'warn' : null });
-                mets.push({ label: 'Gap to ' + sc, value: fcPct((cur.gap_pct || {})[sc]), note: 'target ' + fcMoney((cur.targets || {})[sc]),
-                            tone: (cur.verdict || {})[sc] === 'underrun' ? 'warn' : null });
+            const al = (latest.alerts || []).filter(a => a.scenario === sc);
+
+            /* ---------------------------------------------------------------
+               OVERVIEW FIRST, then zoom and filter, then details on demand.
+               The page is built in that order and nothing below the fold is
+               opened for the reader: 1 where things stand, 2 the picture,
+               3 why, 4 the numbers behind it, 5 how the thing works at all.
+               No source picker anywhere - the system picks on evidence, and
+               says so in "How this forecast works" for anyone who asks.
+               --------------------------------------------------------------- */
+
+            /* 1. OVERVIEW. The scenario is a FILTER on everything under it, so
+               it rides with the overview rather than being dropped into the
+               middle of the page next to a table it also governs. */
+            const ov = fcOverviewCard(latest, sc);
+            if (names.length > 1) {
+                const t0 = ov.querySelector('.section-title');
+                if (t0) t0.append(segControl(names.map(n => ({ label: n.replace('Algorithm ', 'Algo '), value: n })), sc,
+                    (v) => { forecastScenario = v; renderForecast(); }));
             }
-            mets.push({ label: 'Year, projected', value: fcMoney(yearVal), note: yearNote,
-                        tone: (yt != null && yearVal != null && yearVal < yt * 0.9) ? 'warn' : null });
-            if (blendTot) mets.push({ label: 'Backtest accuracy (WRMSSE)', value: Number(blendTot.wrmsse).toFixed(2),
-                                      note: (baseTot ? 'seasonal baseline ' + Number(baseTot.wrmsse).toFixed(2) + ' · ' : '') + 'lower is better' });
-            box.append(metricsStrip(mets));
+            box.append(ov);
+
+            /* Exceptions, and only the ones that are genuinely exceptional. An
+               alert on every month is wallpaper: the two worst are surfaced
+               here with their reason, and the rest wait in the detail below. */
+            if (al.length) {
+                const worst = al.slice().sort((a, b) => fcAlertWeight(b) - fcAlertWeight(a));
+                const ac0 = el('div', 'card');
+                worst.slice(0, 2).forEach(a => ac0.append(fcAlertRow(a)));
+                if (al.length > 2) {
+                    const more = el('div', 'fc-alert');
+                    more.append(el('span', 'fc-drive-lbl', (al.length - 2) + ' more in Alerts, under the detail below.'));
+                    ac0.append(more);
+                }
+                box.append(ac0);
+            }
+
+            /* 2. THE PICTURE. Actual, forecast and uncertainty, with the time
+               control on it. This is the largest thing on the page. */
             box.append(fcChartCard(latest, c.ledger, latest.sanity));
-            box.append(fcSanityCard(latest, sc));
-            box.append(fcOptimisedCard(latest));
-            box.append(fcRecordCard(c));
-            box.append(fcAlgorithmsCard(latest));
-            box.append(el('div', 'section-title', 'Month by month against ' + sc));
-            const mc = el('div', 'card');
-            mc.append(fcTable(['Month', 'Basis', 'Projected', 'P10', 'P90', 'Target', 'Gap', 'Verdict', 'Risk'],
-                rows.map(r => [fcMonth(r.month), (r.method || '').replace(/_/g, ' '), fcMoney(r.p50), fcMoney(r.p10), fcMoney(r.p90),
-                               fcMoney((r.targets || {})[sc]), fcPct((r.gap_pct || {})[sc]),
-                               fcChip(FC_VERDICT[(r.verdict || {})[sc]] || 'note', (r.verdict || {})[sc] || ''),
-                               fcChip(FC_RISK[(r.risk || {})[sc]] || 'note', (r.risk || {})[sc] || '')]),
-                [0, 0, 1, 1, 1, 1, 1, 0, 0]));
-            box.append(mc);
+
+            /* 3. WHY. */
+            const drv = fcDriversCard(latest, sc);
+            if (drv) box.append(drv);
+
+            /* 4. DETAILS ON DEMAND. Tables carry precise money; the chart above
+               carries the pattern. All shut until asked for. */
+            box.append(el('div', 'section-title', 'The numbers behind it'));
+            const detail = el('div');
+            detail.append(fcDrawer('Month by month against ' + sc, function () {
+                const mc = el('div');
+                mc.append(fcTable(['Month', 'Basis', 'Projected', 'P10', 'P90', 'Target', 'Gap', 'Verdict', 'Risk'],
+                    rows.map(r => [fcMonth(r.month), (r.method || '').replace(/_/g, ' '), fcMoney(r.p50), fcMoney(r.p10), fcMoney(r.p90),
+                                   fcMoney((r.targets || {})[sc]), fcPct((r.gap_pct || {})[sc]),
+                                   fcChip(FC_VERDICT[(r.verdict || {})[sc]] || 'note', (r.verdict || {})[sc] || ''),
+                                   fcChip(FC_RISK[(r.risk || {})[sc]] || 'note', (r.risk || {})[sc] || '')]),
+                    [0, 0, 1, 1, 1, 1, 1, 0, 0]));
+                return mc;
+            }));
             const cash = (latest.cash || {})[sc] || [];
-            if (cash.length) {
-                box.append(el('div', 'section-title', 'Cash under ' + sc));
-                const cc = el('div', 'card');
-                cc.append(el('p', 'card-sub', 'The projected sales pushed through the scenario’s own mechanics: its overheads and cost lines, the Shopify Capital remittance on gross, stopping when the loan is repaid.'));
+            if (cash.length) detail.append(fcDrawer('Cash under ' + sc, function () {
+                const cc = el('div');
+                cc.append(el('p', 'card-sub', 'The projected sales pushed through the scenario\u2019s own mechanics: its overheads and cost lines, the Shopify Capital remittance on gross, stopping when the loan is repaid.'));
                 cc.append(fcTable(['Month', 'Gross sales', 'Repayment', 'Net cash', 'Working capital', 'Loan left'],
                     cash.map(r => { const wc = el('span'); wc.textContent = fcMoney(r.working_capital);
                         if (r.negative) wc.append(' ', fcChip('bad', 'negative')); else if (r.below_buffer) wc.append(' ', fcChip('warn', 'below buffer'));
                         return [fcMonth(r.month), fcMoney(r.gross_sales), fcMoney(r.repayment), fcMoney(r.net_cash), wc, fcMoney(r.loan_end)]; }),
                     [0, 1, 1, 1, 1, 1]));
-                box.append(cc);
-            }
-            const al = (latest.alerts || []).filter(a => a.scenario === sc);
-            box.append(el('div', 'section-title', 'Alerts'));
-            const ac = el('div', 'card');
-            if (!al.length) ac.append(el('div', 'empty', 'Nothing to flag under ' + sc + '.'));
-            al.forEach(a => {
-                const row = el('div', 'fc-alert');
-                row.append(fcChip(a.kind === 'cash' || a.risk === 'high' ? 'bad' : 'warn', fcMonth(a.month)));
-                row.append(el('span', null, a.kind === 'cash'
-                    ? (a.verdict + ', working capital ' + fcMoney(a.working_capital))
-                    : (a.verdict + ' by ' + fcPct((a.gap_pct || 0) / 100) + ': projected ' + fcMoney(a.projected) + ' against ' + fcMoney(a.target) + (a.risk ? ', risk ' + a.risk : ''))));
-                ac.append(row);
-            });
-            box.append(ac);
+                return cc;
+            }));
+            detail.append(fcDrawer('Alerts' + (al.length ? ' (' + al.length + ')' : ''), function () {
+                const ac = el('div');
+                if (!al.length) ac.append(el('div', 'empty', 'Nothing to flag under ' + sc + '.'));
+                al.forEach(a => ac.append(fcAlertRow(a)));
+                return ac;
+            }));
+            detail.append(fcDrawer('Every source, side by side', function () {
+                return fcUntitled(fcSanityCard(latest, sc));
+            }));
+            detail.append(fcDrawer('What each source said before the month began', function () {
+                return fcUntitled(fcRecordCard(c));
+            }));
+            box.append(detail);
+
+            /* 5. HOW IT WORKS. Last, and shut. A director signing off a number
+               does not need to read about Theta to trust it; the person who
+               wants to can open one drawer and find all of it. */
+            box.append(el('div', 'section-title', 'How this forecast works'));
+            const how = el('div');
+            how.append(fcDrawer('Which approach is running, and why', function () {
+                return fcUntitled(fcOptimisedCard(latest));
+            }));
+            how.append(fcDrawer('How each one works, and how right it has been', function () {
+                return fcUntitled(fcAlgorithmsCard(latest));
+            }));
+            box.append(how);
             /* The by-category and by-segment tables came from the per-variant
                model, which no longer runs: it forecast October at a quarter of
                what October has ever been. They stay guarded rather than
@@ -9724,8 +10115,12 @@ Projected Image UK"></textarea>
                         .map(n => [n].concat(months.map(m => fcMoney(byName[n][m])))), [0, 1, 1, 1]));
                 box.append(lc);
             });
-            box.append(el('div', 'section-title', 'How much to trust it'));
-            const bc = el('div', 'card');
+            /* How much to trust it: prose when the plain models are running,
+               the M5 backtest table when that build is. Either way it belongs
+               under How this forecast works, not as another section dealt onto
+               a page whose first job is to answer three questions. */
+            const bt = latest.metrics || [];
+            const bc = el('div');
             if (!bt.length) {
                 bc.append(el('p', 'card-sub', 'Each model above was fitted to earlier months and marked against '
                     + 'what actually happened, three times over. Typical error is how far out it usually was; '
@@ -9733,7 +10128,6 @@ Projected Image UK"></textarea>
                     + 'that leans high quietly turns a plan green. The leading model\u2019s own error is the '
                     + 'band on the chart, so the forecast never claims to be more certain than it has earned.'));
                 if (latest.basis) bc.append(el('p', 'card-sub', 'Figures are ' + latest.basis + '.'));
-                box.append(bc);
             } else {
             bc.append(el('p', 'card-sub', 'Five backtests of 28 days each, ending at the run date. WRMSSE is the M5 competition score: under 1 beats a naive forecast scaled to each series, and lower is better. Bias is how far the total ran hot or cold.'));
             const levels = ['total', 'category', 'segment', 'product', 'variant', 'bottom'];
@@ -9743,15 +10137,19 @@ Projected Image UK"></textarea>
                 [0, 1, 1, 1]));
             const w = latest.weights && latest.weights.total;
             if (w) bc.append(el('p', 'card-sub', 'Who earned the top line: ' + Object.keys(w).filter(k => w[k] > 0.005).map(k => k + ' ' + Math.round(w[k] * 100) + '%').join(', ') + '.'));
-            box.append(bc);
             }
-            const wb = c.workbook || {};
-            const rc = el('div', 'card');
-            rc.append(el('div', 'card-title', 'Plan on file'));
-            rc.append(el('p', 'card-sub', wb.name ? (wb.name + ', uploaded ' + fmtDate(wb.uploaded_at) + (wb.by ? ' by ' + wb.by : '') + '. The baseline feature follows ' + (latest.scenario_feature || names[0] || '') + '; every scenario is reported against.')
-                : 'No workbook on file: the run used what the service had.'));
-            if (c.runs && c.runs.length) rc.append(el('p', 'card-sub', 'Recent runs: ' + c.runs.slice(-7).map(r => r.as_of).join(', ') + '.'));
-            box.append(rc);
+            how.append(fcDrawer('How much to trust it', function () { return bc; }));
+            /* What the forecast was measured against. Provenance, not a
+               finding: it belongs at the bottom of the detail, where somebody
+               checking the work will look for it. */
+            how.append(fcDrawer('The plan it is judged against', function () {
+                const wb = c.workbook || {};
+                const rc = el('div');
+                rc.append(el('p', 'card-sub', wb.name ? (wb.name + ', uploaded ' + fmtDate(wb.uploaded_at) + (wb.by ? ' by ' + wb.by : '') + '. The baseline feature follows ' + (latest.scenario_feature || names[0] || '') + '; every scenario is reported against.')
+                    : 'No workbook on file: the run used what the service had.'));
+                if (c.runs && c.runs.length) rc.append(el('p', 'card-sub', 'Recent runs: ' + c.runs.slice(-7).map(r => r.as_of).join(', ') + '.'));
+                return rc;
+            }));
         }
         /* ---------- Size list tab ----------
            The sheet the label lookup reads, every row, as a data table the

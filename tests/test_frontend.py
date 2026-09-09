@@ -1857,8 +1857,26 @@ def t_the_forecast_tab_exists_and_is_gated():
     # are both written in. And MONTH by month, not day by day: the daily line
     # was a spike and a trough for every weekend and said nothing a month does
     # not, while the plan is written in months and judged in months.
-    ok("metricsStrip(mets)" in fn and "fcChartCard(latest, c.ledger, latest.sanity)" in fn,
-       "the KPI blocks and the chart are the house ones")
+    ok("fcChartCard(latest, c.ledger, latest.sanity)" in fn, "the chart is the house one")
+    # Overview first, then zoom and filter, then details on demand. The top of
+    # the page answers three questions in a reader's own words - where am I,
+    # where am I expected to be, is that good - and the tables that used to be
+    # dealt onto the screen all at once now wait behind drawers.
+    ov = SCRIPT.split("function fcOverviewCard(", 1)[1].split("\n        function ", 1)[0]
+    for q in ("'Where am I now'", "'Where am I expected to be'", "'Is that good or bad'"):
+        ok(q in ov, "the overview asks " + q)
+    ok("Full year:" in ov, "and still carries the year, which is the figure asked for next")
+    ok("8 times out of 10" in ov and "not a commitment" in ov,
+       "and says how wide the range is, in money, rather than printing P10 and P90")
+    order = [fn.index("fcOverviewCard(latest, sc)"), fn.index("fcChartCard("),
+             fn.index("fcDriversCard(latest, sc)"), fn.index("'The numbers behind it'"),
+             fn.index("'How this forecast works'")]
+    ok(order == sorted(order),
+       "overview, then the picture, then why, then the numbers, then how it works")
+    for t in ("Month by month against ", "Every source, side by side",
+              "How each one works, and how right it has been"):
+        ok("fcDrawer('" + t in fn or 'fcDrawer(\'' + t in fn or ("fcDrawer('" + t) in fn,
+           "'" + t + "' is a drawer, not dealt onto the screen")
     # The graph is back, and the reader chooses the scale rather than being
     # locked into one: a day question and a year question are different questions.
     chart = SCRIPT.split("function fcChartCard(", 1)[1].split("\n        function ", 1)[0]
@@ -2061,7 +2079,7 @@ def t_the_beta_tabs_say_so_everywhere_they_are_named():
     ok("rTitle.append(el('span', 'beta-tag'" in SCRIPT
        and "cTitle.append(el('span', 'beta-tag'" in SCRIPT
        and "hTitle.append(el('span', 'beta-tag'" in SCRIPT
-       and "title.append(el('span', 'beta-tag', 'Beta'));\n            ht.append(title, el('p', null, 'Where the next few months" in SCRIPT,
+       and "title.append(el('span', 'beta-tag', 'Beta'));" in SCRIPT.split("function renderForecast()")[1],
        "and all four page headings carry it")
     ok("BETA_TABS.indexOf(v) >= 0" in SCRIPT, "and the topbar title does too")
     ok(".beta-tag {" in CSS, "the badge is styled")
@@ -3384,7 +3402,7 @@ def t_a_box_painted_inside_a_card_sits_inside_its_gutter():
                 # prose and both ends of every divider 1px from the card's
                 # border, because its padding shorthand's 0 had quietly
                 # overridden the card's 16px gutter.
-                ".fc-algo", ".fc-alert", ".know-body"):
+                ".fc-algo", ".fc-alert", ".know-body", ".fc-drive-tot"):
         ok(cls in listed, cls + " is inset by margin, not welded to the card's border")
     # The inset must not be taken TWICE. A child that paints a filled box keeps
     # its own padding, because that padding sits inside the box it draws. A
@@ -3408,6 +3426,62 @@ def t_a_box_painted_inside_a_card_sits_inside_its_gutter():
     ok("el('div', 'cx-health bad')" in SCRIPT and "el('div', 'cx-health ok')" in SCRIPT
        and "sCard.append(h)" in SCRIPT,
        "the script still puts the notice straight into the Connection card")
+
+
+@test
+def t_a_forecast_is_drawn_as_a_range_not_as_three_competing_lines():
+    """Actual, forecast, uncertainty - and the reader must be able to tell them
+    apart without being told. The old chart drew four strokes of equal weight
+    (taken, forecast, P90, P10), which reads as four opinions rather than one
+    answer with a range around it, and nothing on the plot said which part had
+    already happened. The Bank of England's finding that carries over to a
+    single series is that a shaded interval is understood as a range while a
+    point estimate is believed as a fact; a full fan is not warranted here
+    because the run publishes ONE interval (p10-p90), not a ladder of them."""
+    tc = SCRIPT.split("function trendChart(", 1)[1].split("\n        function ", 1)[0]
+    ok("opts.band" in tc and "chart-band" in tc, "trendChart can fill an interval")
+    ok("bandOpt.lo.concat(bandOpt.hi)" in tc,
+       "and the band's own values set the y-domain, or the band is drawn and then clipped")
+    ok("chart-split" in tc and "opts.splitAt" in tc,
+       "and can mark where what happened stops and what is expected begins")
+    # A gap is a gap. Y(null) is Y(0), so before this every series was drawn
+    # down to the floor wherever it had no value: the actual line ran along the
+    # bottom through the whole forecast and the forecast line ran along the
+    # bottom through the whole of history, crossing in a meaningless V.
+    ok("const runsOf" in tc and "v != null && isFinite(v)" in tc,
+       "a series with no value at a point leaves a gap rather than dropping to zero")
+    fc = SCRIPT.split("function fcChartCard(", 1)[1].split("\n        function ", 1)[0]
+    ok("'P90'" not in fc and "'P10'" not in fc,
+       "the forecast chart no longer draws P10 and P90 as their own lines")
+    ok("band: band" in fc and "splitAt:" in fc, "it passes the interval and the handover")
+    ok("dash: true" in fc and "lead: true" in fc,
+       "the forecast is the same line continuing, dashed - not a dimmed comparison line")
+    ok("joins(i, r.p10)" in fc and "joins(i, r.p50)" in fc,
+       "and both meet the last actual value, so the band pinches to nothing at today")
+    # Said in words, because a shaded band explains itself only to somebody who
+    # already reads forecast charts, and this page is read by directors.
+    ok("Solid: money already taken" in fc and "Dashed: expected, not yet certain" in fc
+       and "Shaded: the range it should land in" in fc,
+       "and the plot says in words what its three treatments mean")
+
+
+@test
+def t_the_forecast_page_never_dresses_an_estimate_as_a_banked_figure():
+    """Never make predicted money look like confirmed money. The overview
+    separates the two in the reader's own words and says out loud that the
+    forward figure is an expectation."""
+    ov = SCRIPT.split("function fcOverviewCard(", 1)[1].split("\n        function ", 1)[0]
+    ok("taken so far in" in ov, "what is banked is labelled as taken")
+    ok("It is an expectation, not a commitment." in ov,
+       "and what is forward is labelled as an expectation")
+    dr = SCRIPT.split("function fcDriversCard(", 1)[1].split("\n        function ", 1)[0]
+    ok("already taken" in dr and "still expected" in dr,
+       "the driver breakdown splits the month the same way")
+    # The honest decomposition. This model forecasts the shop's takings from the
+    # shop's own history: there is no invoice ledger behind it, so it must not
+    # print "expected invoices" or "late payments" as if there were.
+    ok("recurring" not in dr and "invoice" not in dr.lower() and "late payment" not in dr.lower(),
+       "and claims no invoice-level drivers, because nothing in the run produces them")
 
 
 def _names_the_script_calls_but_never_binds(script):
@@ -3530,7 +3604,7 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
        "only six month columns, or the year and the scores are pushed off the side")
     # No algorithm selector. Asking a person to choose one is asking them to
     # guess at something the machine can measure, so the machine measures it.
-    strip = SCRIPT.split("function renderForecast()")[1].split("box.append(metricsStrip(mets))")[0]
+    strip = SCRIPT.split("function renderForecast()")[1].split("fcChartCard(")[0]
     ok("setFcSourceName" not in strip and "psel" not in strip,
        "the page does not ask anyone to pick an algorithm")
     rec = SCRIPT.split("function fcRecordCard(", 1)[1].split("\n        function ", 1)[0]
@@ -3541,7 +3615,8 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
        "the card says whether the forecast is now ranked on the record or still on the backtest")
     ok("Nothing has closed yet" in rec,
        "and says plainly what will happen at month end when there is nothing yet")
-    ok("box.append(fcRecordCard(c));" in SCRIPT, "the tab draws it")
+    ok("fcUntitled(fcRecordCard(c))" in SCRIPT,
+       "the tab draws it, in the detail layer rather than dealt onto the overview")
 
     # Nobody should have to guess whether the optimised choice is running.
     opt = SCRIPT.split("function fcOptimisedCard(", 1)[1].split("\n        function ", 1)[0]
@@ -3584,8 +3659,13 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
     ok("fc-algo-head" in alg and "fc-algo-nums" in alg,
        "the figures line up down the page so sources can be read against each other")
     ok("m.name === sn.best" in alg, "with the one in use marked here too")
-    ok("box.append(fcOptimisedCard(latest));" in SCRIPT and "box.append(fcAlgorithmsCard(latest));" in SCRIPT,
-       "the tab draws both")
+    # Both are still drawn, but LAST and SHUT. A director signing off a number
+    # does not have to read about Theta to trust it; the reader who wants to
+    # opens one drawer and finds all of it.
+    ok("fcUntitled(fcOptimisedCard(latest))" in SCRIPT and "fcUntitled(fcAlgorithmsCard(latest))" in SCRIPT,
+       "the tab draws both, under How this forecast works")
+    ok(SCRIPT.index("'How this forecast works'") > SCRIPT.index("fcDriversCard(latest, sc)"),
+       "and it sits below the money, never above it")
     ok("!sn || !sn.available" in fn and "sn.reason" in fn,
        "a run with too little history says so instead of drawing an empty table")
     ok("fcSanityCard(latest, sc)" in SCRIPT, "and the tab actually calls it")
