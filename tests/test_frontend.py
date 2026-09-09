@@ -3477,6 +3477,20 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
        "named so the choice explains itself")
     ok("localStorage.setItem(LS_FCROWS" in SCRIPT and "return FC_ROWS.some(r => r[0] === v) ? v : 'three'" in SCRIPT,
        "remembered, defaulting to the three that are quoted, and a junk value falls back rather than breaking")
+    # A year per source, and a way to ask the headline boxes for a specific one.
+    ok("helpHead('Plan year'" in fn, "every source answers what the plan year comes to")
+    ok("m.year_partial ? '*' : ''" in fn,
+       "and a part year is starred rather than shown as if it were a whole one")
+    ok("fcMoney(planYear)" in fn, "the plan's own year sits in the same column to compare against")
+    ok("allMonths.slice(0, 6)" in fn,
+       "only six month columns, or the year and the scores are pushed off the side")
+    strip = SCRIPT.split("function renderForecast()")[1].split("box.append(metricsStrip(mets))")[0]
+    ok("sel.onchange = () => setFcSourceName(sel.value)" in strip,
+       "the headline boxes can be asked to speak for a chosen source")
+    ok("if (!srcs.some(m => m.name === pick)) pick = ''" in strip,
+       "a source that is no longer in the run falls back to the leader rather than blanking the page")
+    ok("chosen.year != null" in strip and "banked plus its share of the rest" in strip,
+       "and the note says which source and on what basis, rather than implying the page moved")
     ok("!sn || !sn.available" in fn and "sn.reason" in fn,
        "a run with too little history says so instead of drawing an empty table")
     ok("fcSanityCard(latest, sc)" in SCRIPT, "and the tab actually calls it")

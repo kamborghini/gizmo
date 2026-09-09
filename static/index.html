@@ -9073,6 +9073,16 @@ Projected Image UK"></textarea>
            so the default is the three that are quoted, and the choice is
            remembered per person. "Just the headline" is a single row: the
            source that leads, with the plan beside it. */
+        /* Which source the three headline boxes speak for. Empty means the one
+           that leads, which is what the month table and the cash path are
+           built from; picking another answers "and what would THIS one say
+           about the year" without pretending the rest of the page moved. */
+        const LS_FCSRC = 'sc_fc_source_v1';
+        function fcSourceName() { try { return localStorage.getItem(LS_FCSRC) || ''; } catch (e) { return ''; } }
+        function setFcSourceName(v) {
+            try { if (v) localStorage.setItem(LS_FCSRC, v); else localStorage.removeItem(LS_FCSRC); } catch (e) {}
+            renderForecast();
+        }
         const LS_FCROWS = 'sc_fc_rows_v1';
         const FC_ROWS = [['one', 'Just the headline'], ['three', 'The three quoted'], ['all', 'Every source']];
         function fcRowsMode() {
@@ -9104,8 +9114,18 @@ Projected Image UK"></textarea>
                 box.append(card); return box;
             }
             const mode = fcRowsMode();
+            /* The sources now reach the end of the plan so each can answer the
+               year, but twelve month columns push the year and the scores off
+               the side of the table. Six is half a year, enough to see where
+               sources part company; the full month-by-month for the leading
+               source is the table below, and Plan year still covers the lot. */
+            const allMonths = sn.months || [];
+            const months = allMonths.slice(0, 6);
             card.append(filterTabs(FC_ROWS, mode, setFcRowsMode));
             card.append(el('p', 'card-sub',
+                (allMonths.length > months.length
+                    ? 'The next ' + months.length + ' months are shown; Plan year covers all '
+                      + allMonths.length + '. ' : '') +
                 mode === 'one'
                 ? 'The source that has been most right on this shop\u2019s own history, with what '
                   + 'the plan expects beside it. Show more above to see whether the others agree. '
@@ -9117,7 +9137,6 @@ Projected Image UK"></textarea>
                 + 'They are scored on this shop\u2019s own history: fitted to earlier months, '
                 + 'then marked against what actually happened. Lower error is better, and a '
                 + 'bias that leans one way every month matters more than the size of it.'));
-            const months = sn.months || [];
             const ranked = (sn.models || []).slice().sort((a, b) => {
                 const x = (a.score || {}).mape, y = (b.score || {}).mape;
                 if (x == null) return 1; if (y == null) return -1; return x - y;
@@ -9137,21 +9156,27 @@ Projected Image UK"></textarea>
                    on hover and on keyboard focus. */
                 if (m.about) { name.title = m.about; name.classList.add('has-help'); name.tabIndex = 0; }
                 const sc2 = m.score || {};
+                const yr = m.year == null ? 'n/a' : fcMoney(m.year) + (m.year_partial ? '*' : '');
                 return [name].concat(months.map(k => m.error ? 'n/a' : fcMoney((m.months || {})[k])))
-                    .concat([sc2.mape == null ? 'n/a' : (sc2.mape * 100).toFixed(0) + '%',
+                    .concat([yr, sc2.mape == null ? 'n/a' : (sc2.mape * 100).toFixed(0) + '%',
                              sc2.bias == null ? 'n/a' : fcPct(sc2.bias), m.note || m.error || '']);
             });
             /* No separate median footer: "Median of all" is a ranked row in the
                table now, scored like everything else, so a second unranked
                copy of it below would be the same number twice. */
+            const planYear = ((latest.year || {}).targets || {})[sc];
             const plan = ['Your plan (' + sc + ')'].concat(months.map(k => {
                 const r = (latest.monthly || []).find(x => x.month === k);
                 return fcMoney(r ? (r.targets || {})[sc] : null);
-            })).concat(['', '', '']);
+            })).concat([fcMoney(planYear), '', '', '']);
             const helpHead = (text, about) => {
                 const sp = el('span', 'has-help', text); sp.title = about; sp.tabIndex = 0; return sp;
             };
             card.append(fcTable(['Source'].concat(months.map(fcMonth)).concat([
+                    helpHead('Plan year', 'What the whole of the plan\u2019s year comes to if you believe '
+                        + 'this source: the months already banked, which are the same whichever source you '
+                        + 'believe, plus this one\u2019s forecast for the rest. A star means the source does '
+                        + 'not reach the end of the plan, so the figure covers only part of the year.'),
                     helpHead('Typical error', 'How far out this source usually was. Each was fitted to '
                         + 'earlier months and marked against what actually happened, three times over. '
                         + 'Lower is better. Around a quarter is close to the floor for this business, '
@@ -9161,7 +9186,7 @@ Projected Image UK"></textarea>
                         + 'quietly makes a plan look safer than it is.'),
                     'How it works']),
                 rows.concat([plan]),
-                [0].concat(months.map(() => 1)).concat([1, 1, 0])));
+                [0].concat(months.map(() => 1)).concat([1, 1, 1, 0])));
             box.append(card);
             return box;
         }
@@ -9192,6 +9217,25 @@ Projected Image UK"></textarea>
             if (!forecastScenario || names.indexOf(forecastScenario) < 0) forecastScenario = names[0] || '';
             const sc = forecastScenario;
             const st = el('div', 'section-title', 'Against the plan');
+            /* Which source the boxes answer for. The leader is the default and
+               is what everything below is built from; any other is answering a
+               "what would this one say" question, and the note says so. */
+            const sn0 = latest.sanity || {};
+            const srcs = (sn0.models || []).filter(m => m.months && (m.score || {}).mape != null)
+                .sort((a, b) => a.score.mape - b.score.mape);
+            let pick = fcSourceName();
+            if (!srcs.some(m => m.name === pick)) pick = '';
+            const chosen = pick ? srcs.find(m => m.name === pick) : (srcs[0] || null);
+            if (srcs.length > 1) {
+                const sel = el('select', 'psel');
+                sel.setAttribute('aria-label', 'Which source the headline figures speak for');
+                [['', 'Leading source' + (srcs[0] ? ' (' + srcs[0].name + ')' : '')]]
+                    .concat(srcs.map(m => [m.name, m.name])).forEach(([v, label]) => {
+                        const o = el('option', null, label); o.value = v; if (v === pick) o.selected = true; sel.append(o);
+                    });
+                sel.onchange = () => setFcSourceName(sel.value);
+                st.append(sel);
+            }
             if (names.length > 1) st.append(segControl(names.map(n => ({ label: n.replace('Algorithm ', 'Algo '), value: n })), sc, (v) => { forecastScenario = v; renderForecast(); }));
             box.append(st);
             const rows = latest.monthly || [];
@@ -9200,16 +9244,41 @@ Projected Image UK"></textarea>
             const bt = latest.metrics || [];
             const blendTot = bt.find(m => m.model === 'blend+mint' && m.level === 'total') || bt.find(m => m.model === 'blend' && m.level === 'total');
             const baseTot = bt.find(m => m.model === 'seasonal_level' && m.level === 'total');
+            /* The boxes answer for whichever source is picked. For the leader
+               that is the run's own arithmetic. For any other, the year is
+               that source's plan-year total from the service, and the month is
+               what has been banked plus the share of its month-figure that has
+               not happened yet - the same uniform split, said plainly in the
+               note rather than presented as if the whole page had moved. */
+            const isLead = !pick;
+            const srcLabel = chosen ? chosen.name : '';
+            let monthVal = cur ? cur.p50 : null, monthNote = cur ? ('P10 ' + fcMoney(cur.p10) + ' · P90 ' + fcMoney(cur.p90)) : '';
+            let yearVal = year.p50, yearNote = yt != null ? ('vs ' + fcMoney(yt) + ' (' + fcPct((year.p50 - yt) / yt) + ')') : '';
+            if (!isLead && chosen) {
+                const cm = cur ? cur.month : null;
+                const whole = cm ? (chosen.months || {})[cm] : null;
+                if (whole != null && cur) {
+                    const d = new Date(latest.as_of + 'T00:00:00');
+                    const days = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+                    const left = Math.max(0, days - d.getDate());
+                    monthVal = (cur.actual_to_date || 0) + whole * (left / days);
+                    monthNote = srcLabel + ' · ' + fcMoney(cur.actual_to_date) + ' banked plus its share of the rest';
+                }
+                if (chosen.year != null) {
+                    yearVal = chosen.year;
+                    yearNote = (yt != null ? 'vs ' + fcMoney(yt) + ' (' + fcPct((yearVal - yt) / yt) + ') · ' : '')
+                        + srcLabel + (chosen.year_partial ? ', part year only' : '');
+                }
+            }
             const mets = [];
             if (cur) {
-                mets.push({ label: 'This month, projected', value: fcMoney(cur.p50), note: 'P10 ' + fcMoney(cur.p10) + ' · P90 ' + fcMoney(cur.p90),
+                mets.push({ label: 'This month, projected', value: fcMoney(monthVal), note: monthNote,
                             tone: (cur.risk || {})[sc] === 'high' ? 'warn' : null });
                 mets.push({ label: 'Gap to ' + sc, value: fcPct((cur.gap_pct || {})[sc]), note: 'target ' + fcMoney((cur.targets || {})[sc]),
                             tone: (cur.verdict || {})[sc] === 'underrun' ? 'warn' : null });
             }
-            mets.push({ label: 'Year, projected', value: fcMoney(year.p50),
-                        note: yt != null ? ('vs ' + fcMoney(yt) + ' (' + fcPct((year.p50 - yt) / yt) + ')') : '',
-                        tone: (yt != null && year.p50 < yt * 0.9) ? 'warn' : null });
+            mets.push({ label: 'Year, projected', value: fcMoney(yearVal), note: yearNote,
+                        tone: (yt != null && yearVal != null && yearVal < yt * 0.9) ? 'warn' : null });
             if (blendTot) mets.push({ label: 'Backtest accuracy (WRMSSE)', value: Number(blendTot.wrmsse).toFixed(2),
                                       note: (baseTot ? 'seasonal baseline ' + Number(baseTot.wrmsse).toFixed(2) + ' · ' : '') + 'lower is better' });
             box.append(metricsStrip(mets));

@@ -61,6 +61,35 @@ def _fetch_workbook(url: str, token: str, into: Path) -> Path | None:
         raise
 
 
+def _year_per_source(sanity: dict, monthly, cf) -> None:
+    """Give every source a whole-plan-year total, in place.
+
+    The plan runs a fixed set of months. Some are already banked and are the
+    same whichever source you believe; the rest are the source's own forecast.
+    Adding them is the only honest way to put two sources side by side over a
+    year, and a source that does not reach the end of the window says so with
+    `year_partial` rather than quietly reporting a shorter year as if it were
+    the same thing."""
+    import pandas as pd
+    if not sanity.get("available") or monthly is None or not len(monthly):
+        return
+    banked, future = 0.0, []
+    for _, r in monthly.iterrows():
+        m = pd.Timestamp(r["month"]).strftime("%Y-%m")
+        if str(r.get("method", "")).startswith("actual") and "forecast" not in str(r.get("method", "")):
+            banked += float(r["projected_p50"] or 0)
+        else:
+            future.append(m)
+    for entry in sanity.get("models", []):
+        months = entry.get("months") or {}
+        have = [m for m in future if months.get(m) is not None]
+        entry["year"] = round(banked + sum(float(months[m]) for m in have), 2) if have else None
+        entry["year_partial"] = bool(have) and len(have) < len(future)
+        entry["year_months"] = len(have)
+    sanity["year_banked"] = round(banked, 2)
+    sanity["year_future_months"] = len(future)
+
+
 def _payload(cfg, cf, sanity, opinions, monthly, cash, alerts, summary, actual_daily, fdaily) -> dict:
     """What the Forecast tab draws, as one JSON document.
 
@@ -180,7 +209,17 @@ def main() -> int:
             actual_daily = daily_cash(orders, as_of)
             if months.empty:
                 raise RuntimeError("no orders came back from Shopify")
-            sanity = sanity_forecasts(months, horizon=int(env.get("FORECAST_MONTHS", "6")))
+            # Reach the end of the plan, so every source can be asked what it
+            # thinks the YEAR comes to rather than only the next few months.
+            # The forecast starts at the month in progress, which is the first
+            # one `monthly_cash` withheld.
+            import pandas as _pd
+            _first = _pd.Period(as_of, freq="M")
+            _last = max((_pd.Period(m, freq="M") for m in cf.projection_months()), default=_first)
+            _need = max(1, (_last.year - _first.year) * 12 + (_last.month - _first.month) + 1)
+            horizon_months = int(env.get("FORECAST_MONTHS", "0")) or min(_need, 18)
+            log.info("forecasting %d month(s), to %s", horizon_months, _last)
+            sanity = sanity_forecasts(months, horizon=horizon_months)
             if not sanity.get("available"):
                 raise RuntimeError(sanity.get("reason") or "not enough history to forecast")
             opinions = pick_opinions(sanity)
@@ -200,6 +239,12 @@ def main() -> int:
             monthly_view = eng.monthly_view(actual_daily, fdaily)
             cash_view = {n: eng.cash_view(monthly_view, n) for n in cf.scenario_names if n in cf.flows}
             alerts = eng.alerts(monthly_view, cash_view)
+            # A year figure for EVERY source, not just the one that leads: the
+            # months already banked (shared by all of them) plus that source's
+            # own forecast for the rest of the plan's window. It is the number
+            # a director actually asks for, and it should be answerable of any
+            # source on the page rather than only the headline.
+            _year_per_source(sanity, monthly_view, cf)
             payload = _payload(cfg, cf, sanity, opinions, monthly_view, cash_view, alerts,
                                eng.summary(monthly_view, cash_view, alerts), actual_daily, fdaily)
 

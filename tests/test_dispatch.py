@@ -12322,6 +12322,19 @@ def t_the_forecast_is_many_sources_ranked_by_what_each_was_worth():
        "every source carries a plain-English explanation for whoever reads the board pack")
     ok("Last year, adjusted for this year" in simple and "Average, extremes removed" in simple,
        "and is NAMED for what it does, not for the paper it came from")
+    # "What does the YEAR come to" is the question a director asks, and it has
+    # to be answerable of any source on the page, not only the headline.
+    ok("def _year_per_source(" in simple or "def _year_per_source(" in nightly,
+       "every source carries a whole-plan-year total")
+    yr = nightly.split("def _year_per_source(", 1)[1].split("\ndef ", 1)[0]
+    ok('entry["year"] = round(banked + sum(' in yr,
+       "the months already banked plus that source's own forecast for the rest")
+    ok('entry["year_partial"]' in yr,
+       "and a source that does not reach the end of the plan says so rather than "
+       "quietly reporting a short year as if it were a whole one")
+    ok("_year_per_source(sanity, monthly_view, cf)" in nightly, "the run fills it in")
+    ok("horizon_months = int(env.get(\"FORECAST_MONTHS\", \"0\")) or min(_need, 18)" in nightly,
+       "and the horizon reaches the end of the plan so there is a year to total")
 
     for fn in ("last_year_times_run_rate", "seasonal_share", "holt_winters_flat",
                "holt_winters_trend", "theta"):
