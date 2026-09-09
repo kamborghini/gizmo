@@ -6253,8 +6253,12 @@ Projected Image UK"></textarea>
         }
         async function loadCustomerTags() {
             if (customerTags !== null) return;   // load once per session
+            /* The load-once guard keys on null, so writing [] in the catch made
+               a single failed fetch permanent: the picker offered nothing but
+               Comprehensive for the rest of the session and never said why.
+               Leave it null so the next call retries. */
             try { const d = await api('/api/customer-tags', {}); customerTags = (d && Array.isArray(d.tags)) ? d.tags : []; }
-            catch (e) { customerTags = []; }
+            catch (e) { customerTags = null; toastError('The customer segments could not be loaded. ' + (e.message || '')); }
             // Never repaint over an analysis that is mid-flight (that would restore the
             // Run gate and make the merchant think their click was ignored).
             if ($('view-customers').classList.contains('active') && !customersLoading) renderCustomers(customersSeg);
@@ -6806,8 +6810,12 @@ Projected Image UK"></textarea>
             try { const im = await api('/api/impact', {}); if (im && Array.isArray(im.impact)) impact = im.impact; } catch (e) {}
             if ($('view-memory').classList.contains('active')) renderMemory();
         }
+        /* Conclude and delete both come through here, so a discarded error was
+           a delete that appeared to work and did not. */
         function impactOp(payload) {
-            api('/api/impact', payload).then(d => { if (d && Array.isArray(d.impact)) impact = d.impact; renderMemory(); loadMemory(); }).catch(() => {});
+            api('/api/impact', payload)
+                .then(d => { if (d && Array.isArray(d.impact)) impact = d.impact; renderMemory(); loadMemory(); })
+                .catch(e => toastError('That change was not saved. ' + (e.message || '')));
         }
         function impactCard(it) {
             const c = el('div', 'card impact-card' + (it.status === 'concluded' ? ' done' : ''));
@@ -22719,22 +22727,48 @@ Projected Image UK"></textarea>
                 }
             }).catch(() => { box.innerHTML = '<div class="setting-sub">Usage unavailable.</div>'; });
         }
+        /* This switch says whether an unattended run happens overnight, so it
+           must never show a setting the server did not accept. It used to flip
+           its own class first and then discard every error, which left the
+           merchant looking at "on" while nothing had been enabled and nothing
+           would ever say so. The class now follows the WRITE: it moves when
+           the server agrees, and moves back when it does not. */
+        function paintSchedule(on, hours) {
+            $('sched-toggle').classList.toggle('on', !!on);
+            if (hours) $('sched-freq').value = String(hours);
+            $('sched-freq-row').style.display = on ? '' : 'none';
+        }
         function loadSchedule() {
             api('/api/schedule', {}).then(d => {
                 const s = (d && d.schedule) || {};
-                $('sched-toggle').classList.toggle('on', !!s.enabled);
-                if (s.every_hours) $('sched-freq').value = String(s.every_hours);
-                $('sched-freq-row').style.display = s.enabled ? '' : 'none';
-            }).catch(() => {});
+                paintSchedule(!!s.enabled, s.every_hours);
+            }).catch(e => {
+                /* A failed READ must not be painted as "off" either: that is
+                   the same lie in the other direction, so say so rather than
+                   leaving the switch showing whatever it happened to hold. */
+                toastError('The schedule could not be read. ' + (e.message || ''));
+            });
         }
-        $('sched-toggle').onclick = function () {
-            this.classList.toggle('on');
-            const on = this.classList.contains('on');
-            $('sched-freq-row').style.display = on ? '' : 'none';
-            api('/api/schedule', { config: { enabled: on, every_hours: parseInt($('sched-freq').value, 10) || 168 } }).catch(() => {});
+        $('sched-toggle').onclick = async function () {
+            const was = this.classList.contains('on');
+            const on = !was;
+            const hours = parseInt($('sched-freq').value, 10) || 168;
+            paintSchedule(on, hours);
+            try {
+                await api('/api/schedule', { config: { enabled: on, every_hours: hours } });
+            } catch (e) {
+                paintSchedule(was, hours);
+                toastError('The schedule was not changed. ' + (e.message || ''));
+            }
         };
-        $('sched-freq').onchange = function () {
-            api('/api/schedule', { config: { every_hours: parseInt(this.value, 10) || 168 } }).catch(() => {});
+        $('sched-freq').onchange = async function () {
+            const hours = parseInt(this.value, 10) || 168;
+            try {
+                await api('/api/schedule', { config: { every_hours: hours } });
+            } catch (e) {
+                loadSchedule();
+                toastError('The frequency was not changed. ' + (e.message || ''));
+            }
         };
         /* The X is the only way out, like every other modal here (user rule:
            a misclick must not wipe a filled form, and Settings IS a form).

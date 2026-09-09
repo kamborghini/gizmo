@@ -1010,6 +1010,51 @@ def t_the_deal_board_can_be_worked_without_a_mouse():
 
 
 @test
+def t_a_write_that_failed_is_never_shown_as_a_write_that_worked():
+    """A control that changes something on the server must not move until the
+    server says it moved. The nightly schedule switch flipped its own class
+    first and then discarded every error, so a merchant could be looking at
+    "on" while nothing had been enabled and nothing would ever tell them; the
+    same shape hid a failed conclude and a failed delete on the Memory tab.
+
+    Three swallows are deliberate and stay: an opportunistic cache warm, a
+    font-ready race that must fall through to printing either way, and a
+    sign-in probe that degrades to the ordinary sign-in card. Each is a READ
+    whose failure costs nothing. What is banned is discarding the error from a
+    WRITE."""
+    import re as _re
+    allowed = {
+        "loansWarmCrm",          # prefetch; the real load reports for itself
+        "labelFontReady",        # documented: a broken font must still print
+        "authApi",               # falls through to the normal sign-in card
+        "crmOp",                 # marks a lead seen; the lead opens regardless
+    }
+    bad = []
+    src_lines = SCRIPT.splitlines()
+    for i, line in enumerate(src_lines, 1):
+        if ".catch(() => {})" not in line and ".catch(()=>{})" not in line:
+            continue
+        # The call being swallowed is usually a few lines above the .catch, so
+        # the window is what identifies it, not the closing line on its own.
+        window = "\n".join(src_lines[max(0, i - 8):i])
+        if any(a in window for a in allowed):
+            continue
+        bad.append(str(i) + ": " + line.strip()[:110])
+    ok(not bad, "an error from a write is being discarded: " + "; ".join(bad))
+
+    # And the switch itself: the class follows the write, both ways.
+    fn = SCRIPT.split("$('sched-toggle').onclick", 1)[1].split("};", 1)[0]
+    ok("const was = this.classList.contains('on')" in fn and "paintSchedule(was" in fn,
+       "the schedule switch goes back when the server refuses")
+    ok("toastError" in fn, "and says so")
+    # A load-once cache must not cache a FAILURE, or one blip removes the
+    # feature for the whole session.
+    tags = SCRIPT.split("async function loadCustomerTags", 1)[1].split("\n        }", 1)[0]
+    ok("customerTags = null" in tags,
+       "a failed segment load stays null so the next call retries")
+
+
+@test
 def t_a_failed_load_is_not_reported_as_an_empty_list():
     """Both tabs cached into a module-level array and swallowed the read error
     into an empty catch, so a 500 rendered the empty state - whose copy actively
