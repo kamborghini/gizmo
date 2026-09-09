@@ -276,6 +276,15 @@ def _backtest_all(y: pd.Series, models: List[Tuple[str, object]], folds: int, h:
 
 
 
+# Daily forecast errors are neither independent nor in step. Both halves of the
+# band arithmetic assume they persist for about this many days: daily_frame
+# widens a measured monthly error by sqrt(days_in_month / this) to get a daily
+# one, and VarianceEngine._window_band shrinks a summed window back by
+# sqrt(n / this). The two MUST use the same number or the round trip does not
+# return the error that was measured, which is exactly the bug this constant
+# was introduced to close.
+BAND_PERSISTENCE_DAYS = 4.0
+
 MIN_LIVE_MONTHS = 3          # before a track record outranks a backtest
 
 
@@ -453,9 +462,24 @@ def daily_frame(model: dict, as_of, profile=None) -> "pd.DataFrame":
                         "p50": [float(v) for _, v in months]}).sort_values("month")
     spread = daily_from_monthly(mdf, profile or DayProfile.uniform(), columns=("p50",))
     spread = spread.rename(columns={"p50_target": "p50"})
+    # What the backtest measures is a MONTHLY error. The page draws a month by
+    # summing these days and shrinking the result by sqrt(n / persistence), so
+    # for that round trip to give back the number that was actually measured,
+    # the daily band has to be the monthly one WIDENED by the same factor.
+    #
+    # It was not: the monthly figure was painted straight onto every day and
+    # then shrunk anyway, so a source whose own record said it is typically
+    # 28.7% out was drawn at +/-10.3% - 2.8 times more confident than anything
+    # had earned. Every "secure" and "high" verdict, and so every alert, was
+    # decided from that band as well.
+    #
+    # A single day really is that much noisier than a month, so the widened
+    # number is the honest one for the daily view too.
     err = float((model.get("score") or {}).get("mape") or 0.3)
     err = min(max(err, 0.10), 0.75)
-    spread["p10"] = spread["p50"] * (1 - err)
-    spread["p90"] = spread["p50"] * (1 + err)
+    dim = spread["date"].dt.days_in_month.astype(float)
+    daily_err = err * np.sqrt(dim / BAND_PERSISTENCE_DAYS)
+    spread["p10"] = (spread["p50"] * (1 - daily_err)).clip(lower=0.0)
+    spread["p90"] = spread["p50"] * (1 + daily_err)
     start = pd.Timestamp(as_of) + pd.Timedelta(days=1)
     return spread[spread["date"] >= start][["date", "p10", "p50", "p90"]].reset_index(drop=True)

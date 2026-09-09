@@ -345,6 +345,46 @@ def t_the_month_in_progress_never_reaches_a_model():
     assert got == {"2026-07": 900.0, "2026-08": 1000.0}, got
 
 
+@test
+def t_the_band_on_the_page_is_the_error_the_model_actually_earned():
+    """The single most important honesty property of this package: the range
+    drawn around a month must be the range the model's own record supports.
+
+    daily_frame paints a band on each day and VarianceEngine._window_band sums
+    those days and shrinks the result by sqrt(n / persistence). The daily band
+    was the MONTHLY error painted straight on, and then shrunk anyway, so the
+    round trip lost a factor of sqrt(days_in_month / 4): a source whose record
+    said it is typically 28.7% out was drawn at 10.3%. The month table, the
+    "secure"/"high" risk verdicts and every alert are all computed from that
+    band, and the tab tells a director it should hold 8 times out of 10."""
+    import pandas as pd
+    from forecast.simple import daily_frame, BAND_PERSISTENCE_DAYS
+    from forecast.cashflow import DayProfile
+    from forecast.variance import VarianceEngine
+    for mape in (0.10, 0.20, 0.287, 0.50, 0.75):
+        model = {"name": "t", "score": {"mape": mape}, "months": {"2026-10": 30000.0}}
+        fd = daily_frame(model, pd.Timestamp("2026-09-30"), DayProfile.uniform())
+        lo, mid, hi = VarianceEngine._window_band(fd)
+        drawn = (hi - mid) / mid
+        ok(abs(drawn - mape) < 0.005,
+           "a %.1f%% model is drawn at %.1f%%" % (mape * 100, drawn * 100))
+        # No day is forecast to take negative money, so on a very wide band the
+        # low side stops at zero and is narrower than the high side. That is
+        # the floor doing its job, not the round trip failing.
+        clipped = float(fd["p10"].min()) <= 0.0
+        low = (mid - lo) / mid
+        if clipped:
+            ok(low < mape + 0.005 and lo >= 0.0,
+               "a clipped low side stays inside the measured error and above zero")
+        else:
+            ok(abs(low - mape) < 0.005, "and the low side matches too")
+        ok(float(fd["p10"].min()) >= 0.0, "no day is forecast to take negative money")
+    # One constant, or the round trip silently stops closing.
+    import inspect, forecast.variance as _v
+    ok("BAND_PERSISTENCE_DAYS" in inspect.getsource(_v),
+       "the shrink and the widen share one persistence constant")
+
+
 if __name__ == "__main__":
     passed = 0
     for fn in TESTS:

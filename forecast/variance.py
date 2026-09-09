@@ -18,6 +18,8 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from .simple import BAND_PERSISTENCE_DAYS
+
 from .cashflow import CashFlowModel, month_start
 from .config import Config
 
@@ -94,13 +96,19 @@ class VarianceEngine:
         return out
 
     @staticmethod
-    def _window_band(fm: pd.DataFrame, persistence_days: float = 4.0):
-        """The band of a SUM of forecast days. Daily P10/P90 are the backtest's
-        daily error quantiles; summing them as they stand assumes every day
-        misses the same way, which is why a month came out with a band five
-        times its width. Daily errors are neither independent nor in step:
-        this takes them as persisting for about four days, so the relative
-        band of an n-day sum is the daily band over sqrt(n / 4)."""
+    def _window_band(fm: pd.DataFrame, persistence_days: float = BAND_PERSISTENCE_DAYS):
+        """The band of a SUM of forecast days. Summing daily P10/P90 as they
+        stand assumes every day misses the same way, which is why a month came
+        out with a band five times its width. Daily errors are neither
+        independent nor in step: this takes them as persisting for about
+        BAND_PERSISTENCE_DAYS, so the relative band of an n-day sum is the
+        daily band over sqrt(n / persistence).
+
+        The daily band this consumes is built by simple.daily_frame, which
+        widens the measured MONTHLY error by the inverse of this factor. The
+        two are one round trip and share one constant; they were out of step,
+        and the month was drawn 2.8 times more confidently than the model's own
+        record supported."""
         if not len(fm):
             return 0.0, 0.0, 0.0
         mid = float(fm["p50"].sum())
