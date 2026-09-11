@@ -1081,6 +1081,21 @@ def t_beating_the_plan_is_not_something_worth_looking_at():
 
 
 @test
+def t_a_stock_gobo_is_named_on_the_day_sheets_not_flagged():
+    """A stock gobo prints its name on the label, so the sheets must agree: the
+    A4 cut list was going to count it as "CHECK-flagged, resolve on the Labels
+    tab first", and the made-day sheet as "no resolved size" - two screens
+    calling a catalogue gobo a problem the label no longer shows."""
+    fn = SCRIPT.split("function printDaySheet(", 1)[1].split("\n        function ", 1)[0]
+    ok("it.stock && !it.production_size && !it.review_reason" in fn,
+       "stock gobos are separated before anything is counted as flagged")
+    ok("'Stock'" in fn and "stock[n]" in fn, "and listed in the tick table by name")
+    ok("(d.stock || []).length" in SCRIPT, "the made-day sheet names them")
+    ok("add a line by hand if one used a blank" in SCRIPT,
+       "and still prompts for a blank, because the order cannot say whether one was used")
+
+
+@test
 def t_a_write_that_failed_is_never_shown_as_a_write_that_worked():
     """A control that changes something on the server must not move until the
     server says it moved. The nightly schedule switch flipped its own class

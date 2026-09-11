@@ -12837,7 +12837,7 @@ Projected Image UK"></textarea>
                     out.innerHTML = '';
                     out.append(el('div', 'cov-line', d.orders + (d.orders === 1 ? ' order' : ' orders')
                         + ' marked made · ' + d.pieces + (d.pieces === 1 ? ' pc' : ' pcs')));
-                    if (!d.rows.length && !d.unresolved.length) {
+                    if (!d.rows.length && !d.unresolved.length && !(d.stock || []).length) {
                         out.append(el('div', 'empty', 'Nothing was marked made on this day.'));
                         return;
                     }
@@ -12846,6 +12846,16 @@ Projected Image UK"></textarea>
                         out.append(el('div', 'cov-note', uq + (uq === 1 ? ' pc' : ' pcs')
                             + ' had no resolved size (' + d.unresolved.map(u => u.name).join(', ')
                             + ') and are not counted below. Add a line by hand if they were made.'));
+                    }
+                    /* Stock gobos by name, not as "no resolved size". Whether one
+                       used a blank is not something the order says, so the
+                       prompt to add a line by hand stays; only the wording
+                       stops calling a catalogue gobo a problem. */
+                    if ((d.stock || []).length) {
+                        const sq = d.stock.reduce((s, u) => s + u.qty, 0);
+                        out.append(el('div', 'cov-note', sq + (sq === 1 ? ' stock gobo' : ' stock gobos')
+                            + ' made (' + d.stock.map(u => u.qty + ' × ' + u.name).join(', ')
+                            + '). They carry no size, so they are not in the sheet below; add a line by hand if one used a blank.'));
                     }
                     if (d.fetch_failed) {
                         out.append(el('div', 'cov-note', d.fetch_failed + ' made order(s) could not be loaded from Shopify (it may be busy) and are missing from this total. Try again shortly.'));
@@ -12998,6 +13008,10 @@ Projected Image UK"></textarea>
                 ds.append(el('div', 'ds-flag', uq2 + (uq2 === 1 ? ' pc' : ' pcs')
                     + ' unresolved: ' + d.unresolved.map(u => u.name + ' (' + u.qty + ')').join(', ')));
             }
+            if ((d.stock || []).length) {
+                ds.append(el('div', 'ds-orders', 'Stock gobos: '
+                    + d.stock.map(u => u.qty + ' × ' + u.name).join(', ')));
+            }
             ds.append(el('div', 'ds-orders', 'Orders: ' + (d.order_names || []).join('   ')));
             box.append(ds);
             let rule = $('label-page-rule');
@@ -13022,8 +13036,17 @@ Projected Image UK"></textarea>
             const orders = labelOrders().filter(o => !o.status && !prodStateOf(o).made_at);
             if (!orders.length) { addToast('Nothing to make: every live order is marked made.'); return; }
             const agg = {};
+            const stock = {};
             let flagged = 0;
             orders.forEach(o => (o.items || []).forEach(it => {
+                /* A stock gobo is named, not sized: it is not summed by size
+                   and it is not a problem, so it is not counted as
+                   CHECK-flagged either. It joins the same tick list, by name. */
+                if (it.stock && !it.production_size && !it.review_reason) {
+                    const n = it.title || 'Stock gobo';
+                    stock[n] = (stock[n] || 0) + (it.quantity || 1);
+                    return;
+                }
                 if (it.review_reason || !it.production_size) { flagged += it.quantity || 1; return; }
                 const key = it.production_size + '|' + (it.glass_type || '');
                 const a = agg[key] = agg[key] || { size: it.production_size, glass: it.glass_type || '', qty: 0 };
@@ -13043,6 +13066,12 @@ Projected Image UK"></textarea>
                 const tr = el('tr');
                 tr.append(el('td', 'ds-size', r.size + 'mm'), el('td', null, r.glass),
                           el('td', 'ds-qty', String(r.qty)), el('td', 'ds-tick', ''));
+                tbody.append(tr);
+            });
+            Object.keys(stock).sort().forEach(n => {
+                const tr = el('tr');
+                tr.append(el('td', 'ds-size', 'Stock'), el('td', null, n),
+                          el('td', 'ds-qty', String(stock[n])), el('td', 'ds-tick', ''));
                 tbody.append(tr);
             });
             tb.append(tbody); ds.append(tb);

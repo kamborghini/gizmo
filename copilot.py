@@ -165,6 +165,10 @@ USAGE_MAX          = int(os.environ.get("USAGE_MAX", "5000"))                  #
 DAILY_COST_CAP     = float(os.environ.get("DAILY_COST_CAP", "25"))             # hard $/day AI ceiling (0 disables)
 PRODUCTION_TAG     = os.environ.get("PRODUCTION_LABEL_TAG", "IP")              # order tag that means "in production"
 PRODUCTION_DAYS    = int(os.environ.get("PRODUCTION_LABEL_DAYS", "180"))       # how far back to look for tagged orders
+# The Shopify product type of a catalogue (stock) gobo. A stock gobo is its own
+# name on a label; the custom products ("Custom Gobo", "Custom Gobos") are not,
+# and still need a fixture before anything is sized.
+STOCK_GOBO_TYPE    = "gobo"
 GOBO_SIZES_PATH    = os.environ.get("GOBO_SIZES_PATH",
                                     os.path.join(os.path.dirname(__file__), "data", "gobo-sizes.csv"))
 # Anthropic list prices, $ per 1M tokens (input, output). Cache read ~0.1x input, write ~1.25x input.
@@ -3541,8 +3545,11 @@ OPTION_CACHE_MAX  = 500
 _option_names_cache: dict = {}   # product_id -> {"at": monotonic, "names": [...]}
 
 
-async def _product_option_names(registry: dict, product_ids) -> dict:
-    """Map product_id -> its option names (e.g. ["Gobo Size"]), fetched concurrently."""
+async def _product_meta(registry: dict, product_ids) -> dict:
+    """Map product_id -> {"names": its option names, "type": its product type},
+    fetched concurrently. One product read answers both, so the option names a
+    label prints and the type that tells a stock gobo from a custom one share a
+    cache entry and never cost two requests."""
     ids = [p for p in dict.fromkeys(product_ids) if p][:40]   # de-duped and bounded
     if not ids:
         return {}
@@ -3550,8 +3557,9 @@ async def _product_option_names(registry: dict, product_ids) -> dict:
     out, misses = {}, []
     for pid in ids:
         hit = _option_names_cache.get(pid)
-        if hit and (now - hit["at"]) < OPTION_CACHE_SECS:
-            out[pid] = hit["names"]
+        # An entry cached before the type was recorded is a miss, not "no type".
+        if hit and (now - hit["at"]) < OPTION_CACHE_SECS and "type" in hit:
+            out[pid] = {"names": hit["names"], "type": hit["type"]}
         else:
             misses.append(pid)
     if not misses:
@@ -3560,17 +3568,28 @@ async def _product_option_names(registry: dict, product_ids) -> dict:
     async def one(pid):
         d = await _tool_json(registry, "shopify_get_product", {"product_id": pid})
         if not _ok(d):
-            return pid, [], False
-        return pid, [str(o.get("name") or "").strip() for o in (d.get("options") or [])], True
+            return pid, [], "", False
+        return (pid, [str(o.get("name") or "").strip() for o in (d.get("options") or [])],
+                str(d.get("product_type") or "").strip(), True)
 
-    for pid, names, good in await asyncio.gather(*[one(i) for i in misses]):
-        out[pid] = names
+    for pid, names, ptype, good in await asyncio.gather(*[one(i) for i in misses]):
+        out[pid] = {"names": names, "type": ptype}
         if good:   # a failed read is not an answer, so it is never cached
-            _option_names_cache[pid] = {"at": time.monotonic(), "names": names}
+            _option_names_cache[pid] = {"at": time.monotonic(), "names": names, "type": ptype}
     while len(_option_names_cache) > OPTION_CACHE_MAX:
         _option_names_cache.pop(min(_option_names_cache,
                                     key=lambda k: _option_names_cache[k]["at"]), None)
     return out
+
+
+async def _product_option_names(registry: dict, product_ids) -> dict:
+    """Map product_id -> its option names (e.g. ["Gobo Size"])."""
+    return {pid: m["names"] for pid, m in (await _product_meta(registry, product_ids)).items()}
+
+
+async def _product_types(registry: dict, product_ids) -> dict:
+    """Map product_id -> its Shopify product type ("Gobo", "Custom Gobo", ...)."""
+    return {pid: m["type"] for pid, m in (await _product_meta(registry, product_ids)).items()}
 
 
 _gobo_cache = {"mtime": None, "by_mm": {}, "by_model": {}, "by_mm_loose": {}, "by_model_loose": {},
@@ -4144,6 +4163,13 @@ def _item_model(li: dict, manufacturer: str) -> str:
             return val
         fallback = fallback or val
     return fallback
+
+
+def _line_has_model(li: dict) -> bool:
+    """Whether a line names the fixture it is sized for, read exactly the way
+    the label reads it. Only lines that do NOT need their product type fetched,
+    which keeps that fetch small however long the production queue is."""
+    return bool(_strip_price(_item_model(li, _strip_price(_item_prop(li, "Manufacturer")))))
 
 
 UNPROCESSED_TAG = os.environ.get("UNPROCESSED_TAG", "Unprocessed")
@@ -4743,7 +4769,8 @@ async def _origin_address(registry: dict) -> dict:
 
 
 
-def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None) -> dict:
+def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
+                       types: Optional[dict] = None) -> dict:
     """One order in the shape the label UI prints."""
     company, person = _label_party(o)
     domain = _order_email_domain(o)
@@ -4759,6 +4786,16 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None) -> di
         entry, reason = _gobo_lookup(mfr, model, cache=cache)
         dsize = _gobo_domain_size(mfr, model, entry, domain, cache=cache)
         title = str(li.get("title") or li.get("name") or "Item").strip()
+        # A stock gobo IS its name. Its fixture usually arrives as free text
+        # (Item Notes) or not at all, so "No model specified" put a CHECK on
+        # something nobody needed to check - and a flagged row drops the name,
+        # so the bench saw two CHECK rows and could not tell Electric Smoke
+        # from Smoke & Mirrors. A stock gobo that DOES name its fixture (the
+        # wedding gobos do) still goes through the lookup and keeps its size;
+        # an unknown product type keeps the CHECK, which is the safe side.
+        stock = str((types or {}).get(li.get("product_id")) or "").strip().lower() == STOCK_GOBO_TYPE
+        if stock and not model:
+            entry, reason, dsize = None, "", None
         items.append({
             "title": title,
             "artwork": ("" if _norm_key(title) in _GENERIC_TITLES else title),
@@ -4773,6 +4810,7 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None) -> di
             "size_note": ("Size for this customer" if dsize
                           else (entry["review"] if entry and entry["production_size"] and entry["review"] else "")),
             "review_reason": "" if dsize else (reason or ""),
+            "stock": stock,
         })
     return {
         "id": o.get("id"),
@@ -4825,7 +4863,9 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
                     "error_note": "Order not found."}
         names = await _product_option_names(
             registry, [li.get("product_id") for li in (o.get("line_items") or []) if _variant_is_real(li)])
-        shaped = _shape_label_order(o, names, cache=_gobo_sizes())
+        types = await _product_types(
+            registry, [li.get("product_id") for li in (o.get("line_items") or []) if not _line_has_model(li)])
+        shaped = _shape_label_order(o, names, cache=_gobo_sizes(), types=types)
         oid = str(shaped["id"])
         st = state if state is not None else _load_prod_state()
         dp = dispatch if dispatch is not None else _load_dispatch()
@@ -4854,8 +4894,15 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
         registry,
         [li.get("product_id") for o in tagged for li in (o.get("line_items") or []) if _variant_is_real(li)],
     )
+    # Only lines that name no fixture need their product type, so this stays
+    # small however long the queue is; a line past the cap simply keeps the
+    # CHECK it had, which is the safe direction.
+    types = await _product_types(
+        registry,
+        [li.get("product_id") for o in tagged for li in (o.get("line_items") or []) if not _line_has_model(li)],
+    )
     sheet = _gobo_sizes()   # one snapshot for the whole list
-    shaped = [_shape_label_order(o, names, cache=sheet) for o in tagged]
+    shaped = [_shape_label_order(o, names, cache=sheet, types=types) for o in tagged]
     state = _load_prod_state()
     disp = _load_dispatch()
     partial = ""
@@ -7162,6 +7209,17 @@ def _write_zeta_pending(p: dict) -> bool:
         return False
 
 
+_ZETA_LINE_KEYS = ("size", "family", "qty", "note")
+
+
+def _zeta_lines(lines: list) -> list:
+    """Usage lines in the stock app's own contract and nothing more. The lines
+    carry fields for this app's screens (which rows are stock gobos, by name);
+    an external endpoint that validates strictly would refuse a push over one
+    extra key, and a refused push parks the order for retry indefinitely."""
+    return [{k: ln[k] for k in _ZETA_LINE_KEYS if k in ln} for ln in lines]
+
+
 async def _zeta_send(op: str, order_id, order_name: str, lines: list) -> dict:
     """One push to zeta. Separate so tests can stand in a fake transport."""
     async with httpx.AsyncClient(timeout=10.0) as cl:
@@ -7203,7 +7261,7 @@ async def _zeta_push_locked(registry: dict, order_id, op: str) -> str:
             if not orders:
                 raise RuntimeError("order could not be read")
             o = orders[0]
-            await _zeta_send("book", order_id, str(o.get("name") or ""), _usage_lines(o))
+            await _zeta_send("book", order_id, str(o.get("name") or ""), _zeta_lines(_usage_lines(o)))
         else:
             await _zeta_send("reverse", order_id, "", [])
         # The queue is reloaded AT write time, never carried across the await:
@@ -7331,6 +7389,14 @@ def _usage_lines(shaped_order: dict) -> list:
         # Original vs Copy is the same physical blank: group stock by the
         # glass family ("Mono - Original" and "Mono - Copy" -> "Mono").
         family = re.split(r"\s+-\s+", it.get("glass_type") or "")[0].strip() or "(type not recorded)"
+        if it.get("stock") and not it.get("production_size") and not it.get("review_reason"):
+            # Named, not sized, and not a problem: carried by name rather than
+            # as "no size resolved". The stock app gets the row shape it has
+            # always had (see _zeta_lines); the name travels in the note.
+            name = str(it.get("title") or "stock gobo")[:160]
+            out.append({"size": "", "family": family, "qty": qty,
+                        "note": ("stock gobo: " + name)[:200], "stock": name})
+            continue
         if it.get("review_reason") or not it.get("production_size"):
             out.append({"size": str(it.get("production_size") or ""), "family": family,
                         "qty": qty, "note": str(it.get("review_reason") or "no size resolved")[:200]})
@@ -7380,6 +7446,7 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
                                      for i in made_ids], return_exceptions=True)
     rows: dict = {}
     unresolved: dict = {}
+    stock: dict = {}
     orders_in, pieces, fetch_failed = [], 0, 0
     for res in fetched:
         if not isinstance(res, dict) or not res.get("orders"):
@@ -7389,6 +7456,9 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
             orders_in.append(str(o.get("name") or ""))
             for line in _usage_lines(o):
                 pieces += line["qty"]
+                if line.get("stock"):
+                    stock[line["stock"]] = stock.get(line["stock"], 0) + line["qty"]
+                    continue
                 if line.get("note"):
                     nm = str(o.get("name") or "")
                     unresolved[nm] = unresolved.get(nm, 0) + line["qty"]
@@ -7400,7 +7470,8 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
     return {"date": day.isoformat(), "orders": len(orders_in), "order_names": orders_in[:60],
             "order_ids": made_ids, "pieces": pieces, "rows": out_rows,
             "fetch_failed": fetch_failed,
-            "unresolved": [{"name": k, "qty": v} for k, v in sorted(unresolved.items())]}
+            "unresolved": [{"name": k, "qty": v} for k, v in sorted(unresolved.items())],
+            "stock": [{"name": k, "qty": v} for k, v in sorted(stock.items())]}
 
 
 async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:

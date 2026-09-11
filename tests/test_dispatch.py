@@ -5984,6 +5984,57 @@ def t_an_unconfigured_bridge_stays_silent():
         (copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN) = saved
 
 @test
+def t_a_stock_gobo_prints_its_name_not_a_check():
+    """Order #104353 printed "2x CHECK No model specified on this item" twice,
+    for Electric Smoke and Smoke & Mirrors - stock gobos whose fixture the
+    Quote Engine had written as free text in Item Notes. A flagged row drops the
+    item's name, so the bench could not even tell the two apart.
+
+    A stock gobo is its own name. One that names its fixture still gets sized;
+    a custom product with no spec still flags; an unknown type fails safe."""
+    P = lambda **kv: [{"name": k, "value": v} for k, v in kv.items()]
+    order = {"id": 1, "name": "#104353", "order_number": 104353, "note": "", "tags": "IP",
+             "line_items": [
+                 {"title": "Smoke & Mirrors Gobo", "quantity": 2, "sku": "NPC-SK-42", "product_id": 101,
+                  "properties": P(**{"Item Notes": "Robe Forte"})},
+                 {"title": "Wedding Gobo 10", "quantity": 1, "product_id": 102,
+                  "properties": P(**{"Manufacturer": "Robe", "Model": "Forte"})},
+                 {"title": "Custom Gobos", "quantity": 1, "product_id": 103, "properties": []},
+                 {"title": "Mystery Gobo", "quantity": 1, "product_id": 104, "properties": []},
+             ]}
+    types = {101: "Gobo", 102: "Gobo", 103: "Custom Gobos"}          # 104 unknown
+    shaped = copilot._shape_label_order(order, {}, cache=copilot._gobo_sizes(), types=types)
+    stock, sized, custom, unknown = shaped["items"]
+    eq(stock["review_reason"], "", "a stock gobo with no fixture is not a CHECK")
+    eq(stock["artwork"], "Smoke & Mirrors Gobo", "it prints its own name")
+    ok(stock["stock"] is True and stock["production_size"] == "", "marked stock, and unsized")
+    ok(sized["stock"] is True and sized["production_size"] == "30.8",
+       "a stock gobo that names its fixture still goes through the lookup")
+    eq(custom["review_reason"], "No model specified on this item", "a custom item with no spec still flags")
+    eq(unknown["review_reason"], "No model specified on this item", "an unknown product type keeps the CHECK")
+    ok(unknown["stock"] is False, "and is not treated as stock")
+    # Without types at all (an older caller) nothing changes.
+    plain = copilot._shape_label_order(order, {}, cache=copilot._gobo_sizes())
+    eq(plain["items"][0]["review_reason"], "No model specified on this item",
+       "no type information is the old behaviour exactly")
+
+    # The consumption lines carry it by name, and the stock app gets the
+    # exact row shape it has always had.
+    lines = copilot._usage_lines({"items": [stock]})
+    eq(len(lines), 1, "one line")
+    eq(lines[0]["note"], "stock gobo: Smoke & Mirrors Gobo", "named, not 'no size resolved'")
+    eq(lines[0]["stock"], "Smoke & Mirrors Gobo", "and flagged as stock for this app's screens")
+    eq(set(copilot._zeta_lines(lines)[0]), {"size", "family", "qty", "note"},
+       "the stock app never sees a key it did not already accept")
+    plain_lines = copilot._usage_lines({"items": [{"quantity": 1, "glass_type": "Mono - Original",
+                                                   "production_size": "26.5"}]})
+    eq(copilot._zeta_lines(plain_lines), plain_lines, "an ordinary line reaches the stock app unchanged")
+    import inspect as _insp
+    ok("_zeta_lines(_usage_lines(o))" in _insp.getsource(copilot._zeta_push_locked),
+       "and the book push actually goes through the contract, not around it")
+
+
+@test
 def t_the_push_lines_match_the_day_sheet_resolution():
     # One resolver feeds both, so the stock app and the printed day sheet can
     # never disagree about what a day's making consumed.
