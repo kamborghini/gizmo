@@ -12744,6 +12744,30 @@ def t_the_forecast_hook_takes_only_its_token_and_the_tab_reads_the_run():
         copilot.FORECAST_INGEST_TOKEN = saved
 
 @test
+def t_an_m_size_holder_takes_an_m_size_gobo():
+    """Order 104357 (2026-09-11): a Chauvet Ovation E-2 FC printed 53.3, a
+    D-size gobo, for a 65.5 mm holder - the M-size holder the merchant already
+    rules at 66 on the Standard M Size row. Sixty-eight fixture rows carried the
+    same holder mapped down a whole size; they were left for Cameron's decision
+    on 2026-09-08 and he ruled 66. The High End SHOWGUN (a 64.9 mm holder whose
+    note says it takes a ringed B-86) is a different case and is left alone."""
+    import csv as _csv
+    rows = list(_csv.DictReader(open(os.path.join(HERE, "data", "gobo-sizes.csv"), encoding="utf-8-sig")))
+    bad = [r["Manufacturer"] + " / " + r["Model"] for r in rows
+           if r["Glass Diameter (mm)"].strip() == "65.5"
+           and r["Closest Production Size (mm)"].strip() != "66"]
+    eq(bad, [], "every 65.5 mm (M-size) holder is cut at 66")
+    ok(len([r for r in rows if r["Glass Diameter (mm)"].strip() == "65.5"]) >= 68,
+       "and the holders themselves still say what they measure")
+    hit, why = copilot._gobo_lookup("Chauvet", "Ovation E2 FC")
+    ok(hit is not None and hit["production_size"] == "66" and not why and not hit["review"],
+       f"104357's fixture -> {hit and hit['production_size']} ({why}, {hit and hit['review']!r})")
+    sg = [r for r in rows if r["Model"].strip() == "SHOWGUN"]
+    ok(sg and sg[0]["Closest Production Size (mm)"].strip() == "53.3",
+       "the SHOWGUN's ringed 64.9 mm holder is left for its own decision")
+
+
+@test
 def t_the_standard_holder_sizes_resolve_to_their_nominal_glass():
     """Order 104335 (2026-09-08): the store's "Standard / M Size" printed 53.3,
     a D-size gobo for an M-size holder. The sheet's own row had the M holder
