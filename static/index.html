@@ -488,7 +488,13 @@
             /* 24px, the reference's content inset, on the two edges you
                see on load. The bottom keeps 40 so a long scroll does not
                end flush against the viewport. */
-            padding: var(--sp-6) var(--wrap-pad) var(--sp-8); }
+            padding: var(--sp-6) var(--wrap-pad) var(--sp-8);
+            /* The gap between blocks, 16 on a phone. A property the phone
+               query re-points, not a second margin rule: a later rule of the
+               same weight beat every exception below at 640px and under, so
+               headings sat 16 above their blocks and the last block added 16
+               to the wrap's own bottom padding. */
+            --page-rhythm: var(--sp-6); }
         /* ONE RHYTHM DOWN THE PAGE. The reference stacks its content in a single
            flex column at gap-6, so every block on a page is separated by exactly
            24px. gizmo's blocks each carried their own bottom margin and arrived
@@ -500,9 +506,15 @@
            A .section-title keeps its asymmetry deliberately: 24 above from the
            block before it, 12 below, because a label belongs to the thing under
            it rather than sitting midway between two. */
-        .ov-wrap > *:not(.run-gate) { margin-top: 0; margin-bottom: var(--sp-6); }
+        .ov-wrap > *:not(.run-gate) { margin-top: 0; margin-bottom: var(--page-rhythm); }
         .ov-wrap > .section-title { margin-bottom: var(--sp-3); }
         .ov-wrap > *:last-child { margin-bottom: 0; }
+        /* A heading that opens a wrapper (the page chat, renderStructured's
+           blocks, the Forecast sections) is not a direct child, so the rule
+           above never zeroes its 24px top margin, and with nothing between
+           them that margin collapses through the wrapper and replaces the
+           gap. The wrapper's own place in the rhythm spaces it instead. */
+        .ov-wrap > * > .section-title:first-child { margin-top: 0; }
         /* Body copy inside any tab: measured, never the full wrap.
            The cap is written in ch HERE rather than held in a custom property,
            because ch resolves against the font size of whatever element uses
@@ -569,8 +581,7 @@
            takes its own line instead, and the text gets the width. */
         @media (max-width: 640px) {
             /* 32px gutters spend 64px of a 390px screen on nothing. */
-            .ov-wrap { padding: var(--sp-4) var(--sp-4) calc(var(--sp-8) + var(--sp-4)); }
-            .ov-wrap > *:not(.run-gate) { margin-bottom: var(--sp-4); }
+            .ov-wrap { padding: var(--sp-4) var(--sp-4) calc(var(--sp-8) + var(--sp-4)); --page-rhythm: var(--sp-4); }
             .ov-hero { flex-wrap: wrap; gap: var(--sp-3); }
             .ov-hero > div:not(.badge) { flex: 1 1 200px; min-width: 0; }
             /* The 56px was clearing the hero badge, which is display: none on
@@ -1312,8 +1323,8 @@
         .nav-refresh svg { width: var(--icon-md); height: var(--icon-md); flex-shrink: 0; }
         .nav-refresh:is(.spin, [aria-busy="true"]) svg { animation: navspin 1s linear infinite; }
         @keyframes navspin { to { transform: rotate(360deg); } }
-        /* per-page ask panel */
-        .page-chat { margin-top: var(--sp-6); }
+        /* per-page ask panel. No margin of its own: it is always a direct
+           child of .ov-wrap, whose rhythm zeroes the top and sets the gap. */
         .pchat { padding: 0; overflow: hidden; }
         .pchat-thread { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); }
         .pchat-hint { font-size: var(--text-xs); color: var(--text-tertiary); }
@@ -1376,7 +1387,9 @@
         .conn-pairs dd { margin: 0; }
         /* The Xero sync page: the ways in as tiles, the Auto Run state as one
            row, the state chips as one row. */
-        .cx-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(var(--sp-8) * 8), 1fr)); gap: var(--sp-4); align-items: start; margin-top: var(--sp-4); }
+        /* The 320px floor gives way to the card: at 375 the card holds 299px,
+           and a floor it cannot shrink below ran every tile past the column. */
+        .cx-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--sp-8) * 8)), 1fr)); gap: var(--sp-4); align-items: start; margin-top: var(--sp-4); }
         .cx-tile { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
         .cx-tile-title { font-size: var(--text-sm); font-weight: var(--weight-medium); }
         .cx-tile-hint { font-size: var(--text-xs); color: var(--text-tertiary); line-height: var(--lh-body); margin: 0; }
@@ -1390,9 +1403,18 @@
            sitting at the same height across the three because the tiles
            stretch and the row hangs at the bottom. */
         .cx-grid { align-items: stretch; }
-        .cx-tile .cx-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); margin-top: auto; }
-        .cx-tile .cx-row input, .cx-tile .cx-row select { grid-column: 1 / -1; width: auto; max-width: none; height: var(--control-h); }
-        .cx-tile .cx-row .btn { width: 100%; justify-content: center; }
+        /* The two buttons share a line when their labels fit and stack when
+           they do not. Two 1fr columns could never be narrower than both
+           labels: "Check tagged orders" and "Send tagged orders" need 318px,
+           a tile on a phone has 265, and the send button ran off the page.
+           Two tiles across with only one stacked, its box sits a row above
+           its neighbour's: the price of keeping every button inside its tile. */
+        .cx-tile .cx-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: auto; }
+        .cx-tile .cx-row input, .cx-tile .cx-row select { flex: 1 1 100%; width: auto; max-width: none; height: var(--control-h); }
+        .cx-tile .cx-row .btn { flex: 1 1 0; justify-content: center; }
+        /* Without the send button (not an admin) the check button keeps the
+           half width it had in the two-column row. */
+        .cx-tile .cx-row .btn:only-of-type { flex: 0 1 calc(50% - var(--sp-1)); }
         /* The card's own notice about the last run: full width, its own
            colour, one line and then the reasons. */
         .cx-health { border-radius: var(--radius-md); padding: var(--sp-3) var(--sp-4); margin: var(--sp-3) 0 0; font-size: var(--text-sm); }
@@ -1401,6 +1423,11 @@
         .cx-health-line { font-weight: var(--weight-medium); }
         .cx-health-item { font-size: var(--text-xs); margin-top: var(--sp-1); opacity: .9; }
         .cx-auto { display: flex; align-items: center; gap: var(--sp-3); padding-top: var(--sp-3); border-top: var(--bw-hairline) solid var(--border-default); }
+        /* A flex item is as wide as its longest unbreakable line, and the
+           status line under Auto Run is .lbl-meta, which never wraps: 418px
+           in a 299px card on a phone. The text shrinks to the row and wraps. */
+        .cx-auto > .lr-what { min-width: 0; overflow-wrap: anywhere; }
+        .cx-auto .lbl-meta { white-space: normal; }
         .cx-chips { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
         .conn-doc { width: 100%; border-collapse: collapse; margin-top: var(--sp-3); }
         .conn-doc th { text-align: left; font-size: var(--text-xs); color: var(--text-tertiary);

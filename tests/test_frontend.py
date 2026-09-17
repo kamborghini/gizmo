@@ -3427,7 +3427,9 @@ def t_one_rhythm_down_the_page():
     unconsidered even when no single element is wrong."""
     rule = re.search(r"\.ov-wrap > \*:not\(\.run-gate\) \{([^}]*)\}", CSS)
     ok(rule, "the page rhythm rule is still there")
-    ok("margin-bottom: var(--sp-6)" in rule.group(1), "and it is the reference's 24px")
+    ok("margin-bottom: var(--page-rhythm)" in rule.group(1)
+       and re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-6\)", CSS),
+       "and it is the reference's 24px")
     ok("margin-top: 0" in rule.group(1),
        "with stray top margins zeroed, or the two stack up")
     head = re.search(r"\.ov-wrap > \.section-title \{([^}]*)\}", CSS)
@@ -3435,6 +3437,43 @@ def t_one_rhythm_down_the_page():
        "a heading still binds to the block under it at 12, not midway between two")
     ok(re.search(r"\.ov-wrap > \*:last-child \{[^}]*margin-bottom: 0", CSS),
        "and the last block does not add to the wrap's own bottom padding")
+
+
+@test
+def t_a_heading_keeps_its_12px_on_a_phone():
+    """At 640px and below every page heading sat 16px above its block instead
+    of 12: Overview, SEO, Keywords, Customers, Forecast, Memory and Skills. The
+    phone rhythm was a second `.ov-wrap > *:not(.run-gate)` rule, the same
+    weight as the heading's exception and later in the sheet, so it won. It
+    beat `:last-child { margin-bottom: 0 }` the same way and put 16px under the
+    last block of every page. Now the phone re-points one property, and an
+    exception written after the rhythm wins at every width."""
+    ok(CSS.count(".ov-wrap > *:not(.run-gate) {") == 1,
+       "the rhythm's margin is declared once, so no later rule of the same "
+       "weight can outrank its exceptions")
+    rhythm = CSS.index(".ov-wrap > *:not(.run-gate) {")
+    ok(CSS.index(".ov-wrap > .section-title {") > rhythm
+       and CSS.index(".ov-wrap > *:last-child {") > rhythm,
+       "and both exceptions come after it")
+    phone = [b for b in re.findall(r"@media \(max-width: 640px\) \{((?:[^{}]|\{[^{}]*\})*)\}", CSS)
+             if re.search(r"(?<![\w-])\.ov-wrap \{", b)]
+    ok(phone and re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-4\)", phone[0]),
+       "the phone gap is the property re-pointed to 16, not a margin rule")
+
+
+@test
+def t_a_heading_that_opens_a_page_block_leaves_the_gap_above_it_alone():
+    """At 375px the page chat, renderStructured's Recommended actions block and
+    the Forecast sections sat 24px below the block before them instead of 16.
+    Each is a wrapper whose first child is a .section-title, and the rhythm
+    only zeroes the top margin of a direct child: the heading's own 24px
+    collapsed through a wrapper with no padding or border to stop it and
+    replaced the page gap. On a desktop both numbers are 24, which is why it
+    only showed on a phone."""
+    ok(re.search(r"\.ov-wrap > \* > \.section-title:first-child \{[^}]*margin-top: 0", CSS),
+       "a heading that opens a top-level block spends no top margin")
+    ok(not re.search(r"(?<![\w-])\.page-chat \{[^}]*margin-top", CSS),
+       "and the chat panel brings no top margin of its own")
 
 
 @test
@@ -5299,6 +5338,31 @@ def t_the_xero_page_gives_its_rows_a_deliberate_width():
     # so a child's own margins are ADDED to the gap and the page pays twice.
     ok("#view-connector .card > * { margin-top: 0; margin-bottom: 0; }" in CSS,
        "the container owns the rhythm; the children bring no vertical margins")
+
+
+@test
+def t_the_xero_page_fits_a_phone():
+    """At 375px the Xero sync page scrolled sideways: 451px of content in a
+    364px column. Three things would not shrink. The tile grid's 320px floor
+    was wider than the 299px card. The tag tile's two buttons sat in two 1fr
+    columns, which cannot be narrower than their labels: 318px in a 265px tile.
+    And the Auto Run status line is .lbl-meta, which never wraps, so the flex
+    item holding it was 418px wide."""
+    fn = fn_src("function renderConnector(")
+    ok("el('div', 'cx-auto')" in fn and "el('div', 'lr-what')" in fn,
+       "the Auto Run row is still built from the classes the rules below style")
+    grid = re.search(r"\.cx-grid \{[^}]*grid-template-columns:([^;]*);", CSS)
+    ok(grid and "minmax(min(100%," in grid.group(1),
+       "a tile's floor gives way to a narrower card")
+    row = re.search(r"\.cx-tile \.cx-row \{([^}]*)\}", CSS)
+    ok(row and "flex-wrap: wrap" in row.group(1) and "1fr 1fr" not in row.group(1),
+       "the buttons stack when their labels do not fit side by side")
+    ok(re.search(r"\.cx-tile \.cx-row \.btn \{[^}]*flex: 1 1 0", CSS),
+       "and share the line when they do")
+    ok(re.search(r"\.cx-auto > \.lr-what \{[^}]*min-width: 0", CSS),
+       "the Auto Run text shrinks to its row")
+    ok(re.search(r"\.cx-auto \.lbl-meta \{[^}]*white-space: normal", CSS),
+       "and its status line wraps")
 
 
 @test
