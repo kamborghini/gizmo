@@ -204,7 +204,21 @@
             --sidebar-w: 272px; --topbar-h: 48px;
             --chevron-room: 30px;   /* right padding a select keeps clear for its chevron */
             --icon-col: 34px;       /* the file list's icon column: 16px glyph, 18px gutter */
-            --stat-tools-w: 78px;   /* what a KPI label clears for its three edit-mode tools */
+            /* The widget grid. Four columns when four cells of --wgrid-cell fit
+               the content column, else two, one on a phone; the gap is the page
+               rhythm, re-pointed for a phone where the rhythm is 16. */
+            --wgrid-cell: 240px; --wgrid-gap: var(--sp-6);
+            /* Cards sliding to new places, and a dropped card settling. The
+               curve is a damped spring, bounce .16 (damping ratio z = .84),
+               sampled at 24 even stops over the duration:
+               x(t) = 1 - exp(-z w t) (cos(d t) + (z w / d) sin(d t)),
+               d = w sqrt(1 - z z), z w = ln 1000 so the swing is a thousandth
+               by t = 1, and the last stop is set to exactly 1. */
+            --dur-layout: .38s;
+            --ease-layout: linear(0, 0.052, 0.171, 0.315, 0.459, 0.59, 0.7, 0.789, 0.858, 0.91, 0.946, 0.972,
+                0.988, 0.998, 1.004, 1.007, 1.008, 1.007, 1.007, 1.006, 1.004, 1.003, 1.002, 1);
+            --dur-landed: .62s;     /* how long a dropped card keeps the focus outline */
+            --lift-scale: 1.02;     /* a held card, a step up and no more */
         }
         * { box-sizing: border-box; }
         html, body { height: 100%; margin: 0; }
@@ -790,23 +804,69 @@
         .drill-more { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--sp-2); }
         .stat-spark { margin-top: var(--sp-3); position: relative; opacity: .92; }
         .stat-spark .spark { height: 30px; }
-        .ov-customize { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); margin-bottom: var(--sp-3); }
-        .ov-cust-hint { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: var(--weight-regular); }
-        .stat-edit { cursor: grab; outline: var(--bw-hairline) dashed var(--border-emphasis); outline-offset: -1px; }
-        .stat-edit.dragging { opacity: .45; }
-        .stat-hidden { opacity: .4; }
-        .stat-hide { position: absolute; top: 8px; right: 8px; width: var(--box-md); height: var(--box-md); border-radius: var(--radius-xs); border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-tertiary); color: var(--text-tertiary); display: grid; place-items: center; cursor: pointer; z-index: 3; padding: 0; }
-        .stat-hide:hover { color: var(--text-primary); border-color: var(--border-emphasis); }
-        .stat-hide:active { background: var(--surface-sunken); }
-        .stat-hide svg, .stat-move svg { width: var(--icon-xs); height: var(--icon-xs); }
-        /* HTML5 drag never fires from touch, so reordering needs a button path too. */
-        .stat-move { position: absolute; top: 8px; width: var(--box-md); height: var(--box-md); border-radius: var(--radius-xs); border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-tertiary); color: var(--text-tertiary); display: grid; place-items: center; cursor: pointer; z-index: 3; padding: 0; }
-        .stat-move:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-emphasis); }
-        .stat-move:disabled { color: var(--text-disabled); border-color: var(--border-default); cursor: not-allowed; }
-        .stat-move.fwd { right: 34px; }
-        .stat-move.back { right: 60px; }
-        /* Three corner buttons on a 170px card: keep the label out from under them. */
-        .stat-edit .label { padding-right: var(--stat-tools-w); }
+        /* ---------- widget grid ----------
+           A view whose blocks carry data-widget ids becomes one grid, and the
+           layer writes the arrangement as DOM order plus two attributes: the
+           column count on the wrap and each card's placed width. Attributes,
+           never inline styles, so print can override them and no screen writes
+           its own size. The gap is the page rhythm, so the margins the flow
+           layout spaced blocks with are zeroed here. */
+        .ov-wrap.wgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: var(--wgrid-gap); align-items: stretch; }
+        .ov-wrap.wgrid[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .ov-wrap.wgrid[data-cols="1"] { grid-template-columns: minmax(0, 1fr); }
+        .ov-wrap.wgrid > * { margin: 0; }
+        /* A fixed block (the header, a banner, the page chat) takes the whole
+           row, and so does a card the tiler gave every column. */
+        .ov-wrap.wgrid > :not([data-widget]), .ov-wrap.wgrid > [data-span="full"] { grid-column: 1 / -1; }
+        .ov-wrap.wgrid > [data-span="2"] { grid-column: span 2; }
+        .ov-wrap.wgrid > [data-span="3"] { grid-column: span 3; }
+        /* The hidden attribute alone loses to a card's own display: flex. */
+        .ov-wrap.wgrid > [data-widget][hidden] { display: none; }
+        @media (max-width: 640px) {
+            :root { --wgrid-gap: var(--sp-4); }
+        }
+        /* One card made of a heading and the blocks under it, built by the
+           renderer that owns them, because trendsSection repaints by swapping
+           its own nodes and a wrapper added from outside would break that. The
+           page rhythm holds inside: 12 under the heading, the grid gap between
+           blocks. */
+        .widget-group { display: flex; flex-direction: column; min-width: 0; }
+        .ov-wrap .widget-group > * { margin: 0; }
+        .ov-wrap .widget-group > * + * { margin-top: var(--wgrid-gap); }
+        .ov-wrap .widget-group > .section-title + * { margin-top: var(--sp-3); }
+        /* One visually hidden text technique for the whole page, the one
+           .disp-opt-sr already uses: read by a screen reader, drawn nowhere. */
+        .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+        /* Customize mode. Every card shows a dashed edge just outside its own
+           border, which is the convention for something you can pick up, and
+           a grab cursor. The wrap is positioned so a card's offsetLeft and
+           offsetTop measure its slot in the grid with no transform in them. A
+           focused card drops the dashed edge for the focus outline every
+           other control draws. */
+        .ov-wrap.wg-editing { position: relative; }
+        .ov-wrap.wg-editing > [data-widget] { position: relative; cursor: grab; user-select: none;
+            -webkit-user-select: none; -webkit-touch-callout: none;
+            transition: outline-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease), scale var(--dur) var(--ease); }
+        .ov-wrap.wg-editing > [data-widget]:not(:focus-visible) {
+            outline: var(--bw-hairline) dashed var(--border-emphasis); outline-offset: var(--sp-0-5); }
+        /* The held card follows the pointer by an inline translate the script
+           writes, and floats: the large shadow, above its neighbours, and a
+           step bigger unless motion is reduced (the script adds wg-lifted only
+           then). */
+        .ov-wrap.wg-editing > [data-widget].wg-held { cursor: grabbing; z-index: 2; box-shadow: var(--shadow-lg); }
+        .ov-wrap.wg-editing > [data-widget].wg-held.wg-lifted { scale: var(--lift-scale); }
+        .ov-wrap.wg-editing > [data-widget].wg-landed { outline: var(--focus-outline); outline-offset: var(--sp-0-5); }
+        /* The hide button sits in the card's top right corner, inset by 8, so
+           its corner takes the card's radius less that inset and the two
+           curves stay parallel. It carries its own ground because it sits
+           over whatever the card draws there. */
+        .ov-wrap.wg-editing > [data-widget] > .wg-hide { position: absolute; top: var(--sp-2); right: var(--sp-2); z-index: 1;
+            margin: 0; padding: var(--sp-1); background: var(--surface-primary); box-shadow: var(--ring-default);
+            border-radius: calc(var(--radius-lg) - var(--sp-2)); cursor: pointer; }
+        .ov-wrap.wg-editing > [data-widget] > .wg-hide:hover { background: var(--surface-tertiary); }
+        .ov-wrap.wg-editing > [data-widget] > .wg-hide:active { background: var(--surface-sunken); }
+        .ov-wrap.wg-editing > [data-widget] > .wg-hide:disabled { background: var(--surface-primary); cursor: not-allowed; }
         /* The cue waits to be asked for. Painted at rest on all four cards it
            turned the metric row into a row of links, and it was promising an
            explanation to a pointer only, so the element takes focus too and
@@ -2762,10 +2822,17 @@
             .view.active { display: block !important; position: static !important; }
             .view.active .scroll { height: auto !important; max-height: none !important; overflow: visible !important; }
             /* drop interactive bits from a static report */
-            .page-chat, .composer-wrap, .run-gate, .chart-expand, .stat-act, .ov-customize, .data-drill,
+            .page-chat, .composer-wrap, .run-gate, .chart-expand, .stat-act, .wg-hide, [data-wg-control], .data-drill,
             .ptools, .pfilters, .fchips, .scan-card, .seg, .alerts-banner, .back-btn,
             .track-btn, .mem-acts, .sk-acts, .skill-form, .chart-tip, .sk-more, .ov-updated { display: none !important; }
             .print-head { display: flex !important; }
+            /* The arrangement on screen, hidden cards left out, in one column:
+               four columns on an A4 page would squeeze every card. The
+               attributes the layer wrote are overruled rather than removed. */
+            .ov-wrap.wgrid { grid-template-columns: minmax(0, 1fr) !important; }
+            .ov-wrap.wgrid > * { grid-column: 1 / -1 !important; }
+            .ov-wrap.wgrid > [data-widget][hidden] { display: none !important; }
+            .ov-wrap.wg-editing > [data-widget] { outline: none !important; box-shadow: none !important; translate: none !important; scale: none !important; }
             /* keep blocks whole across page breaks */
             .card, .chart-card, .stat, .seg-card, .insight, .ktable-wrap, .action, .changes-strip,
             .ov-hero, .seo-score, .section-title, .prod-row, .files-row, .lia-row
@@ -4295,6 +4362,11 @@ Projected Image UK"></textarea>
            the previous session's answers survives either. */
         function claimLocalCache(id) {
             if (!id) return;
+            /* The old Overview layout in this browser can be carried to an
+               account only once it is known whose browser cache this is: by
+               the time this runs, a different owner's has been cleared. */
+            wgOwnerKnown = true;
+            Promise.resolve().then(wgMigrateOverview);
             let owner = null;
             try { owner = localStorage.getItem(LS_OWNER); } catch (e) { return; }
             if (owner === id) return;
@@ -4898,31 +4970,715 @@ Projected Image UK"></textarea>
                 bottom: edges(box.row + box.h - 1).bottom,
             };
         }
+        // The id pattern the server holds a saved layout to, so a card the page names can always be saved.
+        const WG_ID = /^[a-z0-9][a-z0-9-]{0,47}$/;
+        /* An Overview KPI tile's id, from its label, since the tiles come from
+           whatever list the server sends and carry no id of their own. A
+           bracketed threshold goes first: "Low stock (≤5)" carries
+           LOW_STOCK_THRESHOLD, and a saved layout must not lose the tile the
+           day that setting changes. The rest is lower case with every run of
+           other characters one hyphen, cut to the 48 the pattern allows. */
+        function wgKpiId(label) {
+            const bare = String(label == null ? '' : label)
+                .replace(/\(\s*(?:≤|≥|<=|>=|<|>)\s*[\d.,]+\s*\)/g, ' ');
+            const slug = bare.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+            return ('kpi-' + slug).slice(0, 48).replace(/-+$/, '');
+        }
         /* ---------- widget layout end ---------- */
-        /* ---------- dashboard customization (Overview KPIs: reorder + hide) ---------- */
+        /* ---------- widget grid (page layer) ---------- */
+        /* The one place a view's cards are arranged and customized. A renderer
+           marks its blocks with widget() and appends them in its own default
+           order; it never calls anything here. One MutationObserver per content
+           root runs wgArrange after a renderer changes the root, so a screen
+           added next year is arranged without anyone wiring it. The arrangement
+           is DOM order plus data-cols and data-span, never an inline style, so
+           reading order, tab order and screen reader order are the order you
+           see, and print can overrule it. The arithmetic is the pure block
+           above; the design is docs/superpowers/specs/2026-09-17-draggable-widget-grid-design.md. */
+        const APP_VIEWS = ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'forecast', 'connector', 'crm', 'loans', 'mail', 'files', 'team', 'labels', 'sizes', 'memory', 'skills', 'chat', 'guide'];
+        // Chat is a log and a composer, not a page of cards, which is also why the server's LAYOUT_VIEWS leaves it out.
+        const WG_VIEWS = APP_VIEWS.filter(v => v !== 'chat');
+        // Overview is the one content root not named after its view.
+        const wgRoot = (view) => $(view === 'overview' ? 'ov-content' : view + '-content');
+        /* Marks a block as a card the layer may move: an id chosen by what the
+           card is (trends, sectors, never card-3), a size (sm, wide, or full
+           when left out) and, for a block with no card title of its own, the
+           name menus and announcements use. Returns the node, so a renderer
+           appends it in the same expression. */
+        function widget(node, id, size, label) {
+            node.setAttribute('data-widget', id);
+            if (size && size !== 'full') node.setAttribute('data-size', size);
+            if (label) node.setAttribute('data-widget-label', label);
+            return node;
+        }
+        /* The signed-in person's layouts: null until the server answers, false
+           when it could not, else {view: {order, hidden}}. */
+        let wgLayouts = null;
+        /* The view being customized, its draft and the layout it had when
+           Customize was pressed. One view at a time: leaving a view ends it. */
+        let wgEdit = null;
+        let wgDrag = null;
+        const wgWatchers = {};
+        const wgDefaults = {};          // view -> ids in the order the renderer appended them
+        const wgSeq = {};               // view -> Map(id -> when that id was first appended)
+        let wgSeqNext = 0;
+        const wgSeen = new WeakSet();   // nodes the layer has already counted
+        const wgWarned = new WeakSet();
+        const wgOrig = new WeakMap();   // card -> the attributes Customize mode overwrote on it
+        const wgInert = new WeakSet();  // children Customize mode made inert, and only those
+        const wgMotion = new WeakMap(); // card -> its running slide, cancelled by the next one
+        let wgEatClicksUntil = 0;
+        const WG_ARIA = ['role', 'tabindex', 'aria-label', 'aria-posinset', 'aria-setsize', 'aria-haspopup'];
+        /* The gesture's own thresholds rather than design tokens, since nothing
+           is drawn at these sizes: how far a mouse travels before a press is a
+           drag (so a plain click never flashes a lift), how long a finger holds
+           before a card lifts and how far it may wander first (further is a
+           scroll), the least time between two reorders, the buzz on a lift, and
+           how long the click that follows a drop is ignored. */
+        const WG_MOUSE_SLOP = 3, WG_TOUCH_SLOP = 8, WG_HOLD_MS = 350, WG_STEP_MS = 40, WG_BUZZ_MS = 10, WG_EAT_CLICK_MS = 300;
+        // The server's LAYOUT_MAX_IDS: a longer list is refused whole.
+        const WG_MAX_IDS = 64;
+        const wgAttr = (n, name, value) => {
+            if (value == null) { if (n.hasAttribute(name)) n.removeAttribute(name); }
+            else if (n.getAttribute(name) !== value) n.setAttribute(name, value);
+        };
+        const wgShown = (root) => [...root.children].filter(n => n.hasAttribute('data-widget') && !n.hidden);
+        const wgItems = (root) => wgShown(root).map(n => ({ id: n.getAttribute('data-widget'), size: n.getAttribute('data-size') || 'full' }));
+        /* A card's name in menus and announcements: its own card title, the
+           label its renderer gave it, its first heading, or its id. */
+        function wgName(n) {
+            const text = (x) => (x ? x.textContent : '').replace(/\s+/g, ' ').trim();
+            const title = text(n.querySelector(':scope > .card-head > .card-title'));
+            if (title) return title;
+            if (n.getAttribute('data-widget-label')) return n.getAttribute('data-widget-label');
+            return text(n.querySelector('h2, h3, h4, .section-title, .ct')) || n.getAttribute('data-widget');
+        }
+        function wgSay(text) {
+            const region = $('wg-status');
+            if (!region) return;
+            // A live region speaks only when its text changes, and the same move twice is still news.
+            region.textContent = region.textContent === text ? text + '\u00a0' : text;
+        }
+        function wgWatch(view) {
+            if (wgWatchers[view]) return wgWatchers[view];
+            const root = wgRoot(view);
+            if (!root) return null;
+            const w = { root, width: -1 };
+            w.mo = new MutationObserver(() => {
+                // A render during a drag replaces the cards under the pointer: the drag ends and the draft goes onto the new ones.
+                if (wgDrag && wgDrag.view === view) wgDragEnd(false);
+                wgArrange(view);
+            });
+            w.mo.observe(root, { childList: true });
+            /* Columns follow the content column, so the sidebar folding counts
+               as a resize. A change of height alone (every render) is not one. */
+            if (typeof ResizeObserver === 'function') {
+                w.ro = new ResizeObserver(() => {
+                    if (root.clientWidth === w.width) return;
+                    w.width = root.clientWidth;
+                    wgArrange(view);
+                });
+                w.ro.observe(root);
+            }
+            root.addEventListener('pointerdown', (e) => wgPointerDown(view, e));
+            root.addEventListener('click', (e) => wgSwallowClick(view, e), true);
+            root.addEventListener('keydown', (e) => wgKey(view, e), true);
+            // A long press is how a finger lifts a card, so it must not also open the browser's own menu.
+            root.addEventListener('contextmenu', (e) => { if (wgDrag && wgDrag.view === view) e.preventDefault(); });
+            wgWatchers[view] = w;
+            return w;
+        }
+        /* The default order is the order the renderer appended its cards in,
+           which after the first arrangement is no longer the DOM order. So each
+           id is stamped the first time it is seen: a render that replaces every
+           card starts the stamps again, a card appended later in the same render
+           goes after the rest, and a card swapped for a new node with the same
+           id keeps its place. */
+        function wgNoteDefaults(view, widgets, ids) {
+            const seq = wgSeq[view] || (wgSeq[view] = new Map());
+            if (!widgets.some(n => wgSeen.has(n))) seq.clear();
+            widgets.forEach((n, i) => {
+                if (wgSeen.has(n)) return;
+                wgSeen.add(n);
+                if (!seq.has(ids[i])) seq.set(ids[i], wgSeqNext++);
+            });
+            wgDefaults[view] = ids.slice().sort((a, b) => seq.get(a) - seq.get(b));
+        }
+        function wgColumnsFor(root) {
+            // A view that is not showing has no width to measure; setView arranges it again the moment it shows.
+            if (!root.getClientRects().length) return +root.getAttribute('data-cols') || 4;
+            const cs = getComputedStyle(root);
+            const width = root.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+            return wgColumns(width, window.innerWidth, tokenNum('--wgrid-cell'));
+        }
+        /* Idempotent: it compares what is on the page with what should be and
+           writes nothing when they match, so a renderer that builds a page in
+           several steps gets several cheap passes. */
+        function wgArrange(view) {
+            const w = wgWatch(view);
+            if (!w) return;
+            const root = w.root;
+            const kids = [...root.children];
+            const widgets = kids.filter(n => n.hasAttribute('data-widget'));
+            const ids = widgets.map(n => n.getAttribute('data-widget'));
+            wgNoteDefaults(view, widgets, ids);
+            const first = kids.indexOf(widgets[0]), last = kids.indexOf(widgets[widgets.length - 1]);
+            /* A block with no id is fixed, and a fixed block can only lead or
+               trail: one between two cards would have to move with them, and
+               nothing says where it belongs. */
+            const stray = widgets.length ? kids.slice(first, last + 1).find(n => !n.hasAttribute('data-widget')) : null;
+            const twice = widgets.find((n, i) => ids.indexOf(ids[i]) !== i);
+            if (stray && !wgWarned.has(stray)) { wgWarned.add(stray); console.warn('[widgets] ' + view + ': block without an id', stray); }
+            if (twice && !wgWarned.has(twice)) { wgWarned.add(twice); console.warn('[widgets] ' + view + ': the id ' + twice.getAttribute('data-widget') + ' is used twice', twice); }
+            if (widgets.length < 2 || stray || twice) {
+                if (wgDrag && wgDrag.view === view) wgDragEnd(false);
+                if (root.classList.contains('wgrid')) root.classList.remove('wgrid');
+                wgAttr(root, 'data-cols', null);
+                widgets.forEach(n => wgAttr(n, 'data-span', null));
+                wgUndecorate(root);
+                wgControls(view, root, false);
+                return;
+            }
+            if (!root.classList.contains('wgrid')) root.classList.add('wgrid');
+            const editing = !!(wgEdit && wgEdit.view === view);
+            const merged = wgMergeOrder(wgDefaults[view], editing ? wgEdit.draft : (wgLayouts && wgLayouts[view]));
+            let hidden = new Set(merged.hidden);
+            // A saved layout that hides every card that rendered today would leave a page of nothing, so it hides none.
+            if (merged.order.every(id => hidden.has(id))) hidden = new Set();
+            const byId = new Map(widgets.map((n, i) => [ids[i], n]));
+            const cols = wgColumnsFor(root);
+            const places = wgLayout(merged.order.filter(id => !hidden.has(id))
+                .map(id => ({ id, size: byId.get(id).getAttribute('data-size') || 'full' })), cols)
+                .sort((a, b) => a.row - b.row || a.col - b.col);
+            const shown = places.map(p => byId.get(p.id));
+            const want = kids.slice(0, first).concat(shown,
+                merged.order.filter(id => hidden.has(id)).map(id => byId.get(id)), kids.slice(last + 1));
+            wgAttr(root, 'data-cols', String(cols));
+            places.forEach(p => {
+                const n = byId.get(p.id);
+                wgAttr(n, 'data-span', p.w === cols ? 'full' : String(p.w));
+                if (n.hidden) n.hidden = false;
+            });
+            hidden.forEach(id => { const n = byId.get(id); wgAttr(n, 'data-span', null); if (!n.hidden) n.hidden = true; });
+            if (want.some((n, i) => kids[i] !== n)) {
+                // Moving its own nodes is not a render, so the observer is off while it does.
+                w.mo.disconnect();
+                want.forEach((n, i) => { if (root.children[i] !== n) root.insertBefore(n, root.children[i] || null); });
+                w.mo.observe(root, { childList: true });
+            }
+            if (editing) wgDecorate(view, root, shown, widgets);
+            else wgUndecorate(root);
+            wgControls(view, root, true);
+        }
+        /* Customize and its three companions live in the page header's action
+           group, beside Refresh: absent when the view has nothing to arrange or
+           is showing its run gate. */
+        function wgControls(view, root, qualifies) {
+            const act = root.querySelector(':scope > .ov-hero .ov-hero-act');
+            root.querySelectorAll('[data-wg-control]').forEach(b => { if (b.parentNode !== act) b.remove(); });
+            if (!act) return;
+            if (!qualifies || root.querySelector(':scope > .run-gate')) {
+                act.querySelectorAll('[data-wg-control]').forEach(b => b.remove());
+                return;
+            }
+            const editing = !!(wgEdit && wgEdit.view === view);
+            const button = (key, cls, onClick) => {
+                let b = act.querySelector('[data-wg-control="' + key + '"]');
+                if (!b) {
+                    b = el('button', cls); b.type = 'button';
+                    b.setAttribute('data-wg-control', key);
+                    b.onclick = onClick;
+                }
+                return b;
+            };
+            const label = (b, text, icon) => {
+                if (b.dataset.wgText === text) return;
+                b.textContent = '';
+                if (icon) b.append(ico(icon));
+                b.append(document.createTextNode(text));
+                b.dataset.wgText = text;
+            };
+            const want = [];
+            if (editing) {
+                const rendered = new Set(wgDefaults[view] || []);
+                const n = wgEdit.draft.hidden.filter(id => rendered.has(id)).length;
+                if (n) {
+                    const more = button('hidden', 'btn btn-sm', () => wgShowHiddenMenu(view, more));
+                    label(more, 'Show hidden (' + n + ')');
+                    want.push(more);
+                }
+                const reset = button('reset', 'btn btn-sm', () => wgReset(view));
+                label(reset, 'Reset');
+                const done = button('done', 'btn btn-sm btn-primary', () => wgCommit(view, false));
+                label(done, 'Done');
+                if (!!wgEdit.saving !== done.hasAttribute('aria-busy')) setBusy(done, !!wgEdit.saving);
+                want.push(reset, done);
+            } else {
+                const cust = button('customize', 'btn btn-sm', () => wgToggle(view));
+                cust.setAttribute('data-wg-customize', '');
+                wgAttr(cust, 'aria-pressed', 'false');
+                label(cust, 'Customize', I.settings);
+                const off = wgLayouts === false ? 'Layouts are unavailable right now' : wgLayouts === null ? 'Loading your layout' : null;
+                if (cust.disabled !== !!off) cust.disabled = !!off;
+                wgAttr(cust, 'title', off);
+                want.push(cust);
+            }
+            act.querySelectorAll('[data-wg-control]').forEach(b => { if (want.indexOf(b) < 0) b.remove(); });
+            /* Put in order from the last one back, so a button already in place
+               is never moved: moving a focused button would drop its focus. */
+            const tail = want[want.length - 1];
+            if (tail.parentNode !== act || (tail.nextElementSibling && tail.nextElementSibling.hasAttribute('data-wg-control'))) act.append(tail);
+            for (let i = want.length - 2; i >= 0; i--) {
+                if (want[i].nextElementSibling !== want[i + 1]) act.insertBefore(want[i], want[i + 1]);
+            }
+        }
+        /* The mode's marks on a view that is arranged: a list of cards, each
+           focusable, named and hideable, with everything inside it inert so no
+           link, button, chart hover or inner drag answers while cards are being
+           moved. Re-applied after a render, because a render brings new nodes. */
+        function wgDecorate(view, root, shown, widgets) {
+            const hint = $('wg-hint');
+            if (hint && hint.hidden) hint.hidden = false;
+            if (!root.classList.contains('wg-editing')) root.classList.add('wg-editing');
+            wgAttr(root, 'role', 'list');
+            wgAttr(root, 'aria-describedby', 'wg-hint');
+            widgets.forEach(n => {
+                if (!wgOrig.has(n)) wgOrig.set(n, WG_ARIA.map(a => [a, n.getAttribute(a)]));
+                const at = shown.indexOf(n);
+                if (at < 0) { wgOrig.get(n).forEach(([a, v]) => wgAttr(n, a, v)); return; }
+                const name = wgName(n);
+                wgAttr(n, 'role', 'listitem');
+                wgAttr(n, 'tabindex', '0');
+                wgAttr(n, 'aria-label', name);
+                wgAttr(n, 'aria-posinset', String(at + 1));
+                wgAttr(n, 'aria-setsize', String(shown.length));
+                wgAttr(n, 'aria-haspopup', null);
+                [...n.children].forEach(c => {
+                    if (c.classList.contains('wg-hide') || c.inert) return;
+                    c.inert = true;
+                    wgInert.add(c);
+                });
+                let x = n.querySelector(':scope > .wg-hide');
+                if (!x) {
+                    x = el('button', 'icon-btn wg-hide'); x.type = 'button';
+                    x.append(ico(I.x));
+                    x.onclick = () => wgHide(view, n);
+                    n.append(x);
+                }
+                wgAttr(x, 'aria-label', 'Hide ' + name);
+                if (x.disabled !== (shown.length < 2)) x.disabled = shown.length < 2;
+            });
+        }
+        function wgUndecorate(root) {
+            if (!root.classList.contains('wg-editing')) return;
+            root.classList.remove('wg-editing');
+            if (root.getAttribute('role') === 'list') root.removeAttribute('role');
+            if (root.getAttribute('aria-describedby') === 'wg-hint') root.removeAttribute('aria-describedby');
+            [...root.children].forEach(n => {
+                const orig = wgOrig.get(n);
+                if (orig) { orig.forEach(([a, v]) => wgAttr(n, a, v)); wgOrig.delete(n); }
+                n.querySelectorAll(':scope > .wg-hide').forEach(b => b.remove());
+                [...n.children].forEach(c => { if (wgInert.has(c)) { c.inert = false; wgInert.delete(c); } });
+                n.classList.remove('wg-held', 'wg-lifted', 'wg-landed');
+            });
+            const hint = $('wg-hint');
+            if (hint && !document.querySelector('.ov-wrap.wg-editing')) hint.hidden = true;
+        }
+        /* In the mode a click inside a card is a drag that did not travel, and
+           the click that follows a drop is part of the drop, wherever between
+           the cards it lands. A click on the header's own buttons is neither. */
+        function wgSwallowClick(view, e) {
+            const eat = performance.now() < wgEatClicksUntil;
+            if (!eat && !(wgEdit && wgEdit.view === view)) return;
+            const t = e.target, card = t.closest ? t.closest('[data-widget]') : null;
+            if (eat ? !card && t !== wgRoot(view) : !card || t.closest('.wg-hide')) return;
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        function wgAnimate(n, frames) {
+            const opts = { duration: tokenNum('--dur-layout') * 1000, easing: tokenValue('--ease-layout') };
+            // A browser without linear() easing still gets the house curve rather than no slide at all.
+            try { return n.animate(frames, opts); }
+            catch (e) { try { return n.animate(frames, Object.assign(opts, { easing: tokenValue('--ease') })); } catch (e2) { return null; } }
+        }
+        /* FLIP: note where each card is, let apply() move them, then slide each
+           from where it was to where it is now. A card still sliding from the
+           last move is measured where it is on screen, so moves chain. The held
+           card is skipped: it is under the pointer, not in its slot. */
+        function wgFlip(root, apply, skip) {
+            if (REDUCE_MOTION) { apply(); return; }
+            const nodes = [...root.children].filter(n => n.hasAttribute('data-widget') && n !== skip);
+            const before = new Map(nodes.map(n => [n, n.getBoundingClientRect()]));
+            apply();
+            nodes.forEach(n => {
+                const running = wgMotion.get(n);
+                if (running) { running.cancel(); wgMotion.delete(n); }
+                const a = before.get(n);
+                if (n.hidden || n.parentNode !== root || !a.width) return;
+                const b = n.getBoundingClientRect();
+                const dx = a.left - b.left, dy = a.top - b.top;
+                if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+                const anim = wgAnimate(n, [{ transform: 'translate(' + dx + 'px, ' + dy + 'px)' }, { transform: 'none' }]);
+                if (anim) wgMotion.set(n, anim);
+            });
+        }
+        // The draft takes a new order of the shown cards; hidden ones keep their ids after them.
+        function wgAdopt(view, items, skip) {
+            const draft = wgEdit.draft;
+            const ids = items.map(i => i.id);
+            draft.order = ids.concat(draft.hidden.filter(id => ids.indexOf(id) < 0));
+            wgFlip(wgRoot(view), () => wgArrange(view), skip);
+        }
+        function wgToggle(view) {
+            if (wgEdit) { if (wgEdit.view === view) wgCommit(view, false); return; }
+            if (!wgLayouts) return;
+            const saved = wgLayouts[view];
+            const merged = wgMergeOrder(wgDefaults[view] || [], saved);
+            wgEdit = { view, draft: { order: merged.order, hidden: merged.hidden },
+                       before: saved ? { order: (saved.order || []).slice(), hidden: (saved.hidden || []).slice() } : null };
+            const root = wgRoot(view);
+            const focused = document.activeElement && document.activeElement.hasAttribute('data-wg-customize');
+            wgArrange(view);
+            if (focused) { const done = root.querySelector('[data-wg-control="done"]'); if (done) done.focus(); }
+        }
+        function wgReset(view) {
+            if (!wgEdit || wgEdit.view !== view || wgEdit.saving) return;
+            wgEdit.draft = { order: (wgDefaults[view] || []).slice(), hidden: [] };
+            wgFlip(wgRoot(view), () => wgArrange(view));
+        }
+        function wgHide(view, card) {
+            if (!wgEdit || wgEdit.view !== view || wgEdit.saving) return;
+            const root = wgRoot(view);
+            const before = wgShown(root);
+            // The last card on the page stays: its button is disabled, and this holds if something clicks it anyway.
+            if (before.length < 2) return;
+            const at = before.indexOf(card), name = wgName(card), id = card.getAttribute('data-widget');
+            if (wgEdit.draft.hidden.indexOf(id) < 0) wgEdit.draft.hidden.push(id);
+            wgFlip(root, () => wgArrange(view));
+            const after = wgShown(root);
+            const next = at >= 0 && at < after.length ? after[at] : root.querySelector('[data-wg-control="hidden"]');
+            if (next) next.focus();
+            wgSay(name + ' hidden');
+        }
+        function wgShowHiddenMenu(view, anchor) {
+            if (!wgEdit || wgEdit.view !== view) return;
+            const root = wgRoot(view);
+            const rendered = new Set(wgDefaults[view] || []);
+            dropMenu(anchor, wgEdit.draft.hidden.filter(id => rendered.has(id)).map(id => {
+                const n = [...root.children].find(c => c.getAttribute('data-widget') === id);
+                return { label: n ? wgName(n) : id, onClick: () => wgUnhide(view, id) };
+            }));
+        }
+        // A card brought back goes to its default index, where it would be for someone who never customized.
+        function wgUnhide(view, id) {
+            if (!wgEdit || wgEdit.view !== view || wgEdit.saving) return;
+            const root = wgRoot(view), draft = wgEdit.draft;
+            draft.hidden = draft.hidden.filter(x => x !== id);
+            const ids = wgItems(root).map(i => i.id).filter(x => x !== id);
+            ids.splice(Math.min(Math.max((wgDefaults[view] || []).indexOf(id), 0), ids.length), 0, id);
+            draft.order = ids.concat(draft.hidden);
+            wgFlip(root, () => wgArrange(view));
+            const n = [...root.children].find(c => c.getAttribute('data-widget') === id);
+            if (n) { n.focus(); wgSay(wgName(n) + ' shown'); }
+        }
+        /* What Done sends. A draft that lays out as the default with nothing
+           hidden deletes the saved layout rather than saving a copy of the
+           default. Otherwise the ids of a saved layout that did not render this
+           time go back in at their saved index, so a card that is only there
+           on some days (Open follow-ups) keeps its place through a customize
+           on a day it was absent. */
+        function wgBody(view, root) {
+            const defaults = wgDefaults[view] || [];
+            const draft = wgMergeOrder(defaults, wgEdit.draft);
+            const cols = +root.getAttribute('data-cols') || 1;
+            const size = new Map([...root.children].filter(n => n.hasAttribute('data-widget'))
+                .map(n => [n.getAttribute('data-widget'), n.getAttribute('data-size') || 'full']));
+            const read = (ids) => wgLayout(ids.map(id => ({ id, size: size.get(id) })), cols)
+                .sort((a, b) => a.row - b.row || a.col - b.col).map(p => p.id).join(' ');
+            if (!draft.hidden.length && (draft.order.join(' ') === defaults.join(' ') || read(draft.order) === read(defaults)))
+                return { view, reset: true };
+            const saved = (wgLayouts && wgLayouts[view]) || {};
+            const rendered = new Set(defaults);
+            const order = draft.order.slice(), hidden = draft.hidden.slice();
+            (Array.isArray(saved.order) ? saved.order : []).forEach((id, i) => {
+                if (rendered.has(id) || order.indexOf(id) >= 0 || !WG_ID.test(id)) return;
+                order.splice(Math.min(i, order.length), 0, id);
+            });
+            (Array.isArray(saved.hidden) ? saved.hidden : []).forEach(id => {
+                if (!rendered.has(id) && hidden.indexOf(id) < 0 && WG_ID.test(id)) hidden.push(id);
+            });
+            return { view, order: order.slice(0, WG_MAX_IDS), hidden: hidden.slice(0, WG_MAX_IDS) };
+        }
+        /* Done writes before it leaves the mode, and a failed write is never
+           shown as saved: the draft stays on screen to try again. Leaving the
+           view is the other way in, and there a failure drops the draft, so
+           the view opens on its last saved layout next time. */
+        async function wgCommit(view, leaving) {
+            const edit = wgEdit;
+            if (!edit || edit.view !== view || edit.saving) return false;
+            if (wgDrag) wgDragEnd(false);
+            const root = wgRoot(view);
+            const body = wgBody(view, root);
+            edit.saving = true;
+            wgControls(view, root, true);
+            let d = null;
+            try { d = await api('/api/layouts', body); } catch (e) { d = null; }
+            edit.saving = false;
+            const ok = !!(d && d.layouts && typeof d.layouts === 'object' && !Array.isArray(d.layouts));
+            if (ok) wgLayouts = d.layouts;
+            if (ok || leaving) {
+                const focused = document.activeElement && document.activeElement.getAttribute('data-wg-control') === 'done';
+                if (wgEdit === edit) wgEdit = null;
+                wgArrange(view);
+                if (focused) { const cust = root.querySelector('[data-wg-customize]'); if (cust) cust.focus(); }
+            } else {
+                wgArrange(view);
+            }
+            if (!ok) toastError(leaving ? 'Your layout was not saved' : 'Your layout was not saved. Try Done again.');
+            return ok;
+        }
+        async function wgLoadLayouts() {
+            let d = null;
+            try { d = await api('/api/layouts', {}); } catch (e) { d = null; }
+            wgLayouts = d && d.layouts && typeof d.layouts === 'object' && !Array.isArray(d.layouts) ? d.layouts : false;
+            if (wgLayouts) await wgMigrateOverview();
+            WG_VIEWS.forEach(v => { if (wgWatchers[v]) wgArrange(v); });
+        }
+        /* The Overview's KPI order used to live in this browser under
+           sc_ov_layout_v1, by label. Once, when the account has no Overview
+           layout of its own, it is carried over as kpi ids; the key goes only
+           after the server has the layout, so a failed save is tried again on
+           the next start rather than lost. */
         const OV_LAYOUT_KEY = 'sc_ov_layout_v1';
-        let ovEdit = false;
-        let ovLayout = (() => { try { return JSON.parse(localStorage.getItem(OV_LAYOUT_KEY)) || { order: [], hidden: [] }; } catch (e) { return { order: [], hidden: [] }; } })();
-        const saveOvLayout = () => { try { localStorage.setItem(OV_LAYOUT_KEY, JSON.stringify(ovLayout)); } catch (e) {} };
-        function ovOrderedLabels(allLabels) {
-            let order = (ovLayout.order || []).filter(l => allLabels.includes(l));
-            allLabels.forEach(l => { if (!order.includes(l)) order.push(l); });
-            return order;
+        // Set by claimLocalCache: until then the key may be the last person's, who signed in on this browser before.
+        let wgOwnerKnown = false, wgMigrating = false;
+        async function wgMigrateOverview() {
+            if (!wgLayouts || wgLayouts.overview || !wgOwnerKnown || wgMigrating) return;
+            let old = null;
+            try { old = JSON.parse(localStorage.getItem(OV_LAYOUT_KEY) || 'null'); } catch (e) { return; }
+            if (!old || typeof old !== 'object') return;
+            const ids = (list) => [...new Set((Array.isArray(list) ? list : []).map(wgKpiId))].filter(id => WG_ID.test(id)).slice(0, WG_MAX_IDS);
+            const layout = { order: ids(old.order), hidden: ids(old.hidden) };
+            if (layout.order.length || layout.hidden.length) {
+                wgMigrating = true;
+                let d = null;
+                try { d = await api('/api/layouts', Object.assign({ view: 'overview' }, layout)); } catch (e) { d = null; }
+                wgMigrating = false;
+                if (!d || !d.layouts || typeof d.layouts !== 'object') return;
+                wgLayouts = d.layouts;
+            }
+            try { localStorage.removeItem(OV_LAYOUT_KEY); } catch (e) {}
+            wgArrange('overview');
         }
-        function reorderOv(from, to) {
-            if (!from || from === to || !overviewCache) return;
-            const all = (overviewCache.data.metrics || []).map(m => m.label);
-            const order = ovOrderedLabels(all);
-            const fi = order.indexOf(from), ti = order.indexOf(to);
-            if (fi < 0 || ti < 0) return;
-            order.splice(ti, 0, order.splice(fi, 1)[0]);
-            ovLayout.order = order; saveOvLayout(); renderOverview(overviewCache);
+        /* ----- dragging -----
+           Pointer events, because HTML5 drag never fires from touch and draws
+           a ghost instead of moving the card. The move, up, cancel and Escape
+           listeners go on window: moving the held card in the DOM would
+           release a pointer capture set on the card. */
+        function wgPointerDown(view, e) {
+            if (!wgEdit || wgEdit.view !== view || wgEdit.saving || wgDrag) return;
+            if (!e.isPrimary || e.button !== 0) return;
+            const root = wgRoot(view), t = e.target;
+            const card = t.closest ? t.closest('[data-widget]') : null;
+            if (!card || card.parentNode !== root || card.hidden || t.closest('.wg-hide')) return;
+            wgDrag = { view, root, card, id: card.getAttribute('data-widget'), pointer: e.pointerId,
+                       touch: e.pointerType === 'touch', x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY,
+                       lifted: false, hold: 0, trail: 0, last: -Infinity, frame: false, before: null, start: '' };
+            if (wgDrag.touch) wgDrag.hold = setTimeout(wgLift, WG_HOLD_MS);
+            window.addEventListener('pointermove', wgOnMove);
+            window.addEventListener('pointerup', wgOnUp);
+            window.addEventListener('pointercancel', wgOnCancel);
+            window.addEventListener('keydown', wgOnEscape, true);
+            window.addEventListener('scroll', wgFollow, true);
+            card.addEventListener('touchmove', wgNoScroll, { passive: false });
         }
-        function toggleHideOv(label) {
-            const h = new Set(ovLayout.hidden || []);
-            h.has(label) ? h.delete(label) : h.add(label);
-            ovLayout.hidden = [...h]; saveOvLayout(); renderOverview(overviewCache);
+        // Once a card is lifted the finger moves the card, not the page.
+        function wgNoScroll(e) { if (wgDrag && wgDrag.lifted) e.preventDefault(); }
+        function wgLift() {
+            const d = wgDrag;
+            if (!d || d.lifted) return;
+            clearTimeout(d.hold);
+            d.lifted = true;
+            d.before = { order: wgEdit.draft.order.slice(), hidden: wgEdit.draft.hidden.slice() };
+            d.start = wgItems(d.root).map(i => i.id).join(' ');
+            const b = wgBox(d.card, d.root);
+            d.grabX = d.x - b.left; d.grabY = d.y - b.top;
+            d.card.classList.add('wg-held');
+            if (!REDUCE_MOTION) d.card.classList.add('wg-lifted');
+            if (d.touch && navigator.vibrate) navigator.vibrate(WG_BUZZ_MS);
+            wgFollow();
         }
+        /* Where a card's slot is, with no transform in it: offsetLeft and
+           offsetTop ignore the held card's translate and a neighbour's slide.
+           The wrap is positioned in the mode, so it is every card's offsetParent. */
+        function wgBox(n, root) {
+            const r = root.getBoundingClientRect();
+            return { left: r.left + root.clientLeft + n.offsetLeft, top: r.top + root.clientTop + n.offsetTop,
+                     width: n.offsetWidth, height: n.offsetHeight };
+        }
+        // The held card stays under the pointer where it was picked up, whatever slot the order has given it.
+        function wgFollow() {
+            const d = wgDrag;
+            if (!d || !d.lifted) return;
+            const b = wgBox(d.card, d.root);
+            d.card.style.translate = (d.x - d.grabX - b.left) + 'px ' + (d.y - d.grabY - b.top) + 'px';
+        }
+        function wgOnMove(e) {
+            const d = wgDrag;
+            if (!d || e.pointerId !== d.pointer) return;
+            d.x = e.clientX; d.y = e.clientY;
+            if (!d.lifted) {
+                const far = Math.hypot(d.x - d.x0, d.y - d.y0);
+                if (d.touch) { if (far > WG_TOUCH_SLOP) wgDragEnd(false); return; }
+                if (far < WG_MOUSE_SLOP) return;
+                wgLift();
+            }
+            wgFollow();
+            wgStepSoon();
+        }
+        /* At most one reorder per 40ms and per frame. The frame gate is opened
+           by the next animation frame, or by a second 40ms passing, because a
+           hidden tab runs no frames and a drag there must still step on every
+           move rather than wait for one. */
+        function wgStepSoon() {
+            const d = wgDrag;
+            clearTimeout(d.trail);
+            const since = performance.now() - d.last;
+            if (since >= WG_STEP_MS && (!d.frame || since >= 2 * WG_STEP_MS)) wgStep();
+            // A still pointer can take two or three steps to settle, each nearer, so stepping carries on after the last move.
+            d.trail = setTimeout(wgSettle, WG_STEP_MS);
+        }
+        function wgSettle() {
+            const d = wgDrag;
+            if (d && d.lifted && wgStep()) d.trail = setTimeout(wgSettle, WG_STEP_MS);
+        }
+        /* One step: lay out the shown cards, read each row's top and bottom
+           from the cards placed in it, ask wgChoose whether a slot one move away
+           is nearer the held card's centre than its own, and if so adopt the
+           canonical order and slide the others. True when the order changed. */
+        function wgStep() {
+            const d = wgDrag;
+            if (!d || !d.lifted) return false;
+            d.last = performance.now();
+            d.frame = true;
+            requestAnimationFrame(() => { if (wgDrag === d) d.frame = false; });
+            const root = d.root;
+            const cols = +root.getAttribute('data-cols') || 1;
+            const nodes = wgShown(root);
+            const items = nodes.map(n => ({ id: n.getAttribute('data-widget'), size: n.getAttribute('data-size') || 'full' }));
+            const places = wgLayout(items, cols);
+            const me = places.find(p => p.id === d.id);
+            if (!me) return false;
+            const byId = new Map(nodes.map(n => [n.getAttribute('data-widget'), n]));
+            const rowTops = [], rowBottoms = [];
+            places.forEach(p => {
+                const b = wgBox(byId.get(p.id), root);
+                rowTops[p.row] = rowTops[p.row] == null ? b.top : Math.min(rowTops[p.row], b.top);
+                rowBottoms[p.row] = rowBottoms[p.row] == null ? b.top + b.height : Math.max(rowBottoms[p.row], b.top + b.height);
+            });
+            const r = root.getBoundingClientRect(), cs = getComputedStyle(root);
+            const g = { left: r.left + root.clientLeft + parseFloat(cs.paddingLeft), top: rowTops[0],
+                        width: root.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
+                        columns: cols, gap: parseFloat(cs.columnGap) || 0, rowTops, rowBottoms };
+            const box = wgBox(d.card, root);
+            const cx = d.x - d.grabX + box.width / 2, cy = d.y - d.grabY + box.height / 2;
+            const pick = wgChoose(wgSlotFor(me, g), wgCandidates(items, d.id, cols, (s) => wgSlotFor(s, g)), cx, cy);
+            if (!pick) return false;
+            const next = wgCanonical(pick, cols);
+            if (wgSameOrder(next, items)) return false;
+            wgAdopt(d.view, next, d.card);
+            wgFollow();
+            return true;
+        }
+        function wgOnUp(e) {
+            const d = wgDrag;
+            if (!d || e.pointerId !== d.pointer) return;
+            if (!d.lifted) { wgDragEnd(false); return; }
+            d.x = e.clientX; d.y = e.clientY;
+            // The steps a still pointer would have taken on the timer are taken now, so the drop lands where it was aimed.
+            let n = 0;
+            while (n++ < 4 && wgStep());
+            wgDragEnd(true);
+        }
+        function wgOnCancel(e) {
+            const d = wgDrag;
+            if (d && e.pointerId === d.pointer) wgDragEnd(d.lifted);
+        }
+        // Escape while a card is held puts every card back where it was when the drag began.
+        function wgOnEscape(e) {
+            const d = wgDrag;
+            if (!d || e.key !== 'Escape') return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (d.lifted && d.before) {
+                wgEdit.draft = d.before;
+                wgFlip(d.root, () => wgArrange(d.view), d.card);
+            }
+            wgDragEnd(d.lifted, true);
+        }
+        /* The end of a press. A drop slides the card from under the pointer
+           into its slot, outlines it for --dur-landed and eats the click that
+           follows; a drop that changed the order says where the card went. */
+        function wgDragEnd(land, restored) {
+            const d = wgDrag;
+            if (!d) return;
+            wgDrag = null;
+            clearTimeout(d.hold);
+            clearTimeout(d.trail);
+            window.removeEventListener('pointermove', wgOnMove);
+            window.removeEventListener('pointerup', wgOnUp);
+            window.removeEventListener('pointercancel', wgOnCancel);
+            window.removeEventListener('keydown', wgOnEscape, true);
+            window.removeEventListener('scroll', wgFollow, true);
+            d.card.removeEventListener('touchmove', wgNoScroll, { passive: false });
+            if (!d.lifted) return;
+            const from = d.card.style.translate;
+            d.card.style.translate = '';
+            d.card.classList.remove('wg-held', 'wg-lifted');
+            if (!land || d.card.parentNode !== d.root) return;
+            wgEatClicksUntil = performance.now() + WG_EAT_CLICK_MS;
+            if (!REDUCE_MOTION && from) wgAnimate(d.card, [{ translate: from }, { translate: '0px 0px' }]);
+            d.card.classList.add('wg-landed');
+            setTimeout(() => d.card.classList.remove('wg-landed'), tokenNum('--dur-landed') * 1000);
+            const ids = wgItems(d.root).map(i => i.id);
+            if (!restored && ids.join(' ') !== d.start)
+                wgSay(wgName(d.card) + ' moved to ' + (ids.indexOf(d.id) + 1) + ' of ' + ids.length);
+        }
+        /* ----- keyboard -----
+           Alt with Right or Down moves the focused card one place later, Left
+           or Up one place earlier. When the tiler would put an order straight
+           back (a small card cannot pass a wide one without leaving a hole),
+           the move reaches one place further, until the card moves or the end
+           is reached. Enter and Space are held back so a card that opens
+           something on its own does not open while it is being arranged. */
+        function wgKey(view, e) {
+            if (!wgEdit || wgEdit.view !== view || wgEdit.saving) return;
+            const root = wgRoot(view), card = e.target;
+            if (!card || card.parentNode !== root || !card.hasAttribute('data-widget')) return;
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); return; }
+            const delta = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+            if (!e.altKey || !delta || wgDrag) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const items = wgItems(root), id = card.getAttribute('data-widget');
+            const cols = +root.getAttribute('data-cols') || 1;
+            const from = items.findIndex(i => i.id === id);
+            let next = null, reached = from;
+            for (let step = 1; step < items.length && !next; step++) {
+                const to = Math.max(0, Math.min(items.length - 1, from + delta * step));
+                if (to === reached) break;
+                reached = to;
+                const order = wgCanonical(wgKeyMove(items, id, delta * step), cols);
+                if (!wgSameOrder(order, items)) next = order;
+            }
+            if (!next) return;
+            wgAdopt(view, next);
+            // Moving a node in the DOM drops its focus, and the keyboard is still holding this card.
+            if (document.activeElement !== card) card.focus();
+            const now = wgItems(root);
+            wgSay(wgName(card) + ' moved to ' + (now.findIndex(i => i.id === id) + 1) + ' of ' + now.length);
+        }
+        /* ---------- widget grid end ---------- */
         /* One block, the reference's way: a card whose header carries the
            title and one muted line, and whose body runs to the card edge so a
            table or a chart meets the border instead of floating in a second
@@ -5202,8 +5958,11 @@ Projected Image UK"></textarea>
                    heading plus its own .card - was swept into whatever section
                    happened to precede it and wrapped a second time, which put a
                    bordered white card flush inside a bordered white card. */
+                /* A card the widget grid can move is its own block too, so the
+                   heading over the one before it does not sweep it in. */
                 while (n && !(n.classList && n.classList.contains('section-title'))
-                         && !(n.querySelector && n.querySelector('.section-title'))) {
+                         && !(n.querySelector && n.querySelector('.section-title'))
+                         && !(n.hasAttribute && n.hasAttribute('data-widget'))) {
                     body.push(n); n = n.nextElementSibling;
                 }
                 if (!body.length) return;
@@ -5224,6 +5983,13 @@ Projected Image UK"></textarea>
                 });
                 if (hasCard) { node.dataset.carded = 'group'; return; }
                 var card = el('div', 'card');
+                /* A renderer marks the heading, because the card does not exist
+                   until now: the card it becomes is the widget. A heading that
+                   stays a group label keeps them and labels nothing the grid
+                   can move, which is why a group is built by its renderer. */
+                ['data-widget', 'data-size', 'data-widget-label'].forEach(function (a) {
+                    if (node.hasAttribute(a)) card.setAttribute(a, node.getAttribute(a));
+                });
                 var head = el('div', 'card-head');
                 var title = el('h3', 'card-title');
                 // A control that lived in the heading becomes the card's action.
@@ -5242,37 +6008,6 @@ Projected Image UK"></textarea>
                 node.parentNode.insertBefore(card, node);
                 node.remove();
             });
-        }
-        function metricsGridCustom(metrics) {
-            const g = el('div', 'metrics');
-            const byLabel = {}; metrics.forEach(m => byLabel[m.label] = m);
-            const order = ovOrderedLabels(metrics.map(m => m.label));
-            const hidden = new Set(ovLayout.hidden || []);
-            let dragLabel = null;
-            order.forEach((lbl, i) => {
-                const m = byLabel[lbl]; if (!m) return;
-                const isHidden = hidden.has(lbl);
-                if (isHidden && !ovEdit) return;
-                const card = statCard(m, i);
-                if (isHidden) card.classList.add('stat-hidden');
-                if (ovEdit) {
-                    card.classList.add('stat-edit'); card.draggable = true;
-                    card.addEventListener('dragstart', e => { dragLabel = lbl; card.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
-                    card.addEventListener('dragend', () => card.classList.remove('dragging'));
-                    card.addEventListener('dragover', e => e.preventDefault());
-                    card.addEventListener('drop', e => { e.preventDefault(); reorderOv(dragLabel, lbl); });
-                    const bL = el('button', 'stat-move back'); bL.innerHTML = I.chevLeft; bL.title = 'Move left';
-                    bL.disabled = !order[i - 1]; bL.onclick = (e) => { e.stopPropagation(); reorderOv(lbl, order[i - 1]); };
-                    const bR = el('button', 'stat-move fwd'); bR.innerHTML = I.chev; bR.title = 'Move right';
-                    bR.disabled = !order[i + 1]; bR.onclick = (e) => { e.stopPropagation(); reorderOv(lbl, order[i + 1]); };
-                    card.append(bL, bR);
-                    const tg = el('button', 'stat-hide'); tg.innerHTML = isHidden ? I.plus : I.x; tg.title = isHidden ? 'Show' : 'Hide';
-                    tg.onclick = (e) => { e.stopPropagation(); toggleHideOv(lbl); };
-                    card.append(tg);
-                }
-                g.append(card);
-            });
-            return g;
         }
         function insightCard(ins, i) {
             const type = ['win', 'warning', 'opportunity', 'insight'].includes(ins.type) ? ins.type : 'insight';
@@ -5338,14 +6073,18 @@ Projected Image UK"></textarea>
 
         function renderStructured(container, s, opts) {
             opts = opts || {};
+            /* opts.ids names blocks as widgets, {metrics, insights, sections,
+               actions}. Chat renders the same blocks into a message, where
+               nothing is arranged, so only a page that is arranged passes it. */
+            const as = (b, kind) => (opts.ids && opts.ids[kind] ? widget(b, opts.ids[kind]) : b);
             if (s.summary) container.append(el('div', 'summary', s.summary));
-            if (Array.isArray(s.metrics) && s.metrics.length) { const b = el('div', 'block'); b.append(metricsGrid(s.metrics)); container.append(b); }
+            if (Array.isArray(s.metrics) && s.metrics.length) { const b = el('div', 'block'); b.append(metricsGrid(s.metrics)); container.append(as(b, 'metrics')); }
             if (Array.isArray(s.insights) && s.insights.length) {
-                const b = el('div', 'block insights'); s.insights.forEach((ins, i) => b.append(insightCard(ins, i))); container.append(b);
+                const b = el('div', 'block insights'); s.insights.forEach((ins, i) => b.append(insightCard(ins, i))); container.append(as(b, 'insights'));
             }
-            if (Array.isArray(s.sections) && s.sections.length) { const b = el('div', 'block'); s.sections.forEach(sec => b.append(sectionCard(sec))); container.append(b); }
+            if (Array.isArray(s.sections) && s.sections.length) { const b = el('div', 'block'); s.sections.forEach(sec => b.append(sectionCard(sec))); container.append(as(b, 'sections')); }
             if (Array.isArray(s.actions) && s.actions.length) {
-                const b = el('div', 'block'); b.append(el('div', 'section-title', 'Recommended actions')); b.append(actionsCard(s.actions)); container.append(b);
+                const b = el('div', 'block'); b.append(el('div', 'section-title', 'Recommended actions')); b.append(actionsCard(s.actions)); container.append(as(b, 'actions'));
             }
             if (!opts.noFollowups && Array.isArray(s.followups) && s.followups.length) {
                 container.append(followupChips(s.followups, send));
@@ -5876,7 +6615,7 @@ Projected Image UK"></textarea>
            showing rather than leaving two different unlabelled figures for the
            same metric on one screen. */
         const rangeLabel = (r) => 'last ' + r + ' months';
-        function renderTrendsBlock(box, trends, currency, range, onRange, intro) {
+        function renderTrendsBlock(box, trends, currency, range, onRange, intro, id) {
             const has = (k) => trends && trends[k] && trends[k].length;
             const bare = !trends || !(has('revenue') || has('orders') || has('sessions') || has('clicks'));
             const money = (n) => fmtCompact(n) + (currency ? ' ' + currency : '');
@@ -5918,7 +6657,16 @@ Projected Image UK"></textarea>
                 if (has('position')) { const a = S('position'); g.append(trendChart(gsc({ title: 'Average Google position', yUnit: 'Position', value: num1(_avg(V(a))), labels: L(a), series: [{ name: 'Position', color: CH[0], values: V(a) }], format: num1, fitY: true, area: false, annotate: false, note: 'Lower is better. Position 1 is the top of search results.' }))); }
                 if (g.children.length) host.append(g);
             };
-            trendsSection(box, 'Performance over time', range, onRange, paint, intro);
+            /* The heading and every chart under it are one block on the page,
+               built here because trendsSection's repaint swaps nodes it owns
+               and a wrapper put round them from outside would break the range
+               switch. The heading is folded or marked here too, since the
+               page's own cardifySections only walks the page's top level. */
+            const group = el('div', 'widget-group');
+            if (id) widget(group, id, 'full', 'Performance over time');
+            box.append(group);
+            trendsSection(group, 'Performance over time', range, onRange, paint, intro);
+            cardifySections(group);
         }
         function renderSeoTrends(box, trends, range, onRange, intro) {
             const has = (k) => trends && trends[k] && trends[k].length;
@@ -6397,8 +7145,16 @@ Projected Image UK"></textarea>
             box.append(hero);
             { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
             const ofu = memories.filter(m => m.type === 'followup' && m.status === 'open');
+            /* Every block from here to the page chat is a card the grid can
+               move. The alerts banner, the header and the changes strip above
+               stay fixed at the top, and the page chat at the foot. Follow-ups
+               and Sales by sector span the row, as they always have. Half width,
+               the twelve tiles and one half card leave a hole the tiler closes
+               by moving a card, and follow-ups come and go: without them the
+               sector table jumped below the charts for someone who had never
+               customized anything. */
             if (ofu.length) {
-                box.append(el('div', 'section-title', 'Open follow-ups'));
+                box.append(widget(el('div', 'section-title', 'Open follow-ups'), 'followups'));
                 const card = el('div', 'card actions'); card.style.marginBottom = 'var(--sp-5)';
                 ofu.slice(0, 6).forEach(m => {
                     const row = el('div', 'action');
@@ -6411,34 +7167,26 @@ Projected Image UK"></textarea>
                 });
                 box.append(card);
             }
+            /* Each KPI is a card of its own, straight on the page, so a tile
+               can be moved or hidden by itself. No heading over them: once
+               they can be scattered, a heading above the first labels nothing. */
             if (Array.isArray(data.metrics) && data.metrics.length) {
-                /* On a heading rather than floating above the grid on its own.
-                   A control with nothing to its left reads as belonging to
-                   whatever happens to be underneath it, which here was the
-                   first number on the page. */
-                const ctrl = el('div', 'section-title');
-                ctrl.append(el('span', null, 'Key numbers'));
-                if (ovEdit) ctrl.append(el('span', 'ov-cust-hint', 'Use the arrows to reorder, the x to hide.'));
-                const cust = el('button', 'btn btn-sm' + (ovEdit ? ' on' : '')); cust.append(ico(I.settings), document.createTextNode(ovEdit ? 'Done' : 'Customize'));
-                cust.onclick = () => { ovEdit = !ovEdit; renderOverview(overviewCache); };
-                if (ovEdit) {
-                    const rst = el('button', 'btn btn-sm'); rst.textContent = 'Reset';
-                    rst.onclick = () => { ovLayout = { order: [], hidden: [] }; saveOvLayout(); renderOverview(overviewCache); };
-                    ctrl.append(rst);
-                }
-                ctrl.append(cust);
-                box.append(ctrl);
-                box.append(metricsGridCustom(withSparks(data.metrics, data.trends)));
+                withSparks(data.metrics, data.trends).forEach((m, i) => box.append(widget(statCard(m, i), wgKpiId(m.label), 'sm', m.label)));
             }
             if (Array.isArray(data.sector_sales) && data.sector_sales.length) {
-                box.append(cardSection('Sales by sector',
+                box.append(widget(cardSection('Sales by sector',
                     'Revenue, orders and average order value by the sector each customer trades in.',
-                    sectorSalesTable(data.sector_sales, data.currency)));
+                    sectorSalesTable(data.sector_sales, data.currency)), 'sectors'));
             }
-            renderTrendsBlock(box, data.trends, data.currency, ovRange, (v) => { ovRange = v; }, intro);
+            renderTrendsBlock(box, data.trends, data.currency, ovRange, (v) => { ovRange = v; }, intro, 'trends');
             const s = Object.assign({}, data.structured); delete s.summary;
-            if (s.insights && s.insights.length) box.append(el('div', 'section-title', 'What’s notable'));
-            renderStructured(box, s, { noFollowups: true });
+            /* The heading used to stand only over insights, which left figures
+               or sections sent without any as a bare block between two cards,
+               and a block with no id there stops the page being arranged. Under
+               the heading they fold into the one card, whichever arrived. */
+            if (['metrics', 'insights', 'sections'].some(k => Array.isArray(s[k]) && s[k].length))
+                box.append(widget(el('div', 'section-title', 'What’s notable'), 'notable'));
+            renderStructured(box, s, { noFollowups: true, ids: { actions: 'actions' } });
             box.append(pageChatPanel('overview', data));
             cardifySections(box);
             syncPrintBtn();
@@ -22510,7 +23258,9 @@ Projected Image UK"></textarea>
                 if (on) n.setAttribute('aria-current', 'page'); else n.removeAttribute('aria-current');
             });
             revealNavItem(v);
-            ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'forecast', 'connector', 'crm', 'loans', 'mail', 'files', 'team', 'labels', 'sizes', 'memory', 'skills', 'chat', 'guide'].forEach(name => $('view-' + name).classList.toggle('active', v === name));
+            // Leaving a view while customizing it counts as Done.
+            if (wgEdit && wgEdit.view !== v) wgCommit(wgEdit.view, true);
+            APP_VIEWS.forEach(name => $('view-' + name).classList.toggle('active', v === name));
             const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', forecast: 'Forecast', sizes: 'Size list', connector: 'Xero sync', crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             setViewTitle(titles[v] || (active() ? (active().title || 'Chat') : 'Chat'));
             /* Beta rides the topbar title as well: it is the only label still
@@ -22551,6 +23301,10 @@ Projected Image UK"></textarea>
             if (v === 'forecast') showForecastView();
             if (v === 'sizes') showSizesView();
             if (v === 'connector') showConnectorView();
+            /* A hidden view has no width, so its columns are measured now it
+               shows. A render that is still on its way is arranged by the
+               layer's observer when it lands. */
+            if (WG_VIEWS.indexOf(v) >= 0) wgArrange(v);
         }
 
         /* ---------- component states ----------
@@ -22715,6 +23469,17 @@ Projected Image UK"></textarea>
             const t = e.target;
             if (t && t.classList && t.classList.contains('toggle') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); t.click(); }
         });
+        /* The widget grid's own live region, made at boot for the reason the
+           toast host's is below, and kept apart from the toasts: a toast on
+           every Alt+Arrow would be seen as well as heard. The hint beside it
+           describes a card in Customize mode, and is hidden outside that mode. */
+        (function () {
+            const say = el('div', 'sr-only'); say.id = 'wg-status';
+            say.setAttribute('role', 'status'); say.setAttribute('aria-live', 'polite');
+            const hint = el('div', 'sr-only', 'Drag to rearrange. On a touch screen, press and hold first. With a keyboard, hold Alt and press the arrow keys.');
+            hint.id = 'wg-hint'; hint.hidden = true;
+            document.body.append(say, hint);
+        })();
         /* The live region must exist BEFORE the first toast: content that
            arrives together with a brand-new region is unreliably announced. */
         (function () {
@@ -23262,9 +24027,12 @@ Projected Image UK"></textarea>
         const bootOrderId = bootLabels ? parseInt(bootQP.get('id') || '0', 10) : 0;
         if (bootOrderId) skipLabelsAutoLoad = true;   // the deep link fetch owns the view
         if (bootOrderId) window.__pendingAdminLink = { id: bootOrderId, dispatch: bootQP.get('dispatch') === '1' };
+        // Every content root is arranged from here on, whoever renders into it.
+        WG_VIEWS.forEach(v => wgWatch(v));
         renderSidebar(); renderChat(); authBoot(); setView(bootLabels ? 'labels' : 'overview');
         if (bootOrderId) (bootQP.get('dispatch') === '1' ? dispatchFromAdminLink : printFromAdminLink)(bootOrderId);
         loadProfile();  // pull the saved store profile from the server (for the Settings modal)
+        wgLoadLayouts();  // this person's card layouts, for the widget grid
         loadMemory();   // pull saved memories (for Overview follow-ups + the Memory tab)
         loadAnalysisCache();  // restore last AI-tab results (no tokens spent)
         loadAlerts();         // any change alerts from scheduled refreshes

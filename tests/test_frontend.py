@@ -1436,19 +1436,55 @@ def t_the_customers_switcher_is_the_house_control():
        "and the hero comes first, like every other tab")
 
 
+_WGL_START = "        /* ---------- widget grid (page layer) ---------- */"
+_WGL_END = "        /* ---------- widget grid end ---------- */"
+
+
+def _wg_layer():
+    """The widget grid's page layer in static/index.html, between its two
+    marker lines: the observer, Customize mode, the drag, the keyboard and the
+    save. Assertions about the layer read this rather than the whole script,
+    so a line elsewhere cannot satisfy them."""
+    ok(SCRIPT.count(_WGL_START) == 1 and SCRIPT.count(_WGL_END) == 1,
+       "the page layer must sit between %r and %r, each once" % (_WGL_START.strip(), _WGL_END.strip()))
+    a = SCRIPT.index(_WGL_START)
+    return SCRIPT[a:SCRIPT.index(_WGL_END, a)]
+
+
+def _wg_fn(name):
+    """One function of the page layer, from its keyword to the next function
+    declared at the same indentation."""
+    src = _wg_layer()
+    i = src.index(name)
+    rest = src[i + len(name):]
+    ends = [j for j in (rest.find("\n        function "), rest.find("\n        async function "),
+                        rest.find("\n        const "), rest.find("\n        /* ")) if j >= 0]
+    return src[i:i + len(name) + (min(ends) if ends else len(rest))]
+
+
 @test
 def t_reordering_kpis_works_without_a_drag():
     """HTML5 drag events never fire from touch, so the Overview KPI reorder was
     unreachable on a phone and the hint told you to do the one thing you could
-    not do."""
-    ok(re.search(r"\.stat-move \{", HTML), "there is a button path")
-    ok("el('button', 'stat-move back')" in SCRIPT and "el('button', 'stat-move fwd')" in SCRIPT,
-       "one each way")
-    ok("bL.disabled = !order[i - 1]" in SCRIPT and "bR.disabled = !order[i + 1]" in SCRIPT,
-       "and the ends are disabled rather than silently doing nothing")
-    ok("Use the arrows to reorder" in SCRIPT,
+    not do. The arrow buttons that patched it went with the rest of the old
+    Overview customizing: the widget grid moves cards with pointer events,
+    which a finger fires too once it has held a card, and with Alt and the
+    arrow keys, and its hint names all three."""
+    layer = _wg_layer()
+    ok("stat-move" not in HTML and "draggable = true" not in layer and "dragstart" not in layer,
+       "no HTML5 drag and no arrow buttons are left")
+    ok("root.addEventListener('pointerdown', (e) => wgPointerDown(view, e));" in layer,
+       "a press on a card starts the drag, whatever pointer made it")
+    ok("if (wgDrag.touch) wgDrag.hold = setTimeout(wgLift, WG_HOLD_MS);" in layer
+       and "WG_HOLD_MS = 350" in layer,
+       "a finger lifts a card after holding it")
+    ok("card.addEventListener('touchmove', wgNoScroll, { passive: false });" in layer
+       and "if (wgDrag && wgDrag.lifted) e.preventDefault();" in layer,
+       "and once lifted the finger moves the card, not the page")
+    ok("{ ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]" in layer and "!e.altKey" in layer,
+       "Alt and an arrow moves the focused card")
+    ok("'Drag to rearrange. On a touch screen, press and hold first. With a keyboard, hold Alt and press the arrow keys.'" in SCRIPT,
        "the hint describes what actually works")
-    ok("card.draggable = true" in SCRIPT, "drag still works for a mouse")
 
 
 @test
@@ -1958,7 +1994,7 @@ def t_a_kpi_with_a_list_behind_it_opens_it():
        "and the reference's row hover")
     ok(".stat-pick:is(.on, [aria-pressed=\"true\"]) > .stat-act { background: var(--action-primary);" in CSS,
        "a set filter fills its ring")
-    ok(".chart-expand, .stat-act, .ov-customize" in CSS, "the cue is screen furniture, hidden in print")
+    ok(".chart-expand, .stat-act, .wg-hide, [data-wg-control]" in CSS, "the cue is screen furniture, hidden in print")
 
 @test
 def t_the_reconciliation_tab_exists_and_is_gated():
@@ -3250,7 +3286,7 @@ def t_a_dashed_edge_only_ever_means_a_target():
     state, and the dotted help underline that <abbr> renders natively."""
     allowed = ("crm-zone",        # the won/lost drop targets
                "files-list.drag", # drop-hover on the file list
-               "stat-edit",       # a KPI card while it is draggable
+               "wg-editing",      # a card on a page in Customize mode, which can be picked up
                "has-help")        # abbr-style dotted underline on a help label
     for rule in re.findall(r"([^{}]+)\{([^}]*)\}", CSS):
         sel, body = rule
@@ -4897,7 +4933,8 @@ def t_the_loan_units_tab_is_fully_plumbed():
     ok("'loans'" in SCRIPT.split("const TAB_KEYS = [")[1][:300], "the page knows the grant key")
     ok("loans: 'Loan units'" in SCRIPT, "the topbar can name it")
     ok("if (v === 'loans') showLoansView();" in SCRIPT, "and setView opens it")
-    ok("'loans'" in SCRIPT.split("function setView(v) {")[1][:700],
+    ok("'loans'" in SCRIPT.split("const APP_VIEWS = [")[1].split("]")[0]
+       and "APP_VIEWS.forEach(name => $('view-' + name)" in SCRIPT.split("function setView(v) {")[1][:900],
        "it is in the list of views setView shows and hides")
     src = open("copilot.py", encoding="utf-8").read()
     ok('"loans"' in src.split("TAB_KEYS = (")[1][:320], "the server knows the same grant key")
@@ -5376,7 +5413,8 @@ def t_every_control_family_declares_its_states():
                 ".lbl-segbtn": ("hover", "active", "disabled"), ".mail-claim": ("hover", "active", "disabled"),
                 ".send": ("hover", "active", "disabled"), ".dmenu-item": ("hover", "active"),
                 ".convo": ("hover", "active"), ".mem-btn": ("hover", "active"), ".track-btn": ("hover", "active"),
-                ".ptab": ("hover", "active"), ".ftab": ("hover", "active"), ".stat-move": ("disabled",)}
+                ".ptab": ("hover", "active"), ".ftab": ("hover", "active"),
+                ".wg-hide": ("hover", "active", "disabled")}
     for sel, states in families.items():
         for st in states:
             ok(sel + ":" + st in CSS, "%s declares :%s" % (sel, st))
@@ -5412,9 +5450,10 @@ def t_focus_is_declared_once_per_kind():
        "one rule for every field, contenteditable included")
     ok(not re.search(r"\.[\w-]+:focus \{[^}]*(focus-ring|focus-outline)", CSS),
        "no component carries its own copy of either focus look")
-    ok(CSS.count("outline: var(--focus-outline)") == 3,
-       "the outline is read by the control rule and by two deliberate variants (the "
-       "custom-drawn checkbox, and the menu item which insets it), and nowhere else")
+    ok(CSS.count("outline: var(--focus-outline)") == 4,
+       "the outline is read by the control rule and by three deliberate variants (the "
+       "custom-drawn checkbox, the menu item which insets it, and a widget card just dropped "
+       "in Customize mode, which borrows it for --dur-landed), and nowhere else")
 
 
 @test
@@ -5667,7 +5706,7 @@ const block = html.slice(a, b + END.length);
 // rebind the first copy's names.
 const NAMES = 'WG_SPANS, WG_TILING_BUDGET, WG_ENTER, wgOverlaps, wgContains, wgSpanOf, wgLayout, '
   + 'wgTile, wgPack, wgCanonical, wgMoveTo, wgSameOrder, wgChoose, wgCandidates, '
-  + 'wgMergeOrder, wgKeyMove, wgColumns, wgSlotFor';
+  + 'wgMergeOrder, wgKeyMove, wgColumns, wgSlotFor, WG_ID, wgKpiId';
 const lift = (src) => eval('(function () {\n' + src + '\nreturn { ' + NAMES + ' };\n})()');
 const W = lift(block);
 const BUDGET = /const WG_TILING_BUDGET = \d+;/;
@@ -6014,6 +6053,35 @@ check('slots', (count) => {
   }
 });
 
+// Overview KPI ids, from the labels copilot.py sends (_overview's metrics) and the rig fixtures carry.
+check('kpi', (count) => {
+  const want = [
+    ['Revenue (7d)', 'kpi-revenue-7d'], ['Orders (7d)', 'kpi-orders-7d'], ['Avg order value', 'kpi-avg-order-value'],
+    ['Unfulfilled (7d)', 'kpi-unfulfilled-7d'], ['New customers (7d)', 'kpi-new-customers-7d'], ['Products', 'kpi-products'],
+    ['Low stock (\u22645)', 'kpi-low-stock'], ['Sessions (GA4, 28d)', 'kpi-sessions-ga4-28d'],
+    ['Revenue (GA4, 28d)', 'kpi-revenue-ga4-28d'], ['Search clicks (28d)', 'kpi-search-clicks-28d'],
+    ['Search impressions (28d)', 'kpi-search-impressions-28d'], ['Avg Google position', 'kpi-avg-google-position'],
+  ];
+  for (const [label, id] of want) {
+    count();
+    const got = W.wgKpiId(label);
+    if (got !== id) fail('kpi', JSON.stringify(label) + ' gave ' + got + ', expected ' + id);
+    if (!W.WG_ID.test(got)) fail('kpi', got + ' does not match the id pattern');
+  }
+  const ids = want.map(([label]) => W.wgKpiId(label));
+  if (new Set(ids).size !== ids.length) fail('kpi', 'two Overview labels share an id: ' + ids.join(' '));
+  // The threshold is LOW_STOCK_THRESHOLD, so any number and either way of writing the sign is the same tile.
+  for (const label of ['Low stock (\u22643)', 'Low stock (<=10)', 'Low stock (< 25)', 'Low stock']) {
+    count();
+    if (W.wgKpiId(label) !== 'kpi-low-stock') fail('kpi', JSON.stringify(label) + ' gave ' + W.wgKpiId(label));
+  }
+  count();
+  const long = W.wgKpiId('A label far longer than any tile would ever carry, with words to spare at the end');
+  if (long.length > 48 || !W.WG_ID.test(long) || long.endsWith('-')) fail('kpi', 'a long label gave ' + long);
+  count();
+  if (!W.WG_ID.test(W.wgKpiId('')) || !W.WG_ID.test(W.wgKpiId('---'))) fail('kpi', 'an empty label gave an id outside the pattern');
+});
+
 console.log(JSON.stringify({ ran, fails, stats }));
 """
 
@@ -6168,6 +6236,319 @@ def t_the_widget_layout_block_never_touches_the_page():
     block = _wg_block()
     for token in ("document", "window", "getBoundingClientRect", "querySelector", "$("):
         ok(token not in block, "the widget layout block mentions %r" % token)
+
+
+@test
+def t_a_kpi_tile_id_comes_from_its_label_and_not_its_threshold():
+    """An Overview KPI tile has no id of its own, so its widget id is a slug of
+    the label the server sends, and a saved layout names tiles by it. The low
+    stock label carries LOW_STOCK_THRESHOLD in brackets; if the number were in
+    the id, changing that setting would drop the tile from every saved layout.
+    Every real label maps to its expected id, no two collide, the threshold in
+    any form is ignored, and a long or empty label still gives a valid id."""
+    _wg_check("kpi", "wgKpiId gave the wrong id for an Overview label")
+
+
+def _wg_calls(src, name):
+    """The argument lists of every call to `name(` in src, split at their top
+    level commas, so a nested el('div', ...) does not look like the id."""
+    out = []
+    for m in re.finditer(r"(?<![\w.])" + re.escape(name) + r"\(", src):
+        i, depth, args, cur, quote = m.end(), 1, [], "", None
+        while i < len(src) and depth:
+            ch = src[i]
+            if quote:
+                cur += ch
+                if ch == "\\":
+                    cur += src[i + 1]; i += 1
+                elif ch == quote:
+                    quote = None
+            elif ch in "'\"`":
+                quote = ch; cur += ch
+            elif ch in "([{":
+                depth += 1; cur += ch
+            elif ch in ")]}":
+                depth -= 1
+                if depth: cur += ch
+            elif ch == "," and depth == 1:
+                args.append(cur.strip()); cur = ""
+            else:
+                cur += ch
+            i += 1
+        args.append(cur.strip())
+        out.append((m.start(), args))
+    return out
+
+
+@test
+def t_the_widget_grid_reads_its_sizes_and_motion_from_the_one_root():
+    """The grid's cell width, gap and every motion value are tokens in the one
+    top-level :root, with the gap re-pointed for a phone the way a medium may
+    re-point a token. The stylesheet and the layer read them by name, so the
+    widget rules and the script carry no pixel, duration or scale of their own:
+    a number written twice is a number that drifts."""
+    root = CSS.split(":root {")[1].split("\n        }")[0]
+    for decl in ("--wgrid-cell: 240px", "--wgrid-gap: var(--sp-6)", "--dur-layout: .38s",
+                 "--ease-layout: linear(0,", "--dur-landed: .62s", "--lift-scale: 1.02"):
+        ok(decl in root, "the top-level :root defines " + decl)
+    ok(re.search(r"@media \(max-width: 640px\) \{\s*:root \{ --wgrid-gap: var\(--sp-4\); \}", CSS),
+       "a phone re-points the gap to 16 in a nested :root, as the page rhythm does")
+    ok(re.search(r"--ease-layout: linear\(0,[\d., \n]*, 1\);", root),
+       "the spring curve starts at 0 and settles at exactly 1")
+    ok(".ov-wrap.wgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));\n            gap: var(--wgrid-gap);" in CSS,
+       "the grid's gap is the token")
+    ok(".ov-wrap .widget-group > * + * { margin-top: var(--wgrid-gap); }" in CSS
+       and ".ov-wrap .widget-group > .section-title + * { margin-top: var(--sp-3); }" in CSS,
+       "a group keeps the page rhythm inside it: 12 under its heading, the gap between blocks")
+    ok(".wg-held.wg-lifted { scale: var(--lift-scale); }" in CSS, "the lift is the token")
+    layer = _wg_layer()
+    for read in ("tokenNum('--wgrid-cell')", "tokenNum('--dur-layout') * 1000", "tokenValue('--ease-layout')",
+                 "tokenNum('--dur-landed') * 1000"):
+        ok(read in layer, "the layer reads " + read)
+    for literal in ("240", ".38", "380", ".62", "620", "1.02", "1.06", "cubic-bezier", "spring"):
+        ok(literal not in layer.replace("docs/superpowers", ""), "the layer writes %r itself instead of reading a token" % literal)
+    for sel, body in _rules(CSS):
+        if not re.search(r"wgrid|wg-|widget-group", sel):
+            continue
+        flat = re.sub(r"var\(--[\w-]+\)", "", body)
+        ok(not re.search(r"\d(px|ms|s)\b", flat) and "scale(" not in flat,
+           "the widget rule %s carries its own length, duration or scale: %s" % (sel.strip()[:60], body.strip()[:80]))
+
+
+@test
+def t_moving_cards_is_skipped_when_motion_is_reduced():
+    """With prefers-reduced-motion nothing slides: no FLIP of the other cards,
+    no lift scale and no travel from the pointer into the slot. The held card
+    still follows the pointer, because that is the manipulation itself."""
+    flip = _wg_fn("function wgFlip(")
+    ok(flip.split("{", 1)[1].lstrip().startswith("if (REDUCE_MOTION) { apply(); return; }"),
+       "the FLIP applies the new order and returns before it measures anything")
+    ok("if (!REDUCE_MOTION) d.card.classList.add('wg-lifted');" in _wg_fn("function wgLift("),
+       "the lift scale is only added when motion is allowed")
+    ok("if (!REDUCE_MOTION && from) wgAnimate(d.card," in _wg_fn("function wgDragEnd("),
+       "and so is the landing travel")
+    layer = _wg_layer()
+    ok(layer.count("wgAnimate(") == 3 and layer.count(".animate(") == 2,
+       "every animation in the layer goes through those two checked paths (one helper, two callers)")
+    ok("d.card.style.translate = " in _wg_fn("function wgFollow("), "the held card follows the pointer either way")
+
+
+@test
+def t_the_widget_grid_watches_every_view_setview_shows():
+    """The layer's content roots come from the same list setView shows and
+    hides, so a view added to one is in the other. Chat is the one view left
+    out, as it is on the server: it has a log and a composer, not cards."""
+    views = re.search(r"const APP_VIEWS = \[([^\]]*)\];", SCRIPT)
+    ok(views, "one list of views")
+    app = re.findall(r"'(\w+)'", views.group(1))
+    ok(sorted(app) == sorted(re.findall(r'<section class="view(?: active)?" id="view-(\w+)"', HTML)),
+       "APP_VIEWS is exactly the views in the page")
+    fn = fn_src("function setView(")
+    ok("APP_VIEWS.forEach(name => $('view-' + name).classList.toggle('active', v === name));" in fn,
+       "setView shows and hides by that list")
+    ok("'skills', 'chat', 'guide']" not in fn, "and carries no copy of it")
+    ok("if (WG_VIEWS.indexOf(v) >= 0) wgArrange(v);" in fn, "a view is arranged when it shows, when it has a width")
+    layer = _wg_layer()
+    ok("const WG_VIEWS = APP_VIEWS.filter(v => v !== 'chat');" in layer, "the layer's roots derive from it")
+    ok("WG_VIEWS.forEach(v => wgWatch(v));" in SCRIPT, "every one of them is watched from start-up")
+    ok("const wgRoot = (view) => $(view === 'overview' ? 'ov-content' : view + '-content');" in layer,
+       "Overview is the one root not named after its view")
+    for v in app:
+        if v == "chat": continue
+        ok(('id="%s"' % ("ov-content" if v == "overview" else v + "-content")) in HTML, "the root for %s exists" % v)
+    py = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    server = re.findall(r'"(\w+)"', py.split("LAYOUT_VIEWS = (")[1].split(")")[0])
+    ok(sorted(server) == sorted(v for v in app if v != "chat"), "and the server accepts a layout for exactly those views")
+    ok("new MutationObserver(" in layer and "observe(root, { childList: true })" in layer
+       and "new ResizeObserver(" in layer, "a render and a width change each re-arrange")
+
+
+@test
+def t_a_report_page_is_a_list_only_while_it_is_being_customized():
+    """Outside Customize mode a report page is a document with headings, not a
+    list, so the list roles are set by the mode's decoration and nowhere else,
+    and taken off again when it ends."""
+    for role in ("'list'", "'listitem'"):
+        sites = [m.start() for m in re.finditer(r"'role', " + role, SCRIPT)]
+        ok(len(sites) == 1, "one place sets role %s, found %d" % (role, len(sites)))
+        ok(sites[0] > SCRIPT.index("function wgDecorate(") and sites[0] < SCRIPT.index("function wgUndecorate("),
+           "and it is Customize mode's decoration")
+    ok('role="list"' not in HTML and "role = 'list'" not in SCRIPT, "no markup or property sets it either")
+    undo = _wg_fn("function wgUndecorate(")
+    for need in ("if (root.getAttribute('role') === 'list') root.removeAttribute('role');",
+                 "orig.forEach(([a, v]) => wgAttr(n, a, v))", ".wg-hide').forEach(b => b.remove())",
+                 "c.inert = false"):
+        ok(need in undo, "leaving the mode undoes: " + need)
+    deco = _wg_fn("function wgDecorate(")
+    ok("c.inert = true;" in deco and "wgInert.add(c);" in deco,
+       "everything inside a card is inert in the mode, and only what the mode made inert is released")
+
+
+@test
+def t_every_widget_id_is_well_formed_and_named_once_per_renderer():
+    """A widget id is the key a saved layout is kept under, so it matches the
+    server's pattern, and a renderer that gave two cards the same id would
+    leave the page unarrangeable. Every literal id in the page is checked:
+    widget() calls, data-widget attributes and renderStructured's ids."""
+    pattern = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
+    starts = [m.start() for m in re.finditer(r"\n        (?:async )?function \w+", SCRIPT)]
+    owner = lambda at: max([i for i in starts if i < at] or [0])
+    found = []
+    for at, args in _wg_calls(SCRIPT, "widget"):
+        if len(args) >= 2 and re.fullmatch(r"'[^']*'", args[1]):
+            found.append((at, args[1][1:-1]))
+    for m in re.finditer(r"setAttribute\('data-widget', '([^']*)'\)", SCRIPT):
+        found.append((m.start(), m.group(1)))
+    for m in re.finditer(r"ids: \{([^}]*)\}", SCRIPT):
+        found += [(m.start(), v) for v in re.findall(r":\s*'([^']*)'", m.group(1))]
+    found += [(-1, v) for v in re.findall(r'data-widget="([^"]*)"', HTML)]
+    # The id a group's caller passes in, like the Overview's 'trends', is a literal too.
+    for m in re.finditer(r"renderTrendsBlock\([^\n]*, '([^']*)'\);", SCRIPT):
+        found.append((m.start(), m.group(1)))
+    ok(len(found) >= 5, "found the Overview's ids (%d)" % len(found))
+    for _, v in found:
+        ok(pattern.match(v), "the widget id %r does not match the pattern" % v)
+    by = {}
+    for at, v in found:
+        key = owner(at) if at >= 0 else -1
+        ok(v not in by.setdefault(key, set()), "the id %r is given twice by one renderer" % v)
+        by[key].add(v)
+    ov = fn_src("function renderOverview(")
+    for v in ("followups", "sectors", "trends", "notable", "actions"):
+        ok("'%s'" % v in ov, "the Overview names its %s card" % v)
+    ok("widget(statCard(m, i), wgKpiId(m.label), 'sm', m.label)" in ov, "and each KPI tile by its label")
+
+
+@test
+def t_the_old_overview_customizing_is_gone_and_its_key_is_read_only_by_the_migration():
+    """The Overview's own reorder and hide lived in this browser only, with
+    HTML5 drag, arrow buttons and a heading of its own. The widget grid
+    replaces all of it; the one thing left is the migration that carries an
+    old order to the person's account, and it takes the key away only once
+    the server has the layout."""
+    for gone in ("metricsGridCustom", "reorderOv", "toggleHideOv", "ovEdit", "ovLayout", "saveOvLayout",
+                 "ovOrderedLabels", "Key numbers", "ov-customize", "ov-cust-hint", "stat-edit", "stat-hide",
+                 "stat-move", "--stat-tools-w", "Use the arrows to reorder"):
+        ok(gone not in HTML, "%s is gone" % gone)
+    ok(SCRIPT.count("'sc_ov_layout_v1'") == 1 and "const OV_LAYOUT_KEY = 'sc_ov_layout_v1';" in _wg_layer(),
+       "the key is named once, beside the migration")
+    mig = _wg_fn("async function wgMigrateOverview(")
+    reads = [m.start() for m in re.finditer(r"getItem\(OV_LAYOUT_KEY\)", SCRIPT)]
+    ok(len(reads) == 1 and "getItem(OV_LAYOUT_KEY)" in mig, "only the migration reads it")
+    ok("setItem(OV_LAYOUT_KEY" not in SCRIPT, "and nothing writes it any more")
+    ok(mig.index("await api('/api/layouts'") < mig.index("if (!d || !d.layouts || typeof d.layouts !== 'object') return;")
+       < mig.index("localStorage.removeItem(OV_LAYOUT_KEY)"), "the key goes only after the save succeeds; a failure returns first")
+    ok("if (!wgLayouts || wgLayouts.overview || !wgOwnerKnown || wgMigrating) return;" in mig,
+       "an account that already has an Overview layout keeps it, and nothing moves before the browser's owner is known")
+    ok("wgOwnerKnown = true;" in fn_src("function claimLocalCache("), "which claimLocalCache establishes")
+    ok("[LS, LS_SET, LS_OWNER, OV_LAYOUT_KEY]" in SCRIPT,
+       "signing in as someone else still clears it, so one person's old order never lands on another's account")
+
+
+@test
+def t_the_layer_writes_the_arrangement_as_attributes():
+    """The column count and each card's placed width are attributes the
+    stylesheet reads, never inline grid styles or a custom property on an
+    element: print has to be able to overrule them, and a screen does not
+    write its own sizes. The only inline style is the held card's translate,
+    which follows the pointer."""
+    layer = _wg_layer()
+    ok("wgAttr(root, 'data-cols', String(cols));" in layer, "the layer writes data-cols")
+    ok("wgAttr(n, 'data-span', p.w === cols ? 'full' : String(p.w));" in layer, "and data-span")
+    for bad in ("style.gridColumn", "style.gridRow", "style.gridTemplate", "style.setProperty", "style.order", "cssText"):
+        ok(bad not in layer, "the layer writes %s" % bad)
+    ok(set(re.findall(r"\.style\.(\w+) = ", layer)) == {"translate"}, "the held card's translate is its one inline style")
+    for span in ('[data-span="2"] { grid-column: span 2; }', '[data-span="3"] { grid-column: span 3; }',
+                 '[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }',
+                 '[data-cols="1"] { grid-template-columns: minmax(0, 1fr); }'):
+        ok(span in CSS, "the stylesheet reads " + span)
+
+
+@test
+def t_a_printed_grid_is_one_column_and_leaves_the_customize_controls_off():
+    """Printing uses the arrangement on screen, hidden cards left out, in one
+    column: four columns on an A4 page squeeze every card. The hide buttons and
+    the header's Customize, Show hidden, Reset and Done are screen furniture."""
+    prints = [CSS[m.end():] for m in re.finditer(r"@media print \{", CSS)]
+    block = next((p for p in prints if ".ov-wrap.wgrid {" in p[:4000]), "")
+    ok(block, "a print block covers the grid")
+    for rule in (".ov-wrap.wgrid { grid-template-columns: minmax(0, 1fr) !important; }",
+                 ".ov-wrap.wgrid > * { grid-column: 1 / -1 !important; }",
+                 ".ov-wrap.wgrid > [data-widget][hidden] { display: none !important; }"):
+        ok(rule in block, "print: " + rule)
+    ok(re.search(r"\.wg-hide, \[data-wg-control\],[^{]*\{ display: none !important; \}", block),
+       "the hide buttons and every header control are dropped from print")
+    controls = _wg_fn("function wgControls(")
+    ok("b.setAttribute('data-wg-control', key);" in controls, "every header control carries the attribute print hides")
+    ok("el('button', 'icon-btn wg-hide')" in _wg_fn("function wgDecorate("), "and every hide button the class")
+
+
+@test
+def t_the_customize_copy_says_what_works_without_a_dash():
+    """The hint, the controls, the announcements and the save failures are the
+    words of this feature, in the house voice: a full stop or a colon, never a
+    dash. Announcements go to their own live region, not to toasts, which
+    would be seen on every Alt+Arrow as well as heard."""
+    layer = _wg_layer()
+    copy = ["Drag to rearrange. On a touch screen, press and hold first. With a keyboard, hold Alt and press the arrow keys."]
+    ok("'" + copy[0] + "'" in SCRIPT, "the hint says how to move a card with a mouse, a finger and a keyboard")
+    for text in ("'Customize'", "'Show hidden ('", "'Reset'", "'Done'", "' moved to '", "' of '", "' hidden'",
+                 "' shown'", "'Hide '", "'Layouts are unavailable right now'", "'Loading your layout'",
+                 "'Your layout was not saved. Try Done again.'", "'Your layout was not saved'"):
+        ok(text in layer, "the layer says " + text)
+    for lit in re.findall(r"'([^'\n]*)'", layer) + copy:
+        ok("\u2014" not in lit and "\u2013" not in lit and " - " not in lit, "a dash in the copy: %r" % lit)
+    ok("say.id = 'wg-status';" in SCRIPT and "say.setAttribute('aria-live', 'polite');" in SCRIPT,
+       "moves are announced in a polite status region made at start-up")
+    ok("const region = $('wg-status');" in _wg_fn("function wgSay(") and "addToast(" not in layer and "toastOk(" not in layer,
+       "and never as a toast; only a failed save is a toast")
+
+
+@test
+def t_done_saves_before_it_leaves_and_a_failure_keeps_the_draft():
+    """A failed save is never shown as saved: Done writes first, and on a
+    failure the draft stays on screen to try again. Leaving the view counts as
+    Done, and a failure there drops the draft, so the view opens on its last
+    saved layout. A draft that is the default deletes the saved layout instead
+    of saving a copy of it, and a card that did not render today keeps its
+    saved place."""
+    commit = _wg_fn("async function wgCommit(")
+    ok(commit.index("await api('/api/layouts', body)") < commit.index("wgEdit = null"),
+       "the mode ends only after the answer")
+    ok("if (ok || leaving)" in commit and "leaving ? 'Your layout was not saved' : 'Your layout was not saved. Try Done again.'" in commit,
+       "a failed Done stays in the mode; a failed leave drops the draft; each says so")
+    ok("if (wgEdit && wgEdit.view !== v) wgCommit(wgEdit.view, true);" in fn_src("function setView("),
+       "leaving a view while customizing it is Done")
+    body = _wg_fn("function wgBody(")
+    ok("return { view, reset: true };" in body, "a default draft resets")
+    ok("order.splice(Math.min(i, order.length), 0, id);" in body and "if (rendered.has(id) || order.indexOf(id) >= 0" in body,
+       "a saved id that did not render goes back in at its saved index")
+    ok("api('/api/layouts', {})" in _wg_fn("async function wgLoadLayouts(") and "wgLoadLayouts();" in SCRIPT,
+       "the layouts are read once at start-up")
+
+
+@test
+def t_a_card_heading_carries_its_widget_to_the_card_and_a_group_is_built_by_its_renderer():
+    """cardifySections builds a card from a heading after the renderer has
+    run, so the renderer marks the heading and the card takes the marks. The
+    fold stops at a widget, or the Open follow-ups heading would sweep every
+    KPI tile after it into its card. A heading over several blocks is a group
+    its renderer builds, because trendsSection repaints by swapping its own
+    nodes; and only the Overview asks renderStructured for ids."""
+    fold = SCRIPT[SCRIPT.index("function cardifySections("):]
+    fold = fold[:fold.index("\n        function ")]
+    ok("['data-widget', 'data-size', 'data-widget-label'].forEach(function (a) {" in fold
+       and "card.setAttribute(a, node.getAttribute(a));" in fold, "the card takes the heading's widget marks")
+    ok("!(n.hasAttribute && n.hasAttribute('data-widget'))" in fold, "the fold stops at a widget")
+    trends = fn_src("function renderTrendsBlock(")
+    ok("const group = el('div', 'widget-group');" in trends and "if (id) widget(group, id, 'full', 'Performance over time');" in trends
+       and "trendsSection(group, " in trends and "cardifySections(group);" in trends,
+       "the trends heading and its charts are one group, with the id its caller passes")
+    ok(SCRIPT.count("renderTrendsBlock(") == 2 and "intro, 'trends');" in fn_src("function renderOverview("),
+       "the Overview is its one caller and names it")
+    calls = [args for _, args in _wg_calls(SCRIPT, "renderStructured") if len(args) > 2 and "ids:" in args[2]]
+    ok(len(calls) == 1 and calls[0][0] == "box", "only the Overview passes ids to renderStructured")
+    ok(".widget-group { display: flex; flex-direction: column; min-width: 0; }" in CSS, "a group is one column")
 
 
 if __name__ == "__main__":
