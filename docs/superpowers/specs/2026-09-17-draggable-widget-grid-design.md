@@ -1,6 +1,7 @@
 # Draggable widget grid, app wide
 
-Date: 2026-09-17. Status: design approved in chat 2026-09-17, spec awaiting review.
+Date: 2026-09-17. Status: approved 2026-09-17 ("build it"). Revised the same day
+after stage 1 measured every screen in the rig: see Revisions at the end.
 
 ## Why
 
@@ -64,23 +65,41 @@ across to the card it becomes.
 The widget's accessible name and the name used in menus and announcements is
 its `.card-title` text, or `data-widget-label` when it has no title.
 
-**Not widgets**, and never moved: the page header (`heroAct` and its title and
-stamp), the run gate, a loading skeleton, and an empty state. These stay above
-the grid, spanning all columns.
+**Fixed blocks.** A top-level child with no `data-widget` is a fixed block. It
+never moves and spans every column. Fixed blocks are allowed only before the
+first widget (leading) or after the last (trailing). Measured in the rig, the
+leading ones are the page header (`.ov-hero`), the Overview alerts banner (which
+renders above the header), the changes strip, page tabs and segment bars
+(`.page-tabs`, `.lbl-seg`, `.seg-row`), the Files storage meter, the run gate,
+the `.thinking` loading row and an error message; the trailing ones are the page
+chat panel (`.page-chat`, an input rather than a report card) and the Production
+Manager's order preview below 1500px. The layer keeps leading fixed blocks
+first and trailing fixed blocks last in the DOM, in their rendered order.
 
-**A group label moves with its group.** Where `cardifySections` leaves a
-heading beside a block that is already card shaped (it marks the heading
-`data-carded="group"`), the layer wraps the heading and that block in one
-`div.widget` and puts the id on the wrapper.
+**A group is built by its renderer.** Where a heading labels more than one
+block, or a heading sits bare beside a block `cardifySections` will not fold
+(Overview and SEO trends, Keywords paid search, and every heading pair in
+Forecast, Memory and Skills, which never call `cardifySections`), the renderer
+wraps the heading and its blocks in one `div.widget-group` and puts the id on
+that. The layer never wraps anything: `trendsSection` repaints by swapping
+nodes it owns, and a wrapper added from outside would break its range switch.
+Inside a group the page rhythm holds: 12px under the heading, 24px (16px on a
+phone) between blocks.
 
 **A view qualifies** for Customize when, after render, it has two or more
-widgets and every top-level child is either a widget or one of the non-widget
-kinds above. A child that is neither makes the view not customizable, writes
-`console.warn('[widgets] <view>: block without an id', node)`, and fails the
-rig probe. That is how an unlabelled block gets caught: see Testing.
+widgets and every top-level child is a widget or a fixed block in a fixed
+position. A non-widget child between two widgets makes the view not
+customizable, writes `console.warn('[widgets] <view>: block without an id',
+node)`, and fails the rig probe. That is how an unlabelled block gets caught: see
+Testing. Measured in the rig, CRM, Files, Team, Size list and Guide each render
+one block and so get no button.
 
 **Overview KPI tiles become widgets.** Each tile is an `sm` widget with id
-`kpi-<slug of its label>`, a direct child of `#ov-content`. The bespoke
+`kpi-<slug of its label>`, a direct child of `#ov-content`. The slug drops a
+bracketed threshold such as the `(≤5)` in "Low stock (≤5)", so that tile is
+`kpi-low-stock` and a change to `LOW_STOCK_THRESHOLD` does not lose it from a
+saved layout. The "Key numbers" heading goes: a heading over tiles that can be
+scattered across the page labels nothing. The bespoke
 Overview code (`ovEdit`, `reorderOv`, `toggleHideOv`, `ovOrderedLabels`,
 `metricsGridCustom`, its arrow buttons and HTML5 drag) is deleted; the tiles
 keep the `.stat` recipe. Other views' `metricsStrip()` blocks stay one `full`
@@ -155,7 +174,8 @@ The layer sets `data-cols` from the width of the content column:
 | content column narrower than `4 × --wgrid-cell` | 2 |
 | otherwise | 4 |
 
-`--wgrid-cell` is 280px. Three columns are not used: at three, `wide` is two
+`--wgrid-cell` is 240px. At 280, the content column at a 1440px window with the
+sidebar open (1109px) fell short of four cells and got two columns. Three columns are not used: at three, `wide` is two
 thirds and `sm` beside it is a third, a proportion no screen in the app has.
 A `ResizeObserver` on `.ov-wrap` recomputes it, and the sidebar folding counts
 as a resize.
@@ -274,7 +294,7 @@ All motion values are tokens in the one top-level `:root`:
 | `--ease-layout` | a `linear()` spring curve, bounce .16 | the same |
 | `--dur-landed` | `.62s` | how long the landed outline stays |
 | `--lift-scale` | `1.02` | the held card |
-| `--wgrid-cell` | `280px` | column count |
+| `--wgrid-cell` | `240px` | column count |
 | `--wgrid-gap` | `var(--sp-6)`, `var(--sp-4)` at 640px and below | grid gap |
 
 The lift uses `--shadow-lg` and the existing `--dur` and `--ease`. The spring
@@ -315,25 +335,28 @@ A departed account's entry is left in place; it is a list of card ids.
 
 ### Routes
 
-All three go through `_guard(request)` and use only the `uid` it returns. No
-route takes a user id from the request, so no one can read or write another
-person's layout.
+Every app call is a POST with a JSON body (the page's `api()` helper only
+POSTs, and the server has no PUT or DELETE route), so there is one route,
+`POST /api/layouts`, shaped like `/api/profile`. It goes through `_guard` and
+uses only the `uid` it returns. No body field names an account, so no one can
+read or write another person's layout.
 
-| Route | Does |
+| Body | Does |
 |---|---|
-| `GET /api/layouts` | the caller's layouts for every view, `{}` when none |
-| `PUT /api/layouts/{view}` | replaces the caller's layout for that view |
-| `DELETE /api/layouts/{view}` | removes it (Reset then Done) |
+| `{}` | returns `{"layouts": ...}`, the caller's layouts for every view, `{}` when none |
+| `{"view", "order", "hidden"}` | replaces the caller's layout for that view, returns the map |
+| `{"view", "reset": true}` | removes it (Reset then Done), returns the map |
 
-Validation on PUT, each a 400 with a plain message: `view` is one of the 19
-content views; body is an object with `order` and `hidden` lists; each list at
-most 64 ids; each id matches the widget id pattern. `max_body` is 8KB. The
+Validation, each a 400 with a plain message: `view` is one of the 19 content
+views; `order` and `hidden` are lists; each list at most 64 ids; each id matches
+the widget id pattern; `reset` is exactly `true`. The body is capped at 8KB on
+the bytes read, not only the declared length. The
 server does not know which ids a view renders and does not try to: the client
 drops unknown ids when it merges.
 
 ### Client
 
-The layouts are fetched once when the app starts, beside `loadProfile()`. Until they
+The layouts are fetched once when the app starts (`api('/api/layouts', {})`), beside `loadProfile()`. Until they
 arrive a view renders in default order; when they arrive the current view is
 arranged once. If the fetch fails, views stay in default order and the
 Customize button is disabled with the title "Layouts are unavailable right now".
@@ -348,8 +371,8 @@ not saved", and the view shows its last saved layout the next time it opens.
 
 On the first Overview render after the layouts arrive, if the server has no
 Overview layout and `localStorage` holds `sc_ov_layout_v1`, its labels are
-mapped to `kpi-<slug>` ids and saved with PUT. The key is removed only after
-that PUT succeeds, so a failed migration is retried next time rather than lost.
+mapped to `kpi-<slug>` ids and saved. The key is removed only after
+that save succeeds, so a failed migration is retried next time rather than lost.
 
 ## Print
 
@@ -370,8 +393,11 @@ when node is absent, like the existing one.
 - `pack` closes every row; no placement runs past the column count.
 - `full` spans every column at 1, 2 and 4 columns; `wide` is clamped at 1.
 - `canonical` returns the same array when the order is already reading order.
-- `choose` does not oscillate: after adopting a pick, choosing again from the
-  new home slot with the pointer unmoved returns null.
+- `choose` converges: with the pointer still, each adopted move brings the
+  card's slot strictly nearer the pointer, no order repeats, and the chain ends.
+  (The stricter "a second choice returns null" is false for this algorithm: in
+  341,127 harness picks, 6,366 took a second or third step, each nearer. The
+  drag loop therefore expects a still pointer to settle over a few frames.)
 - A group swap trades a `wide` with two `sm` widgets that fill its shape.
 - `mergeOrder` drops unknown and duplicate ids, puts an unmentioned id at its
   default index, and removes hidden ids.
@@ -380,9 +406,9 @@ when node is absent, like the existing one.
 ### Server, in `tests/test_dispatch.py`
 
 - Two accounts save different Overview layouts; each reads back only its own.
-- Without a session every route answers 401.
+- Without a session the route answers 401.
 - An unknown view, a non-list, 65 ids, and an id with a space are each 400.
-- DELETE removes only the caller's entry for that view.
+- A reset removes only the caller's entry for that view.
 - A new account reads `{}`.
 - The store is written through `_write_json_store` with `private=True`.
 
@@ -434,6 +460,27 @@ One feature, delivered in stages that each leave the app working:
 - The outline said "the component's exact tiler". The algorithm is ported as
   written, but with `tall` and `lg` removed and `full` added, because gizmo's
   rows size to content.
+
+## Revisions after stage 1 (2026-09-17)
+
+Stage 1 built the engine, the route and the rig, and measured every screen.
+What it changed here:
+
+- **One POST route** instead of GET, PUT and DELETE, to match the rest of the app.
+- **Fixed blocks** replace the short list of non-widget kinds: the rig found
+  tabs, segment bars, a storage meter, the alerts banner, the changes strip, the
+  page chat and a preview pane at the top or bottom of screens, none of which
+  the first list named.
+- **Renderers build groups**, not the layer, because some groups hold two or
+  three blocks and one of them repaints its own nodes.
+- **`--wgrid-cell` is 240px**, not 280, so a 1440px window with the sidebar open
+  gets four columns.
+- **KPI ids ignore the low-stock threshold**, and the "Key numbers" heading goes.
+- **A group swap must fill its area.** Ported line for line, the component let
+  a swap reach into the empty end of a short last row; that order put the card
+  somewhere other than the slot it claimed, and the chooser picked it every
+  frame. The component's own comment says the area is filled entirely.
+- **The chooser converges rather than stopping at once**; the test says so.
 
 ## Choices made while writing this spec
 
