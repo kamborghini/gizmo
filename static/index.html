@@ -4402,7 +4402,13 @@ Projected Image UK"></textarea>
                account only once it is known whose browser cache this is: by
                the time this runs, a different owner's has been cleared. */
             wgOwnerKnown = true;
-            Promise.resolve().then(wgMigrateOverview);
+            /* The layouts are read here, the moment the app knows who is signed
+               in, and not at start-up: a sign-in from the login screen does not
+               reload the page, so a read made before it failed and left
+               Customize switched off for the whole session, and a different
+               person signing in would have been shown the last person's
+               arrangement. The migration runs once they have arrived. */
+            Promise.resolve().then(wgLoadLayouts);
             let owner = null;
             try { owner = localStorage.getItem(LS_OWNER); } catch (e) { return; }
             if (owner === id) return;
@@ -4722,12 +4728,14 @@ Projected Image UK"></textarea>
            wgCandidates lists the orders one move away and wgChoose picks one.
            Nothing between these two marker lines reads or writes the page, so
            tests/test_frontend.py lifts the block out and runs it under node.
-           Three changes from the component: sizes are sm (one column), wide
+           Four changes from the component: sizes are sm (one column), wide
            (two) and full (every column), all one row high, because gizmo's rows
            are as tall as their content and a two row card would need a row
-           height nobody knows; slot rectangles come from wgSlotFor, which reads
-           row edges from the rendered rows instead of assuming square cells; and
-           a group swap's cards must fill its area, for the reason given there. */
+           height nobody knows; the layout keeps the order it is given instead of
+           tiling, for the reason given at wgLayout; slot rectangles come from
+           wgSlotFor, which reads row edges from the rendered rows instead of
+           assuming square cells; and a group swap must put the card where it
+           claims, for the reason given there. */
         const WG_SPANS = { sm: { col: 1, row: 1 }, wide: { col: 2, row: 1 }, full: { col: Infinity, row: 1 } };
         const wgOverlaps = (a, b) => a.col < b.col + b.w && b.col < a.col + a.w && a.row < b.row + b.h && b.row < a.row + a.h;
         const wgContains = (outer, inner) => inner.col >= outer.col && inner.row >= outer.row
@@ -4737,125 +4745,30 @@ Projected Image UK"></textarea>
             const span = Object.prototype.hasOwnProperty.call(WG_SPANS, item.size) ? WG_SPANS[item.size] : WG_SPANS.full;
             return { w: Math.min(span.col, columns), h: span.row };
         }
-        /* Exact tiling first, because it moves nothing but the order: every card
-           keeps its own width and no row has a hole except possibly the last.
-           Only when that cannot be found in budget does the packer widen cards
-           to close the rows. */
+        /* Cards in the order given, left to right, one after another; a card
+           that does not fit the rest of its row starts the next one. This is
+           where gizmo parts from the component, whose tiler seated a later card
+           before an earlier one to close a hole and widened cards when it could
+           not. gizmo's pages read top to bottom and most of their cards span
+           the row, so closing a hole meant moving a whole report: with nine or
+           ten KPI tiles on the Overview the tiler pulled Sales by sector up
+           between them, and a card dropped between two reports jumped to the
+           foot of the page. Here a card is exactly where it was put, a short
+           row keeps its gap as the old tile grid did, and the placement is the
+           one the browser's own grid auto-placement gives for the same order
+           and spans, so the arithmetic and the page cannot disagree. */
         function wgLayout(items, columns) {
             if (columns < 1 || items.length === 0) return [];
-            return wgTile(items, columns) || wgPack(items, columns);
-        }
-        // A cap on backtracking steps, so a pathological order costs a packed layout rather than a frozen frame.
-        const WG_TILING_BUDGET = 20000;
-        /* The first empty cell in reading order takes the earliest widget that
-           fits there and still lets the rest be placed. */
-        function wgTile(items, columns) {
-            const spans = items.map(item => wgSpanOf(item, columns));
-            const area = spans.reduce((n, s) => n + s.w * s.h, 0);
-            const rows = Math.ceil(area / columns);
-            const grid = new Array(rows * columns).fill(false);
-            const used = new Array(items.length).fill(false);
             const out = [];
-            let budget = WG_TILING_BUDGET;
-            const fits = (w, h, r, c) => {
-                if (c + w > columns || r + h > rows) return false;
-                for (let y = r; y < r + h; y++)
-                    for (let x = c; x < c + w; x++) if (grid[y * columns + x]) return false;
-                return true;
-            };
-            const mark = (w, h, r, c, v) => {
-                for (let y = r; y < r + h; y++)
-                    for (let x = c; x < c + w; x++) grid[y * columns + x] = v;
-            };
-            const place = (count) => {
-                if (count === items.length) return true;
-                if (--budget < 0) return false;
-                const i = grid.indexOf(false);
-                if (i < 0) return false;
-                const r = Math.floor(i / columns), c = i % columns;
-                // Widgets of one shape are interchangeable at this cell, so a shape that failed here is not tried again.
-                const tried = new Set();
-                for (let k = 0; k < items.length; k++) {
-                    if (used[k]) continue;
-                    const { w, h } = spans[k];
-                    const shape = w + 'x' + h;
-                    if (tried.has(shape) || !fits(w, h, r, c)) continue;
-                    tried.add(shape);
-                    used[k] = true;
-                    mark(w, h, r, c, true);
-                    out.push({ id: items[k].id, col: c, row: r, w, h });
-                    if (place(count + 1)) return true;
-                    out.pop();
-                    mark(w, h, r, c, false);
-                    used[k] = false;
-                }
-                return false;
-            };
-            return place(0) ? out : null;
-        }
-        /* The fallback fills a band of rows in order, then widens cards into
-           whatever the band left empty. Once one card is deferred to the next
-           band every later card is too, so the reading order stays the order. */
-        function wgPack(items, columns) {
-            const out = [];
-            let row = 0;
-            let queue = items.map(item => Object.assign({ id: item.id }, wgSpanOf(item, columns)));
-            while (queue.length > 0) {
-                const height = Math.max(...queue.slice(0, columns).map(q => q.h));
-                const cells = new Array(height * columns).fill(false);
-                const band = [], rest = [];
-                for (const q of queue) {
-                    let spot = -1;
-                    for (let i = 0; i < cells.length && spot < 0; i++) {
-                        const r = Math.floor(i / columns), c = i % columns;
-                        if (c + q.w > columns || r + q.h > height) continue;
-                        let free = true;
-                        for (let y = r; y < r + q.h && free; y++)
-                            for (let x = c; x < c + q.w && free; x++)
-                                if (cells[y * columns + x]) free = false;
-                        if (free) spot = i;
-                    }
-                    if (spot < 0 || rest.length > 0) { rest.push(q); continue; }
-                    const r = Math.floor(spot / columns), c = spot % columns;
-                    for (let y = r; y < r + q.h; y++)
-                        for (let x = c; x < c + q.w; x++) cells[y * columns + x] = true;
-                    band.push({ id: q.id, col: c, row: r, w: q.w, h: q.h });
-                }
-                // Grow the card to the left of an empty cell, or failing that the one above it.
-                for (let i = 0; i < cells.length; i++) {
-                    if (cells[i]) continue;
-                    const r = Math.floor(i / columns), c = i % columns;
-                    const left = band.find(p => p.col + p.w === c && p.row <= r && p.row + p.h > r && p.h === 1);
-                    const above = band.find(p => p.row + p.h === r && p.col === c && p.w === 1);
-                    const grow = left || above;
-                    if (!grow) continue;
-                    if (grow === left) grow.w += 1;
-                    else grow.h += 1;
-                    cells[i] = true;
-                }
-                out.push(...band.map(p => Object.assign({}, p, { row: p.row + row })));
-                row += height;
-                queue = rest;
-            }
-            return out;
-        }
-        /* The tiler may seat a later card before an earlier one to avoid a hole,
-           so this takes the reading order of the layout as the order, but only
-           when laying that order out again gives the same picture. It returns
-           the same array when nothing changes, which is what lets a caller skip
-           a DOM pass. */
-        function wgCanonical(items, columns) {
-            const places = wgLayout(items, columns);
-            if (places.length !== items.length) return items;
-            const byId = new Map(items.map(item => [item.id, item]));
-            const sorted = [...places].sort((a, b) => a.row - b.row || a.col - b.col).map(p => byId.get(p.id));
-            if (sorted.every((item, i) => item === items[i])) return items;
-            const at = new Map(places.map(p => [p.id, p]));
-            const same = wgLayout(sorted, columns).every(p => {
-                const q = at.get(p.id);
-                return q && q.col === p.col && q.row === p.row && q.w === p.w && q.h === p.h;
+            let row = 0, col = 0;
+            items.forEach(item => {
+                const { w, h } = wgSpanOf(item, columns);
+                if (col > 0 && col + w > columns) { row += 1; col = 0; }
+                out.push({ id: item.id, col, row, w, h });
+                col += w;
+                if (col >= columns) { row += 1; col = 0; }
             });
-            return same ? sorted : items;
+            return out;
         }
         function wgMoveTo(items, id, index) {
             const from = items.findIndex(item => item.id === id);
@@ -4927,7 +4840,13 @@ Projected Image UK"></textarea>
                             ? Object.assign({}, p, { col: p.col - col + me.col, row: p.row - row + me.row })
                             : p);
                     moved.sort((a, b) => a.row - b.row || a.col - b.col);
-                    out.push({ order: moved.map(p => byId.get(p.id)), slot: toSlot(area) });
+                    const order = moved.map(p => byId.get(p.id));
+                    /* Laid out again, the order must seat the card in the area it
+                       traded for. A swap that changes where a row breaks would
+                       otherwise steer the chooser by a slot the card never takes. */
+                    const lands = wgLayout(order, columns).find(p => p.id === id);
+                    if (!lands || lands.col !== col || lands.row !== row) continue;
+                    out.push({ order, slot: toSlot(area) });
                 }
             }
             const from = items.findIndex(item => item.id === id);
@@ -5465,12 +5384,7 @@ Projected Image UK"></textarea>
         function wgBody(view, root) {
             const defaults = wgDefaults[view] || [];
             const draft = wgMergeOrder(defaults, wgEdit.draft);
-            const cols = +root.getAttribute('data-cols') || 1;
-            const size = new Map([...root.children].filter(n => n.hasAttribute('data-widget'))
-                .map(n => [n.getAttribute('data-widget'), n.getAttribute('data-size') || 'full']));
-            const read = (ids) => wgLayout(ids.map(id => ({ id, size: size.get(id) })), cols)
-                .sort((a, b) => a.row - b.row || a.col - b.col).map(p => p.id).join(' ');
-            if (!draft.hidden.length && (draft.order.join(' ') === defaults.join(' ') || read(draft.order) === read(defaults)))
+            if (!draft.hidden.length && draft.order.join(' ') === defaults.join(' '))
                 return { view, reset: true };
             const saved = (wgLayouts && wgLayouts[view]) || {};
             const rendered = new Set(defaults);
@@ -5493,6 +5407,15 @@ Projected Image UK"></textarea>
             if (!edit || edit.view !== view || edit.saving) return false;
             if (wgDrag) wgDragEnd(false);
             const root = wgRoot(view);
+            /* A view that is not showing its cards has nothing to save: a product
+               opened from the list, a run gate, a refresh half drawn. A draft laid
+               against no cards reads as the default, and Done would delete the
+               layout the person had. Leaving drops the draft instead; otherwise
+               the mode waits for the cards to come back. */
+            if (!root.classList.contains('wgrid')) {
+                if (leaving && wgEdit === edit) wgEdit = null;
+                return false;
+            }
             const body = wgBody(view, root);
             edit.saving = true;
             wgControls(view, root, true);
@@ -5703,9 +5626,8 @@ Projected Image UK"></textarea>
             const cx = d.x - d.grabX + box.width / 2, cy = d.y - d.grabY + box.height / 2;
             const pick = wgChoose(wgSlotFor(me, g), wgCandidates(items, d.id, cols, (s) => wgSlotFor(s, g)), cx, cy);
             if (!pick) return false;
-            const next = wgCanonical(pick, cols);
-            if (wgSameOrder(next, items)) return false;
-            wgAdopt(d.view, next, d.card);
+            if (wgSameOrder(pick, items)) return false;
+            wgAdopt(d.view, pick, d.card);
             wgFollow();
             return true;
         }
@@ -5766,11 +5688,10 @@ Projected Image UK"></textarea>
         }
         /* ----- keyboard -----
            Alt with Right or Down moves the focused card one place later, Left
-           or Up one place earlier. When the tiler would put an order straight
-           back (a small card cannot pass a wide one without leaving a hole),
-           the move reaches one place further, until the card moves or the end
-           is reached. Enter and Space are held back so a card that opens
-           something on its own does not open while it is being arranged. */
+           or Up one place earlier, stopping at either end. The layout keeps the
+           order it is given, so one place in the order is one place on the page.
+           Enter and Space are held back so a card that opens something on its
+           own does not open while it is being arranged. */
         function wgKey(view, e) {
             if (!wgEdit || wgEdit.view !== view || wgEdit.saving) return;
             const root = wgRoot(view), card = e.target;
@@ -5781,17 +5702,8 @@ Projected Image UK"></textarea>
             e.preventDefault();
             e.stopPropagation();
             const items = wgItems(root), id = card.getAttribute('data-widget');
-            const cols = +root.getAttribute('data-cols') || 1;
-            const from = items.findIndex(i => i.id === id);
-            let next = null, reached = from;
-            for (let step = 1; step < items.length && !next; step++) {
-                const to = Math.max(0, Math.min(items.length - 1, from + delta * step));
-                if (to === reached) break;
-                reached = to;
-                const order = wgCanonical(wgKeyMove(items, id, delta * step), cols);
-                if (!wgSameOrder(order, items)) next = order;
-            }
-            if (!next) return;
+            const next = wgKeyMove(items, id, delta);
+            if (next === items) return;
             wgAdopt(view, next);
             // Moving a node in the DOM drops its focus, and the keyboard is still holding this card.
             if (document.activeElement !== card) card.focus();
@@ -24259,7 +24171,6 @@ Projected Image UK"></textarea>
         renderSidebar(); renderChat(); authBoot(); setView(bootLabels ? 'labels' : 'overview');
         if (bootOrderId) (bootQP.get('dispatch') === '1' ? dispatchFromAdminLink : printFromAdminLink)(bootOrderId);
         loadProfile();  // pull the saved store profile from the server (for the Settings modal)
-        wgLoadLayouts();  // this person's card layouts, for the widget grid
         loadMemory();   // pull saved memories (for Overview follow-ups + the Memory tab)
         loadAnalysisCache();  // restore last AI-tab results (no tokens spent)
         loadAlerts();         // any change alerts from scheduled refreshes

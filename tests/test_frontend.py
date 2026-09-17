@@ -5703,15 +5703,12 @@ const END = '        /* ---------- widget layout end ---------- */';
 const a = html.indexOf(START), b = html.indexOf(END, a + 1);
 if (a < 0 || b < 0) { console.log('EXTRACT_FAILED'); process.exit(0); }
 const block = html.slice(a, b + END.length);
-// Evaluated inside a function, so a second copy with a lower budget cannot
-// rebind the first copy's names.
-const NAMES = 'WG_SPANS, WG_TILING_BUDGET, WG_ENTER, wgOverlaps, wgContains, wgSpanOf, wgLayout, '
-  + 'wgTile, wgPack, wgCanonical, wgMoveTo, wgSameOrder, wgChoose, wgCandidates, '
+// Evaluated inside a function, so the block's names stay out of this script's own scope.
+const NAMES = 'WG_SPANS, WG_ENTER, wgOverlaps, wgContains, wgSpanOf, wgLayout, '
+  + 'wgMoveTo, wgSameOrder, wgChoose, wgCandidates, '
   + 'wgMergeOrder, wgKeyMove, wgColumns, wgSlotFor, WG_ID, wgKpiId';
 const lift = (src) => eval('(function () {\n' + src + '\nreturn { ' + NAMES + ' };\n})()');
 const W = lift(block);
-const BUDGET = /const WG_TILING_BUDGET = \d+;/;
-const L = BUDGET.test(block) ? lift(block.replace(BUDGET, 'const WG_TILING_BUDGET = 3;')) : null;
 
 const ran = {}, fails = {}, stats = {};
 const fail = (key, msg) => { fails[key] = fails[key] || []; if (fails[key].length < 5) fails[key].push(msg); };
@@ -5773,27 +5770,46 @@ function cover(places, items, columns) {
 }
 const readingIds = (places) => [...places].sort((p, q) => p.row - q.row || p.col - q.col).map(p => p.id).join(' ');
 
-check('tile', (count) => {
+check('flow', (count) => {
   for (const { columns, items } of CASES) {
-    const t = W.wgTile(items, columns);
+    const places = W.wgLayout(items, columns);
     const tag = columns + ' cols [' + show(items) + ']';
     count();
-    if (!t) { fail('tile', 'did not tile ' + tag); continue; }
-    const c = cover(t, items, columns);
-    c.problems.forEach(m => fail('tile', m + ' in ' + tag));
-    c.fill.forEach((n, r) => { if (r < c.rows - 1 && n !== columns) fail('tile', 'row ' + r + ' has ' + (columns - n) + ' empty cells in ' + tag); });
-    const area = items.reduce((n, i) => n + W.wgSpanOf(i, columns).w, 0);
-    if (c.rows !== Math.ceil(area / columns)) fail('tile', c.rows + ' rows for area ' + area + ' in ' + tag);
-    t.forEach(p => { const it = items.find(i => i.id === p.id); if (it && p.w !== W.wgSpanOf(it, columns).w) fail('tile', p.id + ' was stretched in ' + tag); });
-    if (!same(W.wgLayout(items, columns), t)) fail('tile', 'wgLayout did not use the tiling for ' + tag);
+    cover(places, items, columns).problems.forEach(m => fail('flow', m + ' in ' + tag));
+    if (places.map(p => p.id).join(' ') !== ids(items) || readingIds(places) !== ids(items))
+      fail('flow', 'the page reads ' + readingIds(places) + ', not the order given, in ' + tag);
+    places.forEach((p, i) => {
+      const w = W.wgSpanOf(items[i], columns).w;
+      if (p.w !== w) fail('flow', p.id + ' is ' + p.w + ' wide, not its own ' + w + ', in ' + tag);
+      if (i === 0) { if (p.row !== 0 || p.col !== 0) fail('flow', 'the first card is not at the start in ' + tag); return; }
+      const q = places[i - 1], end = q.col + q.w;
+      // Beside the card before it when it fits the rest of that row, else at the start of the next row, never further.
+      const fits = end < columns && end + p.w <= columns;
+      const want = fits ? { row: q.row, col: end } : { row: q.row + 1, col: 0 };
+      if (p.row !== want.row || p.col !== want.col) fail('flow', p.id + ' at ' + p.row + '/' + p.col + ' should be at ' + want.row + '/' + want.col + ' in ' + tag);
+    });
   }
-  if (!same(W.wgLayout([], 4), []) || !same(W.wgLayout([{ id: 'a', size: 'sm' }], 0), [])) fail('tile', 'no items or no columns should lay out nothing');
+  if (!same(W.wgLayout([], 4), []) || !same(W.wgLayout([{ id: 'a', size: 'sm' }], 0), [])) fail('flow', 'no items or no columns should lay out nothing');
+  // The Overview: however many KPI tiles the store has, every report after them stays after them.
+  for (let tiles = 0; tiles <= 12; tiles++) {
+    for (const columns of [1, 2, 4]) {
+      count();
+      const items = [{ id: 'followups', size: 'full' }]
+        .concat(Array.from({ length: tiles }, (_, i) => ({ id: 'kpi-' + i, size: 'sm' })))
+        .concat(['sectors', 'trends', 'notable', 'actions'].map(id => ({ id, size: 'full' })));
+      if (readingIds(W.wgLayout(items, columns)) !== ids(items)) fail('flow', tiles + ' tiles at ' + columns + ' columns reorder the Overview');
+    }
+  }
+  const four = ['sm', 'wide', 'sm', 'full'].map((size, i) => ({ id: 'abcd'[i], size }));
+  count();
+  if (!W.wgSameOrder(four, four.map(i => Object.assign({}, i))) || W.wgSameOrder(four, [four[1], four[0], four[2], four[3]]) || W.wgSameOrder(four, four.slice(1)))
+    fail('flow', 'wgSameOrder compares ids in order and length');
 });
 
 check('columns', (count) => {
   for (const { columns, items } of CASES) {
     const tag = columns + ' cols [' + show(items) + ']';
-    for (const [name, places] of [['wgLayout', W.wgLayout(items, columns)], ['wgPack', W.wgPack(items, columns)]]) {
+    for (const [name, places] of [['wgLayout', W.wgLayout(items, columns)]]) {
       count();
       places.forEach(p => {
         if (p.col < 0 || p.col + p.w > columns) fail('columns', name + ' put ' + p.id + ' past the last column in ' + tag);
@@ -5818,61 +5834,6 @@ check('columns', (count) => {
   }
 });
 
-check('pack', (count) => {
-  if (!L) { fail('pack', 'const WG_TILING_BUDGET = <number>; was not found, so the budget could not be lowered'); return; }
-  const closed = (key, places, items, columns, tag) => {
-    const c = cover(places, items, columns);
-    c.problems.forEach(m => fail(key, m + ' in ' + tag));
-    c.fill.forEach((n, r) => { if (n !== columns) fail(key, 'row ' + r + ' left ' + (columns - n) + ' cells open in ' + tag); });
-    if (readingIds(places) !== ids(items)) fail(key, 'reading order ' + readingIds(places) + ' is not the order in ' + tag);
-  };
-  let fellBack = 0;
-  for (const { columns, items } of CASES) {
-    const tag = columns + ' cols [' + show(items) + ']';
-    count();
-    closed('pack', W.wgPack(items, columns), items, columns, tag);
-    if (items.length < 4) continue;
-    if (L.wgTile(items, columns) !== null) { fail('pack', 'a budget of 3 still tiled ' + tag); continue; }
-    const got = L.wgLayout(items, columns);
-    if (!same(got, L.wgPack(items, columns))) fail('pack', 'wgLayout did not fall back to wgPack for ' + tag);
-    closed('pack', got, items, columns, tag);
-    fellBack++;
-  }
-  if (!fellBack) fail('pack', 'no case fell back to the packer');
-  // A wide that does not fit defers everything after it, and the small card
-  // left alone grows to close the row.
-  const fx = ['wide', 'sm', 'wide', 'sm', 'sm'].map((size, i) => ({ id: 'p' + i, size }));
-  const want = [{ id: 'p0', col: 0, row: 0, w: 2, h: 1 }, { id: 'p1', col: 2, row: 0, w: 2, h: 1 },
-                { id: 'p2', col: 0, row: 1, w: 2, h: 1 }, { id: 'p3', col: 2, row: 1, w: 1, h: 1 }, { id: 'p4', col: 3, row: 1, w: 1, h: 1 }];
-  count();
-  if (!same(W.wgPack(fx, 4), want)) fail('pack', 'wgPack([wide sm wide sm sm], 4) gave ' + JSON.stringify(W.wgPack(fx, 4)));
-});
-
-check('canonical', (count) => {
-  for (const { columns, items } of CASES) {
-    const tag = columns + ' cols [' + show(items) + ']';
-    count();
-    const once = W.wgCanonical(items, columns);
-    if (W.wgCanonical(once, columns) !== once) fail('canonical', 'a canonical order came back as a new array for ' + tag);
-    if (!once.every(i => items.includes(i)) || once.length !== items.length) fail('canonical', 'the order lost or replaced an item for ' + tag);
-    if (readingIds(W.wgLayout(items, columns)) === ids(items) && once !== items) fail('canonical', 'an order already in reading order was copied for ' + tag);
-    if (!same(W.wgLayout(once, columns).map(p => p.id + p.col + '/' + p.row + '/' + p.w).sort(), W.wgLayout(items, columns).map(p => p.id + p.col + '/' + p.row + '/' + p.w).sort()))
-      fail('canonical', 'the canonical order lays out differently for ' + tag);
-  }
-  const mk = (sizes) => sizes.map((size, i) => ({ id: 'abcde'[i], size }));
-  const four = mk(['sm', 'wide', 'sm', 'full']);
-  count();
-  if (!W.wgSameOrder(four, four.map(i => Object.assign({}, i))) || W.wgSameOrder(four, [four[1], four[0], four[2], four[3]]) || W.wgSameOrder(four, four.slice(1)))
-    fail('canonical', 'wgSameOrder compares ids in order and length');
-  const settled = mk(['sm', 'sm', 'wide']);
-  count();
-  if (W.wgCanonical(settled, 4) !== settled) fail('canonical', '[sm sm wide] at 4 was copied');
-  const jumped = mk(['sm', 'full', 'sm', 'sm', 'sm']);
-  const got = W.wgCanonical(jumped, 4);
-  count();
-  if (got === jumped || ids(got) !== 'a c d e b') fail('canonical', '[sm full sm sm sm] at 4 should read a c d e b, got ' + ids(got));
-});
-
 // Uniform rows, so every slot is a known rectangle.
 const geometry = (columns, rows) => {
   const unit = 200, gap = 16, height = 100;
@@ -5888,7 +5849,7 @@ check('choose', (count) => {
   const gap = (s, cx, cy) => Math.hypot(Math.max(s.left - cx, 0, cx - s.right), Math.max(s.top - cy, 0, cy - s.bottom));
   let picks = 0, chained = 0, longest = 0;
   for (const { columns, items } of CASES.filter((c, i) => i % 8 === 0 && c.items.length <= 12)) {
-    const cur = W.wgCanonical(items, columns);
+    const cur = items;
     const rows = W.wgLayout(cur, columns).reduce((n, p) => Math.max(n, p.row + 1), 0);
     const g = geometry(columns, rows);
     const toSlot = (box) => W.wgSlotFor(box, g);
@@ -5918,7 +5879,7 @@ check('choose', (count) => {
           for (;;) {
             const pick = W.wgChoose(s.home, s.candidates, x, y);
             if (!pick) break;
-            order = W.wgCanonical(pick, columns);
+            order = pick;
             s = step(order, id);
             moves++;
             const now = gap(s.home, x, y);
@@ -6132,57 +6093,42 @@ def _wg_check(key, claim):
 
 
 @test
-def t_an_exact_tiling_leaves_no_hole_before_the_last_row_and_places_every_widget_once():
-    """The grid is gizmo's own port of the tiler in Cameron's React component,
-    and the point of the tiler is that a page of cards reads as whole rows. Run
-    over 1,200 seeded mixes of sm, wide and full at one, two and four columns:
-    every widget is placed once at its own width, no two overlap, and only the
-    last row may be short."""
-    _wg_check("tile", "an exact tiling left a hole, dropped a card or stretched one")
+def t_a_card_is_laid_out_exactly_where_its_order_puts_it():
+    """The component's tiler seated a later card before an earlier one to close
+    a hole in a row. On gizmo's pages, which read top to bottom and whose cards
+    mostly span the row, that meant moving whole reports: with nine or ten KPI
+    tiles the Overview pulled Sales by sector up between them, and a card
+    dropped between two reports jumped to the foot of the page. So the layout
+    keeps the order it is given. Over 1,200 seeded mixes of sm, wide and full at
+    one, two and four columns, every card is placed once at its own width, sits
+    beside the card before it when it fits the rest of the row and otherwise
+    starts the next row, which is what the browser's grid auto-placement does
+    with the same spans, and the Overview keeps its order with any number of
+    tiles from none to twelve."""
+    _wg_check("flow", "the layout moved a card away from its place in the order")
 
 
 @test
 def t_no_widget_is_placed_past_the_last_column():
     """full is Infinity columns wide and has to be clamped, and a wide card on a
-    phone has one column to sit in. Neither the tiler nor the packer may put a
-    card past the column count, full spans every column, wide is one column at
-    one, and a size nobody set spans the row."""
+    phone has one column to sit in. The layout may not put a card past the
+    column count, full spans every column, wide is one column at one, and a
+    size nobody set spans the row."""
     _wg_check("columns", "a card ran past the last column or took the wrong span")
-
-
-@test
-def t_when_tiling_gives_up_the_packer_closes_every_row():
-    """The tiler stops after WG_TILING_BUDGET steps and the packer takes over.
-    The harness runs a second copy of the block with the budget cut to 3, so
-    the fallback is exercised on every case of four or more cards: it must
-    close every row it builds by widening a card, and it must keep the order,
-    which is what deferring every card after the first one that does not fit
-    guarantees."""
-    _wg_check("pack", "the packer left a row open or changed the order")
-
-
-@test
-def t_a_layout_already_in_reading_order_comes_back_as_the_same_array():
-    """While a card is held the chooser runs every frame, and most frames move
-    nothing. wgCanonical returns the same array when nothing moves, so a caller
-    can see that by identity instead of comparing ids, and a canonical order is
-    canonical again."""
-    _wg_check("canonical", "wgCanonical copied an order it did not change, or changed the layout")
 
 
 @test
 def t_a_held_widget_never_swaps_back_and_forth_under_a_still_pointer():
     """With the pointer held still over thousands of positions, each adopted
-    pick is canonicalised and the chooser is asked again from the card's new
-    slot. It may move again, but only strictly nearer the pointer, so no order
-    comes round twice and the chain ends. The spec said the second choice is
-    always null; it is not, about one pick in fifty takes a second or third
-    step, each closer, which is convergence rather than oscillation. Every
-    candidate's slot must also be where its order really puts the card: as
-    ported line for line, a group swap could claim a slot in the empty end of a
-    short last row that its order never reaches, and the chooser picked it
-    every frame. Between two neighbours there is a dead band, from WG_ENTER,
-    where neither takes the card."""
+    pick is taken as the new order and the chooser is asked again from the
+    card's new slot. It may move again, but only strictly nearer the pointer, so
+    no order comes round twice and the chain ends. The spec said the second
+    choice is always null; it is not, some picks take a second or third step,
+    each closer, which is convergence rather than oscillation. Every
+    candidate's slot must also be where its order really puts the card: a group
+    swap that claims a slot its order never gives the card is a slot the
+    chooser would pick every frame. Between two neighbours there is a dead
+    band, from WG_ENTER, where neither takes the card."""
     _wg_check("choose", "the chooser moved a card no nearer, came back to an order, or jumped inside the dead band")
 
 
@@ -6512,10 +6458,15 @@ def t_done_saves_before_it_leaves_and_a_failure_keeps_the_draft():
     Done, and a failure there drops the draft, so the view opens on its last
     saved layout. A draft that is the default deletes the saved layout instead
     of saving a copy of it, and a card that did not render today keeps its
-    saved place."""
+    saved place. A view that is not showing its cards (a product opened from
+    the list, a run gate, a refresh half drawn) saves nothing: its draft would
+    be laid against no cards, read as the default, and delete the layout."""
     commit = _wg_fn("async function wgCommit(")
-    ok(commit.index("await api('/api/layouts', body)") < commit.index("wgEdit = null"),
+    answer = commit.index("await api('/api/layouts', body)")
+    ok(answer < commit.index("if (wgEdit === edit) wgEdit = null;", answer),
        "the mode ends only after the answer")
+    ok(commit.index("if (!root.classList.contains('wgrid'))") < commit.index("const body = wgBody(view, root);"),
+       "nothing is sent for a view that is not showing its cards")
     ok("if (ok || leaving)" in commit and "leaving ? 'Your layout was not saved' : 'Your layout was not saved. Try Done again.'" in commit,
        "a failed Done stays in the mode; a failed leave drops the draft; each says so")
     ok("if (wgEdit && wgEdit.view !== v) wgCommit(wgEdit.view, true);" in fn_src("function setView("),
@@ -6524,8 +6475,11 @@ def t_done_saves_before_it_leaves_and_a_failure_keeps_the_draft():
     ok("return { view, reset: true };" in body, "a default draft resets")
     ok("order.splice(Math.min(i, order.length), 0, id);" in body and "if (rendered.has(id) || order.indexOf(id) >= 0" in body,
        "a saved id that did not render goes back in at its saved index")
-    ok("api('/api/layouts', {})" in _wg_fn("async function wgLoadLayouts(") and "wgLoadLayouts();" in SCRIPT,
-       "the layouts are read once at start-up")
+    ok("api('/api/layouts', {})" in _wg_fn("async function wgLoadLayouts("), "the layouts come from the account")
+    claim = fn_src("function claimLocalCache(")
+    ok("Promise.resolve().then(wgLoadLayouts);" in claim and claim.index("wgLoadLayouts") < claim.index("if (owner === id) return;"),
+       "the layouts are read when the app learns who is signed in, including a sign-in that does not reload the page")
+    ok(SCRIPT.count("wgLoadLayouts") == 2, "and from nowhere else, so a read made before sign-in cannot switch Customize off")
 
 
 @test
