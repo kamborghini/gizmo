@@ -205,9 +205,11 @@
             --chevron-room: 30px;   /* right padding a select keeps clear for its chevron */
             --icon-col: 34px;       /* the file list's icon column: 16px glyph, 18px gutter */
             /* The widget grid. Four columns when four cells of --wgrid-cell fit
-               the content column, else two, one on a phone; the gap is the page
-               rhythm, re-pointed for a phone where the rhythm is 16. */
-            --wgrid-cell: 240px; --wgrid-gap: var(--sp-6);
+               the content column, else two, one on a phone. Its gap is the
+               page's own --page-rhythm, set on .ov-wrap, so there is one
+               number for the space between blocks whether or not a page is a
+               grid. */
+            --wgrid-cell: 240px;
             /* Cards sliding to new places, and a dropped card settling. The
                curve is a damped spring, bounce .16 (damping ratio z = .84),
                sampled at 24 even stops over the duration:
@@ -821,15 +823,15 @@
            its own size. The gap is the page rhythm, so the margins the flow
            layout spaced blocks with are zeroed here. */
         .ov-wrap.wgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
-            gap: var(--wgrid-gap); align-items: stretch; }
+            gap: var(--page-rhythm); align-items: stretch; }
         .ov-wrap.wgrid[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .ov-wrap.wgrid[data-cols="1"] { grid-template-columns: minmax(0, 1fr); }
         .ov-wrap.wgrid > * { margin: 0; }
         /* A fixed block (the header, a banner, the page chat) takes the whole
-           row, and so does a card the tiler gave every column. */
+           row, and so does a card as wide as the grid. No span of three: sizes
+           are one, two or every column, and the layout never widens a card. */
         .ov-wrap.wgrid > :not([data-widget]), .ov-wrap.wgrid > [data-span="full"] { grid-column: 1 / -1; }
         .ov-wrap.wgrid > [data-span="2"] { grid-column: span 2; }
-        .ov-wrap.wgrid > [data-span="3"] { grid-column: span 3; }
         /* The hidden attribute alone loses to a card's own display: flex. */
         .ov-wrap.wgrid > [data-widget][hidden] { display: none; }
         /* A holder its renderer has not filled yet (the trade radar before
@@ -839,7 +841,7 @@
         /* A tab strip belongs to the header above it, so it keeps the
            header's internal 16 there rather than the gap between two blocks,
            as .ov-hero:has(+ .page-tabs) gives it in the flow. */
-        .ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-4) - var(--wgrid-gap)); }
+        .ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-4) - var(--page-rhythm)); }
         /* A segment bar is as wide as its buttons in the flow; a grid item
            would stretch its track across the whole row. */
         .ov-wrap.wgrid > .lbl-seg { justify-self: start; }
@@ -852,9 +854,6 @@
         .ov-wrap .widget-group > .widget-bare > :first-child { margin-top: 0; }
         .ov-wrap.wgrid > :is(.page-chat, .block, .widget-bare) > :last-child,
         .ov-wrap .widget-group > .widget-bare > :last-child { margin-bottom: 0; }
-        @media (max-width: 640px) {
-            :root { --wgrid-gap: var(--sp-4); }
-        }
         /* One card made of a heading and the blocks under it, built by the
            renderer that owns them, because trendsSection repaints by swapping
            its own nodes and a wrapper added from outside would break that. The
@@ -862,7 +861,7 @@
            blocks. */
         .widget-group { display: flex; flex-direction: column; min-width: 0; }
         .ov-wrap .widget-group > * { margin: 0; }
-        .ov-wrap .widget-group > * + * { margin-top: var(--wgrid-gap); }
+        .ov-wrap .widget-group > * + * { margin-top: var(--page-rhythm); }
         .ov-wrap .widget-group > .section-title + * { margin-top: var(--sp-3); }
         /* One visually hidden text technique for the whole page, the one
            .disp-opt-sr already uses: read by a screen reader, drawn nowhere. */

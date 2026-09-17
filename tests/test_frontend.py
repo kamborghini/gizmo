@@ -6229,22 +6229,23 @@ def _wg_calls(src, name):
 
 @test
 def t_the_widget_grid_reads_its_sizes_and_motion_from_the_one_root():
-    """The grid's cell width, gap and every motion value are tokens in the one
-    top-level :root, with the gap re-pointed for a phone the way a medium may
-    re-point a token. The stylesheet and the layer read them by name, so the
-    widget rules and the script carry no pixel, duration or scale of their own:
-    a number written twice is a number that drifts."""
+    """The grid's cell width and every motion value are tokens in the one
+    top-level :root, and its gap is the page's own --page-rhythm, 24 and 16 on
+    a phone, so the space between blocks is one number whether or not a page is
+    a grid. The grid once carried a copy of that value of its own, re-pointed
+    for a phone beside the rhythm it copied. The stylesheet and the layer read
+    them by name, so the widget rules and the script carry no pixel, duration or
+    scale of their own: a number written twice is a number that drifts."""
     root = CSS.split(":root {")[1].split("\n        }")[0]
-    for decl in ("--wgrid-cell: 240px", "--wgrid-gap: var(--sp-6)", "--dur-layout: .38s",
+    for decl in ("--wgrid-cell: 240px", "--dur-layout: .38s",
                  "--ease-layout: linear(0,", "--dur-landed: .62s", "--lift-scale: 1.02"):
         ok(decl in root, "the top-level :root defines " + decl)
-    ok(re.search(r"@media \(max-width: 640px\) \{\s*:root \{ --wgrid-gap: var\(--sp-4\); \}", CSS),
-       "a phone re-points the gap to 16 in a nested :root, as the page rhythm does")
+    ok("--wgrid-gap" not in CSS, "the grid has no gap of its own to drift from the page rhythm")
     ok(re.search(r"--ease-layout: linear\(0,[\d., \n]*, 1\);", root),
        "the spring curve starts at 0 and settles at exactly 1")
-    ok(".ov-wrap.wgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));\n            gap: var(--wgrid-gap);" in CSS,
-       "the grid's gap is the token")
-    ok(".ov-wrap .widget-group > * + * { margin-top: var(--wgrid-gap); }" in CSS
+    ok(".ov-wrap.wgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));\n            gap: var(--page-rhythm);" in CSS,
+       "the grid's gap is the page rhythm")
+    ok(".ov-wrap .widget-group > * + * { margin-top: var(--page-rhythm); }" in CSS
        and ".ov-wrap .widget-group > .section-title + * { margin-top: var(--sp-3); }" in CSS,
        "a group keeps the page rhythm inside it: 12 under its heading, the gap between blocks")
     ok(".wg-held.wg-lifted { scale: var(--lift-scale); }" in CSS, "the lift is the token")
@@ -6405,7 +6406,7 @@ def t_the_layer_writes_the_arrangement_as_attributes():
     for bad in ("style.gridColumn", "style.gridRow", "style.gridTemplate", "style.setProperty", "style.order", "cssText"):
         ok(bad not in layer, "the layer writes %s" % bad)
     ok(set(re.findall(r"\.style\.(\w+) = ", layer)) == {"translate"}, "the held card's translate is its one inline style")
-    for span in ('[data-span="2"] { grid-column: span 2; }', '[data-span="3"] { grid-column: span 3; }',
+    for span in ('[data-span="2"] { grid-column: span 2; }',
                  '[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }',
                  '[data-cols="1"] { grid-template-columns: minmax(0, 1fr); }'):
         ok(span in CSS, "the stylesheet reads " + span)
@@ -6603,7 +6604,7 @@ def t_a_header_keeps_its_tabs_at_16_in_the_grid():
     negative top margin worked out from the two tokens takes the gap back to
     16. On a phone the gap is 16 already and the margin is nothing."""
     ok(".ov-hero:has(+ .page-tabs) { margin-bottom: var(--sp-4); }" in CSS, "the flow's rule is still there")
-    ok(".ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-4) - var(--wgrid-gap)); }" in CSS,
+    ok(".ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-4) - var(--page-rhythm)); }" in CSS,
        "and the grid's reads the same two tokens")
 
 

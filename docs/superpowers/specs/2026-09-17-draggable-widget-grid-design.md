@@ -145,21 +145,20 @@ When a view qualifies, `.ov-wrap` gains the class `wgrid`:
 
 ```
 .ov-wrap.wgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
-                 gap: var(--wgrid-gap); align-items: stretch; }
+                 gap: var(--page-rhythm); align-items: stretch; }
 .ov-wrap.wgrid[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .ov-wrap.wgrid[data-cols="1"] { grid-template-columns: minmax(0, 1fr); }
 .ov-wrap.wgrid > * { margin: 0; }                       /* the gap is the rhythm */
 .ov-wrap.wgrid > :not([data-widget]),
 .ov-wrap.wgrid > [data-span="full"] { grid-column: 1 / -1; }
 .ov-wrap.wgrid > [data-span="2"] { grid-column: span 2; }
-.ov-wrap.wgrid > [data-span="3"] { grid-column: span 3; }
 ```
 
-`--wgrid-gap` is `var(--sp-6)`, and `var(--sp-4)` at 640px and below, so the
-24px and 16px rhythm and the single left edge are unchanged. The layer writes
+The gap is `--page-rhythm`, the property `.ov-wrap` already spaces its blocks by
+(24px, 16px at 640px and below, since `612c92b`), so the 24px and 16px
+rhythm and the single left edge are unchanged. The layer writes
 the column count to `data-cols` on the wrap and each widget's placed width to
-`data-span` (`1`, `2`, `3` or `full`; `3` only arises when `pack` widens a
-widget to close a four column row). It writes attributes, never inline styles,
+`data-span` (`1`, `2` or `full`). It writes attributes, never inline styles,
 so the print stylesheet and the existing inline-size guard both still hold. The
 DOM order is set to the layout's reading order, so auto-placement lands every
 widget where the tiler put it. The component instead kept DOM order fixed and
@@ -298,7 +297,6 @@ All motion values are tokens in the one top-level `:root`:
 | `--dur-landed` | `.62s` | how long the landed outline stays |
 | `--lift-scale` | `1.02` | the held card |
 | `--wgrid-cell` | `240px` | column count |
-| `--wgrid-gap` | `var(--sp-6)`, `var(--sp-4)` at 640px and below | grid gap |
 
 The lift uses `--shadow-lg` and the existing `--dur` and `--ease`. The spring
 values are the component's `SPRING`; its lift scale of 1.06 and its bouncier
