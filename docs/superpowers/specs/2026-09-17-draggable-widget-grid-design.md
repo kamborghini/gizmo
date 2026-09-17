@@ -1,7 +1,9 @@
 # Draggable widget grid, app wide
 
-Date: 2026-09-17. Status: approved 2026-09-17 ("build it"). Revised the same day
-after stage 1 measured every screen in the rig: see Revisions at the end.
+Date: 2026-09-17. Status: approved 2026-09-17 ("build it") and implemented the
+same day in `11ace1f`, `a977fdc`, `8af3da3`, `c9aa216` and `2f73626`. Where the
+body and the two Revisions sections at the end disagree, the later revision is
+what shipped.
 
 ## Why
 
@@ -107,34 +109,35 @@ widget: splitting a joined strip is a design change nobody asked for.
 
 ## Layout
 
-### The tiler
+### The layout
 
-The component's layout functions are ported line for line into one block of
-`static/index.html` between the markers `/* ---------- widget layout (pure) */`
-and `/* ---------- widget layout end */`, with no DOM access, so a test can lift
-the block out and run it under node: `layout`, `tile`, `pack`, `canonical`,
-`moveTo`, `sameOrder`, `choose`, `candidatesFor`, plus `overlaps`, `contains`,
-`spanOf` and the `ENTER` and `TILING_BUDGET` constants.
+The component's arithmetic is ported into one block of `static/index.html`
+between the markers `/* ---------- widget layout (pure) ---------- */` and
+`/* ---------- widget layout end ---------- */`, with no DOM access, so a test
+can lift the block out and run it under node: `wgLayout`, `wgMoveTo`,
+`wgSameOrder`, `wgChoose`, `wgCandidates`, `wgOverlaps`, `wgContains`,
+`wgSpanOf` and `WG_ENTER`, plus gizmo's own `wgMergeOrder`, `wgKeyMove`,
+`wgColumns`, `wgSlotFor`, `WG_ID` and `wgKpiId`.
 
-Two changes from the component, both forced by gizmo's content:
+Three changes from the component, each forced by gizmo's content:
 
 - **Sizes are `sm` 1 column, `wide` 2 columns, `full` every column**, all one
-  row high. `full` is `{col: Infinity, row: 1}`, which `spanOf` already clamps
-  to the column count. The component's `tall` and `lg` are dropped: they need
-  rows of a known height, and gizmo's rows are sized by content.
-- **Rows size to content, not to square cells.** The grid uses
-  `grid-auto-rows: auto`, so a row is as tall as its tallest widget and cards
-  in one row stretch to match. The component computed a slot's rectangle from a
-  uniform cell; here `toSlot` reads column edges from the column count and row
-  edges from the rendered widgets' rectangles. A candidate row below the last
-  rendered row takes the last row's height.
-
-With every widget one row high, `pack` closes each row it builds by widening
-the widget to the left of the gap. `tile` places every widget without
-stretching any, so when the widths do not add up to whole rows it can leave the
-last row short, as the component does; no other row has a hole. `tile` may also
-put a later widget before an earlier one to avoid a gap, and `canonical` then
-takes that reading order as the new order, again as the component does.
+  row high. `full` is `{col: Infinity, row: 1}`, which `wgSpanOf` clamps to the
+  column count. The component's `tall` and `lg` are dropped: they need rows of a
+  known height, and gizmo's rows are sized by content.
+- **Rows size to content, not to square cells.** A row is as tall as its
+  tallest widget and cards in one row stretch to match. `wgSlotFor` reads column
+  edges from the column count and row edges from the rendered widgets; a row
+  below the last rendered one takes the last row's height.
+- **The layout keeps the order it is given.** Cards go left to right in order
+  and a card that does not fit the rest of its row starts the next one, which is
+  the browser's own grid auto-placement for the same spans. The component tiled
+  instead, seating a later card before an earlier one to close a hole and
+  widening cards when it could not. It was ported first and replaced in
+  `2f73626`: on gizmo's pages, which read top to bottom and whose cards mostly
+  span the row, closing a hole meant moving a whole report. With nine or ten KPI
+  tiles the Overview pulled Sales by sector up between them, and a card dropped
+  between two reports jumped to the foot of the page.
 
 ### The grid
 
@@ -266,8 +269,8 @@ and draws a ghost image instead of moving the card.
   listeners are on `window`, because moving the held card in the DOM would
   release a pointer capture set on the card itself. At most once per animation
   frame, and no sooner than `40ms` after the last reorder, `choose` picks among
-  `candidatesFor`; when it returns an order, `canonical` settles it and the
-  siblings move to their new places.
+  `candidatesFor`; when it returns an order, the siblings move to their new
+  places.
 - **Esc while held** returns every card to where it was when the drag began.
 - **Release:** the card travels from under the pointer to its slot, and it
   shows `--focus-outline` for `--dur-landed`, then the outline fades.
@@ -392,7 +395,8 @@ when node is absent, like the existing one.
 - An exact tiling leaves no empty cell and places every widget once.
 - `pack` closes every row; no placement runs past the column count.
 - `full` spans every column at 1, 2 and 4 columns; `wide` is clamped at 1.
-- `canonical` returns the same array when the order is already reading order.
+- The layout keeps the order given at 1, 2 and 4 columns, and the Overview
+  keeps its order with any number of KPI tiles.
 - `choose` converges: with the pointer still, each adopted move brings the
   card's slot strictly nearer the pointer, no order repeats, and the chain ends.
   (The stricter "a second choice returns null" is false for this algorithm: in
@@ -481,6 +485,45 @@ What it changed here:
   somewhere other than the slot it claimed, and the chooser picked it every
   frame. The component's own comment says the area is filled entirely.
 - **The chooser converges rather than stopping at once**; the test says so.
+
+## Revisions after stages 2 and 3 (2026-09-17)
+
+What building and measuring every screen changed:
+
+- **The layout keeps order** (see The layout). `wgTile`, `wgPack` and
+  `wgCanonical` are gone, and a keyboard move is one place in the order.
+- **Every adopted card is full width** except the Overview's twelve KPI tiles
+  (`sm`). A half-width Open follow-ups or Sales by sector left a hole whenever
+  follow-ups were absent. The rule for a new card: full unless it genuinely
+  pairs.
+- **14 screens qualify**: Overview, SEO, Keywords, Products, Customers,
+  Liability, Reconciliation, Forecast, Xero sync, Loan units, Inbox, Production
+  Manager, Memory and Skills. CRM, Files, Team, Size list and Guide draw one
+  block each and are unchanged.
+- **A card whose holder is empty** (`:empty`, or `display: none` set by
+  something other than the person's layout) is left out of the arrangement,
+  the Customize list and the Show hidden count, and comes back when it fills.
+- **Auto-scroll while dragging**, so a phone can carry a card past the fold.
+  It runs from pointer moves plus a timer, not animation frames, and stops at
+  either end, on release and on Esc. Scroll anchoring is off in the mode.
+- **Customize and Done are two buttons**, because the house pressed style would
+  have repainted a pressed Done over its primary fill. Liability, Loan units,
+  Memory and Skills gained an empty `heroAct` slot for the button, and
+  Reconciliation, Forecast, Xero sync and Inbox gained one only after their
+  loading, setup and failure states, which look as they did.
+- **Layouts are read when the app learns who is signed in** (`claimLocalCache`),
+  not at start-up: a sign-in from the login screen does not reload the page, so
+  a read made before it would have left Customize off for the whole session.
+- **Nothing is saved for a screen that is not showing its cards.** A product
+  opened from the list, a run gate or a half-drawn refresh would otherwise lay
+  the draft against no cards, read it as the default and delete the layout.
+- **KPI tile rows are 24px apart**, not the 16 the old tile grid used: the
+  grid has one gap and it is the page rhythm.
+- **Not verified on a real device**: the FLIP and landing motion, the
+  `linear()` spring, touch long press and vibrate, the reduced-motion paths,
+  and whether Alt with an arrow is taken by a browser before the page sees it
+  (on Windows and Linux, Alt+Left is Back; the page cancels the key, but no
+  browser was tried).
 
 ## Choices made while writing this spec
 
