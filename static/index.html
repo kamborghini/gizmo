@@ -604,6 +604,15 @@
                page inset. */
             .ov-updated { margin-left: 0; padding-top: 0; flex-basis: 100%; }
             .ov-hero-act { margin-left: 0; flex-basis: 100%; padding-top: 0; }
+            /* With the widget grid's Customize beside Refresh the row is
+               fuller than the stamp's full-width basis leaves room for, and the
+               icon button was squeezed to 18px wide under its 28px height. On
+               a page that has the control, the buttons keep their size, the
+               stamp takes what is left, and in Customize mode, with Reset and
+               Done as well, the buttons that do not fit wrap under it. */
+            .ov-hero-act:has(> [data-wg-control]) { flex-wrap: wrap; }
+            .ov-hero-act:has(> [data-wg-control]) > .ov-updated { flex: 1 1 auto; }
+            .ov-hero-act:has(> [data-wg-control]) > .btn { flex: none; }
         }
         /* KPI cards: uppercase micro-label + large figure + colored delta */
         /* A floor AND a ceiling. auto-fill with only a floor turned a 2,560px
@@ -823,6 +832,26 @@
         .ov-wrap.wgrid > [data-span="3"] { grid-column: span 3; }
         /* The hidden attribute alone loses to a card's own display: flex. */
         .ov-wrap.wgrid > [data-widget][hidden] { display: none; }
+        /* A holder its renderer has not filled yet (the trade radar before
+           its answer) takes no row: in the flow its margins collapsed through
+           it, but an empty grid item still costs a row and a gap. */
+        .ov-wrap.wgrid > [data-widget]:empty { display: none; }
+        /* A tab strip belongs to the header above it, so it keeps the
+           header's internal 16 there rather than the gap between two blocks,
+           as .ov-hero:has(+ .page-tabs) gives it in the flow. */
+        .ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-4) - var(--wgrid-gap)); }
+        /* A segment bar is as wide as its buttons in the flow; a grid item
+           would stretch its track across the whole row. */
+        .ov-wrap.wgrid > .lbl-seg { justify-self: start; }
+        /* A block with no box of its own (the page chat, a structured block,
+           a plain wrapper marked widget-bare) let its first child's top margin
+           and its last child's bottom margin fall into the page rhythm in the
+           flow. A grid item, and a block in a group's column, keeps them inside
+           itself, which put a heading 24 further down than it was, so they go. */
+        .ov-wrap.wgrid > :is(.page-chat, .block, .widget-bare) > :first-child,
+        .ov-wrap .widget-group > .widget-bare > :first-child { margin-top: 0; }
+        .ov-wrap.wgrid > :is(.page-chat, .block, .widget-bare) > :last-child,
+        .ov-wrap .widget-group > .widget-bare > :last-child { margin-bottom: 0; }
         @media (max-width: 640px) {
             :root { --wgrid-gap: var(--sp-4); }
         }
@@ -844,7 +873,12 @@
            offsetTop measure its slot in the grid with no transform in them. A
            focused card drops the dashed edge for the focus outline every
            other control draws. */
-        .ov-wrap.wg-editing { position: relative; }
+        /* Scroll anchoring is off while cards are being moved: a card lifted
+           out of a row above the fold made the browser shift the page to keep
+           what was on screen still, so the slots moved under a still pointer
+           and the next step carried the card a place further than it was
+           aimed (measured on SEO: a two place move became one). */
+        .ov-wrap.wg-editing { position: relative; overflow-anchor: none; }
         .ov-wrap.wg-editing > [data-widget] { position: relative; cursor: grab; user-select: none;
             -webkit-user-select: none; -webkit-touch-callout: none;
             transition: outline-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease), scale var(--dur) var(--ease); }
@@ -1340,8 +1374,10 @@
         .empty { background: transparent; border: 0; border-radius: 0; padding: var(--sp-6) max(var(--sp-4), calc((100% - 52ch) / 2));
             color: var(--text-tertiary); font-size: var(--text-sm); line-height: var(--lh-prose); text-align: center; }
         /* ...unless it stands alone on the page or in a grid of cards, where it
-           needs the card's own edge or it floats. */
-        .ov-wrap > .empty, .card-grid > .empty { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); }
+           needs the card's own edge or it floats. A widget group is still the
+           page: its heading and empty state are the same two blocks, grouped
+           so the grid moves them together. */
+        .ov-wrap > .empty, .ov-wrap > .widget-group > .empty, .card-grid > .empty { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); }
         /* skills */
         .skill-form { padding: var(--sp-4) var(--sp-4) var(--sp-3); margin-bottom: var(--sp-5); }
         .sk-form-title { font-size: var(--text-sm); font-weight: var(--weight-medium); margin: 0 0 var(--sp-3); display: flex; align-items: center; gap: var(--sp-2); }
@@ -5036,13 +5072,32 @@ Projected Image UK"></textarea>
            scroll), the least time between two reorders, the buzz on a lift, and
            how long the click that follows a drop is ignored. */
         const WG_MOUSE_SLOP = 3, WG_TOUCH_SLOP = 8, WG_HOLD_MS = 350, WG_STEP_MS = 40, WG_BUZZ_MS = 10, WG_EAT_CLICK_MS = 300;
+        /* Carrying a card past the fold: how deep the band at the top and the
+           bottom of the view's scroller is, how fast the page scrolls with the
+           pointer at the very edge (pixels a second, eased in from nothing at
+           the band's inner line), how often a pointer held still in the band
+           steps it, and how often it steps instead when motion is reduced, so
+           the page moves in a few jumps rather than a glide. */
+        const WG_SCROLL_EDGE = 56, WG_SCROLL_MAX = 1200, WG_SCROLL_TICK_MS = 16, WG_SCROLL_JUMP_MS = 200;
         // The server's LAYOUT_MAX_IDS: a longer list is refused whole.
         const WG_MAX_IDS = 64;
         const wgAttr = (n, name, value) => {
             if (value == null) { if (n.hasAttribute(name)) n.removeAttribute(name); }
             else if (n.getAttribute(name) !== value) n.setAttribute(name, value);
         };
-        const wgShown = (root) => [...root.children].filter(n => n.hasAttribute('data-widget') && !n.hidden);
+        const wgHid = new WeakSet();    // cards the layer hid because the person's layout hides them
+        /* A card its renderer is not showing: a holder with nothing in it yet
+           (the trade radar before its answer, Top products when fewer than two
+           earned), or one the renderer set to display none. That is not the
+           person's choice, so it is left out of the arrangement and out of the
+           Customize list without joining their hidden list, and it is laid
+           out again the moment it fills (see wgWatch). */
+        function wgAbsent(n) {
+            return n.matches(':empty') || (!wgHid.has(n) && getComputedStyle(n).display === 'none');
+        }
+        const wgShown = (root) => [...root.children].filter(n => n.hasAttribute('data-widget') && !n.hidden && !wgAbsent(n));
+        // The ids a person could show or hide today: every card that rendered, less those its renderer has not filled.
+        const wgOnPage = (root) => new Set([...root.children].filter(n => n.hasAttribute('data-widget') && !wgAbsent(n)).map(n => n.getAttribute('data-widget')));
         const wgItems = (root) => wgShown(root).map(n => ({ id: n.getAttribute('data-widget'), size: n.getAttribute('data-size') || 'full' }));
         /* A card's name in menus and announcements: its own card title, the
            label its renderer gave it, its first heading, or its id. */
@@ -5070,6 +5125,19 @@ Projected Image UK"></textarea>
                 wgArrange(view);
             });
             w.mo.observe(root, { childList: true });
+            /* A holder fills after the root has changed (paintRadar lands when
+               its request answers, Products redraws Top products on every
+               search), which the root's own childList never sees. So every
+               card is watched here too, its own children and the attributes
+               that can hide it, and the view is arranged again only when a
+               card starts or stops being shown: a chart repainting inside its
+               card, or the held card's translate, changes nothing here. This
+               stays in the layer rather than in each renderer, for the same
+               reason the root is watched: a holder added next year is covered. */
+            w.absent = new Set();
+            w.fill = new MutationObserver((records) => {
+                if (records.some(r => r.target.parentNode === root && wgAbsent(r.target) !== w.absent.has(r.target))) wgArrange(view);
+            });
             /* Columns follow the content column, so the sidebar folding counts
                as a resize. A change of height alone (every render) is not one. */
             if (typeof ResizeObserver === 'function') {
@@ -5130,7 +5198,11 @@ Projected Image UK"></textarea>
             const twice = widgets.find((n, i) => ids.indexOf(ids[i]) !== i);
             if (stray && !wgWarned.has(stray)) { wgWarned.add(stray); console.warn('[widgets] ' + view + ': block without an id', stray); }
             if (twice && !wgWarned.has(twice)) { wgWarned.add(twice); console.warn('[widgets] ' + view + ': the id ' + twice.getAttribute('data-widget') + ' is used twice', twice); }
-            if (widgets.length < 2 || stray || twice) {
+            // Observing a card again only renews its options, so this is cheap on every pass.
+            widgets.forEach(n => w.fill.observe(n, { childList: true, attributes: true, attributeFilter: ['hidden', 'class', 'style'] }));
+            w.absent = new Set(widgets.filter(wgAbsent));
+            const absent = new Set([...w.absent].map(n => n.getAttribute('data-widget')));
+            if (widgets.length - w.absent.size < 2 || stray || twice) {
                 if (wgDrag && wgDrag.view === view) wgDragEnd(false);
                 if (root.classList.contains('wgrid')) root.classList.remove('wgrid');
                 wgAttr(root, 'data-cols', null);
@@ -5142,24 +5214,27 @@ Projected Image UK"></textarea>
             if (!root.classList.contains('wgrid')) root.classList.add('wgrid');
             const editing = !!(wgEdit && wgEdit.view === view);
             const merged = wgMergeOrder(wgDefaults[view], editing ? wgEdit.draft : (wgLayouts && wgLayouts[view]));
-            let hidden = new Set(merged.hidden);
+            const present = merged.order.filter(id => !absent.has(id));
+            let hidden = new Set(merged.hidden.filter(id => !absent.has(id)));
             // A saved layout that hides every card that rendered today would leave a page of nothing, so it hides none.
-            if (merged.order.every(id => hidden.has(id))) hidden = new Set();
+            if (present.every(id => hidden.has(id))) hidden = new Set();
             const byId = new Map(widgets.map((n, i) => [ids[i], n]));
             const cols = wgColumnsFor(root);
-            const places = wgLayout(merged.order.filter(id => !hidden.has(id))
+            const places = wgLayout(present.filter(id => !hidden.has(id))
                 .map(id => ({ id, size: byId.get(id).getAttribute('data-size') || 'full' })), cols)
                 .sort((a, b) => a.row - b.row || a.col - b.col);
             const shown = places.map(p => byId.get(p.id));
+            // Cards off the page, hidden or not yet filled, wait after the shown ones in their merged order.
             const want = kids.slice(0, first).concat(shown,
-                merged.order.filter(id => hidden.has(id)).map(id => byId.get(id)), kids.slice(last + 1));
+                merged.order.filter(id => hidden.has(id) || absent.has(id)).map(id => byId.get(id)), kids.slice(last + 1));
             wgAttr(root, 'data-cols', String(cols));
             places.forEach(p => {
                 const n = byId.get(p.id);
                 wgAttr(n, 'data-span', p.w === cols ? 'full' : String(p.w));
-                if (n.hidden) n.hidden = false;
+                if (wgHid.has(n)) { wgHid.delete(n); n.hidden = false; }
             });
-            hidden.forEach(id => { const n = byId.get(id); wgAttr(n, 'data-span', null); if (!n.hidden) n.hidden = true; });
+            absent.forEach(id => wgAttr(byId.get(id), 'data-span', null));
+            hidden.forEach(id => { const n = byId.get(id); wgAttr(n, 'data-span', null); wgHid.add(n); if (!n.hidden) n.hidden = true; });
             if (want.some((n, i) => kids[i] !== n)) {
                 // Moving its own nodes is not a render, so the observer is off while it does.
                 w.mo.disconnect();
@@ -5200,7 +5275,7 @@ Projected Image UK"></textarea>
             };
             const want = [];
             if (editing) {
-                const rendered = new Set(wgDefaults[view] || []);
+                const rendered = wgOnPage(root);
                 const n = wgEdit.draft.hidden.filter(id => rendered.has(id)).length;
                 if (n) {
                     const more = button('hidden', 'btn btn-sm', () => wgShowHiddenMenu(view, more));
@@ -5363,7 +5438,7 @@ Projected Image UK"></textarea>
         function wgShowHiddenMenu(view, anchor) {
             if (!wgEdit || wgEdit.view !== view) return;
             const root = wgRoot(view);
-            const rendered = new Set(wgDefaults[view] || []);
+            const rendered = wgOnPage(root);
             dropMenu(anchor, wgEdit.draft.hidden.filter(id => rendered.has(id)).map(id => {
                 const n = [...root.children].find(c => c.getAttribute('data-widget') === id);
                 return { label: n ? wgName(n) : id, onClick: () => wgUnhide(view, id) };
@@ -5483,7 +5558,8 @@ Projected Image UK"></textarea>
             if (!card || card.parentNode !== root || card.hidden || t.closest('.wg-hide')) return;
             wgDrag = { view, root, card, id: card.getAttribute('data-widget'), pointer: e.pointerId,
                        touch: e.pointerType === 'touch', x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY,
-                       lifted: false, hold: 0, trail: 0, last: -Infinity, frame: false, before: null, start: '' };
+                       lifted: false, hold: 0, trail: 0, last: -Infinity, frame: false, before: null, start: '',
+                       scroller: root.closest('.scroll'), scrollTimer: 0, scrollAt: 0 };
             if (wgDrag.touch) wgDrag.hold = setTimeout(wgLift, WG_HOLD_MS);
             window.addEventListener('pointermove', wgOnMove);
             window.addEventListener('pointerup', wgOnUp);
@@ -5523,6 +5599,48 @@ Projected Image UK"></textarea>
             const b = wgBox(d.card, d.root);
             d.card.style.translate = (d.x - d.grabX - b.left) + 'px ' + (d.y - d.grabY - b.top) + 'px';
         }
+        /* A held card near the top or bottom of the view's scroller scrolls
+           it, faster the nearer the pointer is to the edge, because a finger
+           holding a card has no other way to reach a place below the fold.
+           Every pointer move steps it and a short timer keeps stepping while
+           the pointer rests in the band; animation frames are not used, since
+           a tab that is not being painted never runs them. A step covers the
+           time since the last one, capped at two ticks, so a move and a tick
+           landing together share the distance instead of doubling it. Each
+           step writes scrollTop straight away, puts the card back under the
+           pointer and asks the chooser again, because the slots moved with
+           the page. It stops outside the band, at either end of the scroll,
+           and when the drag ends (wgDragEnd clears the timer). */
+        function wgAutoScroll() {
+            const d = wgDrag;
+            if (!d) return;
+            clearTimeout(d.scrollTimer);
+            const s = d.scroller;
+            if (!d.lifted || !s) return;
+            const r = s.getBoundingClientRect();
+            const top = Math.max(r.top, 0), bottom = Math.min(r.bottom, window.innerHeight);
+            const band = Math.min(WG_SCROLL_EDGE, (bottom - top) / 4);
+            const up = d.y < top + band, down = !up && d.y > bottom - band;
+            /* The end is where the page's own box ends, not scrollHeight: the
+               held card's translate counts as overflow, so at the foot of the
+               page it kept making room below itself and the scroll ran on into
+               empty space (measured on the Overview at 375: 16778 against a
+               real end of 8772), then jumped back on release. */
+            const own = d.root.getBoundingClientRect().bottom - r.top - s.clientTop + s.scrollTop
+                + parseFloat(getComputedStyle(s).paddingBottom);
+            const end = Math.max(0, Math.min(s.scrollHeight, own) - s.clientHeight);
+            if (!(up || down) || (up && s.scrollTop <= 0) || (down && s.scrollTop >= end)) { d.scrollAt = 0; return; }
+            const depth = Math.min(1, (up ? top + band - d.y : d.y - (bottom - band)) / band);
+            const tick = REDUCE_MOTION ? WG_SCROLL_JUMP_MS : WG_SCROLL_TICK_MS;
+            const now = performance.now();
+            const spent = d.scrollAt ? Math.min(now - d.scrollAt, 2 * tick) : tick;
+            d.scrollAt = now;
+            const by = Math.max(1, Math.round(WG_SCROLL_MAX * depth * depth * spent / 1000));
+            s.scrollTop = Math.max(0, Math.min(end, s.scrollTop + (up ? -by : by)));
+            wgFollow();
+            wgStepSoon();
+            d.scrollTimer = setTimeout(wgAutoScroll, tick);
+        }
         function wgOnMove(e) {
             const d = wgDrag;
             if (!d || e.pointerId !== d.pointer) return;
@@ -5535,6 +5653,7 @@ Projected Image UK"></textarea>
             }
             wgFollow();
             wgStepSoon();
+            wgAutoScroll();
         }
         /* At most one reorder per 40ms and per frame. The frame gate is opened
            by the next animation frame, or by a second 40ms passing, because a
@@ -5625,6 +5744,7 @@ Projected Image UK"></textarea>
             wgDrag = null;
             clearTimeout(d.hold);
             clearTimeout(d.trail);
+            clearTimeout(d.scrollTimer);
             window.removeEventListener('pointermove', wgOnMove);
             window.removeEventListener('pointerup', wgOnUp);
             window.removeEventListener('pointercancel', wgOnCancel);
@@ -6668,7 +6788,7 @@ Projected Image UK"></textarea>
             trendsSection(group, 'Performance over time', range, onRange, paint, intro);
             cardifySections(group);
         }
-        function renderSeoTrends(box, trends, range, onRange, intro) {
+        function renderSeoTrends(box, trends, range, onRange, intro, id) {
             const has = (k) => trends && trends[k] && trends[k].length;
             const bare = !trends || !(has('clicks') || has('impressions'));
             const pct = (n) => (Math.round((+n || 0) * 10) / 10) + '%', num1 = (n) => String(Math.round((+n || 0) * 10) / 10);
@@ -6686,7 +6806,14 @@ Projected Image UK"></textarea>
                 if (has('position')) { const a = S('position'); g2.append(trendChart(gsc({ title: 'Average position', yUnit: 'Position', value: num1(_avg(V(a))), labels: L(a), series: [{ name: 'Position', color: CH[0], values: V(a) }], format: num1, fitY: true, area: false, annotate: false, note: 'Lower is better. Position 1 is the top of search results.' }))); }
                 if (g2.children.length) host.append(g2);
             };
-            trendsSection(box, 'Search performance over time', range, onRange, paint, intro);
+            /* One block on the page, heading and both chart grids, built here
+               for the reason renderTrendsBlock gives: trendsSection repaints by
+               swapping the nodes it owns, so nothing outside may wrap them. */
+            const group = el('div', 'widget-group');
+            if (id) widget(group, id, 'full', 'Search performance over time');
+            box.append(group);
+            trendsSection(group, 'Search performance over time', range, onRange, paint, intro);
+            cardifySections(group);
         }
 
         /* ---------- chat rendering ---------- */
@@ -7222,6 +7349,9 @@ Projected Image UK"></textarea>
             hero.append(heroAct(freshLabel(cache.at), refreshBtn(() => loadSEO(true))));
             box.append(hero);
             { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
+            /* Every block from the score to the page chat is a card the grid can
+               move; the header and the changes strip stay fixed at the top and
+               the page chat at the foot. Each spans the row, as it always has. */
             // Score + KPI strip
             if (typeof data.score === 'number') {
                 const tier = data.score >= 80 ? 'good' : data.score >= 60 ? 'mid' : 'low';
@@ -7231,22 +7361,22 @@ Projected Image UK"></textarea>
                 const bar = el('div', 'bar'); const fill = el('i');
                 fill.style.width = Math.max(0, Math.min(100, data.score)) + '%'; bar.append(fill);
                 sc.append(left, bar);
-                box.append(sc);
+                box.append(widget(sc, 'score', 'full', 'Optimization health score'));
             }
             const mets = (data.metrics || []).filter(m => m.label !== 'SEO score');
-            if (mets.length) box.append(metricsStrip(withSparks(mets, data.trends)));
-            renderSeoTrends(box, data.trends, seoRange, (v) => { seoRange = v; }, intro);
+            if (mets.length) box.append(widget(metricsStrip(withSparks(mets, data.trends)), 'checks', 'full', 'Checks'));
+            renderSeoTrends(box, data.trends, seoRange, (v) => { seoRange = v; }, intro, 'trends');
             // Lead with money opportunities, then findings, then supporting detail
             if (Array.isArray(s.actions) && s.actions.length) {
-                box.append(el('div', 'section-title', 'Top opportunities'));
+                box.append(widget(el('div', 'section-title', 'Top opportunities'), 'opportunities'));
                 box.append(actionsCard(s.actions));
             }
             if (Array.isArray(s.insights) && s.insights.length) {
-                box.append(el('div', 'section-title', 'Performance findings'));
+                box.append(widget(el('div', 'section-title', 'Performance findings'), 'findings'));
                 const b = el('div', 'insights'); s.insights.forEach((ins, i) => b.append(insightCard(ins, i))); box.append(b);
             }
             if (Array.isArray(s.sections) && s.sections.length) {
-                box.append(el('div', 'section-title', 'Details'));
+                box.append(widget(el('div', 'section-title', 'Details'), 'details'));
                 s.sections.forEach(sec => box.append(sectionCard(sec)));
             }
             box.append(pageChatPanel('seo', data));
@@ -7312,7 +7442,10 @@ Projected Image UK"></textarea>
                 { label: 'ROAS', value: t.roas ? (t.roas + 'x') : 'n/a', tone: (t.roas && t.roas < 1) ? 'warn' : null },
             ]));
             if (Array.isArray(ads.campaigns) && ads.campaigns.length) {
-                const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = 'var(--sp-3)'; const tbl = el('table', 'ktable');
+                /* No margin of its own: it sits in the paid search group, whose
+                   gap spaces it from the figures, as the figures' own bottom
+                   margin did in the flow. */
+                const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
                 const thead = el('thead'); const htr = el('tr');
                 ['Campaign', 'Cost', 'CPC', 'Conv.', 'ROAS'].forEach((h, i) => htr.append(el('th', i ? 'num' : null, h)));
                 thead.append(htr); tbl.append(thead); const tb = el('tbody');
@@ -7378,20 +7511,25 @@ Projected Image UK"></textarea>
             hero.append(heroAct(freshLabel(cache.at), refreshBtn(() => loadKeywords(true))));
             box.append(hero);
             { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
-            box.append(keywordScanCard());
-            if (Array.isArray(data.metrics) && data.metrics.length) box.append(metricsStrip(data.metrics));
-            if (Array.isArray(s.actions) && s.actions.length) { box.append(el('div', 'section-title', 'Top keyword opportunities')); box.append(actionsCard(s.actions)); }
-            if (Array.isArray(s.insights) && s.insights.length) { box.append(el('div', 'section-title', 'Findings')); const b = el('div', 'insights'); s.insights.forEach((x, i) => b.append(insightCard(x, i))); box.append(b); }
-            if (Array.isArray(data.keywords) && data.keywords.length) {
-                box.append(el('div', 'section-title', 'Your keywords (Search Console, 90 days)'));
-                box.append(keywordTable(data.keywords));
-            } else {
-                box.append(el('div', 'section-title', 'Your keywords'));
-                box.append(el('div', 'empty', data.gsc_connected ? 'No Search Console queries in this range yet.' : 'Connect Google Search Console to see the keywords you rank for.'));
-            }
-            box.append(el('div', 'section-title', 'Paid search (cost per click)'));
-            box.append(renderCPC(data.ads, cur));
-            if (Array.isArray(s.sections) && s.sections.length) { box.append(el('div', 'section-title', 'Details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
+            /* From the scan card to Details every block is a card the grid can
+               move, each spanning the row; the header and the changes strip stay
+               at the top and the page chat at the foot. */
+            box.append(widget(keywordScanCard(), 'scan', 'full', 'Scan a URL for keywords'));
+            if (Array.isArray(data.metrics) && data.metrics.length) box.append(widget(metricsStrip(data.metrics), 'kpis', 'full', 'Search and ads figures'));
+            if (Array.isArray(s.actions) && s.actions.length) { box.append(widget(el('div', 'section-title', 'Top keyword opportunities'), 'opportunities')); box.append(actionsCard(s.actions)); }
+            if (Array.isArray(s.insights) && s.insights.length) { box.append(widget(el('div', 'section-title', 'Findings'), 'findings')); const b = el('div', 'insights'); s.insights.forEach((x, i) => b.append(insightCard(x, i))); box.append(b); }
+            const ranked = Array.isArray(data.keywords) && data.keywords.length;
+            box.append(widget(el('div', 'section-title', ranked ? 'Your keywords (Search Console, 90 days)' : 'Your keywords'), 'keywords'));
+            box.append(ranked ? keywordTable(data.keywords)
+                : el('div', 'empty', data.gsc_connected ? 'No Search Console queries in this range yet.' : 'Connect Google Search Console to see the keywords you rank for.'));
+            /* The paid search heading labels a figures grid and a table, which
+               the page's cardifySections would leave as a bare label over two
+               loose blocks, so the heading and both are one group built here. */
+            const paid = widget(el('div', 'widget-group'), 'paid-search', 'full', 'Paid search (cost per click)');
+            box.append(paid);
+            paid.append(el('div', 'section-title', 'Paid search (cost per click)'), renderCPC(data.ads, cur));
+            cardifySections(paid);
+            if (Array.isArray(s.sections) && s.sections.length) { box.append(widget(el('div', 'section-title', 'Details'), 'details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
             box.append(pageChatPanel('keywords', data));
             cardifySections(box);
             syncPrintBtn();
@@ -7486,7 +7624,10 @@ Projected Image UK"></textarea>
             slot.append(radarCard(radarCache.data));
         }
         function radarCard(d) {
-            const card = el('div', 'card'); card.style.margin = '0 0 var(--sp-4)';
+            /* No margin of its own. Its slot spaces it: in the flow a bottom
+               margin here only collapsed into the slot's, and in the widget
+               grid, where the slot is its own box, it would add to the gap. */
+            const card = el('div', 'card');
             const head = el('div', 'cov-head');
             head.append(el('h3', null, 'Trade radar'));
             head.append(el('span', 'cov-line', 'From your orders and customer list. No AI credits used.'));
@@ -7603,7 +7744,10 @@ Projected Image UK"></textarea>
             seg = (typeof seg === 'string' && seg) ? seg : (customersSeg || SEG_ALL);
             customersSeg = seg;
             const box = $('customers-content'); box.innerHTML = '';
-            const rslot = el('div'); rslot.id = 'trade-radar-slot';
+            /* Empty until /api/reorder-radar answers, and for good if it fails:
+               the layer leaves an empty card out of the arrangement and lays
+               the page out again when paintRadar fills it. */
+            const rslot = widget(el('div'), 'trade-radar', 'full', 'Trade radar'); rslot.id = 'trade-radar-slot';
             const cached = customersCache[seg];
             if (!cached) { box.append(sectorBar(), rslot); paintRadar(); box.append(customerGate(seg)); return; }
             const data = cached.data; const s = data.structured || {}; const cur = data.currency || '';
@@ -7613,29 +7757,40 @@ Projected Image UK"></textarea>
                 el('p', null, s.summary || (comp ? 'Who your best customers are, how well you retain them, and where to grow lifetime value.' : ('Retention and lifetime value for your ' + seg + ' customers.'))));
             hero.append(badge, ht);
             hero.append(heroAct(freshLabel(cached.at), refreshBtn(() => loadCustomers(true))));
-            box.append(hero, sectorBar(), rslot); paintRadar();
+            /* The header, the sector bar and the changes strip stay fixed at
+               the top and the page chat at the foot; from the trade radar to
+               Details every block is a card the grid can move, each spanning
+               the row. The changes strip used to follow the radar, which would
+               leave a fixed block between two cards, so it now comes first. */
+            box.append(hero, sectorBar());
             { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
-            if (Array.isArray(data.metrics) && data.metrics.length) box.append(metricsGrid(data.metrics));
+            box.append(rslot); paintRadar();
+            if (Array.isArray(data.metrics) && data.metrics.length) box.append(widget(metricsGrid(data.metrics), 'kpis', 'full', 'Customer figures'));
             if (comp && Array.isArray(data.sector_comparison) && data.sector_comparison.length) {
-                box.append(el('div', 'section-title', 'Sector comparison'));
+                box.append(widget(el('div', 'section-title', 'Sector comparison'), 'sectors'));
                 box.append(sectorComparisonTable(data.sector_comparison, cur));
             }
             if (data.trends && data.trends.new_customers && data.trends.new_customers.length) {
                 const nc = data.trends.new_customers;
-                box.append(el('div', 'section-title', 'New customers over time'));
-                box.append(barChart({ title: 'New customers', source: 'Shopify customers', yUnit: 'Customers', value: fmtCompact(sumv(nc)), labels: nc.map(x => monthLabel(x.label)), values: nc.map(x => +x.value || 0), format: fmtCompact, height: 220 }));
+                /* A heading over a chart card stays a label rather than folding,
+                   so the heading and its chart are one group built here. */
+                const ncGroup = widget(el('div', 'widget-group'), 'new-customers', 'full', 'New customers over time');
+                box.append(ncGroup);
+                ncGroup.append(el('div', 'section-title', 'New customers over time'));
+                ncGroup.append(barChart({ title: 'New customers', source: 'Shopify customers', yUnit: 'Customers', value: fmtCompact(sumv(nc)), labels: nc.map(x => monthLabel(x.label)), values: nc.map(x => +x.value || 0), format: fmtCompact, height: 220 }));
+                cardifySections(ncGroup);
             }
             if (Array.isArray(data.segments) && data.segments.length) {
-                box.append(el('div', 'section-title', 'Customer segments'));
+                box.append(widget(el('div', 'section-title', 'Customer segments'), 'segments'));
                 box.append(segCards(data.segments, cur));
             }
-            if (Array.isArray(s.actions) && s.actions.length) { box.append(el('div', 'section-title', 'Retention opportunities')); box.append(actionsCard(s.actions, 'customers')); }
-            if (Array.isArray(s.insights) && s.insights.length) { box.append(el('div', 'section-title', 'Findings')); const b = el('div', 'insights'); s.insights.forEach((x, i) => b.append(insightCard(x, i))); box.append(b); }
+            if (Array.isArray(s.actions) && s.actions.length) { box.append(widget(el('div', 'section-title', 'Retention opportunities'), 'opportunities')); box.append(actionsCard(s.actions, 'customers')); }
+            if (Array.isArray(s.insights) && s.insights.length) { box.append(widget(el('div', 'section-title', 'Findings'), 'findings')); const b = el('div', 'insights'); s.insights.forEach((x, i) => b.append(insightCard(x, i))); box.append(b); }
             if (Array.isArray(data.top_customers) && data.top_customers.length) {
-                box.append(el('div', 'section-title', 'Top customers by lifetime spend'));
+                box.append(widget(el('div', 'section-title', 'Top customers by lifetime spend'), 'top-customers'));
                 box.append(customersTable(data.top_customers, cur));
             }
-            if (Array.isArray(s.sections) && s.sections.length) { box.append(el('div', 'section-title', 'Details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
+            if (Array.isArray(s.sections) && s.sections.length) { box.append(widget(el('div', 'section-title', 'Details'), 'details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
             box.append(pageChatPanel('customers', data));
             cardifySections(box);
             syncPrintBtn();
@@ -7854,10 +8009,14 @@ Projected Image UK"></textarea>
             function pchips() { chipsHost.innerHTML = ''; const c = pActiveChips(rerender); if (c) chipsHost.append(c); }
             pchips();
 
-            const topHost = el('div');
+            /* Two cards the grid can move, each spanning the row. drawList
+               refills Top products on every search and leaves it empty when
+               fewer than two products earned; the layer takes an empty card
+               out of the arrangement and puts it back when it fills. */
+            const topHost = widget(el('div'), 'top-products', 'full', 'Top products by revenue');
             const listWrap = el('div', 'card-bleed prod-rows'); pCard.append(listWrap);
             const footHost = el('div', 'card-bleed'); pCard.append(footHost);
-            box.append(topHost, pCard);
+            box.append(topHost, widget(pCard, 'catalog'));
             xbtn.onclick = () => { const { rows } = pComputeRows(); if (rows.length) exportCSV(rows); };
 
             function drawList() {
@@ -8145,41 +8304,50 @@ Projected Image UK"></textarea>
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.bookmark;
             const htext = el('div'); htext.append(el('h2', null, 'Memory and knowledge'),
                 el('p', null, 'What your copilot knows about your store. Learn your site once, and it captures facts, decisions, your preferences and proven learnings as you chat, then uses them in every answer. Edit or remove anything here.'));
-            hero.append(badge, htext); box.append(hero);
-            box.append(knowledgeCard());
+            /* Under the header every block is a card the grid can move, each
+               spanning the row; the empty action slot is where Customize goes.
+               This page never calls cardifySections, so a heading and the cards
+               under it are one widget-group built here. */
+            hero.append(badge, htext, heroAct('')); box.append(hero);
+            box.append(widget(knowledgeCard(), 'knowledge', 'full', 'Store knowledge'));
             if (impact.length) {
-                box.append(el('div', 'section-title', 'Tracked impact'));
-                impact.forEach(it => box.append(impactCard(it)));
+                const tracked = widget(el('div', 'widget-group'), 'impact', 'full', 'Tracked impact');
+                tracked.append(el('div', 'section-title', 'Tracked impact'));
+                impact.forEach(it => tracked.append(impactCard(it)));
+                box.append(tracked);
             }
             const openFu = memories.filter(m => m.type === 'followup' && m.status === 'open');
             const facts = memories.filter(m => m.type === 'fact' || m.type === 'decision');
             const learned = memories.filter(m => m.type === 'preference' || m.type === 'insight');
             const closed = memories.filter(m => m.type === 'followup' && m.status !== 'open');
             if (!openFu.length && !facts.length && !learned.length && !closed.length) {
-                box.append(el('div', 'section-title', 'Notes'));
+                const notes = widget(el('div', 'widget-group'), 'notes', 'full', 'Notes');
+                notes.append(el('div', 'section-title', 'Notes'));
+                box.append(notes);
                 if (memoryLoadErr) {
-                    box.append(loadFailure('Your notes could not be read, so this list is not empty, it is unknown. ' + memoryLoadErr, loadMemory));
+                    notes.append(loadFailure('Your notes could not be read, so this list is not empty, it is unknown. ' + memoryLoadErr, loadMemory));
                     return;
                 }
                 const e = el('div', 'empty');
                 e.append(el('div', null, "No notes yet. As you chat, the copilot captures key facts, decisions, your preferences, and proven learnings here."));
-                box.append(e); return;
+                notes.append(e); return;
             }
             /* Notes are short and independent, so they read as a wall of cards
                rather than a single column a screen and a half long. The grid
                self-collapses: one column wherever there is not room for two,
                which includes a printed page. */
-            const group = (title, rows, fu) => {
+            const group = (holder, title, rows, fu) => {
                 if (!rows.length) return;
-                box.append(el('div', 'section-title', title));
+                holder.append(el('div', 'section-title', title));
                 const g = el('div', 'card-grid');
                 rows.forEach(m => g.append(memCard(m, fu)));
-                box.append(g);
+                holder.append(g);
+                box.append(holder);
             };
-            group('Open follow-ups', openFu, true);
-            group('Preferences & learnings', learned, false);
-            group('Facts & decisions', facts, false);
-            group('Closed follow-ups', closed, false);
+            group(widget(el('div', 'widget-group'), 'followups', 'full', 'Open follow-ups'), 'Open follow-ups', openFu, true);
+            group(widget(el('div', 'widget-group'), 'learnings', 'full', 'Preferences & learnings'), 'Preferences & learnings', learned, false);
+            group(widget(el('div', 'widget-group'), 'facts', 'full', 'Facts & decisions'), 'Facts & decisions', facts, false);
+            group(widget(el('div', 'widget-group'), 'closed-followups', 'full', 'Closed follow-ups'), 'Closed follow-ups', closed, false);
         }
 
         /* ---------- skills ---------- */
@@ -8202,18 +8370,24 @@ Projected Image UK"></textarea>
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.book;
             const ht = el('div'); ht.append(el('h2', null, 'Skills'),
                 el('p', null, 'Save reusable instructions and playbooks for your copilot. Give each one a title and the details to follow, and it becomes permanent context the AI applies in chat and in every report. Refer to a skill by its title to put it to work.'));
-            hero.append(badge, ht); box.append(hero);
-            box.append(skillForm());
-            box.append(el('div', 'section-title', 'Saved skills' + (skills.length ? ' (' + skills.length + ')' : '')));
+            /* Two cards the grid can move, each spanning the row: the form, and
+               the saved skills under their heading as one widget-group, since
+               this page never calls cardifySections. The empty action slot is
+               where Customize goes. */
+            hero.append(badge, ht, heroAct('')); box.append(hero);
+            box.append(widget(skillForm(), 'add-skill', 'full', 'Add a skill'));
+            const saved = widget(el('div', 'widget-group'), 'saved', 'full', 'Saved skills');
+            saved.append(el('div', 'section-title', 'Saved skills' + (skills.length ? ' (' + skills.length + ')' : '')));
+            box.append(saved);
             if (!skills.length) {
                 if (skillsLoadErr) {
-                    box.append(loadFailure('Your skills could not be read, so this list is not empty, it is unknown. '
+                    saved.append(loadFailure('Your skills could not be read, so this list is not empty, it is unknown. '
                         + skillsLoadErr + ' Do not add one until it loads, or you may end up with a duplicate.', loadSkills));
                     return;
                 }
                 const e = el('div', 'empty');
                 e.textContent = 'No skills yet. Add your first above. Ideas: a brand voice guide, a discounting policy, an SEO checklist, or a product launch playbook.';
-                box.append(e); return;
+                saved.append(e); return;
             }
             /* Same as the notes: independent cards, side by side where there is
                room. The one being EDITED takes a full row of its own, because
@@ -8225,7 +8399,7 @@ Projected Image UK"></textarea>
                 if (skillEditId === s.id) card.classList.add('span-all');
                 g.append(card);
             });
-            box.append(g);
+            saved.append(g);
         }
         function skillForm() {
             const card = el('div', 'card skill-form');
@@ -8437,9 +8611,13 @@ Projected Image UK"></textarea>
                     + (d.tags || []).map(t => '"' + t + '"').join(', ')
                     + '. Terms come from the order itself, then a Net tag on the customer, otherwise Net '
                     + d.default_terms + ' is assumed and marked.'));
-            hero.append(badge, ht);
+            /* The stamp and Refresh live on the tabs; the header's own action
+               slot is where the widget grid puts Customize. */
+            hero.append(badge, ht, heroAct(''));
             box.append(hero);
             box.append(financeTabs('liability', freshLabel(liabilityCache.at), [refreshBtn(() => loadLiability(true, true))]));
+            /* Under the header and its tabs every block is a card the grid can
+               move, each spanning the row. */
 
             // Summary cards.
             /* A figure the server did not send is not zero. liaMoney reads a
@@ -8481,7 +8659,7 @@ Projected Image UK"></textarea>
                 }
                 grid.append(stat);
             });
-            box.append(grid);
+            box.append(widget(grid, 'summary', 'full', 'Summary'));
 
             // Aged-debt bar: one glance says whether the book is healthy.
             if (d.total > 0) {
@@ -8512,7 +8690,7 @@ Projected Image UK"></textarea>
                 bhead.append(el('p', 'card-desc', 'Every unpaid order by how late it is, as a share of '
                     + liaMoney(d.total, cur, 0) + ' outstanding.'));
                 bcard.append(bhead, bar, leg);
-                box.append(bcard);
+                box.append(widget(bcard, 'aged-debt'));
             }
 
             if ((d.stale_tagged || []).length) {
@@ -8526,7 +8704,7 @@ Projected Image UK"></textarea>
                     row.append(orderA(m.name, m.admin_url, 'miss-open'));
                     s.append(row);
                 });
-                box.append(s);
+                box.append(widget(s, 'stale-tags', 'full', 'Paid but still tagged'));
             }
 
             /* The filters, sorted the way the reference sorts them: the search
@@ -8617,7 +8795,7 @@ Projected Image UK"></textarea>
                 + 'when each is due, and what has been paid against it.'));
             lCard.append(lHead);
             lCard.append(tableTools(left, right));
-            box.append(lCard);
+            box.append(widget(lCard, 'owing', 'full', 'Customers owing'));
             const host = el('div', 'lbl-rows'); lCard.append(host);
             function paint() {
                 host.innerHTML = '';
@@ -9572,7 +9750,9 @@ Projected Image UK"></textarea>
             htext.append(el('h2', null, 'Loan units'),
                 el('p', null, 'The projectors that go out to customers, where each one is, '
                     + 'and how long it has been gone.'));
-            hero.append(badge, htext); box.append(hero);
+            /* Under the header every block is a card the grid can move, each
+               spanning the row; the empty action slot is where Customize goes. */
+            hero.append(badge, htext, heroAct('')); box.append(hero);
             const counts = d.counts || { out: 0, in: 0, late: 0 };
             /* Three stats, three columns: on the shared four-column grid the
                empty fourth cell read as a KPI that had failed to load. */
@@ -9583,7 +9763,7 @@ Projected Image UK"></textarea>
                   note: counts.late ? 'past the date agreed' : 'nothing past its date',
                   trend: counts.late ? 'down' : '' }]);
             mgrid.classList.add('metrics-3');
-            box.append(mgrid);
+            box.append(widget(mgrid, 'counts', 'full', 'Loan counts'));
 
             /* ---- what is out ---- */
             const oCard = el('div', 'card');
@@ -9625,7 +9805,7 @@ Projected Image UK"></textarea>
                     oCard.append(row);
                 });
             }
-            box.append(oCard);
+            box.append(widget(oCard, 'out'));
 
             /* ---- the register ---- */
             const rCard = el('div', 'card');
@@ -9701,7 +9881,7 @@ Projected Image UK"></textarea>
                     rCard.append(row);
                 });
             }
-            box.append(rCard);
+            box.append(widget(rCard, 'register'));
 
             if (d.can_manage) {
                 const sCard = el('div', 'card');
@@ -9724,7 +9904,7 @@ Projected Image UK"></textarea>
                 };
                 wrap.append(days, el('span', 'lbl-meta', 'days'), save);
                 sCard.append(wrap);
-                box.append(sCard);
+                box.append(widget(sCard, 'chasing', 'full', 'Chasing'));
             }
         }
 
@@ -9758,6 +9938,11 @@ Projected Image UK"></textarea>
                 box.append(loadFailure('The connector could not be reached. ' + connCache.error, refreshConnector));
                 return;
             }
+            /* Past the loading, unlinked and failure states the page is cards
+               the grid can move, each spanning the row, so the header gets the
+               action slot Customize goes in; the states above keep their
+               header as it was. */
+            hero.append(heroAct(''));
             const st = connCache.data || {};
             const cfg = st.config || {};
             const running = !!st.running;
@@ -9774,7 +9959,7 @@ Projected Image UK"></textarea>
             kpi('Failed', 'failed', 'did not write; retry once the cause is fixed', true);
             kpi('Quarantined', 'quarantined', 'held back rather than written with bad data', true);
             kpi('Blocked', 'blocked', 'kept out on purpose');
-            if (kpis.length) box.append(metricsStrip(kpis));
+            if (kpis.length) box.append(widget(metricsStrip(kpis), 'ledger', 'full', 'The ledger at a glance'));
 
             /* ---- status ---- */
             const sCard = el('div', 'card');
@@ -9860,7 +10045,7 @@ Projected Image UK"></textarea>
             if (running) chipRow.append(el('span', 'lbl-chip note', 'A run is in progress\u2026'));
             if (st.lastError) chipRow.append(el('span', 'lbl-chip bad', 'Last run failed'));
             if (chipRow.childNodes.length) sCard.append(chipRow);
-            box.append(sCard);
+            box.append(widget(sCard, 'connection'));
 
             /* ---- review and send ---- */
             const rCard = el('div', 'card');
@@ -10282,8 +10467,8 @@ Projected Image UK"></textarea>
             } else {
                 vCard.append(el('div', 'sub', 'Run a review to see what would be sent.'));
             }
-            box.append(rCard);
-            box.append(vCard);
+            box.append(widget(rCard, 'review'));
+            box.append(widget(vCard, 'latest-review'));
 
             /* ---- recent runs ---- */
             if ((connRuns || []).length) {
@@ -10314,7 +10499,7 @@ Projected Image UK"></textarea>
                     tbody.append(tr);
                 });
                 tb.append(tbody); wrapT.append(tb); hCard.append(wrapT);
-                box.append(hCard);
+                box.append(widget(hCard, 'runs'));
             }
 
             /* ---- quarantine ---- */
@@ -10359,9 +10544,9 @@ Projected Image UK"></textarea>
                         if (rows.length > 30) qHost.append(el('div', 'sub', (rows.length - 30) + ' more held.'));
                     } catch (e) { qHost.append(el('div', 'sub', 'The quarantine list could not be read.')); }
                 })();
-                box.append(qCard);
+                box.append(widget(qCard, 'quarantine'));
             }
-            if (xCard.childNodes.length) box.append(xCard);
+            if (xCard.childNodes.length) box.append(widget(xCard, 'settings'));
             cardifySections(box);
         }
 
@@ -11202,6 +11387,17 @@ Projected Image UK"></textarea>
             if (!c) { box.append(el('div', 'empty', 'Loading…')); return; }
             if (c.error) { box.append(loadFailure('The forecast could not be read. ' + c.error, refreshForecast)); return; }
             if (!latest) { box.append(forecastSetupCard(c)); return; }
+            /* From here the page is blocks the widget grid can move, each
+               spanning the row: the header gets the action slot Customize goes
+               in (not before, so the loading and setup states keep their header
+               as it was). A failed run's warning stays fixed above them, like
+               any error. This page never calls cardifySections. The overview,
+               the chart and the drivers already come as one wrapper each with
+               their own spacing inside, so they are widgets as they are, marked
+               widget-bare; a heading that stood beside its block on the page is
+               grouped with it here in a widget-group, which keeps 12 under the
+               heading as the flow did. */
+            hero.append(heroAct(''));
             if (c.last_error) {
                 const warn = el('div', 'card');
                 warn.append(fcChip('bad', 'Last run failed'), document.createTextNode(' ' + fmtDate(c.last_error.at) + ': ' + c.last_error.error
@@ -11237,7 +11433,8 @@ Projected Image UK"></textarea>
                         (v) => { forecastScenario = v; renderForecast(); }));
                 }
             }
-            box.append(ov);
+            ov.classList.add('widget-bare');
+            box.append(widget(ov, 'standing', 'full', 'Where things stand'));
 
             /* Exceptions, and only the ones that are genuinely exceptional. An
                alert on every month is wallpaper: the two worst are surfaced
@@ -11247,7 +11444,9 @@ Projected Image UK"></textarea>
                 /* A heading, because a card of red chips floating between the
                    numbers and the chart reads as an error the page has hit
                    rather than as the two months worth looking at. */
-                box.append(el('div', 'section-title', 'Worth looking at'));
+                const alerts = widget(el('div', 'widget-group'), 'alerts', 'full', 'Worth looking at');
+                alerts.append(el('div', 'section-title', 'Worth looking at'));
+                box.append(alerts);
                 const ac0 = el('div', 'card');
                 worst.slice(0, 2).forEach(a => ac0.append(fcAlertRow(a)));
                 if (al.length > 2) {
@@ -11270,21 +11469,25 @@ Projected Image UK"></textarea>
                        control in a card here. */
                     const mrow = el('div', 'fc-more-row'); mrow.append(more); ac0.append(mrow);
                 }
-                box.append(ac0);
+                alerts.append(ac0);
             }
 
             /* 2. THE PICTURE. Actual, forecast and uncertainty, with the time
                control on it. This is the largest thing on the page. */
-            box.append(fcChartCard(latest, c.ledger, latest.sanity));
+            const chart = fcChartCard(latest, c.ledger, latest.sanity);
+            chart.classList.add('widget-bare');
+            box.append(widget(chart, 'cash-in', 'full', 'Cash in'));
 
             /* 3. WHY. */
             const drv = fcDriversCard(latest, sc);
-            if (drv) box.append(drv);
+            if (drv) { drv.classList.add('widget-bare'); box.append(widget(drv, 'drivers', 'full', 'Why the forecast is what it is')); }
 
             /* 4. DETAILS ON DEMAND. Tables carry precise money; the chart above
                carries the pattern. All shut until asked for. */
-            box.append(el('div', 'section-title', 'The numbers behind it'));
-            const detail = el('div');
+            const numbers = widget(el('div', 'widget-group'), 'numbers', 'full', 'The numbers behind it');
+            numbers.append(el('div', 'section-title', 'The numbers behind it'));
+            box.append(numbers);
+            const detail = el('div', 'widget-bare');
             detail.append(fcDrawer('Month by month against ' + sc + ' (' + rows.length + ')', function () {
                 const mc = el('div');
                 mc.append(fcTable(['Month', 'Basis', 'Projected', 'P10', 'P90', 'Target', 'Gap', 'Verdict', 'Risk'],
@@ -11319,20 +11522,22 @@ Projected Image UK"></textarea>
             detail.append(fcDrawer('What each source said before the month began', function () {
                 return fcUntitled(fcRecordCard(c));
             }));
-            box.append(detail);
+            numbers.append(detail);
 
             /* 5. HOW IT WORKS. Last, and shut. A director signing off a number
                does not need to read about Theta to trust it; the person who
                wants to can open one drawer and find all of it. */
-            box.append(el('div', 'section-title', 'How this forecast works'));
-            const how = el('div');
+            const method = widget(el('div', 'widget-group'), 'method', 'full', 'How this forecast works');
+            method.append(el('div', 'section-title', 'How this forecast works'));
+            box.append(method);
+            const how = el('div', 'widget-bare');
             how.append(fcDrawer('Which approach is running, and why', function () {
                 return fcUntitled(fcOptimisedCard(latest));
             }));
             how.append(fcDrawer('How each one works, and how right it has been' + (nsrc ? ' (' + nsrc + ')' : ''), function () {
                 return fcUntitled(fcAlgorithmsCard(latest));
             }));
-            box.append(how);
+            method.append(how);
             /* The by-category and by-segment tables came from the per-variant
                model, which no longer runs: it forecast October at a quarter of
                what October has ever been. They stay guarded rather than
@@ -11342,12 +11547,16 @@ Projected Image UK"></textarea>
                 const items = lv[level] || []; if (!items.length) return;
                 const months = [...new Set(items.map(x => x.month))].sort().slice(0, 3);
                 const byName = {}; items.forEach(x => { (byName[x.name] = byName[x.name] || {})[x.month] = x.p50; });
-                box.append(el('div', 'section-title', 'By ' + level));
+                const byLevel = level === 'category'
+                    ? widget(el('div', 'widget-group'), 'by-category', 'full', 'By category')
+                    : widget(el('div', 'widget-group'), 'by-segment', 'full', 'By segment');
+                byLevel.append(el('div', 'section-title', 'By ' + level));
+                box.append(byLevel);
                 const lc = el('div', 'card');
                 lc.append(fcTable([level === 'category' ? 'Category' : 'Segment'].concat(months.map(fcMonth)),
                     Object.keys(byName).sort((a, b) => (byName[b][months[0]] || 0) - (byName[a][months[0]] || 0))
                         .map(n => [n].concat(months.map(m => fcMoney(byName[n][m])))), [0, 1, 1, 1]));
-                box.append(lc);
+                byLevel.append(lc);
             });
             /* How much to trust it: prose when the plain models are running,
                the M5 backtest table when that build is. Either way it belongs
@@ -11703,6 +11912,11 @@ Projected Image UK"></textarea>
                 ? (rSt.last_sync ? 'Last sweep ' + fmtDate(rSt.last_sync) : 'Never swept') : ''));
             if (!reconCache) { box.append(el('div', 'empty', 'Loading\u2026')); return; }
             if (reconCache.error) { box.append(loadFailure('The reconciliation state could not be read. ' + reconCache.error, refreshRecon)); return; }
+            /* Past the loading and failure states the page is cards the grid
+               can move, each spanning the row, so the header gets the action
+               slot Customize goes in. Added here rather than with the header,
+               so a page that is only a loading line keeps its header as it was. */
+            hero.append(heroAct(''));
             const st = reconCache.st || {};
             /* Connection + sweep card */
             const card = el('div', 'card');
@@ -11772,7 +11986,7 @@ Projected Image UK"></textarea>
                 card.append(xw);
             }
             (st.sweep_notes || []).forEach(n => card.append(el('div', 'field-help', n)));
-            box.append(card);
+            box.append(widget(card, 'connection', 'full', 'Connection'));
             /* The accounts mailbox: a SEPARATE Google account from the Inbox
                tab's, so the card names both to make a wrong consent obvious. */
             if (!mb.connected) {
@@ -11885,7 +12099,7 @@ Projected Image UK"></textarea>
                     mc.append(el('div', 'field-help',
                         'Ask the master account to connect it.'));
                 }
-                box.append(mc);
+                box.append(widget(mc, 'mailbox', 'full', 'Connect the accounts mailbox'));
             }
             /* Setup, master only, until Xero is connected */
             if (!xs.connected && st.setup && st.setup.env_needed) {
@@ -11964,7 +12178,7 @@ Projected Image UK"></textarea>
                 }
                 if (!st.setup.configured) su.append(el('div', 'field-help',
                     'The server does not have the two variables yet: the connect link will say "Not configured" until they are set.'));
-                box.append(su);
+                box.append(widget(su, 'xero-setup', 'full', 'Connect Xero'));
             }
             /* Severity summary: the same KPI card the Liability tab opens with,
                and the same severity tones the rows below already carry, so the
@@ -11985,7 +12199,7 @@ Projected Image UK"></textarea>
                 stat.onclick = () => { reconFilter.severity = reconFilter.severity === k ? '' : k; refreshReconList(); };
                 mets.append(stat);
             });
-            box.append(mets);
+            box.append(widget(mets, 'severity', 'full', 'Severity'));
             /* The discrepancies, in one card composed like the reference's list
                pages: a counted title, a line saying what it is, the export on
                the right of the header, and the search and status on a toolbar.
@@ -12018,7 +12232,7 @@ Projected Image UK"></textarea>
                 ['confirmed_error', 'Errors'], ['ignored', 'Ignored']],
                 reconFilter.status, v => { reconFilter.status = v; refreshReconList(); });
             list.append(tableTools([searchWrap, statusChip], [exp]));
-            box.append(list);
+            box.append(widget(list, 'discrepancies', 'full', 'Discrepancies'));
             if (!ex.length) {
                 list.append(el('div', 'empty', xs.connected
                     ? 'Nothing needs attention with these filters. That is the goal state.'
@@ -13033,8 +13247,12 @@ Projected Image UK"></textarea>
             shipBtn.title = 'Connect World Options and set your dispatch address, boxes and options';
             shipBtn.onclick = openShippingSettings;
             tools.append(shipBtn);
-            if (labelsMissing && labelsMissing.data && (labelsMissing.data.missing || []).length) box.append(missingStrip());
-            if (labelsCoverage) box.append(coverageCard());
+            /* The header, a partial sweep's warning and the queue bar stay fixed
+               at the top; the strip, the size check and the queue are cards the
+               grid can move, each spanning the row. A selected order's preview,
+               appended to the page below 1500px, stays fixed at the foot. */
+            if (labelsMissing && labelsMissing.data && (labelsMissing.data.missing || []).length) box.append(widget(missingStrip(), 'missing', 'full', 'Possibly missing from production'));
+            if (labelsCoverage) box.append(widget(coverageCard(), 'size-check', 'full', 'Size list coverage'));
 
             /* The queue, composed the way the reference composes a list page: a
                counted title with one line saying what this queue is, the few
@@ -13077,7 +13295,7 @@ Projected Image UK"></textarea>
             qCard.append(tableTools([findWrap, filtTabs],
                                     [allBtn, slBtn, oldf, sizeSel].filter(Boolean)));
             qCard.append(fileIn);          // the hidden picker More reaches for
-            box.append(qCard);
+            box.append(widget(qCard, 'queue'));
 
             if (!orders.length) {
                 const emptyCopy = dispatched ? 'No orders have been dispatched yet. Dispatch one from the "To ship" queue.'
@@ -13212,7 +13430,10 @@ Projected Image UK"></textarea>
                 list.append(row);
                 if (labelSel === o.id) {
                     const wrap = el('div', 'lbl-preview');
-                    if (!pane) wrap.style.margin = 'var(--sp-1) 0 var(--sp-4)';
+                    /* On the page, below the queue card. No top margin: in the
+                       flow the card's own 24 swallowed it, and in the widget grid
+                       it would add to the gap. */
+                    if (!pane) wrap.style.margin = '0 0 var(--sp-4)';
                     if (o.customer_id) wrap.append(histLine(o));
                     const sheet = labelSheet(o);
                     wrap.append(sheet);
@@ -19551,11 +19772,12 @@ Projected Image UK"></textarea>
                     + 'then red.'));
             hero.append(badge, ht);
             box.append(hero);
+            return hero;
         }
         function renderMail() {
             const box = $('mail-content'); box.innerHTML = '';
             const d = mailCache;
-            mailHero(box);
+            const hero = mailHero(box);
             if (!d.connected) {
                 const card = el('div', 'card');
                 card.append(el('div', 'setting-title', 'Connect the shared mailbox'));
@@ -19648,6 +19870,17 @@ Projected Image UK"></textarea>
                 box.append(card);
                 return;
             }
+            /* Connected, the page is cards the grid can move, each spanning the
+               row, so the header gets the action slot Customize goes in. */
+            hero.append(heroAct(''));
+            /* A sync that is failing is not a footnote. It stays a row of its
+               own, above everything, in the colour that means stop. It used to
+               come after Who is on today, which would leave a fixed block
+               between two cards; above everything is where it said it was. */
+            if (d.sync_error) {
+                box.append(el('div', 'msg error', 'Sync problem: ' + d.sync_error
+                    + ' The list below may be missing mail that has arrived since.'));
+            }
             /* ---- who's doing what ---- */
             const who = el('div', 'mail-who');
             const PRESENCE_LABEL = { office: 'In office', home: 'At home', out: 'Out' };
@@ -19697,7 +19930,7 @@ Projected Image UK"></textarea>
                 whead.append(el('h3', 'card-title', 'Who is on today'));
                 whead.append(el('p', 'card-desc', 'Where each person is working, and how much they are carrying.'));
                 wcard.append(whead, who);
-                box.append(wcard);
+                box.append(widget(wcard, 'who'));
             }
             /* ---- the board, composed the way the reference composes a list
                page: a counted title, the mailbox and its last sweep as the line
@@ -19712,12 +19945,6 @@ Projected Image UK"></textarea>
                 if (t.owner === d.me) counts.mine++;
                 if (t.state === 'unassigned') counts.unassigned++;
             });
-            /* A sync that is failing is not a footnote. It stays a row of its
-               own, above everything, in the colour that means stop. */
-            if (d.sync_error) {
-                box.append(el('div', 'msg error', 'Sync problem: ' + d.sync_error
-                    + ' The list below may be missing mail that has arrived since.'));
-            }
             const mCard = el('div', 'card');
             const mHead = el('div', 'card-head');
             const lab = (text, n) => text + (n ? ' (' + n + ')' : '');
@@ -19796,7 +20023,7 @@ Projected Image UK"></textarea>
                     mailPendingLine(p.to, p.at)
                     + (p.subject ? ' Subject: ' + p.subject : '')));
             });
-            box.append(mCard);
+            box.append(widget(mCard, 'inbox'));
             const bulkHost = el('div'); bulkHost.id = 'mail-bulk-host';
             mCard.append(bulkHost);
             const bodyHost = el('div'); bodyHost.id = 'mail-board-host';

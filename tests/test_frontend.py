@@ -2637,7 +2637,8 @@ def t_a_filter_that_hides_everything_does_not_hide_itself():
     tools = fn.index("list.append(tableTools([searchWrap, statusChip]")
     empty = fn.index("if (!ex.length) {")
     ok(tools < empty, "the search and the status filter are built before the empty check")
-    ok(fn.index("box.append(list)") < empty, "and the card is on the page before it returns")
+    # The list is a widget-grid card now, so it goes onto the page through widget().
+    ok(fn.index("box.append(widget(list, 'discrepancies'") < empty, "and the card is on the page before it returns")
 
 
 @test
@@ -6402,8 +6403,8 @@ def t_every_widget_id_is_well_formed_and_named_once_per_renderer():
     for m in re.finditer(r"ids: \{([^}]*)\}", SCRIPT):
         found += [(m.start(), v) for v in re.findall(r":\s*'([^']*)'", m.group(1))]
     found += [(-1, v) for v in re.findall(r'data-widget="([^"]*)"', HTML)]
-    # The id a group's caller passes in, like the Overview's 'trends', is a literal too.
-    for m in re.finditer(r"renderTrendsBlock\([^\n]*, '([^']*)'\);", SCRIPT):
+    # The id a group's caller passes in, like the Overview's and SEO's 'trends', is a literal too.
+    for m in re.finditer(r"render(?:TrendsBlock|SeoTrends)\([^\n]*, '([^']*)'\);", SCRIPT):
         found.append((m.start(), m.group(1)))
     ok(len(found) >= 5, "found the Overview's ids (%d)" % len(found))
     for _, v in found:
@@ -6549,6 +6550,132 @@ def t_a_card_heading_carries_its_widget_to_the_card_and_a_group_is_built_by_its_
     calls = [args for _, args in _wg_calls(SCRIPT, "renderStructured") if len(args) > 2 and "ids:" in args[2]]
     ok(len(calls) == 1 and calls[0][0] == "box", "only the Overview passes ids to renderStructured")
     ok(".widget-group { display: flex; flex-direction: column; min-width: 0; }" in CSS, "a group is one column")
+
+
+# Every report view the stage 1 inventory found with two or more blocks, by the
+# renderer that draws it. Named rather than discovered, so renaming one fails here.
+_WG_ADOPTED = {
+    "overview": "function renderOverview(", "seo": "function renderSEO(", "keywords": "function renderKeywords(",
+    "products": "function renderProductList(", "customers": "function renderCustomers(",
+    "liability": "function renderLiability(", "recon": "function renderRecon(", "forecast": "function renderForecast(",
+    "connector": "function renderConnector(", "loans": "function renderLoans(", "mail": "function renderMail(",
+    "labels": "function renderLabels(", "memory": "function renderMemory(", "skills": "function renderSkills(",
+}
+_WG_SINGLE = ["function renderCRM(", "function renderFiles(", "function renderFilesTrash(", "function renderFilesBrowser(",
+              "function renderTeam(", "function renderTeamPeople(", "function renderTeamWork(", "function renderTeamFeed(",
+              "function renderSizes(", "function renderGuide("]
+
+
+def _wg_literal_ids(src):
+    """The literal widget ids one renderer names: widget() calls, the id a
+    trends group is handed, and renderStructured's ids."""
+    ids = [args[1][1:-1] for _, args in _wg_calls(src, "widget") if len(args) >= 2 and re.fullmatch(r"'[^']*'", args[1])]
+    ids += re.findall(r"render(?:TrendsBlock|SeoTrends)\([^\n]*, '([^']*)'\);", src)
+    for m in re.finditer(r"ids: \{([^}]*)\}", src):
+        ids += re.findall(r":\s*'([^']*)'", m.group(1))
+    return ids
+
+
+@test
+def t_every_report_view_with_several_blocks_names_its_cards():
+    """A block with no id between two cards stops a view being arranged at all,
+    and that can only be seen on a rendered page. What the source can hold is
+    the other half: every view the inventory found with two or more blocks names
+    at least two cards in its own renderer, and gives its page header the action
+    slot Customize sits in, because a view that qualifies with no slot shows no
+    button."""
+    ov_ids = _wg_literal_ids(fn_src(_WG_ADOPTED["overview"]))
+    for view, name in _WG_ADOPTED.items():
+        ok(name in SCRIPT, "the %s renderer is still %s" % (view, name.strip("( ")))
+        src = fn_src(name)
+        ids = _wg_literal_ids(src)
+        if view == "overview":
+            ids += ["kpi-*"] if "wgKpiId(m.label)" in src else []
+        ok(len(set(ids)) >= 2, "%s names %d cards: %r" % (view, len(set(ids)), ids))
+        ok("heroAct(" in src or (view == "mail" and "hero.append(heroAct(''))" in src),
+           "the %s header has the action slot Customize goes in" % view)
+    ok(len(ov_ids) >= 5, "and the Overview still names its own")
+
+
+@test
+def t_a_view_with_one_block_has_no_card_ids():
+    """CRM, Files, Team, Size list and Guide each render one block, so there is
+    nothing to arrange and no Customize button, and they look exactly as they
+    did. An id invented for one of them would put a one card grid on the page
+    and a saved layout on the account for no reason."""
+    for name in _WG_SINGLE:
+        ok(name in SCRIPT, "%s still exists" % name.strip("( "))
+        src = fn_src(name)
+        ok(not _wg_calls(src, "widget") and "data-widget" not in src, "%s gives a block a widget id" % name.strip("( "))
+
+
+@test
+def t_a_held_card_scrolls_the_page_near_its_edge_and_stops_when_the_drag_ends():
+    """A finger holding a card cannot also scroll, so without this a card could
+    not be carried past the fold on a phone. The band and the top speed are
+    named beside the other gesture thresholds; the scroll is driven by pointer
+    moves and a short timer, not animation frames, which a tab that is not
+    painted never runs; and it stops when the drag ends, whether by a release,
+    a cancel or Escape, because all three end in wgDragEnd."""
+    layer = _wg_layer()
+    decl = re.search(r"const WG_SCROLL_EDGE = (\d+), WG_SCROLL_MAX = (\d+), WG_SCROLL_TICK_MS = (\d+), WG_SCROLL_JUMP_MS = (\d+);", layer)
+    ok(decl, "the auto-scroll constants are declared together")
+    ok(0 < layer.index("WG_HOLD_MS = 350") < decl.start() < layer.index("WG_HOLD_MS = 350") + 1200,
+       "beside WG_HOLD_MS and the other gesture thresholds")
+    edge, top, tick, jump = (int(x) for x in decl.groups())
+    ok(0 < edge < 200 and top > 0 and 0 < tick < jump, "a band, a speed, and a slower cadence for reduced motion")
+    auto = _wg_fn("function wgAutoScroll(")
+    for need in ("WG_SCROLL_EDGE", "WG_SCROLL_MAX", "REDUCE_MOTION ? WG_SCROLL_JUMP_MS : WG_SCROLL_TICK_MS",
+                 "clearTimeout(d.scrollTimer);", "d.scrollTimer = setTimeout(wgAutoScroll, tick);",
+                 "wgFollow();", "wgStepSoon();", "d.root.getBoundingClientRect().bottom"):
+        ok(need in auto, "wgAutoScroll: " + need)
+    ok("requestAnimationFrame" not in auto and "behavior" not in auto,
+       "no animation frames and no smooth scroll: a hidden tab would never step it")
+    ok("scroller: root.closest('.scroll')" in _wg_fn("function wgPointerDown("), "it scrolls the view's own scroller")
+    ok("wgAutoScroll();" in _wg_fn("function wgOnMove("), "every pointer move steps it")
+    ok("clearTimeout(d.scrollTimer);" in _wg_fn("function wgDragEnd("), "ending the drag stops it")
+    ok("wgDragEnd(true);" in _wg_fn("function wgOnUp(") and "wgDragEnd(d.lifted);" in _wg_fn("function wgOnCancel(")
+       and "wgDragEnd(d.lifted, true);" in _wg_fn("function wgOnEscape("),
+       "a release, a cancel and Escape all end the drag")
+    ok(".ov-wrap.wg-editing { position: relative; overflow-anchor: none; }" in CSS,
+       "scroll anchoring is off while cards move, or the page shifts under a still pointer")
+
+
+@test
+def t_a_header_keeps_its_tabs_at_16_in_the_grid():
+    """A tab strip belongs to the page header above it, so it sits 16 below it
+    rather than at the 24 between blocks: the flow does that with a margin, and
+    in the grid, where every margin is zero and the gap is the rhythm, a
+    negative top margin worked out from the two tokens takes the gap back to
+    16. On a phone the gap is 16 already and the margin is nothing."""
+    ok(".ov-hero:has(+ .page-tabs) { margin-bottom: var(--sp-4); }" in CSS, "the flow's rule is still there")
+    ok(".ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-4) - var(--wgrid-gap)); }" in CSS,
+       "and the grid's reads the same two tokens")
+
+
+@test
+def t_an_unfilled_card_waits_off_the_page_without_being_hidden():
+    """The trade radar fills when its request answers, and Top products empties
+    when fewer than two products earned. Such a card is not the person's choice
+    to hide, so it is left out of the arrangement and the Customize list, never
+    added to their hidden list, and laid out again when it fills. Before, an
+    empty holder took a grid row and a gap of its own."""
+    layer = _wg_layer()
+    ok(".ov-wrap.wgrid > [data-widget]:empty { display: none; }" in CSS, "an empty card takes no row")
+    absent = _wg_fn("function wgAbsent(")
+    ok("n.matches(':empty')" in absent and "getComputedStyle(n).display === 'none'" in absent and "wgHid.has(n)" in absent,
+       "a card is absent when it is empty or its renderer set it to display none, not when the layout hid it")
+    ok("!wgAbsent(n)" in layer.split("const wgShown = ")[1].split("\n")[0], "the shown cards leave it out")
+    arrange = _wg_fn("function wgArrange(")
+    ok("w.fill.observe(n, { childList: true" in arrange and "widgets.length - w.absent.size < 2" in arrange,
+       "every card is watched for filling, and an absent one does not count towards qualifying")
+    ok("const present = merged.order.filter(id => !absent.has(id));" in arrange
+       and "merged.hidden.filter(id => !absent.has(id))" in arrange, "it is placed with neither the shown nor the hidden cards")
+    ok("wgEdit.draft.hidden.push" not in arrange, "and it never joins the hidden list")
+    ok("wgAbsent(r.target) !== w.absent.has(r.target)" in _wg_fn("function wgWatch("),
+       "a card is laid out again only when it starts or stops being shown")
+    for name in ("function renderCustomers(", "function renderProductList("):
+        ok("widget(el('div'), " in fn_src(name), "%s gives its holder the id, not the card drawn into it" % name.strip("( "))
 
 
 if __name__ == "__main__":
