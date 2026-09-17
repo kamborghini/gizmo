@@ -149,6 +149,7 @@ CHAT_CONTEXT_CAP   = int(os.environ.get("CHAT_CONTEXT_CAP", "12000"))  # max cha
 SCHEDULE_PATH      = os.environ.get("SCHEDULE_PATH", "/data/schedule.json")  # auto-refresh config (off by default)
 ALERTS_PATH        = os.environ.get("ALERTS_PATH", "/data/alerts.json")      # change alerts from scheduled runs
 FEEDBACK_PATH      = os.environ.get("FEEDBACK_PATH", "/data/feedback.json")  # feature requests from the desk
+LAYOUTS_PATH       = os.environ.get("LAYOUTS_PATH", "/data/layouts.json")    # each person's arrangement of the cards on a screen
 # Reconciliation engine: exceptions + audit trail, system snapshots, extracted documents.
 RECON_PATH         = os.environ.get("RECON_PATH", "/data/recon.json")
 FORECAST_PATH      = os.environ.get("FORECAST_PATH", "/data/forecast.json")  # the nightly forecasting service's latest run, and the cash flow workbook an admin uploaded (base64), in one store
@@ -12466,11 +12467,11 @@ TAB_KEYS = ("overview", "seo", "keywords", "products", "customers", "liability",
             "crm", "loans", "mail", "files", "labels", "sizes", "memory", "skills", "chat",
             "recon", "forecast", "connector")
 # API routes that belong to no tab and are open to every signed-in account:
-# the sign-in flow, a person's own clock and profile, and the admin routes,
+# the sign-in flow, a person's own clock, profile and card layouts, and the admin routes,
 # which refuse non-admins themselves. Anything else under /api/ that is not in
 # _TAB_ROUTES is refused (see _tab_denied).
 _OPEN_API = ("/api/auth/", "/api/team/", "/api/work/", "/api/google/status", "/api/alerts",
-             "/api/usage", "/api/cache", "/api/profile", "/api/status", "/api/updates",
+             "/api/usage", "/api/cache", "/api/profile", "/api/layouts", "/api/status", "/api/updates",
              "/api/schedule", "/api/backup", "/api/restore")
 
 _TAB_ROUTES = (
@@ -12557,6 +12558,96 @@ def _tab_denied(request: Request) -> Optional[JSONResponse]:
     _track_denied(uid, path)
     return _json({"error": "That part of the app is switched off for your account. "
                            "Ask an admin if you need it."}, 403)
+
+
+# ---------------------------------------------------------------------------
+# Page layouts: how each person has arranged the cards on a report screen.
+# A layout is an order and a hidden list of card ids, kept per account, so
+# rearranging your Overview never moves a colleague's cards and it follows you
+# to another machine. The server does not know which cards a screen renders
+# and does not try to: the page drops ids it did not render when it merges.
+# ---------------------------------------------------------------------------
+
+# Every view the page's setView shows except Chat, which is a log and a
+# composer with no cards to arrange.
+LAYOUT_VIEWS = ("overview", "seo", "keywords", "products", "customers", "liability",
+                "recon", "forecast", "connector", "crm", "loans", "mail", "files", "team",
+                "labels", "sizes", "memory", "skills", "guide")
+# The page's own card id pattern, matched with fullmatch: with re.match a `$`
+# would also accept an id that ends in a newline.
+_LAYOUT_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
+LAYOUT_MAX_IDS = 64
+# Two lists of 64 ids at 48 characters each is under 7KB of JSON, so a body
+# past 8KB is not something the page sends.
+LAYOUT_MAX_BODY = 8 * 1024
+# The load, change and write in _save_layout have no await between them, so
+# today two saves cannot interleave on the one event loop. The lock keeps that
+# true on the day someone adds one, instead of one person's Done silently
+# dropping another's layout.
+_layouts_lock = asyncio.Lock()
+
+
+def _load_layouts() -> dict:
+    """{uid: {view: {"order": [...], "hidden": [...]}}}, read fresh each time.
+    Not the cached loader: _save_layout changes what it is handed, and a
+    fresh object means a failed write leaves nothing changed in memory."""
+    d = _load_json_store(LAYOUTS_PATH, "layouts", {})
+    return d if isinstance(d, dict) else {}
+
+
+def _layouts_for(uid: str) -> dict:
+    mine = _load_layouts().get(uid)
+    return mine if isinstance(mine, dict) else {}
+
+
+def _clean_layout_change(body: dict):
+    """(problem, view, layout) for a save or a reset. `problem` is the plain
+    sentence a 400 carries, empty when the change is sound; `layout` is None
+    for a reset. A card named twice keeps the first place it was given."""
+    view = body.get("view")
+    if not isinstance(view, str) or view not in LAYOUT_VIEWS:
+        return "That screen has no layout to save.", "", None
+    if "reset" in body:
+        if body["reset"] is not True:
+            return "Reset is either true or left out.", "", None
+        return "", view, None
+    layout = {}
+    for name in ("order", "hidden"):
+        ids = body.get(name)
+        if not isinstance(ids, list):
+            return "A layout needs an order list and a hidden list.", "", None
+        if len(ids) > LAYOUT_MAX_IDS:
+            return f"A layout holds at most {LAYOUT_MAX_IDS} cards.", "", None
+        clean = []
+        for i in ids:
+            if not isinstance(i, str) or not _LAYOUT_ID.fullmatch(i):
+                return ("A card id is up to 48 lower-case letters, digits and hyphens, "
+                        "starting with a letter or digit."), "", None
+            if i not in clean:
+                clean.append(i)
+        layout[name] = clean
+    return "", view, layout
+
+
+def _save_layout(uid: str, view: str, layout) -> dict:
+    """Set one person's layout for one view, or remove it when `layout` is
+    None, and return that person's whole map. The caller holds _layouts_lock.
+    Private: it is one file of everyone's entries, and nothing but the app
+    has a reason to read it."""
+    d = _load_layouts()
+    mine = d.get(uid) if isinstance(d.get(uid), dict) else {}
+    if layout is None:
+        if view not in mine:
+            return mine              # nothing saved for that screen, nothing to write
+        mine.pop(view)
+    else:
+        mine[view] = layout
+    if mine:
+        d[uid] = mine
+    else:
+        d.pop(uid, None)             # nothing saved leaves no empty entry behind
+    _write_json_store(LAYOUTS_PATH, "layouts", d, private=True)
+    return mine
 
 
 # ---------------------------------------------------------------------------
@@ -14742,6 +14833,35 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 logger.exception("Profile save failed")
                 return _json({"error": "Couldn't save the profile (is a writable volume mounted at /data?)."}, 500)
         return _json({"profile": _load_profile()})
+
+    @mcp.custom_route("/api/layouts", methods=["POST"])
+    async def layouts_route(request: Request):
+        """The caller's own card layouts: {} reads them all, a view with an
+        order and a hidden list saves that screen's, a view with reset true
+        removes it. On no tab, like the profile: arranging the cards of a
+        screen you can already open is not a permission of its own. The
+        account is only ever the session the door returns, never a name in
+        the body, so nobody can read or change another person's layout. Not
+        tracked: arranging cards is not an event the team needs in its log."""
+        err, body, who = await _guard(request, max_body=LAYOUT_MAX_BODY, cap=LAYOUT_MAX_BODY)
+        if err:
+            return err
+        if not who:
+            return _json({"error": AUTH_REFUSALS["session"], "reason": "session"}, 401)
+        # Any of these keys makes it a change, so a save that forgot its view
+        # is told so instead of quietly answered with a read.
+        if not any(k in body for k in ("view", "order", "hidden", "reset")):
+            return _json({"layouts": _layouts_for(who)})
+        problem, view, layout = _clean_layout_change(body)
+        if problem:
+            return _json({"error": problem}, 400)
+        try:
+            async with _layouts_lock:
+                mine = _save_layout(who, view, layout)
+        except Exception:
+            logger.exception("Layout save failed")
+            return _json({"error": "Couldn't save the layout (is a writable volume mounted at /data?)."}, 500)
+        return _json({"layouts": mine})
 
     @mcp.custom_route("/api/seo", methods=["POST"])
     async def seo_route(request: Request):

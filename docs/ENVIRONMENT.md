@@ -3,7 +3,7 @@
 Generated from the code by `tools/env_reference.py`; do not edit by hand.
 `make env-doc` rewrites it, and CI fails when it is stale.
 
-208 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
+209 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
 
 ## server.py
 
@@ -63,6 +63,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `IMPACT_PATH` | `"/data/impact.json"` | copilot | tracked-action impact log |
 | `KNOWLEDGE_CAP` | `"8000"` | copilot | max stored knowledge chars |
 | `KNOWLEDGE_PATH` | `"/data/store_knowledge.json"` | copilot |  |
+| `LAYOUTS_PATH` | `"/data/layouts.json"` | copilot | each person's arrangement of the cards on a screen |
 | `LEARN_MAX_PAGES` | `"12"` | copilot | pages crawled when learning |
 | `LEARN_PAGE_CHARS` | `"3000"` | copilot | text kept per page |
 | `LOW_STOCK_THRESHOLD` | `"5"` | copilot |  |

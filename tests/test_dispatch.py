@@ -36,6 +36,7 @@ os.environ.update({
     "GOBO_SIZES_LIVE": SCRATCH + "/gobo-sizes.csv",
     "USAGE_SHEETS_PATH": SCRATCH + "/usage_sheets.json",
     "PROFILE_PATH": SCRATCH + "/store_profile.json",
+    "LAYOUTS_PATH": SCRATCH + "/layouts.json",
     "KNOWLEDGE_PATH": SCRATCH + "/store_knowledge.json",
     "ZETA_SYNC_PATH": SCRATCH + "/zeta_sync.json",
     "MAILBOX_PATH": SCRATCH + "/mailbox.json",
@@ -7009,6 +7010,206 @@ def t_tabs_cannot_touch_the_master_and_follow_rank():
                   {"op": "tabs", "id": ian, "tabs": ["files"]}).status_code, 403,
            "but cannot set an admin's, including their own")
     with_accounts(go)
+
+# ---- Page layouts: each person's own arrangement of a screen's cards --------
+
+def with_layouts(fn):
+    """A fresh accounts world with an empty layouts store, wiped again on the
+    way out so no later test inherits somebody's arrangement."""
+    def wipe():
+        try:
+            os.remove(copilot.LAYOUTS_PATH)
+        except FileNotFoundError:
+            pass
+        copilot._poisoned_stores.discard(copilot.LAYOUTS_PATH)
+        copilot._forget_store(copilot.LAYOUTS_PATH)
+    def go():
+        wipe()
+        try:
+            fn()
+        finally:
+            wipe()
+    with_accounts(go)
+
+@test
+def t_a_layout_belongs_to_the_account_that_saved_it():
+    """Rearranging your Overview must never move a colleague's cards. The
+    account is the session the door returns, never a name in the body, so a
+    body that names somebody else still saves to whoever sent it."""
+    def go():
+        ensure_auth()
+        master = APP_AUTH["master"]
+        owen, sess, _pw = ready_user("Owen", "owen")
+        r = post("/api/layouts", {"view": "overview", "order": ["trend", "alerts"],
+                                  "hidden": ["drivers"], "uid": owen, "user": owen})
+        eq(r.status_code, 200, r.text)
+        eq(r.json()["layouts"], {"overview": {"order": ["trend", "alerts"], "hidden": ["drivers"]}},
+           "the save answers with the caller's own map")
+        r = post_s(sess, "/api/layouts", {"view": "overview", "order": ["alerts"], "hidden": []})
+        eq(r.status_code, 200, r.text)
+        eq(post("/api/layouts", {}).json()["layouts"],
+           {"overview": {"order": ["trend", "alerts"], "hidden": ["drivers"]}},
+           "the master reads back only the master's")
+        eq(post_s(sess, "/api/layouts", {}).json()["layouts"],
+           {"overview": {"order": ["alerts"], "hidden": []}},
+           "and Owen only Owen's, although the master's body named him")
+        on_disk = json.load(open(copilot.LAYOUTS_PATH))["layouts"]
+        eq(sorted(on_disk), sorted([master, owen]), "one entry per account, keyed by the session's account")
+    with_layouts(go)
+
+@test
+def t_layouts_are_closed_without_a_session():
+    """A layout is a person's own, so with nobody signed in there is nobody
+    whose layout to read or change."""
+    def go():
+        ensure_auth()
+        eq(bare("/api/layouts", {}).status_code, 401, "no session, no read")
+        r = bare("/api/layouts", {"view": "overview", "order": ["trend"], "hidden": []})
+        eq(r.status_code, 401, "no session, no save")
+        ok(not os.path.exists(copilot.LAYOUTS_PATH), "and nothing reached the disk")
+    with_layouts(go)
+
+@test
+def t_a_layout_the_page_could_not_have_made_is_refused_and_nothing_is_written():
+    """The page only ever sends card ids it rendered, so anything else is a
+    fault or a probe, and each is told plainly rather than half saved. The
+    store starts empty here, so any write at all would leave a file behind."""
+    def go():
+        ensure_auth()
+        good = {"view": "overview", "order": ["trend"], "hidden": []}
+        bad = [
+            ({**good, "view": "nowhere"}, "an unknown view"),
+            ({**good, "view": "chat"}, "chat, which has no cards to arrange"),
+            ({"order": ["trend"], "hidden": []}, "no view at all"),
+            ({**good, "order": "trend"}, "an order that is not a list"),
+            ({"view": "overview", "order": ["trend"]}, "a missing hidden list"),
+            ({**good, "order": ["c%d" % i for i in range(65)]}, "65 ids"),
+            ({**good, "hidden": ["c%d" % i for i in range(65)]}, "65 hidden ids"),
+            ({**good, "order": ["two words"]}, "an id with a space"),
+            ({**good, "order": ["Trend"]}, "an id in upper case"),
+            ({**good, "order": ["trend\n"]}, "an id with a trailing newline"),
+            ({**good, "order": ["-trend"]}, "an id that starts with a hyphen"),
+            ({**good, "order": ["x" * 49]}, "an id longer than 48 characters"),
+            ({**good, "order": [7]}, "an id that is not a string"),
+            ({"view": "overview", "reset": "yes"}, "reset that is not exactly true"),
+            ({"view": "overview", "reset": False}, "reset false"),
+        ]
+        for body, why in bad:
+            r = post("/api/layouts", body)
+            eq(r.status_code, 400, why + ": " + r.text)
+            ok(r.json().get("error"), why + " says what was wrong")
+        ok(not os.path.exists(copilot.LAYOUTS_PATH), "none of those wrote a thing")
+        eq(post("/api/layouts", {**good, "order": ["c%d" % i for i in range(64)]}).status_code, 200,
+           "64 ids is the limit, not past it")
+        os.remove(copilot.LAYOUTS_PATH)
+        copilot._forget_store(copilot.LAYOUTS_PATH)
+        big = {**good, "order": ["x" * 48] * 200}
+        eq(post("/api/layouts", big).status_code, 413, "a body past 8KB is refused before it is read")
+        # The door hands a handler {} for a body that is not a JSON object, so
+        # a list arrives as a read of the caller's own layouts, never a write.
+        r = post("/api/layouts", ["overview", "trend"])
+        eq(r.status_code, 200, r.text)
+        eq(r.json()["layouts"], {}, "a body that is not an object reads, it does not save")
+        ok(not os.path.exists(copilot.LAYOUTS_PATH), "and neither of those wrote a thing")
+    with_layouts(go)
+
+@test
+def t_resetting_a_screen_forgets_only_that_screen_for_that_person():
+    """Reset then Done removes one person's layout for one screen. It must not
+    take their other screens with it, or anyone else's Overview."""
+    def go():
+        ensure_auth()
+        _owen, sess, _pw = ready_user("Owen", "owen")
+        post("/api/layouts", {"view": "overview", "order": ["trend"], "hidden": []})
+        post("/api/layouts", {"view": "crm", "order": ["board", "stats"], "hidden": []})
+        post_s(sess, "/api/layouts", {"view": "overview", "order": ["alerts"], "hidden": ["trend"]})
+        r = post("/api/layouts", {"view": "overview", "reset": True})
+        eq(r.status_code, 200, r.text)
+        eq(r.json()["layouts"], {"crm": {"order": ["board", "stats"], "hidden": []}},
+           "the caller's other screen stays")
+        eq(post_s(sess, "/api/layouts", {}).json()["layouts"],
+           {"overview": {"order": ["alerts"], "hidden": ["trend"]}},
+           "and the other account's Overview is untouched")
+        r = post("/api/layouts", {"view": "overview", "reset": True})
+        eq(r.status_code, 200, "resetting a screen with nothing saved is not an error")
+        eq(r.json()["layouts"], {"crm": {"order": ["board", "stats"], "hidden": []}})
+        post("/api/layouts", {"view": "crm", "reset": True})
+        on_disk = json.load(open(copilot.LAYOUTS_PATH))["layouts"]
+        ok(APP_AUTH["master"] not in on_disk, "an account with nothing saved leaves no empty entry")
+    with_layouts(go)
+
+@test
+def t_a_new_account_has_no_layouts_to_read():
+    """Nothing saved reads as an empty map, so the page renders every screen
+    in its default order instead of treating a newcomer as an error."""
+    def go():
+        ensure_auth()
+        post("/api/layouts", {"view": "overview", "order": ["trend"], "hidden": []})
+        _uid, sess, _pw = ready_user("Nia", "nia")
+        r = post_s(sess, "/api/layouts", {})
+        eq(r.status_code, 200, r.text)
+        eq(r.json(), {"layouts": {}}, "a newcomer reads nothing, not the master's layout")
+    with_layouts(go)
+
+@test
+def t_a_card_named_twice_keeps_its_first_place():
+    """A card sits in one place. A repeat in the list is collapsed rather than
+    refused, keeping the place it was first given."""
+    def go():
+        ensure_auth()
+        r = post("/api/layouts", {"view": "seo", "order": ["trend", "alerts", "trend", "drivers", "alerts"],
+                                  "hidden": ["kpi-score", "kpi-score"]})
+        eq(r.status_code, 200, r.text)
+        eq(r.json()["layouts"]["seo"], {"order": ["trend", "alerts", "drivers"], "hidden": ["kpi-score"]})
+    with_layouts(go)
+
+@test
+def t_the_layouts_file_is_owner_only_and_keyed_by_account():
+    """The file is written only through the one writer, as a private store,
+    so it is owner-only whether it is new or was left readable by something
+    else, and it has the shape the loader expects."""
+    def go():
+        ensure_auth()
+        master = APP_AUTH["master"]
+        eq(post("/api/layouts", {"view": "overview", "order": ["trend", "alerts"],
+                                 "hidden": ["drivers"]}).status_code, 200)
+        eq(os.stat(copilot.LAYOUTS_PATH).st_mode & 0o777, 0o600, "a new file is owner-only")
+        eq(json.load(open(copilot.LAYOUTS_PATH)),
+           {"layouts": {master: {"overview": {"order": ["trend", "alerts"], "hidden": ["drivers"]}}}})
+        os.chmod(copilot.LAYOUTS_PATH, 0o644)
+        eq(post("/api/layouts", {"view": "mail", "order": ["inbox"], "hidden": []}).status_code, 200)
+        eq(os.stat(copilot.LAYOUTS_PATH).st_mode & 0o777, 0o600, "and a readable one is made owner-only again")
+    with_layouts(go)
+
+@test
+def t_a_layout_that_could_not_be_saved_is_never_answered_as_saved():
+    """The page keeps a person in Customize with their draft on screen when a
+    save fails, so the route has to say it failed. A store that will not parse
+    is also never overwritten: everyone's layouts in it are kept for repair."""
+    def go():
+        ensure_auth()
+        with open(copilot.LAYOUTS_PATH, "w") as fh:
+            fh.write('{"layouts": {"broken')
+        r = post("/api/layouts", {"view": "overview", "order": ["trend"], "hidden": []})
+        eq(r.status_code, 500, r.text)
+        ok("Couldn't save the layout" in r.json()["error"], r.text)
+        eq(open(copilot.LAYOUTS_PATH).read(), '{"layouts": {"broken', "the unreadable file is left as it was")
+    with_layouts(go)
+
+@test
+def t_an_account_with_tabs_switched_off_can_still_arrange_its_cards():
+    """Layouts belong to no tab: the route is on the open list, so an account
+    given only the Labels tab can still keep its own arrangement of it."""
+    def go():
+        ensure_auth()
+        owen, sess, _pw = ready_user("Owen", "owen")
+        eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["labels"]}).status_code, 200)
+        eq(post_s(sess, "/api/files/tree", {}).status_code, 403, "the account really is restricted")
+        r = post_s(sess, "/api/layouts", {"view": "labels", "order": ["queue", "made"], "hidden": []})
+        eq(r.status_code, 200, r.text)
+        eq(post_s(sess, "/api/layouts", {}).json()["layouts"],
+           {"labels": {"order": ["queue", "made"], "hidden": []}})
+    with_layouts(go)
 
 @test
 def t_work_the_clock_is_the_servers_and_only_for_parttime():
