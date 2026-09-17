@@ -4606,6 +4606,299 @@ Projected Image UK"></textarea>
             if (finance) g.classList.add('metrics-finance');
             return g;
         }
+        /* ---------- widget layout (pure) ---------- */
+        /* The arithmetic behind the widget grid, ported from the React component
+           Cameron supplied (draggable-widget-grid.tsx) with the React taken out.
+           An arrangement is an order of {id, size} plus a column count: wgLayout
+           turns it into placements {id, col, row, w, h}, and while a card is held
+           wgCandidates lists the orders one move away and wgChoose picks one.
+           Nothing between these two marker lines reads or writes the page, so
+           tests/test_frontend.py lifts the block out and runs it under node.
+           Three changes from the component: sizes are sm (one column), wide
+           (two) and full (every column), all one row high, because gizmo's rows
+           are as tall as their content and a two row card would need a row
+           height nobody knows; slot rectangles come from wgSlotFor, which reads
+           row edges from the rendered rows instead of assuming square cells; and
+           a group swap's cards must fill its area, for the reason given there. */
+        const WG_SPANS = { sm: { col: 1, row: 1 }, wide: { col: 2, row: 1 }, full: { col: Infinity, row: 1 } };
+        const wgOverlaps = (a, b) => a.col < b.col + b.w && b.col < a.col + a.w && a.row < b.row + b.h && b.row < a.row + a.h;
+        const wgContains = (outer, inner) => inner.col >= outer.col && inner.row >= outer.row
+            && inner.col + inner.w <= outer.col + outer.w && inner.row + inner.h <= outer.row + outer.h;
+        // A size nobody set, or one that is not in the table, spans the row, which is where a plain block sits outside the grid.
+        function wgSpanOf(item, columns) {
+            const span = Object.prototype.hasOwnProperty.call(WG_SPANS, item.size) ? WG_SPANS[item.size] : WG_SPANS.full;
+            return { w: Math.min(span.col, columns), h: span.row };
+        }
+        /* Exact tiling first, because it moves nothing but the order: every card
+           keeps its own width and no row has a hole except possibly the last.
+           Only when that cannot be found in budget does the packer widen cards
+           to close the rows. */
+        function wgLayout(items, columns) {
+            if (columns < 1 || items.length === 0) return [];
+            return wgTile(items, columns) || wgPack(items, columns);
+        }
+        // A cap on backtracking steps, so a pathological order costs a packed layout rather than a frozen frame.
+        const WG_TILING_BUDGET = 20000;
+        /* The first empty cell in reading order takes the earliest widget that
+           fits there and still lets the rest be placed. */
+        function wgTile(items, columns) {
+            const spans = items.map(item => wgSpanOf(item, columns));
+            const area = spans.reduce((n, s) => n + s.w * s.h, 0);
+            const rows = Math.ceil(area / columns);
+            const grid = new Array(rows * columns).fill(false);
+            const used = new Array(items.length).fill(false);
+            const out = [];
+            let budget = WG_TILING_BUDGET;
+            const fits = (w, h, r, c) => {
+                if (c + w > columns || r + h > rows) return false;
+                for (let y = r; y < r + h; y++)
+                    for (let x = c; x < c + w; x++) if (grid[y * columns + x]) return false;
+                return true;
+            };
+            const mark = (w, h, r, c, v) => {
+                for (let y = r; y < r + h; y++)
+                    for (let x = c; x < c + w; x++) grid[y * columns + x] = v;
+            };
+            const place = (count) => {
+                if (count === items.length) return true;
+                if (--budget < 0) return false;
+                const i = grid.indexOf(false);
+                if (i < 0) return false;
+                const r = Math.floor(i / columns), c = i % columns;
+                // Widgets of one shape are interchangeable at this cell, so a shape that failed here is not tried again.
+                const tried = new Set();
+                for (let k = 0; k < items.length; k++) {
+                    if (used[k]) continue;
+                    const { w, h } = spans[k];
+                    const shape = w + 'x' + h;
+                    if (tried.has(shape) || !fits(w, h, r, c)) continue;
+                    tried.add(shape);
+                    used[k] = true;
+                    mark(w, h, r, c, true);
+                    out.push({ id: items[k].id, col: c, row: r, w, h });
+                    if (place(count + 1)) return true;
+                    out.pop();
+                    mark(w, h, r, c, false);
+                    used[k] = false;
+                }
+                return false;
+            };
+            return place(0) ? out : null;
+        }
+        /* The fallback fills a band of rows in order, then widens cards into
+           whatever the band left empty. Once one card is deferred to the next
+           band every later card is too, so the reading order stays the order. */
+        function wgPack(items, columns) {
+            const out = [];
+            let row = 0;
+            let queue = items.map(item => Object.assign({ id: item.id }, wgSpanOf(item, columns)));
+            while (queue.length > 0) {
+                const height = Math.max(...queue.slice(0, columns).map(q => q.h));
+                const cells = new Array(height * columns).fill(false);
+                const band = [], rest = [];
+                for (const q of queue) {
+                    let spot = -1;
+                    for (let i = 0; i < cells.length && spot < 0; i++) {
+                        const r = Math.floor(i / columns), c = i % columns;
+                        if (c + q.w > columns || r + q.h > height) continue;
+                        let free = true;
+                        for (let y = r; y < r + q.h && free; y++)
+                            for (let x = c; x < c + q.w && free; x++)
+                                if (cells[y * columns + x]) free = false;
+                        if (free) spot = i;
+                    }
+                    if (spot < 0 || rest.length > 0) { rest.push(q); continue; }
+                    const r = Math.floor(spot / columns), c = spot % columns;
+                    for (let y = r; y < r + q.h; y++)
+                        for (let x = c; x < c + q.w; x++) cells[y * columns + x] = true;
+                    band.push({ id: q.id, col: c, row: r, w: q.w, h: q.h });
+                }
+                // Grow the card to the left of an empty cell, or failing that the one above it.
+                for (let i = 0; i < cells.length; i++) {
+                    if (cells[i]) continue;
+                    const r = Math.floor(i / columns), c = i % columns;
+                    const left = band.find(p => p.col + p.w === c && p.row <= r && p.row + p.h > r && p.h === 1);
+                    const above = band.find(p => p.row + p.h === r && p.col === c && p.w === 1);
+                    const grow = left || above;
+                    if (!grow) continue;
+                    if (grow === left) grow.w += 1;
+                    else grow.h += 1;
+                    cells[i] = true;
+                }
+                out.push(...band.map(p => Object.assign({}, p, { row: p.row + row })));
+                row += height;
+                queue = rest;
+            }
+            return out;
+        }
+        /* The tiler may seat a later card before an earlier one to avoid a hole,
+           so this takes the reading order of the layout as the order, but only
+           when laying that order out again gives the same picture. It returns
+           the same array when nothing changes, which is what lets a caller skip
+           a DOM pass. */
+        function wgCanonical(items, columns) {
+            const places = wgLayout(items, columns);
+            if (places.length !== items.length) return items;
+            const byId = new Map(items.map(item => [item.id, item]));
+            const sorted = [...places].sort((a, b) => a.row - b.row || a.col - b.col).map(p => byId.get(p.id));
+            if (sorted.every((item, i) => item === items[i])) return items;
+            const at = new Map(places.map(p => [p.id, p]));
+            const same = wgLayout(sorted, columns).every(p => {
+                const q = at.get(p.id);
+                return q && q.col === p.col && q.row === p.row && q.w === p.w && q.h === p.h;
+            });
+            return same ? sorted : items;
+        }
+        function wgMoveTo(items, id, index) {
+            const from = items.findIndex(item => item.id === id);
+            if (from < 0 || from === index || index < 0 || index >= items.length) return items;
+            const next = [...items];
+            const [moved] = next.splice(from, 1);
+            next.splice(index, 0, moved);
+            return next;
+        }
+        const wgSameOrder = (a, b) => a.length === b.length && a.every((item, i) => item.id === b[i].id);
+        /* A candidate is measured to its slot shrunk by this fraction on every
+           side, and the held card's own slot is measured whole. The difference
+           is a dead band: a pointer trembling on the line between two slots
+           stays with the slot the card is in, instead of flicking the cards
+           back and forth every frame. It also means each adopted move leaves
+           the card's slot strictly nearer the pointer, so a still pointer can
+           never walk it round a circle of orders. */
+        const WG_ENTER = 0.18;
+        function wgChoose(home, candidates, cx, cy) {
+            const distance = (s, inset) => {
+                const ix = (s.right - s.left) * inset, iy = (s.bottom - s.top) * inset;
+                const dx = Math.max(s.left + ix - cx, 0, cx - (s.right - ix));
+                const dy = Math.max(s.top + iy - cy, 0, cy - (s.bottom - iy));
+                return Math.hypot(dx, dy);
+            };
+            const toCentre = s => Math.hypot((s.left + s.right) / 2 - cx, (s.top + s.bottom) / 2 - cy);
+            let best = distance(home, 0);
+            if (best === 0) return null;
+            let pick = null, bestCentre = Infinity;
+            for (const { order, slot } of candidates) {
+                const d = distance(slot, WG_ENTER);
+                const c = toCentre(slot);
+                // On a tie the earlier candidate wins, and group swaps are listed first.
+                if (d < best || (d === best && pick && c < bestCentre)) {
+                    best = d;
+                    bestCentre = c;
+                    pick = order;
+                }
+            }
+            return pick;
+        }
+        /* Every order one move away from items, each with the slot the held card
+           would take. Group swaps come first: an area of the card's own shape
+           filled entirely by smaller cards trades places with it, and those cards
+           keep their arrangement. Then sequence moves: the card at every other
+           index. toSlot turns a box into a rectangle, normally wgSlotFor. */
+        function wgCandidates(items, id, columns, toSlot) {
+            const places = wgLayout(items, columns);
+            const me = places.find(p => p.id === id);
+            if (!me) return [];
+            const byId = new Map(items.map(item => [item.id, item]));
+            const rows = Math.max(...places.map(p => p.row + p.h));
+            const out = [];
+            for (let row = 0; row + me.h <= rows; row++) {
+                for (let col = 0; col + me.w <= columns; col++) {
+                    const area = { col, row, w: me.w, h: me.h };
+                    if (wgOverlaps(area, me)) continue;
+                    const group = places.filter(p => wgOverlaps(p, area));
+                    if (group.length < 2 || !group.every(p => wgContains(area, p))) continue;
+                    /* The component stopped at the check above, so an area reaching into
+                       the empty end of a short last row passed with a hole in it. Its
+                       order then laid out with the card somewhere else, and the chooser
+                       picked that same unreachable slot every frame. A group has to
+                       fill the area, which is what the component's own comment says. */
+                    if (group.reduce((n, p) => n + p.w * p.h, 0) !== area.w * area.h) continue;
+                    const moved = places.map(p => p.id === id
+                        ? Object.assign({}, p, { col, row })
+                        : group.includes(p)
+                            ? Object.assign({}, p, { col: p.col - col + me.col, row: p.row - row + me.row })
+                            : p);
+                    moved.sort((a, b) => a.row - b.row || a.col - b.col);
+                    out.push({ order: moved.map(p => byId.get(p.id)), slot: toSlot(area) });
+                }
+            }
+            const from = items.findIndex(item => item.id === id);
+            for (let i = 0; i < items.length; i++) {
+                if (i === from) continue;
+                const order = wgMoveTo(items, id, i);
+                const p = wgLayout(order, columns).find(q => q.id === id);
+                if (p) out.push({ order, slot: toSlot(p) });
+            }
+            return out;
+        }
+        /* A saved layout against what rendered. Saved ids that did not render
+           are dropped, and so is a repeat of one. An id the saved order never
+           mentions is a card added since it was saved, so it goes in at its
+           default index: it appears where it would for someone who never
+           customized, and an old Overview order of KPI tiles leaves every other
+           block where it always was. The order holds every default id exactly
+           once, hidden ones included; the caller takes hidden ones off the page. */
+        function wgMergeOrder(defaultIds, saved) {
+            const known = new Set(defaultIds);
+            const keep = (list) => {
+                const seen = new Set();
+                return (Array.isArray(list) ? list : []).filter(id => {
+                    if (!known.has(id) || seen.has(id)) return false;
+                    seen.add(id);
+                    return true;
+                });
+            };
+            const src = saved && typeof saved === 'object' ? saved : {};
+            const order = keep(src.order);
+            const placed = new Set(order);
+            defaultIds.forEach((id, i) => {
+                if (placed.has(id)) return;
+                order.splice(Math.min(i, order.length), 0, id);
+                placed.add(id);
+            });
+            return { order, hidden: keep(src.hidden) };
+        }
+        // Alt with an arrow: one place later or earlier, stopping at either end rather than wrapping.
+        function wgKeyMove(items, id, delta) {
+            const from = items.findIndex(item => item.id === id);
+            if (from < 0) return items;
+            return wgMoveTo(items, id, Math.max(0, Math.min(items.length - 1, from + delta)));
+        }
+        /* One column on a phone, at the same 640px the .ov-wrap padding switches
+           at. Otherwise four when four cells of --wgrid-cell fit the content
+           column, and two when they do not: never three, where a wide card would
+           be two thirds of the row. */
+        function wgColumns(contentWidth, viewportWidth, cell) {
+            if (viewportWidth <= 640) return 1;
+            return contentWidth < 4 * cell ? 2 : 4;
+        }
+        /* The rectangle a box would occupy. Columns are equal, so their edges
+           follow from the grid's width; rows are as tall as their content, so
+           their edges are read from the rendered rows, g.rowTops and
+           g.rowBottoms. A row below the last rendered one (a wide card pushed
+           onto a new row) takes the last row's height, one gap further down.
+           With no rendered rows at all there is nothing to copy, so a row is
+           taken as one column unit tall starting at g.top, or 0. */
+        function wgSlotFor(box, g) {
+            const unit = (g.width - g.gap * (g.columns - 1)) / g.columns;
+            const tops = g.rowTops || [], bottoms = g.rowBottoms || [];
+            const known = Math.min(tops.length, bottoms.length);
+            const edges = (r) => {
+                if (r < known) return { top: tops[r], bottom: bottoms[r] };
+                const height = known ? bottoms[known - 1] - tops[known - 1] : unit;
+                const first = known ? bottoms[known - 1] + g.gap : (g.top || 0);
+                const top = first + (r - known) * (height + g.gap);
+                return { top, bottom: top + height };
+            };
+            const left = g.left + box.col * (unit + g.gap);
+            return {
+                left,
+                top: edges(box.row).top,
+                right: left + box.w * (unit + g.gap) - g.gap,
+                bottom: edges(box.row + box.h - 1).bottom,
+            };
+        }
+        /* ---------- widget layout end ---------- */
         /* ---------- dashboard customization (Overview KPIs: reorder + hide) ---------- */
         const OV_LAYOUT_KEY = 'sc_ov_layout_v1';
         let ovEdit = false;

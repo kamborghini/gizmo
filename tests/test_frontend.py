@@ -5653,6 +5653,523 @@ def t_a_credit_note_preview_shows_the_vat_it_carries():
        "and the reconciliation sentence says a credit note's figure includes the tax")
 
 
+_WG_START = "        /* ---------- widget layout (pure) ---------- */"
+_WG_END = "        /* ---------- widget layout end ---------- */"
+
+_WG_HARNESS = r"""
+const html = require('fs').readFileSync(process.argv[2], 'utf8');
+const START = '        /* ---------- widget layout (pure) ---------- */\n';
+const END = '        /* ---------- widget layout end ---------- */';
+const a = html.indexOf(START), b = html.indexOf(END, a + 1);
+if (a < 0 || b < 0) { console.log('EXTRACT_FAILED'); process.exit(0); }
+const block = html.slice(a, b + END.length);
+// Evaluated inside a function, so a second copy with a lower budget cannot
+// rebind the first copy's names.
+const NAMES = 'WG_SPANS, WG_TILING_BUDGET, WG_ENTER, wgOverlaps, wgContains, wgSpanOf, wgLayout, '
+  + 'wgTile, wgPack, wgCanonical, wgMoveTo, wgSameOrder, wgChoose, wgCandidates, '
+  + 'wgMergeOrder, wgKeyMove, wgColumns, wgSlotFor';
+const lift = (src) => eval('(function () {\n' + src + '\nreturn { ' + NAMES + ' };\n})()');
+const W = lift(block);
+const BUDGET = /const WG_TILING_BUDGET = \d+;/;
+const L = BUDGET.test(block) ? lift(block.replace(BUDGET, 'const WG_TILING_BUDGET = 3;')) : null;
+
+const ran = {}, fails = {}, stats = {};
+const fail = (key, msg) => { fails[key] = fails[key] || []; if (fails[key].length < 5) fails[key].push(msg); };
+const check = (key, fn) => { ran[key] = ran[key] || 0; try { fn(() => ran[key]++); } catch (e) { fail(key, 'threw ' + (e && e.stack || e)); } };
+const show = (items) => items.map(i => i.id + ':' + i.size).join(' ');
+const ids = (items) => items.map(i => i.id).join(' ');
+const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+
+// mulberry32: the same cases on every run, so a failure can be replayed.
+function rng(s) {
+  return () => {
+    s = s + 0x6D2B79F5 | 0;
+    let t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const rand = rng(20260917);
+const CASES = [];
+for (const columns of [1, 2, 4]) {
+  for (let k = 0; k < 400; k++) {
+    const n = 1 + Math.floor(rand() * 16);
+    const pFull = rand() * 0.3, pWide = rand() * 0.6;
+    const items = [];
+    for (let i = 0; i < n; i++) {
+      const r = rand();
+      items.push({ id: 'w' + i, size: r < pFull ? 'full' : r < pFull + pWide ? 'wide' : 'sm' });
+    }
+    CASES.push({ columns, items });
+  }
+}
+
+// Every widget placed once, inside the columns, one row high, with no overlap;
+// returns the problems and how many cells of each row are filled.
+function cover(places, items, columns) {
+  const problems = [], seen = new Set(), known = new Set(items.map(i => i.id)), taken = new Set();
+  let rows = 0;
+  for (const p of places) {
+    if (seen.has(p.id)) problems.push(p.id + ' placed twice');
+    if (!known.has(p.id)) problems.push(p.id + ' is not an item');
+    seen.add(p.id);
+    if (!(p.col >= 0 && p.w >= 1 && p.col + p.w <= columns)) problems.push(p.id + ' runs past column ' + columns + ' (col ' + p.col + ' w ' + p.w + ')');
+    if (!(p.row >= 0 && p.h === 1)) problems.push(p.id + ' at row ' + p.row + ' h ' + p.h);
+    rows = Math.max(rows, p.row + p.h);
+    for (let x = p.col; x < p.col + p.w; x++) {
+      const cell = p.row + ',' + x;
+      if (taken.has(cell)) problems.push(p.id + ' overlaps at ' + cell);
+      taken.add(cell);
+    }
+  }
+  if (seen.size !== items.length) problems.push('placed ' + seen.size + ' of ' + items.length);
+  const fill = [];
+  for (let r = 0; r < rows; r++) {
+    let n = 0;
+    for (let x = 0; x < columns; x++) if (taken.has(r + ',' + x)) n++;
+    fill.push(n);
+  }
+  return { problems, rows, fill };
+}
+const readingIds = (places) => [...places].sort((p, q) => p.row - q.row || p.col - q.col).map(p => p.id).join(' ');
+
+check('tile', (count) => {
+  for (const { columns, items } of CASES) {
+    const t = W.wgTile(items, columns);
+    const tag = columns + ' cols [' + show(items) + ']';
+    count();
+    if (!t) { fail('tile', 'did not tile ' + tag); continue; }
+    const c = cover(t, items, columns);
+    c.problems.forEach(m => fail('tile', m + ' in ' + tag));
+    c.fill.forEach((n, r) => { if (r < c.rows - 1 && n !== columns) fail('tile', 'row ' + r + ' has ' + (columns - n) + ' empty cells in ' + tag); });
+    const area = items.reduce((n, i) => n + W.wgSpanOf(i, columns).w, 0);
+    if (c.rows !== Math.ceil(area / columns)) fail('tile', c.rows + ' rows for area ' + area + ' in ' + tag);
+    t.forEach(p => { const it = items.find(i => i.id === p.id); if (it && p.w !== W.wgSpanOf(it, columns).w) fail('tile', p.id + ' was stretched in ' + tag); });
+    if (!same(W.wgLayout(items, columns), t)) fail('tile', 'wgLayout did not use the tiling for ' + tag);
+  }
+  if (!same(W.wgLayout([], 4), []) || !same(W.wgLayout([{ id: 'a', size: 'sm' }], 0), [])) fail('tile', 'no items or no columns should lay out nothing');
+});
+
+check('columns', (count) => {
+  for (const { columns, items } of CASES) {
+    const tag = columns + ' cols [' + show(items) + ']';
+    for (const [name, places] of [['wgLayout', W.wgLayout(items, columns)], ['wgPack', W.wgPack(items, columns)]]) {
+      count();
+      places.forEach(p => {
+        if (p.col < 0 || p.col + p.w > columns) fail('columns', name + ' put ' + p.id + ' past the last column in ' + tag);
+        const size = items.find(i => i.id === p.id).size;
+        if (size === 'full' && (p.col !== 0 || p.w !== columns)) fail('columns', name + ' full ' + p.id + ' spans ' + p.w + ' of ' + columns + ' in ' + tag);
+        if (size === 'wide' && columns === 1 && p.w !== 1) fail('columns', name + ' wide ' + p.id + ' is ' + p.w + ' wide at one column');
+      });
+    }
+  }
+  count();
+  if (Object.keys(W.WG_SPANS).join(' ') !== 'sm wide full') fail('columns', 'the sizes are sm, wide and full, got ' + Object.keys(W.WG_SPANS).join(' '));
+  for (const columns of [1, 2, 4]) {
+    count();
+    const w = (size) => W.wgSpanOf({ id: 'x', size }, columns).w;
+    if (w('full') !== columns) fail('columns', 'full is ' + w('full') + ' at ' + columns);
+    if (w('wide') !== Math.min(2, columns)) fail('columns', 'wide is ' + w('wide') + ' at ' + columns);
+    if (w('sm') !== 1) fail('columns', 'sm is ' + w('sm') + ' at ' + columns);
+    for (const junk of [undefined, '', 'tall', 'lg', 'constructor', '__proto__', 'toString']) {
+      if (w(junk) !== columns) fail('columns', 'size ' + JSON.stringify(junk) + ' should span the row at ' + columns + ', got ' + w(junk));
+    }
+    if (W.wgSpanOf({ id: 'x', size: 'wide' }, columns).h !== 1) fail('columns', 'every size is one row high');
+  }
+});
+
+check('pack', (count) => {
+  if (!L) { fail('pack', 'const WG_TILING_BUDGET = <number>; was not found, so the budget could not be lowered'); return; }
+  const closed = (key, places, items, columns, tag) => {
+    const c = cover(places, items, columns);
+    c.problems.forEach(m => fail(key, m + ' in ' + tag));
+    c.fill.forEach((n, r) => { if (n !== columns) fail(key, 'row ' + r + ' left ' + (columns - n) + ' cells open in ' + tag); });
+    if (readingIds(places) !== ids(items)) fail(key, 'reading order ' + readingIds(places) + ' is not the order in ' + tag);
+  };
+  let fellBack = 0;
+  for (const { columns, items } of CASES) {
+    const tag = columns + ' cols [' + show(items) + ']';
+    count();
+    closed('pack', W.wgPack(items, columns), items, columns, tag);
+    if (items.length < 4) continue;
+    if (L.wgTile(items, columns) !== null) { fail('pack', 'a budget of 3 still tiled ' + tag); continue; }
+    const got = L.wgLayout(items, columns);
+    if (!same(got, L.wgPack(items, columns))) fail('pack', 'wgLayout did not fall back to wgPack for ' + tag);
+    closed('pack', got, items, columns, tag);
+    fellBack++;
+  }
+  if (!fellBack) fail('pack', 'no case fell back to the packer');
+  // A wide that does not fit defers everything after it, and the small card
+  // left alone grows to close the row.
+  const fx = ['wide', 'sm', 'wide', 'sm', 'sm'].map((size, i) => ({ id: 'p' + i, size }));
+  const want = [{ id: 'p0', col: 0, row: 0, w: 2, h: 1 }, { id: 'p1', col: 2, row: 0, w: 2, h: 1 },
+                { id: 'p2', col: 0, row: 1, w: 2, h: 1 }, { id: 'p3', col: 2, row: 1, w: 1, h: 1 }, { id: 'p4', col: 3, row: 1, w: 1, h: 1 }];
+  count();
+  if (!same(W.wgPack(fx, 4), want)) fail('pack', 'wgPack([wide sm wide sm sm], 4) gave ' + JSON.stringify(W.wgPack(fx, 4)));
+});
+
+check('canonical', (count) => {
+  for (const { columns, items } of CASES) {
+    const tag = columns + ' cols [' + show(items) + ']';
+    count();
+    const once = W.wgCanonical(items, columns);
+    if (W.wgCanonical(once, columns) !== once) fail('canonical', 'a canonical order came back as a new array for ' + tag);
+    if (!once.every(i => items.includes(i)) || once.length !== items.length) fail('canonical', 'the order lost or replaced an item for ' + tag);
+    if (readingIds(W.wgLayout(items, columns)) === ids(items) && once !== items) fail('canonical', 'an order already in reading order was copied for ' + tag);
+    if (!same(W.wgLayout(once, columns).map(p => p.id + p.col + '/' + p.row + '/' + p.w).sort(), W.wgLayout(items, columns).map(p => p.id + p.col + '/' + p.row + '/' + p.w).sort()))
+      fail('canonical', 'the canonical order lays out differently for ' + tag);
+  }
+  const mk = (sizes) => sizes.map((size, i) => ({ id: 'abcde'[i], size }));
+  const four = mk(['sm', 'wide', 'sm', 'full']);
+  count();
+  if (!W.wgSameOrder(four, four.map(i => Object.assign({}, i))) || W.wgSameOrder(four, [four[1], four[0], four[2], four[3]]) || W.wgSameOrder(four, four.slice(1)))
+    fail('canonical', 'wgSameOrder compares ids in order and length');
+  const settled = mk(['sm', 'sm', 'wide']);
+  count();
+  if (W.wgCanonical(settled, 4) !== settled) fail('canonical', '[sm sm wide] at 4 was copied');
+  const jumped = mk(['sm', 'full', 'sm', 'sm', 'sm']);
+  const got = W.wgCanonical(jumped, 4);
+  count();
+  if (got === jumped || ids(got) !== 'a c d e b') fail('canonical', '[sm full sm sm sm] at 4 should read a c d e b, got ' + ids(got));
+});
+
+// Uniform rows, so every slot is a known rectangle.
+const geometry = (columns, rows) => {
+  const unit = 200, gap = 16, height = 100;
+  const rowTops = [], rowBottoms = [];
+  for (let r = 0; r < rows; r++) { rowTops.push(r * (height + gap)); rowBottoms.push(r * (height + gap) + height); }
+  return { left: 0, top: 0, width: columns * unit + (columns - 1) * gap, columns, gap, rowTops, rowBottoms };
+};
+
+check('choose', (count) => {
+  // Adopt each pick with the pointer held still and choose again. Every
+  // adopted order must bring the held card's own slot strictly closer to the
+  // pointer, so no order can come round twice and the chain ends in null.
+  const gap = (s, cx, cy) => Math.hypot(Math.max(s.left - cx, 0, cx - s.right), Math.max(s.top - cy, 0, cy - s.bottom));
+  let picks = 0, chained = 0, longest = 0;
+  for (const { columns, items } of CASES.filter((c, i) => i % 8 === 0 && c.items.length <= 12)) {
+    const cur = W.wgCanonical(items, columns);
+    const rows = W.wgLayout(cur, columns).reduce((n, p) => Math.max(n, p.row + 1), 0);
+    const g = geometry(columns, rows);
+    const toSlot = (box) => W.wgSlotFor(box, g);
+    const tag = columns + ' cols [' + show(cur) + ']';
+    const memo = new Map();
+    const step = (order, id) => {
+      const key = ids(order) + '|' + id;
+      if (!memo.has(key)) {
+        const place = W.wgLayout(order, columns).find(p => p.id === id);
+        const candidates = W.wgCandidates(order, id, columns, toSlot);
+        // A candidate's slot has to be where its order really puts the card,
+        // or the chooser is steering by a slot the card never reaches.
+        candidates.forEach(c => {
+          const real = toSlot(W.wgLayout(c.order, columns).find(p => p.id === id));
+          if (!same(real, c.slot)) fail('choose', 'candidate ' + ids(c.order) + ' claims ' + JSON.stringify(c.slot) + ' but lays ' + id + ' at ' + JSON.stringify(real) + ' in ' + tag);
+        });
+        memo.set(key, { home: toSlot(place), candidates });
+      }
+      return memo.get(key);
+    };
+    for (const { id } of cur) {
+      for (let x = -60; x <= g.width + 60; x += 31) {
+        for (let y = -60; y <= rows * 116 + 180; y += 27) {
+          count();
+          let order = cur, s = step(order, id), last = gap(s.home, x, y), moves = 0;
+          const seen = new Set([ids(order)]);
+          for (;;) {
+            const pick = W.wgChoose(s.home, s.candidates, x, y);
+            if (!pick) break;
+            order = W.wgCanonical(pick, columns);
+            s = step(order, id);
+            moves++;
+            const now = gap(s.home, x, y);
+            if (!(now < last)) { fail('choose', id + ' at (' + x + ', ' + y + ') moved no closer (' + last + ' to ' + now + ') with ' + ids(order) + ' in ' + tag); break; }
+            if (seen.has(ids(order))) { fail('choose', id + ' at (' + x + ', ' + y + ') came back to ' + ids(order) + ' in ' + tag); break; }
+            seen.add(ids(order));
+            last = now;
+          }
+          if (moves) picks++;
+          if (moves > 1) chained++;
+          longest = Math.max(longest, moves);
+        }
+      }
+    }
+  }
+  if (!picks) fail('choose', 'no pointer position picked a move, so nothing was tested');
+  // The dead band: anywhere within a few pixels of the middle of the gap
+  // between two neighbours, neither of them takes the card from the other.
+  const g = geometry(4, 1), toSlot = (box) => W.wgSlotFor(box, g);
+  const row = ['a', 'b', 'c', 'd'].map(id => ({ id, size: 'sm' }));
+  const middle = 200 + 16 / 2;
+  for (const [order, id] of [[row, 'a'], [W.wgMoveTo(row, 'a', 1), 'a']]) {
+    const home = toSlot(W.wgLayout(order, 4).find(p => p.id === id));
+    for (let x = middle - 15; x <= middle + 15; x += 1) {
+      count();
+      const pick = W.wgChoose(home, W.wgCandidates(order, id, 4, toSlot), x, 50);
+      if (pick) fail('choose', id + ' held in ' + ids(order) + ' jumped to ' + ids(pick) + ' with the pointer at ' + x + ', inside the dead band');
+    }
+  }
+  // And past the band the card does go, so the band is not everything.
+  const past = W.wgChoose(toSlot(W.wgLayout(row, 4)[0]), W.wgCandidates(row, 'a', 4, toSlot), middle + 30, 50);
+  count();
+  if (!past || ids(past) !== 'b a c d') fail('choose', 'a pointer well into b left a where it was');
+  stats.choose = { picks, chained, longest };
+});
+
+check('group', (count) => {
+  const g = geometry(4, 3);
+  const toSlot = (box) => W.wgSlotFor(box, g);
+  const items = [['b', 'sm'], ['c', 'sm'], ['d', 'sm'], ['e', 'sm'], ['A', 'wide'], ['f', 'sm'], ['g', 'sm']].map(([id, size]) => ({ id, size }));
+  const cands = W.wgCandidates(items, 'A', 4, toSlot);
+  const groups = cands.length - (items.length - 1);
+  const at = cands.findIndex(c => ids(c.order) === 'A d e b c f g');
+  count();
+  if (at < 0) { fail('group', 'no candidate swaps A with b and c: ' + cands.map(c => ids(c.order)).join(' / ')); return; }
+  if (at >= groups) fail('group', 'the swap is listed among the sequence moves, not before them');
+  if (!same(cands[at].slot, toSlot({ col: 0, row: 0, w: 2, h: 1 }))) fail('group', 'the swap slot is not the area b and c filled');
+  const placed = W.wgLayout(cands[at].order, 4);
+  const pos = (id) => { const p = placed.find(q => q.id === id); return p.col + ',' + p.row + ',' + p.w; };
+  if (pos('A') !== '0,0,2' || pos('b') !== '0,1,1' || pos('c') !== '1,1,1') fail('group', 'after the swap A is ' + pos('A') + ', b ' + pos('b') + ', c ' + pos('c'));
+  // Pointer dead centre on that area: the sequence move to the front lands A
+  // on the same slot, and the swap wins because it is listed first.
+  const s = toSlot({ col: 0, row: 0, w: 2, h: 1 });
+  const home = toSlot(W.wgLayout(items, 4).find(p => p.id === 'A'));
+  const pick = W.wgChoose(home, cands, (s.left + s.right) / 2, (s.top + s.bottom) / 2);
+  count();
+  if (!pick || ids(pick) !== 'A d e b c f g') fail('group', 'the chooser took ' + (pick ? ids(pick) : 'nothing') + ' over the swap');
+  const pair = [{ id: 'A', size: 'wide' }, { id: 'B', size: 'wide' }];
+  count();
+  if (W.wgCandidates(pair, 'A', 4, toSlot).length !== 1) fail('group', 'one wide is not a group, so two wides have only the sequence move');
+});
+
+check('merge', (count) => {
+  const defaults = ['a', 'b', 'c', 'd'];
+  const frozen = defaults.join(' ');
+  const cases = [
+    [{ order: ['c', 'x', 'a', 'c'], hidden: ['b', 'zz', 'b', 5] }, 'c b a d', 'b'],
+    [null, 'a b c d', ''],
+    [undefined, 'a b c d', ''],
+    ['junk', 'a b c d', ''],
+    [{ order: 'nope', hidden: null }, 'a b c d', ''],
+    [{ order: [], hidden: [] }, 'a b c d', ''],
+    [{ order: [null, 7, { id: 'a' }, 'd'], hidden: ['d', 'd'] }, 'a b c d', 'd'],
+    [{ order: ['d', 'c', 'b', 'a'] }, 'd c b a', ''],
+    [{ order: ['b'] }, 'a b c d', ''],
+    [{ order: ['d'] }, 'a b c d', ''],
+    [{ order: ['d', 'a'] }, 'd b c a', ''],
+  ];
+  for (const [saved, order, hidden] of cases) {
+    count();
+    const got = W.wgMergeOrder(defaults, saved);
+    const tag = JSON.stringify(saved === undefined ? 'undefined' : saved);
+    if (got.order.join(' ') !== order) fail('merge', tag + ' ordered ' + got.order.join(' ') + ', expected ' + order);
+    if (got.hidden.join(' ') !== hidden) fail('merge', tag + ' hid ' + got.hidden.join(' ') + ', expected ' + hidden);
+    if (got.order.length !== defaults.length || !defaults.every(id => got.order.filter(o => o === id).length === 1))
+      fail('merge', tag + ' does not hold every default id exactly once');
+  }
+  if (defaults.join(' ') !== frozen) fail('merge', 'the default ids were changed in place');
+  // The Overview migration: saved KPI tiles keep their order, other blocks keep their place.
+  const ov = W.wgMergeOrder(['trend', 'kpi-a', 'kpi-b', 'kpi-c', 'alerts'], { order: ['kpi-c', 'kpi-a', 'kpi-b'], hidden: [] });
+  count();
+  if (ov.order.join(' ') !== 'trend kpi-c kpi-a kpi-b alerts') fail('merge', 'the migrated Overview order is ' + ov.order.join(' '));
+});
+
+check('keys', (count) => {
+  const items = ['a', 'b', 'c', 'd'].map(id => ({ id, size: 'sm' }));
+  const cases = [['a', -1, 'a b c d', true], ['d', 1, 'a b c d', true], ['b', 1, 'a c b d'], ['c', -1, 'a c b d'],
+                 ['b', -5, 'b a c d'], ['b', 9, 'a c d b'], ['a', 1, 'b a c d'], ['d', -1, 'a b d c'], ['zz', 1, 'a b c d', true]];
+  for (const [id, delta, want, unchanged] of cases) {
+    count();
+    const got = W.wgKeyMove(items, id, delta);
+    if (ids(got) !== want) fail('keys', id + ' by ' + delta + ' gave ' + ids(got) + ', expected ' + want);
+    if (unchanged && got !== items) fail('keys', id + ' by ' + delta + ' should return the same array');
+  }
+  if (ids(items) !== 'a b c d') fail('keys', 'the items were changed in place');
+});
+
+check('widths', (count) => {
+  const cases = [[2000, 640, 280, 1], [2000, 641, 280, 4], [300, 641, 280, 2], [1119, 1400, 280, 2],
+                 [1120, 1400, 280, 4], [1120, 375, 280, 1], [960, 961, 240, 4], [959, 961, 240, 2]];
+  for (const [content, viewport, cell, want] of cases) {
+    count();
+    const got = W.wgColumns(content, viewport, cell);
+    if (got !== want) fail('widths', 'content ' + content + ', viewport ' + viewport + ', cell ' + cell + ' gave ' + got + ' columns, expected ' + want);
+  }
+});
+
+check('slots', (count) => {
+  const g = { left: 10, width: 460, columns: 4, gap: 20, rowTops: [0, 150], rowBottoms: [120, 250] };
+  const cases = [
+    [{ col: 1, row: 0, w: 2, h: 1 }, g, { left: 130, top: 0, right: 350, bottom: 120 }],
+    [{ col: 0, row: 1, w: 4, h: 1 }, g, { left: 10, top: 150, right: 470, bottom: 250 }],
+    [{ col: 3, row: 2, w: 1, h: 1 }, g, { left: 370, top: 270, right: 470, bottom: 370 }],
+    [{ col: 0, row: 3, w: 1, h: 1 }, g, { left: 10, top: 390, right: 110, bottom: 490 }],
+    [{ col: 2, row: 1, w: 2, h: 2 }, g, { left: 250, top: 150, right: 470, bottom: 370 }],
+    [{ col: 0, row: 1, w: 1, h: 1 }, { left: 0, top: 5, width: 460, columns: 4, gap: 20, rowTops: [], rowBottoms: [] }, { left: 0, top: 125, right: 100, bottom: 225 }],
+    [{ col: 1, row: 0, w: 1, h: 1 }, { left: 0, width: 220, columns: 2, gap: 20 }, { left: 120, top: 0, right: 220, bottom: 100 }],
+  ];
+  for (const [box, geo, want] of cases) {
+    count();
+    const got = W.wgSlotFor(box, geo);
+    if (!same(got, want)) fail('slots', JSON.stringify(box) + ' gave ' + JSON.stringify(got) + ', expected ' + JSON.stringify(want));
+  }
+});
+
+console.log(JSON.stringify({ ran, fails, stats }));
+"""
+
+_WG_RUN = {}
+
+
+def _wg_block():
+    """The widget layout block exactly as the page ships it, markers included."""
+    ok(HTML.count(_WG_START) == 1 and HTML.count(_WG_END) == 1,
+       "static/index.html must carry each widget layout marker line exactly once, at 8 spaces: "
+       "%r and %r - if they were renamed or reindented, fix these guards too" % (_WG_START.strip(), _WG_END.strip()))
+    a = HTML.index(_WG_START)
+    return HTML[a:HTML.index(_WG_END, a) + len(_WG_END)]
+
+
+def _wg_check(key, claim):
+    """Runs _WG_HARNESS once for every widget layout test below, then asserts
+    that the named group of checks ran at least one case and found nothing.
+    Returns False, having said so, when node is not installed."""
+    if not any(os.access(os.path.join(p, "node"), os.X_OK)
+               for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return False
+    if "out" not in _WG_RUN:
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+            fh.write(_WG_HARNESS)
+            path = fh.name
+        try:
+            r = subprocess.run(["node", path, os.path.join(ROOT, "static", "index.html")],
+                               capture_output=True, text=True, timeout=120)
+            _WG_RUN["out"] = (r.returncode, (r.stdout or "").strip(), r.stderr or "")
+        except subprocess.TimeoutExpired:
+            _WG_RUN["out"] = (-1, "", "timed out after 120s: a layout function is looping")
+        finally:
+            os.unlink(path)
+    code, out, err = _WG_RUN["out"]
+    ok(code == 0, "the widget layout harness failed: " + err[:400])
+    ok(out != "EXTRACT_FAILED",
+       "the widget layout block could not be lifted out of static/index.html: it must sit between the "
+       "exact lines %r and %r - if they were renamed or reindented, fix this guard too"
+       % (_WG_START.strip(), _WG_END.strip()))
+    got = json.loads(out)
+    ok(got["ran"].get(key, 0) > 0, "the %s checks ran no cases, so they prove nothing" % key)
+    found = got["fails"].get(key, [])
+    ok(not found, claim + ": " + " | ".join(found[:3]))
+    return True
+
+
+@test
+def t_an_exact_tiling_leaves_no_hole_before_the_last_row_and_places_every_widget_once():
+    """The grid is gizmo's own port of the tiler in Cameron's React component,
+    and the point of the tiler is that a page of cards reads as whole rows. Run
+    over 1,200 seeded mixes of sm, wide and full at one, two and four columns:
+    every widget is placed once at its own width, no two overlap, and only the
+    last row may be short."""
+    _wg_check("tile", "an exact tiling left a hole, dropped a card or stretched one")
+
+
+@test
+def t_no_widget_is_placed_past_the_last_column():
+    """full is Infinity columns wide and has to be clamped, and a wide card on a
+    phone has one column to sit in. Neither the tiler nor the packer may put a
+    card past the column count, full spans every column, wide is one column at
+    one, and a size nobody set spans the row."""
+    _wg_check("columns", "a card ran past the last column or took the wrong span")
+
+
+@test
+def t_when_tiling_gives_up_the_packer_closes_every_row():
+    """The tiler stops after WG_TILING_BUDGET steps and the packer takes over.
+    The harness runs a second copy of the block with the budget cut to 3, so
+    the fallback is exercised on every case of four or more cards: it must
+    close every row it builds by widening a card, and it must keep the order,
+    which is what deferring every card after the first one that does not fit
+    guarantees."""
+    _wg_check("pack", "the packer left a row open or changed the order")
+
+
+@test
+def t_a_layout_already_in_reading_order_comes_back_as_the_same_array():
+    """While a card is held the chooser runs every frame, and most frames move
+    nothing. wgCanonical returns the same array when nothing moves, so a caller
+    can see that by identity instead of comparing ids, and a canonical order is
+    canonical again."""
+    _wg_check("canonical", "wgCanonical copied an order it did not change, or changed the layout")
+
+
+@test
+def t_a_held_widget_never_swaps_back_and_forth_under_a_still_pointer():
+    """With the pointer held still over thousands of positions, each adopted
+    pick is canonicalised and the chooser is asked again from the card's new
+    slot. It may move again, but only strictly nearer the pointer, so no order
+    comes round twice and the chain ends. The spec said the second choice is
+    always null; it is not, about one pick in fifty takes a second or third
+    step, each closer, which is convergence rather than oscillation. Every
+    candidate's slot must also be where its order really puts the card: as
+    ported line for line, a group swap could claim a slot in the empty end of a
+    short last row that its order never reaches, and the chooser picked it
+    every frame. Between two neighbours there is a dead band, from WG_ENTER,
+    where neither takes the card."""
+    _wg_check("choose", "the chooser moved a card no nearer, came back to an order, or jumped inside the dead band")
+
+
+@test
+def t_a_wide_widget_can_trade_places_with_the_two_small_ones_that_fill_its_shape():
+    """A group swap is how a wide card moves up a row without reshuffling
+    everything between: it trades places with two sm cards that fill its shape,
+    and they keep their order. Group swaps are listed before sequence moves, so
+    on a tie the swap wins, and one wide card is not a group."""
+    _wg_check("group", "the group swap is missing, misplaced or loses its tie")
+
+
+@test
+def t_a_saved_layout_keeps_every_rendered_widget_exactly_once():
+    """A saved layout outlives the cards it names. Ids that did not render and
+    repeats are dropped, a card the saved order never mentions goes in at its
+    default index, hidden ids are filtered the same way, junk saves read as the
+    default, and the Overview migration keeps the old KPI order while every
+    other block stays where it was."""
+    _wg_check("merge", "wgMergeOrder lost, repeated or misplaced a card")
+
+
+@test
+def t_a_keyboard_move_goes_one_place_and_stops_at_either_end():
+    """Alt with an arrow moves a card one place, and at the first or last place
+    it stays put, returning the same array so nothing is announced as moved."""
+    _wg_check("keys", "wgKeyMove wrapped, skipped or copied")
+
+
+@test
+def t_the_grid_picks_one_two_or_four_columns_at_the_documented_widths():
+    """One column at a 640px viewport and below, the query .ov-wrap already
+    uses; two when the content column is narrower than four cells; four
+    otherwise; never three."""
+    _wg_check("widths", "wgColumns picked the wrong count at a boundary")
+
+
+@test
+def t_a_drop_slot_below_the_last_rendered_row_takes_that_rows_height():
+    """Rows are as tall as their content, so a slot's top and bottom come from
+    the rendered rows. A card dragged to a row that does not exist yet needs a
+    rectangle too: it takes the last row's height one gap further down, and
+    with no rows at all a row is one column unit tall."""
+    _wg_check("slots", "wgSlotFor put a slot in the wrong place")
+
+
+@test
+def t_the_widget_layout_block_never_touches_the_page():
+    """The block is lifted out and run under node, which has no page, so a
+    reach into the DOM would pass here only by accident and break the harness
+    the day that path runs. It stays arithmetic."""
+    block = _wg_block()
+    for token in ("document", "window", "getBoundingClientRect", "querySelector", "$("):
+        ok(token not in block, "the widget layout block mentions %r" % token)
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
