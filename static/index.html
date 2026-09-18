@@ -2830,9 +2830,13 @@
             font-weight: var(--weight-semibold); font-size: var(--text-sm); }
         .day-sheet .ds-orders { margin-top: 14px; font-size: var(--text-xs); color: var(--paper-ink-4); }
         @media print {
-            /* Label mode prints ONLY the label sheets, one per physical label. */
-            body.printing-label #app { display: none !important; }
-            body.printing-label .modal-overlay { display: none !important; }
+            /* Label mode prints ONLY the label sheets, one per physical label.
+               Everything else at body level goes, whatever it is. Naming them
+               one at a time is how three things in a row reached the printer:
+               #toast-host, then the skip link, then the widget grid's live
+               region, which is one absolute pixel that sat exactly at the foot
+               of the sheet and printed a second, blank label every time. */
+            body.printing-label > :not(#label-print) { display: none !important; }
             body.printing-label #label-print { position: static !important; left: auto !important; }
             body.printing-label .label-sheet { border: 0 !important; border-radius: 0 !important;
                 break-after: page; page-break-after: always; }
@@ -2857,7 +2861,7 @@
             .view.active { display: block !important; position: static !important; }
             .view.active .scroll { height: auto !important; max-height: none !important; overflow: visible !important; }
             /* drop interactive bits from a static report */
-            .page-chat, .composer-wrap, .run-gate, .chart-expand, .stat-act, .wg-hide, [data-wg-control], .data-drill,
+            .sr-only, .page-chat, .composer-wrap, .run-gate, .chart-expand, .stat-act, .wg-hide, [data-wg-control], .data-drill,
             .ptools, .pfilters, .fchips, .scan-card, .seg, .alerts-banner, .back-btn,
             .track-btn, .mem-acts, .sk-acts, .skill-form, .chart-tip, .sk-more, .ov-updated { display: none !important; }
             .print-head { display: flex !important; }
@@ -3725,12 +3729,6 @@
             font-size: var(--text-sm); color: var(--text-primary); line-height: var(--lh-snug); }
         .build-bar span { flex: 1 1 100%; }
         @media print { .build-bar { display: none !important; } }
-        body.printing-label #toast-host { display: none !important; }
-        /* The skip link is for a keyboard on a screen. It sits OUTSIDE #app, so
-           label mode's "hide the app" did not reach it, and a fixed element
-           carried onto every printed page: "Skip to content" in the corner of
-           each production label. */
-        body.printing-label .skip-link { display: none !important; }
         /* Nothing pinned to the viewport prints, in either mode. Label mode
            hides #app, but a fixed element outside it, or one that happens to
            be open when the print starts (a toast, a menu, the update bar, the

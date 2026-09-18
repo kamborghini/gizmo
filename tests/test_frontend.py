@@ -844,9 +844,21 @@ def t_nothing_pinned_to_the_viewport_prints():
     link, the update bar, toasts, modals, the sign-in scrim, the drawer
     backdrop, menus, the drag bar, the phone sidebar - prints as nothing,
     in label mode and in a report alike, and the rule is checked against the
-    stylesheet so a new fixed element cannot slip past it."""
-    ok("body.printing-label .skip-link { display: none !important; }" in CSS,
-       "label mode hides the skip link, on screen and on paper")
+    stylesheet so a new fixed element cannot slip past it.
+
+    Then it happened a third time, to something not fixed at all: the widget
+    grid's live region, one absolutely positioned pixel at body level, sat
+    exactly at the foot of the label and printed a second, blank label on every
+    production print (18 September; it reached production on the 17th). Naming
+    the things to hide one at a time is the fault, so label mode now hides
+    everything at body level except the sheets, and a report hides the live
+    regions too."""
+    ok("body.printing-label > :not(#label-print) { display: none !important; }" in CSS,
+       "label mode prints the sheets and nothing else at body level")
+    named = re.findall(r"body\.printing-label (#(?!label-print)[\w-]+|\.[\w-]+) \{[^}]*display: none", CSS)
+    ok(not named, "and it names none of them one by one, which is what let three escape: %s" % named)
+    hide = re.search(r"\n\s*(\.sr-only,[^{]*)\{ display: none !important; \}", CSS)
+    ok(hide, "a report prints no live region either: they hold announcements, not content")
     rule = re.search(r"@media print \{\s*(\.skip-link,[^}]*)\{ display: none !important; \}\s*\}", CSS)
     ok(rule, "and no print of any page carries it: one rule hides everything pinned to the viewport")
     hidden = {x.strip() for x in rule.group(1).split(",")} if rule else set()
