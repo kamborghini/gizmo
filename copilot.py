@@ -909,6 +909,28 @@ def _forget_store(path: str) -> None:
     _json_cache.pop(path, None)
 
 
+def _memory_stores() -> dict:
+    """Every store the app keeps a whole-object copy of in memory, beside the
+    path it mirrors. The one list: restore and shop/redact replace or remove
+    files under a running process, and a copy that outlived its file put the
+    old contents straight back (the mailbox and Files caches after a redact,
+    the loan register after a restore, each forgotten from a hand-kept list).
+    A `_mem` global without a row here fails a test."""
+    return {MAILBOX_PATH: "_mail_mem", FILES_PATH: "_files_mem", USERS_PATH: "_users_mem",
+            SESSIONS_PATH: "_sessions_mem", WORK_PATH: "_work_mem",
+            ACTIVITY_PATH: "_events_mem", LOANS_PATH: "_loans_mem"}
+
+
+def _drop_memory_stores(paths=None) -> None:
+    """Forget the in-memory copy of each store (every one when `paths` is
+    None) and its cached parse, so the next read comes from disk."""
+    g = globals()
+    for path, name in _memory_stores().items():
+        if paths is None or path in paths:
+            g[name] = None
+            _forget_store(path)
+
+
 def _write_json_store(path: str, key: Optional[str], data, *, private: bool = False) -> None:
     """The one way a store reaches disk.
 
@@ -1611,12 +1633,33 @@ def _collection_row(v) -> dict:
     return {"date": str(v or ""), "at": "", "order": "", "service": ""}
 
 
+def _london_today():
+    """Today's date where the business is. The server clock is UTC, so a date
+    taken from it is yesterday's for the hour after midnight all summer; a
+    label printed at half past eleven read a wedding three days off as not
+    urgent, and the payroll sheet started every day at 01:00."""
+    return datetime.now(ZoneInfo("Europe/London")).date()
+
+
+def _london_day(iso: str) -> str:
+    """The London calendar day of a UTC stamp, as YYYY-MM-DD; a stamp that
+    cannot be read gives its first ten characters back, which is what the
+    callers used to slice off unconverted."""
+    try:
+        when = datetime.fromisoformat(str(iso or ""))
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return when.astimezone(ZoneInfo("Europe/London")).date().isoformat()
+    except ValueError:
+        return str(iso or "")[:10]
+
+
 def _dispatch_today() -> str:
     """Today, where the parcels are. Every other dispatch date in this app is
     reckoned in Europe/London - the ready window, the next working day - and a
     collection ledger kept in UTC disagrees with all of them for the hour after
     midnight through the summer."""
-    return datetime.now(ZoneInfo("Europe/London")).date().isoformat()
+    return _london_today().isoformat()
 
 
 def _dmy_to_iso(dmy: str) -> str:
@@ -4671,7 +4714,7 @@ def _fmt_due(d) -> str:
     if not d:
         return ""
     out = f"{d.day} {d.strftime('%b')}"
-    return out if d.year == datetime.now(timezone.utc).year else out + f" {d.year}"
+    return out if d.year == _london_today().year else out + f" {d.year}"
 
 
 def _order_status(o: dict) -> str:
@@ -4708,6 +4751,26 @@ def _ship_to(o: dict) -> dict:
     }
 
 
+def _line_qty(li: dict) -> int:
+    """How many of a line the customer still has on the order.
+
+    Shopify keeps `quantity` at what was ORDERED. A refund or an order edit
+    lowers `current_quantity` and leaves `quantity` alone, so a label read
+    from `quantity` printed the refunded gobo, the bench cut it, the stock
+    app booked its glass and the customs declaration carried its value.
+    Everything that makes, weighs, declares or books glass for a line reads
+    this instead. A line with no quantity at all counts as one, as before."""
+    q = li.get("current_quantity")
+    if q is None:
+        q = li.get("quantity")
+    if q is None:
+        return 1
+    try:
+        return max(0, int(q))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _order_weight_kg(o: dict) -> float:
     """Best-effort parcel weight from Shopify per-item grams (0 when not recorded)."""
     grams = 0.0
@@ -4716,7 +4779,7 @@ def _order_weight_kg(o: dict) -> float:
             continue
         g = li.get("grams")
         if g:
-            grams += float(g) * float(li.get("quantity") or 1)
+            grams += float(g) * float(_line_qty(li))
     return round(grams / 1000.0, 3) if grams else 0.0
 
 
@@ -4782,6 +4845,9 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
     for li in (o.get("line_items") or []):
         if _label_skip_item(str(li.get("title") or li.get("name") or "")):
             continue
+        qty = _line_qty(li)
+        if qty <= 0:
+            continue    # refunded or edited off the order: nothing to make
         mfr = _strip_price(_item_prop(li, "Manufacturer"))
         model = _strip_price(_item_model(li, mfr))
         entry, reason = _gobo_lookup(mfr, model, cache=cache)
@@ -4800,7 +4866,7 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
         items.append({
             "title": title,
             "artwork": ("" if _norm_key(title) in _GENERIC_TITLES else title),
-            "quantity": int(li.get("quantity") or 1),
+            "quantity": qty,
             "sku": str(li.get("sku") or "").strip(),
             "options": _line_options(li, names),
             "manufacturer": mfr or (entry["manufacturer"] if entry else ""),
@@ -4826,7 +4892,7 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
         "status": _order_status(o),
         "due": (due.isoformat() if due else ""),
         "due_label": _fmt_due(due),
-        "due_soon": bool(due and (due - datetime.now(timezone.utc).date()).days <= 2),
+        "due_soon": bool(due and (due - _london_today()).days <= 2),
         "proposal_url": proposal_url,
         "note": note_clean[:500],
         "customer_id": (o.get("customer") or {}).get("id"),
@@ -5243,7 +5309,7 @@ def _order_goods_value(o: dict) -> float:
         if _label_skip_item(str(li.get("title") or li.get("name") or "")):
             continue
         try:
-            total += float(li.get("price") or 0) * int(li.get("quantity") or 1)
+            total += float(li.get("price") or 0) * _line_qty(li)
         except (TypeError, ValueError):
             continue
     return round(total, 2)
@@ -5605,7 +5671,8 @@ async def _customs_items(registry: dict, o: dict) -> list:
     goods are worth to the merchant, not what the customer paid, so the cost price
     is the right value; the sale price is only a fallback when no cost is set."""
     lines = [li for li in (o.get("line_items") or [])
-             if not _label_skip_item(str(li.get("title") or li.get("name") or ""))]
+             if not _label_skip_item(str(li.get("title") or li.get("name") or ""))
+             and _line_qty(li) > 0]
 
     async def _inv_id(li):
         vid = li.get("variant_id")
@@ -5678,7 +5745,7 @@ async def _customs_items(registry: dict, o: dict) -> list:
             "key": key,
             "title": title,
             "customs_description": customs_desc,
-            "quantity": int(li.get("quantity") or 1),
+            "quantity": _line_qty(li),
             "price": price,
             "cost": cost,
             "unit_value": unit_value,
@@ -8923,6 +8990,13 @@ async def _watchdog_tick(registry: dict) -> bool:
         # erased by writing our stale copy back wholesale.
         fresh = _load_watch()
         fresh.update(state)
+        # A merge keeps what the snapshot no longer has. The outage flag is
+        # the one key this tick DELETES, and merging it back meant a recovered
+        # connection stayed "down" on disk: a recovered email every hour, the
+        # early-return path answering down, and the paid audits skipped on
+        # three ticks in four, for as long as the volume lasted.
+        if "shopify_down" not in state:
+            fresh.pop("shopify_down", None)
         _save_watch(fresh)
         return up or fails < 3
     except Exception:
@@ -10206,6 +10280,22 @@ def _mail_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _mail_at_or_after(when, stamp) -> bool:
+    """Is a message's time at or after a stamp's, with a minute of slack for
+    the stamp being written a moment before the send? A time that cannot be
+    read is taken as yes: a stamp is settled by the message existing."""
+    try:
+        a = datetime.fromisoformat(str(when or ""))
+        b = datetime.fromisoformat(str(stamp or ""))
+    except ValueError:
+        return True
+    if a.tzinfo is None:
+        a = a.replace(tzinfo=timezone.utc)
+    if b.tzinfo is None:
+        b = b.replace(tzinfo=timezone.utc)
+    return a >= b - timedelta(seconds=60)
+
+
 # Caps on the two settings that get stamped onto outgoing email.
 MAIL_LOGO_MAX = 1024 * 1024          # a footer logo, not a photograph
 MAIL_SIGNOFF_MAX = 200
@@ -10562,6 +10652,20 @@ def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str) -> None:
             # name when it went. Logging it again as it comes back round from
             # Gmail would tell the room somebody answered in Gmail instead.
             if m.get("id") and m.get("id") == t.get("sent_msg_id"):
+                continue
+            pend = t.get("send_pending")
+            if isinstance(pend, dict) and _mail_at_or_after(m.get("at"), pend.get("at")):
+                # A send whose answer was lost, and here is the message in
+                # Gmail, dated after the stamp: it went. The stamp recorded
+                # "we do not know"; this is the finding out, and the only
+                # thing that can settle it once the person has moved on.
+                now = _mail_now()
+                t.pop("send_pending", None)
+                t["sent_at"], t["sent_by"] = m.get("at") or now, pend.get("by") or ""
+                t["sent_to"], t["sent_msg_id"] = pend.get("to") or "", str(m.get("id") or "")
+                t["state"], t["state_at"], t["done_at"] = "waiting", now, ""
+                _mail_log(t, pend.get("by") or "", "sent a reply from Reactor",
+                          "confirmed from Gmail after the answer was lost")
                 continue
             _mail_log(t, "", "replied from Gmail")
             continue
@@ -11793,8 +11897,13 @@ def _redact_shop() -> dict:
     dispatch and customs history with it. The erasure is real either way; the
     archive is what makes a misfire survivable rather than final.
 
-    Credentials are not in the archive (the backup builder excludes them) and
-    are cleared here too: an uninstalled app must not keep holding tokens."""
+    Credentials are not in the archive (the backup builder excludes them). The
+    two Gmail grants are dropped here: with the mailbox store empty, the sync
+    would otherwise rebuild it from Gmail, every customer thread back inside
+    a minute of the privacy log recording the erasure, and reconnecting is
+    one sign-in by the master. Xero and the courier stay: neither holds the
+    shop's data, and the courier key is typed in, with nowhere to get it
+    back from after a misfire."""
     kept = ""
     try:
         buf, added = _build_backup_zip()
@@ -11811,15 +11920,28 @@ def _redact_shop() -> dict:
         # loudly instead, because that is the case where a misfire is final.
         logger.exception("shop/redact: could not archive before erasing")
     wiped = 0
-    for path in (CRM_PATH, MAILBOX_PATH, DISPATCH_STATE_PATH, CHASE_LOG_PATH,
-                 COLLECTIONS_PATH, CUSTOMS_MEMORY_PATH, PRODUCTION_STATE_PATH,
-                 PRODUCTION_ARCHIVE_PATH, FILES_PATH):
+    stores = (CRM_PATH, MAILBOX_PATH, DISPATCH_STATE_PATH, CHASE_LOG_PATH,
+              COLLECTIONS_PATH, CUSTOMS_MEMORY_PATH, PRODUCTION_STATE_PATH,
+              PRODUCTION_ARCHIVE_PATH, FILES_PATH)
+    for path in stores:
         try:
             if os.path.isfile(path):
                 os.remove(path)
                 wiped += 1
         except Exception:
             logger.exception("shop/redact: could not remove %s", path)
+    # The memory copies go with the files. Left alone, _load_mail() kept
+    # serving the erased threads and the mail loop wrote every one of them
+    # back to disk inside a minute; the Files cache did the same on its next
+    # tick, so the erasure the privacy log recorded had not happened.
+    _drop_memory_stores(set(stores))
+    for path in stores:
+        _forget_store(path)
+    for acct in (google_mail.SALES, google_mail.FINANCE):
+        try:
+            google_mail.disconnect(acct)
+        except Exception:
+            logger.exception("shop/redact: could not drop a mailbox grant")
     _privacy_note("shop/redact", "", "",
                   f"erased {wiped} store(s); archive at {kept or '(none - see logs)'}; "
                   f"the archive is deleted after {REDACT_ARCHIVE_DAYS} days, and weekly "
@@ -12758,7 +12880,7 @@ def _loan_state(loan: dict, chase_days: int) -> str:
     commitment the customer never made."""
     due = str(loan.get("due_at") or "").strip()
     if due:
-        return "late" if due < datetime.now(timezone.utc).date().isoformat() else "ok"
+        return "late" if due < _london_today().isoformat() else "ok"
     return "due" if _loan_days_out(loan.get("out_at")) > int(chase_days or 0) else "ok"
 
 
@@ -14192,11 +14314,50 @@ def _team_public_list(d: dict) -> list:
     return users
 
 def _day_starts():
-    now = datetime.now(timezone.utc)
+    """When today, this week and this month began, as UTC stamps that compare
+    with the sessions' own: the boundaries are London midnights, because the
+    people clocking in are in London and a day that starts at 01:00 all summer
+    put a late shift in the wrong day, week and month."""
+    now = datetime.now(ZoneInfo("Europe/London"))
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week = today - timedelta(days=today.weekday())
     month = today.replace(day=1)
-    return today.isoformat(), week.isoformat(), month.isoformat()
+    return tuple(x.astimezone(timezone.utc).isoformat() for x in (today, week, month))
+
+
+def _work_csv(rows: list, names: dict, counts: dict) -> str:
+    """The payroll sheet: one line per session, times as the clock on the
+    wall showed them. Sessions are stamped in UTC; slicing the stamp put the
+    whole of summer an hour early and a shift that started after eleven at
+    night on the day before."""
+    def _csv_cell(v) -> str:
+        # A team display name is free text and unsanitised; without the
+        # armour a name like =HYPERLINK(...) runs as a formula in Excel,
+        # and an embedded quote breaks the row. Matches the client crmCSV.
+        v = str(v if v is not None else "")
+        if v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+            v = "'" + v
+        return '"' + v.replace('"', '""') + '"' if any(c in v for c in ',"\n\r') else v
+
+    def _hhmm(iso: str) -> str:
+        try:
+            when = datetime.fromisoformat(str(iso or ""))
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            return when.astimezone(ZoneInfo("Europe/London")).strftime("%H:%M")
+        except ValueError:
+            return str(iso or "")[11:16]
+
+    lines = ["Name,Date,Clock in,Clock out,Hours,Actions,Corrected"]
+    for s in rows:
+        st, en = str(s.get("start") or ""), str(s.get("end") or "")
+        lines.append(",".join([
+            _csv_cell(names.get(s.get("uid")) or s.get("uid") or ""),
+            _london_day(st), _hhmm(st), _hhmm(en) if en else "",
+            f"{int(s.get('secs') or 0) / 3600:.2f}",
+            str(counts.get(s.get("id"), 0)),
+            "yes" if s.get("corrected") else ""]))
+    return "\n".join(lines)
 
 # -----------------------------------------------------------------------
 # Shipping settings + Dispatch (World Options). The courier API key and
@@ -16165,20 +16326,33 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     references=parent.get("references") or "",
                     cc=", ".join(cc_list), raw_bytes=raw)
             except Exception as e:
-                reason = (str(e) if isinstance(e, google_mail.GmailError)
-                          else "Gmail would not send this reply.")
-                if not isinstance(e, google_mail.GmailError):
-                    logger.exception("mail send failed")
-                # The stamp is there to outlive a CRASH. This is not one: we
-                # know how it ended, so it comes off - and the thread keeps a
-                # line saying an attempt was made, because an attempted send
-                # is news whether or not the person is still at their desk.
-                t.pop("send_pending", None)
-                _mail_log(t, who, "the send did not complete", reason)
+                if isinstance(e, (google_mail.GmailError, httpx.ConnectError)):
+                    # Google answered and refused, or the connection was never
+                    # made: nothing went. The stamp is there to outlive a
+                    # CRASH, and this is not one, so it comes off - and the
+                    # thread keeps a line saying an attempt was made, because
+                    # an attempted send is news whether or not the person is
+                    # still at their desk.
+                    reason = (str(e) if isinstance(e, google_mail.GmailError)
+                              else "Gmail could not be reached, so nothing was sent. Try again.")
+                    t.pop("send_pending", None)
+                    _mail_log(t, who, "the send did not complete", reason)
+                else:
+                    # No answer at all: a timeout or a dropped connection
+                    # after the upload left the machine. Google may well have
+                    # sent it. The stamp STAYS, because "we do not know" is
+                    # exactly what it records, and the person is told to look
+                    # before pressing Send again: this branch used to read as
+                    # a definite failure, and the retry after a lost answer
+                    # is how a customer received the same reply twice.
+                    logger.exception("mail send: Gmail did not answer")
+                    reason = ("Gmail did not answer, so this reply MAY have been sent. Check "
+                              "the mailbox's Sent folder before sending it again.")
+                    _mail_log(t, who, "a send may not have completed", reason)
                 try:
                     _write_mail(_load_mail())
                 except Exception:
-                    logger.exception("mail send: could not clear the send stamp")
+                    logger.exception("mail send: could not record the failed send")
                 _track(who, "mail", "a reply did not send", (t.get("subject") or "")[:60])
                 return _json({"error": reason}, 502)
             # It has gone. Read the leftover draft BEFORE the thread's record
@@ -16197,7 +16371,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             t["state"], t["state_at"], t["done_at"] = "waiting", now, ""
             t["unread"] = False        # answering an email is reading it
             _mail_log(t, who, "sent a reply from Reactor", "to " + to_addr)
-            warn = ""
+            # Gmail may have filed the reply as a conversation of its own when
+            # the threading headers did not satisfy it. The customer has the
+            # email either way, so it is recorded as sent and the person is
+            # told where it went; refusing here left no sent_at, no stamp and
+            # a thread that still read as unanswered.
+            warn = (("The reply was sent, but Gmail filed it as a new conversation rather "
+                     "than onto this one; it will reach the board as its own thread.")
+                    if out.get("misfiled") else "")
             try:
                 _write_mail(_load_mail())
             except Exception:
@@ -16274,16 +16455,23 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             out = await google_mail.send_message("", to_addr, subject, text_body, new=True,
                                                  cc=", ".join(cc_list), raw_bytes=raw)
         except Exception as e:
-            reason = (str(e) if isinstance(e, google_mail.GmailError)
-                      else "Gmail would not send this message.")
-            if not isinstance(e, google_mail.GmailError):
-                logger.exception("mail send failed")
             store = _load_mail()
-            _mail_outbound_drop(store, stamp)
+            if isinstance(e, (google_mail.GmailError, httpx.ConnectError)):
+                # A refusal, or no connection at all: nothing went, so the
+                # stamp comes off.
+                reason = (str(e) if isinstance(e, google_mail.GmailError)
+                          else "Gmail could not be reached, so nothing was sent. Try again.")
+                _mail_outbound_drop(store, stamp)
+            else:
+                # No answer: the message may have gone. The stamp stays, as
+                # the one record that this customer may have been written to.
+                logger.exception("mail send: Gmail did not answer")
+                reason = ("Gmail did not answer, so this message MAY have been sent. Check "
+                          "the mailbox's Sent folder before sending it again.")
             try:
                 _write_mail(store)
             except Exception:
-                logger.exception("mail send: could not clear the outbound stamp")
+                logger.exception("mail send: could not record the failed send")
             _track(who, "mail", "a new message did not send", subject[:60])
             return _json({"error": reason}, 502)
         new_tid = str(out.get("thread_id") or "")
@@ -17260,10 +17448,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _dav_auth_cache.clear()
         restored_names = []
         def _drop_all_caches():
-            global _users_mem, _sessions_mem, _work_mem, _events_mem, _events_dirty, _files_mem, _mail_mem
-            _users_mem = _work_mem = _events_mem = _files_mem = None
-            _sessions_mem = None
-            _mail_mem = None
+            global _events_dirty
+            # Every memory copy, from the one list: the loan register was
+            # missing from the hand-kept one here, so a restored loans.json
+            # was overwritten by the pre-restore register on the next loan.
+            _drop_memory_stores()
             _events_dirty = False
             _dav_auth_cache.clear()
             _json_cache.clear()
@@ -17645,6 +17834,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             except Exception:
                 logger.exception("pre-import snapshot failed")
         d = _load_crm()
+        if not go:
+            # The preview works on a COPY. _crm_import_apply updates records
+            # that already exist in place, and _load_crm hands out the cached
+            # store itself, so a preview over a partial export blanked the
+            # contact off every imported deal in memory and the next unrelated
+            # CRM write put that on disk.
+            import copy as _copy
+            d = _copy.deepcopy(d)
         report = _crm_import_apply(d, data, dry=not go)
         if go:
             _write_crm(d)
@@ -20128,10 +20325,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         to = str(body.get("to") or "")[:10]
         try:
             d = _load_work()
+            # The from/to dates are London days, like the sheet's own Date column.
             rows = [s for s in d["sessions"]
                     if (not uid or s.get("uid") == uid)
-                    and (not frm or str(s.get("start") or "")[:10] >= frm)
-                    and (not to or str(s.get("start") or "")[:10] <= to)]
+                    and (not frm or _london_day(s.get("start")) >= frm)
+                    and (not to or _london_day(s.get("start")) <= to)]
             events = _load_events()
             counts = {}
             for e in events:
@@ -20139,25 +20337,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     counts[e["ws"]] = counts.get(e["ws"], 0) + 1
             names = _team_names()
             total = sum(int(s.get("secs") or 0) for s in rows)
-            def _csv_cell(v) -> str:
-                # A team display name is free text and unsanitised; without the
-                # armour a name like =HYPERLINK(...) runs as a formula in Excel,
-                # and an embedded quote breaks the row. Matches the client crmCSV.
-                v = str(v if v is not None else "")
-                if v[:1] in ("=", "+", "-", "@", "\t", "\r"):
-                    v = "'" + v
-                return '"' + v.replace('"', '""') + '"' if any(c in v for c in ',"\n\r') else v
-            lines = ["Name,Date,Clock in,Clock out,Hours,Actions,Corrected"]
-            for s in rows:
-                st, en = str(s.get("start") or ""), str(s.get("end") or "")
-                lines.append(",".join([
-                    _csv_cell(names.get(s.get("uid")) or s.get("uid") or ""),
-                    st[:10], st[11:16], en[11:16],
-                    f"{int(s.get('secs') or 0) / 3600:.2f}",
-                    str(counts.get(s.get("id"), 0)),
-                    "yes" if s.get("corrected") else ""]))
             return _json({"sessions": rows, "total_secs": total, "count": len(rows),
-                          "event_counts": counts, "csv": "\n".join(lines)})
+                          "event_counts": counts, "csv": _work_csv(rows, names, counts)})
         except Exception:
             logger.exception("work report failed")
             return _json({"error": "Couldn't build the report."}, 500)
@@ -21769,6 +21950,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Request too large."}, 413)
         what = str(body.get("what") or "")
         force = bool(body.get("force"))
+        if recon_engine is not None and recon_engine._sweeping["on"]:
+            # A sweep loads the books and the documents at its start and
+            # writes them back whole at its end, minutes later. Disconnecting
+            # in between deleted them and then watched the sweep's tail put
+            # every invoice and the old watermarks straight back.
+            return _json({"error": "A reconciliation sweep is running. Wait for it to "
+                                   "finish, then disconnect."}, 409)
         notes = []
         if what == "xero":
             r = await xero_api.revoke(force=force)

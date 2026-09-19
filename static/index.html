@@ -4531,8 +4531,13 @@ Projected Image UK"></textarea>
             try { data = await res.json(); }
             catch (e) {
                 // A gateway/proxy error page is not JSON: never show the parse error.
+                /* A proxy 5xx says nothing about whether the request was
+                   acted on: the container may have restarted after a courier
+                   booking went through. Telling the person nothing had been
+                   saved was a guess, and the wrong one for the dispatcher
+                   who booked again. */
                 const err = new Error(res.status >= 500
-                    ? 'The server did not answer properly (error ' + res.status + '). Nothing was saved. Wait a moment and try again.'
+                    ? 'The server did not answer properly (error ' + res.status + '). What you asked for may or may not have gone through: check before trying again.'
                     : 'Unexpected reply from the server (status ' + res.status + '). Please try again.');
                 err.noReply = true;
                 throw err;
@@ -10606,7 +10611,12 @@ Projected Image UK"></textarea>
             try { localStorage.setItem(LS_FCFROM, from); localStorage.setItem(LS_FCTO, to); } catch (e) {}
             renderForecast();
         }
-        const fcISO = (d) => d.toISOString().slice(0, 10);
+        /* The LOCAL calendar day. toISOString() is UTC, and the ranges build
+           their dates at local midnight, which in British Summer Time is
+           23:00 UTC the day before: Today excluded today, and This month on
+           the 1st showed last month. */
+        const fcISO = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+            + '-' + String(d.getDate()).padStart(2, '0');
         /* Details on demand, remembered per person. Shut by default: the whole
            point of the layer below the picture is that a reader who does not
            want it never has to scroll past it, and a reader who does opens one
@@ -20859,7 +20869,8 @@ Projected Image UK"></textarea>
             const back = el('button', 'btn', 'Back');
             go.onclick = async () => {
                 go.disabled = true; back.disabled = true;
-                try { await api('/api/mail/send', payload); }
+                let r;
+                try { r = await api('/api/mail/send', payload); }
                 catch (e) {
                     /* A refusal at the last step is still a refusal: hand the
                        row back rather than closing over a message that never
@@ -20868,7 +20879,11 @@ Projected Image UK"></textarea>
                     go.disabled = false; back.disabled = false;
                     return;
                 }
-                toastOk('Sent to ' + to);
+                /* Sent, with something to know: Gmail filed it as its own
+                   conversation, or the board could not be saved. The server
+                   said so and this window used to drop it on the floor. */
+                if (r && r.warning) addToast(r.warning);
+                else toastOk('Sent to ' + to);
                 done(to);
             };
             back.onclick = () => {

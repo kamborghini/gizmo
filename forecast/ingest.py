@@ -18,11 +18,14 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta
 from typing import Dict, Iterable, List, Mapping, Optional
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 
 from .config import Config
+
+_LONDON = ZoneInfo("Europe/London")
 
 log = logging.getLogger("forecast.ingest")
 
@@ -58,17 +61,24 @@ def _split_tags(v) -> List[str]:
 
 
 def _day(v) -> Optional[date]:
+    """The London calendar day of a timestamp.
+
+    Shopify's bulk query hands back createdAt in UTC. The run's as_of and the
+    plan's months are London days, so through British Summer Time an order in
+    the first hour of the day fell on the day before, and on the 1st it fell
+    in the month before. A timestamp with no zone is taken as it stands."""
     if v is None or v == "":
         return None
     if isinstance(v, datetime):
-        return v.date()
+        return (v.astimezone(_LONDON) if v.tzinfo else v).date()
     if isinstance(v, date):
         return v
     s = str(v).strip().replace("Z", "+00:00")
     try:
-        return datetime.fromisoformat(s[:25] if "T" in s else s[:10]).date()
+        parsed = datetime.fromisoformat(s if "T" in s else s[:10])
     except ValueError:
-        return pd.Timestamp(s).date()
+        parsed = pd.Timestamp(s).to_pydatetime()
+    return (parsed.astimezone(_LONDON) if parsed.tzinfo else parsed).date()
 
 
 # ---------------------------------------------------------------- JSON (Admin shape)

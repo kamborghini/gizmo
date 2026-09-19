@@ -331,6 +331,19 @@ def t_a_sanity_model_refuses_rather_than_guesses_without_two_years():
 
 
 @test
+def t_an_order_is_counted_on_its_london_day():
+    """B47 in the 2026-09-19 bug audit. Shopify's bulk query stamps createdAt
+    in UTC; the run's as_of and the plan's months are London days, so through
+    British Summer Time the first hour of every day fell on the day before,
+    and on the 1st it fell in the month before."""
+    from forecast.ingest import _day
+    ok(_day("2026-08-31T23:30:00Z") == date(2026, 9, 1), "half past midnight BST on the 1st is the 1st")
+    ok(_day("2026-01-31T23:30:00Z") == date(2026, 1, 31), "and in winter nothing moves")
+    ok(_day("2026-08-31") == date(2026, 8, 31), "a bare date is taken as it stands")
+    ok(_day("2026-08-31T23:30:00.123456+00:00") == date(2026, 9, 1), "fractional seconds included")
+
+
+@test
 def t_the_month_in_progress_never_reaches_a_model():
     """Half a September looks like a collapse. Handed one, every model would
     forecast the rest of the year down from it."""

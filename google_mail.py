@@ -726,9 +726,11 @@ async def send_message(thread_id: str, to_addr: str, subject: str, body_text: st
         # nothing was sent; this one cannot - the customer has the email
         # either way - so the sentence says what is true rather than what
         # would be tidier to believe.
+        # Raising here read to the caller like a refusal: it cleared the
+        # stamp, recorded no send and left the thread unanswered on the board
+        # while the customer held the email. It is a send with a note on it.
         logger.warning("Gmail sent the reply onto thread %s, not %s", landed, thread_id)
-        raise GmailError("The reply was sent but Gmail could not attach it to this "
-                         "conversation. Check the mailbox before sending again.")
+        return {"id": str(out.get("id") or ""), "thread_id": landed, "misfiled": True}
     return {"id": str(out.get("id") or ""), "thread_id": landed or str(thread_id)}
 
 

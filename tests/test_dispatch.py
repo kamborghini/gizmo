@@ -8880,8 +8880,10 @@ def t_gmail_send_threads_a_reply_and_leaves_a_new_message_alone():
 @test
 def t_gmail_admits_the_reply_went_even_when_it_lands_on_the_wrong_thread():
     """The draft version of this can honestly say nothing was sent. This one
-    cannot: the customer already has the email, so the sentence has to say so
-    rather than imply the send never happened."""
+    cannot: the customer already has the email. It used to raise, which read
+    to the route like a refusal (stamp cleared, nothing recorded as sent, the
+    thread still unanswered on the board); it is a SEND with a note on it,
+    and the route records it and tells the person where it went."""
     def go():
         _gm.save_connection("rt-test", MBOX)
         async def fake_call(method, path, params=None, body=None, **kw):
@@ -8889,12 +8891,10 @@ def t_gmail_admits_the_reply_went_even_when_it_lands_on_the_wrong_thread():
         saved = _gm._call
         _gm._call = fake_call
         try:
-            try:
-                run_async(_gm.send_message("t1", "jo@customer.com", "S", "hello"))
-                ok(False, "a reply that missed its conversation is not a silent success")
-            except _gm.GmailError as e:
-                ok("was sent" in str(e), str(e))
-                ok("could not attach" in str(e), str(e))
+            out = run_async(_gm.send_message("t1", "jo@customer.com", "S", "hello"))
+            eq(out["id"], "sent1", "the send is reported as the send it was")
+            eq(out["thread_id"], "SOMEWHERE-ELSE", "with where Gmail actually put it")
+            ok(out.get("misfiled"), "and the note that it missed its conversation")
         finally:
             _gm._call = saved
     with_mail(go)
@@ -17320,14 +17320,18 @@ def t_a_reseal_never_destroys_a_secret_it_cannot_handle():
         eq(_tv.reseal_file(empty, ("refresh_token",)), 0,
            "an empty value is not sealed into something that looks like a token")
 
+        # The shape the app WRITES (_write_users wraps the register under
+        # users_store). The fixture used to be the bare register, which the
+        # function read happily and production never produced: it passed
+        # while the boot re-seal sealed nothing on the live volume.
         users = os.path.join(d, "users.json")
         with open(users, "w", encoding="utf-8") as fh:
-            json.dump({"version": 2, "users": {
+            json.dump({"users_store": {"version": 2, "users": {
                 "u1": {"mfa_secret": "SECRETA", "name": "Ada"},
                 "u2": {"name": "Bo"},
-                "u3": "not-a-record"}}, fh)
+                "u3": "not-a-record"}}}, fh)
         eq(_tv.reseal_users(users, ("mfa_secret", "mfa_pending")), 1)
-        back = json.load(open(users))
+        back = json.load(open(users))["users_store"]
         eq(_tv.unseal(back["users"]["u1"]["mfa_secret"]), "SECRETA",
            "the secret still opens, so nobody is locked out of their account")
         eq(back["users"]["u1"]["name"], "Ada")
@@ -18744,6 +18748,436 @@ def t_a_failed_write_forgets_the_cached_store():
     crm_wipe()
     copilot._forget_store(copilot.CRM_PATH)
     eq(copilot._load_crm()["persons"], {}, "and a wiped store is empty again")
+
+
+# ---------------------------------------------------------------------------
+# The 2026-09-19 bug audit (docs/bugs/2026-09-19-bug-audit.md): the highs and
+# the pattern fixes, each pinned by the behaviour that was wrong.
+# ---------------------------------------------------------------------------
+
+@test
+def t_boot_reseal_reads_the_register_as_the_app_writes_it():
+    """B3. users.json is {"users_store": {...}}; the re-seal read "users" off
+    the top level, found nothing, and reported the vault complete while every
+    second-factor secret enrolled before the key was set stayed in plaintext
+    on the volume and in every backup zip."""
+    import tokenvault as _tv
+    def go():
+        old_key = os.environ.get("TOKEN_ENCRYPTION_KEY")
+        os.environ["TOKEN_ENCRYPTION_KEY"] = "a-long-random-key-for-the-test"
+        _tv._key.cache_clear()
+        try:
+            copilot._write_users({"version": 2, "users": {
+                "u1": {"name": "Ada", "username": "ada", "role": "master",
+                       "mfa_secret": "PLAINSECRET"}}})
+            eq(json.load(open(copilot.USERS_PATH))["users_store"]["users"]["u1"]["mfa_secret"],
+               "PLAINSECRET", "enrolled before the key: plaintext on disk")
+            out = copilot.reseal_secrets_at_rest()
+            eq(out["stores"].get("mfa"), 1, out)
+            on_disk = json.load(open(copilot.USERS_PATH))["users_store"]["users"]["u1"]["mfa_secret"]
+            ok(_tv.is_sealed(on_disk), "sealed on disk")
+            eq(_tv.unseal(on_disk), "PLAINSECRET", "and still opens, so nobody is locked out")
+            eq(copilot.token_vault_state()["plaintext"], [], "and the settings panel agrees")
+        finally:
+            if old_key is None:
+                os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
+            else:
+                os.environ["TOKEN_ENCRYPTION_KEY"] = old_key
+            _tv._key.cache_clear()
+    with_accounts(go)
+
+
+@test
+def t_the_watchdog_clears_the_outage_flag_when_shopify_is_back():
+    """B1. The tick popped shopify_down from its snapshot and then merged the
+    snapshot over the file, which kept the key: a recovered email every hour,
+    the between-hours answer "down", scheduled audits skipped three ticks in
+    four, for as long as the volume lasted."""
+    emails = []
+    up = {"v": False}
+    async def probe(registry, name, args):
+        return {"name": "Shop"} if up["v"] else {"error": "boom"}
+    async def mail(subject, lines):
+        # The same tick also checks the team register, which this test does
+        # not seed; only the connection emails are the point here.
+        if "Shopify" in subject:
+            emails.append(subject)
+        return True
+    async def noop(*a, **k):
+        return None
+    async def skip(*a, **k):
+        return {"error": "skip"}
+    saved = (copilot._tool_json, copilot._send_alert_email, copilot._zeta_drain,
+             copilot._zeta_configured, copilot._files_tick, copilot.run_label_coverage,
+             copilot._webhook_ensurer, copilot._watch_last_tick)
+    copilot._tool_json, copilot._send_alert_email = probe, mail
+    copilot._zeta_drain, copilot._zeta_configured = noop, (lambda: False)
+    copilot._files_tick, copilot.run_label_coverage, copilot._webhook_ensurer = (lambda: None), skip, None
+    def clean():
+        w = copilot._load_watch()
+        w.pop("shopify_down", None)
+        w["probe_fails"] = 0
+        copilot._save_watch(w)
+    def tick():
+        copilot._watch_last_tick = 0.0
+        return run_async(copilot._watchdog_tick({}))
+    clean()
+    try:
+        for _ in range(3):
+            tick()
+        ok(copilot._load_watch().get("shopify_down"), "three hourly failures flag the outage")
+        eq(emails, ["Reactor: Shopify connection is failing"])
+        up["v"] = True
+        ok(tick(), "the probe succeeds")
+        eq(copilot._load_watch().get("shopify_down"), None, "and the flag is gone from disk")
+        eq(emails[-1], "Reactor: Shopify connection recovered")
+        tick()
+        eq(emails.count("Reactor: Shopify connection recovered"), 1, "said once, not every hour")
+        copilot._watch_last_tick = time.time()
+        ok(run_async(copilot._watchdog_tick({})), "the between-hours answer is up too")
+    finally:
+        (copilot._tool_json, copilot._send_alert_email, copilot._zeta_drain,
+         copilot._zeta_configured, copilot._files_tick, copilot.run_label_coverage,
+         copilot._webhook_ensurer, copilot._watch_last_tick) = saved
+        clean()
+
+
+@test
+def t_shop_redact_erases_what_memory_holds_too():
+    """B2. The files went and the memory copies stayed: _load_mail() kept
+    serving the erased threads and the mail loop's next write put the whole
+    mailbox back on disk inside a minute, Files likewise on its next tick."""
+    def go():
+        _gm.save_connection("rt-test", MBOX)
+        m = copilot._load_mail()
+        m["threads"]["t1"] = {"from_email": "someone@example.com", "subject": "private"}
+        copilot._write_mail(m)
+        f = copilot._load_files()
+        f["files"]["f1"] = {"name": "secret.pdf", "status": "active"}
+        copilot._write_files(f)
+        r = copilot._redact_shop()
+        ok(r["wiped"] >= 2, r)
+        eq(copilot._load_mail()["threads"], {}, "the erased threads are not served from memory")
+        eq(copilot._load_files()["files"], {}, "nor the erased files")
+        ok(not _gm.connected(), "and the mailbox grant is gone, so the sync cannot rebuild the store from Gmail")
+        copilot._write_mail(copilot._load_mail())       # what the mail loop does every minute
+        copilot._write_files(copilot._load_files())
+        eq(json.load(open(copilot.MAILBOX_PATH))["mailbox"]["threads"], {},
+           "and a write cannot bring them back")
+        eq(json.load(open(copilot.FILES_PATH))["files_store"]["files"], {})
+    with_files(lambda fake: with_mail(go))
+
+
+@test
+def t_every_memory_copy_of_a_store_is_on_the_one_list():
+    """Restore and shop/redact drop the caches from one registry. A `_mem`
+    global added without a row there is the next cache to outlive its file:
+    the loan register was the last one, forgotten from a hand-kept list."""
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "copilot.py"),
+               encoding="utf-8").read()
+    declared = set(re.findall(r"^(_[a-z_]+_mem)\b", src, re.M))
+    eq(declared, set(copilot._memory_stores().values()),
+       "every whole-object cache is dropped by restore and shop/redact")
+
+
+@test
+def t_restore_reaches_the_loan_register():
+    """B9. Restore dropped every memory copy but the loan register's, so the
+    Loans tab kept showing the pre-restore units and the next loan wrote
+    them over the restored file."""
+    def go():
+        ensure_auth()
+        import base64 as b64
+        d = copilot._load_loans()
+        d["units"]["u1"] = {"name": "Loan 1", "created_at": "2026-09-01T00:00:00+00:00"}
+        copilot._write_loans(d)
+        buf, _added = copilot._build_backup_zip()
+        blob = b64.b64encode(buf.getvalue()).decode()
+        d = copilot._load_loans()
+        d["units"].pop("u1")
+        d["units"]["u2"] = {"name": "Loan 2", "created_at": "2026-09-02T00:00:00+00:00"}
+        copilot._write_loans(d)
+        rr = post("/api/restore", {"zip": blob})
+        eq(rr.status_code, 200, rr.text)
+        li = login("cameron", MASTER_PW)          # every session died with the restore
+        APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
+        eq(sorted(copilot._load_loans()["units"]), ["u1"], "the restored register is what is served")
+        copilot._write_loans(copilot._load_loans())
+        eq(sorted(json.load(open(copilot.LOANS_PATH))["loans_store"]["units"]), ["u1"],
+           "and the next write keeps it")
+    def outer():
+        copilot._loans_mem = None
+        try:
+            os.remove(copilot.LOANS_PATH)
+        except FileNotFoundError:
+            pass
+        try:
+            go()
+        finally:
+            copilot._loans_mem = None
+            try:
+                os.remove(copilot.LOANS_PATH)
+            except FileNotFoundError:
+                pass
+    with_accounts(outer)
+
+
+@test
+def t_a_pipedrive_preview_leaves_the_live_crm_alone():
+    """B6. The preview ran the import on the cached store itself, updating
+    every existing deal in place; over a partial export that blanked the
+    contact off each one, and the next unrelated CRM write put it on disk."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        async def full(progress=None):
+            return dict(PD_EXPORT)
+        async def partial(progress=None):
+            bad = dict(PD_EXPORT)
+            bad["persons"] = []
+            bad["complete"] = dict(PD_EXPORT["complete"], persons=False)
+            return bad
+        saved = (pipedrive.export, pipedrive.API_TOKEN)
+        pipedrive.export, pipedrive.API_TOKEN = full, "t"
+        try:
+            eq(post("/api/crm/import", {"go": True}).status_code, 200)
+            def links():
+                return {k: (v.get("person_id"), v.get("org_id"), v.get("stage_id"))
+                        for k, v in copilot._load_crm()["deals"].items()}
+            before = links()
+            ok(all(p for p, _o, _s in before.values()), "the imported deals have their people")
+            pipedrive.export = partial
+            r = post("/api/crm/import", {})
+            eq(r.status_code, 200, r.text)
+            ok(r.json()["dry_run"])
+            eq(links(), before, "a preview changes nothing the board reads")
+            post("/api/crm/contact", {"op": "org_add", "name": "Unrelated write"})
+            disk = json.load(open(copilot.CRM_PATH))["crm"]["deals"]
+            eq({k: (v.get("person_id"), v.get("org_id"), v.get("stage_id")) for k, v in disk.items()},
+               before, "and the write that followed carried the real links, not the preview's")
+        finally:
+            pipedrive.export, pipedrive.API_TOKEN = saved
+    with_accounts(go)
+
+
+@test
+def t_a_xero_record_explains_one_refund_and_one_chargeback_only():
+    """B7, B30. Neither check claimed what it matched, so one credit note
+    satisfied every same-amount refund in its window and one SPEND line every
+    same-amount chargeback; the unrecorded ones read as clean."""
+    r1 = {"id": 77, "created_at": "2026-08-12", "pence": 15000}
+    r2 = {"id": 78, "created_at": "2026-08-14", "pence": 15000}
+    note = {"id": "c", "number": "CN-1", "type": "ACCRECCREDIT", "status": "AUTHORISED",
+            "contact": "Northern Stage Ltd", "date": "2026-08-13", "total": 15000,
+            "remaining": 0, "currency": "GBP", "reference": ""}
+    cache = {"shopify": {"orders": {"1": _ord(104275, "#104275", 84200, refunds=[r1]),
+                                    "2": _ord(104276, "#104276", 30000, refunds=[r2])}},
+             "xero": {"invoices": {}, "credit_notes": {"c": note}, "bank_transactions": {}}}
+    out = _rc.check_refunds(cache)
+    eq([(e["kind"], e["amount"], e["date"]) for e in out],
+       [("shopify_refund_missing", 15000, "2026-08-14")],
+       "the earlier refund takes the note; the later one has no record")
+    from datetime import date as _date, timedelta as _td
+    day = lambda n: (_date.today() - _td(days=n)).isoformat()
+    def dispute(i, when):
+        return {"id": i, "status": "lost", "pence": 5000, "date": when, "currency": "GBP",
+                "reason": "fraudulent", "type": "chargeback"}
+    cache2 = {"shopify": {"disputes": {"d1": dispute("d1", day(12)), "d2": dispute("d2", day(10))}},
+              "xero": {"bank_transactions": {"b1": _bt("b1", 5000, typ="SPEND", date=day(9))},
+                       "credit_notes": {}}}
+    out2 = _rc.check_disputes(cache2)
+    eq([(e["kind"], e["date"]) for e in out2], [("chargeback_missing_from_xero", day(10))],
+       "one SPEND line covers one chargeback, the earlier one")
+    # Not first-come, not nearest-first: an ASSIGNMENT. Note N1 (the 9th)
+    # fits both refunds and comes first in the dictionary; N2 (the 2nd) fits
+    # only the first. Taking N1 for the first refund flagged the second.
+    ra = {"id": 1, "created_at": "2026-08-01", "pence": 15000}
+    rb = {"id": 2, "created_at": "2026-08-15", "pence": 15000}
+    n1, n2 = dict(note, id="n1", number="CN-9", date="2026-08-09"), dict(note, id="n2", number="CN-2", date="2026-08-02")
+    cache3 = {"shopify": {"orders": {"1": _ord(1, "#1", 84200, refunds=[ra]),
+                                     "2": _ord(2, "#2", 30000, refunds=[rb])}},
+              "xero": {"invoices": {}, "credit_notes": {"n1": n1, "n2": n2}, "bank_transactions": {}}}
+    eq(_rc.check_refunds(cache3), [], "both refunds are recorded, whichever note the sweep meets first")
+    # And where the nearest record for the first chargeback is the only one
+    # that fits the second: b1 sits a day from both, b2 twenty days from d1.
+    cache4 = {"shopify": {"disputes": {"d1": dispute("d1", day(12)), "d2": dispute("d2", day(10))}},
+              "xero": {"bank_transactions": {"b1": _bt("b1", 5000, typ="SPEND", date=day(11)),
+                                             "b2": _bt("b2", 5000, typ="SPEND", date=day(32))},
+                       "credit_notes": {}}}
+    eq(_rc.check_disputes(cache4), [], "the pairing that covers both is the one taken")
+
+
+@test
+def t_an_invoice_named_for_one_order_is_not_reused_by_amount_for_another():
+    """B28, B48. A reference hit was never claimed, so the invoice for
+    #104300 also explained #104301 (same customer, same total, two days
+    later) by amount; and an invoice with no contact matched anything of its
+    amount, because an empty name is a substring of every name."""
+    a = _ord(104300, "#104300", 84200, date="2026-08-10")
+    b = _ord(104301, "#104301", 84200, date="2026-08-12")
+    inv = _inv("INV-104300", 84200, date="2026-08-11")
+    for orders in ({"1": a, "2": b}, {"2": b, "1": a}):
+        out = _rc.check_orders_vs_invoices({"shopify": {"orders": orders},
+                                            "xero": {"invoices": {"x": inv}}})
+        missing = [e for e in out if e["kind"] == "shopify_sale_missing"]
+        eq(len(missing), 1, "whichever order the sweep meets first: " + str([e["title"] for e in out]))
+        ok("#104301" in missing[0]["title"], missing[0]["title"])
+    nobody = _inv("SI-0099", 12000, contact="", ref="", date="2026-08-11")
+    out = _rc.check_orders_vs_invoices(
+        {"shopify": {"orders": {"1": _ord(104276, "#104276", 12000, company="Roundhouse Trust")}},
+         "xero": {"invoices": {"n": nobody}}})
+    eq([e["kind"] for e in out], ["shopify_sale_missing"],
+       "an invoice with nobody on it explains nothing by name")
+    nameless = _ord(104277, "#104277", 12000, company="")
+    nameless["customer"] = ""
+    out = _rc.check_orders_vs_invoices(
+        {"shopify": {"orders": {"1": nameless}},
+         "xero": {"invoices": {"r": _inv("SI-0100", 12000, contact="Roundhouse Trust", ref="",
+                                         date="2026-08-11")}}})
+    eq([e["kind"] for e in out], ["shopify_sale_missing"],
+       "and an order with nobody on it is not explained by any invoice of its amount")
+
+
+@test
+def t_a_send_whose_answer_is_lost_keeps_its_stamp():
+    """B5. A timeout after the upload left the machine was handled like a
+    refusal: stamp cleared, "did not send", Send re-armed, and the retry gave
+    the customer the same reply twice. Now the stamp stays and the person is
+    told to look before sending again. A reply Gmail filed elsewhere is a
+    SENT reply with a note, not a refusal."""
+    import httpx as _hx
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        async def lost(thread_id, to_addr, subject, body_text, **kw):
+            raise _hx.ReadTimeout("no answer")
+        saved = (_gm.read_thread, _gm.send_message)
+        _gm.read_thread, _gm.send_message = _one_from_customer(), lost
+        try:
+            r = post("/api/mail/send", {"id": "t1", "text": "Hello Jo."})
+            eq(r.status_code, 502, r.text)
+            ok("MAY have been sent" in r.json()["error"], r.text)
+            t = copilot._load_mail()["threads"]["t1"]
+            eq(t.get("sent_at"), None, "not claimed as sent either")
+            ok(t.get("send_pending"), "the stamp stays: we do not know")
+            disk = json.load(open(copilot.MAILBOX_PATH))["mailbox"]
+            ok(disk["threads"]["t1"].get("send_pending"), "on disk too")
+            ok(any("may not have completed" in a["action"] for a in t["activity"]), str(t["activity"]))
+            # The sync then finds our message in Gmail, dated after the stamp:
+            # that settles it, without anyone pressing anything.
+            store = copilot._load_mail()
+            copilot._mail_apply_thread(store, {"id": "t1", "historyId": "h9", "subject": "Gobo order",
+                "messages": [_mk_msg("t1-m1", "Jo Bloggs", "jo@customer.com", "2026-08-19T01:00:00+00:00"),
+                             _mk_msg("t1-m2", "Sales", MBOX, copilot._mail_now())]}, MBOX)
+            t = store["threads"]["t1"]
+            eq(t.get("send_pending"), None, "Gmail has the reply, so the stamp is settled")
+            ok(t.get("sent_at"), "and it is recorded as sent")
+            eq(t["state"], "waiting")
+            ok("confirmed from Gmail" in json.dumps(t["activity"]), str(t["activity"]))
+            # No connection at all is a definite failure: nothing left the machine.
+            async def unreachable(thread_id, to_addr, subject, body_text, **kw):
+                raise _hx.ConnectError("down")
+            _gm.send_message = unreachable
+            r3 = post("/api/mail/send", {"id": "t1", "text": "Hello?"})
+            eq(r3.status_code, 502, r3.text)
+            ok("nothing was sent" in r3.json()["error"], r3.text)
+            eq(copilot._load_mail()["threads"]["t1"].get("send_pending"), None, "no connection, no stamp")
+            async def misfiled(thread_id, to_addr, subject, body_text, **kw):
+                return {"id": "m9", "thread_id": "other", "misfiled": True}
+            _gm.send_message = misfiled
+            r2 = post("/api/mail/send", {"id": "t1", "text": "Hello again."})
+            eq(r2.status_code, 200, r2.text)
+            ok("filed it as a new conversation" in r2.json().get("warning", ""), r2.text)
+            t = copilot._load_mail()["threads"]["t1"]
+            ok(t.get("sent_at"), "recorded as sent")
+            eq(t.get("send_pending"), None)
+        finally:
+            _gm.read_thread, _gm.send_message = saved
+    with_mail(go)
+
+
+@test
+def t_the_payroll_sheet_and_the_work_board_reckon_days_in_london():
+    """B10. Sessions are stamped in UTC and the sheet sliced the stamp, so
+    every summer shift read an hour early and one after 23:00 fell on the
+    day before; the board's today, week and month began at 01:00."""
+    rows = [{"id": "w1", "uid": "u1", "start": "2026-07-01T08:30:00+00:00",
+             "end": "2026-07-01T12:00:00+00:00", "secs": 12600},
+            {"id": "w2", "uid": "u1", "start": "2026-06-30T23:30:00+00:00",
+             "end": "2026-07-01T01:00:00+00:00", "secs": 5400}]
+    csv = copilot._work_csv(rows, {"u1": "Pat"}, {"w1": 2}).split("\n")
+    eq(csv[1], "Pat,2026-07-01,09:30,13:00,3.50,2,")
+    eq(csv[2], "Pat,2026-07-01,00:30,02:00,1.50,0,", "half past midnight in London, not the 30th")
+    eq(copilot._london_day("2026-06-30T23:30:00+00:00"), "2026-07-01")
+    eq(copilot._london_day("2026-01-31T23:30:00+00:00"), "2026-01-31", "and nothing moves in winter")
+    today, week, month = copilot._day_starts()
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _Z
+    eq(_dt.fromisoformat(today).astimezone(_Z("Europe/London")).strftime("%H:%M"), "00:00",
+       "today starts at London midnight")
+    ok(today.endswith("+00:00") and week <= today and month <= today,
+       "expressed in UTC, like the sessions it is compared with")
+
+
+@test
+def t_a_label_reckons_required_by_where_the_bench_is():
+    """B35. due_soon compared the customer's date with the UTC date, which
+    is yesterday's for the last hour of every summer day: a wedding three
+    days off printed without its urgency box."""
+    from datetime import date as _date
+    saved = copilot._london_today
+    copilot._london_today = lambda: _date(2026, 9, 19)
+    try:
+        o = dict(ORDER, line_items=[{"title": "Custom Gobo", "quantity": 1, "product_id": 1,
+                                     "properties": [{"name": "Date Required", "value": "21/09/2026"}]}])
+        eq(copilot._shape_label_order(o, {})["due_soon"], True, "two days away is soon")
+        o["line_items"][0]["properties"][0]["value"] = "22/09/2026"
+        eq(copilot._shape_label_order(o, {})["due_soon"], False)
+        eq(copilot._fmt_due(_date(2026, 12, 25)), "25 Dec")
+        eq(copilot._fmt_due(_date(2027, 1, 2)), "2 Jan 2027")
+        eq(copilot._loan_state({"due_at": "2026-09-19"}, 14), "ok", "a loan due today is not late yet")
+        eq(copilot._loan_state({"due_at": "2026-09-18"}, 14), "late")
+    finally:
+        copilot._london_today = saved
+
+
+@test
+def t_a_refunded_line_is_not_made_weighed_or_declared():
+    """B4. quantity is what was ORDERED; a refund or an order edit lowers
+    current_quantity and leaves it alone, so the refunded gobo printed, was
+    cut, booked its glass and rode on the customs declaration."""
+    o = dict(ORDER, line_items=[
+        {"title": "Custom Gobo", "quantity": 2, "current_quantity": 1, "price": "127.50",
+         "grams": 75, "product_id": 1},
+        {"title": "Custom Gobo", "quantity": 1, "current_quantity": 0, "price": "127.50",
+         "grams": 75, "product_id": 1},
+        {"title": "Custom Gobo", "quantity": 3, "price": "10.00", "grams": 10, "product_id": 1}])
+    shaped = copilot._shape_label_order(o, {})
+    eq([it["quantity"] for it in shaped["items"]], [1, 3],
+       "the refunded line is gone; a line Shopify never edited keeps its ordered count")
+    eq(copilot._order_goods_value(o), 157.5, "declared at what is still on the order")
+    eq(copilot._order_weight_kg(o), 0.105)
+    eq([c["quantity"] for c in run_async(copilot._customs_items({}, o))], [1, 3])
+    eq(copilot._line_qty({"quantity": 2}), 2)
+    eq(copilot._line_qty({}), 1, "a line with no quantity at all counts as one, as before")
+
+
+@test
+def t_a_disconnect_waits_for_a_running_sweep():
+    """B32. A sweep loads the books at its start and writes them back whole
+    at its end; disconnecting in between deleted the Xero cache and then
+    watched the sweep's tail put every invoice and the old watermarks back."""
+    def go():
+        ensure_auth()
+        _rc._sweeping["on"] = True
+        try:
+            r = post("/api/recon/disconnect", {"what": "xero"})
+            eq(r.status_code, 409, r.text)
+            ok("sweep is running" in r.json()["error"], r.text)
+        finally:
+            _rc._sweeping["on"] = False
+    with_accounts(go)
 
 
 for fn in TESTS:

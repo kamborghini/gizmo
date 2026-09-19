@@ -6645,6 +6645,55 @@ def t_an_unfilled_card_waits_off_the_page_without_being_hidden():
         ok("widget(el('div'), " in fn_src(name), "%s gives its holder the id, not the card drawn into it" % name.strip("( "))
 
 
+@test
+def t_the_forecast_ranges_use_the_local_calendar_day():
+    """B22 in the 2026-09-19 bug audit. fcISO was toISOString().slice(0, 10),
+    which is UTC; the ranges build their dates at LOCAL midnight, so through
+    British Summer Time every range key came out a day early: Today excluded
+    today, and This month on the 1st showed last month."""
+    m = re.search(r"const fcISO = \(d\) => .*?;\n", SCRIPT, re.S)
+    ok(m, "fcISO must still be declared as an arrow function")
+    ok("toISOString" not in m.group(0), "the UTC formatter is gone")
+    if not any(os.access(os.path.join(p, "node"), os.X_OK)
+               for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(m.group(0) + "\nconsole.log(fcISO(new Date('2026-09-19T00:00:00')), "
+                 "fcISO(new Date('2026-06-01T00:00:00')), fcISO(new Date('2026-01-05T00:00:00')));\n")
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path], capture_output=True, text=True,
+                           env=dict(os.environ, TZ="Europe/London"))
+        ok(r.returncode == 0, "fcISO failed to run: " + (r.stderr or "")[:200])
+        ok((r.stdout or "").strip() == "2026-09-19 2026-06-01 2026-01-05",
+           "local midnight is its own day in summer and in winter: " + (r.stdout or "").strip())
+    finally:
+        os.unlink(path)
+
+
+@test
+def t_a_proxy_error_never_claims_nothing_was_saved():
+    """B21 in the 2026-09-19 bug audit. The generic 5xx text told the
+    dispatcher nothing was saved when the courier booking may have gone
+    through; the Guide's advice for "the app will not book" then sent them to
+    the portal to book, and pay, again."""
+    fn = fn_src("async function api(")
+    ok("Nothing was saved" not in fn, "a proxy error page says nothing about what was saved")
+    ok("may or may not have gone through: check before trying again" in fn,
+       "the outcome is stated as unknown, which is what it is")
+
+
+@test
+def t_a_sent_reply_with_a_warning_shows_the_warning():
+    """B5, the page's half. The server answers a send that went somewhere
+    surprising (Gmail filed it as its own conversation; the board could not
+    be saved) with a warning, and the send flow toasted "Sent to X" over it."""
+    fn = fn_src("async function mailSendFlow(")
+    ok("if (r && r.warning) addToast(r.warning);" in fn, "the warning is what the person sees")
+    ok("else toastOk('Sent to ' + to);" in fn, "and a plain success stays a plain success")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

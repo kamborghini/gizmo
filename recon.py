@@ -388,30 +388,51 @@ def check_orders_vs_invoices(cache: dict) -> list:
             by_amount.setdefault((v["total"], v["currency"]), []).append(v)
     claimed: set = set()      # an invoice explains ONE order, not every same-priced one
 
-    for o in orders.values():
+    def _wants_invoice(o: dict) -> bool:
         if o["cancelled"] or o["test"]:
-            continue
+            return False
         if o["financial_status"] not in ("paid", "partially_refunded", "partially_paid", "pending"):
+            return False
+        return o["total"] not in (None, 0)
+
+    # Pass one: the invoices that NAME an order, claimed before any amount
+    # match can take them. A reference hit was never claimed, so the invoice
+    # for #104300 went on to explain #104301, the same customer's identical
+    # order two days later, by amount - and that sale never reached the books.
+    named: dict = {}
+    for key, o in orders.items():
+        if not _wants_invoice(o):
             continue
-        if o["total"] in (None, 0):
-            continue
-        hit = None
         for k in (norm_ref(o["name"]), norm_ref(str(o["id"]))):
             if k and idx.get(k):
-                hit = idx[k][0]
+                named[key] = idx[k][0]
+                claimed.add(idx[k][0]["id"])
                 break
+
+    for key, o in orders.items():
+        if not _wants_invoice(o):
+            continue
+        hit = named.get(key)
         if hit is None:
             # Amount + date + name: the invoice may carry its own numbering.
+            # The nearest unclaimed fit, not the first in dictionary order.
+            fits = []
             for v in by_amount.get((o["total"], o["currency"]), []):
                 if v["id"] in claimed:
                     continue
                 gap = _days_between(o["created_at"], v["date"])
                 if gap is not None and gap <= 7:
                     nm = norm_name(o["company"] or o["customer"])
-                    if not nm or nm in norm_name(v["contact"]) or norm_name(v["contact"]) in nm:
-                        hit = v
-                        claimed.add(v["id"])
-                        break
+                    cn = norm_name(v["contact"])
+                    # An empty name is a substring of every name, so an
+                    # invoice with nobody on it matched anything of its
+                    # amount, and an order with nobody on it took any
+                    # invoice: both sides have to say who.
+                    if nm and cn and (nm in cn or cn in nm):
+                        fits.append((gap, str(v["date"]), str(v["id"]), v))
+            if fits:
+                hit = min(fits)[3]
+                claimed.add(hit["id"])
         if hit is None:
             sev = _sev_for_amount(o["total"], "high")
             out.append(make_exc(
@@ -459,6 +480,33 @@ def check_orders_vs_invoices(cache: dict) -> list:
     return out
 
 
+def _assign(items: list, fits_of: dict) -> dict:
+    """Each item to a record that fits it, each record used once, as many
+    items placed as the fits allow: a maximum matching by augmenting paths.
+
+    Taking the first (or the nearest) fitting record for each item in turn is
+    not enough: refund A dated the 1st takes the note dated the 9th, and
+    refund B dated the 15th, which only that note fitted, is reported as
+    unrecorded while the note dated the 2nd sits unused. An item is flagged
+    only when NO way of pairing the records covers it. `fits_of[item]` lists
+    the records that fit, best first; that order is the preference."""
+    owner: dict = {}
+
+    def place(item, seen: set) -> bool:
+        for rec in fits_of.get(item, ()):
+            if rec in seen:
+                continue
+            seen.add(rec)
+            if rec not in owner or place(owner[rec], seen):
+                owner[rec] = item
+                return True
+        return False
+
+    for item in items:
+        place(item, set())
+    return {item: rec for rec, item in owner.items()}
+
+
 def check_refunds(cache: dict) -> list:
     """A Shopify refund is money leaving; Xero must show it as an ACCREC credit
     note or a refund-shaped bank line."""
@@ -466,41 +514,55 @@ def check_refunds(cache: dict) -> list:
     orders = cache.get("shopify", {}).get("orders", {})
     notes = cache.get("xero", {}).get("credit_notes", {})
     bank = cache.get("xero", {}).get("bank_transactions", {})
-    for o in orders.values():
-        for r in o.get("refunds", []):
-            if not r["pence"]:
+    # A Xero record explains ONE refund. Without the claimed set one credit
+    # note satisfied every same-amount refund in its window, and the second
+    # £150 leaving Shopify read as recorded. Oldest refund first, so the
+    # earliest refund takes the earliest record, as the payouts check does.
+    pairs = [(o, r) for o in orders.values() for r in o.get("refunds", []) if r["pence"]]
+    pairs.sort(key=lambda pr: str(pr[1].get("created_at") or ""))
+    # Every record that fits each refund, credit notes before bank lines and
+    # nearest first, then one assignment of records to refunds that covers as
+    # many as the fits allow (see _assign). A refund with no record in that
+    # assignment is the one the books are missing.
+    label: dict = {}
+    fits_of: dict = {}
+    for i, (o, r) in enumerate(pairs):
+        notes_fit, bank_fit = [], []
+        for c in notes.values():
+            if c["type"] != "ACCRECCREDIT" or c["total"] != r["pence"] or not _live(c):
                 continue
-            hit = None
-            for c in notes.values():
-                if c["type"] != "ACCRECCREDIT" or c["total"] != r["pence"] or not _live(c):
-                    continue
-                gap = _days_between(r["created_at"], c["date"])
-                if gap is not None and gap <= 10:
-                    hit = ("credit note " + (c["number"] or c["id"]), c)
-                    break
-            if hit is None:
-                for t in bank.values():
-                    if t["type"] != "SPEND" or t["pence"] != r["pence"] or not _live(t):
-                        continue
-                    gap = _days_between(r["created_at"], t["date"])
-                    if gap is not None and gap <= 10:
-                        hit = ("bank payment " + t["id"], t)
-                        break
-            if hit is None:
-                out.append(make_exc(
-                    "shopify_refund_missing", _sev_for_amount(r["pence"], "high"),
-                    f"Refund of {money(r['pence'], o['currency'])} on {o['name']} has no Xero record",
-                    [o["id"], r["id"]], amount=r["pence"], currency=o["currency"],
-                    date=r["created_at"], systems=["shopify", "xero"],
-                    why=("Shopify refunded this amount, but no ACCREC credit note and no SPEND "
-                         "bank transaction matches it within 10 days."),
-                    suggestion="Record the refund in Xero, or find where it was recorded under a different amount.",
-                    evidence=[ev("shopify", "order", f"Order {o['name']}", o, 1),
-                              ev("shopify", "refund", f"Refund on {r['created_at']}",
-                                 {**r, "order": o["name"]}, 2)],
-                    computed=[f"Searched {len(notes)} credit notes and {len(bank)} bank "
-                              f"transactions for {money(r['pence'], o['currency'])} within 10 days "
-                              f"of {r['created_at']}: no match."]))
+            gap = _days_between(r["created_at"], c["date"])
+            if gap is not None and gap <= 10:
+                rid = "note:" + str(c["id"])
+                label[rid] = ("credit note " + (c["number"] or c["id"]), c)
+                notes_fit.append((gap, str(c["date"]), rid))
+        for t in bank.values():
+            if t["type"] != "SPEND" or t["pence"] != r["pence"] or not _live(t):
+                continue
+            gap = _days_between(r["created_at"], t["date"])
+            if gap is not None and gap <= 10:
+                rid = "bank:" + str(t["id"])
+                label[rid] = ("bank payment " + t["id"], t)
+                bank_fit.append((gap, str(t["date"]), rid))
+        fits_of[i] = [f[2] for f in sorted(notes_fit)] + [f[2] for f in sorted(bank_fit)]
+    placed = _assign(list(range(len(pairs))), fits_of)
+    for i, (o, r) in enumerate(pairs):
+        hit = label.get(placed.get(i))
+        if hit is None:
+            out.append(make_exc(
+                "shopify_refund_missing", _sev_for_amount(r["pence"], "high"),
+                f"Refund of {money(r['pence'], o['currency'])} on {o['name']} has no Xero record",
+                [o["id"], r["id"]], amount=r["pence"], currency=o["currency"],
+                date=r["created_at"], systems=["shopify", "xero"],
+                why=("Shopify refunded this amount, but no ACCREC credit note and no SPEND "
+                     "bank transaction matches it within 10 days."),
+                suggestion="Record the refund in Xero, or find where it was recorded under a different amount.",
+                evidence=[ev("shopify", "order", f"Order {o['name']}", o, 1),
+                          ev("shopify", "refund", f"Refund on {r['created_at']}",
+                             {**r, "order": o["name"]}, 2)],
+                computed=[f"Searched {len(notes)} credit notes and {len(bank)} bank "
+                          f"transactions for {money(r['pence'], o['currency'])} within 10 days "
+                          f"of {r['created_at']}: no match."]))
     return out
 
 
@@ -858,26 +920,29 @@ def check_disputes(cache: dict) -> list:
     bank = cache.get("xero", {}).get("bank_transactions", {})
     notes = cache.get("xero", {}).get("credit_notes", {})
     horizon = _cutoff_day(FETCH_DAYS)
-    for d in cache.get("shopify", {}).get("disputes", {}).values():
-        if d["status"] in ("won",) or d["pence"] in (None, 0):
-            continue                       # a won dispute takes nothing
-        if str(d.get("date") or "") < horizon:
-            continue                       # older than the books we hold
-        hit = False
+    # One Xero record per chargeback, assigned as in check_refunds: without
+    # that, one SPEND line covered every same-amount chargeback in its window.
+    disputes = [d for d in sorted(cache.get("shopify", {}).get("disputes", {}).values(),
+                                  key=lambda d: str(d.get("date") or ""))
+                if d["status"] not in ("won",) and d["pence"] not in (None, 0)   # a won dispute takes nothing
+                and str(d.get("date") or "") >= horizon]                         # older than the books we hold
+    fits_of: dict = {}
+    for i, d in enumerate(disputes):
+        bank_fit, notes_fit = [], []
         for t in bank.values():
             if t["type"] == "SPEND" and t["pence"] == d["pence"] and _live(t):
                 gap = _days_between(d["date"], t["date"])
                 if gap is not None and gap <= 21:
-                    hit = True
-                    break
-        if not hit:
-            for c in notes.values():
-                if c["type"] == "ACCRECCREDIT" and c["total"] == d["pence"] and _live(c):
-                    gap = _days_between(d["date"], c["date"])
-                    if gap is not None and gap <= 21:
-                        hit = True
-                        break
-        if not hit:
+                    bank_fit.append((gap, str(t["date"]), "bank:" + str(t["id"])))
+        for c in notes.values():
+            if c["type"] == "ACCRECCREDIT" and c["total"] == d["pence"] and _live(c):
+                gap = _days_between(d["date"], c["date"])
+                if gap is not None and gap <= 21:
+                    notes_fit.append((gap, str(c["date"]), "note:" + str(c["id"])))
+        fits_of[i] = [f[2] for f in sorted(bank_fit)] + [f[2] for f in sorted(notes_fit)]
+    placed = _assign(list(range(len(disputes))), fits_of)
+    for i, d in enumerate(disputes):
+        if i not in placed:
             out.append(make_exc(
                 "chargeback_missing_from_xero", _sev_for_amount(d["pence"], "high"),
                 f"Chargeback of {money(d['pence'], d['currency'])} "

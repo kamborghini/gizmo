@@ -172,7 +172,15 @@ def reseal_users(path: str, fields) -> int:
             data = json.load(fh)
     except (OSError, ValueError):
         return 0
-    users = data.get("users") if isinstance(data, dict) else None
+    # The register is written as {"users_store": {"version": 2, "users": {...}}}
+    # by the app's one writer. Reading "users" off the top level found nothing,
+    # returned 0, and the boot log said everything was already sealed while
+    # every second-factor secret enrolled before the key was set stayed in
+    # plaintext. Both shapes are accepted so a hand-restored file still seals.
+    root = data.get("users_store") if isinstance(data, dict) else None
+    if not isinstance(root, dict):
+        root = data
+    users = root.get("users") if isinstance(root, dict) else None
     if not isinstance(users, dict):
         return 0
     changed = 0
