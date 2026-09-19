@@ -6685,6 +6685,39 @@ def t_a_proxy_error_never_claims_nothing_was_saved():
 
 
 @test
+def t_a_customs_line_with_a_gap_stops_the_booking():
+    """B23 in the 2026-09-19 bug audit. A line with a description but no
+    quantity or unit value was dropped from the declaration in silence and
+    the booking went ahead one item short; a zero price prefilled as an
+    empty box, which is how a custom gobo's line went missing."""
+    fn = fn_src("function customsProblem(")
+    ok("needs a quantity" in fn and "needs a unit value" in fn, "the gap is named and the booking stops")
+    ok("unit_price: isNaN(parseFloat(it.price)) ? '' : parseFloat(it.price)" in SCRIPT
+       and "unit_price: isNaN(parseFloat(it.unit_value || it.cost || it.price)) ? ''" in SCRIPT
+       and "pIn.value = (pre.unit_price === 0 || pre.unit_price) ? pre.unit_price : '';" in SCRIPT,
+       "a zero price stays a 0 on the line, on both prefill paths and into the box")
+    ok("unit_price: parseFloat(it.price) || ''" not in SCRIPT
+       and "pIn.value = pre.unit_price || ''" not in SCRIPT, "no prefill turns 0 back into a gap")
+    gap = fn_src("function customsGap(")
+    ok("needs a quantity" in gap and "needs a unit value" in gap
+       and "const gap = customsGap();" in SCRIPT and "if (gap) { toastError(gap); return; }" in SCRIPT,
+       "the pasted-address card has the same gate before it books")
+
+
+@test
+def t_no_native_dialog_is_left_in_the_page():
+    """B24 in the 2026-09-19 bug audit. Chrome removed alert, confirm and
+    prompt inside a cross-origin iframe, which is where this app runs; the
+    attachment row's Save to Files still asked with prompt(), so the button
+    did nothing and said nothing."""
+    ok("prompt('" not in SCRIPT and 'prompt("' not in SCRIPT and "window.prompt" not in SCRIPT
+       and "alert('" not in SCRIPT and "window.alert" not in SCRIPT,
+       "no native dialog anywhere in the script")
+    ok("function uiAskText(" in SCRIPT, "an in-page replacement exists")
+    ok("await uiAskText('Save to Files'" in SCRIPT, "and the attachment save uses it")
+
+
+@test
 def t_a_sent_reply_with_a_warning_shows_the_warning():
     """B5, the page's half. The server answers a send that went somewhere
     surprising (Gmail filed it as its own conversation; the board could not

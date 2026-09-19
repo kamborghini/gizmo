@@ -579,8 +579,16 @@ def check_payouts_vs_bank(cache: dict) -> list:
             receives.setdefault(t["pence"], []).append(t)
     claimed: set = set()
     horizon = _cutoff_day(FETCH_DAYS)
+    today = _cutoff_day(0)
     for p in payouts.values():
         if p["status"] in ("canceled", "failed") or p["pence"] in (None, 0):
+            continue
+        # Only money that has LEFT Shopify can be missing from the bank. The
+        # payouts feed carries tomorrow's scheduled payout and the one in
+        # transit, and each was raised at high (critical over £250) every
+        # night, then went stale when the deposit landed: real gaps hid in
+        # the daily noise.
+        if p["status"] in ("scheduled", "in_transit") or str(p.get("date") or "") > today:
             continue
         # Older than the bank lines we hold: "no matching transaction" would
         # only mean "we did not fetch the transaction". Shopify hands back
@@ -773,13 +781,21 @@ def check_gmail_docs(cache: dict, docs: dict) -> list:
     out = []
     xinv = cache.get("xero", {}).get("invoices", {})
     payments = cache.get("xero", {}).get("payments", {})
+    # Indexed by the normalised number and reference. A second index holds
+    # the NUMBER's bare digits (never the reference, which is free text), and
+    # only a SEGMENTED document number consults it: "2026-0142" finds the
+    # bill Xero holds as INV-2026-0142, while a bare "1500" in the text (an
+    # amount, half a sort code) cannot claim INV-1500.
     num_idx: dict = {}
+    digit_idx: dict = {}
     for v in xinv.values():
         if not _live(v):
             continue
         for k in (norm_ref(v["number"]), norm_ref(v["reference"])):
             if k:
                 num_idx.setdefault(k, []).append(v)
+        if _digit_run(v["number"]):
+            digit_idx.setdefault(_digit_run(v["number"]), []).append(v)
     # Credit notes carry their own numbering: a CN filed correctly in Xero
     # must not read as "missing" just because it is not an invoice.
     for c in cache.get("xero", {}).get("credit_notes", {}).values():
@@ -788,6 +804,8 @@ def check_gmail_docs(cache: dict, docs: dict) -> list:
         for k in (norm_ref(c.get("number")), norm_ref(c.get("reference"))):
             if k:
                 num_idx.setdefault(k, []).append(c)
+        if _digit_run(c.get("number")):
+            digit_idx.setdefault(_digit_run(c.get("number")), []).append(c)
     for d in docs.values():
         if d.get("ignored") or d.get("doc_type") in (None, "", "other"):
             continue
@@ -804,7 +822,8 @@ def check_gmail_docs(cache: dict, docs: dict) -> list:
                                              "currency", "extracted_by")}, 1)]
         if d.get("doc_type") in ("supplier_invoice", "customer_invoice", "credit_note"):
             nums = [n for n in (d.get("invoice_numbers") or []) if norm_ref(n)]
-            missing = [n for n in nums if norm_ref(n) not in num_idx]
+            missing = [n for n in nums if norm_ref(n) not in num_idx
+                       and not (_segmented(n) and _digit_run(n) in digit_idx)]
             if nums and len(missing) == len(nums):
                 amt = d.get("total_pence")
                 # A scan has no text layer to validate the extraction against,
@@ -1137,7 +1156,26 @@ _FIN_WORDS = re.compile(
     r"(?i)\b(remittance|invoice|statement|credit note|payment advice|"
     r"payment confirmation|purchase order|receipt|refund)\b")
 _AMOUNT_RE = re.compile(r"(?<![\d.])(\d{1,3}(?:,\d{3})*\.\d{2})(?!\d)")
-_INVNUM_RE = re.compile(r"(?i)\b((?:inv|in|si|pi|cn)[-# ]?\d{3,10}|\d{4,8})\b")
+# A number may be segmented: INV-2026-0142, SI/24/0088. The whole run is one
+# number; taken piecewise it became "INV-2026" and "0142", neither of which is
+# in Xero, and a bill that WAS there was reported missing at critical.
+_INVNUM_RE = re.compile(r"(?i)\b((?:inv|in|si|pi|cn)[-#/ ]?"
+                        r"(?:\d{3,10}(?:[-/]\d{2,10}){0,2}|\d{2,10}(?:[-/]\d{2,10}){1,2})"
+                        r"|\d{4,8}(?:[-/]\d{2,10}){0,2})\b")
+
+
+def _digit_run(ref: str) -> str:
+    """The digits of a reference with its letters and separators dropped:
+    INV-2026-0142 and 2026-0142 name the same bill."""
+    return re.sub(r"\D", "", str(ref or ""))
+
+
+def _segmented(ref: str) -> bool:
+    """Digit groups joined by - or /, the shape a year-prefixed number takes.
+    Only such a number is looked up by its digits: a bare four-digit run in
+    a document (an amount, a year, half a sort code) matching a bill by
+    digits alone hid a bill that really was missing."""
+    return bool(re.search(r"\d[-/]\d", str(ref or "")))
 
 
 def candidates_in_thread(t: dict, known: set) -> list:

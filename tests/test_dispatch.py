@@ -783,7 +783,7 @@ def t_printing_an_account_order_reports_its_payment_terms_too():
     no due date and nobody was told."""
     def go():
         ensure_auth()
-        reset_prod()
+        reset_prod(); reset_dispatch()    # a fulfilled record left by another test would make this a reprint
         saved_w, saved_tags = copilot._payment_terms_writer, ORDER["tags"]
         ORDER["tags"] = "Unprocessed, purchase order unpaid"
         try:
@@ -3284,13 +3284,14 @@ def t_an_order_already_fulfilled_in_shopify_stops_being_retried_forever():
     # for ever and showed a dispatched order as unfulfilled.
     reset_dispatch(); reset_prod()
     copilot._record_dispatch(12345, {"tracking_number": "T1", "fulfilled": False,
-                                     "carrier_name": "UPS", "notify": False,
+                                     "carrier_name": "UPS", "notify": True,
                                      "dispatched_at": "2026-08-13T09:00:00+00:00"})
     mark_made(12345, True)
     async def already(oid, **kw):
         return {"ok": False, "reason": "nothing_to_fulfill", "detail": "no open fulfillment orders"}
     savedw = copilot._fulfillment_writer; copilot._fulfillment_writer = already
     saveds = copilot._order_status; copilot._order_status = lambda o: "fulfilled"
+    TAG_WRITES.clear()
     try:
         res = run(copilot._fulfill_if_ready({}, 12345))
         eq(res["fulfilled"], True, "treated as done: " + json.dumps(res)[:140])
@@ -3298,6 +3299,29 @@ def t_an_order_already_fulfilled_in_shopify_stops_being_retried_forever():
     finally:
         copilot._fulfillment_writer = savedw
         copilot._order_status = saveds
+    # B11 in the 2026-09-19 bug audit: nothing was created here, so nobody was
+    # emailed from here, and the order still has to leave To ship. Straight
+    # through the gate this time, with the stamps set by hand, so the made
+    # route's own fulfilment pass does not get there first.
+    reset_dispatch(); reset_prod()
+    copilot._record_dispatch(12345, {"tracking_number": "T1", "fulfilled": False, "carrier_name": "UPS",
+                                     "notify": True, "dispatched_at": "2026-08-13T09:00:00+00:00"})
+    copilot._mark_made(12345, True)
+    copilot._fulfillment_writer = already
+    copilot._order_status = lambda o: "fulfilled"
+    TAG_WRITES.clear()
+    try:
+        res = run(copilot._fulfill_if_ready({}, 12345))
+        eq(res["reason"], "already_fulfilled", json.dumps(res)[:200])
+        eq(res["notified"], False, "no tracking email went from here")
+        eq(copilot._load_dispatch()["12345"]["notified"], False, "and the record says so")
+        moved = [t for o, t in TAG_WRITES if o == 12345]
+        ok(moved and "Complete" in moved[-1] and "PC" not in moved[-1],
+           "filed as complete although Shopify reads it as fulfilled: " + str(TAG_WRITES))
+    finally:
+        copilot._fulfillment_writer = savedw
+        copilot._order_status = saveds
+        reset_dispatch(); reset_prod()
 
 @test
 def t_a_corrupt_merchant_store_is_preserved_not_overwritten():
@@ -3315,6 +3339,10 @@ def t_a_corrupt_merchant_store_is_preserved_not_overwritten():
         kept = open(path, encoding="utf-8").read()
         ok("not json" in kept, path_attr + " was preserved for repair, not overwritten")
         copilot._poisoned_stores.discard(path)
+        # The corrupt file used to be left behind, and the loaders read it as
+        # empty and overwrote it for the next test; now they pause the writer
+        # instead, so the wreck has to be cleared away here.
+        os.remove(path)
 
 @test
 def t_an_unreadable_booking_reply_warns_about_a_possible_charge():
@@ -19161,6 +19189,498 @@ def t_a_refunded_line_is_not_made_weighed_or_declared():
     eq([c["quantity"] for c in run_async(copilot._customs_items({}, o))], [1, 3])
     eq(copilot._line_qty({"quantity": 2}), 2)
     eq(copilot._line_qty({}), 1, "a line with no quantity at all counts as one, as before")
+
+
+@test
+def t_a_corrupt_note_or_skill_file_pauses_its_writer_by_itself():
+    """B8. The four hand-rolled loaders returned an empty default on any
+    error and never marked the path poisoned, so _store_writable said yes and
+    the first save after a corruption replaced the merchant's notes, skills,
+    profile or knowledge with the default plus the new item."""
+    for path_attr, loader, writer, payload in (
+            ("MEMORY_PATH", copilot._load_memory, copilot._write_memory, [{"text": "x"}]),
+            ("SKILLS_PATH", copilot._load_skills, copilot._write_skills, [{"title": "x", "body": "y"}])):
+        path = getattr(copilot, path_attr)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{ this is not json")
+        copilot._poisoned_stores.discard(path)
+        eq(loader(), [], "an unreadable file reads as empty")
+        ok(path in copilot._poisoned_stores, path_attr + " is paused by its own loader")
+        writer(payload)
+        ok("not json" in open(path, encoding="utf-8").read(), "and preserved for repair, not overwritten")
+        copilot._poisoned_stores.discard(path)
+        os.remove(path)
+    for path_attr, loader in (("PROFILE_PATH", copilot._load_profile),
+                              ("KNOWLEDGE_PATH", copilot._load_knowledge)):
+        path = getattr(copilot, path_attr)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{ nope")
+        copilot._poisoned_stores.discard(path)
+        eq(loader(), {})
+        ok(path in copilot._poisoned_stores, path_attr + " is paused by its own loader")
+        copilot._poisoned_stores.discard(path)
+        os.remove(path)
+
+
+@test
+def t_a_crown_dependency_postcode_is_not_read_as_great_britain():
+    """B12. JE, GY and IM postcodes have the GB shape, and a paste with no
+    country line was read as GB, confidently, so a Jersey parcel went
+    domestic with no customs declaration."""
+    for text, country in (("Jane Doe\n5 Rue de Paris\nSt Helier\nJersey\nJE2 3AB", "JE"),
+                          ("A Person\n1 High St\nSt Peter Port\nGY1 1AA", "GG"),
+                          ("Bob\nUnit 3\nDouglas\nIM1 1AA", "IM")):
+        r = copilot._parse_address(text)
+        eq(r["address"]["country"], country, text)
+        eq(r["confident"], False, "an island address gets a look: customs applies")
+    r = copilot._parse_address("Some Person, 1200 Kingston Road, Manchester, M1 2AB")
+    eq(r["address"]["country"], "GB")
+    eq(r["confident"], True, "and the common paste still lands without a round trip")
+
+
+@test
+def t_declared_value_and_customs_prices_are_net_of_discounts():
+    """B13. Shopify's line price is before discounts; the discount sits in
+    discount_allocations. The declared value, the insurance basis and the
+    customs unit prices all read the list price, so a trade customer paid
+    duty at the border on money they never spent."""
+    o = dict(ORDER, line_items=[
+        {"title": "Custom Gobo", "quantity": 2, "price": "100.00", "grams": 75, "product_id": 1,
+         "discount_allocations": [{"amount": "40.00"}]},
+        {"title": "Custom Gobo", "quantity": 1, "price": "50.00", "product_id": 1}])
+    eq(copilot._order_goods_value(o), 210.0, "list 250 less the 40 taken off")
+    items = run_async(copilot._customs_items({}, o))
+    eq([i["price"] for i in items], ["80.00", "50.00"], "the unit price the customer paid")
+    eq([i["unit_value"] for i in items], ["80.00", "50.00"], "is what a gobo is declared at")
+    o["line_items"][0]["current_quantity"] = 1       # one of the two refunded since
+    eq(copilot._order_goods_value(o), 130.0, "the discount is per unit ordered, times what is left")
+    # The per-product memory is for gobos whose base price is zero (priced
+    # through options), where the operator typed the value. A gobo with a real
+    # sale price is declared at THIS customer's price, never at a value
+    # remembered from another order.
+    key = copilot._customs_key(o["line_items"][1], "Custom Gobo")
+    saved = copilot._load_customs_memory
+    copilot._load_customs_memory = lambda: {key: {"unit_value": "37.50", "hs": "", "origin": ""}}
+    try:
+        items = run_async(copilot._customs_items({}, o))
+        eq(items[1]["unit_value"], "50.00", "the priced gobo ignores the memory")
+        o["line_items"][1]["price"] = "0.00"
+        items = run_async(copilot._customs_items({}, o))
+        eq(items[1]["unit_value"], "37.50", "the option-priced gobo takes what was typed last time")
+    finally:
+        copilot._load_customs_memory = saved
+
+
+@test
+def t_the_margin_report_reaches_an_order_dispatched_weeks_after_it_was_placed():
+    """B14. The report picked dispatch records inside the window but only
+    fetched orders CREATED within it plus two weeks, so a purchase-order job
+    that sat three weeks in proofing was reported as a Shopify load failure
+    and dropped from the totals."""
+    from datetime import datetime as _dt, timezone as _tz
+    reset_dispatch(); reset_prod()
+    old = {"id": 777, "name": "#777", "currency": "GBP", "created_at": "2026-05-01T10:00:00Z",
+           "taxes_included": False, "total_price": "100.00",
+           "line_items": [{"id": 1, "title": "Gobo", "quantity": 1, "price": "100.00", "variant_id": 111}],
+           "shipping_lines": []}
+    copilot._record_dispatch(777, {"tracking_number": "T7", "carrier_name": "UPS", "order_name": "#777",
+                                   "amount_ex_vat": 8.0, "amount": 9.6,
+                                   "dispatched_at": _dt.now(_tz.utc).isoformat()})
+    async def tools(registry, name, args):
+        if name == "shopify_list_orders":
+            return {"orders": []}                    # placed long before the snapshot's window
+        if name == "shopify_get_order" and int(args.get("order_id") or 0) == 777:
+            return dict(old)
+        if name == "shopify_get_variant":
+            return {"id": 111, "inventory_item_id": 9111}
+        if name == "shopify_get_inventory_items":
+            return {"inventory_items": [{"id": 9111, "cost": "30.00"}]}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    copilot.COST_CACHE_PATH = SCRATCH + "/cost_cache.json"
+    try:
+        os.remove(copilot.COST_CACHE_PATH)
+    except FileNotFoundError:
+        pass
+    try:
+        res = run_async(copilot.run_margin_report({}, days=30))
+        row = next(r for r in res["rows"] if str(r.get("order_id")) == "777")
+        ok("incomplete" not in row, "fetched on its own, not reported as a load failure: " + json.dumps(row)[:200])
+        eq(row["revenue"], 100.0)
+        eq(row["goods_cost"], 30.0)
+    finally:
+        copilot._tool_json = saved
+        reset_dispatch()
+
+
+@test
+def t_reprinting_a_made_orders_label_is_not_a_release():
+    """B15. The printed op moved every id it was sent Unprocessed -> IP and
+    re-ran the Net-30 attach, and the page stamps every print, so a damaged
+    label reprinted from To ship put a made order back into To make beside
+    its PC tag."""
+    reset_dispatch(); reset_prod()
+    mark_made(12345, True)
+    TAG_WRITES.clear()
+    r = post("/api/production-state", {"op": "printed", "ids": [12345]})
+    eq(r.status_code, 200, r.text)
+    eq([w for w in TAG_WRITES if w[0] == 12345], [], "no IP tag goes back on a made order")
+    reset_prod()
+    async def pc(registry, name, args):
+        if name == "shopify_get_order":
+            return dict(ORDER, tags="PC, purchase order unpaid")
+        return await fake_tool_json(registry, name, args)
+    terms_calls = []
+    async def terms(order_id):
+        terms_calls.append(int(order_id))
+        return {"ok": True, "already": True, "name": "Net 30"}
+    saved = (copilot._tool_json, copilot._payment_terms_writer)
+    copilot._tool_json, copilot._payment_terms_writer = pc, terms
+    try:
+        r = post("/api/production-state", {"op": "printed", "ids": [12345]})
+        eq(r.status_code, 200, r.text)
+        eq([w for w in TAG_WRITES if w[0] == 12345], [],
+           "nor on one Shopify shows as made with no stamp here")
+        eq(terms_calls, [], "and the Net-30 attach does not run again for it either")
+        async def fresh(registry, name, args):
+            if name == "shopify_get_order":
+                return dict(ORDER, tags="Unprocessed, purchase order unpaid")
+            return await fake_tool_json(registry, name, args)
+        copilot._tool_json = fresh
+        TAG_WRITES.clear()
+        r = post("/api/production-state", {"op": "printed", "ids": [12345]})
+        moved = [t for o, t in TAG_WRITES if o == 12345]
+        ok(moved and "IP" in moved[-1] and "Unprocessed" not in moved[-1],
+           "an order that is neither is released as before: " + str(TAG_WRITES))
+        eq(terms_calls, [12345], "and a real release starts the account order's clock")
+    finally:
+        copilot._tool_json, copilot._payment_terms_writer = saved
+        reset_prod()
+
+
+@test
+def t_reply_all_knows_who_else_was_on_the_message():
+    """B16. The sync stored no To or Cc, and reply all read them off the
+    stored message, so it never offered anyone and a customer's colleagues
+    on Cc were quietly dropped from every reply."""
+    payload = {"id": "t1", "historyId": "9", "messages": [
+        {"id": "m1", "internalDate": "1758000000000", "labelIds": ["INBOX", "UNREAD"], "snippet": "hi",
+         "payload": {"headers": [{"name": "From", "value": "Jo <jo@c.test>"},
+                                 {"name": "To", "value": MBOX + ", pat@c.test"},
+                                 {"name": "Cc", "value": "Sam <sam@c.test>"},
+                                 {"name": "Subject", "value": "Quote"}],
+                     "body": {"size": 2, "data": "aGk"}, "mimeType": "text/plain"}}]}
+    async def fake_call(method, path, *, params=None, body=None, acct=None):
+        return payload
+    saved = _gm._call
+    _gm._call = fake_call
+    try:
+        full = run_async(_gm.get_thread("t1"))
+    finally:
+        _gm._call = saved
+    m = full["messages"][0]
+    eq((m["to"], m["cc"]), (MBOX + ", pat@c.test", "Sam <sam@c.test>"), "stored with the message")
+    store = {"threads": {}}
+    copilot._mail_apply_thread(store, full, MBOX)
+    eq(copilot._mail_reply_all_cc(store["threads"]["t1"], MBOX), "pat@c.test, sam@c.test",
+       "everyone on it except us and the sender")
+    # The stored To header now reaches the sender fallback for a thread every
+    # message of which is ours: it is parsed, not split on the comma, and a
+    # storefront notification is judged on its own From, not on the To.
+    ours = {"id": "t2", "historyId": "9", "subject": "Quote for Jo",
+            "messages": [{"id": "m2", "from_name": "Sales", "from_email": MBOX,
+                          "to": "Projected Image <info@test-store.co.uk>, Jo <jo@c.test>",
+                          "cc": "", "reply_to": "", "files": [], "at": "2026-08-19T01:00:00+00:00",
+                          "labels": [], "snippet": "hi"}]}
+    copilot._mail_apply_thread(store, ours, MBOX)
+    t2 = store["threads"]["t2"]
+    eq((t2["from_name"], t2["from_email"]), ("Projected Image", "info@test-store.co.uk"),
+       "the first address on the To line, as an address")
+    notice = dict(ours, id="t3", subject="New customer message",
+                  messages=[dict(ours["messages"][0], id="m3")])
+    copilot._mail_apply_thread(store, notice, MBOX)
+    eq(store["threads"]["t3"].get("enquiry"), "new",
+       "a storefront notification sent as the store is still an enquiry")
+
+
+@test
+def t_a_conversation_the_shop_starts_is_not_triaged_as_an_arrival():
+    """B17. A new message was filed through the arrival path before
+    started_to existed, so its sender read as our own mailbox: a rule on our
+    domain filed it as internal mail and archived it, and a subject like
+    "Contact form follow-up" flagged our own words as a website enquiry."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        store = copilot._load_mail()
+        store["rules"].append({"id": "f1", "name": "Internal mail", "enabled": True, "mode": "all",
+                               "conditions": [{"field": "domain", "op": "is", "value": "test-store.co.uk"}],
+                               "assign": "", "pool": [], "done": True, "folder": "Internal", "archive": True,
+                               "hits": 0, "last_hit_at": "", "_next": 0})
+        copilot._write_mail(store)
+        async def send_new(thread_id, to_addr, subject, body_text, **kw):
+            return {"id": "m-new", "thread_id": "tn1"}
+        async def no_thread(tid, acct=None):
+            raise _gm.GmailError("temporarily unavailable")
+        saved = (_gm.send_message, _gm.get_thread)
+        _gm.send_message, _gm.get_thread = send_new, no_thread
+        try:
+            r = post("/api/mail/send", {"to": "jo@customer.com", "subject": "Contact form follow-up",
+                                        "text": "Thanks for getting in touch."})
+            eq(r.status_code, 200, r.text)
+            t = copilot._load_mail()["threads"]["tn1"]
+            eq(t.get("rule"), None, "no rule ran on our own message")
+            eq((t.get("folder"), t.get("folder_archive")), (None, None))
+            eq(t.get("enquiry"), None, "and our own words are not a website enquiry")
+            eq(copilot._load_mail()["rules"][0]["hits"], 0)
+            eq((t["state"], t.get("started_to")), ("waiting", "jo@customer.com"))
+        finally:
+            _gm.send_message, _gm.get_thread = saved
+    with_mail(go)
+
+
+@test
+def t_a_folder_with_an_upload_in_flight_is_not_deleted_under_it():
+    """B18. Folder delete counted only ACTIVE files, so a folder holding a
+    pending upload could go; the finished file then sat in a folder that did
+    not exist, counted, invisible and unreachable on the drive."""
+    def go(fake):
+        folder = post("/api/files/folder", {"op": "add", "name": "Temp"}).json()["id"]
+        up = post("/api/files/upload-url", {"name": "big.pdf", "size": 5, "folder_id": folder}).json()
+        r = post("/api/files/folder", {"op": "delete", "id": folder})
+        eq(r.status_code, 400, "an upload in flight is an occupant: " + r.text)
+        ok("still in progress" in r.json()["error"], r.text)
+        # An upload abandoned hours ago is not: the folder shows empty, and is.
+        d = copilot._load_files()
+        d["files"][up["id"]]["created_at"] = "2026-09-01T00:00:00+00:00"
+        copilot._write_files(d)
+        r = post("/api/files/folder", {"op": "delete", "id": folder})
+        eq(r.status_code, 200, "an abandoned upload does not hold a folder hostage: " + r.text)
+        # And the finished file of an upload whose folder went lands at the
+        # top level, not nowhere.
+        key = up["url"].split("?")[0].replace("https://fake-r2.test/", "")
+        fake.objects[key] = 5
+        r2 = post("/api/files/complete", {"id": up["id"]})
+        eq(r2.status_code, 200, r2.text)
+        eq(r2.json()["store"]["files"][up["id"]]["folder_id"], "", "filed at the top level")
+    with_files(go)
+
+
+@test
+def t_a_bulk_move_keeps_one_name_per_folder():
+    """B19. The multi-select move skipped the same-name check the single move
+    makes, so two active files shared a name in one folder and the drive,
+    which resolves by name, could only ever reach the older one."""
+    def go(fake):
+        art = post("/api/files/folder", {"op": "add", "name": "Artwork"}).json()["id"]
+        inbox = post("/api/files/folder", {"op": "add", "name": "Inbox"}).json()["id"]
+        made = {}
+        for name, fol in (("proof.pdf", art), ("proof.pdf", inbox), ("other.pdf", inbox)):
+            up = post("/api/files/upload-url", {"name": name, "size": 10, "folder_id": fol}).json()
+            fake.objects[up["url"].split("?")[0].replace("https://fake-r2.test/", "")] = 10
+            post("/api/files/complete", {"id": up["id"]})
+            made[(name, fol)] = up["id"]
+        r = post("/api/files/file", {"op": "move", "ids": [made[("proof.pdf", inbox)]], "folder_id": art})
+        eq(r.status_code, 409, "the one file asked for has a namesake there: " + r.text)
+        r2 = post("/api/files/file", {"op": "move", "ids": [made[("proof.pdf", inbox)], made[("other.pdf", inbox)]],
+                                      "folder_id": art})
+        eq(r2.status_code, 200, r2.text)
+        eq(r2.json()["skipped"], ["proof.pdf"], "the namesake stays, the other moves")
+        files = r2.json()["store"]["files"]
+        eq(files[made[("other.pdf", inbox)]]["folder_id"], art)
+        eq(files[made[("proof.pdf", inbox)]]["folder_id"], inbox)
+    with_files(go)
+
+
+@test
+def t_a_finder_rename_keeps_the_sidecar_a_sidecar():
+    """B20. The drive's MOVE cleaned the destination name like an upload from
+    the app, stripping the leading dot: Finder's rename of ._proof.pdf became
+    a visible "_proof.pdf" that no longer resolved as the sidecar, so the next
+    save uploaded a fresh one and the stray sat in the listing."""
+    def go(fake):
+        ensure_auth()
+        import base64 as b64
+        owen, _sess, pw = ready_user("Owen", "owen")
+        auth = {"Authorization": "Basic " + b64.b64encode(f"owen:{pw}".encode()).decode()}
+        copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
+        d = copilot._load_files()
+        now = "2026-09-01T00:00:00+00:00"
+        d["folders"]["d1"] = {"name": "Artwork", "parent_id": "", "created_at": now}
+        d["files"]["f1"] = {"name": "proof.pdf", "folder_id": "d1", "size": 100, "type": "application/pdf",
+                            "r2_key": "f1/proof.pdf", "status": "active", "by": owen, "created_at": now}
+        d["files"]["f2"] = {"name": "._proof.pdf", "folder_id": "d1", "size": 4, "type": "application/octet-stream",
+                            "r2_key": "f2/._proof.pdf", "status": "active", "by": owen, "created_at": now,
+                            "hidden": True}
+        d["seq"] = 2
+        copilot._write_files(d)
+        def dav(method, path, **kw):
+            copilot._rl_hits.clear(); copilot._rl_global.clear()
+            return client.request(method, "/dav" + path, headers={**auth, **kw.pop("headers", {})}, **kw)
+        eq(dav("MOVE", "/Artwork/proof.pdf", headers={"Destination": "http://testserver/dav/Artwork/final.pdf"}).status_code, 201)
+        eq(dav("MOVE", "/Artwork/._proof.pdf", headers={"Destination": "http://testserver/dav/Artwork/._final.pdf"}).status_code, 201)
+        d = copilot._load_files()
+        eq((d["files"]["f2"]["name"], d["files"]["f2"].get("hidden")), ("._final.pdf", True),
+           "the sidecar keeps its dots and stays hidden")
+        eq(copilot._dav_resolve(d, "Artwork/._final.pdf"), ("file", "f2"), "and Finder finds it again")
+        eq((d["files"]["f1"]["name"], d["files"]["f1"].get("hidden")), ("final.pdf", False))
+        eq([v["name"] for v in copilot._files_shape(d)["files"].values()], ["final.pdf"],
+           "the app lists the real file alone")
+    with_files(go)
+
+
+@test
+def t_the_overview_counts_only_sales_that_happened():
+    """B25. The KPIs summed every order the sweep returned: a cancelled
+    £2,000 order sat in Revenue (7d) and Orders (7d), tripped the change
+    alert, and fell out a week later as a drop; a test order and a voided
+    one counted too, and a refund never came off."""
+    eq(copilot._order_counts({"total_price": "10"}), True)
+    for bad in ({"cancelled_at": "2026-09-01T00:00:00Z"}, {"test": True},
+                {"financial_status": "voided"}, {"financial_status": "refunded"}):
+        eq(copilot._order_counts(bad), False, str(bad))
+    eq(copilot._order_revenue({"total_price": "100.00", "current_total_price": "60.00"}), 60.0,
+       "what the order is worth after a partial refund")
+    eq(copilot._order_revenue({"total_price": "100.00"}), 100.0)
+    orders = [{"id": 1, "total_price": "100.00", "financial_status": "paid"},
+              {"id": 2, "total_price": "2000.00", "cancelled_at": "2026-09-18T00:00:00Z"},
+              {"id": 3, "total_price": "50.00", "test": True},
+              {"id": 4, "total_price": "80.00", "financial_status": "voided"}]
+    async def tools(registry, name, args):
+        if name == "shopify_get_shop":
+            return dict(SHOP)
+        if name == "shopify_list_orders":
+            return {"orders": [] if args.get("created_at_max") else orders}
+        if name == "shopify_list_customers":
+            return {"customers": []}
+        if name == "shopify_count_products":
+            return {"count": 0}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        metrics, _extra = run_async(copilot._compute_metrics({}, track_inventory=False))
+    finally:
+        copilot._tool_json = saved
+    by = {m["label"]: m["value"] for m in metrics}
+    eq(by.get("Revenue (7d)"), copilot._money(100.0, "GBP"), by)
+    eq(by.get("Orders (7d)"), "1", by)
+    # The Products page's monthly buckets follow the same rule.
+    month = "2026-09"
+    rows = [{"created_at": month + "-10T10:00:00Z", "line_items": [{"product_id": 5, "quantity": 2, "price": "10.00"}]},
+            {"created_at": month + "-11T10:00:00Z", "cancelled_at": month + "-11T11:00:00Z",
+             "line_items": [{"product_id": 5, "quantity": 9, "price": "10.00"}]}]
+    eq(copilot._orders_product_monthly(rows, [month])[5]["units"][month], 2, "the cancelled order's units are not sold")
+
+
+@test
+def t_the_scan_refuses_what_answered_from_the_inside():
+    """B26. The guard resolved the name once and let the client resolve it
+    again to connect; a name whose records alternate answered the second
+    lookup with a private address, and the inside answered. The address
+    actually connected to is now checked before a byte of the body is read."""
+    eq(copilot._ip_is_public("8.8.8.8"), True)
+    for bad in ("10.0.0.5", "127.0.0.1", "169.254.169.254", "::1", "fe80::1%en0", "0.0.0.0"):
+        eq(copilot._ip_is_public(bad), False, bad)
+    import http.server, threading
+    class Inside(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = b"<html><title>inside</title></html>"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        def log_message(self, *a):
+            pass
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Inside)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    saved = copilot._host_is_public
+    copilot._host_is_public = lambda h: True      # the name check passed, as a rebinding name would
+    try:
+        try:
+            run_async(copilot._fetch_external(f"http://127.0.0.1:{srv.server_port}/"))
+            ok(False, "a fetch that connected to a private address must be refused")
+        except RuntimeError as e:
+            ok("not allowed" in str(e), str(e))
+    finally:
+        copilot._host_is_public = saved
+        srv.shutdown(); srv.server_close()
+
+
+@test
+def t_a_purged_deals_tasks_stay_gone_through_the_next_import():
+    """B27. The bin emptying tombstoned the deal but not its activities, so
+    the next Pipedrive import refused the deal and recreated every task
+    attached to nothing: overdue in the list, counted on the badge."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        async def full(progress=None):
+            return dict(PD_EXPORT)
+        saved = (pipedrive.export, pipedrive.API_TOKEN)
+        pipedrive.export, pipedrive.API_TOKEN = full, "t"
+        try:
+            eq(post("/api/crm/import", {"go": True}).status_code, 200)
+            d = copilot._load_crm()
+            gid = next(k for k, v in d["deals"].items() if v.get("pd_id") == "31")
+            d["deals"][gid]["deleted"], d["deals"][gid]["deleted_at"] = True, "2026-01-01T00:00:00+00:00"
+            copilot._crm_purge(d)
+            copilot._write_crm(d)
+            ok(gid not in copilot._load_crm()["deals"], "the bin emptied")
+            ok("41" in (copilot._load_crm().get("pd_deleted_activities") or []), "its task has a tombstone too")
+            eq(post("/api/crm/import", {"go": True}).status_code, 200)
+            d2 = copilot._load_crm()
+            eq([a for a in d2["activities"].values() if a.get("pd_id") == "41"], [],
+               "and it does not come back attached to nothing")
+        finally:
+            pipedrive.export, pipedrive.API_TOKEN = saved
+    with_accounts(go)
+
+
+@test
+def t_a_payout_still_inside_shopify_is_not_missing_from_the_bank():
+    """B29. The payouts feed carries tomorrow's scheduled payout and the one
+    in transit; each was raised as missing from the bank at high every night
+    and went stale when the deposit landed, so real gaps hid in the noise."""
+    from datetime import date as _date, timedelta as _td
+    tomorrow = (_date.today() + _td(days=1)).isoformat()
+    yesterday = (_date.today() - _td(days=1)).isoformat()
+    cache = {"shopify": {"payouts": {
+                "p1": {"id": "p1", "date": tomorrow, "pence": 123456, "currency": "GBP", "status": "scheduled"},
+                "p2": {"id": "p2", "date": yesterday, "pence": 5000, "currency": "GBP", "status": "in_transit"},
+                "p3": {"id": "p3", "date": yesterday, "pence": 7000, "currency": "GBP", "status": "paid"}}},
+             "xero": {"bank_transactions": {}}}
+    out = _rc.check_payouts_vs_bank(cache)
+    eq([(e["kind"], e["amount"]) for e in out], [("payout_missing_from_bank", 7000)],
+       "only money that has left Shopify can be missing from the bank")
+
+
+@test
+def t_a_segmented_invoice_number_is_one_number():
+    """B31. INV-2026-0142 was read as INV-2026 and 0142, neither of which is
+    in Xero, so a bill that WAS there was reported missing at critical."""
+    found = _rc._INVNUM_RE.findall("Invoice INV-2026-0142 dated 12/09/2026, total 1,500.00, ref SI/24/0088")
+    ok("INV-2026-0142" in found and "SI/24/0088" in found, str(found))
+    ok("INV-2026" not in found, "the year is not a number of its own: " + str(found))
+    doc = {"doc_type": "supplier_invoice", "invoice_numbers": ["INV-2026-0142"], "total_pence": 150000,
+           "amounts": [150000], "currency": "GBP", "invoice_lines": [], "counterparty": "",
+           "extracted_by": "text", "verified": True, "source_key": "m1:a1", "filename": "inv.pdf",
+           "from": "acme", "date": "2026-09-12"}
+    books = {"xero": {"invoices": {"b": _inv("INV-2026-0142", 150000, typ="ACCPAY", contact="Acme Glass")},
+                      "credit_notes": {}, "payments": {}}}
+    eq(_rc.check_gmail_docs(books, {"m1:a1": doc}), [], "the bill is in Xero under the same number")
+    eq(_rc.check_gmail_docs(books, {"m1:a1": dict(doc, invoice_numbers=["2026-0142"])}), [],
+       "and under its bare digits")
+    eq([e["kind"] for e in _rc.check_gmail_docs(books, {"m1:a1": dict(doc, invoice_numbers=["INV-2026-0999"])})],
+       ["gmail_doc_missing_from_xero"], "a number that really is not there still is")
+    # Only a SEGMENTED number is matched by its digits: a bare "1500" in the
+    # document (an amount, half a sort code) must not satisfy INV-1500 and
+    # hide the bill that is missing beside it.
+    books2 = {"xero": {"invoices": {"b": _inv("INV-1500", 150000, typ="ACCPAY", contact="Acme Glass")},
+                       "credit_notes": {}, "payments": {}}}
+    eq([e["kind"] for e in _rc.check_gmail_docs(books2, {"m1:a1": dict(doc, invoice_numbers=["INV-2026-0999", "1500"])})],
+       ["gmail_doc_missing_from_xero"], "a bare digit run explains nothing")
+    ok("in 24" not in _rc._INVNUM_RE.findall("dispatched in 24 hours, ref IN-00312"),
+       "prose is not a number")
 
 
 @test

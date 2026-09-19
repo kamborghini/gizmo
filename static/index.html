@@ -15069,7 +15069,12 @@ Projected Image UK"></textarea>
                     // invisible wrong value is worse than a visible editable one.
                     const oIn = document.createElement('input'); oIn.type = 'text'; oIn.spellcheck = false; oIn.setAttribute('aria-label', 'Country of origin'); oIn.className = 'disp-num disp-boxdim'; oIn.placeholder = 'Origin'; oIn.maxLength = 2; oIn.style.width = 'var(--field-w-xs)';
                     oIn.title = 'Country of origin (2 letters), where the item was MADE, for the commercial invoice';
-                    if (pre) { dIn.value = pre.description || ''; qIn.value = pre.quantity || 1; pIn.value = pre.unit_price || ''; hIn.value = pre.hs || ''; oIn.value = pre.origin || 'GB'; }
+                    if (pre) {
+                        dIn.value = pre.description || ''; qIn.value = pre.quantity || 1;
+                        /* 0 is a value, and the zero warning's cue; '' is a gap the booking stops on. */
+                        pIn.value = (pre.unit_price === 0 || pre.unit_price) ? pre.unit_price : '';
+                        hIn.value = pre.hs || ''; oIn.value = pre.origin || 'GB';
+                    }
                     else { oIn.value = 'GB'; }
                     const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove line';
                     const line = { dIn, qIn, pIn, hIn, oIn, key: (pre && pre.key) || '' };
@@ -15095,7 +15100,8 @@ Projected Image UK"></textarea>
                                optical filter. Still editable on the card. */
                             description: it.customs_description || it.title || 'Custom glass gobo',
                             quantity: it.quantity || 1,
-                            unit_price: parseFloat(it.unit_value || it.cost || it.price) || '',
+                            unit_price: isNaN(parseFloat(it.unit_value || it.cost || it.price)) ? ''
+                                : parseFloat(it.unit_value || it.cost || it.price),
                             hs: it.hs_code || quote.default_hs_code || '',
                             origin: it.origin || '',
                             key: it.key || ''
@@ -15116,7 +15122,10 @@ Projected Image UK"></textarea>
                     (o.items || []).forEach(it => addLine({
                         description: (it.artwork || it.title || 'Custom glass gobo'),
                         quantity: it.quantity || 1,
-                        unit_price: parseFloat(it.price) || '',
+                        /* A zero price is a value of 0, kept on the line so the
+                           zero warning can say so; it used to become an empty
+                           box, and an empty box was dropped from the declaration. */
+                        unit_price: isNaN(parseFloat(it.price)) ? '' : parseFloat(it.price),
                         hs: quote.default_hs_code || ''
                     }));
                 }
@@ -15166,6 +15175,18 @@ Projected Image UK"></textarea>
             function customsProblem() {
                 if (!quote || !quote.international) return '';
                 if (!quote.has_eori) return 'Add your EORI number in Shipping settings first.';
+                /* A line with a description but no quantity or unit value used
+                   to be dropped from the declaration in silence, and the
+                   booking went ahead with a commercial invoice one item short
+                   of the parcel. Name the line and stop. */
+                for (let i = 0; i < customsLines.length; i++) {
+                    const l = customsLines[i];
+                    const d = l.dIn.value.trim();
+                    if (!d) continue;
+                    const q = parseInt(l.qIn.value, 10), p = parseFloat(l.pIn.value);
+                    if (!(q > 0)) return 'Customs line ' + (i + 1) + ' (' + d + ') needs a quantity.';
+                    if (isNaN(p) || p < 0) return 'Customs line ' + (i + 1) + ' (' + d + ') needs a unit value. Enter 0 only if it really is worth nothing.';
+                }
                 const cst = collectCustoms();
                 if (!cst.lines.length) return 'Fill in at least one customs line: description, quantity and unit value.';
                 return '';
@@ -16102,6 +16123,20 @@ Projected Image UK"></textarea>
                          receiver_tax_id: receiverTax ? receiverTax.value.trim() : '',
                          receiver_company_number: receiverCo ? receiverCo.value.trim() : '' };
             }
+            function customsGap() {
+                /* The same rule as the order card: a described line with no
+                   quantity or unit value is named and stops the booking,
+                   rather than vanishing from the declaration in silence. */
+                if (!quote || !quote.international) return '';
+                for (let i = 0; i < customsRows.length; i++) {
+                    const r = customsRows[i], desc = r.desc.value.trim();
+                    if (!desc) continue;
+                    const qty = parseInt(r.qty.value, 10), price = parseFloat(r.price.value);
+                    if (!(qty > 0)) return 'Customs line ' + (i + 1) + ' (' + desc + ') needs a quantity.';
+                    if (isNaN(price) || price < 0) return 'Customs line ' + (i + 1) + ' (' + desc + ') needs a unit value. Enter 0 only if it really is worth nothing.';
+                }
+                return '';
+            }
 
             function renderConfirm() {
                 confirmWrap.innerHTML = '';
@@ -16112,6 +16147,8 @@ Projected Image UK"></textarea>
                 bk.onclick = async () => {
                     const boxes = collectBoxes();
                     if (!boxes) { toastError('Fill in the parcel size and weight first.'); return; }
+                    const gap = customsGap();
+                    if (gap) { toastError(gap); return; }
                     /* Disabled BEFORE the question: a double click here opened
                        two dialogs, and answering both booked two labels. */
                     bk.disabled = true;
@@ -21554,8 +21591,12 @@ Projected Image UK"></textarea>
                     } else {
                         const save = el('button', 'linkish', 'Save to Files');
                         save.onclick = async () => {
-                            const where = prompt('Save "' + f.name + '" into which folder?\n'
-                                + 'Use a slash for folders inside folders.', 'Artwork');
+                            /* Not the browser's own prompt dialog: Chrome removed
+                               it inside a cross-origin iframe, which is where this
+                               app runs, so the button did nothing and said nothing. */
+                            const where = await uiAskText('Save to Files',
+                                'Save "' + f.name + '" into which folder? Use a slash for folders inside folders.',
+                                'Folder', 'Artwork', 'Save');
                             if (where === null) return;
                             save.disabled = true; save.textContent = 'Saving\u2026';
                             try {
@@ -22043,9 +22084,15 @@ Projected Image UK"></textarea>
             const pick = async (folderId) => {
                 overlay.remove();
                 try {
-                    await filesOp('/api/files/file', ids.length === 1
+                    const r = await filesOp('/api/files/file', ids.length === 1
                         ? { op: 'move', id: ids[0], folder_id: folderId }
                         : { op: 'move', ids: ids, folder_id: folderId });
+                    /* A file the folder already had a namesake of stays put;
+                       the server says which, and silence here read as moved. */
+                    if (r && r.skipped && r.skipped.length) {
+                        addToast(r.skipped.join(', ') + (r.skipped.length === 1 ? ' was' : ' were')
+                            + ' left behind: that folder already holds a file with the same name.');
+                    }
                 } catch (e) { toastError(e.message); }
                 filesSel.clear();
                 if (after) after();
@@ -23885,6 +23932,36 @@ Projected Image UK"></textarea>
         /* Ask for the person's own password before a change that a borrowed
            session must not be able to make alone. Resolves to the password,
            or null when they cancel. */
+        /* In-page replacement for the browser's prompt dialog: a title, a line
+           of help, one text field. Resolves with the text, or null when dismissed. */
+        function uiAskText(title, message, label, initial, okText) {
+            return new Promise(resolve => {
+                const overlay = el('div', 'modal-overlay show');
+                const modal = el('div', 'modal');
+                const head = el('div', 'modal-head');
+                head.append(el('h3', null, title));
+                const finish = (v) => { overlay.remove(); resolve(v); };
+                const x = el('button', 'icon-btn'); x.innerHTML = I.x;
+                x.title = 'Close'; x.setAttribute('aria-label', 'Close');
+                x.onclick = () => finish(null);
+                head.append(x);
+                const body = el('div', 'modal-body');
+                if (message) body.append(el('p', 'field-help', message));
+                const f = el('label', 'pfield');
+                f.append(el('span', null, label || 'Value'));
+                const inp = el('input', 'psel'); inp.type = 'text'; inp.value = initial || '';
+                f.append(inp); body.append(f);
+                const foot = el('div', 'modal-foot');
+                const cancel = el('button', 'btn', 'Cancel'); cancel.onclick = () => finish(null);
+                const go = el('button', 'btn btn-primary', okText || 'Continue');
+                go.onclick = () => finish(inp.value);
+                inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); go.click(); } };
+                foot.append(cancel, go);
+                modal.append(head, body, foot); overlay.append(modal); document.body.append(overlay);
+                inp.focus(); inp.select();
+            });
+        }
+
         function uiAskPassword(title, message, okText) {
             return new Promise(resolve => {
                 const overlay = el('div', 'modal-overlay show');

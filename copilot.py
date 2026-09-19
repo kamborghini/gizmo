@@ -364,11 +364,10 @@ def _effort_for(model: str) -> str:
 
 
 def _load_profile() -> dict:
-    try:
-        with open(PROFILE_PATH, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except Exception:
-        return {}
+    # Through the one loader, so an unreadable file pauses the writer: read
+    # by hand, a corrupt profile loaded as empty and the next save replaced it.
+    d = _load_json_store(PROFILE_PATH, None, {})
+    return d if isinstance(d, dict) else {}
 
 
 def _save_profile(data: dict) -> dict:
@@ -427,11 +426,12 @@ def _profile_to_system(p: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def _load_memory() -> list[dict]:
-    try:
-        with open(MEMORY_PATH, "r", encoding="utf-8") as fh:
-            return json.load(fh).get("memories", [])
-    except Exception:
-        return []
+    # Through the one loader: read by hand, a corrupt file loaded as an empty
+    # list, _store_writable saw nothing wrong, and the next note written
+    # replaced every note the merchant had - the opposite of what the writer's
+    # own comment promises.
+    d = _load_json_store(MEMORY_PATH, "memories", [])
+    return d if isinstance(d, list) else []
 
 
 def _write_memory(memories: list[dict]) -> list[dict]:
@@ -558,11 +558,9 @@ def _delete_memory(mid: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _load_skills() -> list[dict]:
-    try:
-        with open(SKILLS_PATH, "r", encoding="utf-8") as fh:
-            return json.load(fh).get("skills", [])
-    except Exception:
-        return []
+    # Through the one loader, for the reason given on _load_memory.
+    d = _load_json_store(SKILLS_PATH, "skills", [])
+    return d if isinstance(d, list) else []
 
 
 def _write_skills(skills: list[dict]) -> list[dict]:
@@ -1807,8 +1805,8 @@ async def _impact_snapshot(registry: dict) -> dict:
     clicks). Each source degrades to absent on error, so this never raises."""
     snap: dict = {"at": datetime.now(timezone.utc).isoformat()}
     try:
-        orders = await _orders_28d(registry)
-        snap["revenue_28d"] = round(sum(float(o.get("total_price") or 0) for o in orders), 2)
+        orders = [o for o in await _orders_28d(registry) if _order_counts(o)]
+        snap["revenue_28d"] = round(sum(_order_revenue(o) for o in orders), 2)
         snap["orders_28d"] = len(orders)
     except Exception:
         pass
@@ -1906,11 +1904,9 @@ outlive the page it came from."""
 
 
 def _load_knowledge() -> dict:
-    try:
-        with open(KNOWLEDGE_PATH, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except Exception:
-        return {}
+    # Through the one loader, for the reason given on _load_memory.
+    d = _load_json_store(KNOWLEDGE_PATH, None, {})
+    return d if isinstance(d, dict) else {}
 
 
 def _save_knowledge(text: str, sources: list[str]) -> dict:
@@ -2384,10 +2380,10 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
     )
     shop = shop or {}
     currency = shop.get("currency", "")
-    o7 = o7r.get("orders", [])
-    op = opr.get("orders", [])
-    rev7 = sum(float(o.get("total_price") or 0) for o in o7)
-    revp = sum(float(o.get("total_price") or 0) for o in op)
+    o7 = [o for o in o7r.get("orders", []) if _order_counts(o)]
+    op = [o for o in opr.get("orders", []) if _order_counts(o)]
+    rev7 = sum(_order_revenue(o) for o in o7)
+    revp = sum(_order_revenue(o) for o in op)
     n7, npv = len(o7), len(op)
     aov = rev7 / n7 if n7 else 0
     unfulfilled = sum(1 for o in o7 if o.get("fulfillment_status") in (None, "partial", "unfulfilled"))
@@ -2477,7 +2473,9 @@ async def _sector_sales(registry: dict, days: int = 28) -> list:
     try:
         customers, orders = await asyncio.gather(
             _paginate_customers(registry),
-            _orders_snapshot(registry, days=days, fields="id,total_price,created_at,customer"),
+            _orders_snapshot(registry, days=days,
+                             fields="id,total_price,current_total_price,created_at,customer,"
+                                    "cancelled_at,test,financial_status"),
         )
         tags = _detect_sector_tags(customers)
         if not tags:
@@ -2490,8 +2488,10 @@ async def _sector_sales(registry: dict, days: int = 28) -> list:
         wanted = {t["tag"].lower(): t["tag"] for t in tags}
         agg = {t["tag"]: {"sector": t["tag"], "revenue": 0.0, "orders": 0} for t in tags}
         for o in orders:
+            if not _order_counts(o):
+                continue
             cid = (o.get("customer") or {}).get("id")
-            rev = float(o.get("total_price") or 0)
+            rev = _order_revenue(o)
             # Attribute each order to ONE sector (the highest-ranked matching tag), so a
             # customer tagged e.g. "Wholesale, VIP" cannot count their revenue twice and
             # the sector rows still sum to at most store revenue.
@@ -2559,9 +2559,11 @@ async def _overview_trends(registry: dict) -> dict:
         rev = {mk: 0.0 for mk in months}
         cnt = {mk: 0 for mk in months}
         for o in orders:
+            if not _order_counts(o):
+                continue
             mk = _month_key(o.get("created_at"))
             if mk in rev:
-                rev[mk] += float(o.get("total_price") or 0)
+                rev[mk] += _order_revenue(o)
                 cnt[mk] += 1
         if any(rev[mk] for mk in months):
             trends["revenue"] = [{"label": mk, "value": round(rev[mk], 2)} for mk in months]
@@ -2740,25 +2742,27 @@ _STOPWORDS = set((
 ).split())
 
 
+def _ip_is_public(addr: str) -> bool:
+    """A public, routable address: not loopback, private, link-local (which is
+    where the cloud metadata service lives), reserved, multicast or unspecified."""
+    try:
+        ip = ipaddress.ip_address(str(addr).split("%")[0])
+    except ValueError:
+        return False
+    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+                or ip.is_multicast or ip.is_unspecified)
+
+
 def _host_is_public(host: str) -> bool:
     """True only if every resolved IP for host is a public, routable address.
-    Blocks loopback, private, link-local (incl. cloud metadata 169.254.169.254),
-    reserved, multicast and unspecified ranges. Used to gate external scraping."""
+    Used to gate external scraping."""
     try:
         infos = socket.getaddrinfo(host, None)
     except Exception:
         return False
     if not infos:
         return False
-    for info in infos:
-        try:
-            ip = ipaddress.ip_address(info[4][0])
-        except ValueError:
-            return False
-        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
-                or ip.is_multicast or ip.is_unspecified):
-            return False
-    return True
+    return all(_ip_is_public(info[4][0]) for info in infos)
 
 
 async def _fetch_external(url: str) -> tuple[Optional[int], str, str]:
@@ -2773,7 +2777,18 @@ async def _fetch_external(url: str) -> tuple[Optional[int], str, str]:
             raise RuntimeError("That address is not allowed (only public websites can be scanned).")
         async with httpx.AsyncClient(follow_redirects=False, timeout=12.0,
                                      headers={"User-Agent": "Reactor-SEO/1.0"}) as c:
-            r = await c.get(url)
+            async with c.stream("GET", url) as r:
+                # The check above resolved the name once; the client resolves
+                # it again to connect, and a name whose records alternate can
+                # answer the second lookup with a private address. So the
+                # address actually connected to is checked before a byte of
+                # the body is read: whatever answered on the inside is never
+                # shown, and never reaches the model.
+                stream = r.extensions.get("network_stream")
+                peer = stream.get_extra_info("server_addr") if stream is not None else None
+                if peer and not _ip_is_public(peer[0]):
+                    raise RuntimeError("That address is not allowed (only public websites can be scanned).")
+                await r.aread()
         if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
             url = urljoin(url, r.headers["location"])
             continue
@@ -3099,13 +3114,14 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
     o28 = o28r.get("orders", [])
     from collections import Counter
     units: Counter = Counter()
+    o28 = [o for o in o28 if _order_counts(o)]
     for o in o28:
         for li in o.get("line_items", []):
             if li.get("title"):
                 units[li["title"]] += li.get("quantity") or 0
     context["commerce"] = {
         "currency": shop.get("currency"),
-        "revenue_28d": round(sum(float(o.get("total_price") or 0) for o in o28), 2),
+        "revenue_28d": round(sum(_order_revenue(o) for o in o28), 2),
         "orders_28d": len(o28),
         "top_products_28d": [{"title": t, "units": q} for t, q in units.most_common(8)],
     }
@@ -3255,6 +3271,31 @@ def _month_key(iso: Optional[str]) -> str:
     return (iso or "")[:7]            # "2025-01-15T..." -> "2025-01"
 
 
+def _order_counts(o: dict) -> bool:
+    """A sale that happened: not cancelled, not a test, not voided or fully
+    refunded. The KPIs summed every order the sweep returned, so a cancelled
+    order sat in Revenue (7d), tripped the change alert, and fell out a week
+    later as a drop."""
+    if not isinstance(o, dict) or o.get("cancelled_at") or o.get("test"):
+        return False
+    return str(o.get("financial_status") or "").lower() not in ("voided", "refunded")
+
+
+def _order_revenue(o: dict) -> float:
+    """What the order is worth now: current_total_price, which is the total
+    after refunds and edits, when Shopify sends it; the original total when
+    it does not."""
+    for k in ("current_total_price", "total_price"):
+        v = o.get(k)
+        if v in (None, ""):
+            continue
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
 def _month_axis(months: int) -> list:
     """Ascending list of the last `months` month keys, ending this month."""
     now = datetime.now(timezone.utc)
@@ -3391,7 +3432,8 @@ async def _sweep_orders(registry: dict, days: int, fields: str, key) -> tuple:
 
 
 async def _orders_snapshot(registry: dict, days: int,
-                           fields: str = "id,created_at,total_price,line_items",
+                           fields: str = "id,created_at,total_price,current_total_price,line_items,"
+                                         "cancelled_at,test,financial_status",
                            meta: Optional[dict] = None, force: bool = False) -> list:
     """Orders from the last `days`, reusing a recent sweep when there is one.
 
@@ -3468,6 +3510,8 @@ def _orders_product_monthly(orders: list, months: list) -> dict:
     mset = set(months)
     out: dict = {}
     for o in orders:
+        if not _order_counts(o):
+            continue
         mk = _month_key(o.get("created_at"))
         if mk not in mset:
             continue
@@ -4261,7 +4305,8 @@ def _tag_lock(order_id) -> "asyncio.Lock":
     return lock
 
 
-async def _sync_order_tags(registry: dict, order_id, add=(), remove=()) -> tuple:
+async def _sync_order_tags(registry: dict, order_id, add=(), remove=(), unless=(),
+                           allow_dead: bool = False, outcome: Optional[dict] = None) -> tuple:
     """Move an order along the tag workflow (Unprocessed -> IP -> PC) without
     touching any other tag. Set-based, case-insensitive: re-running an action
     can never duplicate a tag or leave conflicting statuses. Dead orders
@@ -4278,9 +4323,17 @@ async def _sync_order_tags(registry: dict, order_id, add=(), remove=()) -> tuple
             o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
             if not _ok(o) or not o.get("id"):
                 return False, "Couldn't read the order to update its tags."
-            if _order_status(o):
+            if _order_status(o) and not allow_dead:
                 return True, ""   # cancelled/refunded/fulfilled: tags stay as they are
             cur = _order_tags(o)
+            if unless:
+                # An order that already carries one of these is past the move
+                # being asked for (a reprint of a made order is not a release).
+                keep = {_norm_key(t) for t in unless}
+                if any(_norm_key(t) in keep for t in cur):
+                    if outcome is not None:
+                        outcome["kept"] = True   # told apart from a move, for the caller that cares
+                    return True, ""
             drop = {_norm_key(t) for t in add} | {_norm_key(t) for t in remove}
             new = [t for t in cur if _norm_key(t) not in drop] + list(add)
             if {_norm_key(t) for t in new} == {_norm_key(t) for t in cur}:
@@ -4477,11 +4530,12 @@ async def _release_bg(registry: dict, order_ids: list) -> None:
     then disagree about which orders were released. Never raises."""
     async def once(oid) -> bool:
         try:
-            okd, note = await _sync_order_tags(registry, oid,
-                                               add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG])
+            okd, note, released = await _release_tags(registry, oid)
             if not okd:
                 logger.warning("background release: tag refused for order %s: %s", oid, note)
                 return False
+            if not released:
+                return True       # already made or shipped: nothing to release
             # _net30_on_release records its own outcome on the order, so a
             # failure out here is not lost to the log: the queue row shows it.
             await _net30_on_release(registry, oid)
@@ -4503,14 +4557,40 @@ async def _release_bg(registry: dict, order_ids: list) -> None:
             await asyncio.sleep(0.6)
 
 
-async def _dispatch_move_tags(registry: dict, order_id) -> tuple:
+async def _dispatch_move_tags(registry: dict, order_id, allow_dead: bool = False) -> tuple:
     """Move an order onto the finished tag (Complete): add it, drop the workflow
     tags (Unprocessed / IP / PC). Called while the order is still unfulfilled so
-    the write is not skipped as a 'dead' order. Returns (ok, note)."""
+    the write is not skipped as a 'dead' order; allow_dead is for the order
+    that turned out to be fulfilled already, which still has to leave To ship.
+    Returns (ok, note)."""
     return await _sync_order_tags(
         registry, order_id,
         add=(DISPATCHED_TAG,),
-        remove=(UNPROCESSED_TAG, PRODUCTION_TAG, MADE_TAG))
+        remove=(UNPROCESSED_TAG, PRODUCTION_TAG, MADE_TAG), allow_dead=allow_dead)
+
+
+async def _release_tags(registry: dict, order_id) -> tuple:
+    """Unprocessed -> IP for an order going to the bench: (ok, note, released).
+
+    An order already made or shipped is left where it is, with released
+    False: a reprint of a damaged label from To ship is not a release, and it
+    used to put the made order back into To make beside its PC tag and run
+    the Net-30 attach a second time. The stamps here are the first check; an
+    order that carries PC or Complete in Shopify with no stamp is left alone
+    by the sync itself."""
+    oid = str(order_id)
+    made = bool((_load_prod_state().get(oid) or {}).get("made_at"))
+    # Fulfilled, not merely booked: a label is booked before the gobo is
+    # made, and an order with a label waiting in To make is still released.
+    shipped = bool((_load_dispatch().get(oid) or {}).get("fulfilled"))
+    if made or shipped:
+        return True, "", False
+    out: dict = {}
+    okd, note = await _sync_order_tags(registry, order_id, add=[PRODUCTION_TAG],
+                                       remove=[UNPROCESSED_TAG],
+                                       unless=(MADE_TAG, DISPATCHED_TAG, *LEGACY_DISPATCHED_TAGS),
+                                       outcome=out)
+    return okd, note, bool(okd and not out.get("kept"))
 
 
 async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = None,
@@ -4596,8 +4676,16 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
         current = await _tool_json(registry, "shopify_get_order", {"order_id": oid})
         if _ok(current) and _order_status(current) == "fulfilled":
             logger.info("order %s was already fulfilled in Shopify; recording it", oid)
-            fulfillment = {"ok": True, "reason": "already_fulfilled",
-                           "fulfillment_id": None, "detail": "already fulfilled in Shopify"}
+            fulfillment = {"ok": True, "reason": "already_fulfilled", "fulfillment_id": None,
+                           "detail": "already fulfilled in Shopify; no fulfilment or email went from here"}
+            # The tag move above skipped it as a dead order, so it sat in To
+            # ship under its PC tag for good. It is complete: file it so.
+            tag_ok, tag_note = await _dispatch_move_tags(registry, oid, allow_dead=True)
+            if tag_ok:
+                tag_note = ""
+    # Nothing was created here for an order Shopify already had fulfilled, so
+    # no tracking email went from here either, whatever the record was asked.
+    sent_here = bool(fulfillment.get("ok")) and fulfillment.get("reason") != "already_fulfilled"
     if not fulfillment.get("ok"):
         # Put the order back where it was: it has not shipped after all.
         try:
@@ -4608,7 +4696,7 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
     if fulfillment.get("ok"):
         def _mark_fulfilled(e):
             e.update({"fulfilled": True, "fulfillment_id": fulfillment.get("fulfillment_id"),
-                      "notified": bool(do_notify),
+                      "notified": bool(do_notify and sent_here),
                       "fulfilled_at": datetime.now(timezone.utc).isoformat()})
             return e
         try:
@@ -4622,7 +4710,7 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
     return {"fulfilled": bool(fulfillment.get("ok")),
             "reason": fulfillment.get("reason") or ("ok" if fulfillment.get("ok") else "error"),
             "detail": fulfillment.get("detail") or "",
-            "notified": bool(do_notify and fulfillment.get("ok")),
+            "notified": bool(do_notify and sent_here),
             "tag_note": tag_note}
 
 
@@ -5045,6 +5133,9 @@ _ISO2 = {
 # GB postcodes are the anchor: the format is unambiguous, so finding one tells us
 # both where the postcode is and that the country is GB unless told otherwise.
 _UK_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*([0-9][A-Z]{2})\b", re.I)
+# Postcode areas that are not Great Britain: Jersey, Guernsey (with Alderney
+# and Sark) and the Isle of Man. No mainland area shares these letters.
+_CROWN_POSTCODE_AREAS = {"JE": "JE", "GY": "GG", "IM": "IM"}
 _EIRCODE_RE = re.compile(r"\b([A-Z][0-9]{2})\s?([A-Z0-9]{4})\b", re.I)
 _US_ZIP_RE = re.compile(r"\b([0-9]{5})(?:-[0-9]{4})?\b")
 _GENERIC_PC_RE = re.compile(r"\b([0-9]{4,6})\b")
@@ -5164,9 +5255,13 @@ def _parse_address(text: str) -> dict:
             break
 
     # A GB-shaped postcode with no country named means GB. Saying so is what makes
-    # the common paste land without a round trip to Claude.
+    # the common paste land without a round trip to Claude. Unless the area is
+    # one of the Crown dependencies, which use the same shape and are outside
+    # the UK customs area: "St Helier / Jersey / JE2 3AB" read as GB, confident,
+    # and went domestic with no declaration.
     if not out["country"] and out["postcode"] and _UK_POSTCODE_RE.fullmatch(out["postcode"]):
-        out["country"] = "GB"
+        area = re.match(r"[A-Za-z]{1,2}", out["postcode"]).group(0).upper()
+        out["country"] = _CROWN_POSTCODE_AREAS.get(area, "GB")
 
     # What is left is some combination of a person, a company and street lines.
     # Tagged in place rather than bucketed, because the sender's line order is
@@ -5206,6 +5301,8 @@ def _parse_address(text: str) -> dict:
     confident = not _addr_ready(out) and not unplaced
     if confident and out["country"] == "GB" and not _UK_POSTCODE_RE.fullmatch(out["postcode"]):
         confident = False          # a GB postcode always carries letters
+    if confident and out["country"] in set(_CROWN_POSTCODE_AREAS.values()):
+        confident = False          # an island address gets a look: customs applies
     return {"address": out, "confident": confident, "unplaced": unplaced}
 
 
@@ -5301,17 +5398,48 @@ def _insurance_amount(body: dict):
     return ("%.2f" % f) if f > 0 else ""
 
 
+def _line_discount(li: dict) -> float:
+    """What was taken off a line. Shopify's `price` is the unit price BEFORE
+    discounts; a code or an automatic discount lands in discount_allocations."""
+    total = 0.0
+    for d in li.get("discount_allocations") or []:
+        try:
+            total += float((d or {}).get("amount") or 0)
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
+def _line_unit_net(li: dict) -> Optional[float]:
+    """The unit price the customer actually paid, or None when the line has no
+    readable price. The discount is spread over the quantity ORDERED, which is
+    what Shopify allocated it across; the value of what is still on the order
+    is then this times _line_qty."""
+    try:
+        unit = float(li.get("price") or 0)
+    except (TypeError, ValueError):
+        return None
+    try:
+        ordered = int(li.get("quantity") or 0)
+    except (TypeError, ValueError):
+        ordered = 0
+    ordered = ordered or _line_qty(li) or 1
+    return max(0.0, unit - _line_discount(li) / ordered)
+
+
 def _order_goods_value(o: dict) -> float:
-    """Sum of price*qty across real items; a single unparsable price skips that
-    LINE, never zeroes the whole order."""
+    """Sum of net unit price*qty across real items; a single unparsable price
+    skips that LINE, never zeroes the whole order. Net of discounts: a trade
+    customer's 20% off was declared, insured and taxed at the border as if it
+    had been paid."""
     total = 0.0
     for li in (o.get("line_items") or []):
         if _label_skip_item(str(li.get("title") or li.get("name") or "")):
             continue
-        try:
-            total += float(li.get("price") or 0) * _line_qty(li)
-        except (TypeError, ValueError):
+        unit = _line_unit_net(li)
+        if unit is None:
             continue
+        total += unit * _line_qty(li)
     return round(total, 2)
 
 
@@ -5536,6 +5664,15 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
         fields=("id,name,created_at,currency,taxes_included,total_price,"
                 "subtotal_price,total_discounts,line_items,shipping_lines,customer"))
     by_id = {str(o.get("id")): o for o in orders}
+    # Dispatched inside the window but placed before it: a purchase-order
+    # customer's job can sit weeks in proofing. The snapshot reaches two weeks
+    # past the window; anything older is fetched by itself, so an old order is
+    # a margin row rather than a "could not be loaded from Shopify" one that
+    # drops its revenue and carriage from the totals.
+    for oid in [k for k in dispatched if k not in by_id][:60]:
+        o = await _tool_json(registry, "shopify_get_order", {"order_id": int(oid)})
+        if _ok(o) and o.get("id"):
+            by_id[oid] = o
 
     variant_ids = []
     for oid in dispatched:
@@ -5721,7 +5858,11 @@ async def _customs_items(registry: dict, o: dict) -> list:
         # 9002.20.000, mounted optical filter glass. The shop title is kept
         # alongside so the app can still name the product to the operator.
         customs_desc = _customs_title(title)
+        # The sale price net of the line's discount, as a 2dp string like the
+        # rest of the card; Shopify's own string when nothing was taken off.
         price = str(li.get("price") or "")
+        if price and _line_discount(li) > 0 and _line_unit_net(li) is not None:
+            price = f"{_line_unit_net(li):.2f}"
         # The declared value. Gobos are custom work, declared at their SALE value;
         # stocked goods (projectors and the rest) at COST, falling back to sale
         # when Shopify has no cost recorded, which the card points out.
@@ -5733,9 +5874,16 @@ async def _customs_items(registry: dict, o: dict) -> list:
             unit_value, basis, needs_cost = price, "sale", True
         key = _customs_key(li, title)
         remembered = mem.get(key) or {}
-        if remembered.get("unit_value"):
+        try:
+            priced = float(price or 0) > 0
+        except ValueError:
+            priced = False
+        if remembered.get("unit_value") and (not is_gobo or not priced):
             # What the operator typed last time beats anything derived: they were
-            # looking at the actual goods.
+            # looking at the actual goods. Except a gobo with a real sale price:
+            # it is declared at what THIS customer paid, and the memory (kept
+            # for gobos whose base price is zero) would otherwise hand one
+            # customer's discount to the next.
             unit_value, basis, needs_cost = remembered["unit_value"], "remembered", False
         if remembered.get("hs"):
             hs = remembered["hs"]
@@ -7610,7 +7758,7 @@ async def run_products_list(registry: dict, months_window: Optional[int] = None)
     shop = await _tool_json(registry, "shopify_get_shop", {})
     currency = shop.get("currency", "")
 
-    orders = await _orders_snapshot(registry, days=len(months) * 31)
+    orders = [o for o in await _orders_snapshot(registry, days=len(months) * 31) if _order_counts(o)]
     bucket = _orders_product_monthly(orders, months)
     cutoff28 = datetime.now(timezone.utc) - timedelta(days=28)
     units28: dict = {}
@@ -9385,6 +9533,14 @@ def _crm_purge(d: dict) -> None:
             d["pd_deleted_deals"] = d["pd_deleted_deals"][-5000:]
         d["deals"].pop(k, None)
         for ak in [ak for ak, a in d["activities"].items() if a.get("deal_id") == k]:
+            # The deal's activities go with it, and each needs its own
+            # tombstone: with only the deal's, the next import refused the
+            # deal and recreated every one of its tasks attached to nothing,
+            # overdue in the list and counted on the badge.
+            apid = str((d["activities"].get(ak) or {}).get("pd_id") or "")
+            if apid:
+                d.setdefault("pd_deleted_activities", []).append(apid)
+                d["pd_deleted_activities"] = d["pd_deleted_activities"][-2000:]
             d["activities"].pop(ak, None)
     # Over the cap, the CRM used to DELETE the oldest closed deals and their
     # activities: silently, with no error, and biting precisely on the won/lost
@@ -9725,6 +9881,24 @@ _FILENAME_BAD = re.compile(
     # Zero-width and soft hyphen: invisible, and NOT stripped as whitespace, so
     # "proof<ZWSP>.pdf" renders in Finder as exactly "proof.pdf".
     r"­\u200b\u200c\u200d⁠\ufeff]")
+
+
+FILES_UPLOAD_IN_FLIGHT_SECS = 3600
+
+
+def _files_upload_in_flight(v: dict) -> bool:
+    """A pending upload young enough to still be arriving. One abandoned by a
+    closed tab stays pending until the two-day purge; treating it as an
+    occupant made its folder undeletable while showing empty."""
+    if not isinstance(v, dict) or v.get("status") != "pending":
+        return False
+    try:
+        when = datetime.fromisoformat(str(v.get("created_at") or ""))
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return False
+    return (datetime.now(timezone.utc) - when).total_seconds() < FILES_UPLOAD_IN_FLIGHT_SECS
 
 
 def _files_name_taken(d: dict, folder_id: str, name: str, skip_id: str = "") -> bool:
@@ -10595,14 +10769,22 @@ def _mail_sender(t: dict, mailbox_addr: str) -> tuple:
     # here puts our own mailbox in the from column, and the board then reads
     # as a pile of email from ourselves.
     started = str(t.get("started_to") or (t.get("messages") or [{}])[0].get("to") or "")
-    first = started.split(",")[0].strip()
-    if first:
-        return (first, first)
+    # A To header is "Name <addr>, Name <addr>": parsed, not split on the
+    # comma, or the display name and the brackets became the board's
+    # from_email and nothing downstream (the CRM match, the address book,
+    # the order lookup) could read it.
+    from email.utils import getaddresses
+    pairs = [(n, a) for n, a in getaddresses([started]) if a and "@" in a]
+    if pairs:
+        name, addr = pairs[0]
+        addr = addr.strip().lower()
+        return (name.strip() or addr, addr)
     m = (t.get("messages") or [{}])[0]
     return (m.get("from_name") or m.get("from_email") or "", m.get("from_email") or "")
 
 
-def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str) -> None:
+def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str,
+                       outbound: bool = False) -> None:
     """Merge one freshly fetched thread into the store. Pure store logic, no
     network: this is where new-message transitions live (waiting -> progress
     when the customer replies, done -> reopened), so it is unit-testable."""
@@ -10683,15 +10865,23 @@ def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str) -> None:
                 t["owner"] = ""
             t["done_at"], t["state_at"] = "", _mail_now()
             _mail_log(t, "", "reopened")
-    if arrived:
+    if arrived and not outbound:
         # A storefront contact-form submission is flagged on arrival; the
         # sync files it into the CRM once it can read the body. The flag is
         # set here (sync store logic, unit-testable), the filing happens
         # where the network lives.
-        if _mail_looks_like_enquiry(t.get("subject"), t.get("from_email"), mailbox_addr):
+        # Judged on the message's OWN sender. A storefront notification is
+        # sent as the store, and the thread's from_email is by then whoever
+        # it was addressed to.
+        sender = (msgs[0].get("from_email") if msgs else "") or t.get("from_email")
+        if _mail_looks_like_enquiry(t.get("subject"), sender, mailbox_addr):
             t["enquiry"] = "new"
         # Rules run on ARRIVAL only. A later message must never re-triage a
-        # conversation out from under whoever is already holding it.
+        # conversation out from under whoever is already holding it. And
+        # never on a conversation the shop STARTED: its one message is ours,
+        # so a rule on our own domain filed it as internal mail and archived
+        # it, and a subject like "Contact form follow-up" made an enquiry
+        # of our own words.
         _mail_rules_run(store, t)
 
 
@@ -14164,6 +14354,8 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
     for a in data.get("activities") or []:
         if a["pd_id"] in dead_acts:
             continue
+        if a.get("deal_pd_id") and a["deal_pd_id"] in dead_deals:
+            continue      # its deal was deleted here: the task does not come back without it
         gid = act_ix.get(a["pd_id"])
         rec = d["activities"].get(gid) if gid else None
         if rec is not None and edited_here(rec):
@@ -16495,9 +16687,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                               "from_email": addr, "at": _mail_now(), "labels": [],
                               "files": [], "snippet": text_body[:200]}]}
         store = _load_mail()
-        _mail_apply_thread(store, full or mine, addr)
+        _mail_apply_thread(store, full or mine, addr, outbound=True)
         if new_tid not in store.get("threads", {}):
-            _mail_apply_thread(store, mine, addr)
+            _mail_apply_thread(store, mine, addr, outbound=True)
         t = store.get("threads", {}).get(new_tid)
         if t is None:
             logger.warning("mail send: the new conversation could not be filed")
@@ -17625,11 +17817,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # so a 60-order batch done inline outlives the browser's patience.
                 head, tail = ids[:RELEASE_INLINE_MAX], ids[RELEASE_INLINE_MAX:]
                 for oid in head:
-                    okd, note = await _sync_order_tags(registry, oid,
-                                                       add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG])
+                    okd, note, released = await _release_tags(registry, oid)
                     if not okd and note:
                         notes.append(note)
                         continue
+                    if not released:
+                        continue      # a reprint of a made or shipped order is not a release
                     tn = await _net30_on_release(registry, oid)
                     if tn["account"]:
                         # Per ORDER. Flattened to one boolean and the first
@@ -17725,8 +17918,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         # _fulfill_if_ready already moved the tags to Dispatched - unless
                         # that write failed, which is exactly what must be reported.
                         okd, note = (not ready["tag_note"]), ready["tag_note"]
-                        ship_note = ("Fulfilled in Shopify with the booked tracking"
-                                     + (" and the customer was emailed." if notified else "."))
+                        if ship_reason == "already_fulfilled":
+                            # Nothing was created here, so nothing was emailed
+                            # from here: the toast used to say the customer was.
+                            ship_note = ("Shopify already had this order fulfilled, so no new "
+                                         "fulfilment or tracking email went from here; it is "
+                                         "filed as complete.")
+                        else:
+                            ship_note = ("Fulfilled in Shopify with the booked tracking"
+                                         + (" and the customer was emailed." if notified else "."))
                         if not okd:
                             ship_note += (" The Dispatched tag did not save, so this order will "
                                           "keep showing in To make. Add the tag in Shopify.")
@@ -18686,6 +18886,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                               for v in d["files"].values()):
                         return _json({"error": "The folder isn't empty. Move or delete "
                                                "what's inside first."}, 400)
+                    # An upload still in flight counts as an occupant: with the
+                    # folder gone, the finished file landed in a folder that
+                    # did not exist, counted but unreachable. One abandoned
+                    # hours ago does not: the folder shows empty, and it is.
+                    if any(str(v.get("folder_id") or "") == fid and _files_upload_in_flight(v)
+                           for v in d["files"].values()):
+                        return _json({"error": "An upload into this folder is still in progress. "
+                                               "Wait for it to finish, then try again."}, 400)
                     gone = d["folders"].pop(fid)
                     return _files_ok(d, action="deleted a folder", detail=gone.get("name") or "", who=_who)
                 return _json({"error": "Unknown folder action."}, 400)
@@ -18805,6 +19013,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                            "allows, so it has not been kept."}, 400)
                 f["status"] = "active"
                 f["uploaded_at"] = datetime.now(timezone.utc).isoformat()
+                if f.get("folder_id") and not _files_folder_ok(d, str(f.get("folder_id"))):
+                    # The folder went while the bytes were in flight. A file
+                    # in a folder that does not exist is counted, invisible
+                    # and unreachable on the drive; the top level is where a
+                    # restore puts one too.
+                    f["folder_id"] = ""
                 rep = f.pop("replaces", None)
                 old = d["files"].get(rep) if rep else None
                 replaced = ""
@@ -18862,7 +19076,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     folder = str(body.get("folder_id") or "")
                     if op == "move" and not _files_folder_ok(d, folder):
                         return _json({"error": "That folder no longer exists."}, 400)
-                    hit = 0
+                    hit, skipped = 0, []
                     for i in ids:
                         v = d["files"].get(i)
                         if not v or v.get("status") != "active":
@@ -18871,13 +19085,29 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                             v["status"] = "trashed"
                             v["trashed_at"] = datetime.now(timezone.utc).isoformat()
                         else:
+                            # The same check the single move makes. Without
+                            # it two active files shared a name in a folder
+                            # and the drive, which resolves by name, could
+                            # only ever reach the older one.
+                            if str(v.get("folder_id") or "") != folder \
+                                    and _files_name_taken(d, folder, v.get("name"), i):
+                                skipped.append(str(v.get("name") or ""))
+                                continue
                             v["folder_id"] = folder
                         hit += 1
+                    if not hit and skipped:
+                        return _json({"error": ("That folder already holds a file with this name. "
+                                                "Rename one of them first." if len(skipped) == 1 else
+                                                f"That folder already holds files with {len(skipped)} "
+                                                "of those names. Rename them first.")}, 409)
                     if not hit:
                         return _json({"error": "None of those files exist any more."}, 400)
                     label = ("1 file" if hit == 1 else f"{hit} files")
-                    return _files_ok(d, action=("put files in the trash" if op == "trash"
-                                                else "moved files"), detail=label, who=_who)
+                    if skipped:
+                        label += f", {len(skipped)} left behind: same name in that folder"
+                    return _files_ok(d, extra=({"skipped": skipped} if skipped else None),
+                                     action=("put files in the trash" if op == "trash"
+                                             else "moved files"), detail=label, who=_who)
                 if op == "empty_trash":
                     if _team_level(_who) < ROLE_LEVELS["admin"]:
                         return _json({"error": "Only an admin can delete files for good."}, 403)
@@ -19806,6 +20036,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     if rec is not None:
                         rec.update({"size": total, "status": "active", "by": uid,
                                     "uploaded_at": datetime.now(timezone.utc).isoformat()})
+                        if rec.get("folder_id") and not _files_folder_ok(d, str(rec.get("folder_id"))):
+                            rec["folder_id"] = ""    # the folder went mid-upload: top level, not nowhere
                         if supersede and supersede in d["files"] and supersede != fid:
                             old = d["files"][supersede]
                             old["status"] = "trashed"
@@ -19846,7 +20078,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     if not kid:
                         return Response(status_code=403, headers=hdrs)
                     busy = any(str(f.get("parent_id") or "") == kid for f in d["folders"].values()) \
-                        or any(str(v.get("folder_id") or "") == kid and v.get("status") == "active"
+                        or any(str(v.get("folder_id") or "") == kid
+                               and (v.get("status") == "active" or _files_upload_in_flight(v))
                                for v in d["files"].values())
                     if busy:
                         return Response(status_code=403, headers=hdrs)
@@ -19884,7 +20117,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 dparent = _dav_walk_folder(d, dsegs[:-1])
                 if dparent is None:
                     return Response(status_code=409, headers=hdrs)
-                dname = _files_clean_name(dsegs[-1])
+                # A sidecar keeps its dots, as on PUT: cleaned, Finder's rename
+                # of ._proof.pdf became a visible "_proof.pdf" that no longer
+                # resolved as the sidecar, so the next save uploaded a fresh
+                # one and the stray sat in the listing until the reaper took it.
+                junk = bool(_DAV_JUNK.match(dsegs[-1]))
+                if junk:
+                    dname = _FILENAME_BAD.sub("_", dsegs[-1]).strip()[:180] or "untitled"
+                    if dname in (".", ".."):
+                        dname = "_" + dname
+                else:
+                    dname = _files_clean_name(dsegs[-1])
                 # Every other naming path refuses a program extension - upload,
                 # rename, mail attach, and PUT through _file_verdict. A rename
                 # over the drive did not, so a .txt accepted on the way in
@@ -19916,7 +20159,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     return Response(status_code=201, headers=hdrs)
                 f = d["files"][kid]
                 if method == "MOVE":
-                    f["name"], f["folder_id"] = dname, dparent
+                    f["name"], f["folder_id"], f["hidden"] = dname, dparent, junk
                     _write_files(d)
                     _track(uid, "files", "moved a file from Finder", dname)
                     return Response(status_code=201, headers=hdrs)
@@ -19936,6 +20179,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     logger.exception("dav copy failed")
                     return Response(status_code=502, headers=hdrs)
                 d["files"][nid] = {**f, "name": dname, "folder_id": dparent, "r2_key": nkey,
+                                   "hidden": junk,
                                    "by": uid, "created_at": datetime.now(timezone.utc).isoformat()}
                 _write_files(d)
                 _track(uid, "files", "copied a file from Finder", dname)

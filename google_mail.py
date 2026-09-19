@@ -456,6 +456,11 @@ async def get_thread(thread_id: str, acct: Account = SALES) -> dict:
             f["msg"] = str(m.get("id") or "")
         msgs.append({"id": str(m.get("id") or ""),
                      "from_name": name or email, "from_email": email.lower(),
+                     # Who else was on it. Reply all reads these off the
+                     # stored message; without them it never offered anyone,
+                     # and a customer's colleagues on Cc were quietly dropped.
+                     "to": _header(m, "To"), "cc": _header(m, "Cc"),
+                     "reply_to": _header(m, "Reply-To"),
                      "files": [f for f in files if f["id"]][:20],
                      "at": _msg_time(m),
                      # Gmail's own labels ride along so the list can bold what
