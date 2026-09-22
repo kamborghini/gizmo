@@ -72,6 +72,9 @@ CLOSED_KEEP_DAYS = int(os.environ.get("RECON_CLOSED_KEEP_DAYS", "365"))
 # finally reconciles it, our copy still says unreconciled and the check goes on
 # reporting a discrepancy that was settled weeks ago.
 FETCH_DAYS = CACHE_KEEP_DAYS
+# How many Shopify orders one sweep reads from that window. Hitting it is
+# reported in the sweep's notes, never silent.
+ORDER_FETCH_CAP = int(os.environ.get("RECON_ORDER_CAP", "1500"))
 
 # Injected by copilot.configure(): the engine owns logic, never transport.
 _registry: Optional[dict] = None          # Shopify tool registry
@@ -1319,10 +1322,15 @@ _DOC_SYSTEM = (
     "no derived values, no filling in of blanks.")
 
 
-async def extract_doc(candidate: dict) -> Optional[dict]:
+async def extract_doc(candidate: dict, known_docs: Optional[dict] = None) -> Optional[dict]:
     """Fetch one attachment and turn it into fields. Text layer first (free,
     exact); the AI reads it only when the PDF is a scan - and anything the AI
-    returns that the text layer COULD have shown is cross-checked against it."""
+    returns that the text layer COULD have shown is cross-checked against it.
+
+    `known_docs` is the sweep's own copy of the documents, which holds this
+    batch's earlier reads as well as the store's. The duplicate check read only
+    the store on disk, which the sweep writes at its end, so the same invoice
+    forwarded twice in one batch was read twice and raised twice."""
     if _gmail_bytes is None:
         return None
     if candidate.get("size") and candidate["size"] > DOC_BYTES_MAX:
@@ -1336,8 +1344,9 @@ async def extract_doc(candidate: dict) -> Optional[dict]:
     # The same PDF forwarded twice is one document, not two discrepancies:
     # content-hash it, and a repeat records where else it arrived.
     digest = hashlib.sha1(data, usedforsecurity=False).hexdigest()
-    if _load_docs is not None:
-        for k, other in _load_docs().items():
+    pool = known_docs if known_docs is not None else (_load_docs() if _load_docs is not None else None)
+    if pool is not None:
+        for k, other in pool.items():
             if other.get("sha1") == digest and k != candidate.get("source_key"):
                 return {**candidate, "sha1": digest, "doc_type": "other", "ignored": True,
                         "duplicate_of": k,
@@ -1643,16 +1652,23 @@ async def _sweep_inner(deep_docs: bool) -> dict:
         notes.append("Xero is not connected; the accounts side of every check is missing.")
 
     # --- Shopify orders, whole window (the registry pages by since_id) ------
+    # The read did not reach the newest orders: it failed part way, or it
+    # stopped at its limit. Either way their Xero invoices would read as sales
+    # with no Shopify order, so that check sits this sweep out.
+    orders_short = False
     if _registry is not None and _tool_json is not None:
         try:
             fetched, since_id = 0, 0
             bucket = cache.setdefault("shopify", {}).setdefault("orders", {})
-            while fetched < 1500:
+            while fetched < ORDER_FETCH_CAP:
                 d = await _tool_json(_registry, "shopify_list_orders", {
                     "limit": 250, "status": "any", "since_id": since_id or None,
                     "created_at_min": _cutoff_day(FETCH_DAYS) + "T00:00:00Z"})
                 if d.get("_failed"):
-                    notes.append("Shopify orders could not be read; sale checks ran on the cached copy.")
+                    orders_short = True
+                    notes.append("Shopify orders could not be read; sale checks ran on the cached "
+                                 "copy, and the check for Xero sales with no Shopify order was "
+                                 "skipped rather than flag the invoices of orders it has not seen.")
                     break
                 rows = d.get("orders") or []
                 for o in rows:
@@ -1663,8 +1679,26 @@ async def _sweep_inner(deep_docs: bool) -> dict:
                 fetched += len(rows)
                 if len(rows) < 250:
                     break
+            else:
+                # The loop ran out of allowance on a full page. The crawl goes
+                # oldest first, so what may be missing is the NEWEST orders, and
+                # a partial read has to say so: silently it read as "every sale
+                # checked" when the latest ones never were. A window of exactly
+                # the limit is whole, though, so one more order decides it.
+                more = await _tool_json(_registry, "shopify_list_orders", {
+                    "limit": 1, "status": "any", "since_id": since_id or None,
+                    "created_at_min": _cutoff_day(FETCH_DAYS) + "T00:00:00Z"})
+                if more.get("_failed") or (more.get("orders") or []):
+                    orders_short = True
+            if orders_short and fetched >= ORDER_FETCH_CAP:
+                notes.append(f"The Shopify read stopped at its limit of {fetched} orders in the "
+                             f"{FETCH_DAYS}-day window, so the newest orders were not checked, and "
+                             "the check for Xero sales with no Shopify order was skipped rather "
+                             "than flag their invoices. Raise RECON_ORDER_CAP to read them all.")
         except Exception as e:
-            notes.append(f"Shopify orders sync failed: {str(e)[:120]}")
+            orders_short = True
+            notes.append(f"Shopify orders sync failed: {str(e)[:120]}; the check for Xero sales "
+                         "with no Shopify order was skipped.")
             logger.exception("recon sweep: shopify orders failed")
         # Payouts: present only when the scope is granted and the store uses
         # Shopify Payments. Absence is recorded, never silently skipped.
@@ -1719,7 +1753,7 @@ async def _sweep_inner(deep_docs: bool) -> dict:
             queued = {c["thread_id"] for c in cands[DOCS_PER_SWEEP:] if c.get("thread_id")}
             failed: set = set()
             for c in batch:
-                d = await extract_doc(c)
+                d = await extract_doc(c, docs)
                 if d:
                     docs[c["source_key"]] = d
                 else:
@@ -1760,6 +1794,8 @@ async def _sweep_inner(deep_docs: bool) -> dict:
                                       check_payouts_vs_bank)]
         notes.append("The Xero cache is empty, so the missing-sale, refund and payout "
                      "checks were SKIPPED rather than reporting everything as missing.")
+    if orders_short:
+        checks_to_run = [c for c in checks_to_run if c is not check_xero_orphan_sales]
     for check in checks_to_run:
         try:
             for e in check(cache):

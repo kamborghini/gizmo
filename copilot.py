@@ -2374,7 +2374,7 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
         _tool_json(registry, "shopify_list_orders", {"status": "any", "created_at_min": d14, "created_at_max": d7, "limit": 250}),
         _tool_json(registry, "shopify_list_customers", {"created_at_min": d7, "limit": 250}),
         _tool_json(registry, "shopify_count_products", {}),
-        _tool_json(registry, "shopify_list_products", {"limit": 250, "fields": "id,title,variants"}) if track_inventory else _ret({}),
+        _all_products(registry, "id,title,variants") if track_inventory else _ret(([], True, False)),
         google_data.ga4_summary(28) if ga4_on else _ret({}),
         google_data.gsc_overview(28) if gsc_on else _ret({}),
     )
@@ -2413,10 +2413,11 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
         metrics.append({"label": "Products", "value": str(total_products)})
 
     low = []
-    if track_inventory and not _ok(prodr):
+    # Every product, not the first 250: the low-stock count read one page.
+    products, prod_ok, _prod_cut = prodr
+    if track_inventory and not prod_ok:
         stale.append("inventory")
     elif track_inventory:
-        products = prodr.get("products", [])
         low = [
             {"product": p.get("title"), "variant": v.get("title"), "qty": v.get("inventory_quantity")}
             for p in products for v in p.get("variants", [])
@@ -2848,10 +2849,41 @@ Ground every claim in the supplied numbers, cite them, and quantify impact in mo
 recommendations by (business impact x confidence) / effort.""" + WRITING_STYLE
 
 
+async def _all_products(registry: dict, fields: str) -> tuple:
+    """Every product in the catalogue, paged by since_id: (products, ok, truncated).
+
+    ok is False when any page failed, and what came before it is returned
+    only so a caller can say how far it got. truncated is True only when the
+    page cap stopped the read AND a further product exists. Four callers read
+    a single page of 250 and no more: the Products tab, the SEO audit, the
+    Overview's low-stock count and the loan-unit picker."""
+    products, since_id, pages = [], 0, 0
+    while True:
+        data = await _tool_json(registry, "shopify_list_products",
+                                {"limit": 250, "since_id": since_id, "fields": fields})
+        if not _ok(data):
+            return products, False, False
+        batch = data.get("products", []) or []
+        products += batch
+        pages += 1
+        if len(batch) < 250:
+            return products, True, False
+        since_id = max(int(p.get("id") or 0) for p in batch)
+        if pages >= ORDER_PAGE_CAP:
+            more = await _tool_json(registry, "shopify_list_products",
+                                    {"limit": 1, "since_id": since_id, "fields": "id"})
+            return products, True, bool(_ok(more) and more.get("products"))
+
+
 async def _seo_product_signals(registry: dict) -> dict:
-    data = await _tool_json(registry, "shopify_list_products",
-                            {"limit": 250, "fields": "id,title,handle,body_html,images"})
-    products = data.get("products", [])
+    products, ok, _truncated = await _all_products(registry, "id,title,handle,body_html,images")
+    if not ok:
+        # A read that failed is not a catalogue with nothing wrong in it: the
+        # audit said "0 thin descriptions" and took nothing off the score.
+        return {"unavailable": True, "products_sampled": 0, "thin_descriptions": 0,
+                "missing_descriptions": 0, "duplicate_titles": 0, "images": 0,
+                "images_missing_alt": 0, "alt_coverage_pct": None, "thin_items": [],
+                "missing_items": [], "alt_items": [], "duplicate_groups": []}
     by_title: dict[str, list[dict]] = {}
     thin = no_desc = total_imgs = missing_alt = 0
     # The products behind each count, so a KPI can open the list it counted
@@ -2895,9 +2927,12 @@ async def _seo_product_signals(registry: dict) -> dict:
 
 
 def _seo_scorecard(signals: dict, rs, ss, pages: list[dict], domain: str | None = None,
-                   sitemap_locs: int | None = None) -> tuple[int, list[dict]]:
+                   sitemap_locs: int | None = None) -> tuple[int | None, list[dict]]:
     """The score, and one KPI per check. Every KPI carries a `detail`: the
-    pages or products behind its number, so the card can open them."""
+    pages or products behind its number, so the card can open them. The score
+    is None when the product read failed: three of its checks never ran, so a
+    number would read as passing them, and the change alert would compare it
+    with the last whole one."""
     score = 100
     any_noindex = any(p.get("noindex") for p in pages)
     has_product_schema = any("Product" in (p.get("jsonld_types") or []) for p in pages)
@@ -2906,6 +2941,8 @@ def _seo_scorecard(signals: dict, rs, ss, pages: list[dict], domain: str | None 
     alt = signals.get("alt_coverage_pct")
     thin = signals.get("thin_descriptions", 0)
     dup = signals.get("duplicate_titles", 0)
+    unread = bool(signals.get("unavailable"))   # the product read failed: say so, deduct nothing
+    unread_note = "Shopify did not answer the product read, so this was not checked."
 
     deductions: list[dict] = []
     if any_noindex:        score -= 25; deductions.append({"label": "noindex found on a sampled page", "note": "-25"})
@@ -2921,6 +2958,8 @@ def _seo_scorecard(signals: dict, rs, ss, pages: list[dict], domain: str | None 
     if dup:
         d = min(10, dup); score -= d; deductions.append({"label": f"{dup} duplicated product titles", "note": f"-{d}"})
     score = max(0, min(100, score))
+    if unread:
+        deductions.append({"label": "product checks not run", "note": unread_note})
 
     def purl(handle):
         return f"https://{domain}/products/{handle}" if (domain and handle) else None
@@ -2949,7 +2988,8 @@ def _seo_scorecard(signals: dict, rs, ss, pages: list[dict], domain: str | None 
     n_pages = len(pages)
 
     metrics = [
-        {"label": "SEO score", "value": f"{score}/100", "tone": "warn" if score < 70 else None,
+        {"label": "SEO score", "value": "n/a" if unread else f"{score}/100",
+         "tone": "warn" if unread or score < 70 else None,
          "detail": detail("How the score is made", deductions, "No deductions: every check passed.")},
         {"label": "Indexable", "value": "noindex found" if any_noindex else "Yes",
          "tone": "warn" if any_noindex else None,
@@ -2966,16 +3006,17 @@ def _seo_scorecard(signals: dict, rs, ss, pages: list[dict], domain: str | None 
         {"label": "Image alt", "value": f"{alt}%" if alt is not None else "n/a",
          "tone": "warn" if (alt is not None and alt < 90) else None,
          "detail": detail("Products with images missing alt text", alt_items,
-                          "Every product image has alt text.", total=len(signals.get("alt_items") or []))},
-        {"label": "Thin descriptions", "value": str(thin), "tone": "warn" if thin else None,
+                          unread_note if unread else "Every product image has alt text.",
+                          total=len(signals.get("alt_items") or []))},
+        {"label": "Thin descriptions", "value": "n/a" if unread else str(thin), "tone": "warn" if thin else None,
          "detail": detail("Products with under 50 words of description", thin_items,
-                          "Every product has at least 50 words.",
+                          unread_note if unread else "Every product has at least 50 words.",
                           total=thin + signals.get("missing_descriptions", 0))},
-        {"label": "Duplicate titles", "value": str(dup), "tone": "warn" if dup else None,
+        {"label": "Duplicate titles", "value": "n/a" if unread else str(dup), "tone": "warn" if dup else None,
          "detail": detail("Titles shared by more than one product", dup_items,
-                          "Every product title is unique.", total=dup)},
+                          unread_note if unread else "Every product title is unique.", total=dup)},
     ]
-    return score, metrics
+    return (None if unread else score), metrics
 
 
 class SeoFetchPageInput(BaseModel):
@@ -3099,8 +3140,12 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
                                     sitemap_locs=(stext or "").count("<loc>"))
     context = {
         "domain": primary, "computed_seo_score": score,
-        # the counts only: the item lists are for the cards, not the model
-        "product_signals": {k: v for k, v in signals.items() if not isinstance(v, list)},
+        # the counts only: the item lists are for the cards, not the model;
+        # and no counts at all from a read that failed, whose zeros are not findings
+        "product_signals": ({"unavailable": True, "note": "Shopify did not answer the product read, "
+                                                         "so the product checks and the score were not worked out."}
+                            if signals.get("unavailable")
+                            else {k: v for k, v in signals.items() if not isinstance(v, list)}),
         "robots_txt": {"status": rs, "found": rs == 200, "sample": (rtext or "")[:1000]},
         "sitemap_xml": {"status": ss, "found": ss == 200, "child_locs": (stext or "").count("<loc>")},
         "sampled_pages": pages,
@@ -3158,7 +3203,11 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
                     seo_trends[k] = gts[k]
     except Exception:
         logger.exception("seo trends failed")
-    return {"score": score, "metrics": metrics, "structured": structured, "trends": seo_trends}
+    out = {"score": score, "metrics": metrics, "structured": structured, "trends": seo_trends}
+    if score is None:
+        out["score_note"] = ("Not worked out this time: Shopify did not answer the product read, "
+                             "so three of the checks could not run.")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -3767,6 +3816,14 @@ def _write_gobo_rule_rows(kind: str, rows: list) -> None:
     _gobo_cache["mtime"] = None
 
 
+def _sheet_size(raw) -> str:
+    """A size cell as the label and the stock sheet use it: the plain number
+    when the cell is one ("37.5", "86 mm", "86.0" -> "37.5", "86", "86"), the
+    trimmed text otherwise, so a cell nobody can read still shows what it says."""
+    txt = str(raw or "").strip()
+    return (_clean_gobo_size(txt) or txt) if txt else ""
+
+
 def _clean_gobo_size(raw) -> Optional[str]:
     """A production size, or None if it is not one. Free text is refused rather
     than stored: whatever is here is what the bench reads off the label."""
@@ -3890,7 +3947,10 @@ def _gobo_sizes() -> dict:
                 entry = {
                     "manufacturer": str(row.get("Manufacturer") or "").strip(),
                     "model": str(row.get("Model") or "").strip(),
-                    "production_size": str(row.get("Closest Production Size (mm)") or "").strip(),
+                    # Normalised as it is read: "86 mm" and "86.0" are 86, the key the
+                    # bezel rule and the day sheet look up. Kept raw, an "86 mm" line
+                    # booked 86mm glass instead of a 64.9 blank and a ring.
+                    "production_size": _sheet_size(row.get("Closest Production Size (mm)")),
                     "review": str(row.get("Production Review") or "").strip(),
                 }
                 nm = _norm_key(entry["manufacturer"])
@@ -4121,7 +4181,7 @@ def _gobo_sheet_listing(who: Optional[str] = None) -> dict:
             row = {"manufacturer": mfr, "model": model,
                    "glass": str(r.get("Glass Diameter (mm)") or "").strip(),
                    "image": str(r.get("Image Diameter (mm)") or "").strip(),
-                   "produced": str(r.get("Closest Production Size (mm)") or "").strip(),
+                   "produced": _sheet_size(r.get("Closest Production Size (mm)")),
                    "undercut": str(r.get("Undercut (mm)") or "").strip(),
                    "review": str(r.get("Production Review") or "").strip(),
                    "notes": str(r.get("Notes") or "").strip()}
@@ -5623,6 +5683,9 @@ def _ex_vat_line_total(li: dict, taxes_included: bool) -> float:
     return round(gross, 2)
 
 
+MARGIN_BACKFILL_MAX = int(os.environ.get("MARGIN_BACKFILL_MAX", "60"))   # older orders fetched one by one
+
+
 async def run_margin_report(registry: dict, days: int = 30) -> dict:
     """What each dispatched order actually made: revenue net of VAT and discounts,
     less what the goods cost and what the courier charged.
@@ -5669,10 +5732,24 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
     # past the window; anything older is fetched by itself, so an old order is
     # a margin row rather than a "could not be loaded from Shopify" one that
     # drops its revenue and carriage from the totals.
-    for oid in [k for k in dispatched if k not in by_id][:60]:
+    # Bounded, and paced by the Shopify request layer, which queues its calls
+    # and backs off when rate-limited. An order past the bound is not a load
+    # failure and is not reported as one: it says why it is missing.
+    older = [k for k in dispatched if k not in by_id]
+    unread = set(older[MARGIN_BACKFILL_MAX:])
+    # Missing from a list read that failed or stopped at its cap says nothing
+    # about an order's age, so only a whole read may give age as the reason.
+    read_short = bool(meta.get("failed") or meta.get("truncated"))
+    misses = 0
+    for oid in older[:MARGIN_BACKFILL_MAX]:
         o = await _tool_json(registry, "shopify_get_order", {"order_id": int(oid)})
         if _ok(o) and o.get("id"):
             by_id[oid] = o
+            misses = 0
+        else:
+            misses += 1
+            if misses >= 3:   # Shopify is refusing: more single reads only keep it refusing
+                break
 
     variant_ids = []
     for oid in dispatched:
@@ -5687,7 +5764,10 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
         if not o:
             rows.append({"order_id": oid, "order_name": entry.get("order_name") or ("#" + oid),
                          "admin_url": _admin_order_url(oid),
-                         "incomplete": "the order could not be loaded from Shopify"})
+                         "incomplete": (f"placed long before this period, and the report reads at most "
+                                        f"{MARGIN_BACKFILL_MAX} such orders one by one: choose a shorter period"
+                                        if oid in unread and not read_short
+                                        else "the order could not be loaded from Shopify")})
             continue
         taxes_included = bool(o.get("taxes_included"))
         revenue = 0.0
@@ -5696,8 +5776,17 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
         for li in o.get("line_items") or []:
             if _label_skip_item(str(li.get("title") or li.get("name") or "")):
                 continue
-            revenue += _ex_vat_line_total(li, taxes_included)
-            qty = int(li.get("quantity") or 0)
+            # What is still on the order. The line's discount and VAT were
+            # allocated across the quantity ORDERED, so its net total is scaled
+            # by the share that remains; a refunded unit used to stay in both
+            # the revenue and the goods cost.
+            qty = _line_qty(li)
+            try:
+                ordered = int(li.get("quantity") or 0)
+            except (TypeError, ValueError):
+                ordered = 0
+            share = (qty / ordered) if ordered > 0 else (1.0 if qty else 0.0)
+            revenue += round(_ex_vat_line_total(li, taxes_included) * min(share, 1.0), 2)
             cost = costs.get(int(li.get("variant_id") or 0) or -1, "")
             try:
                 goods_cost += float(cost) * qty
@@ -7566,17 +7655,17 @@ async def _zeta_drain(registry: dict) -> None:
                 # nothing is lost and Settings can still show it.
                 pend = _load_zeta_pending()
                 cur = pend.get(str(oid)) or entry
-                tries = int(cur.get("tries") or 0) + 1
-                if tries > ZETA_MAX_TRIES:
+                tries = int(cur.get("tries") or 0)
+                if tries >= ZETA_MAX_TRIES:
                     if not cur.get("stuck"):
                         cur["stuck"] = True
                         pend[str(oid)] = cur
                         _write_zeta_pending(pend)
-                        logger.error("stock bridge: %s parked after %d attempts", oid, tries - 1)
+                        logger.error("stock bridge: %s parked after %d attempts", oid, tries)
                     continue
-                cur["tries"] = tries
-                pend[str(oid)] = cur
-                _write_zeta_pending(pend)
+                # A failed attempt is counted once, by _zeta_push_locked. The
+                # drain counted it too, so every tick was two tries and an
+                # order was parked for a human after ten attempts, not twenty.
                 await _zeta_push_locked(registry, oid, str(entry.get("op") or "book"))
         except Exception:
             logger.exception("stock bridge: drain failed for %s", oid)
@@ -7625,6 +7714,16 @@ def _usage_lines(shaped_order: dict) -> list:
         else:
             out.append({"size": size, "family": family, "qty": qty})
     return out
+
+
+def _usage_row_order(r: dict) -> tuple:
+    """Largest glass first, then by family; a size that is not a number (a
+    sheet cell edited to "TBC") goes last instead of taking the whole day
+    sheet down with it, which one float() of it used to do."""
+    try:
+        return (0, -float(r["size"]), str(r["glass"]))
+    except (TypeError, ValueError):
+        return (1, 0.0, str(r.get("size") or ""), str(r.get("glass") or ""))
 
 
 async def run_stock_usage(registry: dict, date_str: str) -> dict:
@@ -7682,7 +7781,7 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
                 key = (line["size"], line["family"])
                 r = rows.setdefault(key, {"size": line["size"], "glass": line["family"], "qty": 0})
                 r["qty"] += line["qty"]
-    out_rows = sorted(rows.values(), key=lambda r: (-float(r["size"]), r["glass"]))
+    out_rows = sorted(rows.values(), key=_usage_row_order)
     return {"date": day.isoformat(), "orders": len(orders_in), "order_names": orders_in[:60],
             "order_ids": made_ids, "pieces": pieces, "rows": out_rows,
             "fetch_failed": fetch_failed,
@@ -7753,8 +7852,13 @@ async def run_products_list(registry: dict, months_window: Optional[int] = None)
     months = _month_axis(months_window)
     fields = ("id,title,handle,status,image,variants,product_type,vendor,tags,"
               "created_at,updated_at,published_at")
-    data = await _tool_json(registry, "shopify_list_products", {"limit": 250, "fields": fields})
-    products = data.get("products", [])
+    # Paged, and a failure is said rather than shown as an empty catalogue:
+    # one unchecked page read a throttled answer as a store with no products,
+    # and a store past 250 lost the rest without a word.
+    products, ok, truncated = await _all_products(registry, fields)
+    if not ok:
+        return {"error": "Shopify did not answer the product list, so nothing is shown rather "
+                         "than an empty or partial catalogue. Try again in a moment."}
     shop = await _tool_json(registry, "shopify_get_shop", {})
     currency = shop.get("currency", "")
 
@@ -7816,9 +7920,12 @@ async def run_products_list(registry: dict, months_window: Optional[int] = None)
             "monthly": monthly,
         })
     out.sort(key=lambda x: (x["units_28d"], x["revenue_28d"]), reverse=True)  # best sellers first by default
+    # Every product read, not the best-selling 250: the page searches and
+    # filters on what it is sent, so a product past the 250th could not be
+    # found even by name. `truncated` says when the page cap stopped the read.
     return {"currency": currency, "months": months,
             "vendors": sorted(vendors), "product_types": sorted(types),
-            "products": out[:250]}
+            "products": out, "truncated": truncated}
 
 
 # ---------------------------------------------------------------------------
@@ -9121,6 +9228,7 @@ async def _watchdog_tick(registry: dict) -> bool:
                                              "The app will show its first-run setup screen; recreate the "
                                              "master account, then the team's accounts."])
             _sessions_sweep()
+            _work_close_orphans()
             _events_flush()   # belt for the debounced ledger writes
         except Exception:
             logger.exception("team register check failed")
@@ -9300,12 +9408,76 @@ async def _mail_loop() -> None:
     everyone paying for a sync on their first click."""
     await asyncio.sleep(20)
     while True:
-        try:
-            if google_mail.connected():
-                await _mail_sync_now(force=True)
-        except Exception:
-            logger.exception("mail loop error")
+        await _mail_loop_tick()
         await asyncio.sleep(MAIL_LOOP_SECS)
+
+
+async def _mail_loop_tick() -> None:
+    """One pass of the mail loop: sync, then judge whether the inbox is down.
+    Never raises; the loop must outlive anything a pass throws."""
+    why = ""
+    try:
+        if google_mail.connected():
+            why = await _mail_sync_now(force=True) or ""
+    except Exception as e:
+        logger.exception("mail loop error")
+        why = f"{type(e).__name__}: {e}"[:300]
+    try:
+        await _mail_loop_health(why)
+    except Exception:
+        logger.exception("mail loop: the failure alert could not be sent")
+
+
+_mail_fail_ticks = 0
+_mail_alert_sent = 0.0      # when this process last sent the alert (time.time())
+MAIL_ALERT_AFTER_TICKS = int(os.environ.get("MAIL_ALERT_AFTER_TICKS", "30"))
+
+
+async def _mail_loop_health(why: str) -> bool:
+    """Email once a day when the inbox sync keeps failing; True when it did.
+
+    The sync catches its own errors and files them under sync_error, so the
+    loop's except branch never ran and nothing ever said so: a dead Gmail
+    grant stopped the inbox, the filters and the website enquiries in
+    silence until someone opened the Inbox tab. Thirty failed minutes in a
+    row is an outage rather than a blip, and the stamp in watch.json holds
+    it to one email a day, as the scheduler's own failure email is."""
+    global _mail_fail_ticks, _mail_alert_sent
+    if not why:
+        _mail_fail_ticks = 0
+        return False
+    _mail_fail_ticks += 1
+    if _mail_fail_ticks < MAIL_ALERT_AFTER_TICKS:
+        return False
+    # Two records of the last send, and either one holds the email back: the
+    # stamp in watch.json survives a restart, and this process's own memory
+    # survives a watch.json that cannot be written (a paused, unreadable
+    # store) or a watchdog tick merging its older copy back over the stamp.
+    # With the file alone, a failed write meant an email every minute.
+    if time.time() - _mail_alert_sent < 86400:
+        return False
+    state = _load_watch()
+    last = state.get("mail_error_email_at")
+    if last:
+        try:
+            if (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() < 86400:
+                return False
+        except ValueError:
+            pass
+    _mail_alert_sent = time.time()
+    state["mail_error_email_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        _save_watch(state)
+    except Exception:
+        logger.exception("mail loop: could not stamp the alert in watch.json; memory still holds it")
+    minutes = _mail_fail_ticks * MAIL_LOOP_SECS // 60
+    await _send_alert_email("Reactor: the shared inbox has stopped syncing",
+                            [f"Gmail has not synced for {minutes} minutes. New mail, the inbox "
+                             "filters and website enquiries are on hold until it does.",
+                             "The last error was: " + why[:200],
+                             "If it names the token or the grant, reconnect the mailbox in "
+                             "Settings, Connections."])
+    return True
 
 
 def _ensure_scheduler(registry: dict) -> None:
@@ -10550,10 +10722,15 @@ def _mail_attachment_ok(key: str, uid: str) -> bool:
 
 
 def _mail_part_name(key: str) -> str:
-    """The name a key was built from: <hex>-<name>, so everything after the
-    first dash. A key from Files has no dash of ours, so it is used whole."""
-    last = str(key or "").rsplit("/", 1)[-1]
-    return last.split("-", 1)[-1] if "-" in last else last
+    """The name a key was built from. A mail upload is mail/<uid>/<16 hex>-<name>,
+    so that prefix comes off; a key from Files is <id>/<name> with the name
+    whole. Splitting at any dash named "gobo-layout-final.pdf" from Files as
+    "layout-final.pdf" in every refusal that mentioned it."""
+    k = str(key or "")
+    last = k.rsplit("/", 1)[-1]
+    if k.startswith("mail/") and re.match(r"^[0-9a-f]{16}-", last):
+        return last[17:]
+    return last
 
 
 # A type must START with a letter: "." is a legal token character, so a
@@ -10799,6 +10976,7 @@ def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str,
         senders = {str(m.get("from_email") or "").strip().lower() for m in msgs}
         if senders & erased:
             return
+    first = msgs[0]   # who started it, read before the cut keeps only the latest
     msgs = msgs[-MAIL_MSGS_PER_THREAD:]
     threads = store.setdefault("threads", {})
     t = threads.get(tid)
@@ -10865,6 +11043,14 @@ def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str,
                 t["owner"] = ""
             t["done_at"], t["state_at"] = "", _mail_now()
             _mail_log(t, "", "reopened")
+    # A conversation the shop started in Gmail itself arrives through the sync
+    # like any other, and its first message is ours: Gmail labels it SENT.
+    # It gets what a Reactor-started one gets, no inbox rules and no enquiry
+    # flag. A storefront notification also comes FROM the shop's address, but
+    # it was not sent through this account, so it carries no SENT label and is
+    # still judged as the enquiry it may be.
+    if arrived and not outbound and "SENT" in (first.get("labels") or []):
+        outbound = True
     if arrived and not outbound:
         # A storefront contact-form submission is flagged on arrival; the
         # sync files it into the CRM once it can read the body. The flag is
@@ -10873,7 +11059,7 @@ def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str,
         # Judged on the message's OWN sender. A storefront notification is
         # sent as the store, and the thread's from_email is by then whoever
         # it was addressed to.
-        sender = (msgs[0].get("from_email") if msgs else "") or t.get("from_email")
+        sender = first.get("from_email") or t.get("from_email")
         if _mail_looks_like_enquiry(t.get("subject"), sender, mailbox_addr):
             t["enquiry"] = "new"
         # Rules run on ARRIVAL only. A later message must never re-triage a
@@ -11154,20 +11340,22 @@ def _mail_prune(store: dict) -> None:
             threads.pop(tid, None)
 
 
-async def _mail_sync_now(force: bool = False) -> None:
+async def _mail_sync_now(force: bool = False) -> str:
     """Refresh the working set from Gmail. Never raises: a failed sync leaves
-    the last good picture on the board with the error alongside it."""
+    the last good picture on the board with the error alongside it. Returns
+    that error, "" otherwise: the mail loop judges the inbox on it, and
+    reading it back from the store fails exactly when the store is what broke."""
     store = _load_mail()
     if not force and store.get("synced_at"):
         try:
             age = (datetime.now(timezone.utc)
                    - datetime.fromisoformat(store["synced_at"])).total_seconds()
             if age < MAIL_SYNC_SECONDS:
-                return
+                return ""
         except ValueError:
             pass
     if not google_mail.connected():
-        return
+        return ""
     async with _mail_lock:
         # Re-check under the lock: a queued caller finds the sync just done.
         store = _load_mail()
@@ -11176,7 +11364,7 @@ async def _mail_sync_now(force: bool = False) -> None:
                 age = (datetime.now(timezone.utc)
                        - datetime.fromisoformat(store["synced_at"])).total_seconds()
                 if age < MAIL_SYNC_SECONDS:
-                    return
+                    return ""
             except ValueError:
                 pass
         try:
@@ -11210,7 +11398,7 @@ async def _mail_sync_now(force: bool = False) -> None:
                 # sync photographed the PRE-restore board; writing it now
                 # would clobber what was just restored. Walk away.
                 logger.warning("mail sync abandoned: the store changed underneath it")
-                return
+                return ""
             inbox_ids = {t["id"] for t in listed}
             for full in fetched:
                 if full:
@@ -11297,18 +11485,21 @@ async def _mail_sync_now(force: bool = False) -> None:
                 # it just as easily. Re-check before the write or the restored
                 # board is overwritten by the picture we started with.
                 logger.warning("mail sync abandoned after reconcile: the store changed underneath it")
-                return
+                return ""
             store["synced_at"] = _mail_now()
             store["sync_error"] = ""
             _write_mail(store)
+            return ""
         except Exception as e:
             logger.warning(f"mail sync failed: {e}")
-            store["sync_error"] = str(e)[:300]
+            why = (str(e) or type(e).__name__)[:300]
+            store["sync_error"] = why
             if _mail_mem is store:
                 try:
                     _write_mail(store)
                 except Exception:
                     pass
+            return why
 
 
 def _mail_want_label(t: dict) -> str:
@@ -13027,11 +13218,14 @@ async def _loan_product_rows(registry) -> list:
     now = time.monotonic()
     if _loan_products["rows"] and now - _loan_products["at"] < LOAN_PRODUCT_TTL:
         return _loan_products["rows"]
-    data = await _tool_json(registry, "shopify_list_products",
-                            {"limit": 250,
-                             "fields": "id,title,status,vendor,product_type,variants"})
+    # The whole catalogue, not its first page: a unit made from a product
+    # past the 250th could not be picked. A failed read is not cached, so
+    # the next open tries again instead of serving an empty list for ten minutes.
+    products, ok, _cut = await _all_products(registry, "id,title,status,vendor,product_type,variants")
+    if not ok and not products:
+        raise RuntimeError("the product read failed")   # the route says so, not "no matches"
     rows = []
-    for prod in (data.get("products") or []):
+    for prod in products:
         if str(prod.get("status") or "active").lower() == "archived":
             continue
         title = " ".join(str(prod.get("title") or "").split())
@@ -13044,7 +13238,8 @@ async def _loan_product_rows(registry) -> list:
                          "variant_id": str(v.get("id") or ""),
                          "title": full, "sku": str(v.get("sku") or ""),
                          "vendor": " ".join(str(prod.get("vendor") or "").split())})
-    _loan_products.update({"at": now, "rows": rows})
+    if ok:
+        _loan_products.update({"at": now, "rows": rows})   # only a complete read is worth keeping
     return rows
 
 
@@ -13219,6 +13414,51 @@ def _work_open_session(uid: Optional[str]) -> Optional[dict]:
     if not uid:
         return None
     return _load_work()["open"].get(str(uid))
+
+
+def _work_close_open(uid: str, by: str, note: str, action: str) -> Optional[dict]:
+    """Close an account's open shift now, as `by`'s correction, and return
+    it; None when nothing was open. For the three ways an account stops being
+    watched: its role changes, it is switched off, or it is deleted. Only the
+    role change used to do this, so a deleted part-timer who forgot to clock
+    out sat on the work board clocked in for good, their hours still climbing."""
+    w = _load_work()
+    ws = w["open"].pop(uid, None)
+    if not ws:
+        return None
+    nowu = datetime.now(timezone.utc)
+    ws["end"] = nowu.isoformat()
+    try:
+        ws["secs"] = max(0, int((nowu - datetime.fromisoformat(ws["start"])).total_seconds()))
+    except Exception:
+        ws["secs"] = 0
+    ws.update({"corrected": True, "corrected_by": by, "corrected_at": nowu.isoformat(), "note": note})
+    w["sessions"].append(ws)
+    _write_work(w)
+    _track(by, "work", action, _team_name(uid) or uid)
+    return ws
+
+
+def _work_close_orphans() -> list:
+    """Close any open shift whose account is gone or switched off; the ids
+    closed. Deleting or switching off an account closes its shift now, but a
+    shift left open by an account removed before that did sits on the board
+    for good, so the hourly team check sweeps them up."""
+    # An unreadable or empty register reads as nobody, and nobody would mean
+    # every shift on the board: the watchdog alerts on that, this does nothing.
+    if USERS_PATH in _poisoned_stores or _team_setup_needed():
+        return []
+    users = (_load_users() or {}).get("users") or {}
+    closed = []
+    for uid in list((_load_work().get("open") or {}).keys()):
+        u = users.get(uid)
+        # Delete is a soft delete, so an account the register does not hold at
+        # all means the register was lost or rolled back, not that it was removed.
+        if u is not None and (u.get("deleted") or not u.get("active", True)):
+            if _work_close_open(uid, "", "closed automatically: the account had been removed or "
+                                         "switched off", "closed a session left by a removed account"):
+                closed.append(uid)
+    return closed
 
 
 def _work_secs(uid: str, day_from: str) -> int:
@@ -15135,6 +15375,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         async def gen():
             task = asyncio.create_task(runner())
             try:
+                # Said at once: the run is under way and being paid for. A page
+                # that heard nothing may ask /api/chat instead, and before this
+                # an answer with no tool steps was silent until it was done, so
+                # one cut off mid-answer was run and billed a second time.
+                yield 'data: {"type": "start"}\n\n'
                 while True:
                     ev = await q.get()
                     yield "data: " + json.dumps(ev) + "\n\n"
@@ -15593,6 +15838,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                           + ", ".join(sorted(need - headers))
                           + ". Export the sheet with the same columns as before."}, 400)
         model_rows = sum(1 for r in rows if str(r.get("Model") or "").strip())
+        # A size cell is what the bench reads off the label and what the stock
+        # sheet sorts by. Free text there printed as the size and crashed the
+        # day's stock usage, so a sheet whose sizes are not sizes is refused,
+        # naming the rows. An empty cell stays allowed: it means "no size yet".
+        bad = [(i + 2, str(r.get("Model") or "").strip(), str(r.get("Closest Production Size (mm)") or "").strip())
+               for i, r in enumerate(rows)
+               if str(r.get("Closest Production Size (mm)") or "").strip()
+               and _clean_gobo_size(r.get("Closest Production Size (mm)")) is None]
+        if bad:
+            shown = "; ".join(f"row {n} ({m or 'no model'}): \"{v[:20]}\"" for n, m, v in bad[:5])
+            return _json({"error": f"{len(bad)} size cell(s) are not a size in mm, so nothing was "
+                                   f"changed: {shown}" + (" and more." if len(bad) > 5 else ".")}, 400)
         before = (_gobo_sizes().get("health") or {}).get("models") or 0
         if model_rows < 50 or model_rows < before * 0.5:
             return _json({"error": f"That file only has {model_rows} model rows; the current sheet has "
@@ -19634,22 +19891,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     # No longer monitored, so an open shift cannot just hang:
                     # close it now, recorded as this admin's correction.
                     try:
-                        w = _load_work()
-                        ws = w["open"].pop(target, None)
-                        if ws:
-                            nowu = datetime.now(timezone.utc)
-                            ws["end"] = nowu.isoformat()
-                            try:
-                                ws["secs"] = max(0, int((nowu - datetime.fromisoformat(ws["start"])).total_seconds()))
-                            except Exception:
-                                ws["secs"] = 0
-                            ws.update({"corrected": True, "corrected_by": who,
-                                       "corrected_at": nowu.isoformat(),
-                                       "note": "closed automatically when the role changed"})
-                            w["sessions"].append(ws)
-                            _write_work(w)
-                            _track(who, "work", "closed a session on role change",
-                                   _team_name(target) or target)
+                        _work_close_open(target, who, "closed automatically when the role changed",
+                                         "closed a session on role change")
                     except Exception:
                         logger.exception("could not close the work session on role change")
                 _track(who, "team", "changed a role",
@@ -19669,6 +19912,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     _drop_sessions(uid=target)   # off means off, this second
                     _dav_drop_cache(target)
                     _mail_release_owned(target, "account switched off")
+                    try:
+                        _work_close_open(target, who, "closed automatically when the account was switched off",
+                                         "closed a session when an account was switched off")
+                    except Exception:
+                        logger.exception("could not close the work session of a switched-off account")
                 _track(who, "team", "changed access",
                        f"{label}'s access was switched {'on' if on else 'off'}")
             elif op == "colour":
@@ -19795,6 +20043,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _drop_sessions(uid=target)
                 _dav_drop_cache(target)
                 _mail_release_owned(target, "account deleted")
+                try:
+                    _work_close_open(target, who, "closed automatically when the account was deleted",
+                                     "closed a session when an account was deleted")
+                except Exception:
+                    logger.exception("could not close the work session of a deleted account")
                 _track(who, "team", "deleted an account", label)
             else:
                 return _json({"error": "Unknown team action."}, 400)

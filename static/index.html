@@ -6872,9 +6872,17 @@ Projected Image UK"></textarea>
             } catch (e) { throw new Error('STREAM_TRANSPORT'); }
             if (!res.ok || !res.body) throw new Error('STREAM_TRANSPORT');
             const reader = res.body.getReader(), dec = new TextDecoder();
-            let buf = '', result = null, errored = null;
+            let buf = '', result = null, errored = null, heard = false;
             while (true) {
-                const { value, done } = await reader.read();
+                /* A connection dropped mid-answer usually REJECTS here rather
+                   than ending, and its raw "network error" reached the person. */
+                let chunk;
+                try { chunk = await reader.read(); }
+                catch (e) {
+                    if (heard) throw new Error('The answer was interrupted before it finished. Ask again to get it.');
+                    throw new Error('STREAM_TRANSPORT');
+                }
+                const { value, done } = chunk;
                 if (done) break;
                 buf += dec.decode(value, { stream: true });
                 let idx;
@@ -6883,13 +6891,20 @@ Projected Image UK"></textarea>
                     buf = buf.slice(idx + 2);
                     if (!line) continue;
                     let ev; try { ev = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+                    heard = true;
                     if (ev.type === 'step') { if (onStep) onStep(ev.label); }
                     else if (ev.type === 'done') result = ev.result;
                     else if (ev.type === 'error') errored = ev.error;
                 }
             }
             if (errored) throw new Error(errored);          // real server error: do NOT fall back
-            if (!result) throw new Error('STREAM_TRANSPORT'); // truncated: fall back
+            /* Cut off before any answer: the run had started, and was paid
+               for, by the time the first step arrived. Falling back to
+               /api/chat here ran the whole question again, billed a second
+               time, and the person waited twice. Only a stream that never
+               spoke at all is a transport the plain route may replace. */
+            if (!result && heard) throw new Error('The answer was interrupted before it finished. Ask again to get it.');
+            if (!result) throw new Error('STREAM_TRANSPORT'); // nothing came back at all: fall back
             return result;
         }
 
@@ -7324,14 +7339,21 @@ Projected Image UK"></textarea>
                move; the header and the changes strip stay fixed at the top and
                the page chat at the foot. Each spans the row, as it always has. */
             // Score + KPI strip
-            if (typeof data.score === 'number') {
-                const tier = data.score >= 80 ? 'good' : data.score >= 60 ? 'mid' : 'low';
-                const sc = el('div', 'seo-score ' + tier);
+            /* No number when the product read failed: the score is left out
+               rather than read as passing the checks that never ran. */
+            const scored = typeof data.score === 'number';
+            if (scored || data.score_note) {
+                const tier = !scored ? '' : data.score >= 80 ? ' good' : data.score >= 60 ? ' mid' : ' low';
+                const sc = el('div', 'seo-score' + tier);
                 const left = el('div');
-                left.append(el('div', 'num', String(data.score)), el('div', 'out', 'out of 100, optimization health score'));
-                const bar = el('div', 'bar'); const fill = el('i');
-                fill.style.width = Math.max(0, Math.min(100, data.score)) + '%'; bar.append(fill);
-                sc.append(left, bar);
+                left.append(el('div', 'num', scored ? String(data.score) : 'n/a'),
+                            el('div', 'out', scored ? 'out of 100, optimization health score' : data.score_note));
+                sc.append(left);
+                if (scored) {
+                    const bar = el('div', 'bar'); const fill = el('i');
+                    fill.style.width = Math.max(0, Math.min(100, data.score)) + '%'; bar.append(fill);
+                    sc.append(bar);
+                }
                 box.append(widget(sc, 'score', 'full', 'Optimization health score'));
             }
             const mets = (data.metrics || []).filter(m => m.label !== 'SEO score');
@@ -7805,6 +7827,7 @@ Projected Image UK"></textarea>
                 + (cur ? (' ' + cur) : '');
         }
         const fmtMoney = (n, cur) => money(n, cur, 0);
+        const P_ROWS_MAX = 300;   // rows drawn at once; the search and filters still cover every product
         const pState = { q: '', status: '', stock: '', vendor: '', type: '', tag: '', priceMin: null, priceMax: null, minRev: null, minUnits: null, createdAfter: '', createdBefore: '', sort: 'revenue_desc', period: 12, customFrom: null, customTo: null, compare: false, showFilters: false };
         async function loadProducts(force) {
             const box = $('products-content');
@@ -7999,7 +8022,9 @@ Projected Image UK"></textarea>
                 const s2 = el('span'); s2.append(el('b', null, fmtMoney(totRev, cur)), document.createTextNode(' revenue · ' + totUnits.toLocaleString() + ' units · ' + pPeriodLabel())); summary.append(s2);
                 footHost.innerHTML = '';
                 const foot = el('div', 'tbl-foot');
-                foot.append(el('div', 'tbl-count', 'Viewing ' + rows.length + ' of ' + all + ' product' + (all === 1 ? '' : 's')));
+                foot.append(el('div', 'tbl-count', 'Viewing ' + rows.length + ' of ' + all + ' product' + (all === 1 ? '' : 's')
+                    + (rows.length > P_ROWS_MAX ? '. The first ' + P_ROWS_MAX + ' are drawn: search or filter to reach the rest' : '')
+                    + (productList && productList.truncated ? '. The catalogue is larger than one read carries, so some products are not listed' : '')));
                 footHost.append(foot);
                 topHost.innerHTML = '';
                 const top = rows.filter(r => r.revenue > 0).slice(0, 6);
@@ -8013,7 +8038,10 @@ Projected Image UK"></textarea>
                 }
                 listWrap.innerHTML = '';
                 if (!rows.length) { listWrap.append(el('div', 'empty', 'No products match these filters.')); return; }
-                rows.forEach(r => {
+                /* The whole catalogue arrives so search and filters reach every
+                   product; the page draws the first P_ROWS_MAX of what matches,
+                   in the order chosen, and says when it stopped. */
+                rows.slice(0, P_ROWS_MAX).forEach(r => {
                     const p = r.p, row = el('button', 'prod-row');
                     const safeImg = (p.image && /^https:\/\//i.test(p.image)) ? p.image : null;
                     const th = document.createElement(safeImg ? 'img' : 'div'); th.className = 'prod-thumb';
@@ -9558,22 +9586,32 @@ Projected Image UK"></textarea>
             } }));
             const foundNote = el('div', 'field-help', picked.sku
                 ? ('Linked to the shop' + (picked.sku ? ' (' + picked.sku + ')' : '')) : '');
-            let findTimer = null;
+            let findTimer = null, repainting = false;
             findIn.addEventListener('input', function () {
+                /* The repaint below is an input event too; answering it
+                   would read the catalogue again, forever. */
+                if (repainting) return;
                 clearTimeout(findTimer);
                 const q = findIn.value.trim();
                 if (q.length < 2) { findRows = []; return; }
                 findTimer = setTimeout(async () => {
+                    if (!findIn.isConnected) return;
                     try {
                         const r = await api('/api/loans', { op: 'products', q: q });
                         findRows = (r.products || []).map(x => ({
                             id: x.variant_id || x.product_id, name: x.title,
                             sub: [x.sku, x.vendor].filter(Boolean).join(' \u00b7 '),
                             product_id: x.product_id, variant_id: x.variant_id, sku: x.sku }));
-                        /* The dropdown paints from the last keystroke, so ask
-                           for it again now the rows are actually here. */
-                        findIn.dispatchEvent(new Event('input', { bubbles: false }));
-                    } catch (e) { findRows = []; }
+                    } catch (e) {
+                        findRows = [];
+                        foundNote.textContent = e.message;
+                    }
+                    if (!findIn.isConnected) return;
+                    /* The dropdown paints from the last keystroke, so ask
+                       for it again now the rows are actually here. */
+                    repainting = true;
+                    try { findIn.dispatchEvent(new Event('input', { bubbles: false })); }
+                    finally { repainting = false; }
                 }, 220);
             }, true);
             crmField(grid, 'Name', nameIn);
@@ -11824,17 +11862,42 @@ Projected Image UK"></textarea>
             box.append(card);
         }
         async function showReconView() { renderRecon(); refreshRecon(); }
+        let reconListSeq = 0;   // the latest list read; see refreshReconList
+        let reconStatusSeq = 0; // the latest status read: only a full refresh asks
         async function refreshRecon() {
             /* Two independent reads, fired together rather than one after the
                other. The status half is the expensive one: it reads the whole
                reconciliation store and asks Xero and Gmail whether they are
                still connected. */
+            /* One sequence for both reads. The full refresh's status half is
+               the slow one, so a chip clicked while it was in flight drew its
+               list and was then painted over by the old filter's rows when
+               the refresh landed; a refresh overtaken by a newer read is
+               dropped like a stale list is. */
+            const my = ++reconListSeq, mySt = ++reconStatusSeq;
+            let st, ex;
             try {
-                const [st, ex] = await Promise.all([
+                [st, ex] = await Promise.all([
                     api('/api/recon/status', {}),
                     api('/api/recon/exceptions', reconFilter)]);
-                reconCache = { st, ex };
-            } catch (e) { reconCache = { error: e.message }; }
+            } catch (e) {
+                if (my !== reconListSeq) return;
+                reconCache = { error: e.message };
+                if (document.querySelector('#view-recon.active')) renderRecon();
+                return;
+            }
+            if (my !== reconListSeq) {
+                /* Overtaken on the list, by a filter change that did not ask
+                   for the status: unless a later full refresh did, this status
+                   is the newest there is, and the cache holds an older one
+                   (Xero still connected after a Disconnect, say). */
+                if (mySt === reconStatusSeq && reconCache && !reconCache.error) {
+                    reconCache.st = st;
+                    if (document.querySelector('#view-recon.active')) renderRecon();
+                }
+                return;
+            }
+            reconCache = { st, ex };
             if (document.querySelector('#view-recon.active')) renderRecon();
         }
         async function refreshReconList() {
@@ -11842,9 +11905,20 @@ Projected Image UK"></textarea>
                cannot change whether Xero is connected or when the last sweep
                ran, so it does not ask. */
             if (!reconCache || reconCache.error) return refreshRecon();
-            try {
-                reconCache = { st: reconCache.st, ex: await api('/api/recon/exceptions', reconFilter) };
-            } catch (e) { reconCache = { error: e.message }; }
+            /* One answer per filter change, and only the latest is drawn: two
+               quick chip clicks could land the slower, earlier answer last,
+               leaving Critical rows listed under the High chip. */
+            const my = ++reconListSeq;
+            let ex;
+            try { ex = await api('/api/recon/exceptions', reconFilter); }
+            catch (e) {
+                if (my !== reconListSeq) return;
+                reconCache = { error: e.message };
+                if (document.querySelector('#view-recon.active')) renderRecon();
+                return;
+            }
+            if (my !== reconListSeq) return;
+            reconCache = { st: (reconCache || {}).st, ex: ex };
             if (document.querySelector('#view-recon.active')) renderRecon();
         }
         const RECON_SEV = { critical: ['Critical', 'bad'], high: ['High', 'bad'],
@@ -16702,7 +16776,25 @@ Projected Image UK"></textarea>
             const saveB = el('button', 'btn btn-primary'); saveB.textContent = 'Save shipping settings';
             saveB.onclick = async () => {
                 const origin = {}; Object.keys(of).forEach(k => origin[k] = of[k].value.trim());
-                const clean = boxes.filter(b => b.name && b.width > 0 && b.length > 0 && b.depth > 0 && b.weight > 0);
+                /* Every preset is saved or none is. Half-filled rows used to be
+                   dropped in silence under "saved", and removing the last one
+                   was undone on reopen by the same rule, also under "saved". */
+                const gap = boxes.findIndex(b => !(String(b.name || '').trim() && b.width > 0 && b.length > 0
+                                                   && b.depth > 0 && b.weight > 0));
+                if (gap >= 0) {
+                    addToast('Box preset ' + (gap + 1) + ' (' + (String(boxes[gap].name || '').trim() || 'no name')
+                        + ') needs a name, all three sizes and a weight above 0. Fill it in or remove it.');
+                    return;
+                }
+                if (!boxes.length) {
+                    addToast('Keep at least one box preset: the dispatch panel starts every parcel from one.');
+                    return;
+                }
+                if (boxes.length > 24) {
+                    addToast('Keep it to 24 box presets: the server keeps the first 24, and the rest would be dropped.');
+                    return;
+                }
+                const clean = boxes;
                 saveB.disabled = true;
                 try {
                     const payload = { op: 'set', origin: origin, notify_customer: notifyCb.checked,
@@ -16715,7 +16807,7 @@ Projected Image UK"></textarea>
                         export_reason: erSel.value, duties_payor: dpSel.value,
                         label_size_production: sizeIn.label_size_production.value,
                         label_size_shipping: sizeIn.label_size_shipping.value };
-                    if (clean.length) payload.boxes = clean;
+                    payload.boxes = clean;
                     /* Only ever a box that is actually being saved: a default
                        pointing at a deleted or half-filled row would send the
                        dispatch panel looking for a parcel that is not there. */
@@ -22845,6 +22937,10 @@ Projected Image UK"></textarea>
                 err2.setAttribute('role', 'alert');
                 const go = el('button', 'btn btn-primary auth-go', 'Sign in');
                 const submit = async () => {
+                    /* A held Enter repeats keydown every few milliseconds, and
+                       each one posted the same ticket while the first was still
+                       in flight. The disabled button is the in-flight flag. */
+                    if (go.disabled) return;
                     go.disabled = true; err2.textContent = '';
                     try {
                         const r = await authApi('/api/auth/mfa-verify',
@@ -22853,7 +22949,7 @@ Projected Image UK"></textarea>
                     } catch (e) { err2.textContent = e.message; go.disabled = false; }
                 };
                 go.onclick = submit;
-                inCode.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+                inCode.onkeydown = (e) => { if (e.key === 'Enter' && !e.repeat) submit(); };
                 const back = el('button', 'auth-link auth-back', 'Start again');
                 back.onclick = () => { ov.dataset.mode = ''; authShow('login'); };
                 card.append(fc, err2, go, back);
@@ -22886,7 +22982,7 @@ Projected Image UK"></textarea>
                 inPw.autocomplete = 'new-password'; inPw.name = 'new-password';
                 inPw.placeholder = 'Password (8+ characters)';   // the full wording fits a phone only as the label
                 const go = el('button', 'btn btn-primary auth-go', 'Create the master account');
-                [inName, inUser, inPw].forEach(i => i.onkeydown = e => { if (e.key === 'Enter') go.click(); });
+                [inName, inUser, inPw].forEach(i => i.onkeydown = e => { if (e.key === 'Enter' && !e.repeat) go.click(); });
                 go.onclick = async () => {
                     go.disabled = true; err.textContent = '';
                     try {
@@ -22904,7 +23000,7 @@ Projected Image UK"></textarea>
                 inNew.autocomplete = 'new-password'; inNew.name = 'new-password';
                 inNew.placeholder = 'New password (8+ characters)';   // cut off at phone width in full
                 const go = el('button', 'btn btn-primary auth-go', 'Save my password');
-                [inCur, inNew].forEach(i => i.onkeydown = e => { if (e.key === 'Enter') go.click(); });
+                [inCur, inNew].forEach(i => i.onkeydown = e => { if (e.key === 'Enter' && !e.repeat) go.click(); });
                 go.onclick = async () => {
                     go.disabled = true; err.textContent = '';
                     try {
@@ -22933,6 +23029,7 @@ Projected Image UK"></textarea>
                 const [fp, inPw] = authField('Password', 'password', 'au-pw');
                 const go = el('button', 'btn btn-primary auth-go', 'Sign in');
                 const submit = async () => {
+                    if (go.disabled) return;   // in flight: a held Enter must not sign in twice
                     go.disabled = true; err.textContent = '';
                     try {
                         finish(await authApi('/api/auth/login', { username: inUser.value, password: inPw.value }));
@@ -22943,7 +23040,10 @@ Projected Image UK"></textarea>
                    first, so that is where the first Enter is pressed. The setup
                    and change cards already did this; login was the one that
                    missed it. */
-                [inUser, inPw].forEach(i => i.onkeydown = (e) => { if (e.key === 'Enter') submit(); });
+                [inUser, inPw].forEach(i => i.onkeydown = (e) => { if (e.key === 'Enter' && !e.repeat) submit(); });
+                /* !e.repeat: a held Enter repeats, and after a refusal the button is
+                   live again, so each repeat was another failed attempt counted against
+                   the account, and one carried into the two-step card as an empty code. */
                 /* There is no reset-by-email: accounts are the app's own, and
                    an admin resets a password from Team, which hands over a
                    starter password that has to be changed on first use. The

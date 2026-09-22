@@ -3,7 +3,7 @@
 Generated from the code by `tools/env_reference.py`; do not edit by hand.
 `make env-doc` rewrites it, and CI fails when it is stale.
 
-209 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
+212 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
 
 ## server.py
 
@@ -183,6 +183,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `COST_CACHE_PATH` | `"/data/cost_cache.json"` | copilot |  |
 | `CUSTOMS_GOBO_DESCRIPTION` | `"Glass Optical Filter"` | copilot |  |
 | `CUSTOMS_MEMORY_PATH` | `"/data/customs_memory.json"` | copilot |  |
+| `MARGIN_BACKFILL_MAX` | `"60"` | copilot | older orders fetched one by one |
 
 ## copilot.py - Production labels: orders carrying the production tag, shape
 
@@ -218,6 +219,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `ALERT_EMAIL_FROM` | `"Reactor <onboarding@resend.dev>"` | copilot |  |
 | `ALERT_EMAIL_TO` | `""` | copilot |  |
+| `MAIL_ALERT_AFTER_TICKS` | `"30"` | copilot |  |
 | `MAIL_LOOP_SECS` | `"60"` | copilot |  |
 | `RESEND_API_KEY` | `""` | copilot |  |
 | `WATCH_PATH` | `"/data/watch.json"` | copilot |  |
@@ -344,6 +346,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `RECON_DOC_BYTES_MAX` | `str(8 * 1024 * 1024)` | recon |  |
 | `RECON_GMAIL_QUERY` | `"(has:attachment OR remittance OR invoice OR statement OR...` | recon |  |
 | `RECON_MATERIAL_PENCE` | `"25000"` | recon | 250.00 |
+| `RECON_ORDER_CAP` | `"1500"` | recon |  |
 | `RECON_SEEN_CAP` | `"4000"` | recon |  |
 | `RECON_STALE_DAYS` | `"21"` | recon |  |
 | `RECON_THREADS_PER_SWEEP` | `"40"` | recon |  |

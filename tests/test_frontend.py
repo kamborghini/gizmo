@@ -6778,6 +6778,215 @@ def t_a_starter_password_reaches_the_choose_your_own_card():
 
 
 @test
+def t_a_cut_off_chat_answer_is_not_paid_for_twice():
+    """B41 in the 2026-09-19 bug audit. A stream that ended without its done
+    event fell back to /api/chat, which ran the whole question again: the
+    first run had started, and was billed, by the time its first step came.
+    Run here for real: the shipped streamChat against a stream cut after one
+    step, and against one that never said anything."""
+    fn = fn_src("async function streamChat(")
+    if not any(os.access(os.path.join(p, "node"), os.X_OK)
+               for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    harness = fn + r"""
+const authHeaders = async () => ({}); const appSession = () => '';
+function streamOf(chunks) {
+  const enc = new TextEncoder(); let i = 0;
+  return { ok: true, body: { getReader: () => ({ read: async () =>
+    i < chunks.length ? (chunks[i] === 'DROP' ? (i++, Promise.reject(new TypeError('network error')))
+                                              : { value: enc.encode(chunks[i++]), done: false })
+                      : { value: undefined, done: true } }) } };
+}
+async function outcome(chunks) {
+  globalThis.fetch = async () => streamOf(chunks);
+  try { await streamChat({}, () => {}); return 'ok'; } catch (e) { return e.message; }
+}
+(async () => {
+  const cut = await outcome(['data: {"type":"step","label":"Reading orders"}\n\n']);
+  const silent = await outcome([]);
+  const whole = await outcome(['data: {"type":"step","label":"x"}\n\n', 'data: {"type":"done","result":{"summary":"hi"}}\n\n']);
+  const dropped = await outcome(['data: {"type":"step","label":"x"}\n\n', 'DROP']);
+  const droppedEarly = await outcome(['DROP']);
+  console.log(JSON.stringify({ cut, silent, whole, dropped, droppedEarly }));
+})();
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(harness)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path], capture_output=True, text=True)
+        ok(r.returncode == 0, "the stream harness failed: " + (r.stderr or "")[:300])
+        got = json.loads((r.stdout or "").strip())
+        ok(got["cut"] != "STREAM_TRANSPORT" and "interrupted" in got["cut"],
+           "a stream cut after it started says so, and is not run again: " + got["cut"])
+        ok(got["silent"] == "STREAM_TRANSPORT", "a stream that never spoke may still fall back")
+        ok(got["whole"] == "ok", "and a whole answer is an answer")
+        ok("interrupted" in got["dropped"], "a connection dropped mid-answer says so, not 'network error': " + got["dropped"])
+        ok(got["droppedEarly"] == "STREAM_TRANSPORT", "and one dropped before a word may fall back")
+    finally:
+        os.unlink(path)
+
+
+@test
+def t_box_presets_are_saved_whole_or_not_at_all():
+    """B42 in the 2026-09-19 bug audit. Half-filled presets were dropped in
+    silence under "Shipping settings saved", and removing the last one came
+    back on reopen, also under "saved"."""
+    fn = SCRIPT[SCRIPT.index("const saveB = el('button', 'btn btn-primary'); saveB.textContent = 'Save shipping settings';"):][:2600]
+    ok("needs a name, all three sizes and a weight above 0" in fn, "an incomplete preset is named, not dropped")
+    ok("Keep at least one box preset" in fn, "and the last one cannot be removed by a save that says it was")
+    ok("payload.boxes = clean;" in fn and "if (clean.length) payload.boxes = clean;" not in fn,
+       "every preset is sent")
+    ok("boxes.length > 24" in fn, "and never more than the server keeps")
+
+
+@test
+def t_the_products_page_searches_everything_and_draws_a_bounded_list():
+    """B38 and its review. The report now sends every product so search and
+    filters reach them all; the page draws the first P_ROWS_MAX of what
+    matches, and says so, rather than a button row per product in a large
+    catalogue on every filter change."""
+    ok("const P_ROWS_MAX = 300;" in SCRIPT, "a bound on rows drawn")
+    ok("rows.slice(0, P_ROWS_MAX).forEach(r => {" in SCRIPT, "the list draws within it")
+    ok("rows.length > P_ROWS_MAX ? '. The first ' + P_ROWS_MAX" in SCRIPT, "and says when it stopped")
+
+
+@test
+def t_a_held_enter_signs_in_once():
+    """B43 in the 2026-09-19 bug audit. The Enter handlers call submit()
+    directly, and key repeat fires keydown every few milliseconds, so a held
+    Enter posted the same ticket, or the same password, several times over."""
+    step = SCRIPT[SCRIPT.index("function authShowMfa("):]
+    step = step[:step.index("\n            async function finish")]
+    ok("if (go.disabled) return;" in step, "the two-step code submits once")
+    login = SCRIPT.split("card.append(el('h2', null, 'Sign in')")[1][:1800]
+    ok("if (go.disabled) return;" in login, "and so does the password")
+    # And a held key's repeats are not presses: after a refusal the button is
+    # live again, and each repeat was another failed attempt on the account.
+    for site in ("inCode.onkeydown = (e) => { if (e.key === 'Enter' && !e.repeat) submit(); };",
+                 "[inUser, inPw].forEach(i => i.onkeydown = (e) => { if (e.key === 'Enter' && !e.repeat) submit(); });",
+                 "[inName, inUser, inPw].forEach(i => i.onkeydown = e => { if (e.key === 'Enter' && !e.repeat) go.click(); });",
+                 "[inCur, inNew].forEach(i => i.onkeydown = e => { if (e.key === 'Enter' && !e.repeat) go.click(); });"):
+        ok(site in SCRIPT, "a held Enter is one press: " + site[:60])
+
+
+@test
+def t_the_recon_list_draws_only_the_latest_filter():
+    """B46 in the 2026-09-19 bug audit, and its review. Every chip click sent
+    a read and drew whatever came back, so the slower, earlier answer could
+    land last and list Critical rows under the High chip; and the full
+    refresh, whose status half is the slow one, painted the old filter's rows
+    over a chip clicked while it was in flight. Run for real, in node, with
+    the answers released in the order that went wrong."""
+    if not any(os.access(os.path.join(p, "node"), os.X_OK)
+               for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    harness = ("let reconListSeq = 0; let reconStatusSeq = 0; let reconCache = null; const reconFilter = { severity: '' };\n"
+               "const draws = []; const document = { querySelector: () => true };\n"
+               "function renderRecon() { draws.push(reconCache && reconCache.ex ? reconCache.ex.rows : 'error'); }\n"
+               "const pending = [];\n"
+               "function api(path, payload) { return new Promise(res => pending.push({ path, sev: payload && payload.severity, res })); }\n"
+               + fn_src("async function refreshRecon(") + "\n" + fn_src("async function refreshReconList(") + r"""
+const tick = () => new Promise(r => setTimeout(r, 0));
+const answer = (i) => { const p = pending[i]; p.res(p.path.endsWith('status') ? { xero: 'disconnected' } : { rows: p.sev || 'all' }); };
+(async () => {
+  const out = {};
+  // A full refresh (after Disconnect Xero) in flight, then the Critical chip.
+  reconCache = { st: { xero: 'connected' }, ex: { rows: 'old' } };
+  const full = refreshRecon(); await tick();
+  reconFilter.severity = 'critical'; const list = refreshReconList(); await tick();
+  answer(2); await list; await tick();          // the chip's list lands first
+  answer(0); answer(1); await full; await tick(); // then the slow refresh
+  out.afterRefresh = reconCache.ex.rows;
+  out.statusAfterRefresh = reconCache.st.xero;
+  // The other order: the refresh lands first, then the chip.
+  pending.length = 0;
+  reconCache = { st: { xero: 'connected' }, ex: { rows: 'old' } };
+  const full2 = refreshRecon(); await tick();
+  reconFilter.severity = 'high'; const list2 = refreshReconList(); await tick();
+  answer(0); answer(1); await full2; await tick();
+  answer(2); await list2; await tick();
+  out.statusRefreshFirst = reconCache.st.xero;
+  out.rowsRefreshFirst = reconCache.ex.rows;
+  // Two chips, the earlier answer last.
+  pending.length = 0;
+  reconFilter.severity = 'high'; const a = refreshReconList(); await tick();
+  reconFilter.severity = 'critical'; const b = refreshReconList(); await tick();
+  answer(1); await b; await tick(); answer(0); await a; await tick();
+  out.afterChips = reconCache.ex.rows;
+  console.log(JSON.stringify(out));
+})();
+""")
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(harness)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path], capture_output=True, text=True)
+        ok(r.returncode == 0, "the recon harness failed: " + (r.stderr or "")[:300])
+        got = json.loads((r.stdout or "").strip())
+        eq_ = lambda a, b, m: ok(a == b, m + ": %r" % (a,))
+        eq_(got["afterRefresh"], "critical", "a slow full refresh does not paint over the chip clicked after it")
+        eq_(got["afterChips"], "critical", "and the earlier chip's late answer is dropped")
+        eq_(got["statusAfterRefresh"], "disconnected",
+            "an overtaken refresh still brings the newest status: the page does not say Xero is connected after a Disconnect")
+        eq_(got["statusRefreshFirst"], "disconnected", "whichever answer lands first")
+        eq_(got["rowsRefreshFirst"], "high", "and the chip's rows")
+    finally:
+        os.unlink(path)
+
+
+@test
+def t_the_loan_picker_reads_the_catalogue_once_per_keystroke():
+    """Review of B38. The picker's input listener repainted its dropdown by
+    firing another input event, which it then answered with another read:
+    one keystroke read the catalogue about every 220ms for as long as the
+    field existed, modal closed or not. A failed read, no longer cached,
+    turned that into a stream of full catalogue reads while Shopify refused.
+    Run for real, in node, on the shipped listener."""
+    if not any(os.access(os.path.join(p, "node"), os.X_OK)
+               for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    start = SCRIPT.index("let findTimer = null")
+    block = SCRIPT[start:SCRIPT.index("}, true);", start) + len("}, true);")]
+    harness = ("let findRows = []; const foundNote = { textContent: '' }; let calls = 0; let fail = false;\n"
+               "const findIn = new EventTarget(); findIn.value = 'epson'; findIn.isConnected = true;\n"
+               "async function api() { calls++; if (fail) throw new Error('Could not read the shop'); return { products: [] }; }\n"
+               "let painted = 0; findIn.addEventListener('input', () => { painted++; });\n"
+               + block + r"""
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+(async () => {
+  const out = {};
+  findIn.dispatchEvent(new Event('input')); await wait(1500);
+  out.okCalls = calls; out.painted = painted;
+  calls = 0; fail = true;
+  findIn.dispatchEvent(new Event('input')); await wait(1500);
+  out.failCalls = calls; out.note = foundNote.textContent;
+  calls = 0; fail = false; findIn.isConnected = false;
+  findIn.dispatchEvent(new Event('input')); await wait(600);
+  out.closedCalls = calls;
+  console.log(JSON.stringify(out));
+})();
+""")
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(harness)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path], capture_output=True, text=True)
+        ok(r.returncode == 0, "the picker harness failed: " + (r.stderr or "")[:300])
+        got = json.loads((r.stdout or "").strip())
+        ok(got["okCalls"] == 1, "one keystroke, one read: %r" % got)
+        ok(got["painted"] >= 2, "and the dropdown still repaints when the rows arrive: %r" % got)
+        ok(got["failCalls"] == 1 and "Could not read" in got["note"],
+           "a failed read is said once, not retried forever: %r" % got)
+        ok(got["closedCalls"] == 0, "and a closed picker reads nothing: %r" % got)
+    finally:
+        os.unlink(path)
+
+
+@test
 def t_a_sent_reply_with_a_warning_shows_the_warning():
     """B5, the page's half. The server answers a send that went somewhere
     surprising (Gmail filed it as its own conversation; the board could not

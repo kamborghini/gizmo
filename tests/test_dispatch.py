@@ -16490,18 +16490,22 @@ def t_fetching_parts_refuses_the_whole_set_when_one_is_missing_or_too_big():
     def go():
         ensure_auth()
         uid, _sess, _ = ready_user("Ann", "ann")
-        k1, k2 = f"mail/{uid}/aa-a.pdf", f"mail/{uid}/bb-b.png"
+        # Keys in the shape the upload route mints: mail/<uid>/<16 hex>-<name>.
+        # The fixture used "aa-" prefixes, which only passed while the name
+        # was cut at ANY dash, and that is what named Files attachments wrong.
+        hx = "0123456789abcdef"
+        k1, k2 = f"mail/{uid}/{hx}-a.pdf", f"mail/{uid}/{hx[::-1]}-b.png"
         s3.objects[k1] = b"%PDF"; s3.objects[k2] = b"\x89PNG"
         files, inline, total = _run(copilot._mail_fetch_parts([{"key": k1}], uid, inline_keys=[{"key": k2, "cid": "img1"}]))
         eq([f["name"] for f in files], ["a.pdf"]); eq(inline[0]["cid"], "img1"); eq(total, 8)
         try:
-            _run(copilot._mail_fetch_parts([{"key": k1}, {"key": f"mail/{uid}/cc-gone.pdf"}], uid))
+            _run(copilot._mail_fetch_parts([{"key": k1}, {"key": f"mail/{uid}/{hx}-gone.pdf"}], uid))
             ok(False, "a missing part must refuse the set")
         except ValueError as e:
             ok("gone.pdf" in str(e))
-        s3.objects[f"mail/{uid}/dd-huge.bin"] = b"x" * (copilot.MAIL_ATTACH_MAX + 1)
+        s3.objects[f"mail/{uid}/{hx}-huge.bin"] = b"x" * (copilot.MAIL_ATTACH_MAX + 1)
         try:
-            _run(copilot._mail_fetch_parts([{"key": f"mail/{uid}/dd-huge.bin"}], uid)); ok(False)
+            _run(copilot._mail_fetch_parts([{"key": f"mail/{uid}/{hx}-huge.bin"}], uid)); ok(False)
         except ValueError as e:
             ok("25MB" in str(e))
         try:
@@ -16529,7 +16533,7 @@ def t_a_rich_reply_goes_out_sanitised_with_its_twin_footer_and_quote():
             captured.update(thread_id=thread_id, to=to_addr, raw=raw_bytes); return {"id": "m2", "thread_id": thread_id}
         saved = (_gm.read_thread, _gm.send_message); _gm.read_thread, _gm.send_message = fake_read, fake_send
         try:
-            k = f"mail/{uid}/aa-quote.pdf"; s3.objects[k] = b"%PDF-1.4"
+            k = f"mail/{uid}/0123456789abcdef-quote.pdf"; s3.objects[k] = b"%PDF-1.4"   # the minted shape
             body = {"id": "t1", "html": '<p>Hi <b>Jo</b></p><script>x</script>', "cc": "pat@c.test",
                     "attachments": [{"key": k, "name": "quote.pdf", "type": "application/pdf"}]}
             d = post_s(sess, "/api/mail/send", dict(body, dry=True)).json()
@@ -16550,8 +16554,8 @@ def t_a_rich_reply_goes_out_sanitised_with_its_twin_footer_and_quote():
             eq([p.get_filename() for p in m.walk() if p.get_content_disposition() == "attachment"], ["quote.pdf"])
             t = copilot._load_mail()["threads"]["t1"]
             eq(t["sent_attachments"], [{"name": "quote.pdf", "size": 8}])
-            r = post_s(sess, "/api/mail/send", dict(body, attachments=[{"key": f"mail/{uid}/zz-gone.pdf"}]))
-            eq(r.status_code, 400); ok("gone.pdf" in r.json()["error"]); eq(t.get("send_pending"), None)
+            r = post_s(sess, "/api/mail/send", dict(body, attachments=[{"key": f"mail/{uid}/fedcba9876543210-gone.pdf"}]))
+            eq(r.status_code, 400); ok("gone.pdf is missing" in r.json()["error"], r.json()["error"]); eq(t.get("send_pending"), None)
             r = post_s(sess, "/api/mail/send", dict(body, quote=False)); m = message_from_bytes(captured["raw"], policy=_epol.default)
             ok("gizmo-quote" not in next(p for p in m.walk() if p.get_content_type() == "text/html").get_content())
         finally:
@@ -17611,7 +17615,7 @@ def t_an_oversized_attachment_is_refused_before_its_bytes_are_read():
     try:
         raised = ""
         try:
-            _run(copilot._mail_fetch_parts([{"key": "mail/u1/abc-big.pdf",
+            _run(copilot._mail_fetch_parts([{"key": "mail/u1/0123456789abcdef-big.pdf",
                                              "name": "big.pdf"}], "u1"))
         except ValueError as e:
             raised = str(e)
@@ -18779,6 +18783,520 @@ def t_a_failed_write_forgets_the_cached_store():
 
 
 # ---------------------------------------------------------------------------
+# The 2026-09-19 bug audit, the lows (B33, B36-B46)
+# ---------------------------------------------------------------------------
+
+@test
+def t_a_removed_part_timer_is_not_left_clocked_in():
+    """B33. Only a role change closed an open shift. Deleting a part-timer who
+    forgot to clock out, or switching them off, left them on the work board
+    clocked in for good, their hours still climbing into the totals."""
+    def go():
+        ensure_auth()
+        a, _s1, _p1 = ready_user("Ann Bench", "annb", role="parttime")
+        b, _s2, _p2 = ready_user("Bo Bench", "bob", role="parttime")
+        w = copilot._load_work()
+        for uid in (a, b):
+            w["open"][uid] = {"id": "w-" + uid, "uid": uid, "start": "2026-09-19T08:00:00+00:00"}
+        copilot._write_work(w)
+        eq(post("/api/team/user", {"op": "delete", "id": a}).status_code, 200)
+        eq(post("/api/team/user", {"op": "active", "id": b, "active": False}).status_code, 200)
+        w = copilot._load_work()
+        eq(sorted(w["open"]), [], "neither is still clocked in")
+        closed = {s["uid"]: s for s in w["sessions"] if s.get("id", "").startswith("w-")}
+        eq(sorted(closed), sorted([a, b]), "both shifts were closed into the ledger")
+        ok("deleted" in closed[a]["note"] and "switched off" in closed[b]["note"],
+           "each says why: " + str([closed[a]["note"], closed[b]["note"]]))
+        ok(closed[a]["corrected"] and closed[a]["secs"] > 0, "as a correction, with its hours")
+    with_accounts(go)
+
+
+@test
+def t_the_stock_bridge_counts_each_failed_attempt_once():
+    """B36. The drain counted an attempt and the push counted it again, so an
+    order was parked for a human after ten attempts rather than twenty."""
+    reset_dispatch(); reset_prod()
+    async def down(op, order_id, order_name, lines, sent):
+        raise RuntimeError("zeta is down")
+    def go(sent):
+        run_async(copilot._zeta_push_locked({}, 12345, "book"))
+        eq(copilot._load_zeta_pending()["12345"]["tries"], 1, "the first failure counts one")
+        for n in (2, 3, 4):
+            run_async(copilot._zeta_drain({}))
+            eq(copilot._load_zeta_pending()["12345"]["tries"], n, "one per retry, not two")
+        pend = copilot._load_zeta_pending()
+        pend["12345"]["tries"] = copilot.ZETA_MAX_TRIES
+        copilot._write_zeta_pending(pend)
+        run_async(copilot._zeta_drain({}))
+        entry = copilot._load_zeta_pending()["12345"]
+        ok(entry.get("stuck"), "parked after exactly ZETA_MAX_TRIES failures")
+        eq(entry["tries"], copilot.ZETA_MAX_TRIES, "and not tried again once parked")
+    with_zeta(go, send=down)
+
+
+@test
+def t_a_size_that_is_not_a_number_neither_crashes_nor_uploads():
+    """B37. The day sheet sorted by float(size), so one cell edited to "TBC"
+    in an uploaded sheet took the whole day's stock usage down; the upload
+    checked the columns, never the sizes in them."""
+    rows = {("TBC", "Mono"): {"size": "TBC", "glass": "Mono", "qty": 1},
+            ("37.5", "Mono"): {"size": "37.5", "glass": "Mono", "qty": 2},
+            ("64.9", "Colour"): {"size": "64.9", "glass": "Colour", "qty": 1}}
+    eq([r["size"] for r in sorted(rows.values(), key=copilot._usage_row_order)], ["64.9", "37.5", "TBC"],
+       "largest first, and a size that is not one goes last instead of raising")
+    def go():
+        ensure_auth()
+        text = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "gobo-sizes.csv"),
+                    encoding="utf-8-sig").read()
+        import csv as _csv, io as _io
+        src = list(_csv.DictReader(_io.StringIO(text)))
+        col = "Closest Production Size (mm)"
+        at = next(i for i, r in enumerate(src) if (r.get(col) or "").strip())
+        src[at][col] = "TBC"
+        buf = _io.StringIO()
+        wr = _csv.DictWriter(buf, fieldnames=list(src[0].keys()))
+        wr.writeheader(); wr.writerows(src)
+        before = open(copilot.GOBO_SIZES_LIVE, encoding="utf-8").read() if os.path.exists(copilot.GOBO_SIZES_LIVE) else None
+        r = post("/api/gobo-sizes/upload", {"csv": buf.getvalue()})
+        eq(r.status_code, 400, r.text)
+        ok("not a size" in r.json()["error"] and "TBC" in r.json()["error"] and f"row {at + 2}" in r.json()["error"],
+           "the bad cell is named: " + r.json()["error"])
+        after = open(copilot.GOBO_SIZES_LIVE, encoding="utf-8").read() if os.path.exists(copilot.GOBO_SIZES_LIVE) else None
+        eq(after, before, "and nothing was changed")
+    with_accounts(go)
+
+
+@test
+def t_the_products_tab_says_so_when_shopify_does_not_answer():
+    """B38. One unchecked page: a throttled answer showed as a store with no
+    products, and a store past 250 lost the rest, from the search as well."""
+    async def failed(registry, name, args):
+        if name == "shopify_list_products":
+            return {"_failed": True}
+        return {} if name != "shopify_list_orders" else {"orders": []}
+    saved = copilot._tool_json
+    copilot._tool_json = failed
+    try:
+        res = run_async(copilot.run_products_list({}, 1))
+    finally:
+        copilot._tool_json = saved
+    ok("did not answer" in res.get("error", ""), "an error, not an empty catalogue: " + json.dumps(res)[:160])
+    seen = []
+    async def paged(registry, name, args):
+        if name == "shopify_list_products":
+            seen.append(args.get("since_id"))
+            start = int(args.get("since_id") or 0)
+            n = 250 if start < 500 else 3
+            return {"products": [{"id": start + i + 1, "title": f"P{start + i + 1}", "variants": []} for i in range(n)]}
+        if name == "shopify_list_orders":
+            return {"orders": []}
+        return {}
+    copilot._tool_json = paged
+    try:
+        res = run_async(copilot.run_products_list({}, 1))
+    finally:
+        copilot._tool_json = saved
+    eq(len(res["products"]), 503, "every product, not the first 250")
+    eq(seen, [0, 250, 500], "paged by since_id")
+    eq(res["truncated"], False)
+
+
+@test
+def t_the_mail_loop_says_when_the_inbox_has_stopped():
+    """B39. The sync files its own errors under sync_error, so the loop's
+    except branch never ran and a dead Gmail grant stopped the inbox, the
+    filters and the enquiries without a word to anyone."""
+    emails = []
+    async def mail(subject, lines):
+        emails.append((subject, " ".join(lines)))
+        return True
+    saved = (copilot._send_alert_email, copilot._mail_fail_ticks)
+    copilot._send_alert_email = mail
+    w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
+    copilot._mail_fail_ticks = 0
+    try:
+        for _ in range(copilot.MAIL_ALERT_AFTER_TICKS - 1):
+            eq(run_async(copilot._mail_loop_health("invalid_grant")), False)
+        eq(emails, [], "a blip is not an outage")
+        eq(run_async(copilot._mail_loop_health("invalid_grant")), True, "half an hour of failures is")
+        ok("stopped syncing" in emails[0][0] and "invalid_grant" in emails[0][1], emails)
+        eq(run_async(copilot._mail_loop_health("invalid_grant")), False, "once a day, not once a minute")
+        eq(run_async(copilot._mail_loop_health("")), False)
+        eq(copilot._mail_fail_ticks, 0, "a good sync starts the count again")
+    finally:
+        copilot._send_alert_email, copilot._mail_fail_ticks = saved
+        copilot._mail_alert_sent = 0.0
+        w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
+
+
+@test
+def t_a_files_attachment_is_named_whole():
+    """B40. The prefix split came off at any dash, so a file from Files called
+    gobo-layout-final.pdf was "layout-final.pdf" in every refusal."""
+    eq(copilot._mail_part_name("f12/gobo-layout-final.pdf"), "gobo-layout-final.pdf")
+    eq(copilot._mail_part_name("mail/u1/0123456789abcdef-proof-v2.pdf"), "proof-v2.pdf",
+       "an upload's own prefix still comes off")
+    eq(copilot._mail_part_name("mail/u1/not-hex-prefix.pdf"), "not-hex-prefix.pdf")
+
+
+@test
+def t_the_same_pdf_twice_in_one_batch_is_read_once():
+    """B44. The duplicate check read the documents on disk, which the sweep
+    writes at its end, so two copies of one invoice in the same batch were
+    both read and both raised."""
+    async def same_bytes(message_id, attachment_id):
+        return b"not really a pdf, identical in both messages"
+    _rc.configure(gmail_bytes=same_bytes)
+    try:
+        first = run_async(_rc.extract_doc({"source_key": "m1:a1", "message_id": "m1", "attachment_id": "a1",
+                                           "size": 10}, {}))
+        ok(first and first.get("sha1"), "the first copy is read")
+        second = run_async(_rc.extract_doc({"source_key": "m2:a2", "message_id": "m2", "attachment_id": "a2",
+                                            "size": 10}, {"m1:a1": first}))
+        ok(second and second.get("ignored") and second.get("duplicate_of") == "m1:a1",
+           "the second, in the same batch, is recognised as the first: " + json.dumps(second)[:160])
+    finally:
+        _rc.configure(gmail_bytes=None)
+
+
+@test
+def t_a_capped_order_read_says_the_newest_were_not_checked():
+    """B45. The crawl stopped at 1500 orders, oldest first, with no note, so
+    past that the newest sales were never checked and the sweep read clean."""
+    # An invoice for an order the capped read never reaches: it must not be
+    # flagged as a Xero sale with no Shopify order.
+    # (An amount no order has: one that matches any order is not an orphan.)
+    fx = _FakeXero(invoices=[_raw_xinv("INV-900001", "987.65")])
+    stores = _recon_world(fx, [])
+    async def endless(reg, name, args):
+        if name == "shopify_list_orders":
+            start = int(args.get("since_id") or 0)
+            return {"orders": [_raw_order(start + i + 1, f"#{start + i + 1}", "10.00") for i in range(250)]}
+        if name == "shopify_list_payouts":
+            return {"available": False, "reason": "not on Shopify Payments"}
+        return {"_failed": True}
+    saved = _rc.ORDER_FETCH_CAP
+    _rc.ORDER_FETCH_CAP = 500
+    _rc.configure(tool_json=endless)
+    try:
+        r = run_async(_rc.sweep())
+        ok(any("stopped at its limit of 500 orders" in n for n in r["notes"]), r["notes"])
+        ok(not any(e["kind"] == "xero_sale_without_shopify" for e in stores["store"]["exceptions"].values()),
+           "and the Xero-sales check sat it out rather than flag invoices for orders it never read")
+        stores2 = _recon_world(fx, [_raw_order(1, "#1", "10.00")])
+        r2 = run_async(_rc.sweep())
+        ok(not any("stopped at its limit" in n for n in r2["notes"]), "a read that finished says nothing")
+        # A page that fails part way leaves the same hole as the cap.
+        async def breaks(reg, name, args):
+            if name == "shopify_list_orders":
+                start = int(args.get("since_id") or 0)
+                if start >= 250:
+                    return {"_failed": True}
+                return {"orders": [_raw_order(start + i + 1, f"#{start + i + 1}", "10.00") for i in range(250)]}
+            if name == "shopify_list_payouts":
+                return {"available": False, "reason": "not on Shopify Payments"}
+            return {"_failed": True}
+        stores3 = _recon_world(fx, [])
+        _rc.configure(tool_json=breaks)
+        run_async(_rc.sweep())
+        ok(not any(e["kind"] == "xero_sale_without_shopify" for e in stores3["store"]["exceptions"].values()),
+           "a failed page skips the Xero-sales check too")
+        # Exactly the cap, and nothing after it: the read was whole.
+        async def exact(reg, name, args):
+            if name == "shopify_list_orders":
+                start = int(args.get("since_id") or 0)
+                if start >= 500:
+                    return {"orders": []}
+                return {"orders": [_raw_order(start + i + 1, f"#{start + i + 1}", "10.00") for i in range(250)]}
+            if name == "shopify_list_payouts":
+                return {"available": False, "reason": "not on Shopify Payments"}
+            return {"_failed": True}
+        stores4 = _recon_world(fx, [])
+        _rc.configure(tool_json=exact)
+        r4 = run_async(_rc.sweep())
+        ok(not any("stopped at its limit" in n for n in r4["notes"]), "a window of exactly the cap is whole")
+        ok(any(e["kind"] == "xero_sale_without_shopify" for e in stores4["store"]["exceptions"].values()),
+           "and the Xero-sales check runs on it")
+    finally:
+        _rc.ORDER_FETCH_CAP = saved
+        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
+                      mail_thread=None, load_store=None, write_store=None,
+                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
+
+
+@test
+def t_a_size_cell_is_read_as_the_number_the_bench_uses():
+    """Review of B37. The upload accepted "86 mm" and "86.0" (the cleaner can
+    read them) but the sheet stored the raw text, and the bezel rule looks up
+    "86" exactly: an "86 mm" line booked 86mm glass instead of a 64.9 blank
+    and a ring. The sheet is normalised as it is read."""
+    for raw, want in (("86 mm", "86"), ("86.0", "86"), ("37.5", "37.5"), (" 64.9 ", "64.9"),
+                      ("TBC", "TBC"), ("", "")):
+        eq(copilot._sheet_size(raw), want, repr(raw))
+    ok(copilot._sheet_size("86 mm") in copilot._BEZEL_UP, "and it is the key the bezel rule knows")
+
+
+@test
+def t_the_mail_loop_itself_raises_the_alarm_and_never_floods():
+    """Review of B39. Driven through the loop's own tick, from the sync's
+    sync_error, and with watch.json unwritable: the stamp there was the only
+    brake, so a store that could not be written sent an email every minute."""
+    emails = []
+    async def mail(subject, lines):
+        emails.append(subject)
+        return True
+    async def failing_sync(force=False):
+        st = copilot._load_mail()
+        st["sync_error"] = "invalid_grant"
+        copilot._write_mail(st)
+        return "invalid_grant"
+    saved = (copilot._send_alert_email, copilot._mail_fail_ticks, copilot._mail_alert_sent,
+             copilot._mail_sync_now, _gm.connected)
+    copilot._send_alert_email, copilot._mail_sync_now = mail, failing_sync
+    _gm.connected = lambda *a, **k: True
+    copilot._mail_fail_ticks, copilot._mail_alert_sent = 0, 0.0
+    w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
+    def go():
+        copilot._poisoned_stores.add(copilot.WATCH_PATH)      # watch.json cannot be written
+        for _ in range(copilot.MAIL_ALERT_AFTER_TICKS + 10):
+            run_async(copilot._mail_loop_tick())
+        eq(emails, ["Reactor: the shared inbox has stopped syncing"],
+           "one email from the real loop, and one only, though nothing could be stamped on disk")
+    try:
+        with_mail(go)
+    finally:
+        copilot._poisoned_stores.discard(copilot.WATCH_PATH)
+        (copilot._send_alert_email, copilot._mail_fail_ticks, copilot._mail_alert_sent,
+         copilot._mail_sync_now, _gm.connected) = saved
+        copilot._mail_alert_sent = 0.0
+        w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
+
+
+@test
+def t_every_product_reader_reads_the_whole_catalogue_or_says_it_could_not():
+    """Review of B38. The Products tab was one of four readers that took a
+    single page of 250: the SEO audit (whose failed read reported no thin
+    descriptions), the Overview's low-stock count and the loan-unit picker."""
+    def catalogue(n, fail_after=None):
+        calls = []
+        async def tools(registry, name, args):
+            if name != "shopify_list_products":
+                return {}
+            calls.append(args.get("since_id"))
+            if fail_after is not None and len(calls) > fail_after:
+                return {"_failed": True}
+            start = int(args.get("since_id") or 0)
+            left = max(0, n - start)
+            return {"products": [{"id": start + i + 1, "title": f"P{start + i + 1}", "handle": f"p{start + i + 1}",
+                                  "body_html": "", "images": [], "variants": [{"id": 1, "inventory_quantity": 1}]}
+                                 for i in range(min(int(args.get("limit") or 250), left))]}
+        return tools, calls
+    saved = copilot._tool_json
+    try:
+        copilot._tool_json, calls = catalogue(260)
+        prods, okd, cut = run_async(copilot._all_products({}, "id"))
+        eq((len(prods), okd, cut), (260, True, False))
+        copilot._tool_json, _c = catalogue(600, fail_after=1)
+        eq(run_async(copilot._all_products({}, "id"))[1], False, "a failed page is a failed read")
+        sig = run_async(copilot._seo_product_signals({}))
+        ok(sig.get("unavailable"), "the SEO audit knows its read failed")
+        _score, kpis = copilot._seo_scorecard(sig, 200, 200, [], "shop.test")
+        thin = next(k for k in kpis if k["label"] == "Thin descriptions")
+        eq(thin["value"], "n/a", "and says so rather than reporting none")
+        ok("did not answer" in thin["detail"]["empty"], thin["detail"])
+        eq(_score, None, "no headline score: a number would read as passing the checks that never ran, "
+                         "and the change alert would compare it with the last whole one")
+        head = next(k for k in kpis if k["label"] == "SEO score")
+        eq(head["value"], "n/a")
+        eq(copilot._metric_snapshot({"score": _score, "metrics": kpis})["metrics"].get("SEO score"),
+           None, "so nothing is saved for the alert to compare")
+        copilot._loan_products.update({"at": 0.0, "rows": []})
+        raised = False
+        try:
+            run_async(copilot._loan_product_rows({}))
+        except RuntimeError:
+            raised = True
+        ok(raised, "the loan picker's failed read is an error the route reports, not 'no matches'")
+        copilot._tool_json, _c = catalogue(300)
+        copilot._loan_products.update({"at": 0.0, "rows": []})
+        eq(len(run_async(copilot._loan_product_rows({}))), 300, "the loan picker reaches every product")
+    finally:
+        copilot._tool_json = saved
+        copilot._loan_products.update({"at": 0.0, "rows": []})
+
+
+@test
+def t_an_open_shift_left_by_a_removed_account_is_swept_up():
+    """Review of B33. The fix closes a shift when an account is removed now;
+    one left open by an account removed before that sat on the board for good."""
+    def go():
+        ensure_auth()
+        a, _s, _p = ready_user("Cy Bench", "cyb", role="parttime")
+        d = copilot._load_users()
+        d["users"][a]["deleted"], d["users"][a]["active"] = True, False
+        copilot._write_users(d)
+        w = copilot._load_work()
+        w["open"][a] = {"id": "w-old", "uid": a, "start": "2026-09-01T08:00:00+00:00"}
+        w["open"]["ghost"] = {"id": "w-ghost", "uid": "ghost", "start": "2026-09-01T08:00:00+00:00"}
+        copilot._write_work(w)
+        eq(copilot._work_close_orphans(), [a], "the removed account's shift is closed")
+        eq(list(copilot._load_work()["open"]), ["ghost"],
+           "and one the register has never heard of is left alone: delete is a soft delete, "
+           "so a missing account means a lost register, not a removal")
+        eq(copilot._work_close_orphans(), [], "and a second pass finds nothing")
+    with_accounts(go)
+
+
+@test
+def t_a_broken_accounts_file_clocks_nobody_out():
+    """Review of the B33 sweep. An unreadable users.json loads as an empty
+    register, and against an empty register every open shift belonged to a
+    missing account: the hourly check wrote every part-timer's shift closed
+    as "the account had been removed", in the hour the watchdog was already
+    alerting that the register had emptied."""
+    def go():
+        ensure_auth()
+        b, _s, _p = ready_user("Di Bench", "dib", role="parttime")
+        c, _s2, _p2 = ready_user("Ed Bench", "edb", role="parttime")
+        w = copilot._load_work()
+        for uid in (b, c):
+            w["open"][uid] = {"id": "w-" + uid, "uid": uid, "start": "2026-09-01T08:00:00+00:00"}
+        copilot._write_work(w)
+        with open(copilot.USERS_PATH, "w") as fh:
+            fh.write("{ not json")
+        copilot._users_mem = None
+        try:
+            eq(copilot._work_close_orphans(), [], "nothing is closed on an unreadable register")
+            eq(sorted(copilot._load_work()["open"]), sorted([b, c]), "both are still clocked in")
+        finally:
+            copilot._poisoned_stores.discard(copilot.USERS_PATH)
+    with_accounts(go)
+
+
+@test
+def t_the_margin_report_counts_only_what_is_still_on_the_order():
+    """Note from the B4 review. A refunded unit stayed in the margin report's
+    revenue and its goods cost; and an order past the report's back-fill bound
+    was called a Shopify load failure."""
+    from datetime import datetime as _dt, timezone as _tz
+    reset_dispatch(); reset_prod()
+    order = {"id": 778, "name": "#778", "currency": "GBP", "created_at": _dt.now(_tz.utc).isoformat(),
+             "taxes_included": False, "total_price": "200.00",
+             "line_items": [{"id": 1, "title": "Gobo", "quantity": 2, "current_quantity": 1, "price": "100.00",
+                             "variant_id": 111, "discount_allocations": [{"amount": "20.00"}]}],
+             "shipping_lines": []}
+    copilot._record_dispatch(778, {"tracking_number": "T8", "carrier_name": "UPS", "order_name": "#778",
+                                   "amount_ex_vat": 0.0, "dispatched_at": _dt.now(_tz.utc).isoformat()})
+    async def tools(registry, name, args):
+        if name == "shopify_list_orders":
+            return {"orders": [order]}
+        if name == "shopify_get_variant":
+            return {"id": 111, "inventory_item_id": 9111}
+        if name == "shopify_get_inventory_items":
+            return {"inventory_items": [{"id": 9111, "cost": "30.00"}]}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    copilot.COST_CACHE_PATH = SCRATCH + "/cost_cache2.json"
+    try:
+        os.remove(copilot.COST_CACHE_PATH)
+    except FileNotFoundError:
+        pass
+    try:
+        res = run_async(copilot.run_margin_report({}, days=30))
+        row = next(r for r in res["rows"] if str(r.get("order_id")) == "778")
+        eq(row["revenue"], 90.0, "one of two units left: (200 - 20) / 2")
+        eq(row["goods_cost"], 30.0, "and one unit's cost")
+    finally:
+        copilot._tool_json = saved
+        reset_dispatch()
+    for oid in (801, 802):
+        copilot._record_dispatch(oid, {"tracking_number": f"T{oid}", "carrier_name": "UPS", "order_name": f"#{oid}",
+                                       "dispatched_at": _dt.now(_tz.utc).isoformat()})
+    async def none(registry, name, args):
+        return {"orders": []} if name == "shopify_list_orders" else {"_failed": True}
+    saved_max = copilot.MARGIN_BACKFILL_MAX
+    copilot._tool_json, copilot.MARGIN_BACKFILL_MAX = none, 1
+    try:
+        res = run_async(copilot.run_margin_report({}, days=30))
+        notes = sorted(r["incomplete"] for r in res["rows"] if str(r.get("order_id")) in ("801", "802"))
+        eq(len(notes), 2)
+        ok(any("could not be loaded from Shopify" in n for n in notes), "the one fetched and refused says so")
+        ok(any("reads at most 1 such orders" in n for n in notes), "the one past the bound says why: " + str(notes))
+    finally:
+        copilot._tool_json, copilot.MARGIN_BACKFILL_MAX = saved, saved_max
+        reset_dispatch()
+    # The list read itself failed: an order missing from it says nothing
+    # about its age, and Shopify is refusing, so the back-fill stops asking.
+    for oid in range(810, 816):
+        copilot._record_dispatch(oid, {"tracking_number": f"T{oid}", "carrier_name": "UPS", "order_name": f"#{oid}",
+                                       "dispatched_at": _dt.now(_tz.utc).isoformat()})
+    singles = []
+    async def refusing(registry, name, args):
+        if name == "shopify_get_order":
+            singles.append(args.get("order_id"))
+        return {"_failed": True}
+    copilot._tool_json, copilot.MARGIN_BACKFILL_MAX = refusing, 1
+    copilot._bust_orders()
+    try:
+        res = run_async(copilot.run_margin_report({}, days=31))
+        notes = [r["incomplete"] for r in res["rows"]]
+        eq(len(notes), 6)
+        ok(all(n == "the order could not be loaded from Shopify" for n in notes),
+           "no age reason when the read failed: " + str(notes))
+        copilot.MARGIN_BACKFILL_MAX = 60
+        singles.clear()
+        run_async(copilot.run_margin_report({}, days=32))
+        eq(len(singles), 3, "three refusals in a row and the back-fill stops asking")
+    finally:
+        copilot._tool_json, copilot.MARGIN_BACKFILL_MAX = saved, saved_max
+        reset_dispatch()
+
+
+@test
+def t_a_conversation_started_in_gmail_is_not_triaged_as_an_arrival():
+    """Note from the B17 review. A conversation the shop started from Gmail
+    itself reached the board through the sync, and the inbox rules ran on its
+    first message, which is ours. Gmail labels such a message SENT; a
+    storefront notification, also from the shop's address, carries no SENT
+    and is still judged as the enquiry it may be."""
+    store = {"threads": {}, "rules": [{"id": "f1", "name": "Internal mail", "enabled": True, "mode": "all",
+             "conditions": [{"field": "domain", "op": "is", "value": "test-store.co.uk"}],
+             "assign": "", "pool": [], "done": True, "folder": "Internal", "archive": True,
+             "hits": 0, "last_hit_at": "", "_next": 0}]}
+    ours = {"id": "g1", "historyId": "1", "subject": "Contact form follow-up",
+            "messages": [dict(_mk_msg("g1-m1", "Sales", MBOX, "2026-09-20T09:00:00+00:00"),
+                              to="jo@customer.com", labels=["SENT"])]}
+    copilot._mail_apply_thread(store, ours, MBOX)
+    t = store["threads"]["g1"]
+    eq((t.get("rule"), t.get("folder"), t.get("enquiry")), (None, None, None),
+       "no rule and no enquiry on our own message")
+    eq(store["rules"][0]["hits"], 0)
+    notice = {"id": "g2", "historyId": "1", "subject": "New customer message",
+              "messages": [dict(_mk_msg("g2-m1", "Store", MBOX, "2026-09-20T09:00:00+00:00"), labels=["INBOX"])]}
+    copilot._mail_apply_thread(store, notice, MBOX)
+    eq(store["threads"]["g2"].get("enquiry"), "new", "the storefront notification is still an enquiry")
+    # Who started it is read before the store keeps only the latest messages:
+    # a customer's long thread whose kept window happens to open on one of
+    # our replies is still the customer's, and still triaged.
+    rule = {"id": "f2", "name": "Customer", "enabled": True, "mode": "all",
+            "conditions": [{"field": "domain", "op": "is", "value": "customer.com"}],
+            "assign": "", "pool": [], "done": False, "folder": "Customers", "archive": False,
+            "hits": 0, "last_hit_at": "", "_next": 0}
+    store2 = {"threads": {}, "rules": [rule]}
+    n = copilot.MAIL_MSGS_PER_THREAD
+    msgs = [dict(_mk_msg("g3-m0", "Jo", "jo@customer.com", "2026-09-01T09:00:00+00:00"), labels=["INBOX"])]
+    for i in range(1, n + 1):
+        ours_turn = i % 2 == 1
+        msgs.append(dict(_mk_msg(f"g3-m{i}", "Sales" if ours_turn else "Jo",
+                                 MBOX if ours_turn else "jo@customer.com",
+                                 "2026-09-%02dT09:%02d:00+00:00" % (2 + i // 60, i % 60)),
+                         labels=["SENT"] if ours_turn else ["INBOX"]))
+    copilot._mail_apply_thread(store2, {"id": "g3", "historyId": "1", "subject": "Long job", "messages": msgs}, MBOX)
+    eq(store2["threads"]["g3"].get("folder"), "Customers",
+       "a customer's thread is triaged however the kept window happens to begin")
+
+
+# ---------------------------------------------------------------------------
 # The 2026-09-19 bug audit (docs/bugs/2026-09-19-bug-audit.md): the highs and
 # the pattern fixes, each pinned by the behaviour that was wrong.
 # ---------------------------------------------------------------------------
@@ -19699,6 +20217,69 @@ def t_a_disconnect_waits_for_a_running_sweep():
             _rc._sweeping["on"] = False
     with_accounts(go)
 
+
+
+@test
+def t_a_broken_mailbox_file_still_raises_the_inbox_alarm():
+    """Review of B39. The loop read the sync's error back out of the mailbox
+    store, so when that store was the thing that broke, the sync's write of
+    its error failed, the loop re-read an empty default, and the failure count
+    started again every minute: no alarm, ever. Driven through the real sync."""
+    emails = []
+    async def mail(subject, lines):
+        emails.append(subject)
+        return True
+    async def gmail_down(*a, **k):
+        raise RuntimeError("invalid_grant")
+    saved = (copilot._send_alert_email, copilot._mail_fail_ticks, copilot._mail_alert_sent,
+             _gm.connected, _gm.list_threads, _gm.address)
+    def go():
+        copilot._send_alert_email = mail
+        _gm.connected = lambda *a, **k: True
+        _gm.list_threads = gmail_down
+        _gm.address = lambda *a, **k: MBOX
+        copilot._mail_fail_ticks, copilot._mail_alert_sent = 0, 0.0
+        w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
+        with open(copilot.MAILBOX_PATH, "w") as fh:
+            fh.write("{ truncated")
+        copilot._mail_mem = None
+        for _ in range(copilot.MAIL_ALERT_AFTER_TICKS + 2):
+            run_async(copilot._mail_loop_tick())
+        eq(emails, ["Reactor: the shared inbox has stopped syncing"],
+           "the alarm is raised although the mailbox file could not hold the error")
+    try:
+        with_mail(go)
+    finally:
+        (copilot._send_alert_email, copilot._mail_fail_ticks, copilot._mail_alert_sent,
+         _gm.connected, _gm.list_threads, _gm.address) = saved
+        copilot._mail_alert_sent = 0.0
+        copilot._poisoned_stores.discard(copilot.MAILBOX_PATH)
+        w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
+
+
+@test
+def t_the_chat_stream_says_it_has_started_before_the_answer():
+    """Review of B41. The page may re-ask /api/chat only when the stream
+    never spoke, and an answer with no tool steps said nothing until it was
+    done: cut off mid-answer, it was run and billed a second time. The
+    stream's first event now says the run is under way."""
+    started = []
+    async def slow_answer(history, dispatch, tools, model, extra, emit=None):
+        started.append(True)
+        return {"structured": {"summary": "hi"}}
+    def go():
+        ensure_auth()
+        _a, sess, _p = ready_user("Fay Chat", "fayc", role="admin")
+        saved = copilot.run_chat
+        copilot.run_chat = slow_answer
+        copilot._rl_global.clear()
+        try:
+            r = post_s(sess, "/api/chat/stream", {"message": "hello"})
+            events = [json.loads(l[5:]) for l in r.text.split("\n") if l.startswith("data:")]
+            eq([e["type"] for e in events], ["start", "done"], "the first thing said is that it started")
+        finally:
+            copilot.run_chat = saved
+    with_accounts(go)
 
 for fn in TESTS:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
