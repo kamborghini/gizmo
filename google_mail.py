@@ -24,11 +24,13 @@ Env:
 Unconfigured -> connected() is False and the Inbox tab shows a connect card.
 """
 import os
+import re
 import html as _htm
 import json
 import time
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 from email.utils import parseaddr, parsedate_to_datetime
 from urllib.parse import urlencode
 
@@ -380,7 +382,7 @@ async def list_threads(query: str = "in:inbox", max_results: int = 100) -> dict:
 
 
 async def list_thread_ids(query: str, max_results: int = 500, pages: int = 8, acct: Account = SALES,
-                          out_complete=None) -> set:
+                          out_complete=None, history: Optional[dict] = None) -> set:
     """Just the ids matching a query.
 
     Used to ask Gmail point blank which threads are unread, rather than
@@ -396,6 +398,11 @@ async def list_thread_ids(query: str, max_results: int = 500, pages: int = 8, ac
         for t in (data.get("threads") or []):
             if t.get("id"):
                 out.add(str(t["id"]))
+                if history is not None:
+                    # Moves whenever the thread changes, a new message
+                    # included: what lets a caller tell a thread it has
+                    # already read from one that has grown since.
+                    history[str(t["id"])] = str(t.get("historyId") or "")
         token = data.get("nextPageToken")
         done += 1
         if not token:
@@ -451,7 +458,7 @@ async def get_thread(thread_id: str, acct: Account = SALES) -> dict:
         name, email = parseaddr(_header(m, "From"))
         subject = subject or _header(m, "Subject")
         files: list = []
-        _walk_files(m.get("payload") or {}, files)
+        _walk_files(m.get("payload") or {}, files, _cid_refs(" ".join(_html_parts(m.get("payload") or {}))))
         for f in files:
             f["msg"] = str(m.get("id") or "")
         msgs.append({"id": str(m.get("id") or ""),
@@ -505,20 +512,53 @@ def _b64url(data: str, charset: str = "") -> str:
     return raw.decode("utf-8", "replace")
 
 
-def _walk_files(part: dict, out: list) -> None:
+# A signature logo is small; artwork pasted into an email body usually is not.
+INLINE_DECOR_MAX = 64 * 1024
+
+
+def _cid_refs(html: str) -> set:
+    """The Content-IDs an HTML body actually draws, lower-cased, without <>."""
+    return {c.strip().strip("<>").lower()
+            for c in re.findall(r"cid:([^\"'\s>)]+)", html or "", re.I)}
+
+
+def _html_parts(part: dict) -> list:
+    """Every inline text/html body in the tree. Apple Mail splits a message
+    into several HTML parts around its images, so the cids one part draws are
+    not the whole story."""
+    if part.get("filename"):
+        return []
+    kids = part.get("parts") or []
+    if kids:
+        return [h for k in kids for h in _html_parts(k)]
+    mime = str(part.get("mimeType") or "").split(";")[0].strip().lower()
+    body = part.get("body") or {}
+    if mime == "text/html" and body.get("data") and not body.get("attachmentId"):
+        return [_b64url(body["data"], _part_charset(part))]
+    return []
+
+
+def _walk_files(part: dict, out: list, cids: Optional[set] = None) -> None:
     """Attachment names and sizes from the part tree. The BYTES are never
     touched here: an attachmentId is a pointer, and fetching it is a separate,
-    deliberate act (a 20MB artwork file has no business in a board refresh)."""
+    deliberate act (a 20MB artwork file has no business in a board refresh).
+
+    `cids` is what the message's HTML draws by cid:. A corporate signature
+    ships its logo as a small image with a filename that the HTML draws, so
+    counting those puts a paperclip on half the inbox and offers image001.png
+    as if it were artwork: those, and only those, are skipped. A Content-ID
+    or an inline disposition alone says nothing: Gmail puts a Content-ID on
+    every attachment, and Apple Mail sends PDFs and photos inline, and both
+    were being dropped whole, from the Inbox and from reconciliation."""
     name = str(part.get("filename") or "").strip()
     body = part.get("body") or {}
     if name:
-        # A corporate signature ships its logo as an inline part WITH a
-        # filename, so counting those puts a paperclip on half the inbox and
-        # offers image001.png as if it were artwork. Inline parts carry a
-        # Content-ID and say "inline" in their disposition.
         hdrs = {str(h.get("name", "")).lower(): str(h.get("value") or "")
                 for h in (part.get("headers") or [])}
-        if "content-id" in hdrs or "inline" in hdrs.get("content-disposition", "").lower():
+        cid = hdrs.get("content-id", "").strip().strip("<>").lower()
+        mime = str(part.get("mimeType") or "").split(";")[0].strip().lower()
+        if (cid and cid in (cids or set()) and mime.startswith("image/")
+                and int(body.get("size") or 0) <= INLINE_DECOR_MAX):
             return
         out.append({"name": name[:200],
                     "size": int(body.get("size") or 0),
@@ -527,7 +567,7 @@ def _walk_files(part: dict, out: list) -> None:
                     "msg": ""})
         return                       # do not descend into an attached .eml
     for k in (part.get("parts") or []):
-        _walk_files(k, out)
+        _walk_files(k, out, cids)
 
 
 def _walk_body(part: dict, out: dict) -> None:

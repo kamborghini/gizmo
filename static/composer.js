@@ -445,11 +445,17 @@
         });
         bar.append(el('div', 'cmp-sep'));
         bar.append(btn('Link', 'link', function () {
-            var u = window.prompt('Link address (https://\u2026)', 'https://');
-            if (!u) return;
-            if (!/^https:\/\//i.test(u.trim())) { say('A link has to start with https://'); return; }
-            say('');
-            cmd('createLink', u.trim());
+            /* Asked with the page's own dialog (opts.ask): the app runs inside
+               the Shopify admin's iframe, where a native prompt does nothing,
+               so the button was silent. The selection is kept by cmd(). */
+            if (typeof opts.ask !== 'function') { say('Links cannot be added here.'); return; }
+            Promise.resolve(opts.ask('Add a link', 'The web address the selected text should open.',
+                                     'Link address', 'https://')).then(function (u) {
+                if (!u) return;
+                if (!/^https:\/\//i.test(String(u).trim())) { say('A link has to start with https://'); return; }
+                say('');
+                cmd('createLink', String(u).trim());
+            });
         }, 'Add a link'));
         bar.append(btn('Image', 'image', function () { pick(true); }, 'Insert an image'));
         bar.append(btn('Attach', 'attach', function () { pick(false); }, 'Attach a file'));

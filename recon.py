@@ -29,6 +29,7 @@ import hashlib
 import json
 import logging
 import os
+from zoneinfo import ZoneInfo
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -37,13 +38,27 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
+
+def _env_num(cast, raw, default, name):
+    """A numeric setting, read forgivingly: a value set but not a number
+    ("60s", "$25", "") is logged and the default used. Parsed bare, one typo
+    in Railway crashed the whole app at import, and the log blamed the chat."""
+    try:
+        return cast(raw)
+    except (TypeError, ValueError):
+        logging.getLogger("shopify_mcp").warning(
+            "setting %s=%r is not a number; using the default %s", name, raw, default)
+        return cast(default)
+
+
 # Tunables. Env-overridable so materiality is the merchant's call, not code's.
-WINDOW_DAYS = int(os.environ.get("RECON_WINDOW_DAYS", "120"))
-MATERIAL_PENCE = int(os.environ.get("RECON_MATERIAL_PENCE", "25000"))     # 250.00
-TOLERANCE_PENCE = int(os.environ.get("RECON_TOLERANCE_PENCE", "100"))     # 1.00
-STALE_UNRECONCILED_DAYS = int(os.environ.get("RECON_STALE_DAYS", "21"))
-DOCS_PER_SWEEP = int(os.environ.get("RECON_DOCS_PER_SWEEP", "8"))
-DOC_BYTES_MAX = int(os.environ.get("RECON_DOC_BYTES_MAX", str(8 * 1024 * 1024)))
+
+WINDOW_DAYS = _env_num(int, os.environ.get("RECON_WINDOW_DAYS", "120"), "120", "RECON_WINDOW_DAYS")
+MATERIAL_PENCE = _env_num(int, os.environ.get("RECON_MATERIAL_PENCE", "25000"), "25000", "RECON_MATERIAL_PENCE")     # 250.00
+TOLERANCE_PENCE = _env_num(int, os.environ.get("RECON_TOLERANCE_PENCE", "100"), "100", "RECON_TOLERANCE_PENCE")     # 1.00
+STALE_UNRECONCILED_DAYS = _env_num(int, os.environ.get("RECON_STALE_DAYS", "21"), "21", "RECON_STALE_DAYS")
+DOCS_PER_SWEEP = _env_num(int, os.environ.get("RECON_DOCS_PER_SWEEP", "8"), "8", "RECON_DOCS_PER_SWEEP")
+DOC_BYTES_MAX = _env_num(int, os.environ.get("RECON_DOC_BYTES_MAX", str(8 * 1024 * 1024)), str(8 * 1024 * 1024), "RECON_DOC_BYTES_MAX")
 # What to ask the accounts mailbox for. Attachments are where remittances,
 # invoices and statements actually live; the words catch the ones sent in the
 # body. Gmail's own search does the work, so the app never walks the mailbox.
@@ -51,20 +66,24 @@ MAIL_QUERY = os.environ.get(
     "RECON_GMAIL_QUERY",
     "(has:attachment OR remittance OR invoice OR statement OR \"credit note\") "
     "newer_than:{days}d")
-THREADS_PER_SWEEP = int(os.environ.get("RECON_THREADS_PER_SWEEP", "40"))
+THREADS_PER_SWEEP = _env_num(int, os.environ.get("RECON_THREADS_PER_SWEEP", "40"), "40", "RECON_THREADS_PER_SWEEP")
 # How many walked threads to remember. Past this the OLDEST are forgotten and
 # may be walked again: wasted budget, never a lost document, because a thread
 # is only ever skipped when its documents were already read into the store.
-SEEN_CAP = int(os.environ.get("RECON_SEEN_CAP", "4000"))
+SEEN_CAP = _env_num(int, os.environ.get("RECON_SEEN_CAP", "4000"), "4000", "RECON_SEEN_CAP")
+# A document that could not be read (the AI call failed, the daily spend cap
+# was reached, the attachment would not download) is tried again on this many
+# sweeps before it is filed as unreadable, rather than filed on the first.
+DOC_READ_TRIES = _env_num(int, os.environ.get("RECON_DOC_READ_TRIES", "5"), "5", "RECON_DOC_READ_TRIES")
 # RETENTION. Every other store in this app prunes; these three held third
 # parties' financial records and document text for ever. Nothing is kept
 # beyond what a sweep can still reconcile, plus a margin: a record older than
 # the window cannot be matched against anything, so keeping it is a liability
 # with no use. Resolved discrepancies keep their evidence for a while, because
 # the audit trail is the point, then shed it.
-CACHE_KEEP_DAYS = int(os.environ.get("RECON_CACHE_KEEP_DAYS", str(WINDOW_DAYS + 60)))
-DOCS_KEEP_DAYS = int(os.environ.get("RECON_DOCS_KEEP_DAYS", str(WINDOW_DAYS + 60)))
-CLOSED_KEEP_DAYS = int(os.environ.get("RECON_CLOSED_KEEP_DAYS", "365"))
+CACHE_KEEP_DAYS = _env_num(int, os.environ.get("RECON_CACHE_KEEP_DAYS", str(WINDOW_DAYS + 60)), str(WINDOW_DAYS + 60), "RECON_CACHE_KEEP_DAYS")
+DOCS_KEEP_DAYS = _env_num(int, os.environ.get("RECON_DOCS_KEEP_DAYS", str(WINDOW_DAYS + 60)), str(WINDOW_DAYS + 60), "RECON_DOCS_KEEP_DAYS")
+CLOSED_KEEP_DAYS = _env_num(int, os.environ.get("RECON_CLOSED_KEEP_DAYS", "365"), "365", "RECON_CLOSED_KEEP_DAYS")
 # How far back every sweep FETCHES. Deliberately the same number as the
 # retention horizon, and not the shorter check window: whatever is still in the
 # cache must still be refetchable. Ask Xero only for the last WINDOW_DAYS and a
@@ -74,7 +93,7 @@ CLOSED_KEEP_DAYS = int(os.environ.get("RECON_CLOSED_KEEP_DAYS", "365"))
 FETCH_DAYS = CACHE_KEEP_DAYS
 # How many Shopify orders one sweep reads from that window. Hitting it is
 # reported in the sweep's notes, never silent.
-ORDER_FETCH_CAP = int(os.environ.get("RECON_ORDER_CAP", "1500"))
+ORDER_FETCH_CAP = _env_num(int, os.environ.get("RECON_ORDER_CAP", "1500"), "1500", "RECON_ORDER_CAP")
 
 # Injected by copilot.configure(): the engine owns logic, never transport.
 _registry: Optional[dict] = None          # Shopify tool registry
@@ -239,6 +258,9 @@ def slim_payment(p: dict) -> dict:
         "pence": pence(p.get("Amount")),
         "reference": str(p.get("Reference") or ""),
         "status": str(p.get("Status") or ""),
+        # ACCRECPAYMENT (a customer paying us) or ACCPAYPAYMENT (us paying a
+        # supplier), and the AR/AP prepayment and overpayment kinds.
+        "type": str(p.get("PaymentType") or ""),
         "invoice_id": str(inv.get("InvoiceID") or ""),
         "invoice_number": str(inv.get("InvoiceNumber") or ""),
         "contact": str(((inv.get("Contact") or {}).get("Name")) or ""),
@@ -809,7 +831,59 @@ def check_gmail_docs(cache: dict, docs: dict) -> list:
                 num_idx.setdefault(k, []).append(c)
         if _digit_run(c.get("number")):
             digit_idx.setdefault(_digit_run(c.get("number")), []).append(c)
-    for d in docs.values():
+    # Every remittance matched to the payments it explains at once, each
+    # payment used once, from live receipts only (see _check_remittance).
+    inv_by_number = {norm_ref(v.get("number")): v for v in xinv.values() if norm_ref(v.get("number"))}
+    usable = {pid: p for pid, p in payments.items()
+              if _live(p) and _receipt(p, xinv, inv_by_number)}
+    rems = [(dk, d) for dk, d in docs.items()
+            if not d.get("ignored") and d.get("doc_type") == "remittance"]
+
+    def _gap(d, p):
+        g = _days_between(_day(d.get("date")), p["date"])
+        return g if g is not None else 10 ** 6
+
+    # 1. Line by line: each allocation line to one payment against that
+    # invoice for that amount, nearest in date. An invoice paid in instalments
+    # has several such payments, and each line takes one of them, not all.
+    line_items, line_fits = [], {}
+    for dk, d in rems:
+        for idx, l in enumerate(d.get("invoice_lines") or []):
+            opts = sorted((_gap(d, p), pid) for pid, p in usable.items()
+                          if p["pence"] == l.get("pence")
+                          and norm_ref(p.get("invoice_number")) == norm_ref(l.get("number")))
+            line_items.append((dk, idx))
+            line_fits[(dk, idx)] = [pid for _g, pid in opts]
+    line_pay = _assign(line_items, line_fits)
+    settled = {dk for dk, d in rems if d.get("invoice_lines")
+               and all((dk, i) in line_pay for i in range(len(d["invoice_lines"])))}
+    # Only the payments a settled remittance actually takes are held back.
+    held = {pid for (dk, _i), pid in line_pay.items() if dk in settled}
+
+    # 2. By total, for the rest: a payment made against a remittance's own
+    # invoice goes to that remittance first, whichever order they are met in;
+    # what is left is shared out by amount and date.
+    rem_keys, fits, own_fits = [], {}, {}
+    for dk, d in rems:
+        if dk in settled or not d.get("total_pence"):
+            continue
+        own = {norm_ref(n) for n in (d.get("invoice_numbers") or [])} \
+            | {norm_ref(l.get("number")) for l in (d.get("invoice_lines") or [])}
+        opts = []
+        for pid, p in usable.items():
+            if pid in held or p["pence"] != d["total_pence"]:
+                continue
+            gap = _days_between(_day(d.get("date")), p["date"])
+            if gap is not None and gap <= 14:
+                opts.append((0 if norm_ref(p.get("invoice_number")) in own else 1, gap, pid))
+        rem_keys.append(dk)
+        fits[dk] = [pid for _o, _g, pid in sorted(opts)]
+        own_fits[dk] = [pid for o, _g, pid in sorted(opts) if o == 0]
+    rem_pay = _assign(rem_keys, own_fits)
+    used = set(rem_pay.values())
+    rest = [k for k in rem_keys if k not in rem_pay]
+    rem_pay.update(_assign(rest, {k: [p for p in fits[k] if p not in used] for k in rest}))
+    for dk, d in docs.items():
         if d.get("ignored") or d.get("doc_type") in (None, "", "other"):
             continue
         ident = [d.get("source_key") or ""]
@@ -850,7 +924,9 @@ def check_gmail_docs(cache: dict, docs: dict) -> list:
                     exc["basis"] = "ai_extraction"
                 out.append(exc)
         if d.get("doc_type") == "remittance":
-            rems = _check_remittance(d, base_ev, num_idx, payments)
+            rems = _check_remittance(d, base_ev, num_idx, usable,
+                                     usable.get(rem_pay.get(dk)),
+                                     settled_by_lines=(dk in settled))
             if scan:
                 for e in rems:
                     e["basis"] = "ai_extraction"
@@ -861,10 +937,33 @@ def check_gmail_docs(cache: dict, docs: dict) -> list:
     return out
 
 
-def _check_remittance(d: dict, base_ev: list, num_idx: dict, payments: dict) -> list:
+def _receipt(p: dict, xinv: dict, by_number: Optional[dict] = None) -> bool:
+    """Is this Xero payment money coming IN? By its own type when Xero gave
+    one, else by the invoice it pays, found by id or by number (a payment
+    cached before the type was kept). Unknown either way is let through
+    rather than guessed at."""
+    t = str(p.get("type") or "").upper()
+    if t:
+        # The AR credit, overpayment and prepayment kinds are refunds paid OUT
+        # to a customer; only ACCRECPAYMENT is a customer paying us.
+        return t == "ACCRECPAYMENT"
+    inv = xinv.get(str(p.get("invoice_id") or "")) \
+        or (by_number or {}).get(norm_ref(p.get("invoice_number"))) or {}
+    return str(inv.get("type") or "ACCREC").upper() == "ACCREC"
+
+
+def _check_remittance(d: dict, base_ev: list, num_idx: dict, payments: dict,
+                      assigned: Optional[dict] = None,
+                      settled_by_lines: Optional[bool] = None) -> list:
     """One remittance advice, taken apart: does each referenced invoice exist,
     do the allocation amounts fit, and did a matching payment reach Xero?
-    Partial payments and multi-invoice remittances are the normal case."""
+    Partial payments and multi-invoice remittances are the normal case.
+
+    `payments` holds only live receipts, and `assigned` is the one this
+    remittance was given when every remittance's total was matched at once
+    (check_gmail_docs): a deleted payment, a payment to a supplier, or one
+    another remittance already accounts for used to hide a missing receipt,
+    because any payment of the same amount within 14 days would do."""
     out = []
     ident = [d.get("source_key") or ""]
     cur = d.get("currency") or "GBP"
@@ -907,19 +1006,13 @@ def _check_remittance(d: dict, base_ev: list, num_idx: dict, payments: dict) -> 
                     f"Line {money(l['pence'], cur)} vs invoice total {money(v['total'], v['currency'])}, "
                     f"due {money(v['due_pence'], v['currency'])}, paid {money(v['paid_pence'], v['currency'])}."]))
     if total:
-        pay_hit = None
-        for p in payments.values():
-            if p["pence"] == total:
-                gap = _days_between(_day(d.get("date")), p["date"])
-                if gap is not None and gap <= 14:
-                    pay_hit = p
-                    break
+        pay_hit = assigned
         if pay_hit is None and lines:
-            hits = sum(1 for l in lines
-                       if any(p["pence"] == l.get("pence")
-                              and norm_ref(p["invoice_number"]) == norm_ref(l.get("number"))
-                              for p in payments.values()))
-            if hits == len(lines):
+            if settled_by_lines is None:       # matched on its own, not among others
+                settled_by_lines = all(any(p["pence"] == l.get("pence")
+                                           and norm_ref(p["invoice_number"]) == norm_ref(l.get("number"))
+                                           for p in payments.values()) for l in lines)
+            if settled_by_lines:
                 pay_hit = {"split": True}
         if pay_hit is None:
             out.append(make_exc(
@@ -1132,6 +1225,20 @@ ALL_CHECKS = [check_orders_vs_invoices, check_refunds, check_payouts_vs_bank,
               check_stale_unreconciled, check_duplicates, check_overpayments,
               check_disputes, check_xero_orphan_sales]
 
+# Which Xero collections each check reads: a check whose collection could not
+# be read this sweep sits it out rather than run on the last good copy.
+CHECK_READS = {
+    "check_orders_vs_invoices": {"invoices"},
+    "check_refunds": {"bank_transactions", "credit_notes"},
+    "check_payouts_vs_bank": {"bank_transactions"},
+    "check_stale_unreconciled": {"bank_transactions"},
+    "check_duplicates": {"invoices"},
+    "check_overpayments": {"invoices", "payments"},
+    "check_disputes": {"bank_transactions", "credit_notes"},
+    "check_xero_orphan_sales": {"invoices"},
+    "check_gmail_docs": {"invoices", "payments", "credit_notes"},
+}
+
 # Which exception kinds each check owns. The stale-marking loop only trusts a
 # kind whose check actually ran: keep this in step when adding checks (the
 # suite asserts every kind ever emitted is claimed by exactly one check).
@@ -1187,7 +1294,13 @@ def candidates_in_thread(t: dict, known: set) -> list:
     plain dict."""
     out = []
     subject = str(t.get("subject") or "")
+    # Nothing older than the documents are kept for: re-walking a grown thread
+    # re-read a PDF retention had already dropped, raised it against a Xero
+    # cache that had dropped its invoice too, and pruned it again.
+    keep_from = _cutoff_day(DOCS_KEEP_DAYS)
     for m in (t.get("messages") or []):
+        if _day(m.get("at")) and _day(m.get("at")) < keep_from:
+            continue
         for f in (m.get("files") or []):
             name = str(f.get("name") or "")
             if not name.lower().endswith(".pdf"):
@@ -1205,7 +1318,9 @@ def candidates_in_thread(t: dict, known: set) -> list:
 
 
 async def find_doc_candidates(known: set, seen_threads: set,
-                              cap: Optional[int] = None) -> tuple:
+                              cap: Optional[int] = None,
+                              seen_history: Optional[dict] = None,
+                              backlog: Optional[set] = None) -> tuple:
     """Ask the ACCOUNTS mailbox what has arrived.
 
     Returns (candidates, threads_read, search_ok, listing_complete).
@@ -1216,11 +1331,17 @@ async def find_doc_candidates(known: set, seen_threads: set,
       * listing_complete is False when Gmail had more matches than one listing
         returns, which the merchant is told rather than left to assume.
 
+    threads_read maps each thread read to the historyId the listing gave it
+    ("" when the search gives none). A thread already walked is walked again
+    when that id has moved: a supplier replying on last month's thread with
+    this month's invoice was never read, because the skip was per thread.
+    Attachments already read are known by source key and not read twice.
+
     Candidates come back NEWEST FIRST. Gmail hands back an unordered set, and
     with a per-sweep budget an arbitrary 40 threads means the newest invoice
     can sit unread behind a year of old post."""
     if _mail_search is None or _mail_thread is None:
-        return [], set(), False, True
+        return [], {}, False, True
     # Read at CALL time, not bound as a default: a default argument captures
     # the value at import, so the env setting could never actually be changed.
     cap = THREADS_PER_SWEEP if cap is None else cap
@@ -1230,20 +1351,40 @@ async def find_doc_candidates(known: set, seen_threads: set,
         ids = await _mail_search(query, 200, complete_flag)
     except Exception:
         logger.exception("recon: the accounts mailbox search failed")
-        return [], set(), False, True
+        return [], {}, False, True
     complete = complete_flag[0] if complete_flag else True
-    fresh = [i for i in ids if i not in seen_threads]
-    # Gmail thread ids sort by age (they are ordered hex), so the newest are
-    # the largest. Sorting by length first keeps that true across id widths.
-    fresh.sort(key=lambda i: (len(str(i)), str(i)), reverse=True)
-    out, read = [], set()
+    hist = {str(k): str(v or "") for k, v in ids.items()} if isinstance(ids, dict) else {}
+    before = seen_history if seen_history is not None else {}
+    for i in ids:
+        # A thread walked before history was kept: take the listing's word
+        # for where it stands now (recorded in the caller's dict) rather than
+        # walk the whole backlog at once on the first sweep. It is walked once
+        # later, behind everything fresh (`backlog`, the caller's set), in case
+        # it grew while nothing was watching.
+        if i in seen_threads and hist.get(i) and not before.get(i):
+            before[i] = hist[i]
+            if backlog is not None:
+                backlog.add(i)
+    fresh = [i for i in ids
+             if i not in seen_threads or (hist.get(i) and before.get(i) != hist.get(i))]
+    # Most recent activity first: a historyId moves with every change, so a new
+    # invoice on an old conversation comes ahead of it. Without one, Gmail
+    # thread ids sort by age (ordered hex; length first keeps that true across
+    # id widths), so the newest are the largest.
+    def _recent(i):
+        h = hist.get(i) or ""
+        return (int(h) if h.isdigit() else 0, len(str(i)), str(i))
+    fresh.sort(key=_recent, reverse=True)
+    if backlog:
+        fresh += sorted((i for i in backlog if i in ids and i not in fresh), key=_recent, reverse=True)
+    out, read = [], {}
     for tid in fresh[:cap]:
         try:
             t = await _mail_thread(tid)
         except Exception:
             logger.exception("recon: could not read thread %s", tid)
             continue
-        read.add(tid)
+        read[tid] = hist.get(tid, "")
         out.extend(candidates_in_thread(t, known))
     out.sort(key=lambda c: str(c.get("date") or ""), reverse=True)
     return out, read, True, complete
@@ -1347,7 +1488,8 @@ async def extract_doc(candidate: dict, known_docs: Optional[dict] = None) -> Opt
     pool = known_docs if known_docs is not None else (_load_docs() if _load_docs is not None else None)
     if pool is not None:
         for k, other in pool.items():
-            if other.get("sha1") == digest and k != candidate.get("source_key"):
+            if other.get("sha1") == digest and k != candidate.get("source_key") \
+                    and not other.get("duplicate_of"):
                 return {**candidate, "sha1": digest, "doc_type": "other", "ignored": True,
                         "duplicate_of": k,
                         "note": "same content as a document already read"}
@@ -1364,14 +1506,24 @@ async def extract_doc(candidate: dict, known_docs: Optional[dict] = None) -> Opt
             ai = await _ai_extract(data, text)
             if ai:
                 parsed = _merge_extractions(parsed, ai, text)
+            else:
+                # The allocation lines were not read: keep what the text gave,
+                # and read it again with the AI on a later day (the sweep's
+                # waiting list), rather than lose the line checks for good.
+                parsed = {**parsed, "needs_ai": True}
         return {**candidate, **parsed, "text_chars": len(text)}
     if _ai_call is None:
-        return {**candidate, "doc_type": "other", "ignored": True,
+        # needs_ai: read again once an AI key is configured (see the sweep).
+        return {**candidate, "doc_type": "other", "ignored": True, "needs_ai": True,
                 "note": "scanned document and no AI configured"}
     ai = await _ai_extract(data, "")
     if not ai:
-        return {**candidate, "doc_type": "other", "ignored": True,
-                "note": "extraction failed"}
+        # NOT read, so not stored: the sweep keeps the thread coming back.
+        # Stored as "ignored", a scan read on a night the AI was down or the
+        # spend cap was reached was never read again. Marked as the AI's
+        # failure, so the retry waits for another day rather than bill a
+        # call on every sweep.
+        return {"_retry": "ai"}
     # WHITELISTED, never splatted: the model's dict must not be able to
     # overwrite source_key, message ids or provenance, and its amounts are
     # PARSED into pence here, not trusted as fields.
@@ -1600,6 +1752,7 @@ async def _sweep_inner(deep_docs: bool) -> dict:
     store = _load_store()
     docs = _load_docs()
     notes: list = []
+    xero_failed: list = []   # the Xero collections this sweep could not read
 
     # --- Xero, incrementally ------------------------------------------------
     if _xero is not None and _xero.connected():
@@ -1646,6 +1799,7 @@ async def _sweep_inner(deep_docs: bool) -> dict:
                 else:
                     marks[name] = stamp
             except Exception as e:
+                xero_failed.append(name)
                 notes.append(f"Xero {name} could not be read: {str(e)[:120]}")
                 logger.exception("recon sweep: xero %s failed", name)
     else:
@@ -1739,10 +1893,61 @@ async def _sweep_inner(deep_docs: bool) -> dict:
     mailbox_linked = bool(_mail_connected()) if _mail_connected else (_mail_search is not None)
     if _mail_search is not None and mailbox_linked and deep_docs:
         try:
-            known = set(docs.keys())
             seen = set(store.get("seen_threads") or [])
-            found = await find_doc_candidates(known, seen)
+            seen_hist = dict(store.get("seen_history") or {})
+            today = datetime.now(ZoneInfo("Europe/London")).date().isoformat()
+            # Tries are counted per DAY, not per sweep: Sweep now pressed five
+            # times on a day the AI spend cap was reached used every try, and
+            # the document was filed unreadable for good.
+            tries = {}
+            for k, v in (store.get("doc_tries") or {}).items():
+                tries[k] = v if isinstance(v, dict) else {"n": int(v or 0), "day": ""}
+
+            def bump(key):
+                t = tries.get(key) or {"n": 0, "day": ""}
+                if t.get("day") != today:
+                    t = {"n": int(t.get("n") or 0) + 1, "day": today}
+                tries[key] = t
+                return t["n"]
+            if _ai_call is not None:
+                # Documents read without the AI are read again now it is here:
+                # scans filed while no AI was configured, remittances whose
+                # allocation lines the AI could not read, and those an earlier
+                # build filed as "extraction failed" on a night the AI call
+                # failed. At most once a day each, and not past the tries.
+                waiting = [k for k, v in docs.items()
+                           if v.get("needs_ai") or v.get("note") in (
+                               "scanned document and no AI configured", "extraction failed")]
+                again: set = set()
+                for k in waiting:
+                    t = tries.get(k) or {}
+                    if t.get("day") == today:
+                        continue
+                    if int(t.get("n") or 0) >= DOC_READ_TRIES:
+                        docs[k].pop("needs_ai", None)      # given up: kept as it is
+                        continue
+                    # KEPT until a new reading replaces it (a remittance read
+                    # by its text still holds its figures); only made unknown
+                    # to the walk, and its thread walked again.
+                    again.add(k)
+                    tid = docs[k].get("thread_id")
+                    if tid:
+                        seen.discard(tid)
+                        seen_hist.pop(tid, None)
+            else:
+                again = set()
+            known = set(docs.keys()) - again
+            backlog = set(store.get("recheck_threads") or [])
+            found = await find_doc_candidates(known, seen, seen_history=seen_hist, backlog=backlog)
             cands, walked, search_ok, complete = found
+            store["recheck_threads"] = sorted(backlog - set(walked))
+            # A document already tried today waits for tomorrow: the tries are
+            # counted by day, and a retry on every sweep billed the AI each time.
+            def _wait(c):
+                t = tries.get(c["source_key"]) or {}
+                return t.get("day") == today and (t.get("ai") or c["source_key"] in docs)
+            later = {c.get("thread_id") for c in cands if _wait(c)}
+            cands = [c for c in cands if not _wait(c)]
             if not search_ok:
                 # A mailbox that cannot be read has checked NO documents. Saying
                 # nothing here reads as "no missing invoices", which is the one
@@ -1752,19 +1957,50 @@ async def _sweep_inner(deep_docs: bool) -> dict:
             batch = cands[:DOCS_PER_SWEEP]
             queued = {c["thread_id"] for c in cands[DOCS_PER_SWEEP:] if c.get("thread_id")}
             failed: set = set()
+            given_up = 0
             for c in batch:
+                key = c["source_key"]
                 d = await extract_doc(c, docs)
+                ai_failed = bool(d and d.get("_retry") == "ai")
+                if ai_failed:
+                    d = None
+                if d and not d.get("needs_ai"):
+                    docs[key] = d
+                    tries.pop(key, None)
+                    continue
                 if d:
-                    docs[c["source_key"]] = d
+                    # Read, but without the AI part it needed: kept, and read
+                    # again on a later day (see waiting above). Only a try when
+                    # there IS an AI to have failed.
+                    docs[key] = d
+                    if _ai_call is not None:
+                        bump(key)
+                    continue
+                # Extraction failed: the document is NOT read, so its thread
+                # must come back. Marking it seen would drop an invoice
+                # permanently and silently. Bounded, so one document that can
+                # never be read does not cost a try on every sweep for good.
+                n = bump(key)
+                tries[key]["ai"] = ai_failed or bool(tries[key].get("ai"))
+                if n >= DOC_READ_TRIES:
+                    docs[key] = {**c, "doc_type": "other", "ignored": True,
+                                 "note": f"could not be read on {n} different days"}
+                    given_up += 1
                 else:
-                    # Extraction failed: the document is NOT read, so its thread
-                    # must come back. Marking it seen would drop an invoice
-                    # permanently and silently.
                     failed.add(c.get("thread_id"))
+            store["doc_tries"] = {k: v for k, v in tries.items()
+                                  if k not in docs or docs[k].get("needs_ai")}
             if failed:
                 notes.append(f"{len(failed)} document(s) could not be read this sweep and "
                              "will be retried.")
-            store["seen_threads"] = sorted((seen | walked) - queued - failed)[-SEEN_CAP:]
+            if given_up:
+                notes.append(f"{given_up} document(s) could not be read on {DOC_READ_TRIES} "
+                             "different days and are listed as unreadable: open them in the "
+                             "accounts mailbox.")
+            store["seen_threads"] = sorted((seen | set(walked)) - queued - failed - later)[-SEEN_CAP:]
+            kept = set(store["seen_threads"])
+            seen_hist.update({t: h for t, h in walked.items() if h})
+            store["seen_history"] = {t: h for t, h in seen_hist.items() if t in kept}
             if len(cands) > DOCS_PER_SWEEP:
                 notes.append(f"{len(cands) - DOCS_PER_SWEEP} more documents from the accounts "
                              "mailbox are queued for later sweeps.")
@@ -1796,6 +2032,18 @@ async def _sweep_inner(deep_docs: bool) -> dict:
                      "checks were SKIPPED rather than reporting everything as missing.")
     if orders_short:
         checks_to_run = [c for c in checks_to_run if c is not check_xero_orphan_sales]
+    if xero_failed:
+        # A read that failed is not a current ledger. Run on the copy from the
+        # last good sweep, each order since then read as a sale missing from
+        # Xero: a dead grant filled the board with false criticals every night.
+        # A check sits the sweep out when anything it reads failed, so what it
+        # found before stays as it was; the rest still run.
+        skipped = [c for c in checks_to_run if CHECK_READS.get(c.__name__, set()) & set(xero_failed)]
+        checks_to_run = [c for c in checks_to_run if c not in skipped]
+        if skipped or CHECK_READS["check_gmail_docs"] & set(xero_failed):
+            notes.append("Xero could not be read this sweep (" + ", ".join(xero_failed) + "), so "
+                         "the checks that read it were skipped rather than run on the copy from "
+                         "the last good sweep. What they found before stays as it was.")
     for check in checks_to_run:
         try:
             for e in check(cache):
@@ -1806,9 +2054,10 @@ async def _sweep_inner(deep_docs: bool) -> dict:
             notes.append(f"The {check.__name__} check crashed; its findings are missing "
                          "from this sweep.")
     try:
-        for e in check_gmail_docs(cache, docs):
-            fresh[e["id"]] = e
-        ran_kinds |= CHECK_KINDS["check_gmail_docs"]
+        if not (CHECK_READS["check_gmail_docs"] & set(xero_failed)):   # the same stale copy
+            for e in check_gmail_docs(cache, docs):
+                fresh[e["id"]] = e
+            ran_kinds |= CHECK_KINDS["check_gmail_docs"]
     except Exception:
         logger.exception("recon check_gmail_docs crashed")
 
@@ -1819,6 +2068,9 @@ async def _sweep_inner(deep_docs: bool) -> dict:
     # them - the same lost-update the investigate op already guards against.
     marks = store.get("watermarks", {})
     seen_now = store.get("seen_threads")
+    seen_hist_now = store.get("seen_history")
+    tries_now = store.get("doc_tries")
+    recheck_now = store.get("recheck_threads")
     store = _load_store()
     store["watermarks"] = {**store.get("watermarks", {}), **marks}
     # Everything this sweep learned has to cross the reload, not just the
@@ -1826,6 +2078,12 @@ async def _sweep_inner(deep_docs: bool) -> dict:
     # dropping it here left the crawl rereading its first 40 threads forever.
     if seen_now is not None:
         store["seen_threads"] = seen_now
+    if seen_hist_now is not None:
+        store["seen_history"] = seen_hist_now
+    if tries_now is not None:
+        store["doc_tries"] = tries_now
+    if recheck_now is not None:
+        store["recheck_threads"] = recheck_now
     existing = store.setdefault("exceptions", {})
     for xid, e in fresh.items():
         old = existing.get(xid)

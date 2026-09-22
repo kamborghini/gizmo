@@ -31,7 +31,7 @@ jobs:
         run: python tests/test_frontend.py
       - name: No em or en dashes in UI copy
         run: |
-          if grep -q '—\|–' static/index.html; then
+          if grep -qE '—|–|\\u201[34]|&[mn]dash;' static/index.html static/composer.js; then
             echo "UI copy contains an em or en dash"; exit 1
           fi
       # Dependency scanning belongs on the PR, not only on Monday. The weekly

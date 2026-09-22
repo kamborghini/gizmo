@@ -118,6 +118,7 @@ async def fake_tool_json(registry, name, args):
     if name == "shopify_get_shop": return dict(SHOP)
     if name == "shopify_list_orders": return {"orders": []}
     return {}
+REAL_TOOL_JSON = copilot._tool_json
 copilot._tool_json = fake_tool_json
 
 TAG_WRITES = []
@@ -135,6 +136,11 @@ async def fake_canceler(fulfillment_id):
 copilot._fulfillment_canceler = fake_canceler
 def reset_dispatch():
     json.dump({"orders": {}}, open(SCRATCH + "/dispatch_state.json", "w"))
+    # A booking left unresolved by one test is not another test's business.
+    try:
+        os.remove(SCRATCH + "/booking_intents.json")
+    except FileNotFoundError:
+        pass
     # The failure store accumulates across tests otherwise.
     try:
         os.remove(SCRATCH + "/wo_failures.json")
@@ -1701,7 +1707,16 @@ def t_options_carry_vat_split():
 
 @test
 def t_unprint_undoes_a_print():
+    # An order in production and not made: the case Undo exists for. (The
+    # shared fixture carries PC, a made order, which Undo now leaves alone.)
     reset_prod(); TAG_WRITES.clear()
+    saved_tags = ORDER["tags"]; ORDER["tags"] = "IP"
+    try:
+        _t_unprint_undoes_a_print()
+    finally:
+        ORDER["tags"] = saved_tags
+
+def _t_unprint_undoes_a_print():
     r = post("/api/production-state", {"op": "printed", "ids": [12345]})
     eq(r.status_code, 200, r.text)
     st = json.load(open(SCRATCH + "/production_state.json"))["orders"]
@@ -4920,7 +4935,7 @@ def t_a_redelivered_event_does_not_count_twice():
 
 @test
 def t_webhook_registration_is_a_standing_repair():
-    import server
+    import server, hmac, hashlib
     calls = {"listed": 0, "made": []}
     async def fake_request(method, path, params=None, body=None):
         if method == "GET" and path == "webhooks.json":
@@ -4930,18 +4945,34 @@ def t_webhook_registration_is_a_standing_repair():
                 {"id": 1, "topic": "orders/create",
                  "address": "https://app.example.test/webhooks/orders"},
                 {"id": 2, "topic": "orders/updated",
-                 "address": "https://old.example.test/webhooks/orders"}]}
+                 "address": "https://old.example.test/webhooks/orders"},
+                {"id": 3, "topic": "refunds/create",
+                 "address": "https://app.example.test/webhooks/orders"}]}
         if method == "POST" and path == "webhooks.json":
             calls["made"].append(body["webhook"]["topic"])
             return {"webhook": {"id": 99, **body["webhook"]}}
+        if method == "DELETE":
+            calls.setdefault("deleted", []).append(path)
+            return {}
         raise AssertionError("unexpected " + method + " " + path)
     saved_req = server._request; server._request = fake_request
     os.environ["APP_URL"] = "https://app.example.test"
     try:
         res = run(server.ensure_order_webhooks())
         ok(res["ok"], str(res))
-        eq(sorted(calls["made"]), ["orders/updated", "refunds/create"],
+        eq(sorted(calls["made"]), ["orders/updated"],
            "only the missing topics were created, at the current address")
+        eq(calls.get("deleted"), ["webhooks/3.json"],
+           "and a topic the endpoint refuses (A20: refunds/create, 422 on every delivery) is removed")
+        # Every topic registered here is one the receiver accepts.
+        for topic in server.WEBHOOK_TOPICS:
+            raw = json.dumps({"id": 1}).encode()
+            sig = base64.b64encode(hmac.new(SECRET.encode(), raw, hashlib.sha256).digest()).decode()
+            r = client.post("/webhooks/orders", content=raw, headers={
+                "x-shopify-hmac-sha256": sig, "x-shopify-topic": topic,
+                "x-shopify-shop-domain": "test-store.myshopify.com",
+                "x-shopify-webhook-id": "reg-" + topic, "content-type": "application/json"})
+            ok(r.status_code != 422, topic + " is accepted by the endpoint it is registered at")
     finally:
         server._request = saved_req
         os.environ.pop("APP_URL", None)
@@ -18499,7 +18530,7 @@ def t_every_json_store_reaches_disk_through_the_one_writer():
        "a new temp-and-replace writer appeared; use _write_json_store")
     # JSON serialised straight into a file handle: only the primitive and the two
     # append-only archives, which are lines added to a log, not a store rewritten.
-    eq(owners("fh.write(json.dumps"), {"_archive_dispatch_rows", "_write_prod_state"},
+    eq(owners("fh.write(json.dumps"), {"_archive_dispatch_rows", "_write_prod_state", "_work_trim"},
        "JSON is being written to disk outside the primitive")
     ok("allow_nan=False" in src.split("def _write_json_store")[1][:1500], "NaN is refused for every store")
 
@@ -20280,6 +20311,1395 @@ def t_the_chat_stream_says_it_has_started_before_the_answer():
         finally:
             copilot.run_chat = saved
     with_accounts(go)
+
+
+# ---------------------------------------------------------------------------
+# The 2026-09-22 bug audit (docs/bugs/2026-09-22-bug-audit.md): the P2s, each
+# pinned by the behaviour that was wrong.
+# ---------------------------------------------------------------------------
+from datetime import datetime, timezone, timedelta
+
+@test
+def t_a_made_orders_reprint_undo_and_ready_to_make_leave_it_made():
+    """A2. Undo on a reprint's toast tagged a made order Unprocessed, and
+    Ready to make then put it back in To make beside its PC tag."""
+    reset_prod(); TAG_WRITES.clear()
+    saved_tags = ORDER["tags"]; ORDER["tags"] = "PC"
+    try:
+        copilot._mark_made(12345, True)
+        eq(post("/api/production-state", {"op": "printed", "ids": [12345]}).status_code, 200)
+        r = post("/api/production-state", {"op": "unprinted", "ids": [12345]})
+        eq(r.status_code, 200, r.text)
+        ok(not any("unprocessed" in t.lower() for _o, t in TAG_WRITES),
+           "Undo on a made order's reprint does not send it back to Unprocessed: " + str(TAG_WRITES))
+        ok(copilot._load_prod_state()["12345"].get("made_at"), "and it is still made")
+        TAG_WRITES.clear()
+        q = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"})
+        eq(q.status_code, 200, q.text)
+        eq(q.json().get("released"), False, "Ready to make on a made order releases nothing")
+        eq(TAG_WRITES, [], "and writes no IP tag")
+    finally:
+        ORDER["tags"] = saved_tags
+        reset_prod()
+
+
+@test
+def t_a_walked_finance_thread_is_read_again_when_it_grows():
+    """A3. The reconciliation skipped any thread it had walked, so next month's
+    invoice sent as a reply on last month's conversation was never read."""
+    import types as _types
+    day = lambda n: (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%d") + "T09:00:00+00:00"
+    threads = {"t1": {"id": "t1", "subject": "Invoice from Glassworks", "messages": [
+        {"id": "m1", "at": day(40), "from_email": "accounts@glassworks.co.uk",
+         "files": [{"id": "a1", "name": "SI-1001.pdf", "size": 4000}]}]}}
+    hist = {"t1": "100"}
+    async def search(q, mx=200, out_complete=None):
+        if out_complete is not None:
+            out_complete.append(True)
+        return dict(hist)             # {thread id: historyId}, as the finance search gives
+    read = []
+    async def gbytes(mid, aid):
+        read.append(mid); return b"%PDF-1.4 scan of " + mid.encode()   # two documents, two contents
+    class Block:
+        type = "tool_use"
+        def __init__(self, num):
+            self.input = {"doc_type": "supplier_invoice", "currency": "GBP", "total": "100.00",
+                          "invoice_numbers": [num], "invoice_lines": []}
+    async def ai(system, messages, tools, tool_choice):
+        return _types.SimpleNamespace(content=[Block("SI-1001" if len(read) == 1 else "SI-1002")],
+                                      model="claude-test")
+    stores = _mail_world(threads, gbytes=gbytes, search=search)
+    _rc.configure(ai_call=ai)
+    try:
+        run_async(_rc.sweep())
+        eq(read, ["m1"])
+        threads["t1"]["messages"].append({"id": "m2", "at": day(2), "from_email": "accounts@glassworks.co.uk",
+                                          "files": [{"id": "a2", "name": "SI-1002.pdf", "size": 4000}]})
+        run_async(_rc.sweep())
+        eq(read, ["m1"], "an unchanged thread is not walked again")
+        hist["t1"] = "205"            # Gmail moves the thread's historyId when a message arrives
+        run_async(_rc.sweep())
+        eq(read, ["m1", "m2"], "a thread that has grown is walked again, and only the new PDF is read")
+        titles = [e["title"] for e in stores["store"]["exceptions"].values()
+                  if e["kind"] == "gmail_doc_missing_from_xero"]
+        ok(any("SI-1002" in t for t in titles), "and the new invoice is reported: " + str(titles))
+        # A message older than documents are kept is not read again when the
+        # thread moves: retention dropped it, and the Xero side of it too.
+        threads["t1"]["messages"].insert(0, {"id": "m0", "at": day(_rc.DOCS_KEEP_DAYS + 5),
+                                             "from_email": "accounts@glassworks.co.uk",
+                                             "files": [{"id": "a0", "name": "SI-0900.pdf", "size": 4000}]})
+        hist["t1"] = "300"
+        run_async(_rc.sweep())
+        ok("m0" not in read, "a PDF older than the retention window is never read again: " + str(read))
+        # A thread walked before history was kept is not walked again on the
+        # first sweep after the upgrade: the listing's word is taken for it.
+        st = stores["store"]; st["seen_history"] = {}
+        hist["t1"] = "400"; before = list(read)
+        run_async(_rc.sweep())
+        eq(read, before, "no mass re-walk of the backlog after the upgrade")
+        eq(stores["store"]["seen_history"].get("t1"), "400", "its history is simply recorded")
+        async def broken(q, mx=200, out_complete=None):
+            raise RuntimeError("Gmail is down")
+        _rc.configure(mail_search=broken)
+        r = run_async(_rc.sweep())
+        ok(not any("part-way" in n for n in r["notes"]), "a failed search says so once, cleanly: " + str(r["notes"]))
+    finally:
+        _mail_world_off()
+
+
+@test
+def t_a_scan_read_while_the_ai_is_down_is_read_when_it_is_back():
+    """A4. A scan read on a night the AI call failed was stored as ignored and
+    its thread marked seen, so it was never read again."""
+    import types as _types
+    day = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
+    threads = {"t1": {"id": "t1", "subject": "Invoice SI-88812", "messages": [{
+        "id": "m1", "at": day + "T09:00:00+00:00", "from_email": "accounts@glassworks.co.uk",
+        "files": [{"id": "a1", "name": "SI-88812.pdf", "size": 4000}]}]}}
+    stores = _mail_world(threads)
+    async def ai_down(system, messages, tools, tool_choice):
+        raise RuntimeError("The daily AI spending limit has been reached.")
+    calls = []
+    class Block:
+        type = "tool_use"
+        input = {"doc_type": "supplier_invoice", "counterparty": "Glassworks", "currency": "GBP",
+                 "total": "1,840.00", "invoice_numbers": ["SI-88812"], "invoice_lines": []}
+    async def ai_up(system, messages, tools, tool_choice):
+        calls.append(1)
+        return _types.SimpleNamespace(content=[Block()], model="claude-test")
+    try:
+        _rc.configure(ai_call=ai_down)
+        r1 = run_async(_rc.sweep())
+        ok("m1:a1" not in stores["docs"], "an unread scan is not stored as read")
+        ok(any("retried" in n for n in r1["notes"]), r1["notes"])
+        _rc.configure(ai_call=ai_up)
+        run_async(_rc.sweep())
+        eq(len(calls), 0, "not again the same day: a retry on every sweep billed the AI each time")
+        stores["store"]["doc_tries"]["m1:a1"]["day"] = "2000-01-01"     # the next night
+        run_async(_rc.sweep())
+        eq(len(calls), 1, "the next day's sweep reads it")
+        ok(any(e["kind"] == "gmail_doc_missing_from_xero" for e in stores["store"]["exceptions"].values()),
+           "and the bill missing from Xero is reported")
+        # Tries are counted per day: Sweep now pressed five times on a day the
+        # spend cap was reached must not use them all up.
+        stores2 = _mail_world({"t9": dict(threads["t1"], id="t9")})
+        _rc.configure(ai_call=ai_down)
+        for _ in range(_rc.DOC_READ_TRIES + 1):
+            run_async(_rc.sweep())
+        ok("m1:a1" not in stores2["docs"], "five sweeps in one day are one try, not five")
+        eq(stores2["store"]["doc_tries"]["m1:a1"]["n"], 1)
+        # One that can never be read, on day after day, is filed as unreadable.
+        days = 1
+        while "m1:a1" in (stores2["store"].get("doc_tries") or {}) and days < 20:
+            stores2["store"]["doc_tries"]["m1:a1"]["day"] = "2000-01-%02d" % days   # a day gone by
+            run_async(_rc.sweep())
+            days += 1
+        eq(days, _rc.DOC_READ_TRIES, "one try a day, and filed on the last")
+        doc = stores2["docs"].get("m1:a1") or {}
+        ok(doc.get("ignored") and "different days" in (doc.get("note") or ""),
+           "after the last day it is filed as unreadable, saying so: " + str(doc))
+    finally:
+        _mail_world_off()
+
+
+@test
+def t_a_failed_xero_read_does_not_check_new_orders_against_yesterdays_books():
+    """A5. With a copy cached by the last good sweep, a failed Xero read ran the
+    sale checks on it, and every order since read as a sale missing from Xero."""
+    day = lambda n: (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%d")
+    def xi(num, total, d):
+        r = _raw_xinv(num, total); r["DateString"] = d + "T00:00:00"; r["Reference"] = num.split("-")[1]
+        return r
+    def od(oid, name, total, d):
+        o = _raw_order(oid, name, total); o["created_at"] = d + "T09:00:00Z"; return o
+    fx = _FakeXero(invoices=[xi("INV-104300", "120.00", day(3))])
+    orders = [od(104300, "#104300", "120.00", day(3))]
+    stores = _recon_world(fx, orders)
+    try:
+        run_async(_rc.sweep(deep_docs=False))
+        class Dead(_FakeXero):
+            async def list_invoices(self, since=None, modified_since=None):
+                raise RuntimeError("Xero refused the refresh token.")
+            list_payments = list_bank_transactions = list_credit_notes = list_invoices
+        orders.append(od(104301, "#104301", "95.00", day(1)))
+        orders.append(od(104302, "#104302", "480.00", day(0)))
+        _rc.configure(xero=Dead())
+        r2 = run_async(_rc.sweep(deep_docs=False))
+        live = [e for e in stores["store"]["exceptions"].values()
+                if not e.get("stale") and e["kind"] == "shopify_sale_missing"]
+        eq(live, [], "no sale is called missing from books that could not be read")
+        ok(any("could not be read this sweep" in n for n in r2["notes"]), r2["notes"])
+        # Only the bank refused (a scope not granted, say): invoices read fine,
+        # so a sale really missing from Xero is still reported.
+        class NoBank(_FakeXero):
+            async def list_bank_transactions(self, since=None, modified_since=None):
+                raise RuntimeError("insufficient scope")
+        _rc.configure(xero=NoBank(invoices=[xi("INV-104300", "120.00", day(3))]))
+        run_async(_rc.sweep(deep_docs=False))
+        live = [e for e in stores["store"]["exceptions"].values()
+                if not e.get("stale") and e["kind"] == "shopify_sale_missing"]
+        ok(live, "with only the bank unreadable, the sale checks still run and report")
+    finally:
+        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
+                      mail_thread=None, load_store=None, write_store=None,
+                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
+
+
+@test
+def t_a_remittance_is_satisfied_only_by_a_live_receipt_of_its_own():
+    """A6. A deleted payment, a payment to a supplier, or one another
+    remittance already used all hid a missing receipt."""
+    d0 = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%d")
+    def inv(i, num, total, contact, typ="ACCREC"):
+        return {"id": i, "number": num, "type": typ, "status": "AUTHORISED", "contact": contact,
+                "date": d0, "due": d0, "total": total, "tax": 0, "due_pence": total, "paid_pence": 0,
+                "credited_pence": 0, "currency": "GBP", "reference": "", "updated": ""}
+    def pay(i, p, status, inv_num, typ=""):
+        return {"id": i, "date": d0, "pence": p, "reference": "", "status": status, "type": typ,
+                "invoice_id": "", "invoice_number": inv_num, "contact": "", "account": "090",
+                "is_reconciled": True}
+    def remit(key, num):
+        return {"source_key": key, "doc_type": "remittance", "from": key, "counterparty": key,
+                "date": d0, "total_pence": 50000, "currency": "GBP", "invoice_numbers": [num],
+                "invoice_lines": [{"number": num, "pence": 50000}], "verified": True}
+    def flagged(payments, docs):
+        cache = {"xero": {"invoices": {"a": inv("a", "INV-0142", 50000, "Northern Stage"),
+                                       "b": inv("b", "INV-0143", 50000, "Leeds Playhouse"),
+                                       "s": inv("s", "GW-77", 50000, "Glassworks", "ACCPAY")},
+                          "payments": payments, "credit_notes": {}, "bank_transactions": {}}}
+        return sorted(e["refs"][0] for e in _rc.check_gmail_docs(cache, docs)
+                      if e["kind"] == "remittance_payment_missing")
+    one = {"r1": remit("r1", "INV-0142")}
+    eq(flagged({"p1": pay("p1", 50000, "AUTHORISED", "INV-0142")}, one), [], "a real receipt satisfies it")
+    eq(flagged({"p1": pay("p1", 50000, "DELETED", "INV-0142")}, one), ["r1"], "a deleted one does not")
+    eq(flagged({"p2": pay("p2", 50000, "AUTHORISED", "GW-77")}, one), ["r1"],
+       "nor does our payment to a supplier, known by the bill it pays")
+    eq(flagged({"p3": pay("p3", 50000, "AUTHORISED", "", "ACCPAYPAYMENT")}, one), ["r1"],
+       "or by its own type")
+    two = {"r2": remit("r2", "INV-0143"), "r1": remit("r1", "INV-0142")}
+    eq(flagged({"p4": pay("p4", 50000, "AUTHORISED", "INV-0142")}, two), ["r2"],
+       "one receipt explains one remittance, the one whose invoice it pays")
+    for kind in ("ARCREDITPAYMENT", "AROVERPAYMENTPAYMENT", "ARPREPAYMENTPAYMENT"):
+        eq(flagged({"p5": pay("p5", 50000, "AUTHORISED", "", kind)}, one), ["r1"],
+           kind + " is a refund paid out, not a receipt")
+    eq(flagged({"p6": pay("p6", 50000, "AUTHORISED", "", "ACCRECPAYMENT")}, one), [], "ACCRECPAYMENT is")
+    # r1 was paid line by line (300 + 200 against its own invoices); r2, for
+    # 300, has no receipt. The 300 is r1's, never r2's by amount.
+    split = {"r1": dict(remit("r1", "INV-0142"), total_pence=50000, invoice_numbers=["INV-0142", "INV-0143"],
+                        invoice_lines=[{"number": "INV-0142", "pence": 30000},
+                                       {"number": "INV-0143", "pence": 20000}]),
+             "r2": dict(remit("r2", "INV-0999"), total_pence=30000,
+                        invoice_lines=[{"number": "INV-0999", "pence": 30000}])}
+    eq(flagged({"q1": pay("q1", 30000, "AUTHORISED", "INV-0142"),
+                "q2": pay("q2", 20000, "AUTHORISED", "INV-0143")}, split), ["r2"],
+       "a remittance's line payments are its own, and the one with no receipt is the one flagged")
+
+
+@test
+def t_an_erasure_takes_the_deals_leads_and_enquiry_email_too():
+    """A7. customers/redact tombstoned the contact and the threads they sent,
+    and left their deal, their lead and the storefront enquiry (sent from the
+    shop's own address) with their name, message and phone number."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        addr = "jo.smith@example.com"
+        store = {"threads": {}}
+        enq = {"id": "e1", "historyId": "1", "subject": "New customer message on 20 September", "messages": [
+            dict(_mk_msg("e1-m1", "Store", MBOX, "2026-09-20T09:00:00+00:00",
+                         snippet="Name: Jo Smith Email: jo.smith@example.com Phone: 07700 900123"),
+                 labels=["INBOX"])]}
+        copilot._mail_apply_thread(store, enq, MBOX)
+        copilot._write_mail(store)
+        d = copilot._load_crm()
+        d["persons"]["p1"] = {"id": "p1", "name": "Jo Smith", "emails": [addr], "created_at": "", "updated_at": ""}
+        d["deals"]["d1"] = {"id": "d1", "title": "Jo Smith - website enquiry", "person_id": "p1",
+                            "mail_thread_id": "e1", "stage_id": (d["stages"][0]["id"] if d["stages"] else ""),
+                            "notes": [{"id": "n1", "text": "Given on the form: phone 07700 900123"}],
+                            "pd_id": "777"}
+        d["leads"]["l1"] = {"id": "l1", "title": "Jo Smith lead", "person_id": "p1"}
+        d["activities"]["a1"] = {"id": "a1", "subject": "Call Jo", "deal_id": "d1", "pd_id": "888"}
+        copilot._write_crm(d)
+        out = copilot._redact_customer(addr, "555")
+        d = copilot._load_crm()
+        eq((d["deals"].get("d1"), d["leads"].get("l1"), d["activities"].get("a1")), (None, None, None),
+           "the deal, the lead and the deal's task are gone")
+        ok("777" in (d.get("pd_deleted_deals") or []), "and an import cannot bring the deal back")
+        ok("e1" not in copilot._load_mail()["threads"], "the storefront enquiry is gone from the board")
+        st = copilot._load_mail()
+        copilot._mail_apply_thread(st, enq, MBOX)
+        ok("e1" not in st["threads"], "and the sync cannot fetch it back")
+        ok(out["erased"] >= 4, out)
+        # Nobody else's record goes with them. Bob's thread mentions Jo; an
+        # organisation's won deal had Jo as its contact; and erasing
+        # sales@firm.co is not erasing sales@firm.co.uk.
+        st = copilot._load_mail()
+        bob = {"id": "b1", "historyId": "1", "subject": "Order", "messages": [
+            _mk_msg("b1-m1", "Bob", "bob@venue.com", "2026-09-21T09:00:00+00:00",
+                    snippet="please send the invoice to our finance lead jo.smith@example.com")]}
+        uk = {"id": "k1", "historyId": "1", "subject": "Hello", "messages": [
+            _mk_msg("k1-m1", "Sam", "sales@firm.co.uk", "2026-09-21T09:00:00+00:00", snippet="hi")]}
+        copilot._mail_apply_thread(st, bob, MBOX); copilot._mail_apply_thread(st, uk, MBOX)
+        copilot._write_mail(st)
+        d = copilot._load_crm()
+        d["persons"]["p2"] = {"id": "p2", "name": "Ann Other", "emails": ["ann@other.com"], "phones": ["07700 900555"]}
+        d["deals"]["d2"] = {"id": "d2", "title": "Northern Stage: Ann Other rig", "person_id": "p2",
+                            "org_id": "o1", "status": "won", "value": 18000, "pd_id": "999",
+                            "notes": [{"id": "n2", "text": "Ann Other on 07700 900555 signed it off"}]}
+        copilot._write_crm(d)
+        copilot._redact_customer("jo.smith@example.com", "555")
+        copilot._redact_customer("ann@other.com", "556")
+        copilot._redact_customer("sales@firm.co", "557")
+        st = copilot._load_mail()
+        ok("b1" in st["threads"], "Bob's thread stays: he wrote it")
+        ok("jo.smith@example.com" not in st["threads"]["b1"]["snippet"], "with Jo's address scrubbed from it")
+        copilot._mail_apply_thread(st, dict(bob, messages=bob["messages"] + [
+            _mk_msg("b1-m2", "Bob", "bob@venue.com", "2026-09-22T09:00:00+00:00", snippet="new order")]), MBOX)
+        ok("b1" in st["threads"] and len(st["threads"]["b1"]["messages"]) == 2, "and Bob's next email still arrives")
+        ok("k1" in st["threads"], "erasing sales@firm.co leaves sales@firm.co.uk alone")
+        d = copilot._load_crm()
+        deal = d["deals"].get("d2") or {}
+        ok(deal.get("status") == "won" and "999" not in (d.get("pd_deleted_deals") or []),
+           "the organisation's won deal stays, and is not tombstoned")
+        ok(not deal.get("person_id") and "Ann Other" not in deal.get("title", "")
+           and "07700 900555" not in deal["notes"][0]["text"], "without Ann in it: " + str(deal))
+    with_mail(go)
+
+
+@test
+def t_a_second_import_on_the_same_day_keeps_the_first_restore_point():
+    """A8. The pre-import snapshot was named by the day, so a second import that
+    day replaced the only copy of the CRM from before the first."""
+    import zipfile, pipedrive as _pd
+    saved = (copilot.BACKUP_STATE_PATH, copilot.BACKUP_SNAPSHOT_DIR)
+    copilot.BACKUP_STATE_PATH = SCRATCH + "/backup_state_a8.json"
+    copilot.BACKUP_SNAPSHOT_DIR = SCRATCH + "/snapshots_a8"
+    def go():
+        ensure_auth()
+        crm_wipe()
+        post("/api/crm/contact", {"op": "org_add", "name": "Typed by hand"})
+        async def fake_export(progress=None):
+            return dict(PD_EXPORT)
+        was = (_pd.export, _pd.API_TOKEN)
+        _pd.export, _pd.API_TOKEN = fake_export, "t"
+        try:
+            eq(post("/api/crm/import", {"go": True}).status_code, 200)
+            eq(post("/api/crm/import", {"go": True}).status_code, 200)
+        finally:
+            _pd.export, _pd.API_TOKEN = was
+        snaps = sorted(glob.glob(copilot.BACKUP_SNAPSHOT_DIR + "/*.zip"), key=os.path.getmtime)
+        eq(len(snaps), 2, "two imports, two restore points: " + str(snaps))
+        for _ in range(4):
+            copilot._weekly_snapshot(True)          # three, four, five and six runs that day
+        still = sorted(glob.glob(copilot.BACKUP_SNAPSHOT_DIR + "/*.zip"), key=os.path.getmtime)
+        ok(snaps[0] in still, "however many runs that day, the one from before the first is kept")
+        with zipfile.ZipFile(snaps[0]) as z:
+            first = json.loads(z.read("volume/crm.json"))["crm"]
+        eq(len(first["deals"]), 0, "the first still holds the CRM from before any import")
+        ok(any(o.get("name") == "Typed by hand" and not o.get("pd_id") for o in first["orgs"].values()))
+    try:
+        with_accounts(go)
+    finally:
+        copilot.BACKUP_STATE_PATH, copilot.BACKUP_SNAPSHOT_DIR = saved
+
+
+@test
+def t_a_gateway_error_on_a_booking_says_it_may_have_been_booked():
+    """A9. An HTML 504 from World Options' edge was a plain failure, and the
+    page re-armed Book, which booked and charged again."""
+    import httpx as _hx
+    ensure_auth()
+    post("/api/shipping/config", {"op": "set", "meter_number": "METER-9999", "key": "KEY-abc",
+                                   "password": "PW-xyz",
+                                   "origin": {"street": "1 Mill St", "postcode": "LS1 1AA", "country": "GB",
+                                              "city": "Leeds", "company": "PI", "phone": "0113 555 1111",
+                                              "email": "shop@projectedimage.com"}})
+    reset_dispatch(); reset_prod()
+    posts = []
+    def handler(request):
+        if "DoShipment" in request.content.decode():
+            posts.append(1)
+            return _hx.Response(504, text="<html><body><h1>504 Gateway Time-out</h1></body></html>")
+        return _hx.Response(200, text=RATE_XML)
+    Real = worldoptions.httpx.AsyncClient
+    class Stub(Real):
+        def __init__(self, *a, **kw):
+            kw["transport"] = _hx.MockTransport(handler)
+            super().__init__(*a, **kw)
+    saved = (worldoptions._soap_call, worldoptions.httpx.AsyncClient)
+    worldoptions._soap_call, worldoptions.httpx.AsyncClient = REAL_SOAP_CALL, Stub
+    try:
+        r = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
+        err = r.json().get("error", "")
+        ok("MAY still have been booked" in err, "the booking may exist, and the page is told so: " + err)
+        eq(len(posts), 1, "and it is never sent a second time by itself")
+        page = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+        rx = re.search(r"const BOOKING_UNKNOWN = /(.*?)/i;", page).group(1)
+        ok(re.search(rx, err, re.I), "which is what holds the Book button on the page")
+        ok(page.count("BOOKING_UNKNOWN.test(msg)") == 2,
+           "on the order panel and the pasted-address panel alike")
+        def handler403(request):
+            if "DoShipment" in request.content.decode():
+                return _hx.Response(403, text="<!DOCTYPE html><html><body>Forbidden</body></html>")
+            return _hx.Response(200, text=RATE_XML)
+        class Stub403(Real):
+            def __init__(self, *a, **kw):
+                kw["transport"] = _hx.MockTransport(handler403)
+                super().__init__(*a, **kw)
+        worldoptions.httpx.AsyncClient = Stub403
+        reset_dispatch()
+        err2 = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX}).json().get("error", "")
+        ok(not re.search(rx, err2, re.I), "a 4xx refusal is a definite failure, not a maybe: " + err2)
+    finally:
+        worldoptions._soap_call, worldoptions.httpx.AsyncClient = saved
+        reset_dispatch()
+
+
+@test
+def t_gmail_and_apple_mail_attachments_are_listed():
+    """A10. Any part with a Content-ID or an inline disposition was taken for a
+    signature logo: Gmail puts a Content-ID on every attachment and Apple Mail
+    sends PDFs inline, so both vanished from the Inbox and from reconciliation."""
+    import base64 as _b64
+    enc = lambda x: _b64.urlsafe_b64encode(x.encode()).decode().rstrip("=")
+    def thread(parts):
+        return {"id": "t1", "messages": [{"id": "m1", "labelIds": ["INBOX"], "payload": {
+            "mimeType": "multipart/mixed", "headers": [{"name": "From", "value": "Jo <jo@c.com>"}],
+            "parts": parts}}]}
+    html = {"mimeType": "text/html",
+            "body": {"data": enc('<p>Hi</p><img src="cid:image001.png@01D9">')}}
+    gmail = {"mimeType": "application/pdf", "filename": "Invoice INV-2291.pdf",
+             "headers": [{"name": "Content-Disposition", "value": 'attachment; filename="Invoice INV-2291.pdf"'},
+                         {"name": "Content-ID", "value": "<f_lxyz0>"}, {"name": "X-Attachment-Id", "value": "f_lxyz0"}],
+             "body": {"attachmentId": "a1", "size": 88000}}
+    apple = {"mimeType": "application/pdf", "filename": "artwork.pdf",
+             "headers": [{"name": "Content-Disposition", "value": "inline; filename=artwork.pdf"}],
+             "body": {"attachmentId": "a2", "size": 400000}}
+    logo = {"mimeType": "image/png", "filename": "image001.png",
+            "headers": [{"name": "Content-Disposition", "value": 'inline; filename="image001.png"'},
+                        {"name": "Content-ID", "value": "<image001.png@01D9>"}],
+            "body": {"attachmentId": "a3", "size": 6000}}
+    async def fake_call(method, path, params=None, acct=None, **kw):
+        return thread([html, gmail, apple, logo])
+    saved = _gm._call
+    _gm._call = fake_call
+    try:
+        t = run_async(_gm.get_thread("t1"))
+        eq([f["name"] for f in t["messages"][0]["files"]], ["Invoice INV-2291.pdf", "artwork.pdf"],
+           "the Gmail and Apple Mail attachments are files; the signature logo the email draws is not")
+    finally:
+        _gm._call = saved
+
+
+@test
+def t_a_filter_that_assigns_and_archives_does_not_close_the_email():
+    """A11. The filter's own "take it out of the inbox" was read back on the
+    next sync as somebody archiving it in Gmail, and the owner's email closed."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        ann, _s, _p = ready_user("Ann", "ann", role="member")
+        post("/api/mail/rules", {"op": "save", "rule": {
+            "name": "Supplier invoices to Ann", "assign": ann, "folder": "Suppliers", "archive": True,
+            "conditions": [{"field": "domain", "op": "is", "value": "glassworks.co.uk"}]}})
+        in_inbox = {"s1"}
+        msg = {"id": "s1-m1", "from_name": "Glassworks", "from_email": "accounts@glassworks.co.uk",
+               "at": "2026-09-22T09:00:00+00:00", "snippet": "invoice attached", "labels": ["INBOX", "UNREAD"],
+               "files": []}
+        async def listing(q, n):
+            return {"threads": [{"id": t, "snippet": "", "historyId": "h1"} for t in sorted(in_inbox)],
+                    "complete": True}
+        async def get_thread(tid, acct=None):
+            return {"id": tid, "historyId": "h1", "subject": "Invoice 2291", "messages": [msg]}
+        async def modify(tid, add=None, remove=None):
+            if remove and "INBOX" in remove:
+                in_inbox.discard(tid)
+        async def label(name, known):
+            known[name] = "L_" + name; return known[name]
+        async def ids(q, max_results=500, pages=8, acct=None, out_complete=None):
+            if out_complete is not None:
+                out_complete.append(True)
+            return {"s1"}
+        saved = (_gm.list_threads, _gm.get_thread, _gm.modify_thread, _gm.ensure_label, _gm.list_thread_ids)
+        _gm.list_threads, _gm.get_thread, _gm.modify_thread, _gm.ensure_label, _gm.list_thread_ids = \
+            listing, get_thread, modify, label, ids
+        try:
+            run_async(copilot._mail_sync_now(force=True))
+            ok("s1" not in in_inbox, "the filter took it out of the Gmail inbox")
+            run_async(copilot._mail_sync_now(force=True))
+            t = copilot._load_mail()["threads"]["s1"]
+            eq((t["state"], t["owner"]), ("assigned", ann), "and it is still Ann's, open")
+            in_inbox.add("s1")                    # it comes back to the inbox
+            run_async(copilot._mail_sync_now(force=True))
+            in_inbox.discard("s1")                # and then a person archives it in Gmail
+            run_async(copilot._mail_sync_now(force=True))
+            eq(copilot._load_mail()["threads"]["s1"].get("closed_by"), "archive",
+               "a person's archive still closes it")
+        finally:
+            _gm.list_threads, _gm.get_thread, _gm.modify_thread, _gm.ensure_label, _gm.list_thread_ids = saved
+    with_mail(go)
+
+
+@test
+def t_documents_read_without_the_ai_are_read_again_when_it_is_there():
+    """Review of A4. A remittance with a text layer whose allocation lines the
+    AI could not read lost its line checks for good; and a scan waiting for the
+    AI, forwarded once, came back as a duplicate of its own copy."""
+    import types as _types
+    day = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d") + "T09:00:00+00:00"
+    remit_text = ("REMITTANCE ADVICE  Northern Stage Ltd  Payment reference NS-7781  "
+                  "We have paid the following invoices: INV-0142 500.00  Total paid 500.00 GBP  "
+                  "Date 19/09/2026  Please allocate accordingly. Thank you.")
+    class Block:
+        type = "tool_use"
+        def __init__(self, inp): self.input = inp
+    calls = []
+    async def ai_up(system, messages, tools, tool_choice):
+        calls.append(1)
+        text = str(messages[0]["content"][0].get("text") or "")
+        if "REMITTANCE" in text:
+            return _types.SimpleNamespace(content=[Block({"doc_type": "remittance", "currency": "GBP",
+                "total": "500.00", "invoice_numbers": ["INV-0142"],
+                "invoice_lines": [{"number": "INV-0142", "amount": "500.00"}]})], model="t")
+        return _types.SimpleNamespace(content=[Block({"doc_type": "supplier_invoice", "currency": "GBP",
+            "total": "1,840.00", "invoice_numbers": ["SI-88812"], "invoice_lines": []})], model="t")
+    async def ai_down(system, messages, tools, tool_choice):
+        raise RuntimeError("The AI service is overloaded.")
+    saved_text = _rc._pdf_text
+    _rc._pdf_text = lambda data: remit_text if b"remit" in data else ""
+    async def gbytes(mid, aid):
+        return b"%PDF-1.4 remit" if mid == "r1" else b"%PDF-1.4 same scan"
+    threads = {"tr": {"id": "tr", "subject": "Remittance", "messages": [
+                  {"id": "r1", "at": day, "from_email": "ap@northernstage.org",
+                   "files": [{"id": "a1", "name": "remittance.pdf", "size": 4000}]}]},
+               "ts": {"id": "ts", "subject": "Invoice SI-88812", "messages": [
+                  {"id": "s1", "at": day, "from_email": "accounts@glassworks.co.uk",
+                   "files": [{"id": "a1", "name": "SI-88812.pdf", "size": 4000}]}]},
+               "tf": {"id": "tf", "subject": "Fwd: Invoice SI-88812", "messages": [
+                  {"id": "s2", "at": day, "from_email": "boss@test-store.co.uk",
+                   "files": [{"id": "a1", "name": "SI-88812.pdf", "size": 4000}]}]}}
+    stores = _mail_world(threads, gbytes=gbytes)
+    try:
+        _rc.configure(ai_call=ai_down)           # the AI is failing: the remittance is read by text
+        run_async(_rc.sweep())
+        doc = stores["docs"].get("r1:a1") or {}
+        ok(doc.get("doc_type") == "remittance" and doc.get("needs_ai"),
+           "the remittance keeps its text reading and is marked to be read again: " + str(doc))
+        _rc.configure(ai_call=None)              # and a night with no AI configured: the scans wait
+        stores["store"]["doc_tries"] = {}
+        run_async(_rc.sweep())
+        ok(stores["docs"].get("s1:a1", {}).get("needs_ai") or stores["docs"].get("s2:a1", {}).get("needs_ai"),
+           "the scan waits for the AI: " + str({k: v.get("note") for k, v in stores["docs"].items()}))
+        _rc.configure(ai_call=ai_up)
+        for k in list(stores["store"].get("doc_tries") or {}):
+            stores["store"]["doc_tries"][k]["day"] = "2000-01-01"   # the waiting was yesterday
+        run_async(_rc.sweep())
+        run_async(_rc.sweep())
+        doc = stores["docs"].get("r1:a1") or {}
+        ok(doc.get("invoice_lines") and not doc.get("needs_ai"), "the remittance is read again, lines and all: " + str(doc))
+        kinds = [e["kind"] for e in stores["store"]["exceptions"].values() if not e.get("stale")]
+        ok("gmail_doc_missing_from_xero" in kinds,
+           "and the scan is read, not filed as a duplicate of its own forwarded copy: " + str(kinds))
+    finally:
+        _rc._pdf_text = saved_text
+        _mail_world_off()
+
+
+@test
+def t_a_logo_drawn_by_a_second_html_part_is_still_a_logo():
+    """Review of A10. Apple Mail splits a message into several HTML parts
+    around its images; the cids of only the first were read."""
+    import base64 as _b64
+    enc = lambda x: _b64.urlsafe_b64encode(x.encode()).decode().rstrip("=")
+    parts = [{"mimeType": "text/html", "body": {"data": enc("<p>Hello</p>")}},
+             {"mimeType": "image/png", "filename": "sig-logo.png",
+              "headers": [{"name": "Content-ID", "value": "<sig@apple>"},
+                          {"name": "Content-Disposition", "value": "inline; filename=sig-logo.png"}],
+              "body": {"attachmentId": "a1", "size": 5000}},
+             {"mimeType": "text/html", "body": {"data": enc('<img src="cid:sig@apple"><p>Jo</p>')}},
+             {"mimeType": "application/pdf", "filename": "quote.pdf",
+              "headers": [{"name": "Content-Disposition", "value": "inline; filename=quote.pdf"}],
+              "body": {"attachmentId": "a2", "size": 90000}}]
+    async def fake_call(method, path, params=None, acct=None, **kw):
+        return {"id": "t1", "messages": [{"id": "m1", "labelIds": ["INBOX"], "payload": {
+            "mimeType": "multipart/mixed", "headers": [{"name": "From", "value": "Jo <jo@c.com>"}],
+            "parts": parts}}]}
+    saved = _gm._call
+    _gm._call = fake_call
+    try:
+        t = run_async(_gm.get_thread("t1"))
+        eq([f["name"] for f in t["messages"][0]["files"]], ["quote.pdf"])
+    finally:
+        _gm._call = saved
+
+
+@test
+def t_an_invoice_paid_in_instalments_flags_no_paid_remittance():
+    """Review of A6. Holding back every payment that COULD settle another
+    remittance's lines, instead of the one it used, flagged a remittance that
+    was paid whenever an invoice was paid in instalments."""
+    day = lambda n: (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%d")
+    def inv(i, num, total):
+        return {"id": i, "number": num, "type": "ACCREC", "status": "AUTHORISED", "contact": "NS",
+                "date": day(90), "due": day(60), "total": total, "tax": 0, "due_pence": 0,
+                "paid_pence": total, "credited_pence": 0, "currency": "GBP", "reference": "", "updated": ""}
+    def pay(i, p, num, d):
+        return {"id": i, "date": d, "pence": p, "reference": "", "status": "AUTHORISED",
+                "type": "ACCRECPAYMENT", "invoice_id": "", "invoice_number": num, "contact": "",
+                "account": "090", "is_reconciled": True}
+    def remit(key, d, total, lines, nums=None):
+        return {"source_key": key, "doc_type": "remittance", "from": key, "counterparty": "NS", "date": d,
+                "total_pence": total, "currency": "GBP", "invoice_numbers": nums or [n for n, _ in lines],
+                "invoice_lines": [{"number": n, "pence": p} for n, p in lines], "verified": True}
+    cache = {"xero": {"invoices": {"a": inv("a", "INV-0142", 100000), "b": inv("b", "INV-0143", 20000)},
+                      "payments": {"p1": pay("p1", 50000, "INV-0142", day(40)),
+                                   "p2": pay("p2", 50000, "INV-0142", day(9)),
+                                   "p3": pay("p3", 20000, "INV-0143", day(40))},
+                      "credit_notes": {}, "bank_transactions": {}}}
+    def flagged(docs):
+        return sorted(e["refs"][0] for e in _rc.check_gmail_docs(cache, docs)
+                      if e["kind"] == "remittance_payment_missing")
+    eq(flagged({"r1": remit("r1", day(40), 70000, [("INV-0142", 50000), ("INV-0143", 20000)]),
+                "r2": remit("r2", day(9), 50000, [("INV-0142", 50000)])}), [],
+       "two instalments of one invoice, each remitted and each paid")
+    eq(flagged({"r1": remit("r1", day(40), 50000, [("INV-0142", 50000)]),
+                "r3": remit("r3", day(9), 50000, [], nums=["INV-0142"])}), [],
+       "and a remittance read without its lines takes the instalment the other did not")
+
+
+@test
+def t_an_erasure_stays_erased_and_takes_only_theirs():
+    """Review of A7. The next Pipedrive import wrote the person back into a
+    kept organisation deal; an enquiry that named a company was kept as an
+    organisation's deal, message and all; a one-word name was scrubbed out of
+    other words; and a kept thread still named them in its Cc, and the next
+    sync put their address back in its snippet."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+        d = copilot._load_crm()
+        d["orgs"]["o1"] = {"id": "o1", "name": "Northern Stage", "pd_id": "501"}
+        d["persons"]["p1"] = {"id": "p1", "name": "Sarah Whitfield", "emails": ["sarah@ns.co.uk"],
+                              "phones": ["0191 111"], "org_id": "o1", "pd_id": "601"}
+        d["deals"]["d1"] = {"id": "d1", "title": "Sarah Whitfield - 12 steel gobos", "person_id": "p1",
+                            "org_id": "o1", "status": "won", "pd_id": "701", "notes": []}
+        d["activities"]["a1"] = {"id": "a1", "subject": "Call Sarah Whitfield", "deal_id": "d1",
+                                 "person_id": "p1", "note": "Rang Sarah Whitfield on 0191 111", "pd_id": "801"}
+        d["orgs"]["o2"] = {"id": "o2", "name": "Jo Smith Photography"}
+        d["persons"]["p2"] = {"id": "p2", "name": "Jo Smith", "emails": ["jo@photo.com"], "org_id": "o2"}
+        d["deals"]["d2"] = {"id": "d2", "title": "Jo Smith - website enquiry", "person_id": "p2",
+                            "org_id": "o2", "source": "Website form", "mail_thread_id": "e9", "notes": []}
+        d["persons"]["p3"] = {"id": "p3", "name": "Will", "emails": ["will@ns.co.uk"], "org_id": "o1"}
+        d["deals"]["d3"] = {"id": "d3", "title": "Northern Stage - Willow set", "person_id": "p3",
+                            "org_id": "o1", "status": "open", "notes": [{"id": "n3", "text": "They will need 40 gobos"}]}
+        copilot._write_crm(d)
+        st = copilot._load_mail()
+        bob = {"id": "b1", "historyId": "1", "subject": "Order", "messages": [
+            dict(_mk_msg("b1-m1", "Bob", "bob@venue.com", "2026-09-21T09:00:00+00:00",
+                         snippet="copying in sarah@ns.co.uk from finance"),
+                 cc="Sarah Whitfield <sarah@ns.co.uk>, Ann <ann@venue.com>")]}
+        copilot._mail_apply_thread(st, bob, MBOX)
+        copilot._write_mail(st)
+        for a in ("sarah@ns.co.uk", "jo@photo.com", "will@ns.co.uk"):
+            copilot._redact_customer(a, "1")
+        d = copilot._load_crm()
+        deal, act = d["deals"]["d1"], d["activities"]["a1"]
+        ok("Sarah" not in deal["title"] and "Sarah" not in act["subject"] and "0191" not in act["note"],
+           "the kept deal and its task no longer name her: " + str((deal["title"], act)))
+        ok(deal.get("edited_here") and act.get("edited_here"), "and are marked so the import leaves them be")
+        ok("d2" not in d["deals"] and "o2" not in d["orgs"],
+           "an enquiry is the person's own, and the company typed into it goes with it")
+        eq(d["deals"]["d3"]["title"], "Northern Stage - Willow set", "a one-word name is not cut out of words")
+        eq(d["deals"]["d3"]["notes"][0]["text"], "They will need 40 gobos")
+        st = copilot._load_mail()
+        m = st["threads"]["b1"]["messages"][0]
+        ok("sarah" not in m.get("cc", "").lower() and "ann@venue.com" in m.get("cc", ""),
+           "her entry is gone from the Cc, and nobody else's: " + m.get("cc", ""))
+        copilot._mail_apply_thread(st, dict(bob, messages=bob["messages"] + [
+            _mk_msg("b1-m2", "Bob", "bob@venue.com", "2026-09-22T09:00:00+00:00", snippet="thanks")]), MBOX)
+        ok("sarah@ns.co.uk" not in json.dumps(st["threads"]["b1"]), "and the next sync does not put her back")
+    with_mail(go)
+
+
+@test
+def t_a_remittance_waiting_for_the_ai_keeps_its_figures():
+    """Review of A4. A text remittance marked to be read again with the AI
+    was removed before it was re-read, and lost for good when its thread was
+    not walked again that sweep."""
+    import types as _types
+    day = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d") + "T09:00:00+00:00"
+    remit_text = ("REMITTANCE ADVICE  Northern Stage Ltd  Payment reference NS-7781  "
+                  "We have paid the following invoices: INV-0142 500.00  Total paid 500.00 GBP  "
+                  "Date 19/09/2026  Please allocate accordingly. Thank you.")
+    threads = {"tr": {"id": "tr", "subject": "Remittance", "messages": [
+        {"id": "r1", "at": day, "from_email": "ap@ns.org", "files": [{"id": "a1", "name": "remittance.pdf", "size": 4000}]}]}}
+    listed = {"tr": "1"}
+    async def search(q, mx=200, out_complete=None):
+        if out_complete is not None:
+            out_complete.append(True)
+        return dict(listed)
+    async def ai_down(system, messages, tools, tool_choice):
+        raise RuntimeError("overloaded")
+    saved = _rc._pdf_text
+    _rc._pdf_text = lambda data: remit_text
+    stores = _mail_world(threads, search=search)
+    try:
+        _rc.configure(ai_call=ai_down)
+        run_async(_rc.sweep())
+        ok(stores["docs"].get("r1:a1", {}).get("needs_ai"), "read by its text, waiting for the AI")
+        listed.clear()                                   # the thread is not listed on day two
+        stores["store"]["doc_tries"]["r1:a1"]["day"] = "2000-01-01"
+        run_async(_rc.sweep())
+        ok(stores["docs"].get("r1:a1", {}).get("doc_type") == "remittance",
+           "its figures are kept until a new reading replaces them")
+    finally:
+        _rc._pdf_text = saved
+        _mail_world_off()
+
+
+# ---------------------------------------------------------------------------
+# The 2026-09-22 bug audit, the P3s.
+# ---------------------------------------------------------------------------
+import copy as _copy
+import xml.etree.ElementTree as _ET
+
+def _ship_cfg():
+    post("/api/shipping/config", {"op": "set", "meter_number": "METER-9999", "key": "K", "password": "P",
+                                   "origin": {"street": "1 Mill St", "postcode": "LS1 1AA", "country": "GB",
+                                              "city": "Leeds", "company": "PI", "phone": "0113 555 1111",
+                                              "email": "shop@projectedimage.com"}})
+
+
+@test
+def t_a_redact_a_store_refused_is_said_and_retried():
+    """A14. A customers/redact whose CRM write failed was logged as erased and
+    never tried again; an unreadable CRM was logged as "erased 0"."""
+    def go():
+        ensure_auth(); crm_wipe()
+        d = copilot._load_crm()
+        d["persons"]["p1"] = {"id": "p1", "name": "Kim Lee", "emails": ["kim@x.com"]}
+        copilot._write_crm(d)
+        good = open(copilot.CRM_PATH).read()
+        with open(copilot.CRM_PATH, "w") as fh:
+            fh.write("{ broken")
+        copilot._json_cache.pop(copilot.CRM_PATH, None)
+        reset_dispatch()
+        copilot._record_dispatch(4242, {"email": "kim@x.com", "tracking_number": "T-42"})
+        try:
+            out = copilot._redact_customer("kim@x.com", "9")
+            ok("the CRM" in out["failed"], out)
+            asked = copilot._load_dispatch()["4242"].get("redacted_request_at")
+            ok(asked, "the kept booking records when the request came in")
+            last = copilot._load_privacy_log()["events"][-1]["detail"]
+            ok("NOT YET ERASED from the CRM" in last, "the record says what was not done: " + last)
+            ok(any(p["email"] == "kim@x.com" for p in copilot._load_privacy_log().get("pending") or []),
+               "and it is owed")
+        finally:
+            copilot._poisoned_stores.discard(copilot.CRM_PATH)
+            with open(copilot.CRM_PATH, "w") as fh:
+                fh.write(good)
+            copilot._json_cache.pop(copilot.CRM_PATH, None)
+        # The hourly tick is what runs it (the round-4 review found the test
+        # called the retry directly, so dropping it from the tick passed).
+        ran = []
+        async def probe(registry, name, args):
+            return {"name": "Shop"} if name == "shopify_get_shop" else {}
+        async def noop(*a, **k):
+            return None
+        async def skip(*a, **k):
+            return {"error": "skip"}
+        saved = (copilot._tool_json, copilot._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
+                 copilot._files_tick, copilot.run_label_coverage, copilot._webhook_ensurer,
+                 copilot._watch_last_tick, copilot._redact_retry_pending)
+        copilot._tool_json, copilot._send_alert_email, copilot._zeta_drain = probe, noop, noop
+        copilot._zeta_configured, copilot._files_tick = (lambda: False), (lambda: None)
+        copilot.run_label_coverage, copilot._webhook_ensurer, copilot._watch_last_tick = skip, None, 0.0
+        copilot._redact_retry_pending = lambda: ran.append(1) or saved[-1]()
+        try:
+            run_async(copilot._watchdog_tick({}))
+        finally:
+            (copilot._tool_json, copilot._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
+             copilot._files_tick, copilot.run_label_coverage, copilot._webhook_ensurer,
+             copilot._watch_last_tick, copilot._redact_retry_pending) = saved
+        eq(ran, [1], "the hourly tick runs the retry")
+        eq(copilot._load_dispatch()["4242"].get("redacted_request_at"), asked,
+           "and the retry leaves that time alone")
+        reset_dispatch()
+        ok(not any(p.get("id") == "p1" for p in copilot._load_crm()["persons"].values()), "and she is gone")
+        eq(copilot._load_privacy_log().get("pending"), [], "nothing is owed any more")
+    with_mail(go)
+
+
+def _open_order(i, tags=""):
+    return {"id": i, "name": "#%d" % i, "order_number": i, "created_at": "2026-09-%02dT10:00:00Z" % (1 + i % 20),
+            "tags": tags, "cancelled_at": None, "fulfillment_status": None, "financial_status": "paid",
+            "customer": {"first_name": "A", "last_name": "B"}, "shipping_address": {"company": "Venue"},
+            "line_items": [{"title": "Custom Gobo", "quantity": 1,
+                            "properties": [{"name": "Manufacturer", "value": "ETC"},
+                                           {"name": "Model", "value": "Source Four"}]}]}
+
+
+@test
+def t_the_missing_check_reads_every_open_order():
+    """A15. It read one page of 100 open orders; the oldest, most at risk of
+    never reaching the bench, were the ones past it."""
+    orders = [_open_order(i, tags="IP") for i in range(2, 262)] + [_open_order(1)]
+    async def tools(registry, name, args):
+        if name == "shopify_list_orders":
+            sid = int(args.get("since_id") or 0)
+            rows = sorted((o for o in orders if o["id"] > sid), key=lambda o: o["id"])
+            return {"orders": [dict(o) for o in rows[:int(args.get("limit") or 50)]]}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        res = run_async(copilot.run_missing_production({}))
+        eq(res["checked"], 261, "every open order is read")
+        eq([m["name"] for m in res["missing"]], ["#1"], "and the oldest untagged one is found")
+        eq(res["truncated"], False)
+    finally:
+        copilot._tool_json = saved
+
+
+@test
+def t_a_stock_sheet_with_unread_orders_is_not_sent_as_final():
+    """A16. The day's sheet went as FINAL figures for orders the server could
+    not read, un-booking the glass their automatic bookings recorded."""
+    from zoneinfo import ZoneInfo
+    ensure_auth(); reset_dispatch(); reset_prod()
+    copilot._mark_made(12345, True); copilot._mark_made(777, True)
+    async def tools(registry, name, args):
+        if name == "shopify_get_order":
+            return {"_failed": True} if int(args["order_id"]) == 777 else _copy.deepcopy(ORDER)
+        if name == "shopify_get_shop":
+            return dict(SHOP)
+        return {}
+    sent = []
+    async def sheet(payload):
+        sent.append(payload); return {"ok": True}
+    saved = (copilot._tool_json, copilot._zeta_send_sheet, copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN)
+    copilot._tool_json, copilot._zeta_send_sheet = tools, sheet
+    copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN = "https://zeta.test", "tok"
+    try:
+        today = datetime.now(ZoneInfo("Europe/London")).date().isoformat()
+        r = post("/api/stock-usage/send", {"date": today, "lines": [
+            {"family": "Mono", "size": "37.5", "estimated": 0, "final": 0}]})
+        eq(r.status_code, 409, r.text)
+        eq(sent, [], "nothing reaches the stock app")
+        ok("777" in r.json()["error"], "and the order that could not be read is named: " + r.text)
+        # An order Shopify no longer has (found by the round-4 review) held
+        # the day's sheet for good: a deleted order is not "read just now".
+        # It is left out, its booking stands, and the send says so. Both
+        # shapes: the real tool's non-JSON text and an error field.
+        for gone in ({"_failed": True, "_said": "Resource not found \u2014 double-check the ID."},
+                     {"error": "Shopify API 404: Not Found"}):
+            async def tools(registry, name, args, gone=gone):
+                if name == "shopify_get_order":
+                    return dict(gone) if int(args["order_id"]) == 777 else _copy.deepcopy(ORDER)
+                return dict(SHOP) if name == "shopify_get_shop" else {}
+            copilot._tool_json = tools
+            sent.clear()
+            r = post("/api/stock-usage/send", {"date": today, "lines": [
+                {"family": "Mono", "size": "37.5", "estimated": 0, "final": 0}]})
+            eq(r.status_code, 200, r.text)
+            eq(sent[0]["order_ids"], ["12345"], "the gone order is not in the FINAL sheet")
+            ok("777" in r.json()["note"] and "stays booked" in r.json()["note"], r.text)
+    finally:
+        copilot._tool_json, copilot._zeta_send_sheet, copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN = saved
+        reset_prod()
+
+
+@test
+def t_the_erased_address_patterns_are_built_once_each():
+    """Found by the round-4 review: the one-entry cache made the header and
+    body patterns evict each other, so every synced thread rebuilt both."""
+    gone = {"jo@x.com", "kim@y.org"}
+    copilot._erased_rx_cache.clear()
+    body, head = copilot._mail_erased_rx(gone), copilot._mail_erased_rx(gone, header=True)
+    # Counted, not compared by identity: re keeps its own cache of compiled
+    # patterns, so a rebuilt one can be the very same object.
+    eq(sorted(k[1] for k in copilot._erased_rx_cache), [False, True], "each form is kept")
+    eq(head.sub("[erased]", "Jo Smith <jo@x.com>, ann@z.com"), "[erased], ann@z.com")
+    eq(body.sub("[erased]", "write to jo@x.com today"), "write to [erased] today")
+    ok(copilot._mail_erased_rx(gone | {"new@x.com"}) is not body, "and a longer list is a new pattern")
+
+
+@test
+def t_a_tool_read_keeps_what_shopify_said():
+    """What the tool answered is kept on a failed read, so a caller can tell
+    an order Shopify no longer has from one it did not answer for."""
+    async def _aio_ret(v):
+        return v
+    reg = {"t": (lambda m: _aio_ret("Resource not found \u2014 double-check the ID."), lambda **k: None),
+           "u": (lambda m: _aio_ret("Request timed out \u2014 try again."), lambda **k: None)}
+    a = asyncio.run(REAL_TOOL_JSON(reg, "t", {}))
+    b = asyncio.run(REAL_TOOL_JSON(reg, "u", {}))
+    ok(not copilot._ok(a) and copilot._shopify_gone(a), a)
+    ok(not copilot._ok(b) and not copilot._shopify_gone(b), b)
+
+
+@test
+def t_a_channel_islands_postcode_ships_as_its_own_country():
+    """A17. An order to 'United Kingdom' with a Jersey or Guernsey postcode was
+    quoted domestic and booked with no customs declaration."""
+    def to(zip_, cc="GB"):
+        o = _copy.deepcopy(ORDER); o["shipping_address"].update({"zip": zip_, "country_code": cc})
+        return copilot._ship_to(o)["country"]
+    eq((to("JE2 3AB"), to("GY1 1AA"), to("IM1 1AA"), to("M1 2AB"), to("JE2 3AB", "JE")),
+       ("JE", "GG", "GB", "GB", "JE"), "Jersey and Guernsey leave the UK customs area; the Isle of Man does not")
+
+
+@test
+def t_old_shifts_are_archived_and_still_on_the_payroll_report():
+    """A18. The shift log kept the newest 2,000 and dropped the rest, so a
+    report for an older period came back short without a word."""
+    def go():
+        ensure_auth()
+        saved = (copilot.WORK_KEEP, copilot.WORK_ARCHIVE_PATH)
+        copilot.WORK_KEEP = 3
+        copilot.WORK_ARCHIVE_PATH = SCRATCH + "/worklog_archive_a18.jsonl"
+        try:
+            try:
+                os.remove(copilot.WORK_ARCHIVE_PATH)
+            except FileNotFoundError:
+                pass
+            w = copilot._load_work()
+            w["sessions"] = []
+            for i in range(5):
+                w["sessions"].append({"id": "w%d" % i, "uid": "u9", "start": "2026-0%d-01T09:00:00+00:00" % (i + 1),
+                                      "end": "2026-0%d-01T12:00:00+00:00" % (i + 1), "secs": 10800})
+                copilot._write_work(w)
+            eq(len(copilot._load_work()["sessions"]), 3, "the live log keeps its cap")
+            eq(len(copilot._work_archived()), 2, "what left it is archived")
+            r = post("/api/work/report", {"from": "2026-01-01", "to": "2026-12-31"})
+            eq(r.json()["count"], 5, "and the report still has every shift")
+        finally:
+            copilot.WORK_KEEP, copilot.WORK_ARCHIVE_PATH = saved
+            w = copilot._load_work(); w["sessions"] = []; copilot._write_work(w)
+    with_accounts(go)
+
+
+@test
+def t_two_uploads_of_one_name_leave_one_active_file():
+    """A19. Two uploads of one name whose reservations overlapped both became
+    active; Finder could reach only one of them."""
+    def go(fake):
+        ensure_auth()
+        a = post("/api/files/upload-url", {"name": "logo.png", "size": 1000, "type": "image/png", "folder_id": ""}).json()
+        b = post("/api/files/upload-url", {"name": "logo.png", "size": 2000, "type": "image/png", "folder_id": ""}).json()
+        d = copilot._load_files()
+        fake.objects[d["files"][a["id"]]["r2_key"]] = 1000
+        fake.objects[d["files"][b["id"]]["r2_key"]] = 2000
+        eq(post("/api/files/complete", {"id": a["id"]}).status_code, 200)
+        eq(post("/api/files/complete", {"id": b["id"]}).status_code, 200)
+        active = [k for k, v in copilot._load_files()["files"].items()
+                  if v.get("status") == "active" and v.get("name") == "logo.png"]
+        eq(active, [b["id"]], "the later one is the file; the earlier is in the bin")
+    with_files(go)
+
+
+@test
+def t_a_booking_whose_answer_was_lost_is_not_booked_again_blind():
+    """A21. A booking was recorded last, after the label download, and nothing
+    marked one in flight: a restart in that window, or a lost answer followed
+    by a reload, left the next Book free to pay for a second label."""
+    import worldoptions as _wo
+    ensure_auth(); _ship_cfg(); reset_dispatch(); reset_prod()
+    calls = []
+    async def soap(service, action, inner, retryable=True):
+        if service == "ShipmentService":
+            calls.append(1)
+            if len(calls) == 1:
+                e = _wo.WorldOptionsError("World Options error (HTTP 504)."); e.ambiguous = True
+                raise e
+            return _ET.fromstring(BOOK_XML)
+        return _ET.fromstring(RATE_XML)
+    seen = []
+    async def links(labels):
+        seen.append((copilot._load_dispatch().get("12345") or {}).get("tracking_number"))
+        return labels
+    saved = (_wo._soap_call, copilot._resolve_label_links)
+    _wo._soap_call, copilot._resolve_label_links = soap, links
+    try:
+        r1 = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX}).json()
+        ok("MAY still" in r1.get("error", ""), r1)
+        r2 = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX}).json()
+        ok("outcome was never recorded" in r2.get("error", ""), "the next Book is stopped: " + str(r2))
+        eq(len(calls), 1, "and nothing was sent")
+        r3 = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX,
+                                         "confirm_unknown": True}).json()
+        ok(r3.get("ok"), "once someone has checked, it books: " + str(r3)[:200])
+        ok(seen and seen[0], "and the tracking number was on record before the label was fetched")
+    finally:
+        _wo._soap_call, copilot._resolve_label_links = saved
+        reset_dispatch()
+
+
+@test
+def t_a_relayed_gateway_timeout_is_never_booked_twice_by_itself():
+    """A22. A FAILED reply relaying "(504) Gateway Timeout" matched the
+    transient list and was re-sent, though a timeout is the one outcome a
+    retry must never gamble on."""
+    import worldoptions as _wo
+    ensure_auth(); _ship_cfg(); reset_dispatch(); reset_prod()
+    failed = ("<Envelope><Body><DoShipmentResponse><DoShipmentResult>"
+              "<Message>The remote server returned an error: (504) Gateway Timeout.</Message>"
+              "<NotificationtType>FAILED</NotificationtType></DoShipmentResult></DoShipmentResponse></Body></Envelope>")
+    sent = []
+    async def soap(service, action, inner, retryable=True):
+        if service == "ShipmentService":
+            sent.append(1)
+            return _ET.fromstring(failed if len(sent) == 1 else BOOK_XML)
+        return _ET.fromstring(RATE_XML)
+    saved = (_wo._soap_call, copilot.WO_RETRY_WAIT_SECS)
+    _wo._soap_call, copilot.WO_RETRY_WAIT_SECS = soap, 0
+    try:
+        r1 = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX}).json()
+        eq(len(sent), 1, "sent once, not retried")
+        # And not read as a refusal either (found by the round-4 review): the
+        # guard was cleared, the page's unknown-outcome rule did not match, Book
+        # re-armed, and the next press booked and charged a second time.
+        ok("MAY still have been booked" in r1.get("error", ""), r1)
+        rx = re.search(r"const BOOKING_UNKNOWN = /(.*?)/i;", open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "..", "static", "index.html"), encoding="utf-8").read()).group(1)
+        ok(re.search(rx, r1["error"], re.I), "the page holds Book on it")
+        ok(copilot._intent_open(12345), "the guard keeps its record")
+        r2 = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX}).json()
+        ok(r2.get("unknown_booking") and len(sent) == 1, "the next press is stopped, not sent: %r" % r2)
+    finally:
+        _wo._soap_call, copilot.WO_RETRY_WAIT_SECS = saved
+        reset_dispatch()
+
+
+@test
+def t_an_unknown_fulfilment_or_terms_outcome_is_not_called_a_failure():
+    """A23. When the answer to a fulfilment or a Net-30 write was lost and the
+    read that settles it also failed, the app reported a definite failure and
+    reverted the tags of an order that may have shipped."""
+    import server as _srv, httpx as _hx
+    ensure_auth(); reset_dispatch(); reset_prod(); TAG_WRITES.clear()
+    copilot._record_dispatch(12345, {"tracking_number": "T-5", "carrier_name": "UPS", "notify": True,
+                                     "dispatched_at": "2026-09-22T09:00:00Z"})
+    state = {"fo": 0}
+    async def req(method, path, params=None, body=None, **kw):
+        if method == "GET" and path.endswith("fulfillment_orders.json"):
+            state["fo"] += 1
+            if state["fo"] == 1:
+                return {"fulfillment_orders": [{"id": 9, "status": "open", "line_items": [{"id": 1, "fulfillable_quantity": 1}]}]}
+            raise _hx.ConnectTimeout("")
+        if method == "POST" and path == "fulfillments.json":
+            raise _hx.ReadTimeout("")
+        raise AssertionError(method + path)
+    # Shopify's tags as last written, so a revert has something to undo and
+    # shows up as a write (with fixed tags it was a no-op the test could not see).
+    async def tools(registry, name, args):
+        if name == "shopify_get_order":
+            o = dict(ORDER)
+            if TAG_WRITES:
+                o["tags"] = TAG_WRITES[-1][1]
+            return o
+        return await fake_tool_json(registry, name, args)
+    saved = (_srv._request, copilot._fulfillment_writer, copilot._tool_json)
+    _srv._request, copilot._fulfillment_writer, copilot._tool_json = req, _srv.create_order_fulfillment, tools
+    try:
+        r = mark_made().json()
+        eq(r["fulfilled"], False)
+        ok("may already be fulfilled" in (r.get("ship_note") or ""), r.get("ship_note"))
+        ok(TAG_WRITES and copilot.DISPATCHED_TAG.lower() in TAG_WRITES[0][1].lower(), TAG_WRITES)
+        eq([t for _o, t in TAG_WRITES[1:]], [],
+           "and the tags were not put back as if it had not shipped")
+    finally:
+        _srv._request, copilot._fulfillment_writer, copilot._tool_json = saved
+        reset_dispatch(); reset_prod()
+    # Net-30: the create's answer lost, and the check afterwards fails too.
+    calls = {"n": 0}
+    async def gq(method, path, params=None, body=None, **kw):
+        q = (body or {}).get("query", "")
+        calls["n"] += 1
+        if "paymentTermsTemplates" in q:
+            return {"data": {"paymentTermsTemplates": [{"id": "T30", "name": "Net 30", "paymentTermsType": "NET", "dueInDays": 30}]}}
+        if "paymentTermsCreate" in q:
+            raise _hx.ReadTimeout("")
+        if "createdAt" in q:
+            return {"data": {"order": {"id": "gid://shopify/Order/1", "createdAt": "2026-09-20T10:00:00Z", "paymentTerms": None}}}
+        raise _hx.ConnectTimeout("")
+    saved2 = (_srv._request, dict(_srv._net30_template))
+    _srv._request = gq
+    _srv._net30_template["id"] = ""
+    try:
+        out = run_async(_srv.set_order_payment_terms_net30(1))
+        eq(out.get("reason"), "unknown", "not 'the order is not on 30-day terms': " + str(out))
+    finally:
+        _srv._request = saved2[0]
+        _srv._net30_template.clear(); _srv._net30_template.update(saved2[1])
+    # And its one caller does not turn "not known" back into "could not be
+    # added" (found by the round-4 review).
+    saved3 = (copilot._payment_terms_writer, ORDER.get("tags"))
+    async def unknown_writer(oid):
+        return {"ok": False, "reason": "unknown", "detail": "it is not known whether the order is on 30-day terms."}
+    copilot._payment_terms_writer, ORDER["tags"] = unknown_writer, copilot.PO_UNPAID_TAG
+    try:
+        v = run_async(copilot._net30_on_release({}, 12345))
+        ok(v.get("unknown") and "could not be added" not in v["note"] and "not known" in v["note"], v)
+    finally:
+        copilot._payment_terms_writer, ORDER["tags"] = saved3
+        reset_prod()
+
+
+@test
+def t_the_log_drain_counts_a_refused_batch_and_ships_the_traceback():
+    """A24. A sink that answered 401 (a rotated token) was treated as having
+    taken the batch, and logger.exception lines arrived without their cause."""
+    import logdrain as _ld, httpx as _hx, logging as _lg
+    saved_post = _hx.post
+    _hx.post = lambda url, **kw: _hx.Response(401, request=_hx.Request("POST", url))
+    try:
+        raised = False
+        try:
+            _ld._default_sender("https://sink.test", "t")([{"kind": "audit"}])
+        except Exception:
+            raised = True
+        ok(raised, "a refused batch is an error the drain counts as dropped")
+    finally:
+        _hx.post = saved_post
+    got = []
+    saved_put = _ld._put
+    _ld._put = got.append
+    try:
+        try:
+            raise ValueError("the real cause")
+        except ValueError:
+            import sys as _sys
+            rec = _lg.LogRecord("x", _lg.ERROR, __file__, 1, "booking failed", None, _sys.exc_info())
+        _ld._Handler().emit(rec)
+        ok(got and "the real cause" in got[0].get("exc", ""), "the traceback travels with it: " + str(got)[:200])
+    finally:
+        _ld._put = saved_put
+
+
+@test
+def t_a_malformed_number_setting_falls_back_instead_of_stopping_the_app():
+    """A25. SESSION_HOURS="" or MAIL_LOOP_SECS="60s" crashed boot at import,
+    and the log blamed the chat."""
+    import subprocess
+    eq(copilot._env_num(int, "60s", "60", "MAIL_LOOP_SECS"), 60)
+    eq(copilot._env_num(float, "", "24", "SESSION_HOURS"), 24.0)
+    r = subprocess.run([sys.executable, "-c", "import copilot; print(copilot.SESSION_HOURS, copilot.MAIL_LOOP_SECS)"],
+                       env={**os.environ, "SESSION_HOURS": "", "MAIL_LOOP_SECS": "60s"},
+                       cwd=HERE, capture_output=True, text=True)
+    eq(r.returncode, 0, r.stderr[-400:])
+    ok(r.stdout.strip().endswith("24.0 60"), r.stdout)
+
+
+@test
+def t_a_lost_answer_to_an_address_edit_is_settled_by_reading_the_order():
+    """A26. A lost answer was reported as "Shopify refused the change"; the
+    retry then found nothing to change, so the booked label's new address was
+    never marked and Mark made emailed tracking for the old one."""
+    import server as _srv, httpx as _hx
+    ensure_auth(); reset_dispatch(); reset_prod()
+    copilot._record_dispatch(12345, {"tracking_number": "T-9", "carrier_name": "DPD",
+                                     "dispatched_at": "2026-09-22T09:00:00Z"})
+    live = _copy.deepcopy(ORDER)
+    async def tools(registry, name, args):
+        if name == "shopify_get_order":
+            return _copy.deepcopy(live)
+        return await fake_tool_json(registry, name, args)
+    async def req(method, path, params=None, body=None, **kw):
+        live["shipping_address"]["zip"] = body["variables"]["input"]["shippingAddress"]["zip"]
+        raise _hx.ReadTimeout("")
+    saved = (copilot._tool_json, _srv._request, copilot._order_writer)
+    copilot._tool_json, _srv._request, copilot._order_writer = tools, req, _srv.update_order_fields
+    try:
+        r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 6JK"}, "confirm_booked": True})
+        eq(r.status_code, 200, "the change landed, and is reported as made: " + r.text)
+        ok(copilot._load_dispatch()["12345"].get("address_changed_at"), "and the booked label is marked as diverged")
+        # A booking that recorded its address is marked even by a no-change retry.
+        copilot._record_dispatch(12345, {"tracking_number": "T-9", "carrier_name": "DPD",
+                                         "dispatched_at": "2026-09-22T09:00:00Z",
+                                         "booked_address": {"street": "24 Liberty Ave", "street2": "Unit 3",
+                                                            "postcode": "M1 2AB", "city": "Manchester", "country": "GB"}})
+        post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 6JK"}, "confirm_booked": True})
+        ok(copilot._load_dispatch()["12345"].get("address_changed_at"), "whichever edit found it done")
+    finally:
+        copilot._tool_json, _srv._request, copilot._order_writer = saved
+        reset_dispatch()
+
+
+@test
+def t_an_address_changed_in_the_shopify_admin_stops_mark_made():
+    """A26, found by the round-4 review: an address changed in the Shopify
+    admin never passes through the app's edit route, and Mark made read no
+    live address, so it fulfilled and emailed tracking for a parcel cut to the
+    old one. Asked and answered once, it is not asked again."""
+    import worldoptions as _wo
+    ensure_auth(); _ship_cfg(); reset_dispatch(); reset_prod()
+    saved = (_wo._soap_call, dict(ORDER["shipping_address"]))
+    async def soap(service, action, inner, retryable=True):
+        return _ET.fromstring(BOOK_XML if service == "ShipmentService" else RATE_XML)
+    _wo._soap_call = soap
+    try:
+        ok(post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX}).json().get("ok"), "booked")
+        # The same address read back is not a change.
+        m = mark_made().json()
+        ok(m.get("fulfilled"), "an unchanged address ships as before: %r" % m)
+        reset_dispatch(); reset_prod()
+        ok(post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX}).json().get("ok"), "booked again")
+        ORDER["shipping_address"].update(address1="9 New Street", zip="LS2 9ZZ", city="Leeds")
+        m = mark_made().json()
+        ok(not m.get("fulfilled") and not m.get("notified") and m.get("needs_ack"),
+           "an admin-side change stops it before tracking goes out: %r" % m)
+        m = post("/api/production-state", {"op": "made", "id": 12345, "on": True, "ack_address": True}).json()
+        ok(m.get("fulfilled"), "answered, it ships: %r" % m)
+    finally:
+        _wo._soap_call = saved[0]
+        ORDER["shipping_address"].clear(); ORDER["shipping_address"].update(saved[1])
+        reset_dispatch(); reset_prod()
+
+
+@test
+def t_a_failed_customer_read_is_not_analysed_as_no_customers():
+    """A27. It showed zeros, paid the AI to explain them, and saved them as the
+    baseline for the next run's changes."""
+    async def tools(registry, name, args):
+        if name == "shopify_list_customers":
+            return {"_failed": True}
+        if name == "shopify_get_shop":
+            return dict(SHOP)
+        return {"orders": []} if name == "shopify_list_orders" else {}
+    called = []
+    async def xc(client, **kw):
+        called.append(1); raise AssertionError("no AI call")
+    saved = (copilot._tool_json, copilot._xcreate)
+    copilot._tool_json, copilot._xcreate = tools, xc
+    try:
+        r = post("/api/customers", {})
+        eq(r.status_code, 502, r.text[:200])
+        eq(called, [], "no AI credits spent")
+        eq((copilot._load_analysis_cache().get("customers_segments") or {}).get("__all__", {}).get("snapshot", {}).get("metrics", {}).get("Customers"),
+           None, "and no zero baseline saved")
+    finally:
+        copilot._tool_json, copilot._xcreate = saved
+
+
+@test
+def t_a_handover_that_failed_once_moves_the_gmail_label_whole():
+    """A28. The retry added the new owner's label and never removed the old
+    one, whose id the failure had evicted."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        ann, _s, _p = ready_user("Ann", "ann"); bob, _s2, _p2 = ready_user("Bob", "bob")
+        labels = {"t1": set()}
+        ids = {"Copilot/Ann": "L1", "Copilot/Bob": "L2"}
+        fail = {"n": 0}
+        async def list_labels():
+            return dict(ids)
+        async def modify(tid, add=None, remove=None):
+            if fail["n"]:
+                fail["n"] -= 1; raise _gm.GmailError("Backend Error")
+            labels[tid] |= set(add or []); labels[tid] -= set(remove or [])
+        saved = (_gm.list_labels, _gm.modify_thread)
+        _gm.list_labels, _gm.modify_thread = list_labels, modify
+        try:
+            _seed_thread("t1")
+            st = copilot._load_mail(); t = st["threads"]["t1"]
+            t["owner"], t["state"] = ann, "assigned"
+            run_async(copilot._mail_sync_labels(t, "Ann"))
+            t["owner"] = bob; fail["n"] = 1
+            run_async(copilot._mail_sync_labels(t, "Bob"))
+            run_async(copilot._mail_sync_labels(t, "Bob"))
+            eq(sorted(labels["t1"]), ["L2"], "only Bob's label is on it in Gmail")
+        finally:
+            _gm.list_labels, _gm.modify_thread = saved
+    with_mail(go)
+
+
+@test
+def t_an_ai_draft_waits_its_turn_in_the_ai_window():
+    """A29. Drafting a reply with Claude neither took nor respected a slot in
+    the global AI window."""
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    seg = src.split("async def mail_draft_route(")[1].split("resp = await _xcreate(_anthropic(), model=MODEL_DEEP")[0]
+    ok("_window_ok(_rl_global, RATE_MAX_GLOBAL" in seg, "the compose checks the AI window before the call")
+
+
+@test
+def t_the_keyword_scan_reads_no_more_than_it_keeps():
+    """A40. The whole body was read into memory before 600 KB were kept."""
+    import httpx as _hx
+    read = {"n": 0}
+    chunk = b"x" * (1024 * 1024)
+    class Body(_hx.AsyncByteStream):
+        async def __aiter__(self):
+            for _ in range(80):
+                read["n"] += len(chunk)
+                yield chunk
+        async def aclose(self):
+            pass
+    Real = copilot.httpx.AsyncClient
+    class Client(Real):
+        def __init__(self, *a, **k):
+            k["transport"] = _hx.MockTransport(lambda rq: _hx.Response(200, headers={"content-type": "text/html"}, stream=Body()))
+            super().__init__(*a, **k)
+    saved = (copilot.httpx.AsyncClient, copilot._host_is_public)
+    copilot.httpx.AsyncClient, copilot._host_is_public = Client, (lambda h: True)
+    try:
+        st, _u, text = run_async(copilot._fetch_external("https://competitor.example/catalogue"))
+        eq(len(text), copilot.EXTERNAL_FETCH_MAX)
+        ok(read["n"] <= 2 * 1024 * 1024, "stopped reading near the cap, not after 80 MB: %d" % read["n"])
+    finally:
+        copilot.httpx.AsyncClient, copilot._host_is_public = saved
+
+
+@test
+def t_booked_labels_are_not_held_in_memory():
+    """A41. Every label written stayed in the store cache until a restart,
+    about a megabyte a booking, pruned from disk or not."""
+    copilot._save_dispatch_labels("990001", [{"type": "pdf", "value": "x" * 1000}])
+    ok(not any(str(p).startswith(copilot.DISPATCH_LABELS_DIR) for p in copilot._json_cache),
+       "a label file is written, not cached")
+
+
+@test
+def t_the_backup_download_is_built_off_the_event_loop():
+    """A42. Deflating the whole volume inline stalled every request and webhook."""
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    seg = src.split('@mcp.custom_route("/api/backup"')[1][:2500]
+    ok("await asyncio.to_thread(_build_backup_zip)" in seg, "off the loop, as the pre-import snapshot is")
+
+
+@test
+def t_a_folder_holding_only_finders_sidecars_can_be_deleted():
+    """A43. A hidden .DS_Store counted as content while the tab showed the
+    folder empty, and nothing in the tab could remove it."""
+    import base64 as _b64
+    def go():
+        def inner(fake):
+            ensure_auth()
+            copilot._dav_auth_cache.clear()
+            _u, _s, pw = ready_user("Poppy", "poppy", role="member")
+            auth = {"Authorization": "Basic " + _b64.b64encode(("poppy:" + pw).encode()).decode()}
+            client.request("MKCOL", "/dav/Old job", headers=auth)
+            client.put("/dav/Old job/.DS_Store", headers=auth, content=b"\x00\x00\x00\x01Bud1" + b"\x00" * 60)
+            tree = post("/api/files/tree", {}).json()["store"]
+            fid = next(k for k, v in tree["folders"].items() if v["name"] == "Old job")
+            eq(post("/api/files/folder", {"op": "delete", "id": fid}).status_code, 200)
+            ok(not any(str(v.get("folder_id") or "") == fid for v in copilot._load_files()["files"].values()),
+               "and the sidecar went with it")
+        with_files(inner)
+    with_accounts(go)
+
+
+@test
+def t_what_the_customer_paid_for_delivery_is_what_they_paid():
+    """A44. The shipping line's list price: a free-shipping code still read as
+    the full charge, and VAT was set against the courier's ex VAT cost."""
+    o = _copy.deepcopy(ORDER)
+    o["taxes_included"] = True
+    o["shipping_lines"] = [{"title": "Tracked 24", "price": "12.00", "discount_allocations": [],
+                            "tax_lines": [{"price": "2.00"}]}]
+    eq(copilot._shipping_paid(o, ex_vat=False), 12.0, "what they paid, VAT in")
+    eq(copilot._shipping_paid(o, ex_vat=True), 10.0, "and ex VAT, for the courier comparison")
+    o["shipping_lines"][0]["discount_allocations"] = [{"amount": "12.00"}]
+    o["shipping_lines"][0]["tax_lines"] = []
+    eq(copilot._shipping_paid(o, ex_vat=False), 0.0, "a free-shipping code is a free delivery")
+    # And the booking records that, not the list price (the round-4 review
+    # found the test passed with the record put back to the list price).
+    import worldoptions as _wo
+    ensure_auth(); _ship_cfg(); reset_dispatch(); reset_prod()
+    saved = (_wo._soap_call, ORDER.get("shipping_lines"), ORDER.get("taxes_included"))
+    async def soap(service, action, inner, retryable=True):
+        return _ET.fromstring(BOOK_XML if service == "ShipmentService" else RATE_XML)
+    _wo._soap_call = soap
+    ORDER["taxes_included"] = True
+    ORDER["shipping_lines"] = [{"title": "Tracked 24", "price": "12.00", "tax_lines": [],
+                                "discount_allocations": [{"amount": "12.00"}]}]
+    try:
+        ok(post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX}).json().get("ok"), "booked")
+        eq(copilot._load_dispatch()["12345"].get("shipping_paid"), "0.00", "the record says they paid nothing")
+    finally:
+        _wo._soap_call = saved[0]
+        for k, v in (("shipping_lines", saved[1]), ("taxes_included", saved[2])):
+            if v is None:
+                ORDER.pop(k, None)
+            else:
+                ORDER[k] = v
+        reset_dispatch(); reset_prod()
+
+
+@test
+def t_a_long_thread_lists_its_newest_attachments():
+    """A45. A thread kept its OLDEST twenty attachments, so the newest proofs
+    in a long artwork thread could not be saved."""
+    store = {"threads": {}}
+    msgs = [{"id": "m%d" % i, "from_name": "Jo", "from_email": "jo@c.com", "at": "2026-09-%02dT10:00:00+00:00" % i,
+             "snippet": "proof", "files": [{"name": "proof-v%d-%d.pdf" % (i, k), "size": 1, "mime": "application/pdf",
+                                             "id": "a%d%d" % (i, k), "msg": "m%d" % i} for k in range(1, 5)]}
+            for i in range(1, 7)]
+    copilot._mail_apply_thread(store, {"id": "t2", "historyId": "1", "subject": "Artwork", "messages": msgs}, MBOX)
+    names = [f["name"] for f in store["threads"]["t2"]["files"]]
+    eq(len(names), 20)
+    ok("proof-v6-4.pdf" in names and "proof-v1-1.pdf" not in names, names[-3:])
 
 for fn in TESTS:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The

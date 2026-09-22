@@ -2242,10 +2242,30 @@ def t_the_tab_picker_sends_what_it_shows():
 
 @test
 def t_reconciliation_is_not_ticked_by_default():
-    ok("const OPT_IN_TABS = ['recon', 'forecast']" in SCRIPT,
-       "the tab is declared as one nobody inherits")
+    """And the page's copy of the tabs is the server's, read from copilot.py
+    rather than written into this test. A1 in the 2026-09-22 bug audit: the
+    server made Xero sync an opt-in tab and the page's copy was not updated,
+    so the Team picker ticked it, unnamed, for every account on the default
+    tabs, and any save of that panel granted it."""
+    import ast
+    src = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    tree = ast.parse(src)
+    consts = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name) and node.targets[0].id in ("TAB_KEYS", "OPT_IN_TABS"):
+            consts[node.targets[0].id] = [e.value for e in node.value.elts]
+    page_tabs = re.search(r"const TAB_KEYS = \[([^\]]*)\]", SCRIPT).group(1)
+    page_opt = re.search(r"const OPT_IN_TABS = \[([^\]]*)\]", SCRIPT).group(1)
+    names = re.search(r"const NAMES = \{(.*?)\};", SCRIPT, re.S).group(1)
+    ok(sorted(re.findall(r"'(\w+)'", page_tabs)) == sorted(consts["TAB_KEYS"]),
+       "the page's tab keys are the server's")
+    ok(sorted(re.findall(r"'(\w+)'", page_opt)) == sorted(consts["OPT_IN_TABS"]),
+       "the tabs nobody inherits are the server's: " + page_opt)
+    ok(sorted(re.findall(r"(\w+):\s*'", names)) == sorted(consts["TAB_KEYS"]),
+       "and every tab the picker offers has a name, so none is ticked as 'undefined'")
     ok("Array.isArray(u.tabs) ? u.tabs : DEFAULT_TABS" in SCRIPT,
-       "so the team editor shows it unticked for an account with no list of its own")
+       "so the team editor shows them unticked for an account with no list of its own")
 
 
 @test
@@ -2360,7 +2380,7 @@ def t_a_charged_booking_can_never_leave_a_blank_window():
     # The safe wrappers are what the booking actually calls.
     ok("renderResultSafe(res);" in SCRIPT and "renderBookedSafe(r);" in SCRIPT,
        "both booking paths go through the wrapper")
-    body = SCRIPT.split("try { res = await doBook(false); }")[1][:2600]
+    body = SCRIPT.split("try { res = await doBook(force, sure); break; }")[1][:3200]
     ok("renderResult(res);" not in body, "and never call the bare renderer after a charge")
     for name in ("renderResultSafe", "renderBookedSafe"):
         fn = SCRIPT.split("function " + name + "(")[1][:1800]
@@ -4818,8 +4838,14 @@ def t_footer_slots_are_edited_by_leads_with_a_logo_picker():
 def t_no_em_or_en_dash_reaches_the_page():
     """CI fails the build on one, and the house voice uses a colon or a full
     stop. Asserted here too so it fails in the suite the author actually runs."""
-    for ch, name in (("—", "em dash"), ("–", "en dash")):
-        ok(ch not in HTML, "an " + name + " is in static/index.html")
+    # Written out or escaped: "\u2014" in a string renders an em dash just the
+    # same, and the literal-character check let one reach a toast (A48 in the
+    # 2026-09-22 bug audit). The composer is page copy too.
+    for src, where in ((HTML, "static/index.html"), (COMPOSER, "static/composer.js")):
+        for ch, name in (("—", "em dash"), ("–", "en dash"), ("\\u2014", "escaped em dash"),
+                         ("\\u2013", "escaped en dash"), ("&mdash;", "em dash entity"),
+                         ("&ndash;", "en dash entity")):
+            ok(ch not in src, "an " + name + " is in " + where)
 
 
 @test
@@ -6719,6 +6745,13 @@ def t_no_native_dialog_is_left_in_the_page():
        "no native dialog anywhere in the script")
     ok("function uiAskText(" in SCRIPT, "an in-page replacement exists")
     ok("await uiAskText('Save to Files'" in SCRIPT, "and the attachment save uses it")
+    # The composer is page code too (A47 in the 2026-09-22 bug audit): its Link
+    # button asked with window.prompt, and this guard read only index.html.
+    for word in ("prompt(", "alert(", "confirm("):
+        ok(("window." + word) not in COMPOSER and not re.search(r"(?<![\w.])" + re.escape(word), COMPOSER),
+           "no native " + word + " in the composer")
+    ok(SCRIPT.count("mountComposer(box, { upload: mailUpload, ask: composerAsk") == 2,
+       "and both composers are handed the page's own dialog")
 
 
 @test
@@ -6986,6 +7019,230 @@ const wait = (ms) => new Promise(r => setTimeout(r, ms));
         os.unlink(path)
 
 
+
+# A small DOM for running page functions in node: elements, a document with
+# capture and bubble listeners, and the default action a browser takes for
+# Enter on a focused button (a click, unless the keydown was cancelled).
+MINIDOM = r"""// A small DOM for node: elements, a document with capture/bubble listeners,
+// and the default action a browser takes for Enter or Space on a focused button.
+class Ev { constructor(type, init) { Object.assign(this, init || {}); this.type = type; this.defaultPrevented = false; this._stop = false; this._stopNow = false; }
+  preventDefault() { this.defaultPrevented = true; } stopPropagation() { this._stop = true; } stopImmediatePropagation() { this._stop = true; this._stopNow = true; } }
+class Node_ {
+  constructor(tag) { this.tagName = (tag || 'div').toUpperCase(); this.children = []; this.parentNode = null; this._l = {}; this.attrs = {}; this.classList = new CL(this); this.style = {}; this.dataset = {}; this._text = ''; this.disabled = false; this.hidden = false; this.value = ''; }
+  get className() { return [...this.classList._s].join(' '); } set className(v) { this.classList._s = new Set(String(v || '').split(/\s+/).filter(Boolean)); }
+  append(...ns) { ns.forEach(n => { if (typeof n === 'string') n = document.createTextNode(n); if (n.parentNode) n.remove(); n.parentNode = this; this.children.push(n); }); }
+  appendChild(n) { this.append(n); return n; }
+  prepend(...ns) { ns.reverse().forEach(n => { if (n.parentNode) n.remove(); n.parentNode = this; this.children.unshift(n); }); }
+  insertBefore(n, ref) { if (n.parentNode) n.remove(); n.parentNode = this; const i = ref ? this.children.indexOf(ref) : -1; if (i < 0) this.children.push(n); else this.children.splice(i, 0, n); return n; }
+  remove() { if (this.parentNode) { const p = this.parentNode; p.children = p.children.filter(c => c !== this); this.parentNode = null; } }
+  get textContent() { return this._text + this.children.map(c => c.textContent).join(''); } set textContent(v) { this._text = String(v); this.children = []; }
+  get innerHTML() { return this._html || ''; } set innerHTML(v) { this._html = v; this.children = []; this._text = ''; }
+  setAttribute(k, v) { this.attrs[k] = String(v); if (k === 'id') this.id = v; } getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; } hasAttribute(k) { return k in this.attrs; } removeAttribute(k) { delete this.attrs[k]; }
+  addEventListener(t, f, o) { (this._l[t] = this._l[t] || []).push({ f, capture: o === true || !!(o && o.capture) }); }
+  removeEventListener(t, f) { this._l[t] = (this._l[t] || []).filter(x => x.f !== f); }
+  focus() { document.activeElement = this; } blur() { if (document.activeElement === this) document.activeElement = document.body; }
+  click() { if (this.disabled) return; dispatch(this, new Ev('click', { bubbles: true })); }
+  contains(n) { while (n) { if (n === this) return true; n = n.parentNode; } return false; }
+  closest() { return null; } querySelector() { return null; } querySelectorAll() { return []; }
+  getClientRects() { return [1]; } getBoundingClientRect() { return { left: 0, top: 0, width: 10, height: 10 }; }
+}
+class CL { constructor(o) { this._s = new Set(); } add(...c) { c.forEach(x => this._s.add(x)); } remove(...c) { c.forEach(x => this._s.delete(x)); } contains(c) { return this._s.has(c); } toggle(c, on) { if (on === undefined) on = !this._s.has(c); on ? this._s.add(c) : this._s.delete(c); return on; } }
+function dispatch(target, ev) {
+  ev.target = target; const path = []; let n = target; while (n) { path.push(n); n = n.parentNode; } if (path[path.length - 1] !== document) path.push(document);
+  // capture, from the top down; then target and bubble. Each node's listener list is read when the event reaches it, as the DOM spec says.
+  for (let i = path.length - 1; i > 0 && !ev._stop; i--) { const ls = (path[i]._l[ev.type] || []).filter(x => x.capture).slice(); for (const x of ls) { if (ev._stopNow) break; ev.currentTarget = path[i]; x.f.call(path[i], ev); } }
+  for (let i = 0; i < path.length && !ev._stop; i++) { const on = path[i]['on' + ev.type]; const ls = (path[i]._l[ev.type] || []).filter(x => i === 0 || !x.capture).slice(); ev.currentTarget = path[i];
+    if (on) on.call(path[i], ev); for (const x of ls) { if (ev._stopNow) break; x.f.call(path[i], ev); } if (ev.bubbles === false) break; }
+  return !ev.defaultPrevented;
+}
+// A key press as a browser delivers it: keydown to the focused element, and for
+// Enter on a button its activation (a click) unless the keydown was cancelled.
+function pressKey(key, opts) {
+  const t = document.activeElement || document.body;
+  const ev = new Ev('keydown', Object.assign({ key, bubbles: true, repeat: false }, opts || {}));
+  const notCancelled = dispatch(t, ev);
+  if (notCancelled && key === 'Enter' && t.tagName === 'BUTTON') t.click();
+  return ev;
+}
+const document = new Node_('#document');
+document.tagName = '#document';
+document.body = new Node_('body'); document.body.parentNode = document; document.children = [document.body];
+document.createElement = (t) => new Node_(t);
+document.createTextNode = (s) => { const n = new Node_('#text'); n._text = String(s); return n; };
+document.activeElement = document.body;
+document.hidden = false;
+function el(tag, cls, text) { const n = new Node_(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+const Node = Node_;
+
+"""
+
+
+def _node_ok():
+    return any(os.access(os.path.join(p, "node"), os.X_OK)
+               for p in os.environ.get("PATH", "").split(os.pathsep))
+
+
+def _run_node(js):
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(js)
+        path = fh.name
+    try:
+        try:
+            r = subprocess.run(["node", path], capture_output=True, text=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            ok(False, "the node harness never finished (a timer left running?)")
+        ok(r.returncode == 0, "the node harness failed: " + (r.stderr or "")[:400])
+        return json.loads((r.stdout or "").strip().splitlines()[-1])
+    finally:
+        os.unlink(path)
+
+
+@test
+def t_a_confirm_dialog_answers_for_the_focused_button():
+    """A12 in the 2026-09-22 bug audit. Enter was bound on the document and
+    answered yes wherever focus was: Tab to Cancel, Enter, and Book & dispatch
+    booked and charged a courier. A held key's repeats were further presses,
+    and one Escape closed two stacked dialogs. Run for real, in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    destr = re.search(r"const DESTRUCTIVE = /.*?/i;", SCRIPT).group(0)
+    stack = re.search(r"const confirmStack = \[\];", SCRIPT)
+    ok(stack, "the page keeps one stack of open confirms")
+    js = MINIDOM + "\n" + destr + "\n" + stack.group(0) + "\n" + fn_src("function uiConfirm(message, opts)") + r"""
+const top = () => document.body.children[document.body.children.length - 1];
+const btns = () => top().children[0].children[2].children;
+const settle = (p) => Promise.race([p.then(v => v), new Promise(r => setTimeout(() => r('open'), 10))]);
+(async () => {
+  const out = {};
+  let p = uiConfirm('This books the courier and charges your World Options account.', { okText: 'Book & dispatch' });
+  btns()[0].focus(); pressKey('Enter');
+  out.enterOnCancel = await settle(p);
+  p = uiConfirm('Book it?', { okText: 'Book & dispatch' });
+  pressKey('Enter');
+  out.enterOnYes = await settle(p);
+  p = uiConfirm('Book it?', { okText: 'Book & dispatch' });
+  pressKey('Enter', { repeat: true });
+  out.heldRepeat = await settle(p);
+  pressKey('Enter');
+  out.afterRepeat = await settle(p);
+  const outer = uiConfirm(el('div'), { title: 'Collections', okText: 'Done', hideCancel: true });
+  const inner = uiConfirm('Clear it?', { okText: 'Clear it' });
+  pressKey('Escape');
+  out.inner = await settle(inner); out.outer = await settle(outer);
+  pressKey('Escape');
+  out.outerAfterSecond = await settle(outer);
+  p = uiConfirm('Delete this for good?', { okText: 'Delete' });
+  pressKey('Enter');
+  out.dangerEnter = await settle(p);
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["enterOnCancel"] is False, "Enter on a focused Cancel is Cancel: %r" % got)
+    ok(got["enterOnYes"] is True, "Enter on the focused Book is still yes")
+    ok(got["heldRepeat"] == "open" and got["afterRepeat"] is True, "a held key's repeats answer nothing")
+    ok(got["inner"] is False and got["outer"] == "open", "one Escape closes only the dialog on top: %r" % got)
+    ok(got["outerAfterSecond"] is False, "and the next closes the one under it")
+    ok(got["dangerEnter"] is False, "a destructive dialog opens on Cancel, so Enter cancels it")
+
+
+@test
+def t_bulk_undo_puts_back_every_batch_and_says_how_many():
+    """A13 in the 2026-09-22 bug audit. A bulk action over 150 emails is sent
+    in batches, each with its own undo token; the page kept only the last, so
+    Undo put back the last 150 and said "Put back" over the rest."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
+let mailView = 'list', mailFilter = '', mailCache = { lead: false, team: [] };
+const rows = []; for (let i = 0; i < 400; i++) rows.push({ id: 'b' + i, unread: false });
+const mailSel = new Set(rows.map(r => r.id));
+const sent = [], undone = [], toasts = []; let failOne = false;
+let stopAt = 0;
+async function api(path, body) {
+  if (path === '/api/mail/undo') {
+    undone.push(body.token);
+    if (failOne && body.token === 'T2') throw new Error('That is too old to undo now.');
+    return { ok: true, restored: sent[+body.token.slice(1) - 1] };
+  }
+  if (stopAt && sent.length + 1 === stopAt) throw new Error('The app is being asked for too much at once.');
+  sent.push(body.ids.length);
+  return { changed: body.ids.length, skipped: [], undo: 'T' + sent.length, what: 'marked done' };
+}
+async function uiConfirm() { return true; }
+async function refreshMailQuiet() {}
+function toastError(m) { toasts.push('error: ' + m); } function toastOk(m) { toasts.push('ok: ' + m); }
+function paintMailBody() {}
+""" + fn_src("function paintMailBulk(rows)") + "\n" + fn_src("function mailOfferUndo(") + r"""
+const findBtn = (host, text) => { const walk = (n) => { if (n.tagName === 'BUTTON' && n.textContent === text) return n;
+  for (const c of n.children || []) { const f = walk(c); if (f) return f; } return null; }; return walk(host); };
+(async () => {
+  paintMailBulk(rows);
+  await findBtn($('mail-bulk-host'), 'Mark done').onclick();
+  await findBtn($('mail-bulk-host'), 'Undo').onclick();
+  const first = { sent: sent.slice(), undone: undone.slice(), toasts: toasts.slice() };
+  sent.length = 0; undone.length = 0; toasts.length = 0; failOne = true;
+  for (const r of rows) mailSel.add(r.id);
+  paintMailBulk(rows);
+  await findBtn($('mail-bulk-host'), 'Mark done').onclick();
+  await findBtn($('mail-bulk-host'), 'Undo').onclick();
+  const second = { undone: undone.slice(), toasts: toasts.slice() };
+  sent.length = 0; undone.length = 0; toasts.length = 0; failOne = false; stopAt = 3;
+  for (const r of rows) mailSel.add(r.id);
+  paintMailBulk(rows);
+  await findBtn($('mail-bulk-host'), 'Mark done').onclick();
+  const undo = findBtn($('mail-bulk-host'), 'Undo');
+  if (undo) await undo.onclick();
+  console.log(JSON.stringify({ first, second, third: { undoOffered: !!undo, undone: undone.slice(), toasts: toasts.slice() } }));
+})();
+"""
+    got = _run_node(js)
+    ok(got["first"]["sent"] == [150, 150, 100], got)
+    ok(got["first"]["undone"] == ["T1", "T2", "T3"], "Undo sends every batch's token: %r" % got["first"])
+    ok(got["first"]["toasts"] == ["ok: Put back"], "and says Put back only when all 400 came back")
+    ok(got["second"]["toasts"] and got["second"]["toasts"][0].startswith("error: Put back 250 of 400"),
+       "a batch that could not be undone is said, with the count: %r" % got["second"])
+    ok(got["third"]["undoOffered"] and got["third"]["undone"] == ["T1", "T2"],
+       "a bulk action that stopped part way still offers to put back what it did: %r" % got["third"])
+
+
+@test
+def t_ready_to_make_on_a_made_order_says_it_stayed():
+    """A2's page half: the server now leaves a made order where it is, and the
+    toast says so instead of "moved to To make"; and an Undo on a made order's
+    reprint keeps its printed stamp and says why, rather than deleting it on
+    the page and saying "Put back as not printed". Run for real, in node."""
+    fn = fn_src("async function readyToMake(")
+    ok("if (r.released === false)" in fn and "addToast(r.note" in fn, fn[:400])
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+const toasts = []; function addToast(m) { toasts.push(m); } function toastError(m) { toasts.push('error: ' + m); }
+const I = { x: '' }; function renderLabels() {}
+document.getElementById = () => null;
+const labelsCache = { data: { state: { '5': { made_at: '2026-09-20', printed_at: '2026-09-22T10:00:00Z' },
+                                       '6': { printed_at: '2026-09-22T10:00:00Z' } } } };
+function prodStateOf(o) { return labelsCache.data.state[String(o.id)] || {}; }
+async function api(path, body) {
+  return { ok: true, kept: ['5'], state: { '5': { made_at: '2026-09-20', printed_at: '2026-09-22T10:00:00Z' }, '6': {} } };
+}
+""" + fn_src("function undoPrintBar(ids)") + r"""
+const findBtn = (n, t) => { if (n.tagName === 'BUTTON' && n.textContent === t) return n; for (const c of n.children || []) { const f = findBtn(c, t); if (f) return f; } return null; };
+(async () => {
+  undoPrintBar([5, 6]);
+  await findBtn(document.body, 'Undo').onclick();
+  console.log(JSON.stringify({ toasts, made: labelsCache.data.state['5'].printed_at || null, other: labelsCache.data.state['6'].printed_at || null }));
+})();
+"""
+    got = _run_node(js)
+    ok(got["made"], "the made order keeps its printed stamp on the page too: %r" % got)
+    ok(got["other"] is None, "the other is put back as not printed")
+    ok(got["toasts"] == ["Put back as not printed, apart from 1 already made."], got["toasts"])
+
 @test
 def t_a_sent_reply_with_a_warning_shows_the_warning():
     """B5, the page's half. The server answers a send that went somewhere
@@ -6994,6 +7251,339 @@ def t_a_sent_reply_with_a_warning_shows_the_warning():
     fn = fn_src("async function mailSendFlow(")
     ok("if (r && r.warning) addToast(r.warning);" in fn, "the warning is what the person sees")
     ok("else toastOk('Sent to ' + to);" in fn, "and a plain success stays a plain success")
+
+
+
+@test
+def t_team_actions_wrap_onto_their_own_line_on_a_phone():
+    """A30 in the 2026-09-22 bug audit. Tabs and Delete account sat in one
+    unbroken row past the card's clipped edge on a phone."""
+    ok(re.search(r"@media \(max-width: 640px\) \{ \.tm-row \.files-acts \{ flex: 1 1 100%; flex-wrap: wrap; \} \}", HTML),
+       "a person's actions take their own line and wrap at phone width")
+
+
+@test
+def t_a_paid_report_run_is_one_run_and_stays_on_screen():
+    """A31 in the 2026-09-22 bug audit. Leaving a report's tab while its paid
+    run was going and coming back painted the Run gate over it, and Run or
+    Refresh then paid for a second run. Run for real, in node."""
+    ok("if (customersRuns.has(seg)) { customersBusy(seg); return; }" in fn_src("function renderCustomers(seg)"),
+       "Customers keeps a running sector's loading screen too")
+    ok(re.search(r"const reportRuns = \{\};", SCRIPT), "one record of the runs in flight")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
+const I = {}; function loader() { return el('span'); }
+const reportRuns = {};
+let overviewCache = null, seoCache = null, keywordsCache = null;
+let calls = 0, release; const answer = new Promise(r => { release = r; });
+async function api(path) { calls += 1; await answer; return { structured: {} }; }
+const painted = [];
+function renderOverview(c) { painted.push('report'); $('ov-content').innerHTML = ''; $('ov-content').append(el('div', null, 'REPORT')); }
+function renderRunGate(id) { painted.push('gate'); $(id).innerHTML = ''; $(id).append(el('div', null, 'RUN GATE')); }
+""" + fn_src("function showOverviewView()") + "\n" + fn_src("async function loadOverview(force)") + "\n" + fn_src("async function runOverview(box, force)") + r"""
+(async () => {
+  showOverviewView();
+  const first = loadOverview(true);
+  showOverviewView();                          // away and back while it runs
+  const during = $('ov-content').textContent;
+  const second = loadOverview(true);           // Refresh or Run pressed again
+  release(); await first; await second;
+  showOverviewView();
+  console.log(JSON.stringify({ calls, during, painted, after: $('ov-content').textContent, idle: reportRuns.overview }));
+})();
+"""
+    got = _run_node(js)
+    ok(got["calls"] == 1, "one paid run, not two: %r" % got)
+    ok("RUN GATE" not in got["during"] and "Analyzing" in got["during"],
+       "coming back mid-run keeps the loading screen: %r" % got["during"])
+    ok(got["painted"] == ["gate", "report", "report"] and got["after"] == "REPORT", got)
+    ok(got["idle"] is None, "and the run is let go when it lands")
+    # Customers, one run per sector (found by the round-4 review): one slot for
+    # the tab let a second sector's run take it, and the first was run again.
+    js = MINIDOM + r"""
+const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
+const I = {}; function loader() { return el('span'); } function sectorBar() { return el('div'); }
+const SEG_ALL = '__all__'; const customersCache = {}; let customersSeg = SEG_ALL;
+const customersRuns = new Set();
+const painted = []; function renderCustomers(seg) { painted.push(seg); }
+const runs = []; const gates = [];
+async function api(path, body) { runs.push(body.segment || SEG_ALL); await new Promise(r => gates.push(r)); return {}; }
+""" + fn_src("function customersBusy(seg)") + "\n" + fn_src("async function loadCustomers(force, seg)") + r"""
+(async () => {
+  const a = loadCustomers(true, 'Theatre');
+  const b = loadCustomers(true, 'Education');
+  const c = loadCustomers(true, 'Theatre');          // back to Theatre while it runs, and Run
+  const busy = $('customers-content').textContent;
+  gates.forEach(g => g()); await Promise.all([a, b, c]);
+  console.log(JSON.stringify({ runs, busy, painted, left: customersRuns.size }));
+})();
+"""
+    got = _run_node(js)
+    ok(got["runs"] == ["Theatre", "Education"], "each sector is one paid run: %r" % got)
+    ok("Analyzing the Theatre sector" in got["busy"], "and a running sector shows its loading screen: %r" % got["busy"])
+    ok(got["left"] == 0, "every run is let go when it lands")
+
+
+@test
+def t_a_dropped_connection_is_not_read_as_a_refusal():
+    """A32 in the 2026-09-22 bug audit. "Failed to fetch" reached the person,
+    and every caller read it as a refusal: the mail Send was offered again and
+    Mark made said nothing was changed. Run for real, in node."""
+    ok("if (e.noReply) {" in SCRIPT and "go.textContent = 'May have been sent: check the conversation';" in SCRIPT,
+       "a send with no answer is not re-armed")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+async function authHeaders() { return {}; } function appSession() { return 'S'; } function noteBuild() {}
+async function fetch() { throw new TypeError('Failed to fetch'); }
+""" + fn_src("async function api(path, payload, opts)") + r"""
+(async () => {
+  try { await api('/api/mail/send', {}); console.log(JSON.stringify({ threw: false })); }
+  catch (e) { console.log(JSON.stringify({ threw: true, noReply: !!e.noReply, msg: e.message })); }
+})();
+"""
+    got = _run_node(js)
+    ok(got["threw"] and got["noReply"], got)
+    ok("Failed to fetch" not in got["msg"] and "may or may not have gone through" in got["msg"], got["msg"])
+
+
+@test
+def t_a_signed_out_boot_is_not_greeted_as_an_expired_sign_in():
+    """A38 in the 2026-09-22 bug audit. The boot's data calls go out before
+    the sign-in check answers; each 401 on a request that carried no session
+    reloaded the page and said "Your sign-in has expired", after a deliberate
+    Log out too. Run for real, in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+const store = {}; const sessionStorage = { setItem: (k, v) => { store[k] = v; }, getItem: (k) => store[k] || null };
+let reloads = 0; const location = { reload: () => { reloads += 1; } };
+let sess = ''; const shown = [];
+async function authHeaders() { return {}; } function appSession() { return sess; } function noteBuild() {}
+function setAppSession(v) { sess = v; } function clearLocalCache() {} function authShow(w) { shown.push(w); }
+const reply = { status: 401, headers: { get: () => null }, clone() { return { json: async () => ({ reason: 'session', error: 'Please log in.' }) }; } };
+async function fetch() { return reply; }
+""" + fn_src("async function api(path, payload, opts)") + r"""
+(async () => {
+  const out = {};
+  try { await api('/api/layouts', {}); } catch (e) { out.signedOut = { msg: e.message, reloads, saved: store.sc_auth_reason || null }; }
+  sess = 'S';
+  try { await api('/api/layouts', {}); } catch (e) { out.expired = { reloads, saved: !!store.sc_auth_reason }; }
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["signedOut"]["reloads"] == 0 and got["signedOut"]["saved"] is None,
+       "no session to begin with: no reload, no 'expired' greeting: %r" % got)
+    ok(got["expired"]["reloads"] == 1 and got["expired"]["saved"],
+       "a real expired session still reloads once and says why: %r" % got)
+
+
+@test
+def t_a_late_product_plan_does_not_replace_the_one_on_screen():
+    """A33 in the 2026-09-22 bug audit. A plan takes up to a minute; opening
+    another product meanwhile let the earlier answer land last and replace
+    it. Run for real, in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    # The list's painter drops whatever plan is coming, by any route to it:
+    # Back, and (found by the round-4 review) a tab switch, which painted the
+    # list through showProductsView and let the plan land over it.
+    head = fn_src("function renderProductList()").split("\n")[1].split("//")[0].strip()
+    ok(head.startswith("productSeq++; productPlanRun = false;"), head)
+    js = MINIDOM + r"""
+const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
+const I = {}; function loader() { return el('span'); } function ico() { return el('span'); }
+function renderRunGate() { shown.push('gate'); }
+let productSeq = 0, productPlanRun = false, productList = [];
+function renderProductList() { """ + head + r""" shown.push('list'); }
+const shown = []; const gates = {};
+async function api(path, body) { await new Promise(r => { gates[body.product_id] = r; }); return { id: body.product_id }; }
+function renderProductDetail(d) { shown.push(d.id); }
+""" + fn_src("function showProductsView()") + "\n" + fn_src("function productBack()") + "\n" + fn_src("async function openProduct(id, title)") + r"""
+const tick = () => new Promise(r => setTimeout(r, 0));
+(async () => {
+  const a = openProduct('A', 'Gobo A'); const b = openProduct('B', 'Gobo B');
+  await tick(); gates.B(); await b; gates.A(); await a;
+  const c = openProduct('C', 'Gobo C'); await tick();
+  $('products-content').children[0].onclick();      // back to the list mid-run
+  gates.C(); await c;
+  const d = openProduct('D', 'Gobo D'); await tick();
+  showProductsView();                               // away to another tab and back mid-run
+  const during = shown.slice();
+  gates.D(); await d;
+  showProductsView();                               // and once it has landed, the list as before
+  console.log(JSON.stringify({ shown, during }));
+})();
+"""
+    got = _run_node(js)
+    ok(got["shown"] == ["B", "list", "D", "list"],
+       "only the plan last opened is drawn, never over the list, and a tab switch keeps a running plan: %r" % got)
+    ok(got["during"] == ["B", "list"], "coming back mid-run keeps the plan's loading screen: %r" % got)
+
+
+@test
+def t_a_follow_up_typed_while_an_answer_streams_is_kept():
+    """A34 in the 2026-09-22 bug audit. The box was cleared first and the
+    question then refused because an answer was still coming. Run for real,
+    in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+const I = {}; const PAGE_LABELS = {}; const pageBusy = {}; const asked = [], toasts = [];
+function threadKey(p) { return p; } function renderPageThread() {}
+function addToast(m) { toasts.push(m); }
+function pageAsk(page, text) { asked.push(text); pageBusy[page] = true; }
+""" + fn_src("function pageChatPanel(page, data)") + r"""
+const find = (n, tag) => { if (n.tagName === tag) return n; for (const c of n.children || []) { const f = find(c, tag); if (f) return f; } return null; };
+const wrap = pageChatPanel('overview', {});
+const ta = find(wrap, 'TEXTAREA'), btn = find(wrap, 'BUTTON');
+ta.value = 'What drove the dip?'; btn.onclick();
+ta.value = 'And in September?'; ta.focus(); pressKey('Enter');
+const kept = ta.value;
+pageBusy.overview = false; btn.onclick();
+console.log(JSON.stringify({ asked, kept, toasts, after: ta.value }));
+"""
+    got = _run_node(js)
+    ok(got["asked"] == ["What drove the dip?", "And in September?"], "the follow-up is sent once the answer is in: %r" % got)
+    ok(got["kept"] == "And in September?", "and it stays in the box while the answer is coming: %r" % got)
+    ok(got["toasts"] == ["Wait for the answer, then send this."], got["toasts"])
+
+
+@test
+def t_a_double_click_opens_one_email_window():
+    """A35 in the 2026-09-22 bug audit. A double click on an Inbox row sent
+    two reads and stacked two windows. Run for real, in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+let reads = 0, windows = 0;
+const setInterval = () => 0;
+async function api() { reads += 1; await new Promise(r => setTimeout(r, 5)); return { id: 't1' }; }
+function toastError() {}
+function mailModal() { windows += 1; const o = el('div'); o.querySelector = () => el('div'); return { overlay: o, body: el('div'), close() {} }; }
+function paintMailThread() {}
+const mailOpening = new Set();
+""" + fn_src("async function openMailThread(id)") + r"""
+(async () => {
+  await Promise.all([openMailThread('t1'), openMailThread('t1')]);
+  await openMailThread('t1');
+  console.log(JSON.stringify({ reads, windows }));
+})();
+"""
+    got = _run_node(js)
+    ok(got == {"reads": 2, "windows": 2}, "a double click is one open; a later open still works: %r" % got)
+
+
+@test
+def t_a_half_written_skill_survives_a_tab_switch():
+    """A36 in the 2026-09-22 bug audit. Coming back to Skills re-rendered it
+    and wiped the skill being written. Run for real, in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
+$('view-skills').classList.add('active');
+let skills = [], skillsLoadErr = '', paints = 0;
+async function api() { return { skills: [{ id: 's1', title: 'Promo', content: 'x' }] }; }
+function renderSkills() { paints += 1; }
+const title = el('input'); title.dataset.initial = ''; const body = el('textarea'); body.value = 'x'; body.dataset.initial = 'x';
+document.querySelectorAll = () => [title, body];
+""" + fn_src("async function loadSkills()") + r"""
+(async () => {
+  await loadSkills(); const clean = paints;
+  title.value = 'Black Friday'; await loadSkills(); const typing = paints;
+  title.value = ''; body.value = 'x'; await loadSkills();
+  console.log(JSON.stringify({ clean, typing, after: paints }));
+})();
+"""
+    got = _run_node(js)
+    ok(got == {"clean": 1, "typing": 1, "after": 2}, "no repaint over unsaved typing, and one as soon as it is saved or undone: %r" % got)
+
+
+@test
+def t_a_failed_note_alert_or_knowledge_change_is_said():
+    """A37 in the 2026-09-22 bug audit. Deleting a note, dismissing a change
+    alert or deleting store knowledge swallowed the failure. Run for real, in
+    node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
+let memories = [], alerts = [], knowledge = { a: 1 }, overviewCache = null; const errors = [];
+async function api() { throw new Error('The server is busy.'); }
+async function uiConfirm() { return true; }
+function toastError(m) { errors.push(m); } function renderMemory() {} function renderOverview() {}
+""" + fn_src("async function memOp(") + "\n" + fn_src("async function alertOp(") + "\n" + fn_src("async function deleteKnowledge(") + r"""
+(async () => {
+  await memOp({ op: 'delete', id: 'm1' }); await alertOp({ op: 'dismiss', id: 'a1' }); await deleteKnowledge();
+  console.log(JSON.stringify({ errors, knowledge }));
+})();
+"""
+    got = _run_node(js)
+    eq_ = len(got["errors"]) == 3 and all("not" in e and "The server is busy." in e for e in got["errors"])
+    ok(eq_, "each failure is said, with the reason: %r" % got)
+    ok(got["knowledge"] == {"a": 1}, "and the knowledge on screen is not wiped by a delete that failed")
+
+
+@test
+def t_the_crm_refresh_waits_for_someone_typing_in_it():
+    """A39 in the 2026-09-22 bug audit. The background refresh repainted the
+    CRM under someone typing in its search box. Run for real, in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+let reads = 0, paints = 0, crmCache = {}, crmLoadedAt = 0, onRead = null;
+const setInterval = () => 0;
+document.querySelector = (sel) => sel === '#view-crm.active' ? el('div') : null;
+async function api() { reads += 1; if (onRead) onRead(); crmLoadedAt = 0; return { crm: {} }; }
+function renderCRM() { paints += 1; }
+""" + fn_src("async function crmMaybeRefresh(") + r"""
+const host = el('div'); host.id = 'crm-content';
+const search = el('input'); host.append(search);
+search.closest = (sel) => sel === '#crm-content' ? host : null;
+(async () => {
+  search.focus(); await crmMaybeRefresh();
+  const typing = { reads, paints };
+  search.blur(); onRead = () => search.focus(); await crmMaybeRefresh();
+  const startedMidRead = { reads, paints };
+  search.blur(); onRead = null; crmLoadedAt = 0; await crmMaybeRefresh();
+  console.log(JSON.stringify({ typing, startedMidRead, idle: { reads, paints } }));
+})();
+"""
+    got = _run_node(js)
+    ok(got["typing"] == {"reads": 0, "paints": 0}, "no refresh under the search box: %r" % got)
+    ok(got["startedMidRead"] == {"reads": 1, "paints": 0}, "nor when typing starts while it reads: %r" % got)
+    ok(got["idle"] == {"reads": 2, "paints": 1}, "and it refreshes once nobody is typing: %r" % got)
+
+
+@test
+def t_team_shift_times_are_london_clock_times():
+    """A46 in the 2026-09-22 bug audit. Clock-in and clock-out were sliced out
+    of UTC stamps, an hour early all summer."""
+    ok("timeZone: 'Europe/London'" in fn_src("function londonHM(iso)"), "the hour is read on the London clock")
+    for bad in ("String(ws.start).slice(11, 16)", "String(s.start).slice(11, 16)",
+                "String(s.end).slice(11, 16)", "String(d.sent.sent_at).slice(11, 16)"):
+        ok(bad not in SCRIPT, bad + " reads the UTC hour")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = fn_src("function londonHM(iso)") + r"""
+console.log(JSON.stringify([londonHM('2026-07-01T08:30:00Z'), londonHM('2026-12-01T08:30:00Z'), londonHM('garbage')]));
+"""
+    got = _run_node(js)
+    ok(got[:2] == ["09:30", "08:30"], "summer is an hour on, winter is not: %r" % got)
 
 
 if __name__ == "__main__":

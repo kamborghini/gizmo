@@ -3715,6 +3715,10 @@
         .tm-row { flex-wrap: wrap; }
         .tm-row .files-meta { white-space: normal; }
         @media (max-width: 640px) { .tm-row .files-meta { margin-left: 0; } }
+        /* On a phone a person's actions take their own line and wrap: in one
+           unbroken row, Tabs and Delete account sat past the card's clipped
+           edge, where no finger could reach them. */
+        @media (max-width: 640px) { .tm-row .files-acts { flex: 1 1 100%; flex-wrap: wrap; } }
         /* A text field that matches the height of .lbl-size selects, so a row
            mixing inputs, a select and a button lines up. */
         .tm-field { flex: 1 1 120px; min-width: 0; background: var(--surface-primary); color: var(--text-primary);
@@ -4240,6 +4244,14 @@ Projected Image UK"></textarea>
             return a;
         };
         const $ = (id) => document.getElementById(id);
+        /* A time of day as the clock on the wall showed it. The stamps are UTC,
+           and slicing the hour out of one put every clock-in an hour early from
+           March to October. */
+        function londonHM(iso) {
+            const d = new Date(iso);
+            if (isNaN(d)) return String(iso || '').slice(11, 16);
+            return d.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' });
+        }
         function fmtDate(iso) {
             const d = new Date(iso);
             if (isNaN(d)) return String(iso || '').slice(0, 10);
@@ -4520,11 +4532,24 @@ Projected Image UK"></textarea>
             const hdrs = Object.assign({ 'Content-Type': 'application/json' }, await authHeaders());
             const sess = appSession();
             if (sess) hdrs['X-App-Session'] = sess;
-            const res = await fetch(path, {
-                method: 'POST',
-                headers: hdrs,
-                body: JSON.stringify(payload || {}),
-            });
+            let res;
+            try {
+                res = await fetch(path, {
+                    method: 'POST',
+                    headers: hdrs,
+                    body: JSON.stringify(payload || {}),
+                });
+            } catch (e) {
+                /* The connection dropped: the request may have arrived and been
+                   acted on. The browser's own words ("Failed to fetch", "Load
+                   failed") reached the person, and every caller read them as a
+                   refusal: Send was offered again, Mark made said nothing had
+                   changed. */
+                const err = new Error('The connection dropped before the server answered. What you '
+                    + 'asked for may or may not have gone through: check before trying again.');
+                err.noReply = true;
+                throw err;
+            }
             try { noteBuild(res.headers.get('X-App-Build')); } catch (e) {}
             if (res.status === 401) {
                 /* The door says WHY. A stale Shopify embed token is not a dead
@@ -4552,6 +4577,13 @@ Projected Image UK"></textarea>
                     throw new Error(text);
                 }
                 if (!path.startsWith('/api/auth/')) {
+                    /* Nobody was signed in to begin with: the boot's data calls
+                       run before the sign-in check answers, and a refusal of a
+                       request that carried no session is not an expired one. It
+                       cost a reload, and greeted whoever sat down next, after a
+                       deliberate Log out too, with "Your sign-in has expired".
+                       The sign-in card is authBoot's to show. */
+                    if (!sess && reason === 'session') throw new Error(text);
                     try { sessionStorage.setItem('sc_auth_reason', JSON.stringify({ reason, text })); } catch (e) {}
                     if (reason === 'token') {
                         authShow('login');
@@ -7051,9 +7083,15 @@ Projected Image UK"></textarea>
             const row = el('div', 'pchat-input');
             const ta = el('textarea', 'pchat-ta'); ta.rows = 1; ta.placeholder = 'Ask a question about this report…';
             ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'; });
-            ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const v = ta.value; ta.value = ''; ta.style.height = 'auto'; pageAsk(page, v, data); } });
+            /* While an answer is still coming, the question stays in the box:
+               it was cleared first and then refused, gone without a word. */
+            const sendIt = () => {
+                if (pageBusy[threadKey(page)]) { addToast('Wait for the answer, then send this.'); return; }
+                const v = ta.value; ta.value = ''; ta.style.height = 'auto'; pageAsk(page, v, data);
+            };
+            ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!e.repeat) sendIt(); } });
             const btn = el('button', 'btn btn-primary pchat-send'); btn.innerHTML = I.send; btn.title = 'Ask';
-            btn.onclick = () => { const v = ta.value; ta.value = ''; ta.style.height = 'auto'; pageAsk(page, v, data); };
+            btn.onclick = sendIt;
             row.append(ta, btn); card.append(row); wrap.append(card);
             return wrap;
         }
@@ -7133,21 +7171,32 @@ Projected Image UK"></textarea>
             if (o.note) card.append(el('div', 'rg-note', o.note));
             box.append(card);
         }
+        /* A paid report run in flight, by report. While one runs, its tab keeps
+           the loading screen when you come back to it, and Run or Refresh
+           waits on the run already going instead of paying for a second. */
+        const reportRuns = {};
         function showOverviewView() {
+            if (reportRuns.overview) return;
             if (overviewCache) { renderOverview(overviewCache); return; }
             renderRunGate('ov-content', { icon: I.grid, title: 'Store overview', desc: 'Compute live KPIs and an AI executive summary from your latest orders, customers and traffic.', cta: 'Run overview', note: 'Uses AI credits only when you run it.', onRun: () => loadOverview(true) });
         }
         function showSeoView() {
+            if (reportRuns.seo) return;
             if (seoCache) { renderSEO(seoCache); return; }
             renderRunGate('seo-content', { icon: I.search, title: 'SEO and optimization audit', desc: 'Crawl your storefront and fuse Search Console, Analytics and Shopify sales into a money-ranked plan.', cta: 'Run SEO audit', note: 'Uses AI credits only when you run it. Can take up to a minute.', onRun: () => loadSEO(true) });
         }
         function showProductsView() {
+            if (productPlanRun) return;   // a plan is being built: coming back keeps its loading screen
             if (productList) { renderProductList(); return; }
             renderRunGate('products-content', { icon: I.box, title: 'Product analytics', desc: 'Load your catalog with up to 24 months of sales so you can filter, sort, compare periods and export.', cta: 'Load products', note: 'Pulls live Shopify data. No AI credits used.', onRun: () => loadProducts(true) });
         }
         async function loadOverview(force) {
             const box = $('ov-content');
+            if (reportRuns.overview) return reportRuns.overview;
             if (overviewCache && !force) { renderOverview(overviewCache); return; }
+            return (reportRuns.overview = runOverview(box, force).finally(() => { reportRuns.overview = null; }));
+        }
+        async function runOverview(box, force) {
             box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.grid;
             const htext = el('div'); htext.append(el('h2', null, 'Store overview'), el('p', null, 'Analyzing your store…'));
@@ -7169,7 +7218,8 @@ Projected Image UK"></textarea>
             if ($('view-overview').classList.contains('active') && overviewCache) renderOverview(overviewCache);
         }
         async function alertOp(payload) {
-            try { const d = await api('/api/alerts', payload); if (d && Array.isArray(d.alerts)) alerts = d.alerts; } catch (e) {}
+            try { const d = await api('/api/alerts', payload); if (d && Array.isArray(d.alerts)) alerts = d.alerts; }
+            catch (e) { toastError('That change was not saved. ' + (e.message || '')); }
             if (overviewCache) renderOverview(overviewCache);
         }
         function alertsBanner() {
@@ -7309,7 +7359,11 @@ Projected Image UK"></textarea>
         let seoCache = null;
         async function loadSEO(force) {
             const box = $('seo-content');
+            if (reportRuns.seo) return reportRuns.seo;
             if (seoCache && !force) { renderSEO(seoCache); return; }
+            return (reportRuns.seo = runSEO(box).finally(() => { reportRuns.seo = null; }));
+        }
+        async function runSEO(box) {
             box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.search;
             const htext = el('div'); htext.append(el('h2', null, 'SEO and optimization'), el('p', null, 'Auditing your store…'));
@@ -7380,6 +7434,7 @@ Projected Image UK"></textarea>
         /* ---------- keywords + CPC ---------- */
         let keywordsCache = null;
         function showKeywordsView() {
+            if (reportRuns.keywords) return;
             if (keywordsCache) { renderKeywords(keywordsCache); return; }
             renderRunGate('keywords-content', { icon: I.tag, title: 'Keyword and CPC intelligence',
                 desc: 'Pull the keywords you rank for from Search Console and your paid spend, CPC and ROAS from Google Ads (via GA4), then get a money-ranked plan. You can also scan any public URL for the keywords it targets.',
@@ -7388,7 +7443,11 @@ Projected Image UK"></textarea>
         }
         async function loadKeywords(force) {
             const box = $('keywords-content');
+            if (reportRuns.keywords) return reportRuns.keywords;
             if (keywordsCache && !force) { renderKeywords(keywordsCache); return; }
+            return (reportRuns.keywords = runKeywords(box).finally(() => { reportRuns.keywords = null; }));
+        }
+        async function runKeywords(box) {
             box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.tag;
             const ht = el('div'); ht.append(el('h2', null, 'Keyword and CPC intelligence'), el('p', null, 'Analyzing your keywords and paid search…'));
@@ -7548,7 +7607,7 @@ Projected Image UK"></textarea>
             catch (e) { customerTags = null; toastError('The customer segments could not be loaded. ' + (e.message || '')); }
             // Never repaint over an analysis that is mid-flight (that would restore the
             // Run gate and make the merchant think their click was ignored).
-            if ($('view-customers').classList.contains('active') && !customersLoading) renderCustomers(customersSeg);
+            if ($('view-customers').classList.contains('active') && !customersRuns.has(customersSeg || SEG_ALL)) renderCustomers(customersSeg);
         }
         function sectorBar() {
             const wrap = el('div', 'lbl-seg');
@@ -7676,22 +7735,31 @@ Projected Image UK"></textarea>
             }
             return card;
         }
-        let customersLoading = null;   // sector currently being analyzed (guards stale renders)
-        async function loadCustomers(force, seg) {
-            seg = (typeof seg === 'string' && seg) ? seg : (customersSeg || SEG_ALL);
-            customersSeg = seg;
-            if (customersCache[seg] && !force) { renderCustomers(seg); return; }
-            if (customersLoading === seg) return;   // already running: don't start a second paid run
+        /* The sectors being analysed now, each one paid run. One slot for the
+           whole tab let a second sector's run take it, and coming back to the
+           first then offered Run over the run still going: paid twice. */
+        const customersRuns = new Set();
+        function customersBusy(seg) {
             const comp = seg === SEG_ALL;
             const box = $('customers-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.users;
             const ht = el('div'); ht.append(el('h2', null, comp ? 'Customers and retention' : (seg + ' sector')), el('p', null, 'Analyzing ' + (comp ? 'your customers and sectors' : ('the ' + seg + ' sector')) + '…'));
             hero.append(badge, ht); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Reading customers and 12 months of orders. This can take up to a minute…')); box.append(t);
-            customersLoading = seg;
+            return { box, hero, ht };
+        }
+        async function loadCustomers(force, seg) {
+            seg = (typeof seg === 'string' && seg) ? seg : (customersSeg || SEG_ALL);
+            customersSeg = seg;
+            if (customersRuns.has(seg)) { customersBusy(seg); return; }   // already running: don't start a second paid run
+            if (customersCache[seg] && !force) { renderCustomers(seg); return; }
+            const comp = seg === SEG_ALL;
+            const { box, hero, ht } = customersBusy(seg);
+            customersRuns.add(seg);
             try {
                 const data = await api('/api/customers', { segment: comp ? '' : seg, fresh: !!force });
                 customersCache[seg] = { data, at: Date.now() };
+                customersRuns.delete(seg);
                 // Only paint if the merchant is still looking at this sector: they may
                 // have switched tabs during the run, and clobbering their view looks
                 // like the click did nothing (which invites a second paid run).
@@ -7702,7 +7770,7 @@ Projected Image UK"></textarea>
                 const er = el('div', 'msg error'); er.append(el('div', 'bubble', e.message || String(e))); box.append(er);
                 ht.children[1].textContent = 'Could not run the analysis.';
             } finally {
-                if (customersLoading === seg) customersLoading = null;
+                customersRuns.delete(seg);
             }
         }
         function segCards(segments, cur) {
@@ -7736,6 +7804,7 @@ Projected Image UK"></textarea>
         function renderCustomers(seg) {
             seg = (typeof seg === 'string' && seg) ? seg : (customersSeg || SEG_ALL);
             customersSeg = seg;
+            if (customersRuns.has(seg)) { customersBusy(seg); return; }   // its run is still going: keep the loading screen
             const box = $('customers-content'); box.innerHTML = '';
             /* Empty until /api/reorder-radar answers, and for good if it fails:
                the layer leaves an empty card out of the arrangement and lays
@@ -7935,7 +8004,13 @@ Projected Image UK"></textarea>
             a.href = url; a.download = 'products-' + pPeriodLabel().replace(/\s+/g, '-') + '.csv'; document.body.append(a); a.click(); a.remove();
             setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
+        /* The plan being built: a run takes up to a minute, and opening
+           another product, or the list painted by any route (Back, a tab
+           switch, a reload of the catalogue), while one was running let the
+           earlier answer land last and replace what was on screen. */
+        let productSeq = 0, productPlanRun = false;
         function renderProductList() {
+            productSeq++; productPlanRun = false;     // whatever plan was coming is not what is on screen now
             const box = $('products-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
             const ht = el('div'); ht.append(el('h2', null, 'Products'),
@@ -8066,17 +8141,24 @@ Projected Image UK"></textarea>
         }
         function productBack() { const b = el('button', 'btn back-btn'); b.append(ico(I.chevLeft), document.createTextNode('Products')); b.onclick = renderProductList; return b; }
         async function openProduct(id, title) {
+            const my = ++productSeq; productPlanRun = true;
             const box = $('products-content'); box.innerHTML = '';
             box.append(productBack());
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
             const ht = el('div'); ht.append(el('h2', null, title || 'Product'), el('p', null, 'Analyzing search, traffic, sales and on-page SEO…'));
             hero.append(badge, ht); box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Building the optimization plan. This can take up to a minute…')); box.append(t);
-            try { renderProductDetail(await api('/api/product', { product_id: id })); }
+            try {
+                const d = await api('/api/product', { product_id: id });
+                if (my !== productSeq) return;          // overtaken: not what is on screen now
+                renderProductDetail(d);
+            }
             catch (e) {
+                if (my !== productSeq) return;
                 box.innerHTML = ''; box.append(productBack());
                 const er = el('div', 'msg error'); er.append(el('div', 'bubble', e.message || String(e))); box.append(er);
             }
+            finally { if (my === productSeq) productPlanRun = false; }
         }
         function renderProductDetail(d) {
             const box = $('products-content'); box.innerHTML = ''; box.append(productBack());
@@ -8153,7 +8235,8 @@ Projected Image UK"></textarea>
             return c;
         }
         async function memOp(payload) {
-            try { const d = await api('/api/memory', payload); if (d && Array.isArray(d.memories)) memories = d.memories; } catch (e) {}
+            try { const d = await api('/api/memory', payload); if (d && Array.isArray(d.memories)) memories = d.memories; }
+            catch (e) { toastError('That change was not saved. ' + (e.message || '')); }
             renderMemory();
             if ($('view-overview').classList.contains('active') && overviewCache) renderOverview(overviewCache);
         }
@@ -8169,7 +8252,8 @@ Projected Image UK"></textarea>
         }
         async function deleteKnowledge() {
             if (!await uiConfirm('Delete what the copilot has learned about your store? This cannot be undone.', { title: 'Delete store knowledge', okText: 'Delete' })) return;
-            try { const d = await api('/api/learn', { op: 'delete' }); knowledge = (d && d.knowledge) || {}; } catch (e) {}
+            try { const d = await api('/api/learn', { op: 'delete' }); knowledge = (d && d.knowledge) || {}; }
+            catch (e) { toastError('The store knowledge was not deleted. ' + (e.message || '')); }
             renderMemory();
         }
         /* Chrome removed alert()/confirm()/prompt() inside cross-origin iframes, and
@@ -8204,6 +8288,7 @@ Projected Image UK"></textarea>
            something must not look like one that saves something, and must not be
            answerable by the Enter reflex. */
         const DESTRUCTIVE = /\b(delete|remove|erase|wipe|discard|purge|reset|revoke|cancel shipment|for good|cannot be undone)\b/i;
+        const confirmStack = [];   // open confirm dialogs, topmost last
         function uiConfirm(message, opts) {
             opts = opts || {};
             const danger = opts.danger != null ? !!opts.danger
@@ -8228,16 +8313,28 @@ Projected Image UK"></textarea>
                 if (opts.hideCancel) foot.append(yes); else foot.append(no, yes);
                 modal.append(head, body, foot); overlay.append(modal); document.body.append(overlay);
                 const prev = document.activeElement;
+                confirmStack.push(overlay);
                 const done = (v) => {
                     overlay.remove(); document.removeEventListener('keydown', key);
+                    const at = confirmStack.indexOf(overlay); if (at >= 0) confirmStack.splice(at, 1);
                     if (prev && prev.focus) prev.focus();
                     resolve(v);
                 };
                 function key(e) {
+                    /* Only the dialog on top answers: two stacked confirms each
+                       listen on the document, and one Escape closed both. */
+                    if (confirmStack[confirmStack.length - 1] !== overlay) return;
                     if (e.key === 'Escape') { e.stopPropagation(); done(false); }
                     // Enter is a reflex, so it answers only the reversible dialogs.
-                    // A destructive one has to be clicked or tabbed to.
-                    if (e.key === 'Enter' && !danger) { e.preventDefault(); done(true); }
+                    // A destructive one has to be clicked or tabbed to. And it is
+                    // the focused button's answer: with Cancel focused, Enter is
+                    // Cancel (it said yes, and booked and charged a courier), and a
+                    // held key's repeats are not further presses.
+                    if (e.key === 'Enter' && !danger) {
+                        e.preventDefault();
+                        if (e.repeat) return;
+                        done(document.activeElement !== no);
+                    }
                 }
                 no.onclick = () => done(false);
                 yes.onclick = () => done(true);
@@ -8358,7 +8455,12 @@ Projected Image UK"></textarea>
             skillsLoadErr = '';
             try { const d = await api('/api/skills', {}); if (d && Array.isArray(d.skills)) skills = d.skills; }
             catch (e) { skillsLoadErr = e.message || 'Could not read your skills.'; }
-            if ($('view-skills').classList.contains('active')) renderSkills();
+            /* Not over unsaved typing: coming back to the tab re-rendered it and
+               a half-written skill (the one thing here worth minutes of
+               typing) was wiped, though a page unload already asked first. */
+            const dirty = [...document.querySelectorAll('#skills-content .sk-input, #skills-content .sk-textarea')]
+                .some(f => f.value !== (f.dataset.initial || ''));
+            if ($('view-skills').classList.contains('active') && !dirty) renderSkills();
         }
         async function skillOp(payload) {
             try { const d = await api('/api/skills', payload); if (d && Array.isArray(d.skills)) skills = d.skills; return true; }
@@ -12667,12 +12769,23 @@ Projected Image UK"></textarea>
                 u.disabled = true;
                 try {
                     const r = await api('/api/production-state', { op: 'unprinted', ids });
+                    /* The server's word for each order, not a guess: an order
+                       already made or shipped keeps its stamp and its tags,
+                       because its print was a reprint and not a release. */
+                    const kept = new Set(((r && r.kept) || []).map(String));
                     ids.forEach(id => {
-                        const st = prodStateOf({ id: id }); if (st) delete st.printed_at;
+                        const st = prodStateOf({ id: id }); if (!st) return;
+                        const now = ((r && r.state) || {})[String(id)];
+                        if (now && now.printed_at) st.printed_at = now.printed_at;
+                        else if (!kept.has(String(id))) delete st.printed_at;
                     });
                     if (r && r.tag_note) toastError(r.tag_note);
                     renderLabels();
-                    addToast('Put back as not printed.');
+                    const back = ids.length - kept.size;
+                    addToast(!kept.size ? 'Put back as not printed.'
+                        : !back ? (ids.length === 1 ? 'That order is already made, so it stays as it is.'
+                                                    : 'Those orders are already made, so they stay as they are.')
+                        : 'Put back as not printed, apart from ' + kept.size + ' already made.');
                 } catch (e) { toastError(e.message || 'Could not undo that.'); }
                 t.remove();
             };
@@ -12691,6 +12804,9 @@ Projected Image UK"></textarea>
             btn.disabled = true;
             try {
                 const r = await api('/api/production-labels/queue', { order_id: o.id, name: orderNo(o) });
+                /* A made or shipped order is not released again: the server
+                   says so, and the toast says what really happened. */
+                if (r.released === false) { addToast(r.note || (orderNo(o) + ' is already made.')); loadLabels(true); return; }
                 /* An account order's payment clock starts here: the outcome is
                    said either way, because a purchase order quietly missing
                    its terms is an invoice nobody chases. */
@@ -12781,7 +12897,8 @@ Projected Image UK"></textarea>
             const head = el('div', 'miss-head');
             head.append(ico(I.warning), el('b', null, 'Possibly missing from production'),
                 el('span', 'miss-sub', (d.missing_total === 1 ? '1 paid order has' : d.missing_total + ' paid orders have')
-                    + ' gobo items but no "' + (d.tag || LABEL_TAG) + '" tag.'));
+                    + ' gobo items but no "' + (d.tag || LABEL_TAG) + '" tag.'
+                    + (d.truncated ? ' Only the first ' + d.checked + ' open orders could be checked.' : '')));
             wrap.append(head);
             d.missing.forEach(m => {
                 const row = el('div', 'miss-row');
@@ -13301,7 +13418,13 @@ Projected Image UK"></textarea>
                at the top; the strip, the size check and the queue are cards the
                grid can move, each spanning the row. A selected order's preview,
                appended to the page below 1500px, stays fixed at the foot. */
-            if (labelsMissing && labelsMissing.data && (labelsMissing.data.missing || []).length) box.append(widget(missingStrip(), 'missing', 'full', 'Possibly missing from production'));
+            /* A check that could not read every open order says so even when
+               it found nothing: silence there reads as "none are missing". */
+            const lm = labelsMissing && labelsMissing.data;
+            const missNote = lm && !(lm.missing || []).length && lm.truncated
+                ? el('div', 'cov-note', 'Only the first ' + lm.checked + ' open orders could be checked for a missing "'
+                    + (lm.tag || LABEL_TAG) + '" tag, and none of those is missing it.') : null;
+            if (lm && ((lm.missing || []).length || missNote)) box.append(widget(missNote || missingStrip(), 'missing', 'full', 'Possibly missing from production'));
             if (labelsCoverage) box.append(widget(coverageCard(), 'size-check', 'full', 'Size list coverage'));
 
             /* The queue, composed the way the reference composes a list page: a
@@ -14199,6 +14322,12 @@ Projected Image UK"></textarea>
                     if (d.fetch_failed) {
                         out.append(el('div', 'cov-note', d.fetch_failed + ' made order(s) could not be loaded from Shopify (it may be busy) and are missing from this total. Try again shortly.'));
                     }
+                    if ((d.gone_ids || []).length) {
+                        const g = d.gone_ids.length;
+                        out.append(el('div', 'cov-note', g + (g === 1 ? ' made order is' : ' made orders are')
+                            + ' no longer in Shopify, so ' + (g === 1 ? 'it is' : 'they are')
+                            + ' left out of this sheet and the glass booked for ' + (g === 1 ? 'it' : 'them') + ' stays booked.'));
+                    }
                     /* The review sheet: the estimate stands on the left, the
                        FINAL figure being sent is the editable column. Lines
                        can be amended, removed, or added before sending. */
@@ -14211,7 +14340,7 @@ Projected Image UK"></textarea>
                         if (d.sent) {
                             const nm = byName(d.sent.by);
                             const b = el('div', 'cov-note',
-                                'Already sent to the stock sheet at ' + String(d.sent.sent_at).slice(11, 16)
+                                'Already sent to the stock sheet at ' + londonHM(d.sent.sent_at)
                                 + (nm ? ' by ' + nm : '') + '. Sending again replaces that sheet.');
                             b.style.color = 'var(--action-primary)';
                             sheetHost.append(b);
@@ -14280,6 +14409,7 @@ Projected Image UK"></textarea>
                                 lastResult = r.result;
                                 paintSheet();
                                 addToast('Stock sheet sent: ' + (r.result.adjustments || 0) + ' adjustment(s) made.', 'good');
+                                if (r.note) addToast(r.note);
                             } catch (e) { toastError(e.message || 'The send failed. Nothing was recorded.'); }
                             send.disabled = false;
                         };
@@ -14596,6 +14726,10 @@ Projected Image UK"></textarea>
            limit and returns a stack that is mostly missing, which is worse
            than being told to narrow the list. */
         const SHIP_RUN_MAX = 60;
+        /* A booking whose outcome is unknown: the server's wording when a
+           request reached World Options and no clear answer came back. Both
+           booking panels hold Book on it. */
+        const BOOKING_UNKNOWN = /MAY still|check this order|did not get a reply/i;
         function shipLabelEligible(o) {
             /* o.status is cancelled / refunded / already-fulfilled - the same
                rule the gobo bulk print uses two buttons along. d.canceled is a
@@ -15574,20 +15708,30 @@ Projected Image UK"></textarea>
                         + '… do not close this window';
                     x.disabled = true;
                     askedCollection = collectionForRun || '';
-                    const doBook = (force) => api('/api/dispatch/book', {
+                    const doBook = (force, confirmUnknown) => api('/api/dispatch/book', {
                         order_id: o.id, name: orderNo(o), option: chosen, boxes: lastBoxes, notify: nb.checked, force: !!force,
+                        confirm_unknown: !!confirmUnknown,
                         insurance: lastInsurance, signature: sigSel ? sigSel.value : '',
                         customs: quote.international ? collectCustoms() : null,
                         collection_option: askedCollection
                     });
                     try {
-                        let res;
-                        try { res = await doBook(false); }
-                        catch (e) {
-                            // Shopify already shows the order fulfilled: ask, then retry once.
-                            if (!/retry with the confirmation/.test(e.message || '')) throw e;
-                            if (!await uiConfirm('Shopify already shows this order as fulfilled, which usually means it has already shipped. Book a courier anyway?', { title: 'Order looks already shipped', okText: 'Book anyway' })) { book.disabled = false; setLabel(); return; }
-                            res = await doBook(true);
+                        let res, force = false, sure = false;
+                        for (;;) {
+                            try { res = await doBook(force, sure); break; }
+                            catch (e) {
+                                // Shopify already shows the order fulfilled: ask, then retry once.
+                                if (!force && /retry with the confirmation/.test(e.message || '')) {
+                                    if (!await uiConfirm('Shopify already shows this order as fulfilled, which usually means it has already shipped. Book a courier anyway?', { title: 'Order looks already shipped', okText: 'Book anyway' })) { book.disabled = false; setLabel(); return; }
+                                    force = true; continue;
+                                }
+                                // An earlier booking of this order never recorded its outcome.
+                                if (!sure && /outcome was never recorded/.test(e.message || '')) {
+                                    if (!await uiConfirm(e.message + '\n\nOnly if there is no such booking in World Options, book it now.', { title: 'A booking may already exist', okText: 'I checked: book it', danger: true })) { book.disabled = false; setLabel(); booking = false; x.disabled = false; return; }
+                                    sure = true; continue;
+                                }
+                                throw e;
+                            }
                         }
                         booking = false; x.disabled = false;
                         quoteCache.delete(String(o.id));
@@ -15601,7 +15745,7 @@ Projected Image UK"></textarea>
                         const msg = String(e.message || 'Booking failed');
                         // If the outcome is unknown the courier MAY already be booked and
                         // charged: do not re-arm the button into a second charge.
-                        const unknown = e.noReply || /MAY still|check this order|did not get a reply/i.test(msg);
+                        const unknown = e.noReply || BOOKING_UNKNOWN.test(msg);
                         toastError(msg);
                         const tech = techPanel(e.tech);
                         /* Open, not collapsed. A booking that will not go through is
@@ -16287,8 +16431,12 @@ Projected Image UK"></textarea>
                         + '? Your World Options account is charged.',
                         { title: 'Book the courier', okText: 'Book it' })) { bk.disabled = false; return; }
                     booking = true;
+                    let sure = false;
                     try {
+                        for (;;) {
+                            try {
                         const r = await api('/api/custom/book', {
+                            confirm_unknown: sure,
                             id: shipId, option: chosen, address: readAddress(), boxes: boxes,
                             insurance: insCb.checked ? parseFloat(insAmt.value) || 0 : 0,
                             declared: parseFloat(valueIn.value) || 0,
@@ -16298,10 +16446,23 @@ Projected Image UK"></textarea>
                         });
                         booking = false;
                         renderBookedSafe(r);
+                        break;
+                            } catch (e) {
+                                if (!sure && /outcome was never recorded/.test(e.message || '')) {
+                                    if (!await uiConfirm(e.message + '\n\nOnly if there is no such booking in World Options, book it now.', { title: 'A booking may already exist', okText: 'I checked: book it', danger: true })) { booking = false; bk.disabled = false; return; }
+                                    sure = true; continue;
+                                }
+                                throw e;
+                            }
+                        }
                     } catch (e) {
                         booking = false;
-                        bk.disabled = false;
-                        confirmWrap.append(el('div', 'msg error', e.message || 'The booking failed'));
+                        const msg = String(e.message || 'The booking failed');
+                        /* The same rule as the order panel: an outcome nobody
+                           knows may already be a booked and charged label, so
+                           Book stays held rather than offering a second one. */
+                        if (!(e.noReply || BOOKING_UNKNOWN.test(msg))) bk.disabled = false;
+                        confirmWrap.append(el('div', 'msg error', msg));
                     }
                 };
                 bar.append(bk); confirmWrap.append(bar);
@@ -17170,7 +17331,7 @@ Projected Image UK"></textarea>
                         detail: d.value.trim(), where: where || '' });
                     updCache = null;
                     m.close();
-                    toastOk('Sent. Thank you \u2014 it is on the list.');
+                    toastOk('Sent. Thank you: it is on the list.');
                 } catch (e) { go.disabled = false; toastError(e.message); }
             };
             bar.append(go);
@@ -17302,10 +17463,20 @@ Projected Image UK"></textarea>
             /* .show, not mere existence: the settings modal's overlay is
                always in the DOM, and matching it made this a no-op forever. */
             if (document.querySelector('.modal-overlay.show')) return;
+            /* Nor under someone typing in the tab's search: the repaint rebuilt
+               the input, focus went and the last keystrokes with it. Checked
+               again when the answer lands; the new data waits for the next
+               paint. The Inbox has always kept this rule. */
+            const typing = () => {
+                const a = document.activeElement;
+                return !!(a && a.closest && a.closest('#crm-content')
+                    && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA'));
+            };
+            if (typing()) return;
             try {
                 const r = await api('/api/crm/board', {});
                 crmCache = r.crm; crmLoadedAt = Date.now();
-                renderCRM();
+                if (!typing()) renderCRM();
             } catch (e) { /* stale is better than an error bar mid-work */ }
         }
         document.addEventListener('visibilitychange', () => { if (!document.hidden) crmMaybeRefresh(); });
@@ -20185,7 +20356,8 @@ Projected Image UK"></textarea>
                        entire pile, with no way to trim it, would strand the
                        person on the one action this feature exists for. */
                     const CHUNK = 150;
-                    let changed = 0, skipped = [], undoToken = '', what = '';
+                    let changed = 0, skipped = [], what = '';
+                    const undoTokens = [];   // one per batch: Undo has to send them all
                     try {
                         for (let i = 0; i < ids.length; i += CHUNK) {
                             if (ids.length > CHUNK) {
@@ -20196,7 +20368,7 @@ Projected Image UK"></textarea>
                                 Object.assign({ ids: ids.slice(i, i + CHUNK) }, body));
                             changed += (r.changed || 0);
                             if (r.skipped) skipped = skipped.concat(r.skipped);
-                            if (r.undo) { undoToken = r.undo; what = r.what || 'that'; }
+                            if (r.undo) { undoTokens.push(r.undo); what = r.what || 'that'; }
                         }
                         mailSel.clear();
                     } catch (e) {
@@ -20204,6 +20376,8 @@ Projected Image UK"></textarea>
                             ? (changed + ' were changed, then it stopped: ' + e.message)
                             : e.message);
                         b.disabled = false;
+                        /* What did change can still be put back. */
+                        if (undoTokens.length && changed) mailOfferUndo(undoTokens, changed, what);
                         await refreshMailQuiet();
                         return;
                     }
@@ -20211,7 +20385,7 @@ Projected Image UK"></textarea>
                         toastError(skipped.length + ' could not be changed: '
                             + skipped.slice(0, 3).map(s => s.why).join(', '));
                     }
-                    if (undoToken && changed) mailOfferUndo(undoToken, changed, what);
+                    if (undoTokens.length && changed) mailOfferUndo(undoTokens, changed, what);
                     await refreshMailQuiet();
                 };
                 bar.append(b);
@@ -20326,7 +20500,8 @@ Projected Image UK"></textarea>
                 host.append(more);
             }
         }
-        function mailOfferUndo(token, n, what) {
+        function mailOfferUndo(tokens, n, what) {
+            tokens = Array.isArray(tokens) ? tokens : [tokens];
             /* One mis-click can move 150 emails. The offer is short-lived and
                deliberately loud, because it is only useful in the seconds
                after somebody realises. */
@@ -20337,8 +20512,17 @@ Projected Image UK"></textarea>
             const go = el('button', 'linkish', 'Undo');
             go.onclick = async () => {
                 go.disabled = true;
-                try { await api('/api/mail/undo', { token: token }); toastOk('Put back'); }
-                catch (e) { toastError(e.message); }
+                /* A bulk action over more than one batch holds one token per
+                   batch. Sending only the last put back the last 150 and said
+                   "Put back" over the rest. What is said is what the server
+                   says it restored. */
+                let back = 0, why = '';
+                for (const t of tokens) {
+                    try { back += ((await api('/api/mail/undo', { token: t })) || {}).restored || 0; }
+                    catch (e) { why = why || e.message; }
+                }
+                if (!why && back >= n) toastOk('Put back');
+                else toastError('Put back ' + back + ' of ' + n + (why ? ': ' + why : '.'));
                 bar.remove();
                 refreshMailQuiet();
             };
@@ -21060,9 +21244,16 @@ Projected Image UK"></textarea>
                 catch (e) {
                     /* A refusal at the last step is still a refusal: hand the
                        row back rather than closing over a message that never
-                       went, which would read as sent. */
+                       went, which would read as sent. But no answer is not a
+                       refusal: it may have gone, and Send offered again would
+                       email the customer twice. */
                     toastError(e.message);
-                    go.disabled = false; back.disabled = false;
+                    back.disabled = false;
+                    if (e.noReply) {
+                        go.textContent = 'May have been sent: check the conversation';
+                        return;
+                    }
+                    go.disabled = false;
                     return;
                 }
                 /* Sent, with something to know: Gmail filed it as its own
@@ -21333,7 +21524,7 @@ Projected Image UK"></textarea>
             const box = el('div');
             bodyL.append(box);
             body.append(bodyL);
-            const cmp = mountComposer(box, { upload: mailUpload, label: 'Message',
+            const cmp = mountComposer(box, { upload: mailUpload, ask: composerAsk, label: 'Message',
                                              placeholder: 'Write the message' });
             mailReplyPicker(cmp, body);
             mailAddedWhenSent(body);
@@ -21397,7 +21588,7 @@ Projected Image UK"></textarea>
                 + 'it would have had to guess at a price or a date: fill those in.'));
             const box = el('div');
             host.append(box);
-            const cmp = mountComposer(box, { upload: mailUpload, label: 'Reply',
+            const cmp = mountComposer(box, { upload: mailUpload, ask: composerAsk, label: 'Reply',
                                              placeholder: 'Write the reply' });
             /* The panel keeps its own handle, so a repaint of the thread can
                rescue what is half written and the order panel can drop a
@@ -21613,10 +21804,17 @@ Projected Image UK"></textarea>
             x.onclick = close;   /* the X is the only way out, as everywhere else */
             return { body: body, close: close, overlay: overlay };
         }
+        /* The email being fetched to open: a double click (the gesture every
+           mail client teaches) or a held Enter sent two reads and stacked two
+           windows of one email, each with its own heartbeat. */
+        const mailOpening = new Set();
         async function openMailThread(id) {
+            if (mailOpening.has(id)) return;
+            mailOpening.add(id);
             let r;
             try { r = await api('/api/mail/thread', { id: id }); }
             catch (e) { toastError(e.message); return; }
+            finally { mailOpening.delete(id); }
             const m = mailModal('Email');
             m.overlay.querySelector('.modal').classList.add('mreader');
             paintMailThread(m, r);
@@ -22844,7 +23042,7 @@ Projected Image UK"></textarea>
            the bank line and the accounts mailbox, so it is handed over on
            purpose rather than inherited by having an account. Mirrors
            OPT_IN_TABS on the server, which is the side that actually decides. */
-        const OPT_IN_TABS = ['recon', 'forecast'];
+        const OPT_IN_TABS = ['recon', 'connector', 'forecast'];
         const DEFAULT_TABS = TAB_KEYS.filter(k => OPT_IN_TABS.indexOf(k) < 0);
         function tabAllowed(v) {
             if (!teamMe || !Array.isArray(teamMe.tabs)) return true;
@@ -23317,7 +23515,8 @@ Projected Image UK"></textarea>
                         products: 'Products', customers: 'Customers', liability: 'Liability',
                         crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', labels: 'Production Manager',
                         memory: 'Memory', skills: 'Skills', chat: 'Chat',
-                        recon: 'Reconciliation', forecast: 'Forecast', sizes: 'Size list' };
+                        recon: 'Reconciliation', forecast: 'Forecast', connector: 'Xero sync',
+                        sizes: 'Size list' };
                     const chosen = new Set(Array.isArray(u.tabs) ? u.tabs : DEFAULT_TABS);
                     const boxes = [];
                     const group = el('div');
@@ -23474,7 +23673,7 @@ Projected Image UK"></textarea>
                     const row = el('div', 'files-row tm-row');
                     const name = el('span', 'files-name still'); name.textContent = nm(ws.uid);
                     row.append(name, el('span', 'files-meta',
-                        'since ' + String(ws.start).slice(11, 16) + ' · ' + fd(ws.secs) + ' so far'));
+                        'since ' + londonHM(ws.start) + ' · ' + fd(ws.secs) + ' so far'));
                     const acts = el('div', 'files-acts'); acts.style.opacity = '1';
                     const res = el('button', 'btn', 'Close this session');
                     res.onclick = async () => {
@@ -23513,8 +23712,8 @@ Projected Image UK"></textarea>
                     const name = el('span', 'files-name still');
                     name.textContent = nm(s.uid) + (s.corrected ? ' (closed by ' + nm(s.corrected_by) + ')' : '');
                     row.append(name, el('span', 'files-meta',
-                        fmtDate(s.start) + ' · ' + String(s.start).slice(11, 16) + ' to '
-                        + String(s.end).slice(11, 16) + ' · ' + fd(s.secs || 0) + ' · '
+                        fmtDate(s.start) + ' · ' + londonHM(s.start) + ' to '
+                        + londonHM(s.end) + ' · ' + fd(s.secs || 0) + ' · '
                         + ((d.event_counts || {})[s.id] || 0) + ' actions'));
                     sl.append(row);
                 });
@@ -24129,6 +24328,9 @@ Projected Image UK"></textarea>
            or null when they cancel. */
         /* In-page replacement for the browser's prompt dialog: a title, a line
            of help, one text field. Resolves with the text, or null when dismissed. */
+        /* The composer's questions (a link's address) through the page's own
+           dialog: native prompts do nothing inside the admin iframe. */
+        const composerAsk = (title, message, label, initial) => uiAskText(title, message, label, initial, 'Add link');
         function uiAskText(title, message, label, initial, okText) {
             return new Promise(resolve => {
                 const overlay = el('div', 'modal-overlay show');

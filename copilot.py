@@ -65,6 +65,19 @@ import tokenvault
 import totp
 logger = logging.getLogger("shopify_mcp.copilot")
 
+
+def _env_num(cast, raw, default, name):
+    """A numeric setting, read forgivingly: a value set but not a number
+    ("60s", "$25", "") is logged and the default used. Parsed bare, one typo
+    in Railway crashed the whole app at import, and the log blamed the chat."""
+    try:
+        return cast(raw)
+    except (TypeError, ValueError):
+        logging.getLogger("shopify_mcp").warning(
+            "setting %s=%r is not a number; using the default %s", name, raw, default)
+        return cast(default)
+
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -82,14 +95,14 @@ ANTHROPIC_EFFORT = os.environ.get("ANTHROPIC_EFFORT", "max")
 THINKING_MODE = os.environ.get("ANTHROPIC_THINKING", "adaptive").strip().lower()
 if THINKING_MODE in ("off", "none", "disabled", "0", ""):
     THINKING_MODE = ""
-LOW_STOCK_THRESHOLD = int(os.environ.get("LOW_STOCK_THRESHOLD", "5"))
+LOW_STOCK_THRESHOLD = _env_num(int, os.environ.get("LOW_STOCK_THRESHOLD", "5"), "5", "LOW_STOCK_THRESHOLD")
 # History windows for trend charts + product analytics. Up to 24 months of
 # Shopify order history is paginated for the Products tab and product detail;
 # Google (GA4/GSC) timeseries are single calls. ORDER_PAGE_CAP bounds how many
 # 250-order pages we will page through so the request stays responsive.
-TREND_MONTHS = int(os.environ.get("TREND_MONTHS", "24"))
-PRODUCT_TREND_MONTHS = int(os.environ.get("PRODUCT_TREND_MONTHS", "12"))
-ORDER_PAGE_CAP = int(os.environ.get("ORDER_PAGE_CAP", "30"))
+TREND_MONTHS = _env_num(int, os.environ.get("TREND_MONTHS", "24"), "24", "TREND_MONTHS")
+PRODUCT_TREND_MONTHS = _env_num(int, os.environ.get("PRODUCT_TREND_MONTHS", "12"), "12", "PRODUCT_TREND_MONTHS")
+ORDER_PAGE_CAP = _env_num(int, os.environ.get("ORDER_PAGE_CAP", "30"), "30", "ORDER_PAGE_CAP")
 # App Bridge identity = the app's Client ID + secret. Accept either the
 # SHOPIFY_API_KEY/SECRET names or the SHOPIFY_CLIENT_ID/SECRET names (same values).
 SHOPIFY_API_KEY    = os.environ.get("SHOPIFY_API_KEY") or os.environ.get("SHOPIFY_CLIENT_ID", "")
@@ -112,40 +125,40 @@ _API_HEADERS = {
 }
 
 # --- Abuse / cost controls --------------------------------------------------
-RATE_WINDOW      = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))      # seconds
-RATE_MAX_CLIENT  = int(os.environ.get("RATE_LIMIT_PER_CLIENT", "120"))  # requests/window/client
+RATE_WINDOW      = _env_num(int, os.environ.get("RATE_LIMIT_WINDOW", "60"), "60", "RATE_LIMIT_WINDOW")      # seconds
+RATE_MAX_CLIENT  = _env_num(int, os.environ.get("RATE_LIMIT_PER_CLIENT", "120"), "120", "RATE_LIMIT_PER_CLIENT")  # requests/window/client
 # 30/min was reachable by one busy operator: a single order costs up to four
 # calls (history, quote, book, mark made) before any refresh or tab switch.
-RATE_MAX_GLOBAL  = int(os.environ.get("RATE_LIMIT_GLOBAL", "150"))     # AI requests/window (cost ceiling)
-MAX_BODY_BYTES   = int(os.environ.get("MAX_BODY_BYTES", str(256 * 1024)))  # 256 KB
-MAX_MESSAGES     = int(os.environ.get("MAX_MESSAGES", "100"))          # chat history length
-MAX_CHAT_CHARS   = int(os.environ.get("MAX_CHAT_CHARS", "100000"))     # total chars in a chat request
+RATE_MAX_GLOBAL  = _env_num(int, os.environ.get("RATE_LIMIT_GLOBAL", "150"), "150", "RATE_LIMIT_GLOBAL")     # AI requests/window (cost ceiling)
+MAX_BODY_BYTES   = _env_num(int, os.environ.get("MAX_BODY_BYTES", str(256 * 1024)), str(256 * 1024), "MAX_BODY_BYTES")  # 256 KB
+MAX_MESSAGES     = _env_num(int, os.environ.get("MAX_MESSAGES", "100"), "100", "MAX_MESSAGES")          # chat history length
+MAX_CHAT_CHARS   = _env_num(int, os.environ.get("MAX_CHAT_CHARS", "100000"), "100000", "MAX_CHAT_CHARS")     # total chars in a chat request
 
-MAX_TOOL_ROUNDS    = int(os.environ.get("COPILOT_MAX_TOOL_ROUNDS", "12"))
-MAX_TOKENS         = int(os.environ.get("COPILOT_MAX_TOKENS", "16000"))  # headroom for rich output at high effort (non-streaming-safe)
-TOOL_RESULT_CAP    = int(os.environ.get("COPILOT_TOOL_RESULT_CAP", "50000"))
-STORE_CONTEXT_CAP  = int(os.environ.get("STORE_CONTEXT_CAP", "4000"))
+MAX_TOOL_ROUNDS    = _env_num(int, os.environ.get("COPILOT_MAX_TOOL_ROUNDS", "12"), "12", "COPILOT_MAX_TOOL_ROUNDS")
+MAX_TOKENS         = _env_num(int, os.environ.get("COPILOT_MAX_TOKENS", "16000"), "16000", "COPILOT_MAX_TOKENS")  # headroom for rich output at high effort (non-streaming-safe)
+TOOL_RESULT_CAP    = _env_num(int, os.environ.get("COPILOT_TOOL_RESULT_CAP", "50000"), "50000", "COPILOT_TOOL_RESULT_CAP")
+STORE_CONTEXT_CAP  = _env_num(int, os.environ.get("STORE_CONTEXT_CAP", "4000"), "4000", "STORE_CONTEXT_CAP")
 # Server-side store profile. Default path lives under /data so a Railway volume
 # mounted there makes it durable across redeploys.
 PROFILE_PATH       = os.environ.get("PROFILE_PATH", "/data/store_profile.json")
-PROFILE_FIELD_CAP  = int(os.environ.get("PROFILE_FIELD_CAP", "6000"))
+PROFILE_FIELD_CAP  = _env_num(int, os.environ.get("PROFILE_FIELD_CAP", "6000"), "6000", "PROFILE_FIELD_CAP")
 MEMORY_PATH        = os.environ.get("MEMORY_PATH", "/data/store_memory.json")
-MEMORY_MAX         = int(os.environ.get("MEMORY_MAX", "500"))    # max stored memories
-MEMORY_INJECT      = int(os.environ.get("MEMORY_INJECT", "40"))  # max of each kind injected into prompts
+MEMORY_MAX         = _env_num(int, os.environ.get("MEMORY_MAX", "500"), "500", "MEMORY_MAX")    # max stored memories
+MEMORY_INJECT      = _env_num(int, os.environ.get("MEMORY_INJECT", "40"), "40", "MEMORY_INJECT")  # max of each kind injected into prompts
 KNOWLEDGE_PATH     = os.environ.get("KNOWLEDGE_PATH", "/data/store_knowledge.json")
-KNOWLEDGE_CAP      = int(os.environ.get("KNOWLEDGE_CAP", "8000"))     # max stored knowledge chars
+KNOWLEDGE_CAP      = _env_num(int, os.environ.get("KNOWLEDGE_CAP", "8000"), "8000", "KNOWLEDGE_CAP")     # max stored knowledge chars
 IMPACT_PATH        = os.environ.get("IMPACT_PATH", "/data/impact.json")  # tracked-action impact log
-IMPACT_MAX         = int(os.environ.get("IMPACT_MAX", "100"))
-LEARN_MAX_PAGES    = int(os.environ.get("LEARN_MAX_PAGES", "12"))    # pages crawled when learning
-LEARN_PAGE_CHARS   = int(os.environ.get("LEARN_PAGE_CHARS", "3000"))  # text kept per page
+IMPACT_MAX         = _env_num(int, os.environ.get("IMPACT_MAX", "100"), "100", "IMPACT_MAX")
+LEARN_MAX_PAGES    = _env_num(int, os.environ.get("LEARN_MAX_PAGES", "12"), "12", "LEARN_MAX_PAGES")    # pages crawled when learning
+LEARN_PAGE_CHARS   = _env_num(int, os.environ.get("LEARN_PAGE_CHARS", "3000"), "3000", "LEARN_PAGE_CHARS")  # text kept per page
 SKILLS_PATH        = os.environ.get("SKILLS_PATH", "/data/store_skills.json")  # merchant-authored skills
-SKILLS_MAX         = int(os.environ.get("SKILLS_MAX", "200"))        # max stored skills
-SKILL_TITLE_CAP    = int(os.environ.get("SKILL_TITLE_CAP", "120"))   # chars per skill title
-SKILL_BODY_CAP     = int(os.environ.get("SKILL_BODY_CAP", "6000"))   # chars per skill body
-SKILLS_INJECT_CAP  = int(os.environ.get("SKILLS_INJECT_CAP", "24000"))  # max total skill chars injected
+SKILLS_MAX         = _env_num(int, os.environ.get("SKILLS_MAX", "200"), "200", "SKILLS_MAX")        # max stored skills
+SKILL_TITLE_CAP    = _env_num(int, os.environ.get("SKILL_TITLE_CAP", "120"), "120", "SKILL_TITLE_CAP")   # chars per skill title
+SKILL_BODY_CAP     = _env_num(int, os.environ.get("SKILL_BODY_CAP", "6000"), "6000", "SKILL_BODY_CAP")   # chars per skill body
+SKILLS_INJECT_CAP  = _env_num(int, os.environ.get("SKILLS_INJECT_CAP", "24000"), "24000", "SKILLS_INJECT_CAP")  # max total skill chars injected
 ANALYSIS_CACHE_PATH      = os.environ.get("ANALYSIS_CACHE_PATH", "/data/analysis_cache.json")  # last result per AI tab
-ANALYSIS_CACHE_MAX_BYTES = int(os.environ.get("ANALYSIS_CACHE_MAX_BYTES", "800000"))  # per-entry size guard
-CHAT_CONTEXT_CAP   = int(os.environ.get("CHAT_CONTEXT_CAP", "12000"))  # max chars of page-report context injected into chat
+ANALYSIS_CACHE_MAX_BYTES = _env_num(int, os.environ.get("ANALYSIS_CACHE_MAX_BYTES", "800000"), "800000", "ANALYSIS_CACHE_MAX_BYTES")  # per-entry size guard
+CHAT_CONTEXT_CAP   = _env_num(int, os.environ.get("CHAT_CONTEXT_CAP", "12000"), "12000", "CHAT_CONTEXT_CAP")  # max chars of page-report context injected into chat
 SCHEDULE_PATH      = os.environ.get("SCHEDULE_PATH", "/data/schedule.json")  # auto-refresh config (off by default)
 ALERTS_PATH        = os.environ.get("ALERTS_PATH", "/data/alerts.json")      # change alerts from scheduled runs
 FEEDBACK_PATH      = os.environ.get("FEEDBACK_PATH", "/data/feedback.json")  # feature requests from the desk
@@ -159,13 +172,13 @@ RECON_CACHE_PATH   = os.environ.get("RECON_CACHE_PATH", "/data/recon_cache.json"
 RECON_DOCS_PATH    = os.environ.get("RECON_DOCS_PATH", "/data/recon_docs.json")
 CHANGELOG_PATH     = os.environ.get("CHANGELOG_PATH",
                                     os.path.join(os.path.dirname(__file__), "data", "changelog.json"))
-ALERTS_MAX         = int(os.environ.get("ALERTS_MAX", "60"))
-SCHEDULE_CHECK_SECS = int(os.environ.get("SCHEDULE_CHECK_SECS", "900"))       # how often the scheduler wakes to check
+ALERTS_MAX         = _env_num(int, os.environ.get("ALERTS_MAX", "60"), "60", "ALERTS_MAX")
+SCHEDULE_CHECK_SECS = _env_num(int, os.environ.get("SCHEDULE_CHECK_SECS", "900"), "900", "SCHEDULE_CHECK_SECS")       # how often the scheduler wakes to check
 USAGE_PATH         = os.environ.get("USAGE_PATH", "/data/usage.json")          # AI token-usage + cost log (measurement)
-USAGE_MAX          = int(os.environ.get("USAGE_MAX", "5000"))                  # max usage events retained
-DAILY_COST_CAP     = float(os.environ.get("DAILY_COST_CAP", "25"))             # hard $/day AI ceiling (0 disables)
+USAGE_MAX          = _env_num(int, os.environ.get("USAGE_MAX", "5000"), "5000", "USAGE_MAX")                  # max usage events retained
+DAILY_COST_CAP     = _env_num(float, os.environ.get("DAILY_COST_CAP", "25"), "25", "DAILY_COST_CAP")             # hard $/day AI ceiling (0 disables)
 PRODUCTION_TAG     = os.environ.get("PRODUCTION_LABEL_TAG", "IP")              # order tag that means "in production"
-PRODUCTION_DAYS    = int(os.environ.get("PRODUCTION_LABEL_DAYS", "180"))       # how far back to look for tagged orders
+PRODUCTION_DAYS    = _env_num(int, os.environ.get("PRODUCTION_LABEL_DAYS", "180"), "180", "PRODUCTION_LABEL_DAYS")       # how far back to look for tagged orders
 # The Shopify product type of a catalogue (stock) gobo. A stock gobo is its own
 # name on a label; the custom products ("Custom Gobo", "Custom Gobos") are not,
 # and still need a fixture before anything is sized.
@@ -786,7 +799,7 @@ def _page_context_to_system(ctx) -> str:
 # ---------------------------------------------------------------------------
 
 PRODUCTION_STATE_PATH = os.environ.get("PRODUCTION_STATE_PATH", "/data/production_state.json")
-PRODUCTION_STATE_MAX = int(os.environ.get("PRODUCTION_STATE_MAX", "1000"))
+PRODUCTION_STATE_MAX = _env_num(int, os.environ.get("PRODUCTION_STATE_MAX", "1000"), "1000", "PRODUCTION_STATE_MAX")
 
 
 # A store that fails to PARSE (as opposed to not existing) must never be
@@ -876,6 +889,7 @@ class StoreUnwritable(RuntimeError):
 # failed one ("memory never outlives a failed write"), and a caller that
 # mutated the object and then could not write must forget it too.
 _json_cache: dict = {}
+_cached_paths: set = set()   # the stores read through _load_json_cached
 
 
 def _stat_key(path: str):
@@ -890,6 +904,7 @@ def _load_json_cached(path: str, key, default, prepare=None):
     """_load_json_store with a cache keyed on the file. `prepare` runs once
     per file version, on the miss, and its result is what is cached - for a
     store whose loader normalises what it read."""
+    _cached_paths.add(path)
     sk = _stat_key(path)
     hit = _json_cache.get(path)
     if hit is not None and sk is not None and hit[0] == sk:
@@ -966,9 +981,14 @@ def _write_json_store(path: str, key: Optional[str], data, *, private: bool = Fa
         except OSError:
             pass
     # What was just written IS the store now; a re-parse would only produce
-    # an equal object more slowly. Kept for every store, not only the ones
-    # read through the cache: an entry nobody reads costs one reference.
-    _json_cache[path] = (_stat_key(path), data)
+    # an equal object more slowly. Only for the stores read through the cache:
+    # kept for every path, each booked label (a file per shipment, about a
+    # megabyte with its print images) stayed in memory until the next
+    # restart, pruned from disk or not.
+    if path in _cached_paths:
+        _json_cache[path] = (_stat_key(path), data)
+    else:
+        _json_cache.pop(path, None)
 
 
 # ---------------------------------------------------------------------------
@@ -984,7 +1004,7 @@ DISPATCH_STATE_PATH = os.environ.get("DISPATCH_STATE_PATH", "/data/dispatch_stat
 DISPATCH_LABELS_DIR = os.environ.get(
     "DISPATCH_LABELS_DIR",
     os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".", "dispatch_labels"))
-DISPATCH_STATE_MAX  = int(os.environ.get("DISPATCH_STATE_MAX", "2000"))
+DISPATCH_STATE_MAX  = _env_num(int, os.environ.get("DISPATCH_STATE_MAX", "2000"), "2000", "DISPATCH_STATE_MAX")
 # Rows leaving the live store go here, whole. A dispatch record is a customs
 # declaration and a courier booking - the records the redaction code keeps
 # "under a legal obligation" because HMRC can ask for them within six years.
@@ -994,6 +1014,16 @@ DISPATCH_STATE_MAX  = int(os.environ.get("DISPATCH_STATE_MAX", "2000"))
 DISPATCH_ARCHIVE_PATH = os.environ.get(
     "DISPATCH_ARCHIVE_PATH",
     os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".", "dispatch_state_archive.jsonl"))
+# A booking in flight: written before World Options is asked, cleared once the
+# answer is recorded or is a definite refusal. One left behind means the
+# process stopped (a deploy, a crash) or the answer was lost between asking and
+# recording, so the booking may exist and be charged with no record here: the
+# next Book on that shipment is stopped until someone has checked.
+BOOKING_INTENT_PATH = os.environ.get(
+    "BOOKING_INTENT_PATH",
+    os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".", "booking_intents.json"))
+BOOKING_INTENT_HOURS = 48
+_book_confirmed: "contextvars.ContextVar[bool]" = contextvars.ContextVar("book_confirmed", default=False)
 DISPATCHED_TAG      = os.environ.get("DISPATCHED_TAG", "Complete")
 # Orders finished before the tag was renamed still carry the old word. The queue
 # accepts both so history does not vanish from the app; nothing writes the old one.
@@ -1233,7 +1263,7 @@ async def _resolve_label_links(labels: list) -> list:
     return out
 
 
-DISPATCH_LABELS_MAX = int(os.environ.get("DISPATCH_LABELS_MAX", "400"))
+DISPATCH_LABELS_MAX = _env_num(int, os.environ.get("DISPATCH_LABELS_MAX", "400"), "400", "DISPATCH_LABELS_MAX")
 
 
 _ADHOC = "adhoc:"     # shipments with no Shopify order behind them
@@ -1372,7 +1402,7 @@ BACKUP_KEEP = 4
 # the whole archive un-downloadable, NOT as a retention rule: a CRM holding an
 # imported sales history will pass 10MB, and the backup meant to protect it
 # must not be the thing that quietly stops including it.
-BACKUP_FILE_MAX = int(os.environ.get("BACKUP_FILE_MAX", str(60 * 1024 * 1024)))
+BACKUP_FILE_MAX = _env_num(int, os.environ.get("BACKUP_FILE_MAX", str(60 * 1024 * 1024)), str(60 * 1024 * 1024), "BACKUP_FILE_MAX")
 
 
 def _build_backup_zip():
@@ -1481,19 +1511,42 @@ def _weekly_snapshot(force: bool = False) -> bool:
         if not added:
             return False
         os.makedirs(BACKUP_SNAPSHOT_DIR, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        path = os.path.join(BACKUP_SNAPSHOT_DIR, f"snapshot-{stamp}.zip")
+        # A forced snapshot is the restore point from before something
+        # irreversible, so it is named to the second and never replaces
+        # anything: named by the day, a second import that day overwrote the
+        # only copy of the CRM from before the first. It keeps its own count,
+        # so imports cannot push the weekly snapshots out, and it leaves the
+        # weekly schedule alone.
+        prefix = "pre-import" if force else "snapshot"
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ" if force else "%Y-%m-%d")
+        path = os.path.join(BACKUP_SNAPSHOT_DIR, f"{prefix}-{stamp}.zip")
+        n = 2
+        while force and os.path.exists(path):
+            path = os.path.join(BACKUP_SNAPSHOT_DIR, f"{prefix}-{stamp}-{n}.zip")
+            n += 1
         tmp = path + ".tmp"
         with open(tmp, "wb") as fh:
             fh.write(buf.getvalue())
         os.replace(tmp, path)
-        old = sorted(glob.glob(os.path.join(BACKUP_SNAPSHOT_DIR, "snapshot-*.zip")))
-        for stale in old[:-BACKUP_KEEP]:
+        old = sorted(glob.glob(os.path.join(BACKUP_SNAPSHOT_DIR, f"{prefix}-*.zip")),
+                     key=os.path.getmtime)
+        keep = set(old[-BACKUP_KEEP:])
+        if force:
+            # And the FIRST of each day for a month: kept by count alone, a
+            # fifth run of an import deleted the only snapshot from before the
+            # first, which is the one a bad import needs.
+            since = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y%m%d")
+            first_of_day: dict = {}
+            for f in old:
+                day = os.path.basename(f)[len(prefix) + 1:len(prefix) + 9]
+                first_of_day.setdefault(day, f)
+            keep |= {f for day, f in first_of_day.items() if day >= since}
+        for stale in [f for f in old if f not in keep]:
             try:
                 os.remove(stale)
             except OSError:
                 pass
-        _note_backup("snapshot")
+        _note_backup("pre_import" if force else "snapshot")
         logger.info("weekly snapshot written: %s (%s files)", path, added)
         return True
     except Exception:
@@ -1652,6 +1705,18 @@ def _london_day(iso: str) -> str:
         return str(iso or "")[:10]
 
 
+def _london_hm(iso) -> str:
+    """"14:05 on 22 Sep", London time, from a UTC stamp; the stamp itself when
+    it cannot be read."""
+    try:
+        when = datetime.fromisoformat(str(iso or ""))
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return when.astimezone(ZoneInfo("Europe/London")).strftime("%H:%M on %d %b")
+    except ValueError:
+        return str(iso or "")
+
+
 def _dispatch_today() -> str:
     """Today, where the parcels are. Every other dispatch date in this app is
     reckoned in Europe/London - the ready window, the next working day - and a
@@ -1805,9 +1870,11 @@ async def _impact_snapshot(registry: dict) -> dict:
     clicks). Each source degrades to absent on error, so this never raises."""
     snap: dict = {"at": datetime.now(timezone.utc).isoformat()}
     try:
-        orders = [o for o in await _orders_28d(registry) if _order_counts(o)]
-        snap["revenue_28d"] = round(sum(_order_revenue(o) for o in orders), 2)
-        snap["orders_28d"] = len(orders)
+        m28: dict = {}
+        orders = [o for o in await _orders_28d(registry, meta=m28) if _order_counts(o)]
+        if not m28.get("failed"):      # a failed read is absent, never a zero
+            snap["revenue_28d"] = round(sum(_order_revenue(o) for o in orders), 2)
+            snap["orders_28d"] = len(orders)
     except Exception:
         pass
     try:
@@ -2327,13 +2394,24 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
 
 async def _tool_json(registry: dict, name: str, args: dict) -> dict:
     func, model = registry[name]
+    raw = None
     try:
-        return json.loads(await func(model(**(args or {}))))
+        raw = await func(model(**(args or {})))
+        return json.loads(raw)
     except Exception:
         # Signal failure rather than an empty result: callers must not report a
         # throttled/errored fetch as a real zero (that produces false alerts).
+        # What the tool said is kept, so a caller can tell "not there" from
+        # "not answered".
         logger.warning("shopify tool %s failed; treating as unavailable", name)
-        return {"_failed": True}
+        return {"_failed": True, "_said": str(raw or "")[:300]}
+
+
+def _shopify_gone(d) -> bool:
+    """A read that Shopify answered with "no such thing" (a deleted order), as
+    opposed to one that was not answered. Retrying the first never helps."""
+    said = str((d or {}).get("_said") or (d or {}).get("error") or "") if isinstance(d, dict) else ""
+    return bool(re.search(r"resource not found|\b404\b", said, re.I))
 
 
 def _ok(d) -> bool:
@@ -2368,10 +2446,14 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
 
     # Pull every independent input at once (Shopify reads + Google), then compute.
     ga4_on, gsc_on = google_data.ga4_configured(), google_data.gsc_configured()
-    shop, o7r, opr, custr, cntr, prodr, ga, gsc = await asyncio.gather(
+    # Both weeks from one paged read, split by date: a single page of 250 per
+    # week cut a busy week off, and only the AI was told ("up to 250").
+    m14: dict = {}
+    shop, o14, custr, cntr, prodr, ga, gsc = await asyncio.gather(
         _tool_json(registry, "shopify_get_shop", {}),
-        _tool_json(registry, "shopify_list_orders", {"status": "any", "created_at_min": d7, "limit": 250}),
-        _tool_json(registry, "shopify_list_orders", {"status": "any", "created_at_min": d14, "created_at_max": d7, "limit": 250}),
+        _paginate_orders(registry, days=14, meta=m14,
+                         fields="id,created_at,total_price,current_total_price,cancelled_at,test,"
+                                "financial_status,fulfillment_status,line_items"),
         _tool_json(registry, "shopify_list_customers", {"created_at_min": d7, "limit": 250}),
         _tool_json(registry, "shopify_count_products", {}),
         _all_products(registry, "id,title,variants") if track_inventory else _ret(([], True, False)),
@@ -2380,8 +2462,17 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
     )
     shop = shop or {}
     currency = shop.get("currency", "")
-    o7 = [o for o in o7r.get("orders", []) if _order_counts(o)]
-    op = [o for o in opr.get("orders", []) if _order_counts(o)]
+    orders_ok = not m14.get("failed")
+    week_start = now - timedelta(days=7)
+
+    def _placed(o):
+        try:
+            t = datetime.fromisoformat(str(o.get("created_at") or "").replace("Z", "+00:00"))
+            return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    o7 = [o for o in o14 if _order_counts(o) and (_placed(o) or now) >= week_start]
+    op = [o for o in o14 if _order_counts(o) and _placed(o) is not None and _placed(o) < week_start]
     rev7 = sum(_order_revenue(o) for o in o7)
     revp = sum(_order_revenue(o) for o in op)
     n7, npv = len(o7), len(op)
@@ -2394,7 +2485,7 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
     stale: list[str] = []
     rev_delta, rev_trend = _delta(rev7, revp)
     ord_delta, ord_trend = _delta(n7, npv)
-    if _ok(o7r):
+    if orders_ok:
         metrics.append({"label": "Revenue (7d)", "value": _money(rev7, currency), "delta": rev_delta, "trend": rev_trend})
         metrics.append({"label": "Orders (7d)", "value": str(n7), "delta": ord_delta, "trend": ord_trend})
         metrics.append({"label": "Avg order value", "value": _money(aov, currency)})
@@ -2442,7 +2533,8 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
                      "low_stock_examples": low[:8]} if track_inventory
                     else {"total_products": total_products, "inventory": "not tracked, unlimited stock"}),
         "top_products_7d": [{"title": t, "units": q} for t, q in units.most_common(5)],
-        "note": "Order figures are based on up to 250 orders per 7-day window.",
+        "note": ("Order figures are complete for both weeks." if not m14.get("truncated") else
+                 "The order read stopped at its page limit, so the busiest days may be missing."),
     }
     if stale:
         context["data_warning"] = (
@@ -2472,12 +2564,16 @@ async def _sector_sales(registry: dict, days: int = 28) -> list:
     """Revenue / orders / AOV for the period, split by customer-account tag (the
     merchant's sectors). Returns [] when no tags are in use. Never raises."""
     try:
+        cmeta: dict = {}
+        ometa: dict = {}
         customers, orders = await asyncio.gather(
-            _paginate_customers(registry),
+            _paginate_customers(registry, meta=cmeta),
             _orders_snapshot(registry, days=days,
                              fields="id,total_price,current_total_price,created_at,customer,"
-                                    "cancelled_at,test,financial_status"),
+                                    "cancelled_at,test,financial_status", meta=ometa),
         )
+        if cmeta.get("failed") or ometa.get("failed"):
+            return []        # no split rather than a split of zeros
         tags = _detect_sector_tags(customers)
         if not tags:
             return []
@@ -2599,7 +2695,7 @@ async def _overview_trends(registry: dict) -> dict:
 # SEO — knowledge layer + live technical audit
 # ---------------------------------------------------------------------------
 
-SEO_SAMPLE_PAGES = int(os.environ.get("SEO_SAMPLE_PAGES", "5"))
+SEO_SAMPLE_PAGES = _env_num(int, os.environ.get("SEO_SAMPLE_PAGES", "5"), "5", "SEO_SAMPLE_PAGES")
 SEO_DETAIL_CAP = 80  # products or pages listed behind a KPI; the card shows the count
 
 SEO_KNOWLEDGE = """## Technical SEO + revenue-optimization expertise (apply this model)
@@ -2730,7 +2826,7 @@ def _parse_seo(html: str) -> dict:
 # Keyword scraper for arbitrary external URLs (SSRF-guarded) + on-page keywords
 # ---------------------------------------------------------------------------
 
-EXTERNAL_FETCH_MAX = int(os.environ.get("EXTERNAL_FETCH_MAX", str(600 * 1024)))  # bytes of text kept
+EXTERNAL_FETCH_MAX = _env_num(int, os.environ.get("EXTERNAL_FETCH_MAX", str(600 * 1024)), str(600 * 1024), "EXTERNAL_FETCH_MAX")  # bytes of text kept
 
 _STOPWORDS = set((
     "the a an and or but of to in on for with at by from as is are was were be been being this that "
@@ -2789,11 +2885,23 @@ async def _fetch_external(url: str) -> tuple[Optional[int], str, str]:
                 peer = stream.get_extra_info("server_addr") if stream is not None else None
                 if peer and not _ip_is_public(peer[0]):
                     raise RuntimeError("That address is not allowed (only public websites can be scanned).")
-                await r.aread()
+                # Read no more than is kept. Reading the whole body first held
+                # a video or an endless page in the one worker's memory (the
+                # timeout is per read, not per response) before cutting it.
+                held = bytearray()
+                async for chunk in r.aiter_bytes():
+                    held += chunk
+                    if len(held) >= EXTERNAL_FETCH_MAX:
+                        break
+                body = bytes(held[:EXTERNAL_FETCH_MAX])
         if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
             url = urljoin(url, r.headers["location"])
             continue
-        return r.status_code, str(r.url), (r.text or "")[:EXTERNAL_FETCH_MAX]
+        try:
+            text = body.decode(r.charset_encoding or "utf-8", "replace")
+        except LookupError:
+            text = body.decode("utf-8", "replace")
+        return r.status_code, str(r.url), text[:EXTERNAL_FETCH_MAX]
     raise RuntimeError("Too many redirects.")
 
 
@@ -3124,7 +3232,7 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
         google_data.gsc_top_queries(28) if gsc_on else _ret({}),
         google_data.ga4_summary(28) if ga4_on else _ret({}),
         _tool_json(registry, "shopify_get_shop", {}),
-        _tool_json(registry, "shopify_list_orders", {"status": "any", "created_at_min": since28, "limit": 250}),
+        _orders_28d(registry),
     )
     rs, rtext = robots
     ss, stext = sitemap
@@ -3156,7 +3264,7 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
         context["analytics"] = ga_sum
 
     # Shopify commerce context: 28-day revenue, orders, and best sellers.
-    o28 = o28r.get("orders", [])
+    o28 = list(o28r or [])
     from collections import Counter
     units: Counter = Counter()
     o28 = [o for o in o28 if _order_counts(o)]
@@ -3310,10 +3418,12 @@ async def run_keyword_scan(registry: dict, url: str, extra_system: str = "") -> 
 # Per-product optimization plans
 # ---------------------------------------------------------------------------
 
-async def _orders_28d(registry: dict) -> list:
-    since = (datetime.now(timezone.utc) - timedelta(days=28)).isoformat()
-    return (await _tool_json(registry, "shopify_list_orders",
-                             {"status": "any", "created_at_min": since, "limit": 250})).get("orders", [])
+async def _orders_28d(registry: dict, meta: Optional[dict] = None) -> list:
+    """The last 28 days of orders, every page of them (one page of 250 cut a
+    busy month short), through the shared snapshot."""
+    return await _orders_snapshot(registry, days=28, meta=meta,
+                                  fields="id,created_at,total_price,current_total_price,line_items,"
+                                         "cancelled_at,test,financial_status,customer")
 
 
 def _month_key(iso: Optional[str]) -> str:
@@ -3384,7 +3494,7 @@ def _month_axis(months: int) -> list:
 # next paid the whole 8-page fan-out again. Correctness does not rest on the
 # TTL: _bust_orders() clears these the moment an order webhook lands or the app
 # writes a tag, so a real change is never waited out.
-ORDER_CACHE_SECS = int(os.environ.get("ORDER_CACHE_SECS", "180"))
+ORDER_CACHE_SECS = _env_num(int, os.environ.get("ORDER_CACHE_SECS", "180"), "180", "ORDER_CACHE_SECS")
 # Distinct (days, fields) sweeps kept. There are about seven in the codebase,
 # so with a longer TTL this became the binding constraint rather than the
 # clock: at 6, an Overview or Margins run could evict the production queue's
@@ -3677,7 +3787,7 @@ def _line_options(li: dict, option_names: dict) -> list:
 # a queue load spent up to 40 Shopify calls re-learning that a gobo has a
 # "Gobo Size" option. Held per process, so a redeploy relearns them; a miss is
 # harmless anyway (the variant renders as the generic "Option").
-OPTION_CACHE_SECS = int(os.environ.get("OPTION_CACHE_SECS", "21600"))   # 6 hours
+OPTION_CACHE_SECS = _env_num(int, os.environ.get("OPTION_CACHE_SECS", "21600"), "21600", "OPTION_CACHE_SECS")   # 6 hours
 OPTION_CACHE_MAX  = 500
 _option_names_cache: dict = {}   # product_id -> {"at": monotonic, "names": [...]}
 
@@ -4514,6 +4624,29 @@ async def _order_editable(registry: dict, order_id) -> tuple:
     }, ""
 
 
+_ADDR_COMPARE = ("street", "street2", "postcode", "city", "country")
+
+
+def _addr_key(a: dict) -> tuple:
+    return tuple(" ".join(str((a or {}).get(k) or "").lower().split()) for k in _ADDR_COMPARE)
+
+
+def _flag_address_divergence(order_id, live: dict) -> None:
+    """A live booking cut for a different address than the order now has is
+    marked, so the fulfilment path stops instead of emailing tracking for a
+    parcel going somewhere else. Only when the booking recorded its address."""
+    try:
+        e = (_load_dispatch().get(str(order_id)) or {})
+        booked_at = e.get("booked_address")
+        if (e.get("tracking_number") and not e.get("canceled") and not e.get("fulfilled")
+                and isinstance(booked_at, dict) and not e.get("address_changed_at")
+                and _addr_key(booked_at) != _addr_key(live)):
+            _update_dispatch(order_id, lambda x: x.update(
+                {"address_changed_at": datetime.now(timezone.utc).isoformat()}))
+    except Exception:
+        logger.exception("could not compare the booked address for %s", order_id)
+
+
 async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
     """Apply a merchant's edit to a placed order.
 
@@ -4545,6 +4678,10 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
             if not changed:
                 # Provably wrote nothing, so nothing is stale. Busting here would
                 # cost a full store sweep for a save that did not save anything.
+                # But a booked label cut for a different address is still worth
+                # saying out loud: a retry after a lost answer finds the change
+                # already made, and without this the divergence was never marked.
+                _flag_address_divergence(order_id, current)
                 return True, "", [], name, []
             # The parcel may already be moving under the old address. Changing
             # Shopify does NOT change a label that is printed and booked, so the
@@ -4557,6 +4694,22 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
                                + "). Changing the address here does not change that "
                                "label or the courier's booking."), [], name, []
             r = await _order_writer(int(order_id), fields)
+            if not r.get("ok") and r.get("reason") == "unknown":
+                # The answer was lost, not necessarily the change: read the order
+                # and see. "Shopify refused the change" was said over edits that
+                # had landed, and the retry then found nothing to do.
+                _bust_orders()
+                again = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+                if _ok(again) and again.get("id"):
+                    now_there = dict(_ship_to(again))
+                    now_there["note"] = str(again.get("note") or "")
+                    _f2, _w2, still, _warn2 = _clean_edit_fields(body, now_there)
+                    if not still:
+                        r = {"ok": True}
+                if not r.get("ok"):
+                    return False, ("Shopify did not answer, so it is not known whether the change "
+                                   "was made. Open the order in Shopify to check before trying again."), \
+                        [], name, []
             if not r.get("ok"):
                 reason = str(r.get("reason") or "")
                 detail = str(r.get("detail") or "")
@@ -4678,6 +4831,20 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
         return {"fulfilled": False, "reason": "not_made", "notified": False,
                 "detail": "Label booked. Shopify is fulfilled and the customer emailed "
                           "when you mark this order made.", "tag_note": ""}
+    # An address changed in the Shopify admin never passes through the app's
+    # own edit route, so it is compared here too, the last moment before
+    # tracking goes out. A failed read does not hold the order: the label and
+    # the made gobo are real, and a Shopify outage must not stop the bench.
+    booked_at = entry.get("booked_address")
+    if (isinstance(booked_at, dict) and not ack_address and not entry.get("address_changed_at")
+            and not entry.get("address_acked_at")):
+        try:
+            live = await _tool_json(registry, "shopify_get_order", {"order_id": oid})
+            if _ok(live) and live.get("id"):
+                _flag_address_divergence(oid, _ship_to(live))
+                entry = dict(_load_dispatch().get(str(oid)) or {})
+        except Exception:
+            logger.exception("could not read order %s to compare its address", oid)
     # The delivery address was edited AFTER this label was booked. Fulfilling now
     # would email the customer tracking for a parcel that is on its way to the
     # address the label was cut from, while the order page shows the new one -
@@ -4691,9 +4858,12 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
                 "tag_note": ""}
     if entry.get("address_changed_at") and ack_address:
         # Asked and answered. Clear it so the order is not stopped twice, and so
-        # a later genuine edit can raise it again.
+        # a later genuine edit through the app can raise it again; the read of
+        # the live order above is not repeated for an answered question.
         try:
-            _update_dispatch(oid, lambda e: (e.pop("address_changed_at", None), e)[1])
+            _acked = datetime.now(timezone.utc).isoformat()
+            _update_dispatch(oid, lambda e: (e.pop("address_changed_at", None),
+                                             e.update({"address_acked_at": _acked}), e)[2])
         except Exception:
             logger.exception("could not clear the address-change flag on %s", oid)
 
@@ -4746,8 +4916,10 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
     # Nothing was created here for an order Shopify already had fulfilled, so
     # no tracking email went from here either, whatever the record was asked.
     sent_here = bool(fulfillment.get("ok")) and fulfillment.get("reason") != "already_fulfilled"
-    if not fulfillment.get("ok"):
-        # Put the order back where it was: it has not shipped after all.
+    if not fulfillment.get("ok") and fulfillment.get("reason") != "unknown":
+        # Put the order back where it was: it has not shipped after all. Not
+        # when the outcome is unknown: it may have shipped, and a revert then
+        # put a fulfilled order back in To ship under a "failed" message.
         try:
             await _sync_order_tags(registry, oid, add=(MADE_TAG,),
                                    remove=(DISPATCHED_TAG, *LEGACY_DISPATCHED_TAGS))
@@ -4877,6 +5049,20 @@ def _order_status(o: dict) -> str:
     return ""
 
 
+def _order_country(country, postcode) -> str:
+    """The country an order is really going to. A customer can choose United
+    Kingdom and give a Jersey or Guernsey postcode, and those islands are
+    outside the UK customs area: read as GB, the parcel was quoted domestic
+    and booked with no declaration. The Isle of Man is inside it, so an IM
+    postcode stays GB. The pasted-address parser already knew this (B12)."""
+    cc = str(country or "").strip().upper()
+    if cc in ("GB", "UK"):
+        m = re.match(r"\s*([A-Za-z]{2})[0-9]", str(postcode or ""))
+        if m and m.group(1).upper() in ("JE", "GY"):
+            return {"JE": "JE", "GY": "GG"}[m.group(1).upper()]
+    return str(country or "")
+
+
 def _ship_to(o: dict) -> dict:
     """The order's delivery address in our internal address shape (for a quote)."""
     a = o.get("shipping_address") or o.get("billing_address") or {}
@@ -4893,7 +5079,7 @@ def _ship_to(o: dict) -> dict:
         "postcode":  a.get("zip") or "",
         "city":      a.get("city") or "",
         "state":     a.get("province_code") or a.get("province") or "",
-        "country":   a.get("country_code") or "",
+        "country":   _order_country(a.get("country_code"), a.get("zip")),
         "phone":     a.get("phone") or o.get("phone") or cust.get("phone") or "",
         "email":     o.get("email") or cust.get("email") or "",
     }
@@ -4939,7 +5125,7 @@ def _order_weight_kg(o: dict) -> float:
 # Cached ONLY on success. A failed read must never become an answer, so a
 # Shopify hiccup falls through to the empty dict exactly as it did before.
 _shop_cache: dict = {}
-SHOP_CACHE_SECS = int(os.environ.get("SHOP_CACHE_SECS", "900"))
+SHOP_CACHE_SECS = _env_num(int, os.environ.get("SHOP_CACHE_SECS", "900"), "900", "SHOP_CACHE_SECS")
 
 
 async def _shop_record(registry: dict) -> dict:
@@ -5052,8 +5238,9 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
         # Total goods value: customs totals, declared values and insurance prefill.
         "goods_value": _order_goods_value(o),
         # What the customer paid for delivery, so the courier pick is not blind.
+        # What they actually paid: after a free-shipping code, VAT included.
         "shipping_paid": (lambda sl: ({"title": str(sl[0].get("title") or ""),
-                                       "price": str(sl[0].get("price") or "")}
+                                       "price": "%.2f" % _shipping_paid(o, ex_vat=False)}
                                       if sl else None))(o.get("shipping_lines") or []),
     }
 
@@ -5075,7 +5262,7 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
         o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
         if not _ok(o) or not o.get("id"):
             return {"tag": PRODUCTION_TAG, "days": 0, "count": 0, "orders": [],
-                    "error_note": "Order not found."}
+                    "error_note": "Order not found.", "missing": _shopify_gone(o)}
         names = await _product_option_names(
             registry, [li.get("product_id") for li in (o.get("line_items") or []) if _variant_is_real(li)])
         types = await _product_types(
@@ -5093,7 +5280,7 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
     days = max(1, min(int(days or PRODUCTION_DAYS), 730))
     fields = ("id,order_number,name,created_at,tags,email,customer,billing_address,"
               "shipping_address,line_items,note,cancelled_at,fulfillment_status,"
-              "financial_status,shipping_lines")
+              "financial_status,shipping_lines,taxes_included")
     # meta carries {failed, truncated} from the pagination. Without it a sweep
     # that died on page 2 returned the pages it had and the queue rendered as
     # though the missing orders simply did not exist - a short list nobody
@@ -5659,6 +5846,27 @@ def _remember_customs(lines: list) -> None:
         logger.exception("could not remember the customs values")
 
 
+def _shipping_paid(o: dict, ex_vat: bool = True) -> float:
+    """What the customer paid for delivery, over every shipping line: net of
+    its discounts (a free-shipping code), and net of VAT when `ex_vat`, which
+    is how it is set against a courier's ex VAT cost. One definition for the
+    booking panel, the manifest and the margin report, which disagreed."""
+    ti = bool(o.get("taxes_included"))
+    total = 0.0
+    for sl in o.get("shipping_lines") or []:
+        net = _ex_vat_line_total({"price": sl.get("price"), "quantity": 1,
+                                  "tax_lines": sl.get("tax_lines"),
+                                  "discount_allocations": sl.get("discount_allocations")}, ti)
+        if not ex_vat:
+            for t in sl.get("tax_lines") or []:
+                try:
+                    net += float((t or {}).get("price") or 0)
+                except (TypeError, ValueError):
+                    pass
+        total += net
+    return round(total, 2)
+
+
 def _ex_vat_line_total(li: dict, taxes_included: bool) -> float:
     """What a line actually earned, net of its discounts and of VAT.
 
@@ -5683,7 +5891,7 @@ def _ex_vat_line_total(li: dict, taxes_included: bool) -> float:
     return round(gross, 2)
 
 
-MARGIN_BACKFILL_MAX = int(os.environ.get("MARGIN_BACKFILL_MAX", "60"))   # older orders fetched one by one
+MARGIN_BACKFILL_MAX = _env_num(int, os.environ.get("MARGIN_BACKFILL_MAX", "60"), "60", "MARGIN_BACKFILL_MAX")   # older orders fetched one by one
 
 
 async def run_margin_report(registry: dict, days: int = 30) -> dict:
@@ -5793,12 +6001,7 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
             except (TypeError, ValueError):
                 unknown.append(str(li.get("title") or "item"))
         # What the customer paid for delivery, net of VAT, is revenue too.
-        ship_rev = 0.0
-        for sl in o.get("shipping_lines") or []:
-            ship_rev += _ex_vat_line_total({"price": sl.get("price"), "quantity": 1,
-                                            "tax_lines": sl.get("tax_lines"),
-                                            "discount_allocations": sl.get("discount_allocations")},
-                                           taxes_included)
+        ship_rev = _shipping_paid(o, ex_vat=True)
         # Records written before the ex VAT figure was stored only have the gross
         # charge. Using it understates the margin slightly, which is the safe
         # direction, but the row says so rather than quietly mixing the two.
@@ -6597,17 +6800,24 @@ async def run_dispatch_book(registry: dict, order_id, option: dict, boxes: list,
 # which is the one thing a retry must never gamble on.
 _WO_TRANSIENT_RE = re.compile(
     r"ssl|tls|secure channel|temporarily unavailable|service unavailable|"
-    r"try again later|service is busy|\b50[234]\b", re.I)
-WO_RETRY_WAIT_SECS = int(os.environ.get("WO_RETRY_WAIT_SECS", "15"))
+    r"try again later|service is busy|\b50[23]\b", re.I)
+# Checked FIRST, and it wins: a timeout, 504 included, is exactly the unknown
+# outcome a retry must never gamble on. A relayed "(504) Gateway Timeout" used
+# to match the 50x above and was re-sent.
+_WO_NEVER_RETRY_RE = re.compile(r"\b504\b|gateway time-?out|timed out|time-?out", re.I)
+WO_RETRY_WAIT_SECS = _env_num(int, os.environ.get("WO_RETRY_WAIT_SECS", "15"), "15", "WO_RETRY_WAIT_SECS")
 
 
 async def _book_with_one_retry(*args, **kwargs):
     try:
         return await worldoptions.book(*args, **kwargs)
     except worldoptions.WorldOptionsError as e:
+        if getattr(e, "ambiguous", False):
+            raise      # it may have been booked: a second send could be a second charge
         never_reached = bool(getattr(e, "not_sent", False))
         answered_failed = bool(getattr(e, "sent", False))
-        transient = bool(_WO_TRANSIENT_RE.search(str(getattr(e, "raw", "") or e)))
+        said = str(getattr(e, "raw", "") or e)
+        transient = bool(_WO_TRANSIENT_RE.search(said)) and not _WO_NEVER_RETRY_RE.search(said)
         if never_reached or (answered_failed and transient):
             logger.warning("world options booking failed (%s); retrying once in %ss: %s",
                            "never reached them" if never_reached else "answered FAILED, transient",
@@ -6831,6 +7041,42 @@ def _shops_for(cfg: dict, option: dict) -> tuple:
     return dropoff_shop, delivery_shop, ""
 
 
+def _intents() -> dict:
+    d = _load_json_store(BOOKING_INTENT_PATH, "intents", {})
+    return d if isinstance(d, dict) else {}
+
+
+def _intent_set(key, by: str) -> None:
+    try:
+        d = _intents()
+        d[str(key)] = {"at": datetime.now(timezone.utc).isoformat(), "by": str(by or "")[:40]}
+        if _store_writable(BOOKING_INTENT_PATH):
+            _write_json_store(BOOKING_INTENT_PATH, "intents", d)
+    except Exception:
+        logger.exception("booking intent could not be written for %s", key)
+
+
+def _intent_clear(key) -> None:
+    try:
+        d = _intents()
+        if d.pop(str(key), None) is not None and _store_writable(BOOKING_INTENT_PATH):
+            _write_json_store(BOOKING_INTENT_PATH, "intents", d)
+    except Exception:
+        logger.exception("booking intent could not be cleared for %s", key)
+
+
+def _intent_open(key) -> Optional[dict]:
+    """An unresolved booking on this shipment within the last two days."""
+    rec = _intents().get(str(key))
+    if not isinstance(rec, dict):
+        return None
+    try:
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(str(rec.get("at")))
+    except ValueError:
+        return None
+    return rec if age.total_seconds() < BOOKING_INTENT_HOURS * 3600 else None
+
+
 async def _book_and_record(*, key, order_label: str, log_label: str, option: dict,
                            origin: dict, dest: dict, boxes: list, cfg: dict, currency: str,
                            reference: str, description: str, insurance: str, signature: str,
@@ -6849,6 +7095,14 @@ async def _book_and_record(*, key, order_label: str, log_label: str, option: dic
     Returns {"error": ...} up to the moment the courier is booked. After that
     nothing raises and nothing returns an error: the account is charged, and
     a failure reported now would have the operator book a second label."""
+    left = _intent_open(key)
+    if left and not _book_confirmed.get():
+        when = _london_hm(left.get("at"))
+        return {"error": f"A booking for {order_label} was started at {when} and its outcome was "
+                         "never recorded (the app stopped, or the answer was lost), so it may "
+                         "already exist and be charged. Check your World Options portal for it "
+                         "before booking again.", "unknown_booking": True}
+    _intent_set(key, by)
     _ready_dmy, _ready_hm = _collection_ready(cfg)
     # What this courier is asked for. A one-off choice at the desk wins;
     # otherwise the courier's own arrangement, softened to "already scheduled"
@@ -6877,8 +7131,20 @@ async def _book_and_record(*, key, order_label: str, log_label: str, option: dic
         # way to tell which field they meant, and waiting on a developer to
         # read a server log is not a dispatch process.
         msg = str(e)
+        relayed_timeout = (not getattr(e, "ambiguous", False) and bool(getattr(e, "sent", False))
+                           and bool(_WO_NEVER_RETRY_RE.search(str(getattr(e, "raw", "") or e))))
+        if relayed_timeout and "MAY still" not in msg:
+            # World Options answered FAILED, but what it relayed is a timeout
+            # behind it: the same unknown outcome the retry rule refuses to
+            # re-send, so it is not a refusal here either. Read as one, the
+            # guard was cleared and Book re-armed, and a second press booked
+            # and charged again.
+            msg += (" The shipment MAY still have been booked and charged: check your World "
+                    "Options portal for a new shipment before booking again.")
         if getattr(e, "retried", False):
             msg += " The app already retried once for you; if this keeps happening it is a World Options outage."
+        if not getattr(e, "ambiguous", False) and "MAY still" not in msg:
+            _intent_clear(key)          # a definite refusal: nothing was booked
         out = {"error": msg}
         tech = _wo_tech(e, order_label)
         if tech:
@@ -6901,6 +7167,21 @@ async def _book_and_record(*, key, order_label: str, log_label: str, option: dic
     # From here the courier is BOOKED and the account is charged. Nothing below
     # may raise: an exception now would be reported as "the booking failed" and
     # the operator would book (and pay for) a second label.
+    # Recorded FIRST, as the architecture says: the tracking number before the
+    # label download and render, which take seconds, so a process that stops in
+    # that window leaves a booked record the guard sees, not a paid-for label
+    # with none. The full record replaces it below.
+    try:
+        _record_dispatch(key, {"tracking_number": shipment["tracking_number"],
+                               "carrier_name": shipment.get("carrier_name"),
+                               "service_name": shipment.get("service_name"),
+                               "amount": shipment.get("amount"), "currency": shipment.get("currency"),
+                               "by": str(by or "")[:40],
+                               "dispatched_at": datetime.now(timezone.utc).isoformat(),
+                               "fulfilled": False, "notified": False, **entry_extra})
+        _intent_clear(key)
+    except Exception:
+        logger.exception("the first record of a booking failed, %s", order_label)
     _record_collection(shipment.get("carrier_name") or option.get("carrier_name"),
                        _asked_collection, _ready_dmy, reference,
                        shipment.get("service_name") or option.get("service_name")
@@ -6948,6 +7229,9 @@ async def _book_and_record(*, key, order_label: str, log_label: str, option: dic
         "ready_date": _ready_dmy,
         "insured": insurance or "",
         "international": international,
+        # The address the label was cut for, so an edit made after it (or one
+        # whose answer was lost) can be compared with it.
+        "booked_address": {k: str((dest or {}).get(k) or "") for k in _ADDR_COMPARE},
         "dropoff": (dropoff_shop or {}).get("name") or "",
         "delivery_shop": (delivery_shop or {}).get("name") or "",
         **entry_extra,
@@ -7061,8 +7345,10 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
             # join, and what the customer paid for delivery, so margin is one
             # subtraction.
             "order_name": str(o.get("name") or ("#" + str(order_id))),
-            "shipping_paid": (lambda sl: str(sl[0].get("price") or "") if sl else "")(
-                o.get("shipping_lines") or []),
+            # Net of discounts and of VAT, as the manifest sets it against the
+            # courier's ex VAT cost: the list price called a free-shipping
+            # order "covered" by the full delivery charge.
+            "shipping_paid": ("%.2f" % _shipping_paid(o, ex_vat=True)) if o.get("shipping_lines") else "",
             # The merchant's email choice is made HERE but used when the order
             # is marked made, which is when Shopify is actually told it shipped.
             "notify": do_notify,
@@ -7107,13 +7393,27 @@ async def run_missing_production(registry: dict, tag: Optional[str] = None) -> d
     got the production tag: the ones that silently never reach the workbench.
     A plain Shopify read, no AI."""
     tag = (tag or PRODUCTION_TAG).strip() or PRODUCTION_TAG
-    data = await _tool_json(registry, "shopify_list_orders",
-                            {"status": "open", "limit": 100,
-                             "fields": ("id,order_number,name,created_at,tags,cancelled_at,"
-                                        "fulfillment_status,financial_status,line_items,"
-                                        "customer,billing_address,shipping_address,note")})
-    if not _ok(data):
-        return {"error": "Couldn't read your orders from Shopify. Try again in a moment."}
+    # Every open order, paged: one page of 100 left the rest unchecked, and
+    # the oldest, the ones longest at risk of never reaching the bench, were
+    # the ones past it. The page is told when the read stopped at its cap.
+    fields = ("id,order_number,name,created_at,tags,cancelled_at,fulfillment_status,"
+              "financial_status,line_items,customer,billing_address,shipping_address,note")
+    open_orders, since_id, pages, truncated = [], 0, 0, False
+    while True:
+        res = await _tool_json(registry, "shopify_list_orders",
+                               {"status": "open", "limit": 250, "since_id": since_id, "fields": fields})
+        if not _ok(res):
+            return {"error": "Couldn't read your orders from Shopify. Try again in a moment."}
+        batch = res.get("orders") or []
+        open_orders += batch
+        pages += 1
+        if len(batch) < 250:
+            break
+        since_id = max(int(o.get("id") or 0) for o in batch)
+        if pages >= ORDER_PAGE_CAP:
+            truncated = True
+            break
+    data = {"orders": open_orders}
     store = (SHOPIFY_STORE or "").split(".")[0]
     missing = []
     for o in (data.get("orders") or []):
@@ -7147,7 +7447,7 @@ async def run_missing_production(registry: dict, tag: Optional[str] = None) -> d
         })
     missing.sort(key=lambda m: str(m.get("created_at") or ""))
     return {"tag": tag, "checked": len(data.get("orders") or []), "missing": missing[:20],
-            "missing_total": len(missing)}
+            "missing_total": len(missing), "truncated": truncated}
 
 
 LIABILITY_TAGS = [t.strip() for t in os.environ.get(
@@ -7157,8 +7457,8 @@ LIABILITY_TAGS = [t.strip() for t in os.environ.get(
 def _liability_channel(tag: str) -> str:
     """Short payment-channel label from the tag: "Bank transfer unpaid" -> "Bank transfer"."""
     return re.sub(r"\s+unpaid$", "", tag, flags=re.I).strip() or tag
-LIABILITY_DEFAULT_TERMS = int(os.environ.get("LIABILITY_DEFAULT_TERMS", "30"))
-LIABILITY_DUE_SOON_DAYS = int(os.environ.get("LIABILITY_DUE_SOON_DAYS", "7"))
+LIABILITY_DEFAULT_TERMS = _env_num(int, os.environ.get("LIABILITY_DEFAULT_TERMS", "30"), "30", "LIABILITY_DEFAULT_TERMS")
+LIABILITY_DUE_SOON_DAYS = _env_num(int, os.environ.get("LIABILITY_DUE_SOON_DAYS", "7"), "7", "LIABILITY_DUE_SOON_DAYS")
 _TERMS_TAG_RE = re.compile(r"\bnet[\s-]*(\d{1,3})\b", re.I)
 
 
@@ -7469,9 +7769,9 @@ async def run_liability(registry: dict) -> dict:
 ZETA_URL = os.environ.get("ZETA_URL", "").strip().rstrip("/")
 ZETA_SYNC_TOKEN = os.environ.get("ZETA_SYNC_TOKEN", "").strip()
 ZETA_SYNC_PATH = os.environ.get("ZETA_SYNC_PATH", "/data/zeta_sync.json")
-ZETA_DRAIN_MAX = int(os.environ.get("ZETA_DRAIN_MAX", "40"))        # retries per tick
-ZETA_DRAIN_SECONDS = float(os.environ.get("ZETA_DRAIN_SECONDS", "45"))  # and its deadline
-ZETA_MAX_TRIES = int(os.environ.get("ZETA_MAX_TRIES", "20"))        # then park for a human
+ZETA_DRAIN_MAX = _env_num(int, os.environ.get("ZETA_DRAIN_MAX", "40"), "40", "ZETA_DRAIN_MAX")        # retries per tick
+ZETA_DRAIN_SECONDS = _env_num(float, os.environ.get("ZETA_DRAIN_SECONDS", "45"), "45", "ZETA_DRAIN_SECONDS")  # and its deadline
+ZETA_MAX_TRIES = _env_num(int, os.environ.get("ZETA_MAX_TRIES", "20"), "20", "ZETA_MAX_TRIES")        # then park for a human
 _zeta_last = {"ok_at": 0.0, "error": ""}
 
 
@@ -7762,10 +8062,17 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
     rows: dict = {}
     unresolved: dict = {}
     stock: dict = {}
-    orders_in, pieces, fetch_failed = [], 0, 0
-    for res in fetched:
+    orders_in, pieces, fetch_failed, unread, gone = [], 0, 0, [], []
+    for oid, res in zip(made_ids, fetched):
+        if isinstance(res, dict) and res.get("missing"):
+            # Shopify no longer has it (a deleted test order). Asking again
+            # will not bring it back, so it is left out of the sheet rather
+            # than holding the day's sheet for good; its own booking stands.
+            gone.append(oid)
+            continue
         if not isinstance(res, dict) or not res.get("orders"):
             fetch_failed += 1   # a made order whose fetch was throttled/failed
+            unread.append(oid)
             continue
         for o in (res.get("orders") or []):
             orders_in.append(str(o.get("name") or ""))
@@ -7783,8 +8090,8 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
                 r["qty"] += line["qty"]
     out_rows = sorted(rows.values(), key=_usage_row_order)
     return {"date": day.isoformat(), "orders": len(orders_in), "order_names": orders_in[:60],
-            "order_ids": made_ids, "pieces": pieces, "rows": out_rows,
-            "fetch_failed": fetch_failed,
+            "order_ids": [i for i in made_ids if i not in gone], "pieces": pieces, "rows": out_rows,
+            "fetch_failed": fetch_failed, "unread_ids": unread, "gone_ids": gone,
             "unresolved": [{"name": k, "qty": v} for k, v in sorted(unresolved.items())],
             "stock": [{"name": k, "qty": v} for k, v in sorted(stock.items())]}
 
@@ -8071,11 +8378,20 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
     analysis covers all customers and compares the sectors."""
     _ai_kind.set("customers")
     months = _month_axis(12)
+    cmeta: dict = {}
+    ometa: dict = {}
     shop, all_customers, orders = await asyncio.gather(
         _tool_json(registry, "shopify_get_shop", {}),
-        _paginate_customers(registry),
-        _orders_snapshot(registry, days=len(months) * 31, fields="id,created_at,customer"),
+        _paginate_customers(registry, meta=cmeta),
+        _orders_snapshot(registry, days=len(months) * 31, fields="id,created_at,customer", meta=ometa),
     )
+    # A read that failed is not a store with no customers: analysed as one,
+    # it showed zeros, paid the model to explain them, and saved them as the
+    # baseline the next run's changes were measured from.
+    if cmeta.get("failed") or ometa.get("failed"):
+        return {"error": "Couldn't read all your customers and orders from Shopify just now "
+                         "(it may be busy). The figures would be wrong, so nothing was worked "
+                         "out and no AI credits were used. Try again in a moment."}
     shop = shop or {}
     currency = shop.get("currency", "")
     sector_tags = _detect_sector_tags(all_customers)
@@ -9229,6 +9545,7 @@ async def _watchdog_tick(registry: dict) -> bool:
                                              "master account, then the team's accounts."])
             _sessions_sweep()
             _work_close_orphans()
+            _redact_retry_pending()
             _events_flush()   # belt for the debounced ledger writes
         except Exception:
             logger.exception("team register check failed")
@@ -9395,7 +9712,7 @@ async def _scheduler_loop(registry: dict) -> None:
         await asyncio.sleep(SCHEDULE_CHECK_SECS)
 
 
-MAIL_LOOP_SECS = int(os.environ.get("MAIL_LOOP_SECS", "60"))
+MAIL_LOOP_SECS = _env_num(int, os.environ.get("MAIL_LOOP_SECS", "60"), "60", "MAIL_LOOP_SECS")
 
 
 async def _mail_loop() -> None:
@@ -9430,7 +9747,7 @@ async def _mail_loop_tick() -> None:
 
 _mail_fail_ticks = 0
 _mail_alert_sent = 0.0      # when this process last sent the alert (time.time())
-MAIL_ALERT_AFTER_TICKS = int(os.environ.get("MAIL_ALERT_AFTER_TICKS", "30"))
+MAIL_ALERT_AFTER_TICKS = _env_num(int, os.environ.get("MAIL_ALERT_AFTER_TICKS", "30"), "30", "MAIL_ALERT_AFTER_TICKS")
 
 
 async def _mail_loop_health(why: str) -> bool:
@@ -9518,13 +9835,13 @@ CRM_PATH = os.environ.get("CRM_PATH", "/data/crm.json")
 # imported sales history they are the difference between keeping your won/lost
 # record and quietly shredding it. Raised, and the eviction below now REFUSES
 # to touch anything rather than deleting the oldest.
-CRM_DEALS_MAX = int(os.environ.get("CRM_DEALS_MAX", "60000"))
-CRM_ACTIVITIES_MAX = int(os.environ.get("CRM_ACTIVITIES_MAX", "200000"))
+CRM_DEALS_MAX = _env_num(int, os.environ.get("CRM_DEALS_MAX", "60000"), "60000", "CRM_DEALS_MAX")
+CRM_ACTIVITIES_MAX = _env_num(int, os.environ.get("CRM_ACTIVITIES_MAX", "200000"), "200000", "CRM_ACTIVITIES_MAX")
 CRM_NOTE_CAP = 20000                # characters per note
 CRM_DELETED_KEEP_DAYS = 30          # Pipedrive's restore window
 # The website-enquiry subject is attacker-controllable; this bounds how many
 # auto-filed CRM deals a spam run can mint in a day. Real volume is single digits.
-CRM_ENQUIRY_DAILY_CAP = int(os.environ.get("CRM_ENQUIRY_DAILY_CAP", "50"))
+CRM_ENQUIRY_DAILY_CAP = _env_num(int, os.environ.get("CRM_ENQUIRY_DAILY_CAP", "50"), "50", "CRM_ENQUIRY_DAILY_CAP")
 
 # Pipedrive seeds a new pipeline with these five stages; renaming them to the
 # merchant's own language is the first thing the stage editor is for.
@@ -9689,31 +10006,39 @@ def _crm_activity_state(deal_id: str, next_by_deal: dict, today) -> tuple:
 _CRM_STATE_RANK = {"overdue": 0, "today": 1, "none": 2, "future": 3}
 
 
+def _crm_drop_activity(d: dict, ak: str) -> None:
+    """An activity gone for good, tombstoned so an import cannot recreate it."""
+    apid = str((d["activities"].get(ak) or {}).get("pd_id") or "")
+    if apid:
+        d.setdefault("pd_deleted_activities", []).append(apid)
+        d["pd_deleted_activities"] = d["pd_deleted_activities"][-2000:]
+    d["activities"].pop(ak, None)
+
+
+def _crm_drop_deal(d: dict, k: str) -> None:
+    """A deal gone for good, with its activities, and tombstoned.
+
+    The moment the record stops existing is the moment the tombstone has to
+    exist instead: without one the next Pipedrive import brings the deal
+    straight back, and a deal deleted five weeks ago reappears on the board
+    with no explanation. The deal's activities go with it, and each needs its
+    own tombstone: with only the deal's, the next import refused the deal and
+    recreated every one of its tasks attached to nothing."""
+    pid = str((d["deals"].get(k) or {}).get("pd_id") or "")
+    if pid:
+        d.setdefault("pd_deleted_deals", []).append(pid)
+        d["pd_deleted_deals"] = d["pd_deleted_deals"][-5000:]
+    d["deals"].pop(k, None)
+    for ak in [ak for ak, a in d["activities"].items() if a.get("deal_id") == k]:
+        _crm_drop_activity(d, ak)
+
+
 def _crm_purge(d: dict) -> None:
     """Deleted deals fall out after the 30-day restore window; caps hold."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=CRM_DELETED_KEEP_DAYS)).isoformat()
     dead = [k for k, v in d["deals"].items() if v.get("deleted") and str(v.get("deleted_at") or "") < cutoff]
     for k in dead:
-        # The bin emptying is the moment the record stops existing, so it is
-        # the moment the tombstone has to exist instead: without one the next
-        # Pipedrive import brings the deal straight back, and a deal deleted
-        # five weeks ago reappears on the board with no explanation. Notes,
-        # activities and contacts have had this; deals were the gap.
-        pid = str((d["deals"].get(k) or {}).get("pd_id") or "")
-        if pid:
-            d.setdefault("pd_deleted_deals", []).append(pid)
-            d["pd_deleted_deals"] = d["pd_deleted_deals"][-5000:]
-        d["deals"].pop(k, None)
-        for ak in [ak for ak, a in d["activities"].items() if a.get("deal_id") == k]:
-            # The deal's activities go with it, and each needs its own
-            # tombstone: with only the deal's, the next import refused the
-            # deal and recreated every one of its tasks attached to nothing,
-            # overdue in the list and counted on the badge.
-            apid = str((d["activities"].get(ak) or {}).get("pd_id") or "")
-            if apid:
-                d.setdefault("pd_deleted_activities", []).append(apid)
-                d["pd_deleted_activities"] = d["pd_deleted_activities"][-2000:]
-            d["activities"].pop(ak, None)
+        _crm_drop_deal(d, k)
     # Over the cap, the CRM used to DELETE the oldest closed deals and their
     # activities: silently, with no error, and biting precisely on the won/lost
     # history a business keeps a CRM for. Nothing here deletes a real record any
@@ -9888,10 +10213,10 @@ R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "").strip()
 R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "").strip()
 R2_BUCKET = os.environ.get("R2_BUCKET", "gizmo-files").strip()
 FILES_PATH = os.environ.get("FILES_PATH", "/data/files.json")
-FILES_QUOTA_GB = float(os.environ.get("FILES_QUOTA_GB", "50"))
+FILES_QUOTA_GB = _env_num(float, os.environ.get("FILES_QUOTA_GB", "50"), "50", "FILES_QUOTA_GB")
 FILES_MAX_UPLOAD = 4 * 1024 * 1024 * 1024      # a single presigned PUT tops out near 5GB
-FILES_REAP_MAX = int(os.environ.get("FILES_REAP_MAX", "4000"))     # keys per reaper tick
-FILES_REAP_SECONDS = float(os.environ.get("FILES_REAP_SECONDS", "20"))  # and its deadline
+FILES_REAP_MAX = _env_num(int, os.environ.get("FILES_REAP_MAX", "4000"), "4000", "FILES_REAP_MAX")     # keys per reaper tick
+FILES_REAP_SECONDS = _env_num(float, os.environ.get("FILES_REAP_SECONDS", "20"), "20", "FILES_REAP_SECONDS")  # and its deadline
 FILES_TRASH_DAYS = 30
 _files_s3_client = None
 _files_s3_birth = threading.Lock()   # boto3's default session is not thread-safe to build on
@@ -10183,6 +10508,26 @@ def _files_folder_ok(d: dict, folder_id: str) -> bool:
     return folder_id == "" or folder_id in d["folders"]
 
 
+def _files_supersede(d: dict, fid: str) -> int:
+    """The file just completed is THE file of its name in its folder: every
+    other active one goes to the bin. Decided at completion, not when the
+    upload was reserved: two uploads of one name whose reservations overlapped
+    (two people, a drop repeated while a big file was sending, a double Save
+    to Files) each saw nothing to replace, and the folder was left with two
+    active files of one name, the newer unreachable from Finder."""
+    f = d["files"].get(fid) or {}
+    name = str(f.get("name") or "").lower()
+    folder = str(f.get("folder_id") or "")
+    now = datetime.now(timezone.utc).isoformat()
+    n = 0
+    for k, v in d["files"].items():
+        if k != fid and v.get("status") == "active" and not v.get("hidden") \
+                and str(v.get("name") or "").lower() == name and str(v.get("folder_id") or "") == folder:
+            v["status"], v["trashed_at"] = "trashed", now
+            n += 1
+    return n
+
+
 def _files_purge(d: dict) -> None:
     """Metadata only: trash past its window and uploads that never completed
     move their keys to the doomed list. No byte dies here; the reaper deletes
@@ -10338,12 +10683,12 @@ MAIL_SYNC_SECONDS = 120        # board re-syncs when its picture is older than t
 # Two years, not sixty days: the inbox stopped being only a triage board the
 # day deals started carrying their correspondence - it is the shop's email
 # HISTORY now, and a deal's thread from last spring has to be findable.
-MAIL_TRACK_DAYS = int(os.environ.get("MAIL_TRACK_DAYS", "730"))
-MAIL_DONE_KEEP_DAYS = int(os.environ.get("MAIL_DONE_KEEP_DAYS", "730"))
-MAIL_THREADS_CAP = int(os.environ.get("MAIL_THREADS_CAP", "6000"))
+MAIL_TRACK_DAYS = _env_num(int, os.environ.get("MAIL_TRACK_DAYS", "730"), "730", "MAIL_TRACK_DAYS")
+MAIL_DONE_KEEP_DAYS = _env_num(int, os.environ.get("MAIL_DONE_KEEP_DAYS", "730"), "730", "MAIL_DONE_KEEP_DAYS")
+MAIL_THREADS_CAP = _env_num(int, os.environ.get("MAIL_THREADS_CAP", "6000"), "6000", "MAIL_THREADS_CAP")
 # How many orders a print run releases inline before the rest goes to a paced
 # background pass. Each release is a tag GET+PUT plus up to three GraphQL calls.
-RELEASE_INLINE_MAX = int(os.environ.get("RELEASE_INLINE_MAX", "12"))
+RELEASE_INLINE_MAX = _env_num(int, os.environ.get("RELEASE_INLINE_MAX", "12"), "12", "RELEASE_INLINE_MAX")
 MAIL_LIST_MAX = 5000           # most threads one sync will walk from Gmail
 MAIL_MSGS_PER_THREAD = 50      # newest messages kept per thread record
 MAIL_STATES = ("unassigned", "assigned", "progress", "waiting", "done")
@@ -10960,6 +11305,27 @@ def _mail_sender(t: dict, mailbox_addr: str) -> tuple:
     return (m.get("from_name") or m.get("from_email") or "", m.get("from_email") or "")
 
 
+_erased_rx_cache: dict = {}
+
+
+def _mail_erased_rx(erased: set, header: bool = False):
+    """One pattern for every erased address, as whole addresses; rebuilt only
+    when the list changes. In a header (To, Cc, Reply-To) the display name
+    in front of the address goes with it: "Jo Smith <jo@x.com>" is all theirs."""
+    key = (tuple(sorted(erased)), header)
+    if key not in _erased_rx_cache:
+        alts = "|".join(re.escape(a) for a in key[0] if a) or r"(?!)"
+        core = r"(?<![\w.+-])(?:" + alts + r")(?![\w-]|\.\w)"
+        if header:
+            core = r'(?:"[^"]*"\s*|[^,<>"\s][^,<>"]*)?<\s*' + core + r"\s*>|" + core
+        # One entry per form (header and body): clearing on every build made
+        # the two alternate, and each thread rebuilt both.
+        for k in [k for k in _erased_rx_cache if k[1] == header]:
+            _erased_rx_cache.pop(k, None)
+        _erased_rx_cache[key] = re.compile(core, re.I)
+    return _erased_rx_cache[key]
+
+
 def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str,
                        outbound: bool = False) -> None:
     """Merge one freshly fetched thread into the store. Pure store logic, no
@@ -10976,6 +11342,17 @@ def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str,
         senders = {str(m.get("from_email") or "").strip().lower() for m in msgs}
         if senders & erased:
             return
+    if tid in set(store.get("redacted_threads") or []):
+        return          # erased on request; its sender may be the shop itself
+    if erased:
+        # Someone else's thread that mentions an erased person keeps coming
+        # back from Gmail with their address in it (the snippet, To and Cc,
+        # which Reply all reads): scrubbed on the way in, every time.
+        rx = _mail_erased_rx(erased)
+        hx = _mail_erased_rx(erased, header=True)
+        msgs = [{**m, **{f: (hx if f != "snippet" else rx).sub("[erased]", str(m.get(f)))
+                         for f in ("snippet", "to", "cc", "reply_to")
+                         if m.get(f) and rx.search(str(m.get(f)))}} for m in msgs]
     first = msgs[0]   # who started it, read before the cut keeps only the latest
     msgs = msgs[-MAIL_MSGS_PER_THREAD:]
     threads = store.setdefault("threads", {})
@@ -11001,7 +11378,9 @@ def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str,
     # first message, msgs[0] is no longer the thread's beginning.
     t["first_at"] = t.get("first_at") or msgs[0].get("at") or _mail_now()
     t["unread"] = any("UNREAD" in (m.get("labels") or []) for m in msgs)
-    t["files"] = [dict(f) for m in msgs for f in (m.get("files") or [])][:20]
+    # The NEWEST twenty: in a long proofing thread the latest artwork is the one
+    # to save, and the oldest were kept while it was cut.
+    t["files"] = [dict(f) for m in msgs for f in (m.get("files") or [])][-20:]
     t["last_at"] = msgs[-1].get("at") or _mail_now()
     name, email = _mail_sender(t, mailbox_addr)
     t["from_name"], t["from_email"] = str(name)[:120], str(email)[:200]
@@ -11410,6 +11789,10 @@ async def _mail_sync_now(force: bool = False) -> str:
             for tid, t in threads.items():
                 was_in, now_in = t.get("in_inbox", True), tid in inbox_ids
                 t["in_inbox"] = now_in
+                if now_in:
+                    t.pop("archived_by_app", None)   # back in the inbox: a later archive is a person's
+                elif t.get("archived_by_app"):
+                    continue
                 if now_in and not was_in and t.get("state") == "done" \
                         and t.get("closed_by") == "archive":
                     # It came BACK to the inbox. Gmail's own snooze does
@@ -11575,6 +11958,11 @@ async def _mail_file_folders(store: dict, limit: int = 10, budget: float = 5.0) 
             drop = ["INBOX"] if t.get("folder_archive") else None
             await google_mail.modify_thread(t["id"], add=[lid], remove=drop)
             t["folder_done"] = t["folder"]
+            if drop:
+                # Out of the inbox by the filter's hand, not a person's: the
+                # archive check must not read it as "done in Gmail" and close
+                # an email the same filter just gave to somebody.
+                t["archived_by_app"] = True
             t.pop("folder_error", None)
         except Exception as e:
             logger.warning("mail: could not file %s under %s: %s",
@@ -11657,6 +12045,14 @@ async def _mail_sync_labels(t: dict, owner_name: str = "") -> bool:
 
     async def run():
         add, remove = [], []
+        if have and not labels.get(have):
+            # Evicted by an earlier failure: resolve it again rather than skip
+            # it, or the retry adds the new owner's label, never removes the
+            # old one, and the thread wears both in Gmail for good. Not
+            # created: a label that no longer exists has nothing to remove.
+            live = await google_mail.list_labels()
+            if live.get(have):
+                labels[have] = live[have]
         if have and labels.get(have):
             remove.append(labels[have])
         if want:
@@ -11683,8 +12079,8 @@ async def _mail_sync_labels(t: dict, owner_name: str = "") -> bool:
 # What the board is FOR: live work, plus recently closed conversations for
 # context. Two years of finished mail belongs behind search, not in a payload
 # rebuilt and shipped to every open client every 60 seconds.
-MAIL_BOARD_DONE_DAYS = int(os.environ.get("MAIL_BOARD_DONE_DAYS", "90"))
-MAIL_BOARD_MAX = int(os.environ.get("MAIL_BOARD_MAX", "1500"))
+MAIL_BOARD_DONE_DAYS = _env_num(int, os.environ.get("MAIL_BOARD_DONE_DAYS", "90"), "90", "MAIL_BOARD_DONE_DAYS")
+MAIL_BOARD_MAX = _env_num(int, os.environ.get("MAIL_BOARD_MAX", "1500"), "1500", "MAIL_BOARD_MAX")
 
 
 _MAIL_ADDR_RX = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?"
@@ -12330,7 +12726,7 @@ def _redact_shop() -> dict:
     return {"wiped": wiped, "archive": kept}
 
 
-def _redact_customer(email: str, customer_id="") -> dict:
+def _redact_customer(email: str, customer_id="", retry: bool = False) -> dict:
     """Erase what we hold about a person by choice; keep what we hold by law.
 
     The split is the whole design. CRM records and email threads are
@@ -12344,10 +12740,43 @@ def _redact_customer(email: str, customer_id="") -> dict:
     if not addr:
         return {"erased": 0, "retained": 0}
     erased = retained = 0
+    # A store is erased when its write lands, not before; an unreadable one
+    # is not erased at all (its loader hands back an empty default, and
+    # "erased 0" was logged as the compliance record). Failures are said, and
+    # kept for the hourly retry.
+    failed: list = []
+    # The person lives in more places than their own contact: the deals and
+    # leads filed against them (a website enquiry becomes a deal whose title,
+    # notes and phone number are theirs) and the enquiry email, which the
+    # storefront sends from the shop's OWN address with theirs only inside
+    # it. All of it is relationship data, and all of it goes.
+    threads_to_erase: set = set()
+    # Their address as a whole address: "sales@firm.co" must not match
+    # "sales@firm.co.uk", nor "jo@x.com" match "bjo@x.com".
+    names_them = re.compile(r"(?<![\w.+-])" + re.escape(addr) + r"(?![\w-]|\.\w)", re.I)
+    their_words: set = {addr}           # what is scrubbed from a record that stays
+
+    def scrub(text):
+        """Their name, addresses and numbers out of a record that stays, as
+        whole words only: a bare substring turned "willow" into "[erased]ow"
+        for a person called Will. A name counts only when it is two words or
+        more; one word alone is too likely to be somebody else's."""
+        out = str(text or "")
+        for w in sorted(their_words, key=len, reverse=True):
+            w = str(w).strip()
+            if len(w) < 4 or ("@" not in w and not any(c.isdigit() for c in w) and len(w.split()) < 2):
+                continue
+            out = re.sub(r"(?<![\w@.])" + re.escape(w) + r"(?![\w@]|\.\w)", "[erased]", out, flags=re.I)
+        return out
 
     # --- erased: the CRM -----------------------------------------------------
+    before = erased
     try:
+        if CRM_PATH in _poisoned_stores:
+            raise RuntimeError("the CRM file could not be read")
         d = _load_crm()
+        pids = set()
+        orgs_touched: set = set()
         for pid in [k for k, v in (d.get("persons") or {}).items()
                     if addr in {str(e).strip().lower() for e in (v.get("emails") or [])}
                     or str(v.get("email") or "").strip().lower() == addr]:
@@ -12358,22 +12787,114 @@ def _redact_customer(email: str, customer_id="") -> dict:
             # the person was erased, and they were back within the hour.
             rec = d["persons"][pid]
             rec["id"] = pid           # the tombstone pops by the record's own id
+            if rec.get("mail_thread_id"):
+                threads_to_erase.add(str(rec["mail_thread_id"]))
+            their_words.update(str(x).strip() for x in [rec.get("name")] + list(rec.get("emails") or [])
+                               + list(rec.get("phones") or []) if str(x or "").strip())
+            if rec.get("org_id"):
+                orgs_touched.add(str(rec["org_id"]))
             _crm_tombstone_contact(d, "persons", rec)
+            pids.add(pid)
             erased += 1
+        for k in [k for k, v in (d.get("deals") or {}).items()
+                  if pids and str(v.get("person_id") or "") in pids]:
+            deal = d["deals"][k]
+            if deal.get("mail_thread_id"):
+                threads_to_erase.add(str(deal["mail_thread_id"]))
+            own = (str(deal.get("source") or "") == "Website form" or deal.get("mail_thread_id")
+                   or not str(deal.get("org_id") or "").strip())
+            if str(deal.get("org_id") or "").strip():
+                orgs_touched.add(str(deal["org_id"]))
+            if own:
+                # Theirs alone: a website enquiry (whose "organisation" is only
+                # the company they typed into the form, and whose note is their
+                # own message), or a deal with no organisation. It goes.
+                _crm_drop_deal(d, k)
+            else:
+                # An organisation's deal is the organisation's record: a won or
+                # lost deal is the history a CRM is kept for, and this person
+                # was only its contact. It stays, without them in it, and is
+                # marked edited here so the next import cannot write them back.
+                deal["person_id"] = ""
+                deal["title"] = scrub(deal.get("title"))
+                for n in (deal.get("notes") or []):
+                    if isinstance(n, dict):
+                        n["text"] = scrub(n.get("text"))
+                deal["updated_at"], deal["edited_here"] = _crm_now(), True
+            erased += 1
+        for ak in [ak for ak, a in (d.get("activities") or {}).items()
+                   if pids and str(a.get("person_id") or "") in pids]:
+            act = d["activities"][ak]
+            if str(act.get("deal_id") or "") in (d.get("deals") or {}):
+                # On a kept organisation deal: kept, without them in it.
+                act["person_id"] = ""
+                for f in ("subject", "note", "location"):
+                    if act.get(f):
+                        act[f] = scrub(act.get(f))
+                act["updated_at"], act["edited_here"] = _crm_now(), True
+            else:
+                _crm_drop_activity(d, ak)
+        # An organisation that existed only because of them (typed into their
+        # enquiry form, never imported, nobody else in it) goes too.
+        for rec_org in [pid_org for pid_org in orgs_touched]:
+            org = (d.get("orgs") or {}).get(rec_org)
+            if org and not org.get("pd_id") \
+                    and not any(str(p.get("org_id") or "") == rec_org for p in d["persons"].values()) \
+                    and not any(str(v.get("org_id") or "") == rec_org for v in d["deals"].values()):
+                org["id"] = rec_org
+                _crm_tombstone_contact(d, "orgs", org)
+        # Leads carry person_id, not an email, so matching their email alone
+        # never erased one.
         for lid in [k for k, v in (d.get("leads") or {}).items()
-                    if str(v.get("email") or "").strip().lower() == addr]:
+                    if str(v.get("email") or "").strip().lower() == addr
+                    or (pids and str(v.get("person_id") or "") in pids)]:
+            if d["leads"][lid].get("mail_thread_id"):
+                threads_to_erase.add(str(d["leads"][lid]["mail_thread_id"]))
             d["leads"].pop(lid, None); erased += 1
         _write_crm(d)
     except Exception:
         logger.exception("redact: CRM")
+        erased = before
+        failed.append("the CRM")
 
     # --- erased: the mailbox -------------------------------------------------
+    before = erased
     try:
+        if MAILBOX_PATH in _poisoned_stores:
+            raise RuntimeError("the mailbox file could not be read")
         store = _load_mail()
         threads = store.get("threads") or {}
-        for tid in [k for k, t in threads.items()
-                    if str(t.get("from_email") or "").strip().lower() == addr]:
+
+        def theirs(tid, t):
+            """Their conversation: they wrote it, or it is their website
+            enquiry (the storefront sends it from the shop's own address, with
+            theirs inside and as its Reply-To). Only these are erased and
+            blocked; a thread someone ELSE wrote that merely mentions them is
+            that person's email, and has the mention scrubbed instead."""
+            if tid in threads_to_erase or str(t.get("from_email") or "").strip().lower() == addr:
+                return True
+            if t.get("enquiry") and names_them.search(str(t.get("snippet") or "")):
+                return True
+            for m in (t.get("messages") or []):
+                if str(m.get("from_email") or "").strip().lower() == addr \
+                        or names_them.search(str(m.get("reply_to") or "")):
+                    return True
+            return False
+        for tid in [k for k, t in threads.items() if theirs(k, t)]:
             threads.pop(tid, None); erased += 1
+            threads_to_erase.add(tid)
+        for t in threads.values():
+            if names_them.search(str(t.get("snippet") or "")):
+                t["snippet"] = names_them.sub("[erased]", str(t.get("snippet") or ""))
+            hx = _mail_erased_rx({addr}, header=True)
+            for m in (t.get("messages") or []):
+                for f in ("snippet", "to", "cc", "reply_to"):
+                    if names_them.search(str(m.get(f) or "")):
+                        m[f] = (names_them if f == "snippet" else hx).sub("[erased]", str(m.get(f) or ""))
+        # And never fetched back: the sync refuses a thread by its sender,
+        # and an enquiry's sender is the shop itself.
+        gone_t = [x for x in (store.get("redacted_threads") or []) if isinstance(x, str)]
+        store["redacted_threads"] = (gone_t + sorted(threads_to_erase - set(gone_t)))[-5000:]
         # The same anti-resurrection rule for the mailbox. Gmail is still
         # holding the correspondence and the sync looks two years back, so a
         # deleted thread was simply "not in threads" and was fetched again on
@@ -12385,6 +12906,8 @@ def _redact_customer(email: str, customer_id="") -> dict:
         _write_mail(store)
     except Exception:
         logger.exception("redact: mailbox")
+        erased = before
+        failed.append("the mailbox")
 
     # --- retained, and noted -------------------------------------------------
     stamp = datetime.now(timezone.utc).isoformat()
@@ -12392,23 +12915,66 @@ def _redact_customer(email: str, customer_id="") -> dict:
         orders = _load_dispatch()
         for rec in orders.values():
             if str(rec.get("email") or "").strip().lower() == addr:
-                rec["redacted_request_at"] = stamp
+                # When the request came in: the hourly retry of a store that
+                # refused must not move it to the time of the retry.
+                rec.setdefault("redacted_request_at", stamp)
                 retained += 1
         _write_dispatch(orders)
     except Exception:
         logger.exception("redact: dispatch")
 
-    _privacy_note("customers/redact", addr, customer_id,
-                  f"erased {erased} relationship record(s); "
-                  f"retained {retained} record(s) held under a legal obligation")
-    return {"erased": erased, "retained": retained}
+    # A retry that fails again adds nothing to the record: the first attempt
+    # already said what is owed, and an hourly line would bury the log.
+    if not (retry and failed):
+        _privacy_note("customers/redact", addr, customer_id,
+                  ("retried: " if retry else "")
+                  + f"erased {erased} relationship record(s); "
+                  f"retained {retained} record(s) held under a legal obligation"
+                  + ("; NOT YET ERASED from " + " and ".join(failed)
+                     + " (that store could not be read or written); retried hourly"
+                     if failed else ""))
+    if failed or retry:
+        _redact_pending_set(addr, customer_id, failed)
+    return {"erased": erased, "retained": retained, "failed": failed}
 
 
-ACTIVITY_MAX = int(os.environ.get("ACTIVITY_MAX", "8000"))
-SESSION_HOURS = float(os.environ.get("SESSION_HOURS", "24"))
+def _redact_pending_set(addr: str, customer_id, failed: list) -> None:
+    """Remember an erasure that did not complete, or forget one that has."""
+    try:
+        d = _load_privacy_log()
+        pend = [p for p in (d.get("pending") or []) if isinstance(p, dict) and p.get("email") != addr]
+        if failed:
+            pend.append({"email": addr, "customer_id": str(customer_id or ""),
+                         "stores": failed, "at": datetime.now(timezone.utc).isoformat()})
+        if pend != (d.get("pending") or []):
+            d["pending"] = pend[-500:]
+            if _store_writable(PRIVACY_LOG_PATH):
+                _write_json_store(PRIVACY_LOG_PATH, None, d)
+    except Exception:
+        logger.exception("privacy log: could not record a pending erasure")
+
+
+def _redact_retry_pending() -> int:
+    """The hourly retry of erasures a store refused; how many are still owed.
+    Shopify is answered 200 once and never asks again, so this is the only
+    second attempt there is."""
+    try:
+        pend = list(_load_privacy_log().get("pending") or [])
+    except Exception:
+        return 0
+    left = 0
+    for p in pend:
+        if isinstance(p, dict) and p.get("email"):
+            out = _redact_customer(p["email"], p.get("customer_id") or "", retry=True)
+            left += 1 if out.get("failed") else 0
+    return left
+
+
+ACTIVITY_MAX = _env_num(int, os.environ.get("ACTIVITY_MAX", "8000"), "8000", "ACTIVITY_MAX")
+SESSION_HOURS = _env_num(float, os.environ.get("SESSION_HOURS", "24"), "24", "SESSION_HOURS")
 # The sliding window alone let a session used once a day live forever, and a
 # stolen one with it. A month is longer than any shift pattern here.
-SESSION_MAX_DAYS = float(os.environ.get("SESSION_MAX_DAYS", "30"))
+SESSION_MAX_DAYS = _env_num(float, os.environ.get("SESSION_MAX_DAYS", "30"), "30", "SESSION_MAX_DAYS")
 DAV_FAIL_PER_MIN = 20      # wrong drive passwords per client per minute before 429
 MFA_FAIL_LIMIT = 10        # wrong second-factor codes per account before it pauses
 LOGIN_FAIL_LIMIT = 5
@@ -12629,7 +13195,7 @@ def _write_sessions(d: dict) -> None:
     _write_json_store(SESSIONS_PATH, "sessions", d, private=True)
 
 
-SESSIONS_PER_USER = int(os.environ.get("SESSIONS_PER_USER", "12"))
+SESSIONS_PER_USER = _env_num(int, os.environ.get("SESSIONS_PER_USER", "12"), "12", "SESSIONS_PER_USER")
 
 
 # Half-finished logins. In memory only and deliberately so: a ticket is worth
@@ -12808,6 +13374,13 @@ async def _net30_on_release(registry: dict, order_id) -> dict:
         else:
             note = "30-day payment terms added."
         return {"account": True, "ok": True, "note": note}
+    if r.get("reason") == "unknown":
+        # Not a failure: Shopify may have taken them. Still one to look at, so
+        # the row stays marked, but in words that do not say they are missing.
+        return {"account": True, "ok": False, "unknown": True,
+                "note": ("Released. Shopify did not answer about the 30-day payment terms and "
+                         "the check afterwards failed too, so it is not known whether they are "
+                         "on the order: look at it in Shopify before adding them again.")}
     return {"account": True, "ok": False,
             "note": ("Released, but the 30-day payment terms could not be added: "
                      + str(r.get("detail") or "unknown error"))}
@@ -12922,7 +13495,7 @@ def _team_names() -> dict:
 # How long a break-glass password stays usable. Long enough to redeploy, read
 # the log and sign in; short enough that the copy left in the deploy log is
 # useless to anyone who reads it later.
-MASTER_RESET_MINUTES = int(os.environ.get("MASTER_RESET_MINUTES", "30"))
+MASTER_RESET_MINUTES = _env_num(int, os.environ.get("MASTER_RESET_MINUTES", "30"), "30", "MASTER_RESET_MINUTES")
 _master_reset_done = False
 
 
@@ -13367,10 +13940,16 @@ def _loan_history(d: dict, unit_id: str) -> list:
 
 
 WORK_PATH = os.environ.get("WORK_PATH", "/data/worklog.json")
-WORK_KEEP = int(os.environ.get("WORK_KEEP", "2000"))
+WORK_KEEP = _env_num(int, os.environ.get("WORK_KEEP", "2000"), "2000", "WORK_KEEP")
+# The part-timers' hours are the payroll record. The live log is capped for
+# speed; what leaves it is appended here, one JSON line per shift, and the
+# report reads both. The cap used to drop what it trimmed, so a report for an
+# older period came back short or empty without a word.
+WORK_ARCHIVE_PATH = os.environ.get(
+    "WORK_ARCHIVE_PATH", os.path.join(os.path.dirname(WORK_PATH) or ".", "worklog_archive.jsonl"))
 # Shorter than this is a mis-tap, not a shift. It also stops the fixed-size
 # work log being flushed by anyone willing to clock in and out repeatedly.
-WORK_MIN_SECS = int(os.environ.get("WORK_MIN_SECS", "60"))
+WORK_MIN_SECS = _env_num(int, os.environ.get("WORK_MIN_SECS", "60"), "60", "WORK_MIN_SECS")
 _work_mem: Optional[dict] = None
 
 
@@ -13382,6 +13961,43 @@ def _load_work() -> dict:
     return _work_mem
 
 
+def _work_trim(d: dict) -> None:
+    """Move shifts past WORK_KEEP into the archive; if the archive cannot be
+    written, they stay in the live log rather than be lost."""
+    over = len(d.get("sessions") or []) - WORK_KEEP
+    if over <= 0:
+        return
+    gone = d["sessions"][:over]
+    try:
+        os.makedirs(os.path.dirname(WORK_ARCHIVE_PATH) or ".", exist_ok=True)
+        with open(WORK_ARCHIVE_PATH, "a", encoding="utf-8") as fh:
+            for ws in gone:
+                fh.write(json.dumps(ws, default=str) + "\n")
+    except Exception:
+        logger.exception("work archive append failed; the shifts stay in the live log")
+        return
+    d["sessions"] = d["sessions"][over:]
+
+
+def _work_archived() -> list:
+    """Every archived shift; a line that does not parse is skipped, not fatal."""
+    out = []
+    try:
+        with open(WORK_ARCHIVE_PATH, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict):
+                    out.append(rec)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.exception("work archive read failed")
+    return out
+
+
 def _write_work(d: dict) -> None:
     """Memory never outlives a failed write. Handlers mutate the object the
     loader handed them, so by the time a refusal happens the cache already
@@ -13391,6 +14007,7 @@ def _write_work(d: dict) -> None:
     if not _store_writable(WORK_PATH):
         _work_mem = None
         raise RuntimeError("work log is not writable")
+    _work_trim(d)
     try:
         _write_json_store(WORK_PATH, "work_store", d)
     except Exception:
@@ -13861,7 +14478,7 @@ def _dav_entry_xml(href: str, name: str, is_dir: bool, size: int = 0, mtime: str
             "</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>")
 
 
-REDACT_ARCHIVE_DAYS = int(os.environ.get("REDACT_ARCHIVE_DAYS", "30"))
+REDACT_ARCHIVE_DAYS = _env_num(int, os.environ.get("REDACT_ARCHIVE_DAYS", "30"), "30", "REDACT_ARCHIVE_DAYS")
 
 
 def _redact_archive_reap(now: Optional[float] = None) -> int:
@@ -14974,8 +15591,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         return await google_mail.attachment_bytes(message_id, attachment_id, acct=_fin)
 
     async def _fin_search(query, max_results=200, out_complete=None):
-        return await google_mail.list_thread_ids(query, max_results=max_results, acct=_fin,
-                                                 out_complete=out_complete)
+        # {thread id: historyId}: the reconciliation walks a thread again when
+        # it has grown, so a new invoice on last month's thread is read.
+        hist: dict = {}
+        await google_mail.list_thread_ids(query, max_results=max_results, acct=_fin,
+                                          out_complete=out_complete, history=hist)
+        return hist
 
     async def _fin_thread(thread_id):
         return await google_mail.get_thread(thread_id, acct=_fin)
@@ -16506,6 +17127,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # holds goals, strategy and private notes written for an assistant
         # talking to the MERCHANT, and it is marked authoritative; none of it
         # belongs in text addressed to a customer.
+        # A slot in the global AI window, like every other AI route: drafting
+        # was the one that neither took nor respected one.
+        # (Checked here, as the reconciliation's investigate does: only the one
+        # door hands out slots, and this route's Save is no AI call at all.)
+        if not _window_ok(_rl_global, RATE_MAX_GLOBAL, time.monotonic()):
+            return _json({"error": "The assistant is busy right now. Please try again shortly."}, 429)
         try:
             resp = await _xcreate(_anthropic(), model=MODEL_DEEP, max_tokens=1200,
                                   system=MAIL_DRAFT_SYSTEM,
@@ -17131,10 +17758,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if rec is not None:
                 rec.update({"status": "active",
                             "uploaded_at": datetime.now(timezone.utc).isoformat()})
-                prior = rec.pop("replaces", "")
-                if prior and prior in d["files"] and prior != fid:
-                    d["files"][prior]["status"] = "trashed"
-                    d["files"][prior]["trashed_at"] = datetime.now(timezone.utc).isoformat()
+                rec.pop("replaces", "")
+                _files_supersede(d, fid)
                 _write_files(d)
         where = "/".join(folder) or "Files"
         _mail_log(t, who, "saved " + name + " to " + where)
@@ -17987,7 +18612,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
-        buf, added = _build_backup_zip()
+        # Off the event loop, as the pre-import snapshot is: deflating the
+        # whole volume inline stopped every request and webhook for seconds.
+        buf, added = await asyncio.to_thread(_build_backup_zip)
         if not added:
             return _json({"error": "Nothing to back up yet."}, 404)
         _note_backup("download")
@@ -18115,9 +18742,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if not ids:
                     return _json({"error": "No orders given."}, 400)
                 state = _load_prod_state()
+                shipped_ids = _load_dispatch()
+                past = {oid for oid in ids
+                        if (state.get(str(oid)) or {}).get("made_at")
+                        or (shipped_ids.get(str(oid)) or {}).get("fulfilled")}
                 for oid in ids:
                     entry = state.get(str(oid))
-                    if entry:
+                    if entry and oid not in past:
                         entry.pop("printed_at", None)
                         if not entry:
                             state.pop(str(oid), None)
@@ -18130,12 +18761,21 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                        str(len(ids)) + (" order" if len(ids) == 1 else " orders"))
                 notes = []
                 for oid in ids:
+                    # A made or shipped order's print was a reprint, not a
+                    # release, so there is no move to undo: sending it back to
+                    # Unprocessed put a made order on course for To make again.
+                    if oid in past:
+                        continue
                     okd, note = await _sync_order_tags(registry, oid,
-                                                       add=[UNPROCESSED_TAG], remove=[PRODUCTION_TAG])
+                                                       add=[UNPROCESSED_TAG], remove=[PRODUCTION_TAG],
+                                                       unless=(MADE_TAG, DISPATCHED_TAG,
+                                                               *LEGACY_DISPATCHED_TAGS))
                     if not okd and note:
                         notes.append(note)
                 return _json({"ok": True,
                               "state": {str(i): _load_prod_state().get(str(i), {}) for i in ids},
+                              # Made or shipped: its print was a reprint, left as it is.
+                              "kept": sorted(str(i) for i in past),
                               "tag_note": (notes[0] if notes else "")})
             if op == "made":
                 oid = int(body.get("id") or 0)
@@ -18187,6 +18827,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         if not okd:
                             ship_note += (" The Dispatched tag did not save, so this order will "
                                           "keep showing in To make. Add the tag in Shopify.")
+                    elif ready.get("reason") == "unknown":
+                        # It may have shipped: its tags are left as the dispatch
+                        # step set them, and the note says to look in Shopify.
+                        okd, note = True, ""
+                        ship_note = ready["detail"]
                     else:
                         okd, note = await _sync_order_tags(registry, oid, add=[MADE_TAG],
                                                            remove=[PRODUCTION_TAG])
@@ -19138,9 +19783,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     fid = str(body.get("id") or "")
                     if fid not in d["folders"]:
                         return _json({"error": "That folder no longer exists."}, 400)
+                    # Finder's own sidecars (.DS_Store, ._name) are hidden: the
+                    # tab shows the folder empty, so they must not make it
+                    # "not empty" with nothing anyone can remove.
                     if any(str(f.get("parent_id") or "") == fid for f in d["folders"].values()) \
                        or any(str(v.get("folder_id") or "") == fid and v.get("status") == "active"
-                              for v in d["files"].values()):
+                              and not v.get("hidden") for v in d["files"].values()):
                         return _json({"error": "The folder isn't empty. Move or delete "
                                                "what's inside first."}, 400)
                     # An upload still in flight counts as an occupant: with the
@@ -19152,6 +19800,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         return _json({"error": "An upload into this folder is still in progress. "
                                                "Wait for it to finish, then try again."}, 400)
                     gone = d["folders"].pop(fid)
+                    # The sidecars go with it, their bytes onto the reaper's list.
+                    for k in [k for k, v in d["files"].items()
+                              if str(v.get("folder_id") or "") == fid and v.get("hidden")]:
+                        f = d["files"].pop(k)
+                        if f.get("r2_key"):
+                            d.setdefault("doomed", []).append(f["r2_key"])
                     return _files_ok(d, action="deleted a folder", detail=gone.get("name") or "", who=_who)
                 return _json({"error": "Unknown folder action."}, 400)
         except RuntimeError:
@@ -19276,13 +19930,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     # and unreachable on the drive; the top level is where a
                     # restore puts one too.
                     f["folder_id"] = ""
-                rep = f.pop("replaces", None)
-                old = d["files"].get(rep) if rep else None
-                replaced = ""
-                if old is not None and old.get("status") == "active":
-                    old["status"] = "trashed"
-                    old["trashed_at"] = datetime.now(timezone.utc).isoformat()
-                    replaced = " (replaced the previous version)"
+                f.pop("replaces", None)
+                replaced = " (replaced the previous version)" if _files_supersede(d, fid) else ""
                 return _files_ok(d, action="uploaded a file",
                                  detail=(f"{f.get('name')} ({true_size} bytes)" + replaced)[:200],
                                  who=_who)
@@ -20295,6 +20944,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                             old = d["files"][supersede]
                             old["status"] = "trashed"
                             old["trashed_at"] = datetime.now(timezone.utc).isoformat()
+                        if not rec.get("hidden"):
+                            _files_supersede(d, fid)   # and any other of its name that landed meanwhile
                         _write_files(d)
             finally:
                 spool.close()
@@ -20709,9 +21360,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                   "note": "That was under a minute, so it was not added to "
                                           "the work log."})
                 d["sessions"].append(ws)
-                if len(d["sessions"]) > WORK_KEEP:
-                    d["sessions"] = d["sessions"][-WORK_KEEP:]
-                _write_work(d)
+                _write_work(d)      # which moves anything past the cap to the archive
                 _track(who, "work", "clocked out", _fmt_secs(ws["secs"]))
                 return _json({"ok": True, "session": ws})
             return _json({"error": "Unknown clock action."}, 400)
@@ -20822,8 +21471,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         to = str(body.get("to") or "")[:10]
         try:
             d = _load_work()
+            # The archive as well as the live log, once each: a shift can be in
+            # both if the live write failed after its archive line was made.
+            seen_ids: set = set()
+            every = []
+            for ws in _work_archived() + list(d["sessions"]):
+                k = str(ws.get("id") or "") + "|" + str(ws.get("uid") or "") + "|" + str(ws.get("start") or "")
+                if k not in seen_ids:
+                    seen_ids.add(k)
+                    every.append(ws)
             # The from/to dates are London days, like the sheet's own Date column.
-            rows = [s for s in d["sessions"]
+            rows = [s for s in every
                     if (not uid or s.get("uid") == uid)
                     and (not frm or _london_day(s.get("start")) >= frm)
                     and (not to or _london_day(s.get("start")) <= to)]
@@ -20908,6 +21566,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Couldn't rebuild the day's order list."}, 500)
         if usage.get("error"):
             return _json({"error": usage["error"]}, 400)
+        # FINAL figures replace what the per-order bookings recorded, for every
+        # order named in the sheet. An order that could not be read has no
+        # glass in these lines, so sending it would un-book what it used.
+        if usage.get("fetch_failed"):
+            n = int(usage.get("fetch_failed") or 0)
+            ids = ", ".join(str(i) for i in (usage.get("unread_ids") or [])[:10])
+            return _json({"error": f"{n} made order{'' if n == 1 else 's'} could not be read from "
+                                   f"Shopify just now (order id {ids}), so the day's figures are "
+                                   "incomplete. Nothing was sent; refresh the sheet in a moment and "
+                                   "send it then."}, 409)
         payload = {"sheet_id": "day-" + usage["date"], "day": usage["date"],
                    "order_ids": [str(i) for i in (usage.get("order_ids") or [])],
                    "lines": lines}
@@ -20931,9 +21599,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _track(who, "production", "sent a stock sheet",
                f"{usage['date']} · {len(lines)} line(s)"
                + (" · replaced the earlier send" if result.get("replaced") else ""))
+        gone = usage.get("gone_ids") or []
         return _json({"ok": True, "sent": {"sent_at": rec["sent_at"], "by": who,
                                            "replaced": rec["replaced"]},
-                      "result": result})
+                      "result": result,
+                      "note": (f"{len(gone)} made order{'' if len(gone) == 1 else 's'} Shopify no "
+                               f"longer has (order id {', '.join(str(i) for i in gone[:10])}) "
+                               f"{'was' if len(gone) == 1 else 'were'} left out of the sheet; "
+                               "the glass booked for it stays booked." if gone else "")})
 
     @mcp.custom_route("/api/production-labels/queue", methods=["POST"])
     async def labels_queue_route(request: Request):
@@ -20949,11 +21622,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not oid:
             return _json({"error": "No order id given."}, 400)
         try:
-            okd, note = await _sync_order_tags(registry, oid,
-                                               add=[PRODUCTION_TAG], remove=[UNPROCESSED_TAG])
+            # The one guarded release: an order already made or shipped stays
+            # where it is. An Undo on a made order's reprint used to leave it
+            # tagged Unprocessed, and this button then put it back in To make.
+            okd, note, released = await _release_tags(registry, oid)
             if not okd:
                 return _json({"error": note or "Couldn't tag the order."}, 502)
             nm = re.sub(r"[^#\w-]", "", str(body.get("name") or ""))[:20] or f"order {oid}"
+            if not released:
+                return _json({"ok": True, "released": False, "po_unpaid": False, "terms_note": "",
+                              "terms_ok": True,
+                              "note": f"{nm} is already made, so it stays where it is."})
             _track(_who, "production", "released to make", nm)
             # Best-effort and SAID OUT LOUD either way: the release is the
             # primary action and must not fail with it, but a purchase order
@@ -21206,6 +21885,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except (TypeError, ValueError):
             declared = 0.0
         try:
+            _book_confirmed.set(bool(body.get("confirm_unknown")))
             res = await run_custom_book(
                 registry, str(body.get("id") or ""), option,
                 _clean_address(body.get("address") or {}), boxes,
@@ -21379,6 +22059,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             co = str(body.get("collection_option") or "").strip()
             if co and worldoptions and co not in worldoptions.COLLECTION_OPTIONS:
                 return _json({"error": "That is not a collection arrangement World Options offers."}, 400)
+            _book_confirmed.set(bool(body.get("confirm_unknown")))
             res = await run_dispatch_book(registry, oid, option, boxes, notify=notify,
                                           force=bool(body.get("force")),
                                           insurance=_insurance_amount(body),
@@ -22041,6 +22722,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         try:
             _refresh_asked(body)
             res = await run_customers(registry, extra, segment=segment or None)
+            if res.get("error"):
+                return _json(res, 502)      # nothing worked out, nothing saved
             res = _save_customer_segment(segment or "__all__", res)
             return _json(res)
         except anthropic.APIError:
@@ -22484,7 +23167,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _write_recon_docs({})
                 notes.append(f"{len(docs)} extracted documents were deleted.")
             d = _load_recon()
-            d.pop("seen_threads", None)
+            for k in ("seen_threads", "seen_history", "doc_tries", "recheck_threads"):
+                d.pop(k, None)      # what was read from that mailbox goes with it
             _write_recon(d)
             _track(who, "recon", "disconnected the accounts mailbox", " ".join(notes)[:120])
             notes.append("Google keeps its own record of the grant: remove gizmo at "

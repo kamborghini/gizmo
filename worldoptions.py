@@ -816,20 +816,33 @@ def _parse(resp: httpx.Response, url: str = "") -> ET.Element:
             "This usually means the wrong web-service URL. Expected the shipping web service at "
             f"{DEFAULT_BASE}.")
     body = resp.content or b""
+    # Everything from here on answers a request that REACHED World Options.
+    # A reply that cannot be read, or a gateway error page (5xx) with no SOAP
+    # fault in it, says nothing about whether the request was acted on: the
+    # errors below are marked ambiguous, so a booking reads "MAY have been
+    # booked" and is never re-sent, instead of a plain failure whose Book
+    # button booked and charged a second label.
+    def _ambiguous(message):
+        # A 4xx page is a refusal, whatever it looks like (WCF's own 400
+        # "Request Error" page carries a DOCTYPE, a firewall's 403 is HTML):
+        # nothing was acted on, and the booking did not happen.
+        err = WorldOptionsError(message)
+        err.ambiguous = not (400 <= resp.status_code < 500)
+        return err
     if len(body) > SOAP_MAX_BYTES:
         # Parsing is what turns bytes into memory; refuse before that, not after.
-        raise WorldOptionsError(
+        raise _ambiguous(
             f"World Options returned {len(body) // (1024 * 1024)}MB, which is far larger than "
-            "any shipping reply. Nothing was processed.")
+            "any shipping reply, so this app did not read it.")
     if re.search(rb"<!\s*(DOCTYPE|ENTITY)", body[:4000], re.I) if isinstance(body, bytes) \
             else re.search(r"<!\s*(DOCTYPE|ENTITY)", str(body)[:4000], re.I):
         # A courier reply never carries a DOCTYPE; one that does is not worth
         # handing to a parser that would expand whatever it declares.
-        raise WorldOptionsError("World Options returned a response this app will not parse.")
+        raise _ambiguous("World Options returned a response this app will not parse.")
     try:
         root = ET.fromstring(body)
     except Exception:
-        raise WorldOptionsError(f"World Options returned an unreadable response (HTTP {resp.status_code}).")
+        raise _ambiguous(f"World Options returned an unreadable response (HTTP {resp.status_code}).")
     fault = _find(root, "Fault")
     if fault is not None:
         # Enterprise Library validation faults carry the real reasons in the
@@ -841,6 +854,8 @@ def _parse(resp: httpx.Response, url: str = "") -> ET.Element:
             raise WorldOptionsError("World Options needs more information: " + " ".join(details))
         reason = _text(fault, "Text") or _text(fault, "faultstring") or "SOAP fault"
         raise WorldOptionsError(_friendly_fault(reason), raw=reason)
+    if resp.status_code >= 500:
+        raise _ambiguous(f"World Options error (HTTP {resp.status_code}).")
     if resp.status_code >= 400:
         raise WorldOptionsError(f"World Options error (HTTP {resp.status_code}).")
     return root
@@ -1570,6 +1585,13 @@ async def book(option: dict, origin: dict, destination: dict, boxes: list,
         e.envelope = _redacted(inner)
         logger.error("world options: DoShipment rejected: %s\nEnvelope sent:\n%s",
                      e, e.envelope)
+        if getattr(e, "ambiguous", False):
+            maybe = WorldOptionsError(
+                f"{e} The shipment MAY still have been booked and charged: check your World "
+                "Options portal for a new shipment before booking again.", envelope=e.envelope)
+            maybe.sent = True
+            maybe.ambiguous = True
+            raise maybe from e
         raise
     reply = _find(root, "DoShipmentResult")
     try:

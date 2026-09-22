@@ -125,9 +125,15 @@ class _Handler(logging.Handler):
             # shows it, and must not also travel to a third-party sink.
             if getattr(record, "no_drain", False):
                 return
-            _put({"kind": "log", "at": datetime.now(timezone.utc).isoformat(),
-                  "level": record.levelname, "logger": record.name,
-                  "message": record.getMessage()})
+            event = {"kind": "log", "at": datetime.now(timezone.utc).isoformat(),
+                     "level": record.levelname, "logger": record.name,
+                     "message": record.getMessage()}
+            if record.exc_info:
+                # logger.exception's whole point is the traceback; without it
+                # every exception reached the sink as a bare sentence. Scrubbed
+                # with the rest of the event in _put, and bounded.
+                event["exc"] = logging.Formatter().formatException(record.exc_info)[-8000:]
+            _put(event)
         except Exception:
             pass      # a logging handler that raises breaks the caller's logging
 
@@ -138,7 +144,11 @@ def _default_sender(url: str, token: str):
         headers = {"Content-Type": "application/json"}
         if token:
             headers["Authorization"] = "Bearer " + token
-        httpx.post(url, json={"events": batch}, headers=headers, timeout=10)
+        r = httpx.post(url, json={"events": batch}, headers=headers, timeout=10)
+        # A sink that answers 401 (a wrong or rotated token), 413 or 5xx has
+        # NOT taken the batch: raised here, it is counted as dropped rather
+        # than lost without a trace.
+        r.raise_for_status()
     return send
 
 

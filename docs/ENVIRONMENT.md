@@ -3,7 +3,7 @@
 Generated from the code by `tools/env_reference.py`; do not edit by hand.
 `make env-doc` rewrites it, and CI fails when it is stale.
 
-212 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
+215 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
 
 ## server.py
 
@@ -165,6 +165,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `LOANS_PATH` | `"/data/loans.json"` | copilot |  |
+| `WORK_ARCHIVE_PATH` | `os.path.join(os.path.dirname(WORK_PATH) or ".", "worklog_...` | copilot |  |
 | `WORK_KEEP` | `"2000"` | copilot |  |
 | `WORK_MIN_SECS` | `"60"` | copilot |  |
 | `WORK_PATH` | `"/data/worklog.json"` | copilot |  |
@@ -241,6 +242,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `BACKUP_FILE_MAX` | `str(60 * 1024 * 1024)` | copilot |  |
 | `BACKUP_SNAPSHOT_DIR` | `"/data/snapshots"` | copilot |  |
 | `BACKUP_STATE_PATH` | `"/data/backup_state.json"` | copilot |  |
+| `BOOKING_INTENT_PATH` | `os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".",...` | copilot |  |
 | `COLLECTIONS_PATH` | `"/data/collections.json"` | copilot |  |
 | `DISPATCHED_TAG` | `"Complete"` | copilot |  |
 | `DISPATCH_ARCHIVE_PATH` | `os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".",...` | copilot |  |
@@ -344,6 +346,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `RECON_DOCS_KEEP_DAYS` | `str(WINDOW_DAYS + 60)` | recon |  |
 | `RECON_DOCS_PER_SWEEP` | `"8"` | recon |  |
 | `RECON_DOC_BYTES_MAX` | `str(8 * 1024 * 1024)` | recon |  |
+| `RECON_DOC_READ_TRIES` | `"5"` | recon |  |
 | `RECON_GMAIL_QUERY` | `"(has:attachment OR remittance OR invoice OR statement OR...` | recon |  |
 | `RECON_MATERIAL_PENCE` | `"25000"` | recon | 250.00 |
 | `RECON_ORDER_CAP` | `"1500"` | recon |  |

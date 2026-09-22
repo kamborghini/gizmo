@@ -28,6 +28,18 @@ from starlette.datastructures import MutableHeaders
 # Configuration
 # ---------------------------------------------------------------------------
 
+def _env_num(cast, raw, default, name):
+    """A numeric setting, read forgivingly: a value set but not a number
+    ("60s", "$25", "") is logged and the default used. Parsed bare, one typo
+    in Railway crashed the whole app at import, and the log blamed the chat."""
+    try:
+        return cast(raw)
+    except (TypeError, ValueError):
+        logging.getLogger("shopify_mcp").warning(
+            "setting %s=%r is not a number; using the default %s", name, raw, default)
+        return cast(default)
+
+
 SHOPIFY_STORE        = os.environ.get("SHOPIFY_STORE", "")           # e.g. "my-store"
 SHOPIFY_TOKEN        = os.environ.get("SHOPIFY_ACCESS_TOKEN", "")    # Static token (shpat_...)
 SHOPIFY_CLIENT_ID    = os.environ.get("SHOPIFY_CLIENT_ID", "")
@@ -35,10 +47,13 @@ SHOPIFY_CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
 API_VERSION          = os.environ.get("SHOPIFY_API_VERSION", "2026-07")
 
 # Refresh buffer: refresh token 30 minutes before expiry (only used with OAuth)
-TOKEN_REFRESH_BUFFER = int(os.environ.get("TOKEN_REFRESH_BUFFER", "1800"))
+
+TOKEN_REFRESH_BUFFER = _env_num(int, os.environ.get("TOKEN_REFRESH_BUFFER", "1800"), "1800", "TOKEN_REFRESH_BUFFER")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("shopify_mcp")
+
+
 
 # Off-host log shipping, when LOG_DRAIN_URL is set. Returns False and changes
 # nothing when it is not, so a deployment without one behaves as before.
@@ -46,7 +61,7 @@ import logdrain
 if logdrain.install():
     logger.info("log drain installed")
 
-PORT          = int(os.environ.get("PORT", "8000"))
+PORT          = _env_num(int, os.environ.get("PORT", "8000"), "8000", "PORT")
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "streamable-http")
 
 mcp = FastMCP("shopify_mcp", host="0.0.0.0", port=PORT, json_response=True)
@@ -117,8 +132,8 @@ def _http() -> httpx.AsyncClient:
     return _pool
 
 
-GZIP_MIN_BYTES = int(os.environ.get("GZIP_MIN_BYTES", "1024"))
-GZIP_LEVEL = int(os.environ.get("GZIP_LEVEL", "6"))
+GZIP_MIN_BYTES = _env_num(int, os.environ.get("GZIP_MIN_BYTES", "1024"), "1024", "GZIP_MIN_BYTES")
+GZIP_LEVEL = _env_num(int, os.environ.get("GZIP_LEVEL", "6"), "6", "GZIP_LEVEL")
 # What is worth compressing. Everything here is text; images, PDFs and the
 # stored label files are already compressed and would only cost CPU.
 _COMPRESSIBLE = ("application/json", "application/javascript", "application/xml",
@@ -413,7 +428,7 @@ async def _headers() -> dict:
 # unbounded burst guarantees 429s. Cap in-flight requests and retry throttled
 # or transient failures with backoff, so a busy moment slows down instead of
 # silently dropping data.
-_shopify_gate = asyncio.Semaphore(int(os.environ.get("SHOPIFY_MAX_CONCURRENCY", "4")))
+_shopify_gate = asyncio.Semaphore(_env_num(int, os.environ.get("SHOPIFY_MAX_CONCURRENCY", "4"), "4", "SHOPIFY_MAX_CONCURRENCY"))
 _RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
@@ -1496,20 +1511,26 @@ async def set_order_payment_terms_net30(order_id: int) -> dict:
         A create that succeeds and then loses its response - a timeout, a
         gateway 502 - leaves the order correctly on Net 30 while the release
         reports a red failure, which is the one thing this function exists to
-        stop. None means we could not find out."""
+        stop. None means the order has no terms; "unknown" means we could not
+        find out, which is not the same answer and is not reported as one."""
         try:
             again = await gql("query($id: ID!) { order(id: $id) { paymentTerms {"
                               " id paymentTermsName paymentTermsType dueInDays } } }",
                               {"id": gid}, read=True)
         except Exception:
-            return None
-        if _throttled(again):
-            return None
+            return "unknown"
+        if _throttled(again) or again.get("errors"):
+            return "unknown"
         return ((again.get("data") or {}).get("order") or {}).get("paymentTerms") or None
 
-    def _is_net30(terms: Optional[dict]) -> bool:
-        return bool(terms and terms.get("paymentTermsType") == "NET"
+    def _is_net30(terms) -> bool:
+        return bool(isinstance(terms, dict) and terms.get("paymentTermsType") == "NET"
                     and terms.get("dueInDays") == 30)
+
+    _TERMS_UNKNOWN = {"ok": False, "reason": "unknown",
+                      "detail": "Shopify did not answer, and the check afterwards failed too, so "
+                                "it is not known whether the order is on 30-day terms. Look at the "
+                                "order in Shopify before trying again."}
 
     def _perm(scope: str) -> dict:
         return {"ok": False, "reason": "permission",
@@ -1644,6 +1665,8 @@ async def set_order_payment_terms_net30(order_id: int) -> dict:
                            code, order_id)
             return {"ok": True, "verified": True,
                     "name": str((landed or {}).get("paymentTermsName") or "Net 30")}
+        if landed == "unknown" and code >= 500:
+            return dict(_TERMS_UNKNOWN)
         return {"ok": False, "reason": "http", "detail": f"Shopify answered {code}."}
     except (httpx.TimeoutException, httpx.TransportError):
         # The write may well have landed; asking beats guessing, and guessing
@@ -1654,6 +1677,8 @@ async def set_order_payment_terms_net30(order_id: int) -> dict:
             logger.warning("payment terms: the answer was lost but order %s is on Net 30", order_id)
             return {"ok": True, "verified": True,
                     "name": str((landed or {}).get("paymentTermsName") or "Net 30")}
+        if landed == "unknown":
+            return dict(_TERMS_UNKNOWN)
         return {"ok": False, "reason": "timeout",
                 "detail": "Shopify did not answer in time, and the order is not on 30-day "
                           "terms. Try this order again."}
@@ -1718,7 +1743,10 @@ async def create_order_fulfillment(
         try:
             again = await _request("GET", f"orders/{order_id}/fulfillment_orders.json")
         except Exception:
-            return None
+            return {"ok": False, "reason": "unknown",
+                    "detail": "Shopify did not answer, and the check afterwards failed too, so "
+                              "this order may already be fulfilled and the customer emailed. "
+                              "Look at it in Shopify before trying again."}
         rows = again.get("fulfillment_orders", []) or []
         tried = {g["fulfillment_order_id"] for g in groups}
         still_open = [r for r in rows if r.get("id") in tried
@@ -1746,16 +1774,16 @@ async def create_order_fulfillment(
                     "detail": "The access token can read fulfillment orders but cannot create "
                               "fulfillments (needs write_fulfillments)."}
         landed = await _already_landed()
-        if landed:
-            logger.warning("fulfillment POST answered %s but the fulfillment exists; "
-                           "treating order %s as fulfilled", code, order_id)
+        if landed and (landed.get("ok") or code >= 500):
+            logger.warning("fulfillment POST answered %s; the settling read says %s for order %s",
+                           code, landed.get("reason") or "fulfilled", order_id)
             return landed
         raise
     except (httpx.TimeoutException, httpx.TransportError):
         landed = await _already_landed()
         if landed:
-            logger.warning("fulfillment POST timed out but the fulfillment exists; "
-                           "treating order %s as fulfilled", order_id)
+            logger.warning("fulfillment POST timed out; the settling read says %s for order %s",
+                           landed.get("reason") or "fulfilled", order_id)
             return landed
         raise
     f = data.get("fulfillment", data)
@@ -1782,7 +1810,11 @@ async def cancel_order_fulfillment(fulfillment_id: int) -> dict:
 # Webhook topics the desk listens for. orders/updated fires for paid, cancelled,
 # edited, fulfilled and tag changes, so together these cover everything the
 # order snapshot caches; duplicate deliveries are deduped at the receiver.
-WEBHOOK_TOPICS = ("orders/create", "orders/updated", "refunds/create")
+# Every topic the receiver at /webhooks/orders accepts, and no other: a refund
+# also fires orders/updated, and refunds/create sent to this endpoint was
+# refused (422) on every delivery, so Shopify retried it for hours and then
+# deleted the subscription, which the hourly repair put straight back.
+WEBHOOK_TOPICS = ("orders/create", "orders/updated")
 
 
 def _app_public_url() -> str:
@@ -1814,6 +1846,16 @@ async def ensure_order_webhooks() -> dict:
             if str(w.get("address") or "") == address:
                 have[str(w.get("topic") or "")] = w
         made = 0
+        for topic, w in list(have.items()):
+            if topic not in WEBHOOK_TOPICS and w.get("id"):
+                # One an earlier build registered here that the endpoint
+                # refuses: every delivery of it fails.
+                try:
+                    await _request("DELETE", f"webhooks/{int(w['id'])}.json")
+                    have.pop(topic, None)
+                    logger.info("webhooks: removed the %s subscription the endpoint refuses", topic)
+                except Exception as e:
+                    logger.warning("webhooks: could not remove %s: %s", topic, e)
         for topic in WEBHOOK_TOPICS:
             if topic in have:
                 continue
@@ -1822,8 +1864,7 @@ async def ensure_order_webhooks() -> dict:
             made += 1
         if made:
             logger.info("webhooks: registered %d subscription(s) at %s", made, address)
-        return {"ok": True, "address": address,
-                "topics": sorted(set(list(have.keys()) + list(WEBHOOK_TOPICS)))}
+        return {"ok": True, "address": address, "topics": sorted(WEBHOOK_TOPICS)}
     except Exception as e:
         logger.warning("webhooks: could not ensure subscriptions: %s", e)
         return {"ok": False, "detail": f"{type(e).__name__}: {e}"[:200]}
@@ -1920,7 +1961,14 @@ async def update_order_fields(order_id: int, fields: dict) -> dict:
         if code in (401, 403):
             return {"ok": False, "reason": "permission",
                     "detail": "The access token lacks write_orders."}
+        if code >= 500:
+            # A gateway error after the request arrived says nothing about
+            # whether it was acted on: the caller reads the order to find out.
+            return {"ok": False, "reason": "unknown", "detail": f"Shopify answered {code}."}
         return {"ok": False, "reason": "http", "detail": f"Shopify answered {code}."}
+    except (httpx.TimeoutException, httpx.TransportError) as e:
+        # The answer was lost, not the change: it may well have landed.
+        return {"ok": False, "reason": "unknown", "detail": type(e).__name__}
     except Exception as e:
         logger.exception("order update failed for order %s", order_id)
         return {"ok": False, "reason": "error", "detail": str(e)[:200]}
@@ -1938,7 +1986,8 @@ try:
                        tax_id_reader=shopify_order_tax_id,
                        order_writer=update_order_fields)
 except Exception as e:
-    logger.error(f"Reactor disabled (chat UI unavailable): {e}")
+    # The whole app is these routes, not just the chat: say so, with the cause.
+    logger.exception(f"Reactor could not start (every page and route is missing): {e}")
 
 
 # ---------------------------------------------------------------------------
