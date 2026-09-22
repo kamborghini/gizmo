@@ -151,6 +151,7 @@
             --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 40px;
             /* Radii from one 10px base: a card is that plus 4, a control minus 2. */
             --radius-3xs: 2px; --radius-2xs: 4px; --radius-xs: 6px; --radius-sm: 8px; --radius-md: 10px; --radius-lg: 14px;
+            --radius-xl: 24px;   /* a surface standing alone on an empty page: the sign-in card */
             /* Icon glyph sizes. Fifty-four svg rules carried a raw pixel size
                between them, in TWELVE different values - 13, 14, 15, 16 and 17
                all appeared, which is nobody's design decision, it is what a
@@ -164,7 +165,7 @@
                step wins. A 1px rule and the scrollbar's own 11px are not boxes
                and keep their values. */
             --box-xs: 16px; --box-sm: 20px; --box-md: 24px; --box-lg: 28px;
-            --box-xl: 36px; --box-2xl: 40px;
+            --box-xl: 36px; --box-2xl: 40px; --box-3xl: 56px;
             --dot-sm: 6px; --dot-md: 8px; --dot-lg: 10px;
             /* A switch is a track with a knob derived from it. */
             --switch-w: 32px; --switch-h: 18px; --switch-inset: 2px;
@@ -188,6 +189,7 @@
             --chart-h: 220px; --chart-h-tall: 300px;
             --chart-dot-r: 3.5px; --chart-stroke: 1.4px;
             --icon-xs: 12px; --icon-sm: 14px; --icon-md: 16px; --icon-lg: 18px; --icon-xl: 20px;
+            --icon-2xl: 28px;   /* the mark in the sign-in card's tile, half of --box-3xl */
             /* The content column, moved here from a second :root block that sat
                three hundred lines further down: a global value must have one
                place to be looked up. */
@@ -199,8 +201,13 @@
             --dur: .15s; --ease: cubic-bezier(.4,0,.2,1);
 
             /* ---- Tier 3: component. Derived from the tiers above. ---- */
-            --control-h: 32px; --control-h-sm: 24px;
+            --control-h: 32px; --control-h-sm: 24px; --control-h-lg: 40px;
             --control-pad-y: 5px;   /* (32 - 20 line - 2 hairlines) / 2 */
+            /* The sign-in card: a sky tint fading to white, a blue hairline,
+               and a button that darkens toward its foot. */
+            --auth-card-top: color-mix(in srgb, var(--info-bg) 60%, var(--surface-primary));
+            --auth-card-line: color-mix(in srgb, var(--info) 14%, var(--surface-primary));
+            --auth-go-top: color-mix(in srgb, var(--action-primary) 80%, var(--surface-primary));
             --sidebar-w: 272px; --topbar-h: 48px;
             --chevron-room: 30px;   /* right padding a select keeps clear for its chevron */
             --icon-col: 34px;       /* the file list's icon column: 16px glyph, 18px gutter */
@@ -3511,24 +3518,60 @@
         .fpick-row svg { width: var(--icon-md); height: var(--icon-md); color: var(--action-primary); }
 
         /* Auth: the app's own front door */
+        /* One centred card on an empty page. The overlay scrolls and the card
+           centres itself with auto margins, so a short window scrolls to the
+           top of the card rather than cutting it off. */
         .auth-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center;
-            justify-content: center; background: var(--surface-primary); }
-        .auth-card { width: min(380px, calc(100vw - 48px)); background: var(--surface-primary);
-            border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); padding: var(--sp-7); box-shadow: var(--shadow-sm); }
-        .auth-brand { width: var(--box-2xl); height: var(--box-2xl); border-radius: var(--radius-md); margin-bottom: var(--sp-4);
-            background: var(--action-primary); color: var(--text-on-action);
+            justify-content: center; background: var(--surface-primary); overflow-y: auto; padding: var(--sp-4); }
+        .auth-card { width: min(384px, 100%); box-sizing: border-box; margin: auto;
+            display: flex; flex-direction: column;
+            background: linear-gradient(to bottom, var(--auth-card-top), var(--surface-primary));
+            border: var(--bw-hairline) solid var(--auth-card-line); border-radius: var(--radius-xl);
+            padding: var(--sp-7); color: var(--text-primary);
+            box-shadow: var(--shadow-sm), var(--shadow-lg); }
+        .auth-brand { width: var(--box-3xl); height: var(--box-3xl); border-radius: var(--radius-lg);
+            margin: 0 auto var(--sp-6); flex: none;
+            background: var(--surface-primary); color: var(--text-primary); box-shadow: var(--shadow-lg);
             display: flex; align-items: center; justify-content: center; }
-        .auth-brand svg { width: var(--icon-xl); height: var(--icon-xl); }
-        .auth-card h2 { margin: 0 0 var(--sp-1-5); font-size: var(--text-xl); font-weight: var(--weight-semibold); letter-spacing: -.02em; }
-        .auth-sub { margin: 0 0 var(--sp-4); font-size: var(--text-sm); color: var(--text-secondary); line-height: var(--lh-body); }
-        .auth-field { margin-bottom: var(--sp-3); }
-        .auth-field label { display: block; font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-primary); margin-bottom: var(--sp-1-5); }
+        .auth-brand svg { width: var(--icon-2xl); height: var(--icon-2xl); }
+        .auth-card h2 { margin: 0 0 var(--sp-2); font-size: var(--text-2xl); font-weight: var(--weight-semibold);
+            letter-spacing: -.02em; text-align: center; }
+        .auth-sub { margin: 0 0 var(--sp-6); font-size: var(--text-sm); color: var(--text-tertiary);
+            line-height: var(--lh-body); text-align: center; }
+        /* The name sits in the field as its placeholder, beside an icon; the
+           label is kept, visually hidden, for screen readers and for the
+           password manager. */
+        .auth-field { position: relative; margin-bottom: var(--sp-3); }
+        .auth-ic { position: absolute; left: var(--sp-3); top: 50%; transform: translateY(-50%);
+            display: flex; color: var(--text-tertiary); pointer-events: none; }
+        .auth-ic svg { width: var(--icon-md); height: var(--icon-md); }
         .auth-field input { width: 100%; box-sizing: border-box; font: inherit; font-size: var(--text-sm);
-            padding: var(--control-pad-y) var(--sp-2-5); min-height: var(--control-h); line-height: var(--lh-control);
-            border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-md);
-            background: var(--surface-primary); color: var(--text-primary); }
-        .auth-error { color: var(--error); font-size: var(--text-xs); min-height: 16px; margin: var(--sp-0-5) 0 var(--sp-2); }
-        .auth-go { width: 100%; justify-content: center; }
+            padding: var(--control-pad-y) var(--sp-3) var(--control-pad-y) calc(2 * var(--sp-3) + var(--icon-md));
+            min-height: var(--control-h-lg); line-height: var(--lh-control);
+            border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md);
+            background: var(--surface-secondary); color: var(--text-primary); }
+        .auth-field input::placeholder { color: var(--text-tertiary); }
+        .auth-error { color: var(--error); font-size: var(--text-xs); line-height: var(--lh-snug);
+            min-height: 16px; margin: var(--sp-0-5) 0 var(--sp-2); }
+        /* Sign-in only: the error on the left, the forgot link on the right. */
+        .auth-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3);
+            margin: var(--sp-0-5) 0 var(--sp-2); }
+        .auth-row .auth-error { margin: 0; flex: 1 1 auto; min-width: 0; text-align: left; }
+        .auth-link { flex: none; border: 0; background: none; padding: 0; font: inherit; font-size: var(--text-xs);
+            font-weight: var(--weight-medium); color: var(--text-primary); cursor: pointer; line-height: var(--lh-snug); }
+        .auth-link:hover { text-decoration: underline; }
+        .auth-note { margin: 0 0 var(--sp-3); padding: var(--sp-2-5) var(--sp-3); border-radius: var(--radius-md);
+            background: var(--surface-secondary); border: var(--bw-hairline) solid var(--border-default);
+            font-size: var(--text-xs); line-height: var(--lh-body); color: var(--text-secondary); text-align: left; }
+        .auth-note[hidden] { display: none; }
+        .auth-back { align-self: center; margin-top: var(--sp-4); color: var(--text-secondary); }
+        /* The button darkens toward its foot. The house primary states still
+           apply when it is disabled; hover and press keep the gradient's shape. */
+        .auth-go { width: 100%; justify-content: center; min-height: var(--control-h-lg); margin-top: var(--sp-2);
+            background: linear-gradient(to bottom, var(--auth-go-top), var(--action-primary));
+            border-color: var(--action-primary); box-shadow: var(--shadow-sm); }
+        .auth-go:hover:not(:disabled) { background: linear-gradient(to bottom, var(--auth-go-top), var(--action-hover)); }
+        .auth-go:active:not(:disabled) { background: var(--action-active); }
 
         /* Files */
         /* Page-level metadata, set at the size the rest of the page's metadata
@@ -4153,6 +4196,11 @@ Projected Image UK"></textarea>
             helpCircle: SV('<circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line>'),
             card: SV('<rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line>'),
             logOut: SV('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line>'),
+            logIn: SV('<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line>'),
+            lock: SV('<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>'),
+            user: SV('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle>'),
+            atSign: SV('<circle cx="12" cy="12" r="4"></circle><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"></path>'),
+            key: SV('<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path>'),
             fileImg: SV('<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline>'),
             fileZip: SV('<polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line>'),
             /* A PDF is the commonest file in this store and it was falling
@@ -4493,6 +4541,15 @@ Projected Image UK"></textarea>
                 if (reason === 'token' && !opts.retried) {
                     await new Promise(r => setTimeout(r, 1200));
                     return api(path, payload, { retried: true });
+                }
+                /* A starter password: the session is good, it just opens nothing
+                   but the choose-your-own card until the password is changed.
+                   Read as "expired", this wiped the session and reloaded, and
+                   the first call made after signing in (the card layouts) did
+                   exactly that, so a new account could never reach the card. */
+                if (reason === 'must_change') {
+                    authShow('change');
+                    throw new Error(text);
                 }
                 if (!path.startsWith('/api/auth/')) {
                     try { sessionStorage.setItem('sc_auth_reason', JSON.stringify({ reason, text })); } catch (e) {}
@@ -22733,7 +22790,7 @@ Projected Image UK"></textarea>
         }
         function authField(labelText, type, id) {
             const w = el('div', 'auth-field');
-            const lab = el('label', null, labelText); lab.htmlFor = id;
+            const lab = el('label', 'sr-only', labelText); lab.htmlFor = id;
             const inp = document.createElement('input');
             inp.type = type; inp.id = id;
             /* Keyed off the FIELD, not the type: the setup card's "Your name"
@@ -22743,8 +22800,21 @@ Projected Image UK"></textarea>
                 : id === 'au-name' ? 'name' : 'username';
             inp.name = inp.autocomplete;
             if (inp.autocomplete === 'username') inp.spellcheck = false;
-            w.append(lab, inp);
+            /* The name is shown IN the field; the label above stays for the
+               screen reader and the password manager, just not on screen. */
+            inp.placeholder = labelText;
+            const ic = el('span', 'auth-ic');
+            const glyph = type === 'password' ? 'lock' : id === 'au-mfa' ? 'key'
+                : id === 'au-name' ? 'user' : 'atSign';
+            ic.innerHTML = I[glyph];
+            w.append(lab, ic, inp);
             return [w, inp];
+        }
+        /* The tile at the top of the card: one mark per step, named by its
+           key in I so only a constant icon can ever reach the markup. */
+        function authBrand(glyph) {
+            const b = el('div', 'auth-brand'); b.innerHTML = I[glyph || 'logIn'];
+            return b;
         }
         function authShow(mode) {
             const ov = authOverlay();
@@ -22752,8 +22822,7 @@ Projected Image UK"></textarea>
             ov.dataset.mode = mode;
             ov.innerHTML = ''; ov.style.display = 'flex';
             const card = el('div', 'auth-card');
-            const brand = el('div', 'auth-brand'); brand.innerHTML = I.spark;
-            card.append(brand);
+            card.append(authBrand(mode === 'change' ? 'lock' : 'logIn'));
             const err = el('div', 'auth-error');
             err.setAttribute('role', 'alert');
             if (mode === 'login') {
@@ -22764,12 +22833,16 @@ Projected Image UK"></textarea>
                 const card = ov.querySelector('.auth-card');
                 if (!card) return;
                 card.innerHTML = '';
-                card.append(el('h2', null, 'One more step'),
+                card.append(authBrand('key'), el('h2', null, 'One more step'),
                     el('p', 'auth-sub', 'Type the six-digit code from your authenticator app. '
                         + 'If you have lost your phone, one of your recovery codes works here too.'));
-                const [fc, inCode] = authField('Code', 'text', 'au-mfa');
+                const [fc, inCode] = authField('Six-digit code', 'text', 'au-mfa');
                 inCode.inputMode = 'numeric'; inCode.autocomplete = 'one-time-code';
-                const err2 = el('div', 'auth-err');
+                /* auth-error, the class the other steps use: this one was
+                   'auth-err', which no rule styled, so a wrong code printed
+                   in body ink with no room reserved for it. */
+                const err2 = el('div', 'auth-error');
+                err2.setAttribute('role', 'alert');
                 const go = el('button', 'btn btn-primary auth-go', 'Sign in');
                 const submit = async () => {
                     go.disabled = true; err2.textContent = '';
@@ -22781,8 +22854,7 @@ Projected Image UK"></textarea>
                 };
                 go.onclick = submit;
                 inCode.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
-                const back = el('button', 'files-crumb', 'Start again');
-                back.style.marginTop = 'var(--sp-2-5)';
+                const back = el('button', 'auth-link auth-back', 'Start again');
                 back.onclick = () => { ov.dataset.mode = ''; authShow('login'); };
                 card.append(fc, err2, go, back);
                 setTimeout(() => inCode.focus(), 50);
@@ -22812,6 +22884,7 @@ Projected Image UK"></textarea>
                 const [fu, inUser] = authField('Username', 'text', 'au-user');
                 const [fp, inPw] = authField('Password (8 characters or more)', 'password', 'au-pw');
                 inPw.autocomplete = 'new-password'; inPw.name = 'new-password';
+                inPw.placeholder = 'Password (8+ characters)';   // the full wording fits a phone only as the label
                 const go = el('button', 'btn btn-primary auth-go', 'Create the master account');
                 [inName, inUser, inPw].forEach(i => i.onkeydown = e => { if (e.key === 'Enter') go.click(); });
                 go.onclick = async () => {
@@ -22829,6 +22902,7 @@ Projected Image UK"></textarea>
                 const [fc, inCur] = authField('Current password', 'password', 'au-cur');
                 const [fp, inNew] = authField('New password (8 characters or more)', 'password', 'au-new');
                 inNew.autocomplete = 'new-password'; inNew.name = 'new-password';
+                inNew.placeholder = 'New password (8+ characters)';   // cut off at phone width in full
                 const go = el('button', 'btn btn-primary auth-go', 'Save my password');
                 [inCur, inNew].forEach(i => i.onkeydown = e => { if (e.key === 'Enter') go.click(); });
                 go.onclick = async () => {
@@ -22839,10 +22913,13 @@ Projected Image UK"></textarea>
                         if (teamMe) teamMe.must_change = false;
                         ov.style.display = 'none'; ov.dataset.mode = '';
                         applyRoleChrome();
+                        /* The layouts were refused while the password was a
+                           starter; read them now, or Customize stays off for
+                           the rest of this session. */
+                        wgLoadLayouts();
                     } catch (e) { err.textContent = e.message; go.disabled = false; }
                 };
-                const back = el('button', 'files-crumb', 'Sign in as someone else');
-                back.style.marginTop = 'var(--sp-2-5)';
+                const back = el('button', 'auth-link auth-back', 'Sign in as someone else');
                 back.onclick = () => { setAppSession(''); ov.dataset.mode = ''; authShow('login'); };
                 card.append(fc, fp, err, go, back);
             } else {
@@ -22867,7 +22944,25 @@ Projected Image UK"></textarea>
                    and change cards already did this; login was the one that
                    missed it. */
                 [inUser, inPw].forEach(i => i.onkeydown = (e) => { if (e.key === 'Enter') submit(); });
-                card.append(fu, fp, err, go);
+                /* There is no reset-by-email: accounts are the app's own, and
+                   an admin resets a password from Team, which hands over a
+                   starter password that has to be changed on first use. The
+                   link says so rather than pretending to send anything. */
+                const forgot = el('button', 'auth-link', 'Forgot password?');
+                forgot.type = 'button';
+                const help = el('p', 'auth-note', 'Ask an admin to reset it in Team. They will give '
+                    + 'you a starter password, and you choose your own the first time you sign in with it.');
+                help.id = 'au-forgot'; help.hidden = true;
+                forgot.setAttribute('aria-controls', 'au-forgot');
+                forgot.setAttribute('aria-expanded', 'false');
+                forgot.onclick = () => {
+                    const open = help.hidden;
+                    help.hidden = !open;
+                    forgot.setAttribute('aria-expanded', String(open));
+                };
+                const row = el('div', 'auth-row');
+                row.append(err, forgot);
+                card.append(fu, fp, row, help, go);
             }
             ov.append(card);
             const first = card.querySelector('input'); if (first) setTimeout(() => first.focus(), 50);

@@ -6492,7 +6492,11 @@ def t_done_saves_before_it_leaves_and_a_failure_keeps_the_draft():
     claim = fn_src("function claimLocalCache(")
     ok("Promise.resolve().then(wgLoadLayouts);" in claim and claim.index("wgLoadLayouts") < claim.index("if (owner === id) return;"),
        "the layouts are read when the app learns who is signed in, including a sign-in that does not reload the page")
-    ok(SCRIPT.count("wgLoadLayouts") == 2, "and from nowhere else, so a read made before sign-in cannot switch Customize off")
+    # Two callers, both after sign-in: claimLocalCache, and the moment a
+    # starter password is replaced (the read during it was refused).
+    ok(SCRIPT.count("wgLoadLayouts") == 3 and SCRIPT.count("wgLoadLayouts();") == 1
+       and "wgLoadLayouts();" in SCRIPT[SCRIPT.index("const r = await authApi('/api/auth/password'"):][:900],
+       "and from nowhere else, so a read made before sign-in cannot switch Customize off")
 
 
 @test
@@ -6715,6 +6719,62 @@ def t_no_native_dialog_is_left_in_the_page():
        "no native dialog anywhere in the script")
     ok("function uiAskText(" in SCRIPT, "an in-page replacement exists")
     ok("await uiAskText('Save to Files'" in SCRIPT, "and the attachment save uses it")
+
+
+@test
+def t_the_sign_in_card_is_the_clean_minimal_design():
+    """Cameron's reference was a React/Tailwind component (clean-minimal-sign-in);
+    the app has neither, so the look is rebuilt on the card that already runs
+    all four steps: a sky-tinted card with a soft float, a white tile carrying
+    the step's mark, centred heading and subtitle, an icon inside each field
+    with the name as placeholder, and a button that darkens toward its foot.
+    What the reference had and this app cannot honour is left out on purpose:
+    there is no Google, Facebook or Apple sign-in, and the image policy would
+    block the logos anyway."""
+    card = re.search(r"\.auth-card \{[^}]*\}", CSS, re.S).group(0)
+    for want in ("linear-gradient(to bottom, var(--auth-card-top), var(--surface-primary))",
+                 "border-radius: var(--radius-xl)", "var(--shadow-lg)", "var(--auth-card-line)"):
+        ok(want in card, "the card carries " + want)
+    ok("background: linear-gradient(to bottom, var(--auth-go-top), var(--action-primary))" in CSS,
+       "the button darkens toward its foot")
+    fld = SCRIPT.split("function authField(labelText, type, id) {")[1][:1600]
+    ok("el('label', 'sr-only', labelText)" in fld, "the label stays, for screen readers and password managers")
+    ok("inp.placeholder = labelText" in fld, "the name is shown in the field")
+    ok("ic.innerHTML = I[glyph]" in fld and "'lock'" in fld and "'atSign'" in fld,
+       "each field carries its icon, from the constant set")
+    ok("card.append(authBrand(mode === 'change' ? 'lock' : 'logIn'))" in SCRIPT
+       and "card.append(authBrand('key'), el('h2', null, 'One more step')" in SCRIPT,
+       "every step shows its mark in the tile, the two-step code included")
+    login = SCRIPT.split("card.append(el('h2', null, 'Sign in')")[1][:3200]
+    ok("'Forgot password?'" in login and "Ask an admin to reset it in Team" in login,
+       "forgetting a password says what actually happens: an admin resets it")
+    ok("forgot.setAttribute('aria-expanded'" in login and "help.hidden" in login,
+       "and the note is a disclosure a screen reader can follow")
+    for gone in ("Or sign in with", "cdn.21st.dev", "Get Started", "Sign in with email"):
+        ok(gone not in SCRIPT, "nothing of the reference that this app cannot honour: " + gone)
+    step = SCRIPT[SCRIPT.index("function authShowMfa("):]
+    step = step[:step.index("\n            async function finish")]
+    ok("el('div', 'auth-error')" in step and "el('div', 'auth-err')" not in step,
+       "a wrong code is styled like every other sign-in error")
+
+
+@test
+def t_a_starter_password_reaches_the_choose_your_own_card():
+    """Found while rebuilding the sign-in card, and live since the widget grid
+    moved the layouts read into sign-in: the server refuses every route but
+    /api/auth/* while an account holds a starter password, with the reason
+    must_change, and api() read any such refusal as an expired session. So the
+    layouts call wiped the new session and reloaded, and a new account, or one
+    an admin had just reset, never saw the choose-your-own card at all."""
+    fn = SCRIPT[SCRIPT.index("async function api(path, payload, opts) {"):]
+    fn = fn[:fn.index("\n        }\n")]
+    at = fn.find("if (reason === 'must_change') {")
+    ok(at > 0, "a starter password is recognised")
+    ok("authShow('change');" in fn[at:at + 120] and "throw new Error(text);" in fn[at:at + 160],
+       "and answered with the card, not with a sign-out")
+    ok(at < fn.find("setAppSession('');"), "before anything wipes the session")
+    change = SCRIPT[SCRIPT.index("const r = await authApi('/api/auth/password'"):][:900]
+    ok("wgLoadLayouts();" in change, "and the layouts refused meanwhile are read once the password is changed")
 
 
 @test
