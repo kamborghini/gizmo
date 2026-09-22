@@ -7586,6 +7586,16 @@ console.log(JSON.stringify([londonHM('2026-07-01T08:30:00Z'), londonHM('2026-12-
     ok(got[:2] == ["09:30", "08:30"], "summer is an hour on, winter is not: %r" % got)
 
 
+
+@test
+def t_the_import_report_counts_erased_people_without_naming_them():
+    """The Pipedrive import says how many erased people it kept out and how
+    many records it took their details out of, and nothing else about them."""
+    i = SCRIPT.index("const er = rep.erased || {};")
+    block = SCRIPT[i:i + 700]
+    ok("er.people" in block and "er.scrubbed" in block, block)
+    ok(".name" not in block and "emails" not in block, "counts only, never a name")
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

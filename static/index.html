@@ -17790,6 +17790,14 @@ Projected Image UK"></textarea>
                     + (ke.persons || 0) + ' people, ' + (ke.orgs || 0) + ' organisations, '
                     + (ke.activities || 0) + ' activities'));
             }
+            /* Counts only: the whole point is that nobody's name is shown. */
+            const er = rep.erased || {};
+            if ((er.people || 0) + (er.scrubbed || 0)) {
+                out.append(el('div', 'crm-sub', 'People erased on request stay out: '
+                    + (er.people ? er.people + (er.people === 1 ? ' contact' : ' contacts') + ' in Pipedrive not brought back, ' : '')
+                    + (er.scrubbed || 0) + (er.scrubbed === 1 ? ' deal, task or note' : ' deals, tasks and notes')
+                    + ' with their details taken out.'));
+            }
             const nm = r.not_migrated || {};
             const losses = [];
             if (nm.files) losses.push(nm.files + ' files and attachments stay in Pipedrive');

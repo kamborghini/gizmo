@@ -31,6 +31,8 @@ import atexit
 import base64
 import hashlib
 import socket
+import unicodedata
+import bisect
 import asyncio
 import logging
 import secrets
@@ -12351,6 +12353,667 @@ def _crm_tombstone_contact(d: dict, kind: str, rec: dict) -> None:
     d[kind].pop(rec["id"], None)
 
 
+# ---- What an erasure leaves behind, and how it stays out ----------------
+# An organisation's deal outlives a contact who asked to be erased: it is the
+# organisation's history. Pipedrive still holds the deal, often with their
+# name in its title and their number in its notes, and the import keeps
+# updating it (stage, value, won), so the name is taken out on EVERY import,
+# not once. To do that the app has to recognise the name without keeping it:
+# each erased name, address and number is remembered only as a keyed hash,
+# never as text. When TOKEN_ENCRYPTION_KEY is set the key comes from it, so a
+# copy of the CRM file (a backup, a snapshot) holds hashes without their key.
+#
+# Two rules keep it from taking what is somebody else's. Only the address the
+# erasure was asked for recognises a person (a colleague who shares a
+# switchboard number or a sales@ address is not them). And anything a live
+# contact also holds (that number, that address, the same name) is theirs
+# too, and is left alone, except in the records that were linked to the
+# person erased.
+_ERASE_EMAIL_RE = re.compile(r"[\w+-][\w.'+-]*@[\w-]+(?:\.[\w-]+)+")
+_ERASE_WORD_RE = re.compile(r"[^\W_]+(?:['-][^\W_]+)*")
+_ERASE_DIGITS_RE = re.compile(r"\+?\d+")
+_ERASE_URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.I)
+# Tags that end a line of text: a name never runs across them.
+_ERASE_BLOCK_TAG_RE = re.compile(r"</?(?:p|br|div|li|ul|ol|tr|td|th|table|h[1-6]|blockquote|pre|hr)\b[^<>]{0,300}>", re.I)
+_ERASE_TAG_RE = re.compile(r"</?[a-zA-Z][^<>]{0,300}>")
+_ERASE_ENTITY_RE = re.compile(r"&(?:nbsp|#160|#xa0|amp|#38);", re.I)
+_ERASE_SPACE_GAP_RE = re.compile(r"[ \t ]+")
+_ERASE_SEP_GAP_RE = re.compile(r"[ \t ]*[&+/()\"'\-–—:][ \t ]*")
+_ERASE_INITIAL_GAP_RE = re.compile(r"\.[ \t ]*")
+_ERASE_REV_GAP_RE = re.compile(r",[ \t ]*")
+_ERASE_PHONE_MIN = 7        # shorter digit runs are order numbers and quantities
+_ERASE_HONORIFICS = frozenset("mr mrs ms miss mx dr prof sir dame rev".split())
+_ERASE_PHONE_LABELS = frozenset(
+    "tel telephone phone ph mob mobile m t cell work home office direct dd switchboard "
+    "fax ext extension x".split())
+# Words that are names AND ordinary English: in a name they count only when
+# written with a capital, so "the price will include delivery" and "amber
+# glass" are not a contact called Will Price or Amber Glass.
+_ERASE_COMMON = frozenset("""
+will price rose amber glass stage door grace hope mark bill frank joy dawn may june april
+summer autumn winter hunter baker cook young white black green brown gold silver stone wood
+hill field ward king lord bishop knight page bell cross lamb fox wolf bird rice long short
+little street lane park bank chase dean earl duke reed rush sharp strong swift wise best hall
+moss pool well wells banks lake ford marsh hart church chapel mason porter carter turner
+walker parker cooper fisher miller taylor steel iron light lighting gobo gobos metal sales
+office accounts info team studio events show house theatre art sky star sun rain snow ray
+lee dale glen heath brook rock ash holly ivy daisy poppy iris lily olive pearl ruby crystal
+faith mercy patience honor honour sterling penny cash case nick pat sue don ben rob jack
+""".split())
+
+
+def _erase_norm(s) -> str:
+    s = unicodedata.normalize("NFC", str(s or ""))
+    return s.replace("’", "'").replace("‘", "'")
+
+
+def _erase_phone_canon(digits: str) -> str:
+    """One spelling of a UK number: +44 191..., 0044 191..., +44 (0)191...
+    and 0191... are the same phone."""
+    d = re.sub(r"\D", "", str(digits or ""))
+    if d.startswith("00"):
+        d = d[2:]
+    if d.startswith("440"):
+        d = "0" + d[3:]
+    elif d.startswith("44") and len(d) == 12:
+        d = "0" + d[2:]
+    return d
+
+
+def _erase_phone_of(w: str) -> str:
+    """The number in a stored phone value, or "" when it is not one. Labels
+    and an extension ("Mob: 07700 900123", "0191 111 2222 ext 4") come off;
+    any other word means it is not a phone."""
+    core = re.sub(r"(?i)(?:\bext(?:ension)?\.?|\bx|#)\s*\d{1,5}\s*$", "", w)
+    words = re.findall(r"[^\W\d_]+", core)
+    if any(x.lower() not in _ERASE_PHONE_LABELS for x in words):
+        return ""
+    core = re.sub(r"[^\W\d_]+\.?:?", " ", core)
+    if not re.fullmatch(r"[\d\s().+/-]+", core.strip() or "x"):
+        return ""
+    d = _erase_phone_canon(core)
+    return d if len(d) >= _ERASE_PHONE_MIN else ""
+
+
+def _erase_canon(word) -> list:
+    """What one erased word is, as [(kind, canonical, size)].
+
+    kind is "email", "phone", "name" (in order, 2 words or more) or "rev" (a
+    two-word name surname first, which needs a comma in the text). A name
+    also counts without its title (Dr, Mrs), without a bracketed or trailing
+    part ("Sarah Whitfield (Lumen)", "Sarah Whitfield - Lumen Events"), and,
+    for three or four words, as its first and last word. One word alone is
+    never a name: it is too likely to be somebody else's."""
+    w = _erase_norm(word).strip()
+    if not w:
+        return []
+    if "@" in w:
+        low = w.lower()
+        return [("email", low, 1)] if _ERASE_EMAIL_RE.fullmatch(low) else []
+    if re.search(r"\d", w):
+        d = _erase_phone_of(w)
+        if d:
+            return [("phone", d, 1)]
+        # Not a number: a name with a digit in it ("Sarah Whitfield 2", a
+        # Pipedrive duplicate; "Sarah Whitfield (Panto 2024)"). Its words
+        # are its name, and the verbatim spelling counts too.
+    out, seen = [], set()
+
+    def add(toks, short=True):
+        while toks and toks[0] in _ERASE_HONORIFICS:
+            toks = toks[1:]
+        if len(toks) < 2 or len(" ".join(toks)) < 4:
+            return
+        variants = [toks]
+        alpha = [t for t in toks if not t.isdigit()]
+        if short and 3 <= len(alpha) <= 4:
+            variants.append([alpha[0], alpha[-1]])
+        if short and len(alpha) == 2 and alpha != toks:
+            variants.append(alpha)
+        for v in variants:
+            key = " ".join(v)
+            if ("name", key) not in seen:
+                seen.add(("name", key))
+                out.append(("name", key, len(v)))
+            if len(v) == 2 and ("rev", v[1] + " " + v[0]) not in seen:
+                seen.add(("rev", v[1] + " " + v[0]))
+                out.append(("rev", v[1] + " " + v[0], 2))
+
+    add([t.lower() for t in _ERASE_WORD_RE.findall(w)], short=False)   # verbatim, as stored
+    # Without a bracketed part, a quoted nickname, or what follows a dash, a
+    # slash, a bar or a comma ("Sarah Whitfield, LD", "... / Lumen").
+    cleaned = re.sub(r"\([^)]*\)|\"[^\"]*\"|(?<!\w)'[^']*'(?!\w)", " ", w)
+    cleaned = re.split(r"\s[-–—|/]\s|,", cleaned)[0]
+    add([t.lower() for t in _ERASE_WORD_RE.findall(cleaned)])
+    return out
+
+
+def _erase_alive(people, names=()) -> set:
+    """(kind, canonical) for everything live contacts hold (their names, their
+    addresses and their numbers) and for other names that are not a person's
+    (organisations: a contact stored as "Lumen Events" or "Box Office" is the
+    firm's or the role's name, not theirs). What is theirs too is not taken
+    out."""
+    out = set()
+    for p in people:
+        for w in _erase_words_of(p):
+            for kind, canon, _n in _erase_canon(w):
+                out.add((kind, canon))
+    for w in names:
+        for kind, canon, _n in _erase_canon(w):
+            if kind in ("name", "rev"):
+                out.add((kind, canon))
+    return out
+
+
+def _erase_same_person(a_words, b_words) -> bool:
+    """Two contact records are one person when they have the same name AND
+    share an address or a number. Either alone is not enough: a colleague
+    shares the switchboard, a namesake shares the name."""
+    def split(words):
+        names, ids = set(), set()
+        for w in words:
+            for kind, canon, _n in _erase_canon(w):
+                if kind == "name":
+                    names.add(canon)
+                elif kind in ("email", "phone"):
+                    ids.add((kind, canon))
+        return names, ids
+    an, ai = split(a_words)
+    bn, bi = split(b_words)
+    return bool(an & bn) and bool(ai & bi)
+
+
+def _erase_list(v) -> list:
+    """A stored field as a list of values, whatever shape it arrived in."""
+    if isinstance(v, (list, tuple)):
+        return list(v)
+    return [v] if isinstance(v, str) and v else []
+
+
+def _erase_words_of(p) -> list:
+    if not isinstance(p, dict):
+        return []
+    return [p.get("name")] + _erase_list(p.get("emails")) + _erase_list(p.get("phones"))
+
+
+def _erase_pepper() -> tuple:
+    """(secret, key id) mixed into every mark's key: derived from the token
+    vault's key when there is one, so the CRM file alone cannot be brute
+    forced; nothing, and the id "none", when there is not."""
+    try:
+        k = tokenvault._key()
+    except Exception:
+        k = None
+    if not k:
+        return b"", "none"
+    pep = hmac.new(k, b"gizmo-erasure-marks-v1", hashlib.sha256).digest()
+    return pep, hashlib.sha256(pep).hexdigest()[:12]
+
+
+def _erase_key(salt: str, pepper: bytes) -> bytes:
+    raw = bytes.fromhex(salt)
+    return hmac.new(pepper, raw, hashlib.sha256).digest() if pepper else raw
+
+
+def _erase_hash(key: bytes, kind: str, canon: str) -> str:
+    return hmac.new(key, (kind + ":" + canon).encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+
+
+def _erase_stale_marks(d: dict) -> int:
+    """Marks made under a key this process does not have (TOKEN_ENCRYPTION_KEY
+    was changed or removed). They can no longer recognise anyone, so an
+    import that relied on them would bring erased people back."""
+    _pep, kid = _erase_pepper()
+    return sum(1 for m in (d.get("erased_marks") or [])
+               if isinstance(m, dict) and str(m.get("kid") or "none") not in ("none", kid))
+
+
+def _erase_import_blocker(d: dict) -> str:
+    """Why a Pipedrive import must not run now, or "". Both reasons are the
+    same risk: people erased on request coming back."""
+    if MAILBOX_PATH in _poisoned_stores:
+        return ("The mailbox file could not be read, and it holds the list of people erased on "
+                "request. Nothing is imported until it is repaired, so nobody who asked to be "
+                "erased comes back.")
+    stale = _erase_stale_marks(d)
+    if stale:
+        return ("People erased on request are remembered under a different encryption key "
+                "(TOKEN_ENCRYPTION_KEY was changed or removed), so an import could not keep "
+                "them out. Put the previous key back before importing.")
+    return ""
+
+
+def _erase_remember(d: dict, words, pd_ids=(), request: str = "", shared=()) -> None:
+    """Keep what is needed to recognise an erased person again, and nothing
+    that names them: keyed hashes of their name, addresses and numbers, the
+    address the erasure was asked for as the one that recognises them, and
+    the Pipedrive ids their contact had. A word a live contact also holds
+    (shared: a switchboard, an office@ address, a namesake) is remembered as
+    shared, and is taken out only of the records that were theirs, even
+    after that contact has gone."""
+    salt = str(d.get("erased_salt") or "")
+    if not re.fullmatch(r"[0-9a-f]{32}", salt):
+        salt = secrets.token_hex(16)
+        d["erased_salt"] = salt
+        d["erased_marks"] = []          # marks under another salt can never match again
+    pepper, kid = _erase_pepper()
+    key = _erase_key(salt, pepper)
+    marks = [m for m in (d.get("erased_marks") or []) if isinstance(m, dict)]
+    have = {(m.get("k"), m.get("h")) for m in marks}
+
+    shared = set(shared or ())
+    old_keys = {"none": _erase_key(salt, b"")}
+    if pepper:
+        old_keys[kid] = key
+    was_shared = {(m.get("k"), m.get("h"), str(m.get("kid") or "none")) for m in marks if m.get("s")}
+
+    def put(kind, canon, n, s=False):
+        h = _erase_hash(key, kind, canon)
+        # Once remembered as shared, always: a mark made again later, when
+        # nobody live holds it any more (or under a new key), keeps that.
+        s = s or any((kind, _erase_hash(k_, kind, canon), mk) in was_shared for mk, k_ in old_keys.items())
+        if (kind, h) not in have:
+            have.add((kind, h))
+            m = {"k": kind, "h": h, "n": n, "kid": kid}
+            if s:
+                m["s"] = 1
+            marks.append(m)
+
+    for w in words:
+        for kind, canon, n in _erase_canon(w):
+            put(kind, canon, n, (kind, canon) in shared)
+            if kind in ("name", "rev"):
+                put("first", canon.split(" ")[0], 1)
+    req = _erase_norm(request).strip().lower()
+    if req and _ERASE_EMAIL_RE.fullmatch(req):
+        put("req", req, 1)
+        put("email", req, 1)
+    d["erased_marks"] = marks[-40000:]
+    ids = [str(x) for x in (d.get("erased_pd_persons") or [])]
+    for x in pd_ids:
+        if x and str(x) not in ids:
+            ids.append(str(x))
+    d["erased_pd_persons"] = ids[-20000:]
+
+
+def _erase_scrubber(d: Optional[dict] = None, words=(), alive=(), requests=()):
+    """A function scrub(text, linked=False) that takes every erased name,
+    address and number out of a text, or None when there is nothing it could
+    take out. It knows the CRM's remembered marks (d), words handed to it in
+    the clear (an erasure's own, or a Pipedrive contact recognised as erased),
+    and erased addresses that recognise a person (requests: the mailbox's
+    list). What live contacts hold (alive) is left alone, except in a record
+    that was linked to the person erased (linked=True), where their name is
+    theirs whoever else shares it.
+
+    Matching is by whole words: an address as a whole address; a number
+    whatever its spacing; a name of two words or more, in order, its words
+    apart by spaces, an initial's full stop, or &, +, /, brackets, a dash or a
+    colon, never across a new line or a sentence; surname first only with a
+    comma. Ordinary words ("Will", "Price") count in a name only with a
+    capital. Tags and entities in HTML notes are seen through."""
+    known: dict = {}
+    for w in words:
+        for kind, canon, n in _erase_canon(w):
+            known.setdefault(kind, set()).add(canon)
+            if kind in ("name", "rev"):
+                known.setdefault("first", set()).add(canon.split(" ")[0])
+    for r in requests:
+        r = _erase_norm(r).strip().lower()
+        if r and "@" in r:
+            known.setdefault("req", set()).add(r)
+            known.setdefault("email", set()).add(r)
+    sizes: set = {n for kind, canon, n in
+                  [c for w in words for c in _erase_canon(w)] if kind == "name"}
+    # Remembered marks, by the key they can be read with: the salt alone for
+    # marks made while no TOKEN_ENCRYPTION_KEY was set (still readable once
+    # one is), the salt and the key for marks made since. Each hash maps to
+    # whether it was shared with a live contact when it was remembered.
+    salt = str((d or {}).get("erased_salt") or "")
+    pepper, kid = _erase_pepper()
+    keys: dict = {}
+    if re.fullmatch(r"[0-9a-f]{32}", salt):
+        keys["none"] = _erase_key(salt, b"")
+        if pepper:
+            keys[kid] = _erase_key(salt, pepper)
+    hashed: dict = {}                   # key id -> kind -> {hash: shared}
+    for m in (d or {}).get("erased_marks") or []:
+        if not (isinstance(m, dict) and m.get("k") and m.get("h")):
+            continue
+        mk = str(m.get("kid") or "none")
+        if mk not in keys:
+            continue                    # made under a key this process does not have
+        hashed.setdefault(mk, {}).setdefault(m["k"], {})[m["h"]] = bool(m.get("s"))
+        if m["k"] == "name":
+            try:
+                sizes.add(int(m.get("n") or 2))
+            except (TypeError, ValueError):
+                sizes.add(2)
+
+    def has(kind):
+        return bool(known.get(kind)) or any(h.get(kind) for h in hashed.values())
+
+    if not any(has(k) for k in ("email", "phone", "name", "rev")):
+        return None
+    alive = set(alive or ())
+    memo: dict = {}
+    first_memo: dict = {}
+
+    def lookup(kind: str, canon: str) -> int:
+        """0: not an erased word; 1: erased; 2: erased, but it was a live
+        contact's too when it was remembered (a switchboard, an office@)."""
+        k2 = (kind, canon)
+        if k2 not in memo:
+            marked = 0
+            for mk, by_kind in hashed.items():
+                got = by_kind.get(kind)
+                if got:
+                    h = _erase_hash(keys[mk], kind, canon)
+                    if h in got:
+                        marked = max(marked, 2 if got[h] else 1)
+            # Shared wins: a word handed over in the clear (a recognised
+            # contact's number, as Pipedrive has it) is still the firm's
+            # switchboard if it was remembered as shared.
+            memo[k2] = 2 if marked == 2 else (1 if marked or canon in known.get(kind, ()) else 0)
+        return memo[k2]
+
+    def is_known(kind: str, canon: str) -> bool:
+        return lookup(kind, canon) > 0
+
+    def applies(kind: str, canon: str, linked: bool) -> bool:
+        """An erased word, here: always in a record that was the erased
+        person's; elsewhere only if no live contact holds it now and none did
+        when it was remembered."""
+        hit = lookup(kind, canon)
+        if not hit:
+            return False
+        if linked:
+            return True
+        return hit == 1 and (kind, canon) not in alive
+
+    size_order = sorted((n for n in sizes if 2 <= n <= 6), reverse=True)
+
+    def caps_ok(raw_tokens) -> bool:
+        return all(t[:1].isupper() or t.lower() not in _ERASE_COMMON for t in raw_tokens)
+
+    def gap_ok(gap: str, before: str) -> bool:
+        if _ERASE_SPACE_GAP_RE.fullmatch(gap) or _ERASE_SEP_GAP_RE.fullmatch(gap):
+            return True
+        return len(before) == 1 and bool(_ERASE_INITIAL_GAP_RE.fullmatch(gap))
+
+    def phone_gap_ok(gap: str) -> bool:
+        return len(gap) <= 8 and "\n" not in gap and sum(c in "()./-" for c in gap) <= 2 \
+            and not gap.strip(" \t ()./-")
+
+    want_email = has("email")
+    want_phone = has("phone")
+    want_name = bool(size_order or has("rev"))
+    done: dict = {}                     # text -> result: an import's sweep meets its own output again
+
+    def scrub(text, linked: bool = False):
+        if not isinstance(text, str) or not text:
+            return text
+        ck = (text, bool(linked))
+        if ck in done:
+            return done[ck]
+        out = _scrub(text, linked)
+        if len(done) < 250000:
+            done[ck] = out
+            if out != text:
+                done[(out, bool(linked))] = out
+        return out
+
+    def _scrub(text, linked):
+        s = unicodedata.normalize("NFC", text) if not unicodedata.is_normalized("NFC", text) else text
+        # Two views of the text, both the same length as it, so a match maps
+        # straight back. Addresses and numbers are read with the tags left in
+        # (an address is often inside them: "Sarah <sarah@...>", a mailto
+        # link); names are read with tags blanked, and a paragraph or line
+        # break read as the end of a line, which no name runs across.
+        ent = s.replace("\u2019", "'").replace("\u2018", "'")
+        if "&" in ent:
+            ent = _ERASE_ENTITY_RE.sub(
+                lambda m: ("&" if m.group(0).lower() in ("&amp;", "&#38;") else " ") + " " * (len(m.group(0)) - 1),
+                ent)
+        flat = ent
+        if "<" in flat:
+            flat = _ERASE_BLOCK_TAG_RE.sub(lambda m: "\n" * len(m.group(0)), flat)
+            flat = _ERASE_TAG_RE.sub(lambda m: " " * len(m.group(0)), flat)
+        spans = []
+        masked = []                         # inside an address or a link: not a name
+        if "@" in ent:
+            for m in _ERASE_EMAIL_RE.finditer(ent):
+                masked.append((m.start(), m.end()))
+                canon = m.group(0).lower()
+                if want_email and applies("email", canon, linked):
+                    spans.append((m.start(), m.end()))
+        if "http" in ent or "www." in ent or "HTTP" in ent or "WWW." in ent:
+            for m in _ERASE_URL_RE.finditer(ent):
+                masked.append((m.start(), m.end()))
+
+        masked.sort()
+        mask_starts = [m[0] for m in masked]
+        mask_reach, far = [], -1
+        for _ma, mb in masked:
+            far = max(far, mb)
+            mask_reach.append(far)
+
+        def in_mask(a, b):
+            """Does a..b overlap an address or a link: does any mask that
+            starts before b end after a?"""
+            k = bisect.bisect_left(mask_starts, b)
+            return k > 0 and mask_reach[k - 1] > a
+
+        chains, cur = [], []
+        for g in (_ERASE_DIGITS_RE.finditer(ent) if want_phone else ()):
+            if cur and phone_gap_ok(ent[cur[-1].end():g.start()]) and not g.group(0).startswith("+"):
+                cur.append(g)
+            else:
+                if cur:
+                    chains.append(cur)
+                cur = [g]
+        if cur:
+            chains.append(cur)
+        for ch in chains:
+            digs = [g.group(0).lstrip("+") for g in ch]
+            if sum(len(x) for x in digs) < _ERASE_PHONE_MIN:
+                continue
+            i = 0
+            while i < len(ch):
+                hit = None
+                for j in range(min(len(ch), i + 6) - 1, i - 1, -1):     # the longest number first
+                    raw = "".join(digs[i:j + 1])
+                    if not (_ERASE_PHONE_MIN <= len(raw) <= 16):
+                        continue
+                    num = _erase_phone_canon(raw)
+                    if len(num) >= _ERASE_PHONE_MIN and applies("phone", num, linked) \
+                            and not in_mask(ch[i].start(), ch[j].end()):
+                        hit = j
+                        break
+                if hit is None:
+                    i += 1
+                    continue
+                spans.append((ch[i].start(), ch[hit].end()))
+                i = hit + 1
+        has_first = has("first")
+        if want_name:
+            it = _ERASE_WORD_RE.finditer(flat)
+            toks = list(it) if not masked else [t for t in it if not in_mask(t.start(), t.end())]
+            low = [t.group(0).lower() for t in toks]
+            if has_first:
+                starts = []
+                for w in low:
+                    v = first_memo.get(w)
+                    if v is None:
+                        v = is_known("first", w) or (w.endswith("'s") and is_known("first", w[:-2]))
+                        first_memo[w] = v
+                    starts.append(v)
+            else:
+                starts = [True] * len(toks)
+            cand = [i for i, v in enumerate(starts) if v]
+            covered = set()
+
+            def name_ok(kind, canon):
+                return applies(kind, canon, linked)
+
+            for i in cand:
+                if i in covered:
+                    continue
+                hit = None
+                for n in size_order:
+                    j = i + n - 1
+                    if j >= len(toks):
+                        continue
+                    if not all(gap_ok(flat[toks[k].end():toks[k + 1].start()], low[k])
+                               for k in range(i, j)):
+                        continue
+                    raw = [t.group(0) for t in toks[i:j + 1]]
+                    if not caps_ok(raw):
+                        continue
+                    words_ = low[i:j + 1]
+                    if name_ok("name", " ".join(words_)):
+                        hit = (j, toks[j].end())
+                        break
+                    # "Sarah Whitfield's order": the possessive is part of
+                    # the last word to the tokenizer, and stays in the text.
+                    if words_[-1].endswith("'s") and name_ok("name", " ".join(words_[:-1] + [words_[-1][:-2]])):
+                        hit = (j, toks[j].end() - 2)
+                        break
+                if hit is None:
+                    continue
+                a, b = toks[i].start(), hit[1]
+                # A bracket opened inside the name closes with it.
+                if flat.count("(", a, b) > flat.count(")", a, b) and flat[b:b + 1] == ")":
+                    b += 1
+                spans.append((a, b))
+                covered.update(range(i, hit[0] + 1))
+            def name_word_next_to(k, j):
+                """A capitalised word right beside token k (j = k-1 or k+1),
+                with only spaces between: then k is part of another name."""
+                if not (0 <= j < len(toks)) or not toks[j].group(0)[:1].isupper():
+                    return False
+                a, b = (toks[j].end(), toks[k].start()) if j < k else (toks[k].end(), toks[j].start())
+                return bool(_ERASE_SPACE_GAP_RE.fullmatch(flat[a:b]))
+
+            for i in cand:
+                if i + 1 >= len(toks) or i in covered or i + 1 in covered:
+                    continue
+                if not _ERASE_REV_GAP_RE.fullmatch(flat[toks[i].end():toks[i + 1].start()]):
+                    continue
+                # "Cc: Tom Whitfield, Sarah Jones" is two other people, not
+                # Sarah Whitfield surname first.
+                if name_word_next_to(i, i - 1) or name_word_next_to(i + 1, i + 2):
+                    continue
+                if not caps_ok([toks[i].group(0), toks[i + 1].group(0)]):
+                    continue
+                if name_ok("rev", low[i] + " " + low[i + 1]):
+                    spans.append((toks[i].start(), toks[i + 1].end()))
+                    covered.update((i, i + 1))
+        if not spans:
+            return text
+        spans.sort()
+        merged = [list(spans[0])]
+        for a, b in spans[1:]:
+            if a <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], b)
+            else:
+                merged.append([a, b])
+        out, at = [], 0
+        for a, b in merged:
+            out.append(s[at:a])
+            out.append("[erased]")
+            at = b
+        out.append(s[at:])
+        return "".join(out)
+
+    def knows(kind: str, canon: str) -> bool:
+        return is_known(kind, _erase_norm(canon).strip().lower() if kind in ("req", "email") else canon)
+
+    scrub.knows = knows
+    return scrub
+
+
+def _erase_sweep(d: dict, scrub, linked_people=(), apply: bool = True,
+                 linked_orgs=(), skip_people=()) -> set:
+    """Every free-text field the CRM keeps, through scrub: deal titles, lost
+    reasons and comments, notes, changelogs and custom values; tasks; the
+    notes, job titles, addresses and custom values of contacts and
+    organisations; leads; and the lost-reason list. Names, addresses and
+    numbers of live contacts are their own and are not touched. Returns the
+    records it changed (or would, with apply=False) as (collection, id).
+    Nothing is marked as edited here, so the import keeps updating them."""
+    if scrub is None:
+        return set()
+    changed: set = set()
+    linked_people = {str(x) for x in linked_people if x}
+    linked_orgs = {str(x) for x in linked_orgs if x}
+    skip_people = {str(x) for x in skip_people if x}
+
+    def fix(rec, coll, rid, fields, notes=True, linked=False):
+        hit = False
+        for f in fields:
+            v = rec.get(f)
+            if isinstance(v, str) and v:
+                nv = scrub(v, linked)
+                if nv != v:
+                    hit = True
+                    if apply:
+                        rec[f] = nv
+        if notes and isinstance(rec.get("notes"), list):
+            for n in rec["notes"]:
+                if isinstance(n, dict) and isinstance(n.get("text"), str) and n["text"]:
+                    nv = scrub(n["text"], linked)
+                    if nv != n["text"]:
+                        hit = True
+                        if apply:
+                            n["text"] = nv
+        if isinstance(rec.get("custom"), dict):
+            new = {}
+            for ck, cv in rec["custom"].items():
+                nv = scrub(cv, linked) if isinstance(cv, str) else cv
+                if nv != cv:
+                    hit = True
+                new[ck] = nv
+            if apply:
+                rec["custom"] = new
+        if hit:
+            changed.add((coll, rid))
+
+    for k, deal in (d.get("deals") or {}).items():
+        lk = str(deal.get("person_id") or "") in linked_people
+        fix(deal, "deals", k, ("title", "lost_reason", "lost_comment"), linked=lk)
+        for ch in (deal.get("changelog") if isinstance(deal.get("changelog"), list) else []):
+            if isinstance(ch, dict):
+                for f in ("from", "to"):
+                    if isinstance(ch.get(f), str) and ch[f]:
+                        nv = scrub(ch[f], lk)
+                        if nv != ch[f]:
+                            changed.add(("deals", k))
+                            if apply:
+                                ch[f] = nv
+    for k, act in (d.get("activities") or {}).items():
+        lk = str(act.get("person_id") or "") in linked_people
+        fix(act, "activities", k, ("subject", "note", "location"), notes=False, linked=lk)
+    for k, rec in (d.get("persons") or {}).items():
+        if k in skip_people:
+            continue                    # about to go altogether
+        fix(rec, "persons", k, ("job_title",))
+    for k, rec in (d.get("orgs") or {}).items():
+        # The organisation they were the contact for is theirs to clean,
+        # whatever a namesake elsewhere is called.
+        fix(rec, "orgs", k, ("address",), linked=k in linked_orgs)
+    for k, rec in (d.get("leads") or {}).items():
+        fix(rec, "leads", k, ("title",), linked=str(rec.get("person_id") or "") in linked_people)
+    reasons = [r for r in (d.get("lost_reasons") or []) if isinstance(r, str)]
+    kept = [r for r in reasons if "[erased]" not in r and scrub(r) == r]
+    if len(kept) != len(reasons):
+        changed.add(("lost_reasons", ""))
+        if apply:
+            d["lost_reasons"] = kept
+    return changed
+
+
 async def _crm_shopify_link_sweep(registry: dict, max_pages: int = 40) -> dict:
     """Fill in person.shopify_customer_id by email, in bulk. One paginated
     customer crawl indexed in memory, then a single pass over the people -
@@ -12726,6 +13389,55 @@ def _redact_shop() -> dict:
     return {"wiped": wiped, "archive": kept}
 
 
+def _crm_erase_links(d: dict, pids: set, orgs_touched=()) -> tuple:
+    """What hangs off contacts being erased (already tombstoned by the caller):
+    their own deals go (a website enquiry, a deal with no organisation), with
+    their tasks; an organisation's deal stays without them as its contact, and
+    so do its tasks; an organisation that existed only because of them goes;
+    their leads go. Returns (records erased, mail threads that were theirs)."""
+    erased, threads = 0, set()
+    orgs_touched = {str(x) for x in (orgs_touched or ()) if isinstance(x, (str, int))}
+    if not pids:
+        return erased, threads
+    for k in [k for k, v in (d.get("deals") or {}).items() if str(v.get("person_id") or "") in pids]:
+        deal = d["deals"][k]
+        if deal.get("mail_thread_id"):
+            threads.add(str(deal["mail_thread_id"]))
+        own = (str(deal.get("source") or "") == "Website form" or deal.get("mail_thread_id")
+               or not str(deal.get("org_id") or "").strip())
+        if str(deal.get("org_id") or "").strip():
+            orgs_touched.add(str(deal["org_id"]))
+        if own:
+            _crm_drop_deal(d, k)
+        else:
+            # An organisation's deal is the organisation's record: a won or
+            # lost deal is the history a CRM is kept for, and this person was
+            # only its contact. It stays, without them in it, and is NOT
+            # frozen against the import: Pipedrive's later changes still
+            # arrive, and every import takes the person out again.
+            deal["person_id"] = ""
+        erased += 1
+    for ak in [ak for ak, a in (d.get("activities") or {}).items() if str(a.get("person_id") or "") in pids]:
+        act = d["activities"][ak]
+        if str(act.get("deal_id") or "") in (d.get("deals") or {}):
+            act["person_id"] = ""
+        else:
+            _crm_drop_activity(d, ak)
+    for rec_org in orgs_touched:
+        org = (d.get("orgs") or {}).get(rec_org)
+        if org and not org.get("pd_id") \
+                and not any(str(p.get("org_id") or "") == rec_org for p in d["persons"].values()) \
+                and not any(str(v.get("org_id") or "") == rec_org for v in d["deals"].values()):
+            org["id"] = rec_org
+            _crm_tombstone_contact(d, "orgs", org)
+    for lid in [k for k, v in (d.get("leads") or {}).items() if str(v.get("person_id") or "") in pids]:
+        if d["leads"][lid].get("mail_thread_id"):
+            threads.add(str(d["leads"][lid]["mail_thread_id"]))
+        d["leads"].pop(lid, None)
+        erased += 1
+    return erased, threads
+
+
 def _redact_customer(email: str, customer_id="", retry: bool = False) -> dict:
     """Erase what we hold about a person by choice; keep what we hold by law.
 
@@ -12756,19 +13468,6 @@ def _redact_customer(email: str, customer_id="", retry: bool = False) -> dict:
     names_them = re.compile(r"(?<![\w.+-])" + re.escape(addr) + r"(?![\w-]|\.\w)", re.I)
     their_words: set = {addr}           # what is scrubbed from a record that stays
 
-    def scrub(text):
-        """Their name, addresses and numbers out of a record that stays, as
-        whole words only: a bare substring turned "willow" into "[erased]ow"
-        for a person called Will. A name counts only when it is two words or
-        more; one word alone is too likely to be somebody else's."""
-        out = str(text or "")
-        for w in sorted(their_words, key=len, reverse=True):
-            w = str(w).strip()
-            if len(w) < 4 or ("@" not in w and not any(c.isdigit() for c in w) and len(w.split()) < 2):
-                continue
-            out = re.sub(r"(?<![\w@.])" + re.escape(w) + r"(?![\w@]|\.\w)", "[erased]", out, flags=re.I)
-        return out
-
     # --- erased: the CRM -----------------------------------------------------
     before = erased
     try:
@@ -12776,10 +13475,18 @@ def _redact_customer(email: str, customer_id="", retry: bool = False) -> dict:
             raise RuntimeError("the CRM file could not be read")
         d = _load_crm()
         pids = set()
+        erased_pd: set = set()          # their Pipedrive ids, so the import knows them
         orgs_touched: set = set()
-        for pid in [k for k, v in (d.get("persons") or {}).items()
-                    if addr in {str(e).strip().lower() for e in (v.get("emails") or [])}
-                    or str(v.get("email") or "").strip().lower() == addr]:
+        mine = [k for k, v in (d.get("persons") or {}).items()
+                if addr in {str(e).strip().lower() for e in (v.get("emails") or [])}
+                or str(v.get("email") or "").strip().lower() == addr]
+        # A duplicate of them under another address (same name, and a shared
+        # address or number) is them too.
+        for k, v in (d.get("persons") or {}).items():
+            if k not in mine and any(_erase_same_person(_erase_words_of(v), _erase_words_of(d["persons"][m]))
+                                     for m in mine):
+                mine.append(k)
+        for pid in mine:
             # TOMBSTONED, not just popped. The Pipedrive importer refuses to
             # recreate a contact it has been told is deleted, and it already
             # did that for contacts deleted by hand. An erasure that the next
@@ -12789,68 +13496,37 @@ def _redact_customer(email: str, customer_id="", retry: bool = False) -> dict:
             rec["id"] = pid           # the tombstone pops by the record's own id
             if rec.get("mail_thread_id"):
                 threads_to_erase.add(str(rec["mail_thread_id"]))
-            their_words.update(str(x).strip() for x in [rec.get("name")] + list(rec.get("emails") or [])
-                               + list(rec.get("phones") or []) if str(x or "").strip())
+            their_words.update(str(x).strip() for x in _erase_words_of(rec) if str(x or "").strip())
             if rec.get("org_id"):
                 orgs_touched.add(str(rec["org_id"]))
+            erased_pd.update(str(x) for x in [rec.get("pd_id")] + list(rec.get("pd_merged_ids") or []) if x)
             _crm_tombstone_contact(d, "persons", rec)
             pids.add(pid)
             erased += 1
-        for k in [k for k, v in (d.get("deals") or {}).items()
-                  if pids and str(v.get("person_id") or "") in pids]:
-            deal = d["deals"][k]
-            if deal.get("mail_thread_id"):
-                threads_to_erase.add(str(deal["mail_thread_id"]))
-            own = (str(deal.get("source") or "") == "Website form" or deal.get("mail_thread_id")
-                   or not str(deal.get("org_id") or "").strip())
-            if str(deal.get("org_id") or "").strip():
-                orgs_touched.add(str(deal["org_id"]))
-            if own:
-                # Theirs alone: a website enquiry (whose "organisation" is only
-                # the company they typed into the form, and whose note is their
-                # own message), or a deal with no organisation. It goes.
-                _crm_drop_deal(d, k)
-            else:
-                # An organisation's deal is the organisation's record: a won or
-                # lost deal is the history a CRM is kept for, and this person
-                # was only its contact. It stays, without them in it, and is
-                # marked edited here so the next import cannot write them back.
-                deal["person_id"] = ""
-                deal["title"] = scrub(deal.get("title"))
-                for n in (deal.get("notes") or []):
-                    if isinstance(n, dict):
-                        n["text"] = scrub(n.get("text"))
-                deal["updated_at"], deal["edited_here"] = _crm_now(), True
-            erased += 1
-        for ak in [ak for ak, a in (d.get("activities") or {}).items()
-                   if pids and str(a.get("person_id") or "") in pids]:
-            act = d["activities"][ak]
-            if str(act.get("deal_id") or "") in (d.get("deals") or {}):
-                # On a kept organisation deal: kept, without them in it.
-                act["person_id"] = ""
-                for f in ("subject", "note", "location"):
-                    if act.get(f):
-                        act[f] = scrub(act.get(f))
-                act["updated_at"], act["edited_here"] = _crm_now(), True
-            else:
-                _crm_drop_activity(d, ak)
-        # An organisation that existed only because of them (typed into their
-        # enquiry form, never imported, nobody else in it) goes too.
-        for rec_org in [pid_org for pid_org in orgs_touched]:
-            org = (d.get("orgs") or {}).get(rec_org)
-            if org and not org.get("pd_id") \
-                    and not any(str(p.get("org_id") or "") == rec_org for p in d["persons"].values()) \
-                    and not any(str(v.get("org_id") or "") == rec_org for v in d["deals"].values()):
-                org["id"] = rec_org
-                _crm_tombstone_contact(d, "orgs", org)
+        # Everything that stays is swept for them, with their own former
+        # records (still linked, so still counted as theirs whatever a
+        # namesake is called) swept before they are cut loose. Nothing is
+        # marked as edited here: the import keeps updating these records,
+        # and takes them out again each time.
+        alive = _erase_alive((d.get("persons") or {}).values(),
+                             [o.get("name") for o in (d.get("orgs") or {}).values()])
+        _erase_sweep(d, _erase_scrubber(words=their_words, alive=alive), linked_people=pids,
+                     linked_orgs=orgs_touched)
+        n, threads = _crm_erase_links(d, pids, orgs_touched)
+        erased += n
+        threads_to_erase |= threads
         # Leads carry person_id, not an email, so matching their email alone
         # never erased one.
         for lid in [k for k, v in (d.get("leads") or {}).items()
-                    if str(v.get("email") or "").strip().lower() == addr
-                    or (pids and str(v.get("person_id") or "") in pids)]:
+                    if str(v.get("email") or "").strip().lower() == addr]:
             if d["leads"][lid].get("mail_thread_id"):
                 threads_to_erase.add(str(d["leads"][lid]["mail_thread_id"]))
             d["leads"].pop(lid, None); erased += 1
+        # Remembered as keyed hashes only, so every later import can take
+        # them out of the organisation deals Pipedrive keeps updating, and can
+        # refuse to bring them back as a contact, even one this CRM never held:
+        # the address the erasure was asked for is enough.
+        _erase_remember(d, their_words, erased_pd, request=addr, shared=alive)
         _write_crm(d)
     except Exception:
         logger.exception("redact: CRM")
@@ -15082,6 +15758,90 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
     dead_orgs = set(d.get("pd_deleted_orgs") or [])
     dead_persons = set(d.get("pd_deleted_persons") or [])
 
+    # People erased on request, and what the import does about them: they are
+    # never brought back as a contact, and their name, addresses and numbers
+    # are taken out of everything it writes, every time, because Pipedrive
+    # keeps the organisation deals they were on and keeps updating them. A
+    # Pipedrive contact is recognised as erased only by the address the
+    # erasure was asked for (the CRM's keyed marks, and the mailbox's list,
+    # which also holds erasures from before the marks existed), or by the
+    # Pipedrive id their contact had. By id alone, its words are learned only
+    # when one of them is already known as theirs: an id now holding somebody
+    # else must not make that person erased. What live contacts hold is
+    # theirs too, and is left alone.
+    erased_pd = {str(x) for x in (d.get("erased_pd_persons") or [])}
+    try:
+        mail_gone = [a for a in (_load_mail().get("redacted") or []) if isinstance(a, str)]
+    except Exception:
+        logger.exception("crm import: could not read the erased addresses from the mailbox")
+        mail_gone = []
+    blocker = _erase_import_blocker(d)
+    if blocker:
+        report["problems"].append(blocker)
+    base = _erase_scrubber(d, requests=mail_gone)
+    found: dict = {}                    # Pipedrive id -> their words, as Pipedrive has them now
+    payload_people = [p for p in (data.get("persons") or []) if str(p.get("pd_id") or "")]
+    for p in payload_people:
+        pd = str(p["pd_id"])
+        if base is None:
+            break
+        words = _erase_words_of(p)
+        if any(base.knows("req", e) for e in (p.get("emails") or [])):
+            found[pd] = words
+        elif pd in erased_pd and any(base.knows(k, c) for k, c, _n in _erase_canon(p.get("name")) if k == "name"):
+            # By id, only with their NAME: an id Pipedrive gave to their
+            # successor keeps the firm's switchboard and office@ address,
+            # which must not make the successor erased.
+            found[pd] = words
+    # A duplicate of them (same name AND a shared address or number) is them
+    # too: in Pipedrive, where it still arrives as its own contact, and in the
+    # CRM, where Pipedrive may have merged it into theirs.
+    if found:
+        for p in payload_people:
+            pd = str(p["pd_id"])
+            if pd not in found and any(_erase_same_person(_erase_words_of(p), w) for w in list(found.values())):
+                found[pd] = _erase_words_of(p)
+    held = {pd: person_ix[pd] for pd in found
+            if person_ix.get(pd) and person_ix[pd] in (d.get("persons") or {})}
+    if found:
+        for gid, rec in (d.get("persons") or {}).items():
+            if gid not in held.values() and any(_erase_same_person(_erase_words_of(rec), w)
+                                                 for w in list(found.values())):
+                held["dup:" + gid] = gid
+    held_ids = set(held.values())
+    learned: list = []
+    for words in found.values():
+        learned.extend(words)
+    for gid in held_ids:
+        learned.extend(_erase_words_of(d["persons"][gid]))
+    alive = _erase_alive([p for p in payload_people if str(p["pd_id"]) not in found]
+                         + [p for k, p in (d.get("persons") or {}).items()
+                            if k not in held_ids and str(p.get("pd_id") or "") not in erased_pd],
+                         [o.get("name") for o in (data.get("orgs") or [])]
+                         + [o.get("name") for o in (d.get("orgs") or {}).values()])
+    scrub_fn = _erase_scrubber(d, words=learned, alive=alive, requests=mail_gone)
+    linked_pd = set(found) | erased_pd
+    # Their organisations: the one they were the contact for is theirs to
+    # clean, whatever a namesake elsewhere is called.
+    linked_org_pd = {str(p.get("org_pd_id")) for p in payload_people
+                     if str(p["pd_id"]) in found and p.get("org_pd_id")}
+    scrubbed_keys: set = set()
+    report["erased"] = {"people": len(found), "scrubbed": 0}
+
+    def scrub(v, linked=False, key=None):
+        """Their details out of one imported text, noting the record it is in."""
+        if scrub_fn is None or not isinstance(v, str) or not v:
+            return v
+        out = scrub_fn(v, linked)
+        if out != v and key:
+            scrubbed_keys.add(key)
+        return out
+
+    def scrub_custom(c, linked=False, key=None):
+        return {ck: scrub(cv, linked, key) for ck, cv in (c or {}).items()}
+
+    dead_persons |= set(found)
+
     # --- organisations, then people, then deals, then their activities and
     # notes: each one links to the one before, so the order is the order.
     for o in data.get("orgs") or []:
@@ -15100,10 +15860,11 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
         else:
             report["orgs"]["updated"] += 1
         report["custom_values"] += len(o.get("custom") or {})
-        rec.update({"name": o["name"], "address": o["address"],
+        o_linked = str(o.get("pd_id") or "") in linked_org_pd
+        rec.update({"name": o["name"], "address": scrub(o["address"], o_linked, ("orgs", gid)),
                     "website": o.get("website", ""),
                     "label": o.get("label") or rec.get("label", ""),
-                    "custom": o.get("custom") or rec.get("custom") or {},
+                    "custom": scrub_custom(o.get("custom") or rec.get("custom") or {}, o_linked, ("orgs", gid)),
                     "created_at": o["created_at"] or rec.get("created_at") or _crm_now(),
                     "updated_at": o["updated_at"] or _crm_now(), "pd_id": o["pd_id"]})
         rec.setdefault("notes", [])
@@ -15130,10 +15891,10 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
         rec.update({"name": p["name"], "emails": p["emails"], "phones": p["phones"],
                     "email_labels": p.get("email_labels") or [],
                     "phone_labels": p.get("phone_labels") or [],
-                    "job_title": p.get("job_title", ""),
+                    "job_title": scrub(p.get("job_title", ""), key=("persons", gid)),
                     "org_id": org_of.get(p["org_pd_id"], rec.get("org_id", "")),
                     "label": p.get("label") or rec.get("label", ""),
-                    "custom": p.get("custom") or rec.get("custom") or {},
+                    "custom": scrub_custom(p.get("custom") or rec.get("custom") or {}, key=("persons", gid)),
                     "created_at": p["created_at"] or rec.get("created_at") or _crm_now(),
                     "updated_at": p["updated_at"] or _crm_now(), "pd_id": p["pd_id"]})
         rec.setdefault("notes", [])
@@ -15160,18 +15921,19 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
         else:
             report["deals"]["updated"] += 1
         report["custom_values"] += len(dl.get("custom") or {})
+        dl_linked = str(dl.get("person_pd_id") or "") in linked_pd
         closed = dl.get("won_at") if dl["status"] == "won" else dl.get("lost_at")
         # won_at is what the Insights tab reads. Folding it into closed_at
         # made an imported sales history report "no wins yet".
         rec.update({
-            "title": dl["title"], "value": dl["value"], "currency": dl["currency"],
+            "title": scrub(dl["title"], dl_linked, ("deals", gid)), "value": dl["value"], "currency": dl["currency"],
             "stage_id": seen_stage.get(dl["stage_pd_id"])
                         or (d["stages"][0]["id"] if d.get("stages") else ""),
             "person_id": person_of.get(dl["person_pd_id"], ""),
             "org_id": org_of.get(dl["org_pd_id"], ""),
             "status": dl["status"], "probability": dl.get("probability"),
             "expected_close": dl["expected_close"],
-            "lost_reason": dl["lost_reason"], "source": dl["source"],
+            "lost_reason": scrub(dl["lost_reason"], dl_linked, ("deals", gid)), "source": dl["source"],
             "archived": dl["archived"],
             "created_at": dl["created_at"] or _crm_now(),
             "updated_at": dl["updated_at"] or _crm_now(),
@@ -15179,14 +15941,14 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
             "closed_at": closed or "",
             "won_at": dl.get("won_at") or "", "lost_at": dl.get("lost_at") or "",
             "label": dl.get("label", rec.get("label", "")),
-            "custom": dl.get("custom") or rec.get("custom") or {},
+            "custom": scrub_custom(dl.get("custom") or rec.get("custom") or {}, dl_linked, ("deals", gid)),
             "touched_at": dl["updated_at"] or dl["created_at"] or _crm_now(),
             "pd_id": dl["pd_id"],
         })
         rec.setdefault("notes", [])
         rec.setdefault("changelog", [])
-        if dl["lost_reason"]:
-            lost_reasons.add(dl["lost_reason"][:60])
+        if rec.get("lost_reason") and "[erased]" not in rec["lost_reason"]:
+            lost_reasons.add(rec["lost_reason"][:60])
         deal_of[dl["pd_id"]] = gid
         if not dry:
             d["deals"][gid] = rec
@@ -15224,8 +15986,9 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
             report["activities"]["new"] += 1
         else:
             report["activities"]["updated"] += 1
+        a_linked = str(a.get("person_pd_id") or "") in linked_pd
         rec.update({
-            "type": a["type"], "subject": a["subject"],
+            "type": a["type"], "subject": scrub(a["subject"], a_linked, ("activities", gid)),
             "deal_id": deal_of.get(a["deal_pd_id"], ""),
             "person_id": person_of.get(a["person_pd_id"], ""),
             "org_id": org_of.get(a["org_pd_id"], ""),
@@ -15233,8 +15996,8 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
             # makes the app invent a job: either overdue today, or a task
             # that was never scheduled appearing in somebody's week.
             "due_date": a["due_date"] or "",
-            "due_time": a["due_time"], "note": a["note"][:CRM_NOTE_CAP],
-            "location": a["location"], "priority": "",
+            "due_time": a["due_time"], "note": scrub(a["note"][:CRM_NOTE_CAP], a_linked, ("activities", gid)),
+            "location": scrub(a["location"], a_linked, ("activities", gid)), "priority": "",
             # Likewise a done date: stamping today would drop years of
             # completed work into "activities completed, last 30 days".
             "done": a["done"], "done_at": a["done_at"] or "",
@@ -15247,28 +16010,72 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
     for n in data.get("notes") or []:
         if not n["text"]:
             continue
-        target = None
+        coll = gid = None
         if n["deal_pd_id"] and deal_of.get(n["deal_pd_id"]):
-            target = d["deals"].get(deal_of[n["deal_pd_id"]]) if not dry else True
+            coll, gid = "deals", deal_of[n["deal_pd_id"]]
+        elif str(n.get("person_pd_id") or "") in linked_pd:
+            # Their own note ("only ring her after 5pm: she is a carer") names
+            # nobody, so no scrub can catch it; with their contact gone it
+            # used to land on the organisation. It stays out.
+            continue
         elif n["person_pd_id"] and person_of.get(n["person_pd_id"]):
-            target = d["persons"].get(person_of[n["person_pd_id"]]) if not dry else True
+            coll, gid = "persons", person_of[n["person_pd_id"]]
         elif n["org_pd_id"] and org_of.get(n["org_pd_id"]):
-            target = d["orgs"].get(org_of[n["org_pd_id"]]) if not dry else True
-        if target is None:
+            coll, gid = "orgs", org_of[n["org_pd_id"]]
+        if coll is None:
+            continue
+        # In a preview a record this import would create is not there yet.
+        target = d[coll].get(gid)
+        if target is None and not dry:
             continue
         report["notes"]["added"] += 1
-        if dry or target is True:
-            continue
-        notes = target.setdefault("notes", [])
-        if any(str(x.get("pd_id")) == n["pd_id"] for x in notes):
-            continue
         # Deleted here means deleted: the tombstone stops every later
-        # import from quietly resurrecting a note somebody removed.
-        if n["pd_id"] in set(target.get("pd_deleted_notes") or []):
+        # import from quietly resurrecting a note somebody removed. Checked
+        # in the preview too, so what it counts is what the run does.
+        if target is not None and (
+                any(str(x.get("pd_id")) == n["pd_id"] for x in (target.get("notes") or []))
+                or n["pd_id"] in set(target.get("pd_deleted_notes") or [])):
             continue
-        notes.append({"id": _crm_id(d, "n"), "at": n["at"] or _crm_now(), "by": "",
-                      "text": n["text"][:CRM_NOTE_CAP], "pinned": bool(n.get("pinned")),
-                      "pd_id": n["pd_id"]})
+        text = scrub(n["text"][:CRM_NOTE_CAP], str(n.get("person_pd_id") or "") in linked_pd, (coll, gid))
+        if dry:
+            continue
+        target.setdefault("notes", []).append(
+            {"id": _crm_id(d, "n"), "at": n["at"] or _crm_now(), "by": "",
+             "text": text, "pinned": bool(n.get("pinned")), "pd_id": n["pd_id"]})
+
+    # A contact recognised as erased that the CRM already holds (brought back
+    # by an import before this one, or a duplicate Pipedrive merged into
+    # theirs) is erased here too, the way an erasure does it. Then every
+    # record the CRM keeps is swept, desk-edited ones included, so nothing
+    # that names an erased person survives an import either.
+    held_orgs = {str(d["persons"][g].get("org_id")) for g in held_ids
+                 if g in d["persons"] and d["persons"][g].get("org_id")}
+    linked_orgs = held_orgs | {org_of[x] for x in linked_org_pd if org_of.get(x)}
+    held_words = {g: (_erase_words_of(d["persons"][g]),
+                      [x for x in [d["persons"][g].get("pd_id")] + list(d["persons"][g].get("pd_merged_ids") or []) if x])
+                  for g in held_ids if g in d["persons"]}
+    if not dry:
+        for gid in held_ids:
+            rec = d["persons"].get(gid)
+            if rec is not None:
+                rec["id"] = gid
+                _crm_tombstone_contact(d, "persons", rec)
+    scrubbed_keys |= _erase_sweep(d, scrub_fn, linked_people=held_ids, apply=not dry,
+                                  linked_orgs=linked_orgs, skip_people=held_ids)
+    if not dry:
+        _gone, threads = _crm_erase_links(d, held_ids, held_orgs)
+        if threads:
+            logger.info("crm import: %d mail thread(s) belonged to a contact erased on request", len(threads))
+        known_dead = set(d.get("pd_deleted_persons") or [])
+        for words, ids in held_words.values():
+            _erase_remember(d, words, ids, shared=alive)
+        for pd, words in found.items():
+            _erase_remember(d, words, [pd], shared=alive)
+            if pd not in known_dead:
+                d.setdefault("pd_deleted_persons", []).append(pd)
+                known_dead.add(pd)
+    report["erased"]["scrubbed"] = len(scrubbed_keys)
+    report["erased"]["removed"] = len(held_ids)
 
     after = {"deals": len(d["deals"]) + (report["deals"]["new"] if dry else 0),
              "activities": len(d["activities"]) + (report["activities"]["new"] if dry else 0)}
@@ -18926,6 +19733,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                    + ", ".join(missing) + "), so nothing was imported. "
                                    "Run the preview and try again."}, 502)
         if go:
+            # Checked before the snapshot: a refused import must not deflate
+            # the whole volume first, every time it is pressed.
+            _load_mail()                    # its state decides whether erased people are known
+            why = _erase_import_blocker(_load_crm())
+            if why:
+                return _json({"error": why}, 503)
             # The one irreversible moment gets a snapshot immediately before it.
             try:
                 # OFF the event loop: this deflates the whole data volume, and
