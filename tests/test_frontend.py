@@ -3163,7 +3163,7 @@ def t_send_requires_a_review_and_spends_it():
     next one needs a fresh look."""
     fn = SCRIPT.split("function renderConnector() {")[1]
     fn = fn[:fn.index("\n        async function showReconView")]
-    ok("send.disabled = running || !connReview;" in fn, "no review, no Send")
+    ok("send.disabled = running || !connReview || revAborted;" in fn, "no review, no Send, and a review that stopped arms nothing")
     ok("Based on the review:" in fn, "the confirm dialog quotes the reviewed numbers")
     ok("will be written into your accounts" in fn, "and says what it means")
     watch = SCRIPT.split("function connStartWatch() {")[1][:1600]
@@ -4987,7 +4987,7 @@ def t_a_tag_is_checked_before_it_is_sent():
     watch = fn_src("function connStartWatch(")
     ok("tagJob" in watch, "the outcome is collected from the status once the service stops, never awaited in the reply")
     ok("if (connTagBusy) connStartWatch();" in fn, "and a tab left mid-job collects it on return")
-    ok(fn.count("connDocRow(d)") == 2, "one order and a tagged list paint a document with the same row")
+    ok(fn.count("connDocTable(") == 2, "one order and a tagged list paint their documents with the same table")
     ok("connIsAdmin()" in fn, "and only an admin sees the send")
 
 
@@ -5217,11 +5217,11 @@ def t_only_a_document_the_connector_returned_can_be_opened():
     an empty modal and read as a fault in the connector rather than an older
     reply that carried no document."""
     fn = fn_src("function renderConnector(")
-    i = fn.find("c.docs")
+    i = fn.find("const docs = c.docs || [];")
     ok(i > 0, "the check result still renders its docs")
-    ok("connDocRow(d)" in fn[i:i + 200], "through the one row both the order and the tag list use")
-    row = fn_src("function connDocRow(")
-    ok("if (d.preview)" in row, "the opener is offered only when a document came back")
+    ok("connDocTable(" in fn[i:i + 900], "through the one table both the order and the tag list use")
+    row = fn_src("function connDocTable(")
+    ok("const p = e.d && e.d.preview;" in row and "if (p) {" in row, "the opener is offered only when a document came back")
     ok("connDocModal(d)" in row, "and it opens that document")
 
 
@@ -5285,8 +5285,10 @@ def t_payout_notes_are_previewed_before_any_are_written():
     ok(i > 0, "the payout card is on the page")
     seg = fn[i:i + 4000]
     ok("op: 'payouts', dryRun: true" in seg, "the check is a dry run")
-    ok("payGo.disabled = !(connPayResult && connPayResult.dryRun" in seg,
+    ok("const payReady = () => !!(connPayResult && connPayResult.dryRun && (connPayResult.notes || []).length" in seg,
        "and the write button is armed only by a dry run that found notes")
+    ok("paySince.value.trim() === (connPayBox || '')" in seg and "since: connPayResult.since" in seg,
+       "for exactly the date that was checked: retyping it disarms the write, which uses the checked date")
     ok("uiConfirm(" in seg, "the write is confirmed")
     ok("no amount changes" in seg,
        "and the confirm says what a note can and cannot do")
@@ -5372,7 +5374,7 @@ def t_auto_run_shows_the_services_state_not_what_this_tab_last_clicked():
     fn = fn_src("async function refreshConnector(")
     ok("op: 'autorun'" in fn, "the state is fetched, not remembered")
     r = fn_src("function renderConnector(")
-    i = r.find("Auto Run")
+    i = r.find("/* ---- Auto Run ----")
     ok(i > 0, "the card is on the page")
     seg = r[i - 400:i + 2600]
     ok("connAuto.enabled" in seg, "and reads the service's own flag")
@@ -5434,14 +5436,10 @@ def t_the_xero_page_does_not_borrow_the_prose_measure_for_its_results():
     inside a 1558px card and collapsed its flexible column to 26px, so the
     action read "cre...". Results get their own container."""
     fn = fn_src("function renderConnector(")
-    ok("el('div', 'conn-results')" in fn,
-       "the result containers do not use the prose class")
-    i = fn.find("const oneOut")
-    ok(i > 0 and "setting-sub" not in fn[i:i + 120],
-       "the one-order results are not a setting-sub")
-    j = fn.find("const payOut")
-    ok(j > 0 and "setting-sub" not in fn[j:j + 120],
-       "nor are the payout results")
+    ok("el('section', 'cx-res conn-results')" in fn,
+       "the result containers are sections of their own, not the prose class")
+    ok("setting-sub" not in fn_src("function connDocTable(") and "setting-sub" not in fn[fn.find("function paintOne()"):fn.find("rCard.append(grid);")],
+       "nothing a check draws borrows the 52ch prose measure")
 
 
 @test
@@ -5474,8 +5472,10 @@ def t_the_xero_page_fits_a_phone():
     ok("el('div', 'cx-auto')" in fn and "el('div', 'lr-what')" in fn,
        "the Auto Run row is still built from the classes the rules below style")
     grid = re.search(r"\.cx-grid \{[^}]*grid-template-columns:([^;]*);", CSS)
-    ok(grid and "minmax(min(100%," in grid.group(1),
-       "a tile's floor gives way to a narrower card")
+    ok(grid and grid.group(1).strip() == "minmax(0, 1fr)",
+       "one tile per row until the card has room for three: a tile never has a floor wider than the card")
+    ok("@container cxcard (min-width: 900px) { .cx-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }" in CSS,
+       "three across only when the card, not the window, has room")
     row = re.search(r"\.cx-tile \.cx-row \{([^}]*)\}", CSS)
     ok(row and "flex-wrap: wrap" in row.group(1) and "1fr 1fr" not in row.group(1),
        "the buttons stack when their labels do not fit side by side")
@@ -5772,7 +5772,7 @@ def t_a_credit_note_preview_shows_the_vat_it_carries():
     Shopify refunded on it, and reconciles the note gross to gross. The screen
     has to say both, or a 43.20 refund reads as 36.00 against 43.20."""
     fn = fn_src("function connDocModal(")
-    ok("(l.taxType || '') + (l.taxAmount != null ? ' \\u00b7 ' + money(l.taxAmount) : '')" in fn,
+    ok("(l.taxType || '') + (l.taxAmount != null ? ' \\u00b7 ' + money2(l.taxAmount) : '')" in fn,
        "the Tax cell shows the amount beside the type when the line carries one")
     ok("(credit ? ' both sides, tax included.' : ' both sides.')" in fn
        and "(credit ? ' with tax' : '')" in fn,
@@ -7780,6 +7780,280 @@ def t_the_reviewers_last_findings_stay_closed():
     # Phone Overview: a sparkline tile takes the row in the widget grid too.
     ok(".ov-wrap.wgrid > .stat[data-widget]:has(.stat-spark) { grid-column: 1 / -1; }" in CSS, "the phone KPI rule reaches the grid")
 
+
+def _run_js(src):
+    """Run a snippet under node and return its stdout, or None when node is
+    not on the PATH (the parse test skips the same way)."""
+    if not any(os.access(os.path.join(p, "node"), os.X_OK)
+               for p in os.environ.get("PATH", "").split(os.pathsep)):
+        return None
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(src)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path], capture_output=True, text=True, timeout=60)
+        ok(r.returncode == 0, "the snippet ran: " + (r.stderr or "")[:400])
+        return r.stdout
+    finally:
+        os.unlink(path)
+
+
+@test
+def t_the_connectors_words_reach_the_page_as_plain_english():
+    """Cameron's screenshot of 2026-09-23: a check that writes nothing listed
+    every document as 'created', each with '(dry run - not pushed)' under it
+    (an em dash on the page), a paid invoice as 'Xero doc is PAID with ...
+    re-import blocked to protect it ... or force', and a red box reading
+    'run aborted: runaway guard: 21 documents exceeds MAX_DOCS_PER_RUN=1.
+    Narrow ORDERS_SINCE or raise the limit.' The inputs here are the
+    connector's own strings (shopify-xero-connector src/sync/reimportOrder.ts,
+    summarise.ts, syncOrders.ts); the helpers are run, not read."""
+    i = SCRIPT.index("        const CX_DOC_WORDS")
+    helpers = SCRIPT[i:SCRIPT.index("        function connDocTable(")]
+    helpers += fn_src("function cxTally(") + fn_src("function cxTallySentence(")
+    D = "—"
+    cases = {
+        "paid": ["cxWhy", {"action": "blocked", "message": "Xero doc is PAID with 1228.60 paid/allocated " + D + " re-import blocked to protect it. Remove the payment/void in Xero, or force."}, False],
+        "part": ["cxWhy", {"action": "blocked", "message": "Xero doc is AUTHORISED with 50 paid/allocated " + D + " re-import blocked to protect it. Remove the payment/void in Xero, or force."}, False],
+        "void": ["cxWhy", {"action": "blocked", "message": "Xero doc is VOIDED " + D + " re-import blocked to protect it. Remove the payment/void in Xero, or force."}, False],
+        "same": ["cxWhy", {"action": "unchanged", "message": "No change since last sync."}, True],
+        "adopt": ["cxWhy", {"action": "unchanged", "message": "Already in Xero as INV-1882 for the same amount: adopted as it is, nothing rewritten."}, True],
+        "dry": ["cxWhy", {"action": "created", "message": "(dry run " + D + " not pushed)"}, True],
+        "inplace": ["cxWhy", {"action": "updated", "message": "Would update INV-1882 in place. (dry run " + D + " not pushed)"}, True],
+        "docs": ["cxProblem", "run aborted: runaway guard: 21 documents exceeds MAX_DOCS_PER_RUN=1. Narrow ORDERS_SINCE or raise the limit."],
+        "orders": ["cxProblem", "run aborted: runaway guard: 300 orders waiting exceeds RUNAWAY_ABORT_ABOVE=250. That is not a backlog, it is a widened ORDERS_SINCE; nothing was created, not even contacts. Narrow the window or raise the guard."],
+        "breaker": ["cxProblem", "run aborted: circuit breaker: 5/10 (50%) documents failed validation " + D + " aborting before push. Review state/quarantine.jsonl."],
+        "edited": ["cxProblem", "3 edited orders exceed MAX_DOCS_PER_RUN=2; none were re-checked this run"],
+        "other": ["cxProblem", "credit note #104300-CN1: pre-resolve failed (timeout) " + D + " pushing without ID"],
+        "thrown": ["cxProblem", "run failed: Shopify said 401"],
+    }
+    tally = [{"order": "#1", "docs": [{"action": "created"}, {"action": "created"}]}] \
+        + [{"order": "#%d" % k, "docs": [{"action": "unchanged"}]} for k in range(31)] \
+        + [{"order": "#b%d" % k, "docs": [{"action": "blocked", "message": "Xero doc is PAID with 10 paid/allocated " + D + " re-import blocked to protect it. Remove the payment/void in Xero, or force."}]} for k in range(33)]
+    # An order that stopped part way keeps its error beside what it did; a
+    # contact that is missing needs someone; a voided order has nothing to
+    # send; an order not in Shopify has no document at all.
+    mixed = [{"order": "#s", "found": True, "error": "Shopify HTTP 502", "docs": [{"action": "created"}]},
+             {"order": "#c", "found": True, "docs": [{"action": "blocked", "message": "No invoice produced " + D + " customer not matched in Xero. Run a full sync to create the contact first."}]},
+             {"order": "#u", "found": False, "docs": []},
+             {"order": "#v", "found": True, "docs": [{"action": "blocked", "message": "Order produced no documents (VOIDED with no refunds)."}]}]
+    js = ("const money = (n, cur, dp) => '£' + Number(n).toFixed(dp);\n" + helpers
+          + "\nconst C = " + json.dumps(cases) + ";\nconst out = {};\n"
+          + "for (const k in C) { const [f, a, b] = C[k]; out[k] = f === 'cxWhy' ? cxWhy(a, b) : cxProblem(a); }\n"
+          + "const T = " + json.dumps(tally) + ";\nconst n = cxTally(T);\n"
+          + "out.tally = n; out.sentence = cxTallySentence(n, true); out.sent = cxTallySentence(n, false);\n"
+          + "out.none = cxTallySentence(cxTally([{docs: [{action: 'unchanged'}]}]), true);\n"
+          + "const X = " + json.dumps(mixed) + ";\nconst nx = cxTally(X);\n"
+          + "out.mixed = nx; out.mixedSentence = cxTallySentence(nx, true);\n"
+          + "out.groups = cxEntries(X).map(e => e.g + (e.stop ? ':stop' : ''));\n"
+          + "out.contact = cxWhy(X[1].docs[0], true); out.voided = cxWhy(X[3].docs[0], true);\n"
+          + "out.oneSame = cxOneSentence([{kind: 'invoice', action: 'created'}, {kind: 'creditnote', action: 'created'}], true);\n"
+          + "out.oneMixed = cxOneSentence([{kind: 'invoice', action: 'created'}, {kind: 'creditnote', action: 'unchanged'}], true);\n"
+          + "out.oneSent = cxOneSentence([{kind: 'invoice', action: 'created'}], false);\n"
+          + "out.testorder = cxKind({action: 'blocked', message: 'No invoice produced: test order.'});\n"
+          + "out.qrange = cxPlain('line 2 (\\\"Gobo 3\\u20134 pack\\\")');\n"
+          + "out.env = cxPlain('Missing required setting: XERO_CLIENT_ID (set it in the Settings tab or .env)');\n"
+          + "out.valid = cxDetail('Rejected by Xero: ValidationException: The TaxType code OUTPUT2 cannot be used with account code 205.');\n"
+          + "out.cnfor = cxProblem('credit note for #1007: no matching refund transaction');\n"
+          + "out.iphone = cxPlain('iPhone case'); out.range = cxPlain('line 1 (\\\"Gobo \\u2013 Glass\\\"): discount rate 150% out of range 0\\u2013100');\n"
+          + "console.log(JSON.stringify(out));\n")
+    def eq(a, b, msg=""):
+        ok(a == b, (msg + ": " if msg else "") + "%r, expected %r" % (a, b))
+    raw = _run_js(js)
+    if raw is None:
+        print("       (node unavailable, skipped)")
+        return
+    o = json.loads(raw)
+    eq(o["paid"], "Paid in Xero, so it is not rewritten. To change it, remove the payment in Xero first.")
+    eq(o["part"], "Partly paid in Xero, so it is not rewritten. To change it, remove the payment in Xero first.")
+    eq(o["void"], "Voided in Xero, so it is not rewritten.")
+    eq(o["same"], "Nothing has changed since it was sent.")
+    eq(o["adopt"], "As INV-1882, for the same amount, so it is kept as it is.")
+    eq(o["dry"], "", "the dry-run note says nothing the page does not already say")
+    eq(o["inplace"], "Rewrites INV-1882 in place.")
+    ok(o["docs"].startswith("It stopped before writing anything: 21 documents were ready, more than one run may write (1).")
+       and "MAX_DOCS" not in o["docs"], o["docs"])
+    ok("300 orders were waiting" in o["orders"] and "start date was moved back" in o["orders"], o["orders"])
+    ok("5 of 10 documents (50%)" in o["breaker"] and "jsonl" not in o["breaker"], o["breaker"])
+    ok(o["edited"].startswith("3 edited orders were more than one run may write (2), so none"), o["edited"])
+    eq(o["thrown"], "The run failed. Shopify said 401.")
+    # 'range' keeps a dash inside a quoted product name on purpose (it is the
+    # name, read against the order), and 'iphone' starts small on purpose.
+    for k, v in o.items():
+        if isinstance(v, str) and k not in ("range", "iphone", "qrange", "testorder"):
+            ok("—" not in v and "–" not in v, "no dash reaches the page: %s %r" % (k, v))
+            ok(not re.search(r"\b[A-Z]+_[A-Z_]+\b", v), "no setting's code name reaches the page: %s %r" % (k, v))
+            ok(not v or v[0].isupper() or v[0] in "£\"'" or v[0].isdigit(), "a sentence starts as one: %s %r" % (k, v))
+    eq(o["tally"]["docs"], 66); eq(o["tally"]["create"], 2); eq(o["tally"]["locked"], 33); eq(o["tally"]["attention"], 0)
+    eq(o["sentence"], "2 would be created, 31 are already in Xero and 33 are paid or closed in Xero, so left alone.")
+    eq(o["sent"], "2 were created, 31 are already in Xero and 33 are paid or closed in Xero, so left alone.")
+    eq(o["groups"], ["write", "attention:stop", "attention", "unread", "alone"],
+       "a part-way stop keeps its row, a missing contact needs attention, a voided order is left alone")
+    eq((o["mixed"]["write"], o["mixed"]["attention"], o["mixed"]["unread"], o["mixed"]["nothing"], o["mixed"]["rows"]), (1, 2, 1, 1, 5))
+    eq(o["mixedSentence"], "1 would be created, 1 has nothing to send and 2 need attention (each row says why).")
+    ok("not a contact in Xero yet" in o["contact"], o["contact"])
+    eq(o["voided"], "The order was voided and nothing was refunded, so there is nothing to send.")
+    eq(o["oneSame"], "The invoice and the credit note would be created.")
+    eq(o["oneMixed"], "The invoice would be created and the credit note is already in Xero.")
+    eq(o["oneSent"], "The invoice was created.")
+    eq(o["iphone"], "iPhone case", "a word that starts small and goes on in capitals keeps its case")
+    eq(o["testorder"], "nothing", "a test order has nothing to send; it does not need attention")
+    ok("3\u20134 pack" in o["qrange"], "a range inside a quoted name is the name: " + o["qrange"])
+    eq(o["env"], 'Missing required setting: "Xero client ID" (set it in Settings)')
+    ok("ValidationException" not in o["valid"] and "cannot be used with account code 205" in o["valid"], o["valid"])
+    eq(o["cnfor"], "Credit note for #1007: No matching refund transaction.")
+    eq(o["range"], 'Line 1 ("Gobo \u2013 Glass"): discount rate 150% out of range 0 to 100.'[:-1],
+       "a quoted name is left as it is, and a range reads 'to'")
+    eq(o["none"], "Nothing would be written: 1 is already in Xero.")
+
+
+@test
+def t_a_check_lists_what_it_found_under_the_tiles_not_inside_one():
+    """Cameron's screenshot of 2026-09-23: a tag check's 62 orders were listed
+    inside the 444px tag tile. The tile is a grid, a grid's implicit column is
+    as wide as its widest content, and the list pushed that column past the
+    tile, over the payout tile beside it and 450px out of the card, while the
+    tile grew 10,535px tall. The tiles are the ways in; what a check finds is
+    a section under all three, the width of the card, as a table."""
+    tile = re.search(r"@supports \(grid-template-rows: subgrid\) \{\s*\.cx-tile \{([^}]*)\}", CSS)
+    ok(tile and "grid-template-columns: minmax(0, 1fr)" in tile.group(1),
+       "a tile's one column can never be wider than the tile")
+    ok(tile and "grid-row: span 3" in tile.group(1), "and it spans title, hint and controls, with no result row")
+    fn = fn_src("function renderConnector(")
+    ok("const cxTile = (title, hint, row) => {" in fn, "a tile takes no result")
+    ok(fn.count("grid.append(cxTile(") == 3 and "Out))" not in fn, "and none of the three is handed one")
+    ok("paintOne(); paintTag(); paintPay();" in fn and "if (results.childNodes.length) rCard.append(results);" in fn,
+       "the results are drawn after the tiles, in their order")
+    ok(".cx-results {" in CSS and "border-top: var(--bw-hairline)" in CSS.split(".cx-results {")[1].split("}")[0],
+       "under a rule, across the card")
+    ok("#view-connector .conn-results { max-width: 56rem; }" not in CSS and "#view-connector .conn-results {" not in CSS,
+       "the old 56rem column is gone: a table of documents takes the card's width")
+    # The table: an order named once over its documents, the outcome in words,
+    # and a tag of 62 orders paged and filtered rather than drawn whole.
+    tb = fn_src("function connDocTable(")
+    ok("first ? (r.order || '') : ''" in tb and "el('tr', (withOrder && !first) ? 'cx-more' : null)" in tb,
+       "an order is named on its first row, and only a list of orders groups its rows")
+    ok("dry ? w[0] : w[1]" in tb, "a check says 'Would create', a send 'Created'")
+    ok("tablePager({ total: kept.length" in fn and "connTagView.f" in fn, "the tag list is paged and filtered")
+    ok("f: n.write ? 'write' : 'all'" in fn, "and opens on what Send would write")
+    ok(".cx-docs td.cx-out, .cx-docs td.cx-note { width: 100%; }" in CSS, "the outcome takes the spare width")
+
+
+@test
+def t_the_run_health_box_says_when_and_in_words():
+    """The red box on Cameron's screen was about a review from 5 Sep that a
+    since-removed guard stopped (connector c3a2ee5, 7 Sep), and nothing on it
+    said so: no date, and the problem in environment-variable names."""
+    fn = fn_src("function renderConnector(")
+    ok("const when = ', on ' + fmtDate(connHealth.lastRunAt);" in fn, "it gives the date of the run it judges")
+    ok("connHealth.lastRunDryRun === true ? 'review'" in fn, "and whether that run was a review or a send")
+    ok("cxProblem(p2, ctx)" in fn, "each problem in plain words")
+    ok("cxProblem('run aborted: ' + r.aborted, ctx)" in fn and "cxProblem(w)" in fn,
+       "and the latest review says its stop and its warnings the same way")
+    ok(".slice(0, 140)" not in fn and "cxDetail(q2.reason" in fn, "a quarantine reason is whole, not cut mid-word")
+    # The Connection card: its facts named, the switch on the row it switches.
+    ok("el('dl', 'conn-pairs cx-facts')" in fn and "fact('Store'" in fn, "the connection's facts each have a name")
+    ok("credentials and mapping live on the connector service" not in fn, "not one run-on line of dots")
+    i = fn.index("const t = el('button', 'btn btn-sm', on ? 'Turn Auto Run off' : 'Turn Auto Run on');")
+    ok("ar.append(t);" in fn[i:i + 1600] and "sAct.append(t);" not in fn, "the Auto Run switch sits on the Auto Run row")
+    ok(".cx-auto > .btn { margin-left: auto;" in CSS, "at its right-hand end")
+
+
+@test
+def t_a_send_arms_only_on_a_check_that_found_something_to_send():
+    """The independent review of 2026-09-23 pressed every Send after every kind
+    of check. 'Send this order' armed after 'No order #999999 in Shopify.',
+    after an error and after a check that would write nothing, and its confirm
+    offered to send 'nothing the check could name'; 'Send tagged orders' armed
+    for a tag with no orders; 'Send to Xero' armed after a review that said
+    nothing should be sent; and the payout write, checked for September,
+    stayed armed when the date was retyped to January and then wrote January."""
+    fn = fn_src("function renderConnector(")
+    armed = fn_src("function connOneArmed(")
+    ok("!connOneCheck.sent" in armed, "a sent order's result stays on screen but arms nothing")
+    ok("if (c.error || c.found === false) return ['', 'The check did not find this order, so there is nothing to send'];" in fn
+       and "if (!cxTally([{ docs: c.docs || [] }]).write) return ['', 'The check found nothing to write for this order'];" in fn,
+       "one order: found, no error, and something to write")
+    ok("if (!(c.details || []).length) return ['', 'No order carries this tag'];" in fn
+       and "if (!cxTally(c.details).write) return ['', 'The check found nothing to write for these orders'];" in fn,
+       "a tag: orders, and something to write")
+    ok("send.disabled = running || !connReview || revAborted;" in fn, "a review that stopped arms no Send")
+    ok("paySince.value.trim() === (connPayBox || '')" in fn and "connPayBox = connPaySince;" in fn
+       and "since: connPayResult.since || connPayBox || ''" in fn,
+       "the payout write is for the date that was checked, and retyping it disarms the write")
+    ok("oneIn.oninput = armOne;" in fn and "tagIn.oninput = armTag;" in fn, "retyping re-asks the same rule")
+    for b in ("oneChk.disabled = running", "tagChk.disabled = running", "payChk.disabled = running"):
+        ok(b in fn, "no second check while the connector is busy: " + b)
+
+
+@test
+def t_what_a_send_did_stays_on_screen_and_the_toast_says_it():
+    """'Sent #104300 to Xero.' was toasted whatever the connector answered, and
+    the reply was thrown away (void r), so a failed or quarantined write read
+    as a success with nothing on screen to say otherwise."""
+    fn = fn_src("function renderConnector(")
+    ok("void r;" not in fn, "the reply is used")
+    ok("connOneCheck = { order: order, data: data, sent: true };" in fn, "it is kept, marked sent")
+    ok("else if (n.attention) toastError('Not all of order ' + order" in fn
+       and "toastError('Order ' + order + ' was not sent. '" in fn, "and the toast follows what happened")
+    ok("'Not sent: order '" in fn and "'Partly sent: order '" in fn and "'Sent: order '" in fn,
+       "under a heading that says what the send did: nothing, part or all")
+    ok("'Nothing sent: '" in fn and "'Partly sent: '" in fn and "'Sending: '" in fn,
+       "and a tag's heading says the same, and 'Sending' while it runs, not 'Sent'")
+    ok("if (bad) toastError('Wrote ' + k" in fn, "a partial payout write is not a green toast either")
+
+
+@test
+def t_the_document_window_opens():
+    """It threw on every document: money2 called money(), and a later
+    'const money = money2' in the same function shadowed the global, so the
+    call hit the const before it was set and then called itself."""
+    fn = fn_src("function connDocModal(")
+    ok(not re.search(r"^\s*(const|let|var)\s+money\s*=", fn, re.M), "no local named money")
+    ok("money(v, cur || p.currency || 'GBP', 2)" in fn, "money2 still goes through the app's one money rule")
+    ok(fn.count("money2(") >= 8, "and every figure in the window goes through money2")
+    ok("const note = cxWhy(d, true);" in fn, "and the connector's note arrives in words, not '(dry run - not pushed)'")
+    sm = fn_src("function sheetModal(")
+    ok("x.focus()" in sm, "focus goes into the window when it opens")
+
+
+@test
+def t_the_page_agrees_with_itself_after_a_run():
+    """After a review finished the watcher re-read the runs but not the health,
+    so the box went on about 5 Sep beside a review from today; a failed tag
+    check raised 'Last run failed' under a box about another run; and every
+    repaint re-read the quarantine list, so a filter click flashed it empty."""
+    watch = fn_src("function connStartWatch(")
+    ok("connHealth = (await connOp({ op: 'health' })).data" in watch and "connAuto = (await connOp({ op: 'autorun' })).data" in watch,
+       "a finished run re-reads the health and Auto Run")
+    fn = fn_src("function renderConnector(")
+    ok("st.lastError !== tagErr && !boxSaysIt" in fn, "the chip does not repeat the tag section or the box")
+    ok("op: 'quarantine'" not in fn and "connQuar" in fn, "the quarantine list is painted from what was read with the status")
+    ok("connTagBusy === 'check' ? 'A tag check is in progress" in fn, "and the busy chip says what is running")
+    ok("connFocus = { sec: 'tag', on: 'tab' };" in fn and "sec.querySelector('.ftab.on')" in fn,
+       "a filter click keeps focus on the filter")
+
+
+@test
+def t_the_xero_page_keeps_the_details_the_last_check_found():
+    """The fixes the verifier found unpinned after the second pass, each the
+    one line that holds it."""
+    fn = fn_src("function renderConnector(")
+    ok(".ktable.cx-docs td { vertical-align: top; }" in CSS, "rows are top-aligned; the bare .cx-docs td rule lost to .ktable td")
+    ok("'Nothing has run yet: no review and no send.'" in fn, "no run is not a green box")
+    ok("((connHealth && connHealth.guards) || {}).reconcileTolerance" in fn, "the tolerance comes from the health guards")
+    ok("connTagPending" in fn and "connTagPending = '';" in fn_src("function connStartWatch("),
+       "the tag in flight names the busy section and is cleared when collected")
+    ok("if (kept.length > 20) sec.append(tablePager(" in fn and "if (order.length > 20) sec.append(tablePager(" in fn,
+       "a pager only when there is a page to turn")
+    ok("const kept = connTagView.f === 'all' ? all : all.filter(e => e.g === connTagView.f);" in fn,
+       "the tabs filter the same rows they count")
+    ok('.cx-docs:not(.cx-pay):not(.cx-quar) tr { grid-template-areas: "ord ord" "kind num" "out act"; }' in CSS,
+       "on a phone a row is order, then document and amount, then outcome and Open")
+    ok("requestAnimationFrame(() => requestAnimationFrame(() => {" in fn and "target.focus({ preventScroll: true });" in fn,
+       "focus returns after the page is laid out, without scrolling the window")
+    ok("'An admin sends exactly what it showed.'" in fn and "'an admin sends'" in fn,
+       "a member is not told to press a Send they do not have")
 
 if __name__ == "__main__":
     print("frontend regressions")
