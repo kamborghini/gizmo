@@ -16,11 +16,11 @@ Cameron sent a screenshot of the Xero sync page's "Review and send" card and ask
 - An order that stopped part way lost its error; "Left alone" claimed every such document was paid, though some need a Xero contact first.
 - After a review the health box kept describing the old run, and the quarantine list was re-read on every repaint.
 
-## Left, and why
+## Closed later the same day
 
-- The unlinked state still names CONNECTOR_URL and CONNECTOR_TOKEN: only an admin sees it, and those are the settings to set in Railway.
-- The ledger KPI still says "Blocked" and the review table "Skipped" (the ledger's and the connector's own counts), beside "Left alone" in the tables.
-- Escape does not close the document window: windows close only by their X (a standing decision).
+- The unlinked page gives an admin numbered steps, each setting as code to copy, and a member one sentence; the header makes no promise while Auto Run's state is unknown.
+- The review table uses the document tables' words (Already in Xero, Needs a Xero contact, Nothing to send, Will void, Edited after payment, left as it is) in place of "Skipped", and the "Blocked" tile is gone: the connector's ledger has no such count, so it only ever appeared in the test rig.
+- Escape still does not close a window: windows close only by their X (a standing decision).
 
 ## The findings
 
@@ -76,7 +76,7 @@ Cameron sent a screenshot of the Xero sync page's "Review and send" card and ask
 | F22 | medium | Unreadable orders in the tag table: For orders that were not found or not read, the 'Not in Shopify' and 'Not checked' chips sit under the Document heading (x=121) while every other chip sits under Outcome (x=212). | Fixed. |
 | F23 | medium | Phone tables and tabs: On a phone the doc tables scroll sideways (460px inside 311px) but squeeze Outcome to 117px, so reasons wrap to 4 lines, while the amount and Open start off-screen. | Fixed. |
 | F24 | low | Chip colours: 'Would create' is green and 'Would update' is amber on a check where nothing has happened yet. | Fixed. |
-| F25 | low | Vocabulary: The page uses different words for the same outcome. | Partly: the KPI still says "Blocked" and the review table "Skipped"; "Quarantined" is now one word everywhere. |
+| F25 | low | Vocabulary: The page uses different words for the same outcome. | Fixed later the same day: one set of outcome words across the tiles, tables and review. |
 | F26 | low | Left alone reason amounts: The reason gives the paid amount including tax ('Paid in Xero (£242.20)') beside a 'Lines total' before tax of £201.83. | Fixed. |
 | F27 | low | One order sentence: The summaries are repetitive and mix words with numerals: '2 documents: 2 would be created.' and 'One document. | Fixed. |
 | F28 | low | Auto Run line and hero promise: The connector's own line, with its own separator dots, is pasted into the page's dot list, for example '… · 148 checks so far · 12 orders checked, 4 documents created · 2 needing attention'. | Fixed. |

@@ -20513,6 +20513,32 @@ def t_a_failed_xero_read_does_not_check_new_orders_against_yesterdays_books():
 
 
 @test
+def t_a_preference_switch_saves_only_the_switches():
+    """A Settings switch now saves the moment it is changed. It posted the
+    page's copy of the whole profile, so a tab whose profile read had failed,
+    or that another admin had saved past, wrote its empty or stale text over
+    the stored brand voice, goals, strategy and notes with one click. The
+    switches alone are sent, and merged into the profile as the server
+    holds it."""
+    r = post("/api/profile", {"profile": {"brand_voice": "Plain and friendly", "business_goals": "Grow trade",
+                                          "strategy": "Turnaround first", "notes": "Gobos",
+                                          "prefs": {"track_inventory": True, "concise": False,
+                                                    "proactive": True, "flag_anomalies": True}}})
+    eq(r.status_code, 200, r.text)
+    r = post("/api/profile", {"prefs": {"concise": True, "not_a_pref": True}})
+    eq(r.status_code, 200, r.text)
+    p = post("/api/profile", {}).json()["profile"]
+    eq(p["brand_voice"], "Plain and friendly", "the stored text is kept")
+    eq(p["notes"], "Gobos")
+    eq(p["prefs"]["concise"], True, "the switch is saved")
+    eq(p["prefs"]["flag_anomalies"], True, "and the others are left as they were")
+    ok("not_a_pref" not in p["prefs"], "an unknown key is not stored")
+    _uid, sess, _pw = ready_user("Pref Member", "prefmember")
+    eq(post_s(sess, "/api/profile", {"prefs": {"concise": False}}).status_code, 403, "a member cannot change them")
+    eq(post("/api/profile", {}).json()["profile"]["prefs"]["concise"], True)
+
+
+@test
 def t_the_sweep_notes_are_sentences_said_once():
     """The Reconciliation page lists the sweep's notes as they are written. A
     Xero read refused for one reason put four near-identical lines on screen,

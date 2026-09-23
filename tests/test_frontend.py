@@ -4664,8 +4664,9 @@ def t_the_settings_modal_carries_your_sign_off():
     m = re.search(r'<textarea id="signoff-text"[^>]*rows="(\d+)"', HTML)
     ok(m and m.group(1) == "4", "four rows, which is the cap the contract sets")
     start = HTML.index('id="settings-modal"')
-    ok(start < HTML.index('id="signoff-text"') < HTML.index('id="settings-save"'),
-       "inside the Settings modal and above its footer, not loose on the page")
+    end = HTML.index('</div>\n    </div>', HTML.index('id="usage"'))
+    ok(start < HTML.index('id="signoff-text"') < end,
+       "inside the Settings modal, not loose on the page")
     ok("async function refreshSignOffRow(" in SCRIPT, "it is filled from the server")
     fn = fn_src("async function refreshSignOffRow(")
     ok("'/api/mail/settings'" in fn, "on the mail settings route")
@@ -7762,7 +7763,7 @@ def t_the_reviewers_last_findings_stay_closed():
        "the backup buttons take their own line under the row's words")
     ok("['Up to date', 'Not downloaded', 'None']" in SCRIPT and "'Download one'" not in SCRIPT, "a state, not an instruction, in the pill")
     ok("Back it up below" not in SCRIPT and "(Backups, above)" in SCRIPT, "the storage row points where the buttons are")
-    ok("Everything above except your sign-off waits for Save profile." in HTML, "and the caption excepts the sign-off")
+    ok("waits for Save profile" not in HTML, "and no caption has to explain two ways of saving: there is one")
     # Save and Cancel sit side by side in the size editor.
     ok("el('div', 'act-row sizes-edit-acts')" in SCRIPT and ".act-row.sizes-edit-acts { flex-wrap: nowrap; }" in CSS,
        "the size editor's buttons do not stack")
@@ -8054,6 +8055,102 @@ def t_the_xero_page_keeps_the_details_the_last_check_found():
        "focus returns after the page is laid out, without scrolling the window")
     ok("'An admin sends exactly what it showed.'" in fn and "'an admin sends'" in fn,
        "a member is not told to press a Send they do not have")
+
+@test
+def t_settings_saves_one_way():
+    """D10 of the 2026-09-23 sweep: the four preference switches waited for a
+    footer 'Save profile' while the Auto-refresh switch beside them saved at
+    once, so the footer's Cancel undid one and not the other, and a caption
+    had to explain it. Now every switch saves when changed and each block of
+    text has its own Save under it; the window has no footer."""
+    m = HTML[HTML.index('id="settings-modal"'):HTML.index('id="usage"')]
+    ok('class="modal-foot"' not in HTML[HTML.index('id="settings-modal"'):HTML.index('<script>', HTML.index('id="settings-modal"'))],
+       "no footer Save or Cancel")
+    ok(m.index('id="pf-notes"') < m.index('id="settings-save"') < m.index('Sign-in'),
+       "Save profile sits under the four text fields it saves")
+    ok("prefToggles().forEach(t => t.onclick = function () { savePrefToggle(this); });" in SCRIPT, "a preference saves when it is changed")
+    fn = fn_src("async function savePrefToggle(")
+    ok("t.classList.toggle('on', was);" in fn and "toastError(" in fn, "and a switch the server refused goes back and says so")
+    ok("api('/api/profile', { prefs: prefs })" in fn and "profile: " not in fn.split("api('/api/profile'")[1][:40],
+       "a switch sends the switches alone, never this page's copy of the text (the server merges them)")
+    close = fn_src("function closeSettings(")
+    ok("profileKey(profile) !== settingsAtOpen" in close and "if (!changed || !overviewCache) return;" in close and "loadOverview(true)" in close,
+       "the Overview is recomputed once on close, only if something really changed and only if it had been run")
+    ap = fn_src("async function applySettings(")
+    ok("const next = Object.assign({}, profile," in ap and "profile = (d && d.profile) ? d.profile : next;" in ap,
+       "a failed Save profile leaves the saved profile as it was")
+    ok("mng.onclick = () => { closeSettings(); openShippingSettings(); };" in SCRIPT, "every way out of the window goes through closeSettings")
+    op = fn_src("function openSettings(")
+    ok("const canEdit = connIsAdmin();" in op and "readOnly = !canEdit" in op and "setAttribute('aria-disabled', 'true')" in op,
+       "someone who cannot change the profile sees it, not controls that bounce")
+
+
+@test
+def t_a_page_is_called_what_the_sidebar_calls_it():
+    """D14 of the 2026-09-23 sweep: on nine screens the topbar and the page
+    heading gave one page two names ('Store overview' under 'Overview', and
+    'Finance' under each of Liability, Reconciliation, Forecast and Xero
+    sync)."""
+    titles = re.search(r"const titles = \{ overview: 'Overview'[^}]*liability[^}]*\}", SCRIPT).group(0)
+    for view, name in (("overview", "Overview"), ("seo", "SEO"), ("keywords", "Keywords"), ("memory", "Memory"),
+                       ("liability", "Liability"), ("recon", "Reconciliation"), ("forecast", "Forecast"), ("connector", "Xero sync")):
+        ok(view + ": '" + name + "'" in titles, "the topbar calls " + view + " " + name)
+        ok("el('h2', null, '" + name + "')" in SCRIPT, "and so does its page heading: " + name)
+    ok("comp ? 'Customers' : (seg + ' sector')" in SCRIPT, "Customers too")
+    for old in ("'Store overview'", "'SEO and optimisation'", "'Keyword and CPC intelligence'",
+                "'Memory and knowledge'", "'Finance'"):
+        ok(("el('h2', null, " + old + ")") not in SCRIPT, "no page is headed " + old)
+        ok(("title: " + old) not in SCRIPT, "nor its Run gate " + old)
+    ok("const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers' };" in SCRIPT,
+       "and the printed report's header uses the same names")
+    ok("comp ? 'Customers and retention'" not in SCRIPT, "nor 'Customers and retention'")
+
+
+@test
+def t_a_search_does_not_take_customise_away():
+    """B31: typing a product search that left fewer than two earners emptied
+    Top products, the page fell to one card, the grid stood down and
+    Customise vanished from the header, then came back as the search was
+    cleared."""
+    fn = fn_src("function renderProductList(")
+    ok("const narrowed = rows.length < all;" in fn and "if (top.length > 1 || narrowed) {" in fn,
+       "a narrowed list keeps the card")
+    ok("so there is nothing to rank." in fn, "and the card says why it has no bars")
+
+
+@test
+def t_the_queue_rows_use_the_small_control():
+    """C-05: the production queue's row buttons were 32px beside the 28px
+    buttons in the same card's head and toolbar."""
+    fn = fn_src("function renderLabels(") if "function renderLabels(" in SCRIPT else SCRIPT
+    ok("const pv = el('button', 'btn btn-sm');" in SCRIPT and "const pr = el('button', 'btn btn-sm');" in SCRIPT,
+       "the row buttons are the small control")
+    ok(".lbl-actions .btn:has(> .lbl-btn-txt) { padding: 0; min-width: var(--control-h-md);" in CSS,
+       "and an icon-only button is square at that size, without squeezing a button that has only words")
+
+
+@test
+def t_the_xero_page_uses_one_set_of_outcome_words():
+    """The review table summed five different things under 'Skipped', and a
+    'Blocked' tile the connector never sends a figure for disagreed with
+    'Left alone' in the tables."""
+    fn = fn_src("function renderConnector(")
+    ok("kpi('Blocked'" not in fn, "no tile for a count the connector does not have")
+    ok("Skipped</th>" not in fn and "['noContact', 'Needs a Xero contact']" in fn and "['inXero', 'Already in Xero']" in fn,
+       "the review counts in the tables' words")
+    rc = fn_src("function cxReviewCounts(")
+    ok("n('skippedSynced') + n('skippedInXero')" in rc and "n('skippedTest') + n('skippedCancelled')" in rc,
+       "from the connector's own counters")
+    ok("An admin links it in Railway." in fn and "el('ol', 'setup-steps')" in fn,
+       "the unlinked page gives an admin the steps and a member the one fact")
+    ok("(!connAuto ? ''" in fn, "and the header makes no promise when Auto Run's state is unknown")
+    ok(".modal-body .section-title + * > .setting-row:first-child { border-top: 0; }" in CSS,
+       "Settings draws no rule straight under a heading, in any section, Connections included")
+    rc = fn_src("function cxReviewCounts(")
+    ok("voided: n('voided'), keptPaid: n('updateBlocked')" in rc and "if (kind === 'creditNotes') {" in rc,
+       "a void and an edit left as posted are counted, and a credit note shows no outcome it cannot have")
+    ok(".setup-steps li > .setup-code { white-space: nowrap; word-break: normal; }" in CSS, "a code word in a step never splits")
+
 
 if __name__ == "__main__":
     print("frontend regressions")

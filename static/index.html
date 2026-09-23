@@ -1244,6 +1244,10 @@
         .card > .know-body, .card > .fc-alert { padding-inline: 0; }
         /* The list's markers sit inside the card's gutter, not over it. */
         .card > .setup-steps { padding-left: calc(var(--sp-4) + var(--sp-5)); }
+        /* A setting's name or an address inside a step's sentence stays whole:
+           .setup-code breaks anywhere, which is right for a long URL on its
+           own line and wrong for '.railway.internal' mid-sentence. */
+        .setup-steps li > .setup-code { white-space: nowrap; word-break: normal; }
         .skill-card > .sk-more { padding-inline: var(--sp-4); }
         /* One algorithm explained: a name, what it does, what it suits and how
            right it has been. A list of these is reference material, so it is
@@ -1880,9 +1884,13 @@
            needs and the name ellipsises instead. */
         @container queue (max-width: 559px) { .lbl-qrow .lbl-meta { display: none; } .lbl-qrow .lbl-actions { min-width: max-content; } }
         /* Below 1,000px of list, the buttons drop to icons: every one keeps its
-           title, the row stays one line, and nothing overlaps. */
+           title, the row stays one line, and nothing overlaps. They are the
+           small control (28px, 36px on touch) like every button beside them
+           in the card: at 32px the rows' buttons stood taller than the card
+           head's and the toolbar's. */
         @container queue (max-width: 999px) {
-            .lbl-actions .lbl-btn-txt { display: none; } .lbl-actions .btn { padding: var(--sp-2); }
+            .lbl-actions .lbl-btn-txt { display: none; }
+            .lbl-actions .btn:has(> .lbl-btn-txt) { padding: 0; min-width: var(--control-h-md); justify-content: center; }
         }
         /* The shared tracks start as soon as the date shows (560px), so a
            refunded order's shorter rail cannot pull its date out of line with
@@ -4129,8 +4137,14 @@
             padding: var(--sp-2) var(--sp-2-5); font: inherit; font-size: var(--text-sm); line-height: var(--lh-body); outline: none; color: var(--text-primary); margin: var(--sp-2) 0 var(--sp-3); background: var(--surface-primary); }
         /* No rule straight under a section heading: it came from the first
            row's own border, so four sections had one and three did not. */
-        .modal-body .section-title + .setting-row, .modal-body .settings-now + .setting-row { border-top: 0; }
-        .settings-now { margin: 0 0 var(--sp-2); }
+        /* No rule straight under a section heading, whether its first row
+           follows the heading or opens a group of switches: Sign-in and
+           Preferences drew one and the other sections did not. */
+        .modal-body .section-title + .setting-row,
+        .modal-body .section-title + * > .setting-row:first-child { border-top: 0; }
+        .toggle[aria-disabled="true"] { cursor: default; }
+        .toggle[aria-disabled="true"] .sw { background: var(--surface-tertiary); }
+        .toggle[aria-disabled="true"]:is(.on, [aria-checked="true"]) .sw { background: var(--border-strong); }
         .settings-toggles { margin-top: var(--sp-1); }
         .setting-row { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-3) 0; border-top: var(--bw-hairline) solid var(--border-default); }
         .setting-row:has(> .row-acts) { flex-wrap: wrap; row-gap: var(--sp-3); }
@@ -4373,6 +4387,10 @@
 
                 <label class="field-label" for="pf-notes">Other notes</label>
                 <textarea id="pf-notes" class="pf-input" rows="2" placeholder="Anything else Reactor should always know: business model, constraints, audience."></textarea>
+                <div class="mail-statebar">
+                    <button class="btn" id="settings-save" type="button">Save profile</button>
+                    <p class="field-help" id="settings-readonly" hidden>An admin sets the store profile and the preferences below.</p>
+                </div>
 
                 <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Sign-in</div>
                 <div class="settings-toggles">
@@ -4412,7 +4430,6 @@ Projected Image UK"></textarea>
                     </div>
                 </div>
                 <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Automatic refresh</div>
-                <p class="field-help settings-now">These save as soon as you change them. Everything above except your sign-off waits for Save profile.</p>
                 <div class="setting-row">
                     <div><div class="setting-title">Auto-refresh reports</div><div class="setting-sub">Re-run your audits on a schedule so they stay fresh, and flag big changes as alerts. Off by default; uses AI credits on each run.</div></div>
                     <div class="toggle" id="sched-toggle"><span class="sw"></span></div>
@@ -4429,10 +4446,6 @@ Projected Image UK"></textarea>
                 <div id="connections"><div class="setting-sub">Checking connections…</div></div>
                 <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">AI usage (last 30 days)</div>
                 <div id="usage"><div class="setting-sub">Loading usage…</div></div>
-            </div>
-            <div class="modal-foot">
-                <button class="btn" id="settings-cancel">Cancel</button>
-                <button class="btn btn-primary" id="settings-save">Save profile</button>
             </div>
         </div>
     </div>
@@ -4730,7 +4743,7 @@ Projected Image UK"></textarea>
         $('print-btn').onclick = function () {
             const av = document.querySelector('.view.active');
             const v = av ? av.id.replace('view-', '') : '';
-            const titles = { overview: 'Store overview', seo: 'SEO and optimisation', keywords: 'Keyword and CPC intelligence', products: 'Products', customers: 'Customers and retention' };
+            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers' };
             let label = titles[v] || 'Report';
             if (v === 'customers' && typeof customersSeg !== 'undefined' && customersSeg && customersSeg !== SEG_ALL) label = customersSeg + ' sector';
             // Stamp when the DATA was computed, not when the PDF was printed. The
@@ -7592,12 +7605,12 @@ Projected Image UK"></textarea>
         function showOverviewView() {
             if (reportRuns.overview) return;
             if (overviewCache) { renderOverview(overviewCache); return; }
-            renderRunGate('ov-content', { icon: I.grid, title: 'Store overview', desc: 'Compute live KPIs and an AI executive summary from your latest orders, customers and traffic.', cta: 'Run overview', note: 'Uses AI credits only when you run it.', onRun: () => loadOverview(true) });
+            renderRunGate('ov-content', { icon: I.grid, title: 'Overview', desc: 'Compute live KPIs and an AI executive summary from your latest orders, customers and traffic.', cta: 'Run overview', note: 'Uses AI credits only when you run it.', onRun: () => loadOverview(true) });
         }
         function showSeoView() {
             if (reportRuns.seo) return;
             if (seoCache) { renderSEO(seoCache); return; }
-            renderRunGate('seo-content', { icon: I.search, title: 'SEO and optimisation', desc: 'Crawl your storefront and fuse Search Console, Analytics and Shopify sales into a money-ranked plan.', cta: 'Run SEO audit', note: 'Uses AI credits only when you run it. Can take up to a minute.', onRun: () => loadSEO(true) });
+            renderRunGate('seo-content', { icon: I.search, title: 'SEO', desc: 'Crawl your storefront and fuse Search Console, Analytics and Shopify sales into a money-ranked plan.', cta: 'Run SEO audit', note: 'Uses AI credits only when you run it. Can take up to a minute.', onRun: () => loadSEO(true) });
         }
         function showProductsView() {
             if (productPlanRun) return;   // a plan is being built: coming back keeps its loading screen
@@ -7613,7 +7626,7 @@ Projected Image UK"></textarea>
         async function runOverview(box, force) {
             box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.grid;
-            const htext = el('div'); htext.append(el('h2', null, 'Store overview'));
+            const htext = el('div'); htext.append(el('h2', null, 'Overview'));
             hero.append(badge, htext); box.append(hero);
             const t = el('div', 'thinking'); const orb = loader(); t.append(orb, el('span', null, 'Working out live metrics and insights.')); box.append(t);
             try {
@@ -7715,7 +7728,7 @@ Projected Image UK"></textarea>
             const intro = firstPaint('overview'); box.classList.toggle('no-intro', !intro);
             { const ab = alertsBanner(); if (ab) box.append(ab); }
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.grid;
-            const htext = el('div'); htext.append(el('h2', null, 'Store overview'), el('p', null, data.structured && data.structured.summary ? data.structured.summary : 'Here’s how your store is doing.'));
+            const htext = el('div'); htext.append(el('h2', null, 'Overview'), el('p', null, data.structured && data.structured.summary ? data.structured.summary : 'Here’s how your store is doing.'));
             hero.append(badge, htext);
             hero.append(heroAct(freshLabel(cache.at), refreshBtn(() => loadOverview(true))));
             box.append(hero);
@@ -7787,7 +7800,7 @@ Projected Image UK"></textarea>
         async function runSEO(box) {
             box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.search;
-            const htext = el('div'); htext.append(el('h2', null, 'SEO and optimisation'));
+            const htext = el('div'); htext.append(el('h2', null, 'SEO'));
             hero.append(badge, htext); box.append(hero);
             const t = el('div', 'thinking');
             t.append(loader(), el('span', null, 'Crawling pages: indexation, structured data, metadata and alt text.'));
@@ -7803,7 +7816,7 @@ Projected Image UK"></textarea>
             const intro = firstPaint('seo'); box.classList.toggle('no-intro', !intro);
             const s = data.structured || {};
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.search;
-            const htext = el('div'); htext.append(el('h2', null, 'SEO and optimisation'),
+            const htext = el('div'); htext.append(el('h2', null, 'SEO'),
                 el('p', null, s.summary || 'How your store performs across search, traffic and sales, and where to grow revenue.'));
             hero.append(badge, htext);
             hero.append(heroAct(freshLabel(cache.at), refreshBtn(() => loadSEO(true))));
@@ -7861,7 +7874,7 @@ Projected Image UK"></textarea>
         function showKeywordsView() {
             if (reportRuns.keywords) return;
             if (keywordsCache) { renderKeywords(keywordsCache); return; }
-            renderRunGate('keywords-content', { icon: I.tag, title: 'Keyword and CPC intelligence',
+            renderRunGate('keywords-content', { icon: I.tag, title: 'Keywords',
                 desc: 'Pull the keywords you rank for from Search Console and your paid spend, CPC and ROAS from Google Ads (via GA4), then get a money-ranked plan. You can also scan any public URL for the keywords it targets.',
                 cta: 'Run keyword analysis', note: 'Uses AI credits only when you run it. Reads Search Console and GA4.',
                 onRun: () => loadKeywords(true) });
@@ -7875,7 +7888,7 @@ Projected Image UK"></textarea>
         async function runKeywords(box) {
             box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.tag;
-            const ht = el('div'); ht.append(el('h2', null, 'Keyword and CPC intelligence'));
+            const ht = el('div'); ht.append(el('h2', null, 'Keywords'));
             hero.append(badge, ht); box.append(hero);
             const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Combining Search Console keywords with Google Ads. This can take up to a minute.')); box.append(t);
             try { const data = await api('/api/keywords', {}); keywordsCache = { data, at: Date.now() }; renderKeywords(keywordsCache); }
@@ -7994,7 +8007,7 @@ Projected Image UK"></textarea>
             const data = cache.data; const box = $('keywords-content'); box.innerHTML = '';
             const s = data.structured || {}; const cur = data.currency || '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.tag;
-            const ht = el('div'); ht.append(el('h2', null, 'Keyword and CPC intelligence'),
+            const ht = el('div'); ht.append(el('h2', null, 'Keywords'),
                 el('p', null, s.summary || 'Your ranking keywords, paid performance, and where to win more profitable search traffic.'));
             hero.append(badge, ht);
             hero.append(heroAct(freshLabel(cache.at), refreshBtn(() => loadKeywords(true))));
@@ -8087,7 +8100,7 @@ Projected Image UK"></textarea>
             const comp = seg === SEG_ALL;
             const card = el('div', 'run-gate');
             const ic = el('div', 'rg-ic'); ic.innerHTML = I.users; card.append(ic);
-            card.append(el('h2', null, comp ? 'Customers and retention' : (seg + ' sector')),
+            card.append(el('h2', null, comp ? 'Customers' : (seg + ' sector')),
                 el('p', null, comp
                     ? 'Analyse all customers and compare your sectors by retention, lifetime value and revenue, with a money-ranked plan.'
                     : ('Analyse the ' + seg + ' sector on its own: retention, lifetime value, segments, and a money-ranked plan for these customers.')));
@@ -8212,7 +8225,7 @@ Projected Image UK"></textarea>
             const comp = seg === SEG_ALL;
             const box = $('customers-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.users;
-            const ht = el('div'); ht.append(el('h2', null, comp ? 'Customers and retention' : (seg + ' sector')));
+            const ht = el('div'); ht.append(el('h2', null, comp ? 'Customers' : (seg + ' sector')));
             hero.append(badge, ht); box.append(hero);
             const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Analysing ' + (comp ? 'your customers and sectors' : ('the ' + seg + ' sector'))
                 + ' from 12 months of orders. This can take up to a minute.')); box.append(t);
@@ -8287,7 +8300,7 @@ Projected Image UK"></textarea>
             const data = cached.data; const s = data.structured || {}; const cur = data.currency || '';
             const comp = seg === SEG_ALL;
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.users;
-            const ht = el('div'); ht.append(el('h2', null, comp ? 'Customers and retention' : (seg + ' sector')),
+            const ht = el('div'); ht.append(el('h2', null, comp ? 'Customers' : (seg + ' sector')),
                 el('p', null, s.summary || (comp ? 'Who your best customers are, how well you retain them, and where to grow lifetime value.' : ('Retention and lifetime value for your ' + seg + ' customers.'))));
             hero.append(badge, ht);
             hero.append(heroAct(freshLabel(cached.at), refreshBtn(() => loadCustomers(true))));
@@ -8603,14 +8616,25 @@ Projected Image UK"></textarea>
                 footHost.append(foot);
                 topHost.innerHTML = '';
                 const top = rows.filter(r => r.revenue > 0).slice(0, 6);
-                if (top.length > 1) {
+                /* A search or a filter that leaves fewer than two earners keeps
+                   the card and says so. Emptied, it left the page one card,
+                   the grid stood down, and Customise vanished from the header
+                   and came back as the search was typed. With no filter and
+                   fewer than two earners there is no such card at all. */
+                const narrowed = rows.length < all;
+                if (top.length > 1 || narrowed) {
                     const tc = el('div', 'card'), th2 = el('div', 'card-head');
                     const nWords = ['', 'one', 'two', 'three', 'four', 'five', 'six'];
-                    th2.append(el('h3', 'card-title', 'Top products by revenue'), el('p', 'card-desc', 'The ' + (nWords[top.length] || top.length) + ' that earned most, ' + pPeriodLabel() + '.'));
+                    th2.append(el('h3', 'card-title', 'Top products by revenue'), el('p', 'card-desc', top.length > 1
+                        ? 'The ' + (nWords[top.length] || top.length) + ' that earned most, ' + pPeriodLabel() + '.'
+                        : 'Fewer than two of these products earned anything (' + pPeriodLabel() + '), so there is nothing to rank.'));
                     tc.append(th2);
-                    const bl = el('div', 'barlist'); const max = top[0].revenue || 1;
-                    top.forEach(r => { const row = el('div', 'barrow'); row.append(el('div', 'bn', r.p.title || 'Untitled')); const tr = el('div', 'bartrack'); const i = el('i'); i.style.width = Math.max(2, r.revenue / max * 100) + '%'; tr.append(i); row.append(tr, el('div', 'bv', fmtMoney(r.revenue, cur))); bl.append(row); });
-                    tc.append(bl); topHost.append(tc);
+                    if (top.length > 1) {
+                        const bl = el('div', 'barlist'); const max = top[0].revenue || 1;
+                        top.forEach(r => { const row = el('div', 'barrow'); row.append(el('div', 'bn', r.p.title || 'Untitled')); const tr = el('div', 'bartrack'); const i = el('i'); i.style.width = Math.max(2, r.revenue / max * 100) + '%'; tr.append(i); row.append(tr, el('div', 'bv', fmtMoney(r.revenue, cur))); bl.append(row); });
+                        tc.append(bl);
+                    }
+                    topHost.append(tc);
                 }
                 listWrap.innerHTML = '';
                 if (!rows.length) { listWrap.append(el('div', 'empty', 'No products match these filters.')); return; }
@@ -8928,7 +8952,7 @@ Projected Image UK"></textarea>
         function renderMemory() {
             const box = $('memory-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.bookmark;
-            const htext = el('div'); htext.append(el('h2', null, 'Memory and knowledge'),
+            const htext = el('div'); htext.append(el('h2', null, 'Memory'),
                 el('p', null, 'What Reactor knows about your store. Learn your site once, and it captures facts, decisions, your preferences and proven learnings as you chat, then uses them in every answer. Edit or remove anything here.'));
             /* Under the header every block is a card the grid can move, each
                spanning the row; the empty action slot is where Customize goes.
@@ -9141,7 +9165,7 @@ Projected Image UK"></textarea>
                not change its name and grow a tab strip when the data lands, as
                Reconciliation and Forecast already do. */
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.spark;
-            const ht = el('div'); ht.append(el('h2', null, 'Finance'),
+            const ht = el('div'); ht.append(el('h2', null, 'Liability'),
                 el('p', null, 'Credit extended to customers, from their unpaid orders.'));
             hero.append(badge, ht); box.append(hero);
             box.append(financeTabs('liability', ''));
@@ -9205,8 +9229,9 @@ Projected Image UK"></textarea>
                than a place you are. */
             const seg = el('div', 'ptabs');
             /* Beta marks the tab that is in beta, as the sidebar marks it,
-               not the 'Finance' heading all four tabs share: that heading
-               gained and lost the tag as you moved between them. */
+               not the page heading above: when all four pages shared the
+               heading 'Finance' it gained and lost the tag as you moved
+               between them, and the tab is where the reader compares. */
             const tab = (key, label) => {
                 const b = el('button', 'ptab' + (key === active ? ' on' : ''), label);
                 if (BETA_TABS.indexOf(key) >= 0) b.append(el('span', 'beta-tag', 'Beta'));
@@ -9253,7 +9278,10 @@ Projected Image UK"></textarea>
             const d = liabilityCache.data;
             const cur = d.currency;
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.spark;
-            const ht = el('div'); ht.append(el('h2', null, 'Finance'),
+            /* Each page is called what the sidebar and the topbar call it: all
+               four Finance pages were headed 'Finance', so one page had two
+               names. The Finance tabs under the heading say which group. */
+            const ht = el('div'); ht.append(el('h2', null, 'Liability'),
                 el('p', null, 'Credit extended to customers, from orders tagged '
                     + (d.tags || []).map(t => '"' + t + '"').join(', ')
                     + '. Terms come from the order itself, then a Net tag on the customer, otherwise Net '
@@ -10453,6 +10481,27 @@ Projected Image UK"></textarea>
             return { created: c.created || 0, updated: c.updated || 0, failed: c.failed || 0,
                      quarantined: c.quarantined || 0, skipped: skipped };
         }
+        /* A review's counts in the outcome words of the document tables.
+           null where the outcome does not exist for that kind: a contact is
+           never quarantined, and nothing is 'sent' for a test order's contact. */
+        function cxReviewCounts(res, kind) {
+            const c = (res || {})[kind] || {};
+            const n = (k) => Number(c[k]) || 0;
+            if (kind === 'contacts') {
+                return { create: n('created'), update: null, inXero: n('skippedExisting') + n('skippedSynced'),
+                         noContact: null, nothing: null, voided: null, keptPaid: null, quarantined: null, failed: n('failed') };
+            }
+            if (kind === 'creditNotes') {
+                return { create: n('created'), update: null, inXero: n('skippedSynced'), noContact: n('skippedNoContact'),
+                         nothing: null, voided: null, keptPaid: null, quarantined: n('quarantined'), failed: n('failed') };
+            }
+            /* A void and an edit left alone are what Send would do too, and a
+               table that left them out said nothing about either. */
+            return { create: n('created'), update: n('updated'), inXero: n('skippedSynced') + n('skippedInXero'),
+                     noContact: n('skippedNoContact'), nothing: n('skippedTest') + n('skippedCancelled'),
+                     voided: n('voided'), keptPaid: n('updateBlocked'),
+                     quarantined: n('quarantined'), failed: n('failed') };
+        }
         function connIsAdmin() {
             return !teamMe || ({ master: 3, admin: 2 }[teamMe.role] || 0) >= 2;
         }
@@ -10923,12 +10972,13 @@ Projected Image UK"></textarea>
             const box = $('connector-content'); box.innerHTML = '';
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.send;
             const ht = el('div');
-            const hTitle = el('h2', null, 'Finance');
+            const hTitle = el('h2', null, 'Xero sync');
             /* The promise follows Auto Run: with it on, new orders go without
                a review, and the header said the opposite. */
             ht.append(hTitle, el('p', null,
                 'Sends Shopify orders into Xero as invoices, refunds as credit notes, and new '
-                + 'customers as contacts. ' + (connAuto && connAuto.enabled
+                + 'customers as contacts. ' + (!connAuto ? ''
+                    : connAuto.enabled
                     ? 'Auto Run is on, so new orders go every ' + (connAuto.intervalMinutes || 10) + ' minutes without a review.'
                     : 'Nothing is written until a review has shown you exactly what will be sent.')));
             hero.append(badge, ht); box.append(hero);
@@ -10939,12 +10989,40 @@ Projected Image UK"></textarea>
             if (connCache.available === false) {
                 /* The same card shape as Forecast's own setup card beside it,
                    rather than a settings row's 14px title and 12px lines. */
+                /* Built like the other setup cards (the accounts mailbox, Xero
+                   on Reconciliation): a plain sentence, then the steps, with
+                   each setting's name as something to copy rather than as
+                   the sentence. Only an admin can do them, so only an admin
+                   is given them. */
                 const card = el('div', 'card');
                 const head = el('div', 'card-head');
                 head.append(el('h3', 'card-title', 'Link the connector service'));
-                head.append(el('p', 'card-desc', connCache.note
-                    || 'Set CONNECTOR_URL and CONNECTOR_TOKEN in Railway.'));
+                head.append(el('p', 'card-desc', 'Reactor is not linked to the Xero connector yet, so nothing can be reviewed or sent from here.'));
                 card.append(head);
+                if (connIsAdmin()) {
+                    const steps = el('ol', 'setup-steps');
+                    /* Text, with any setting or address as code, then the
+                       setting to set on a line of its own. */
+                    const step = (parts, code, value) => {
+                        const li = el('li');
+                        parts.forEach((x, i) => li.append(i % 2 ? el('code', 'setup-code', x) : document.createTextNode(x)));
+                        if (code) {
+                            const r2 = el('div', 'act-row'); r2.append(el('code', 'setup-code', code));
+                            if (value) r2.append(document.createTextNode(' = '), el('code', 'setup-code', value));
+                            li.append(r2);
+                        }
+                        steps.append(li);
+                    };
+                    step(['In Railway, open this app\u2019s service and its Variables.']);
+                    step(['Set the connector service\u2019s address on Railway\u2019s private network. Its private domain ends ', '.railway.internal',
+                          ' and is under its Settings, Networking. A public address has to be https.'],
+                         'CONNECTOR_URL', 'http://<its private domain>:<its port>');
+                    step(['Set the token: the same value as the connector service\u2019s own ', 'DASHBOARD_TOKEN', '.'], 'CONNECTOR_TOKEN');
+                    step(['Let the app redeploy, then come back to this page.']);
+                    card.append(steps);
+                } else {
+                    card.append(el('p', 'card-sub', 'An admin links it in Railway.'));
+                }
                 card.append(el('p', 'card-sub',
                     'The connector runs as its own service (shopify-xero-connector) with its own '
                     + 'ledger and failsafes. Reactor only drives it: credentials stay on that '
@@ -10975,7 +11053,9 @@ Projected Image UK"></textarea>
             kpi('Synced', 'synced', 'invoices, credit notes and contacts in Xero');
             kpi('Failed', 'failed', 'did not write; retry once the cause is fixed', true);
             kpi('Quarantined', 'quarantined', 'held back rather than written with bad data', true);
-            kpi('Blocked', 'blocked', 'kept out on purpose');
+            /* No 'Blocked' tile: the connector's ledger counts synced, failed
+               and quarantined documents only, so the tile could never show
+               and its word disagreed with 'Left alone' in the tables. */
             if (kpis.length) box.append(widget(metricsStrip(kpis), 'ledger', 'full', 'The ledger at a glance'));
 
             /* ---- status ---- */
@@ -11166,7 +11246,9 @@ Projected Image UK"></textarea>
                         + (inv.updated ? ' (and ' + inv.updated + ' already in Xero updated in place)' : '') + ', '
                         + cn.created + (cn.created === 1 ? ' credit note' : ' credit notes') + ' and '
                         + ct.created + (ct.created === 1 ? ' new contact' : ' new contacts')
-                        + ' will be written into your accounts.',
+                        + ' will be written into your accounts.'
+                        + (cxReviewCounts(r, 'invoices').voided ? ' ' + cxReviewCounts(r, 'invoices').voided
+                            + (cxReviewCounts(r, 'invoices').voided === 1 ? ' invoice for a cancelled order will be voided.' : ' invoices for cancelled orders will be voided.') : ''),
                         { title: 'Send to Xero', okText: 'Send to Xero' })) return;
                     send.disabled = true; connBusy = 'send';
                     try { await connOp({ op: 'send' }); connStartWatch(); renderConnector(); }
@@ -11211,20 +11293,27 @@ Projected Image UK"></textarea>
                 if (r.aborted) sec.append(el('div', 'msg error',
                     cxProblem('run aborted: ' + r.aborted, ctx) + ' Nothing should be sent until that is resolved.'));
                 if (r.aborted) sec.append(el('p', 'cx-res-sum', 'What it found before it stopped:'));
+                /* In the words the document tables use. 'Skipped' added up
+                   five different things: already in Xero, no Xero contact
+                   yet, test orders, cancelled orders, and contacts that
+                   exist. A column is drawn only when some row has a figure;
+                   a cell that does not apply to that kind is left empty. */
+                const cols = [['create', 'Will create'], ['update', 'Will update'], ['inXero', 'Already in Xero'],
+                    ['noContact', 'Needs a Xero contact'], ['nothing', 'Nothing to send'], ['voided', 'Will void'],
+                    ['keptPaid', 'Edited after payment, left as it is'], ['quarantined', 'Quarantined'], ['failed', 'Failed']];
+                const rowsR = [['Invoices', 'invoices'], ['Credit notes', 'creditNotes'], ['Contacts', 'contacts']]
+                    .map(([lab2, k]) => [lab2, cxReviewCounts(r, k)]);
+                const shown = cols.filter(([k]) => k === 'create' || rowsR.some(([, c]) => c[k]));
                 const wrapT = el('div', 'ktable-wrap');
                 const tb = el('table', 'ktable');
-                tb.innerHTML = '<thead><tr><th></th><th class="num">Will create</th>'
-                    + '<th class="num">Will update</th>'
-                    + '<th class="num">Quarantined</th><th class="num">Failed</th>'
-                    + '<th class="num">Skipped</th></tr></thead>';
+                const thr = el('tr'); thr.append(el('th'));
+                shown.forEach(([, h]) => thr.append(el('th', 'num', h)));
+                const thead = el('thead'); thead.append(thr); tb.append(thead);
                 const tbody = el('tbody');
-                [['Invoices', 'invoices'], ['Credit notes', 'creditNotes'], ['Contacts', 'contacts']].forEach(([lab2, k]) => {
-                    const c = connCounts(r, k);
+                rowsR.forEach(([lab2, c]) => {
                     const tr = el('tr');
-                    tr.append(el('td', 'kw', lab2), el('td', 'num', String(c.created)),
-                        el('td', 'num', String(c.updated)),
-                        el('td', 'num', String(c.quarantined)), el('td', 'num', String(c.failed)),
-                        el('td', 'num', String(c.skipped)));
+                    tr.append(el('td', 'kw', lab2));
+                    shown.forEach(([k]) => tr.append(el('td', 'num', c[k] == null ? '' : String(c[k]))));
                     tbody.append(tr);
                 });
                 tb.append(tbody); wrapT.append(tb); sec.append(wrapT);
@@ -12744,7 +12833,7 @@ Projected Image UK"></textarea>
             const c = forecastCache; const painting = !!c && !c.error;
             box.classList.toggle('no-intro', !(painting && firstPaint('forecast')));
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.insight;
-            const ht = el('div'); const title = el('h2', null, 'Finance');
+            const ht = el('div'); const title = el('h2', null, 'Forecast');
             /* The top of the page is about MONEY, not about method. How the
                forecast is produced used to be the second sentence a reader
                met, before they had been told where the business stands; it is
@@ -13341,7 +13430,7 @@ Projected Image UK"></textarea>
             box.classList.toggle('no-intro', !(rPainting && firstPaint('recon')));
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.check;
             const ht = el('div');
-            const rTitle = el('h2', null, 'Finance');
+            const rTitle = el('h2', null, 'Reconciliation');
             ht.append(rTitle,
                 el('p', null, 'An independent check that Shopify, Xero and the inbox agree: '
                     + 'every sale in the books, every payout in the bank, every document accounted for. '
@@ -14506,7 +14595,7 @@ Projected Image UK"></textarea>
                         .filter(Boolean).join('  ·  ')));
                     const acts = el('div', 'lbl-actions');
                     if (!sh.canceled && sh.tracking) {
-                        const cp = el('button', 'btn');
+                        const cp = el('button', 'btn btn-sm');
                         cp.textContent = 'Copy tracking';
                         cp.onclick = async () => {
                             try { await navigator.clipboard.writeText(sh.tracking); toastOk('Tracking copied'); }
@@ -14514,7 +14603,7 @@ Projected Image UK"></textarea>
                         };
                         acts.append(cp);
                     }
-                    const rp = el('button', 'btn btn-primary');
+                    const rp = el('button', 'btn btn-sm btn-primary');
                     rp.append(ico(I.printer), document.createTextNode('Reprint label'));
                     if (sh.has_label === false) {
                         rp.disabled = true;
@@ -14888,29 +14977,29 @@ Projected Image UK"></textarea>
                 row.append(who);
                 row.append(el('div', 'lbl-meta', fmtDate(o.created_at)));
                 const acts = el('div', 'lbl-actions');
-                const pv = el('button', 'btn'); pv.title = labelSel === o.id ? 'Hide label preview' : 'Preview label'; pv.append(ico(I.eye), el('span', 'lbl-btn-txt', labelSel === o.id ? 'Hide' : 'Preview'));
+                const pv = el('button', 'btn btn-sm'); pv.title = labelSel === o.id ? 'Hide label preview' : 'Preview label'; pv.append(ico(I.eye), el('span', 'lbl-btn-txt', labelSel === o.id ? 'Hide' : 'Preview'));
                 pv.onclick = (e) => { e.stopPropagation(); labelSel = (labelSel === o.id ? null : o.id); renderLabels(); };
                 acts.append(pv);
                 if (canEditOrders() && o.status !== 'cancelled') {
-                    const ed = el('button', 'btn'); ed.title = 'Change the delivery address or contact details';
+                    const ed = el('button', 'btn btn-sm'); ed.title = 'Change the delivery address or contact details';
                     ed.append(ico(I.edit), el('span', 'lbl-btn-txt', 'Edit'));
                     ed.onclick = (e) => { e.stopPropagation(); openOrderEdit(o); };
                     acts.append(ed);
                 }
                 if (o.proposal_url) {
-                    const pf = el('button', 'btn'); pf.title = 'Preview the proposal proof';
+                    const pf = el('button', 'btn btn-sm'); pf.title = 'Preview the proposal proof';
                     pf.append(ico(I.globe), el('span', 'lbl-btn-txt', 'Proof'));
                     pf.onclick = (e) => { e.stopPropagation(); openProposal(o); };
                     acts.append(pf);
                 }
-                const pr = el('button', 'btn'); pr.title = 'Print label'; pr.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Print'));
+                const pr = el('button', 'btn btn-sm'); pr.title = 'Print label'; pr.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Print'));
                 pr.onclick = (e) => { e.stopPropagation(); printLabels([o]); };
                 acts.append(pr);
                 if (unproc) {
                     // The release gate: out of Unprocessed, into To make. Same
                     // tag move the amber strip's Add to queue performs.
                     if (!o.status) {
-                        const rd = el('button', 'btn btn-primary');
+                        const rd = el('button', 'btn btn-sm btn-primary');
                         rd.title = 'Remove the Unprocessed tag and add IP, so this order joins To make';
                         rd.append(ico(I.check), el('span', 'lbl-btn-txt', 'Ready to make'));
                         rd.onclick = (e) => { e.stopPropagation(); readyToMake(o, rd); };
@@ -14919,14 +15008,14 @@ Projected Image UK"></textarea>
                 } else {
                 if (o.status !== 'cancelled') {
                     const dispatched = !!dsp.tracking_number && !dsp.canceled;
-                    const db = el('button', 'btn' + (dispatched ? ' on' : (queueMode === 'ship' ? ' btn-primary' : '')));
+                    const db = el('button', 'btn btn-sm' + (dispatched ? ' on' : (queueMode === 'ship' ? ' btn-primary' : '')));
                     db.title = dispatched ? 'View shipment / reprint label' : 'Dispatch a courier for this order';
                     db.append(ico(I.truck), el('span', 'lbl-btn-txt', dispatched ? 'Shipment' : 'Dispatch'));
                     db.onclick = (e) => { e.stopPropagation(); openDispatch(o); };
                     acts.append(db);
                 }
                 if (!o.status) {
-                    const mk = el('button', 'btn' + (st.made_at ? ' on' : ''));
+                    const mk = el('button', 'btn btn-sm' + (st.made_at ? ' on' : ''));
                     mk.title = st.made_at ? 'Made ' + fmtDate(st.made_at) + '. Click to unmark.' : 'Mark this order as made';
                     mk.append(ico(I.check), el('span', 'lbl-btn-txt', st.made_at ? 'Made' : 'Mark made'));
                     mk.onclick = (e) => { e.stopPropagation(); toggleMade(o); };
@@ -25742,7 +25831,7 @@ Projected Image UK"></textarea>
                 // A real button appended beside the badge, not instead of it:
                 // replacing it took away the row's only state readout.
                 const mng = el('button', 'btn', sh.ok ? 'Manage' : 'Set up');
-                mng.onclick = () => { $('settings-modal').classList.remove('show'); openShippingSettings(); };
+                mng.onclick = () => { closeSettings(); openShippingSettings(); };
                 shRow.append(mng);
             }
             host.append(shRow);
@@ -26008,39 +26097,87 @@ Projected Image UK"></textarea>
             $('pf-strategy').value = profile.strategy || '';
             $('pf-notes').value = profile.notes || '';
             prefToggles().forEach(t => t.classList.toggle('on', !!profile.prefs[t.dataset.pref]));
+            /* Only an admin can change the store profile (the server says so
+               on every write): for anyone else the fields and switches are
+               shown as they stand, not offered as controls that bounce. */
+            const canEdit = connIsAdmin();
+            ['pf-voice', 'pf-goals', 'pf-strategy', 'pf-notes'].forEach(id => { $(id).readOnly = !canEdit; });
+            prefToggles().forEach(t => { if (canEdit) t.removeAttribute('aria-disabled'); else t.setAttribute('aria-disabled', 'true'); });
+            $('settings-save').hidden = !canEdit;
+            $('settings-readonly').hidden = canEdit;
+            settingsAtOpen = profileKey(profile);
             $('settings-modal').classList.add('show');
-            $('pf-voice').focus();
+            (canEdit ? $('pf-voice') : $('settings-close')).focus();
             loadConnections();
             loadSchedule();
             loadUsage();
         }
-        function closeSettings() { $('settings-modal').classList.remove('show'); }
+        /* One way to save in the whole window: every switch saves the moment
+           it is changed, and each block of text has its own Save under it.
+           The four preference switches used to wait for a footer 'Save
+           profile' while the Auto-refresh switch beside them saved at once,
+           so the footer's Cancel undid one and not the other. A change that
+           alters the Overview recomputes it once, when the window closes. */
+        /* The profile as it was when the window opened, to tell a real change
+           from a switch flicked and put back. */
+        let settingsAtOpen = '';
+        const profileKey = (p) => JSON.stringify([p.brand_voice || '', p.business_goals || '', p.strategy || '', p.notes || '',
+            Object.keys(DEFAULT_PREFS).map(k => !!(p.prefs || {})[k])]);
+        function closeSettings() {
+            $('settings-modal').classList.remove('show');
+            const changed = settingsAtOpen && profileKey(profile) !== settingsAtOpen;
+            settingsAtOpen = '';
+            /* Only an Overview that has been run is run again: one still on
+               its Run button stays there, because a paid run starts only when
+               someone presses Run. */
+            if (!changed || !overviewCache) return;
+            overviewCache = null; // profile changed, recompute the Overview
+            if ($('view-overview').classList.contains('active')) loadOverview(true);
+        }
+        async function savePrefToggle(t) {
+            if (t.getAttribute('aria-disabled') === 'true') return;
+            const was = t.classList.contains('on');
+            t.classList.toggle('on', !was);
+            const prefs = {};
+            prefToggles().forEach(x => prefs[x.dataset.pref] = x.classList.contains('on'));
+            try {
+                /* The switches alone. The server merges them into the profile
+                   it holds: posting this page's copy of the whole profile let
+                   a stale or empty copy overwrite the stored text. */
+                const d = await api('/api/profile', { prefs: prefs });
+                if (d && d.profile) { profile = d.profile; profile.prefs = Object.assign({}, DEFAULT_PREFS, d.profile.prefs || {}); }
+                else profile.prefs = prefs;
+                cacheProfile();
+            } catch (e) {
+                t.classList.toggle('on', was);
+                toastError('That setting was not saved. ' + (e.message || ''));
+            }
+        }
         async function applySettings() {
-            profile.brand_voice = $('pf-voice').value.trim();
-            profile.business_goals = $('pf-goals').value.trim();
-            profile.strategy = $('pf-strategy').value.trim();
-            profile.notes = $('pf-notes').value.trim();
+            /* Built as a copy and taken as the profile only once the server
+               has it: a failed save left its text in the profile, and the
+               next switch then sent the text that had failed. */
             const prefs = {};
             prefToggles().forEach(t => prefs[t.dataset.pref] = t.classList.contains('on'));
-            profile.prefs = prefs;
-            cacheProfile();
+            const next = Object.assign({}, profile, {
+                brand_voice: $('pf-voice').value.trim(), business_goals: $('pf-goals').value.trim(),
+                strategy: $('pf-strategy').value.trim(), notes: $('pf-notes').value.trim(), prefs: prefs });
             const btn = $('settings-save'); btn.disabled = true; btn.textContent = 'Saving…';
             try {
-                const d = await api('/api/profile', { profile });
-                if (d && d.profile) { profile = d.profile; profile.prefs = Object.assign({}, DEFAULT_PREFS, d.profile.prefs || {}); cacheProfile(); }
-                closeSettings();
-                overviewCache = null; // profile changed, recompute the Overview
-                if ($('view-overview').classList.contains('active')) loadOverview(true);
+                const d = await api('/api/profile', { profile: next });
+                profile = (d && d.profile) ? d.profile : next;
+                profile.prefs = Object.assign({}, DEFAULT_PREFS, profile.prefs || {});
+                cacheProfile();
                 btn.textContent = 'Save profile';
+                toastOk('Profile saved.');
             } catch (e) {
                 btn.textContent = 'Save failed, retry';
             } finally { btn.disabled = false; }
         }
         $('settings-btn').onclick = () => { openSettings(); refreshMfaRow(); refreshSignOffRow(); };
         $('settings-close').onclick = closeSettings;
-        $('settings-cancel').onclick = closeSettings;
         $('settings-save').onclick = applySettings;
-        prefToggles().forEach(t => t.onclick = function () { this.classList.toggle('on'); });
+        prefToggles().forEach(t => t.onclick = function () { savePrefToggle(this); });
         function loadUsage() {
             const box = $('usage'); if (!box) return;
             box.innerHTML = '<div class="setting-sub">Loading usage…</div>';

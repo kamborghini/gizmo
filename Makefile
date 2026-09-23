@@ -5,15 +5,16 @@
 #   make run            start the app on :8000, loading .env if there is one
 #   make test           the dispatch suite (about a minute, no network)
 #   make test-frontend  the static guards on the single-page app (seconds)
+#   make test-forecast  the forecast package (skips itself without pandas)
 #   make check          everything CI runs that needs no network
 #   make env-doc        regenerate docs/ENVIRONMENT.md from the code
 
 PY ?= .venv/bin/python
 
-.PHONY: help install run test test-frontend sweep env-doc check
+.PHONY: help install run test test-frontend test-forecast sweep env-doc check
 
 help:
-	@sed -n '4,10p' Makefile
+	@sed -n '4,11p' Makefile
 
 install:
 	python3 -m venv .venv
@@ -32,12 +33,15 @@ test:
 test-frontend:
 	python3 tests/test_frontend.py
 
+test-forecast:
+	$(PY) tests/test_forecast.py
+
 sweep:
 	python3 tools/sweep_tree.py
 
 env-doc:
 	$(PY) tools/env_reference.py --write
 
-check: test-frontend sweep
+check: test-frontend test-forecast sweep
 	$(PY) tools/env_reference.py --check
 	$(PY) tests/test_dispatch.py

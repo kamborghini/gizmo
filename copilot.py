@@ -16881,6 +16881,24 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, body, _who = await _guard(request)
         if err:
             return err
+        # The switches alone, merged into the profile as the server holds it.
+        # A switch used to post the page's copy of the whole profile, so one
+        # click from a tab whose read had failed, or that another admin had
+        # saved past, wrote its stale or empty text over the stored text.
+        if isinstance(body.get("prefs"), dict) and not isinstance(body.get("profile"), dict):
+            if _team_level(_who) < ROLE_LEVELS["admin"]:
+                return _json({"error": "Only an admin can change the store profile."}, 403)
+            try:
+                held = _load_profile()
+                prefs = {**(held.get("prefs") if isinstance(held.get("prefs"), dict) else {}),
+                         **{k: v for k, v in body["prefs"].items()
+                            if k in ("track_inventory", "concise", "proactive", "flag_anomalies")}}
+                saved = _save_profile({**held, "prefs": prefs})
+                _track(_who, "settings", "changed a store preference")
+                return _json({"profile": saved})
+            except Exception:
+                logger.exception("Preference save failed")
+                return _json({"error": "Couldn't save the setting (is a writable volume mounted at /data?)."}, 500)
         # Save when a profile object is supplied; otherwise just load.
         if isinstance(body.get("profile"), dict):
             if _team_level(_who) < ROLE_LEVELS["admin"]:
