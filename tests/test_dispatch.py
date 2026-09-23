@@ -19139,6 +19139,13 @@ def t_every_product_reader_reads_the_whole_catalogue_or_says_it_could_not():
                          "and the change alert would compare it with the last whole one")
         head = next(k for k in kpis if k["label"] == "SEO score")
         eq(head["value"], "n/a")
+        # A check that did not run says so in its words and keeps the figure
+        # column for figures: a sentence sat among the -10s and -5s.
+        notes = [i["note"] for i in (head.get("detail") or {}).get("items", [])]
+        ok(notes and all(n == "not scored" or re.fullmatch(r"-\d+", n) for n in notes), notes)
+        labels = [i["label"] for i in head["detail"]["items"]]
+        ok(any(l.startswith("page checks not run: the storefront could not be crawled") for l in labels), labels)
+        ok(any(l.startswith("product checks not run: Shopify did not answer") for l in labels), labels)
         eq(copilot._metric_snapshot({"score": _score, "metrics": kpis})["metrics"].get("SEO score"),
            None, "so nothing is saved for the alert to compare")
         copilot._loan_products.update({"at": 0.0, "rows": []})
@@ -20499,6 +20506,39 @@ def t_a_failed_xero_read_does_not_check_new_orders_against_yesterdays_books():
         live = [e for e in stores["store"]["exceptions"].values()
                 if not e.get("stale") and e["kind"] == "shopify_sale_missing"]
         ok(live, "with only the bank unreadable, the sale checks still run and report")
+    finally:
+        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
+                      mail_thread=None, load_store=None, write_store=None,
+                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
+
+
+@test
+def t_the_sweep_notes_are_sentences_said_once():
+    """The Reconciliation page lists the sweep's notes as they are written. A
+    Xero read refused for one reason put four near-identical lines on screen,
+    one per collection, and then a fifth naming them as bank_transactions and
+    credit_notes; a crashed check was named by its Python function."""
+    eq(_rc._words(["bank_transactions", "credit_notes"]), "bank transactions and credit notes")
+    eq(_rc._words(["invoices", "payments", "credit_notes"]), "invoices, payments and credit notes")
+    eq(_rc._check_words("check_orders_vs_invoices"), "orders against invoices")
+    fx = _FakeXero(invoices=[])
+    stores = _recon_world(fx, [])
+    try:
+        class Dead(_FakeXero):
+            async def list_invoices(self, since=None, modified_since=None):
+                raise RuntimeError("Xero refused the refresh token.")
+            list_payments = list_bank_transactions = list_credit_notes = list_invoices
+        _rc.configure(xero=Dead())
+        r = run_async(_rc.sweep(deep_docs=False))
+        said = [n for n in r["notes"] if "could not be read" in n and "Xero" in n]
+        eq(len(said), 1, "one reason, one line: %s" % r["notes"])
+        ok("invoices, payments, bank transactions and credit notes" in said[0], said[0])
+        ok(not any(re.search(r"[a-z]_[a-z]", n) for n in r["notes"]), "no code names: %s" % r["notes"])
+        ok(not any("SKIPPED" in n for n in r["notes"]), "and nothing shouted")
+        # What the failure meant is said in the same note, not a second one.
+        ok("The checks that read them were skipped" in said[0], said[0])
+        ok(not any(n.startswith("The checks that read Xero's") for n in r["notes"]),
+           "one failure, one note: %s" % r["notes"])
     finally:
         _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
                       mail_thread=None, load_store=None, write_store=None,

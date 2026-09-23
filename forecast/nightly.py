@@ -162,7 +162,7 @@ def _payload(cfg, cf, sanity, opinions, monthly, cash, alerts, summary, actual_d
     return {
         "as_of": cfg.as_of.isoformat(), "generated_at": datetime.now(timezone.utc).isoformat(),
         "scenarios": names, "scenario_feature": None,
-        "basis": "order total (cash in), the units the plan and Shopify both use",
+        "basis": "order totals, as cash in: the same units the plan and Shopify use",
         "forecast_by": [{"name": m["name"], "note": m.get("note"),
                          "mape": f(m["score"]["mape"]), "bias": f(m["score"]["bias"])} for m in opinions],
         "summary": summary, "monthly": rows,

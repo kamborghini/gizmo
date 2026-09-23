@@ -1225,6 +1225,23 @@ ALL_CHECKS = [check_orders_vs_invoices, check_refunds, check_payouts_vs_bank,
               check_stale_unreconciled, check_duplicates, check_overpayments,
               check_disputes, check_xero_orphan_sales]
 
+# What the sweep's notes call things. They reach the Reconciliation page as
+# sentences, where "bank_transactions" and "check_orders_vs_invoices" read as
+# code that escaped rather than words somebody chose.
+XERO_WORDS = {"invoices": "invoices", "payments": "payments",
+              "bank_transactions": "bank transactions", "credit_notes": "credit notes"}
+
+
+def _words(names) -> str:
+    """invoices, payments and credit notes"""
+    w = [XERO_WORDS.get(n, n.replace("_", " ")) for n in names]
+    return w[0] if len(w) == 1 else ", ".join(w[:-1]) + " and " + w[-1]
+
+
+def _check_words(fn_name: str) -> str:
+    return fn_name.replace("check_", "", 1).replace("_vs_", " against ").replace("_", " ")
+
+
 # Which Xero collections each check reads: a check whose collection could not
 # be read this sweep sits it out rather than run on the last good copy.
 CHECK_READS = {
@@ -1753,6 +1770,8 @@ async def _sweep_inner(deep_docs: bool) -> dict:
     docs = _load_docs()
     notes: list = []
     xero_failed: list = []   # the Xero collections this sweep could not read
+    xero_why: dict = {}      # the reason each failed, grouped so each is said once
+    xero_why_at = None       # the one note that gives it, when there is one
 
     # --- Xero, incrementally ------------------------------------------------
     if _xero is not None and _xero.connected():
@@ -1794,14 +1813,19 @@ async def _sweep_inner(deep_docs: bool) -> dict:
                                 ms / 1000, tz=timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
                         except (AttributeError, ValueError):
                             pass
-                    notes.append(f"Xero {name}: the crawl hit its page cap; this sweep is "
+                    notes.append(f"Xero {_words([name])}: the crawl hit its page cap; this sweep is "
                                  "partial and the next one continues from where it stopped.")
                 else:
                     marks[name] = stamp
             except Exception as e:
                 xero_failed.append(name)
-                notes.append(f"Xero {name} could not be read: {str(e)[:120]}")
+                xero_why.setdefault(str(e)[:120], []).append(name)
                 logger.exception("recon sweep: xero %s failed", name)
+        # One line per distinct reason, not one per collection: four reads that
+        # failed for the one reason said it four times over.
+        for why, names in xero_why.items():
+            notes.append(f"Xero {_words(names)} could not be read this sweep: {why}")
+        xero_why_at = len(notes) - 1 if len(xero_why) == 1 else None
     else:
         notes.append("Xero is not connected; the accounts side of every check is missing.")
 
@@ -2029,7 +2053,7 @@ async def _sweep_inner(deep_docs: bool) -> dict:
                          if c not in (check_orders_vs_invoices, check_refunds,
                                       check_payouts_vs_bank)]
         notes.append("The Xero cache is empty, so the missing-sale, refund and payout "
-                     "checks were SKIPPED rather than reporting everything as missing.")
+                     "checks were skipped rather than reporting everything as missing.")
     if orders_short:
         checks_to_run = [c for c in checks_to_run if c is not check_xero_orphan_sales]
     if xero_failed:
@@ -2041,9 +2065,18 @@ async def _sweep_inner(deep_docs: bool) -> dict:
         skipped = [c for c in checks_to_run if CHECK_READS.get(c.__name__, set()) & set(xero_failed)]
         checks_to_run = [c for c in checks_to_run if c not in skipped]
         if skipped or CHECK_READS["check_gmail_docs"] & set(xero_failed):
-            notes.append("Xero could not be read this sweep (" + ", ".join(xero_failed) + "), so "
-                         "the checks that read it were skipped rather than run on the copy from "
-                         "the last good sweep. What they found before stays as it was.")
+            # With one reason, the consequence finishes the note that gave it:
+            # as two notes, the page said the same failure twice.
+            if xero_why_at is not None:
+                why_note = notes[xero_why_at].rstrip()
+                notes[xero_why_at] = (why_note + ("" if why_note.endswith((".", "!", "?")) else ".")
+                                      + " The checks that read them were skipped rather than run "
+                                      "on the copy from the last good sweep, so what they found "
+                                      "before stays as it was.")
+            else:
+                notes.append("The checks that read Xero's " + _words(xero_failed) + " were skipped "
+                             "rather than run on the copy from the last good sweep. What they found "
+                             "before stays as it was.")
     for check in checks_to_run:
         try:
             for e in check(cache):
@@ -2051,8 +2084,8 @@ async def _sweep_inner(deep_docs: bool) -> dict:
             ran_kinds |= CHECK_KINDS.get(check.__name__, set())
         except Exception:
             logger.exception("recon check %s crashed", check.__name__)
-            notes.append(f"The {check.__name__} check crashed; its findings are missing "
-                         "from this sweep.")
+            notes.append(f"The {_check_words(check.__name__)} check crashed; its findings are "
+                         "missing from this sweep.")
     try:
         if not (CHECK_READS["check_gmail_docs"] & set(xero_failed)):   # the same stale copy
             for e in check_gmail_docs(cache, docs):

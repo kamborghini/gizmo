@@ -65,9 +65,11 @@
         '.cmp-b.bold { font-weight: var(--weight-semibold); }',
         '.cmp-b.ital { font-style: italic; }',
         '.cmp-b.undr { text-decoration: underline; }',
-        '.cmp-sel { height: 32px; border: 1px solid var(--border-default); background: var(--surface-primary);',
+        /* background-color, not the shorthand: the shorthand wiped the page's
+           select caret, so Font and Size read as text boxes. And room for it. */
+        '.cmp-sel { height: 32px; border: 1px solid var(--border-default); background-color: var(--surface-primary);',
         '    color: var(--text-primary); border-radius: var(--radius-xs); font: inherit; font-size: var(--text-xs);',
-        '    padding: 0 var(--sp-1); max-width: 120px; }',
+        '    padding: 0 var(--chevron-room) 0 var(--sp-1); max-width: 120px; }',
         '.cmp-sep { width: 1px; height: 20px; background: var(--border-default); margin: 0 var(--sp-1); }',
         '.cmp-pop { position: absolute; top: 100%; left: var(--sp-1); z-index: 40; margin-top: var(--sp-1);',
         '    display: grid; grid-template-columns: repeat(3, 28px); gap: var(--sp-1);',

@@ -238,7 +238,7 @@ def t_the_guide_is_static_and_covers_the_failure_cases():
     ok(block, "the guide content is a plain constant")
     body = block.group(1)
     ok("api(" not in body and "fetch(" not in body, "it makes no network calls")
-    for must in ["A booking fails", "must go NOW", "will not print", "Unauthorized",
+    for must in ["A booking fails", "must go now", "will not print", "Unauthorized",
                  "customs line shows 0", "Charge you twice"]:
         ok(must in body, "covers: " + must)
     ok("renderGuide" in SCRIPT and "printGuide" in SCRIPT, "it renders and prints")
@@ -472,7 +472,7 @@ def t_stock_sheet_review_is_editable_and_honest():
     ok("'/api/stock-usage/send'" in SCRIPT, "wired to the send route")
     ok(re.search(r"<th class=\"num\">Estimated</th><th class=\"num\">Final</th>", SCRIPT),
        "estimate and final are distinct columns")
-    ok("NO STOCK ITEM" in SCRIPT, "a failed line is named, never silent")
+    ok("No stock item" in SCRIPT, "a failed line is named, never silent")
     ok("Add something that was used but not in the estimate" in SCRIPT,
        "lines can be added beyond the estimate")
 
@@ -492,7 +492,7 @@ def t_the_pipedrive_import_previews_before_it_writes():
     ok("Preview the import" in SCRIPT and "Import it for real" in SCRIPT,
        "and the preview comes first: nobody reaches the write without seeing the counts")
     ok("Nothing is being written" in SCRIPT, "which the preview says while it runs")
-    ok("A backup is taken first" in SCRIPT and "typed into gizmo by hand is left" in SCRIPT,
+    ok("A backup is taken first" in SCRIPT and "typed into Reactor by hand is left" in SCRIPT,
        "and the confirmation says what protects them")
     ok("stay in Pipedrive" in SCRIPT and "become tasks" in SCRIPT,
        "what cannot come across is shown, not silently dropped")
@@ -503,7 +503,7 @@ def t_custom_shipments_have_a_home_on_the_desk():
     """A pasted-address shipment has no order to be a row of, so without its
     own queue the only way back to its label was to reopen the booking window,
     which reads like spending money again."""
-    ok("['shipments', 'Custom Shipments', 'Custom Shipments']" in SCRIPT,
+    ok("['shipments', 'Custom shipments', 'Custom Shipments']" in SCRIPT,
        "Custom Shipments is a queue on the desk, beside the order queues")
     ok("renderCustomQueue" in SCRIPT, "with a list of its own")
     ok("Search reference, name or tracking" in SCRIPT,
@@ -638,7 +638,7 @@ def t_inbox_board_owns_every_email():
        "stale board responses cannot repaint over fresher ones")
     ok("'/api/mail/connect-link'" in SCRIPT,
        "connecting is a button, not a secret pasted into a URL")
-    ok("NOT your own" in SCRIPT,
+    ok("not your own account" in SCRIPT,
        "the card warns which Google account is about to be connected")
     ok("window.open('', '_blank')" in SCRIPT,
        "the consent tab opens inside the click, or the popup blocker eats it")
@@ -757,7 +757,7 @@ def t_printing_cannot_waste_stock_or_print_invisible_text():
     fit = re.search(r"function fitLabel.*?\n        \}", SCRIPT, re.S).group(0)
     ok("scrollWidth" in fit, "fitLabel measures WIDTH too, not only height")
     ok("clipped" in fit, "and reports when the content still does not fit")
-    ok("does NOT fit on" in SCRIPT, "the preview warns instead of printing a short cut list")
+    ok("does not fit on" in SCRIPT, "the preview warns instead of printing a short cut list")
     ok("function labelFontReady" in SCRIPT, "one shared font gate")
     ok(SCRIPT.count("labelFontReady()") >= 5,
        "every print path waits for the label typeface (%d)" % SCRIPT.count("labelFontReady()"))
@@ -1011,7 +1011,7 @@ def t_the_targets_a_finger_has_to_hit_are_big_enough():
 def t_icon_only_buttons_clear_the_minimum():
     """An icon button was the 16px glyph plus 4px of padding: 24px, on the line."""
     rule = re.search(r"\.icon-btn \{.*?\}", HTML, re.S).group(0)
-    ok("min-width: 28px" in rule and "min-height: 28px" in rule,
+    ok("min-width: var(--control-h-md)" in rule and "min-height: var(--control-h-md)" in rule,
        "icon buttons carry an explicit floor rather than inheriting one from their glyph")
     ok(re.search(r"\.toast-x \{ min-width: var\(--control-h-sm\); min-height: var\(--control-h-sm\)", HTML),
        "so does the toast dismiss, which sits on its own over the page")
@@ -1187,7 +1187,7 @@ def t_a_failed_question_is_not_dressed_as_an_answer():
        "the failure is not replayed to the model as something it said")
     render = re.search(r"function renderPageThread.*?\n        \}", SCRIPT, re.S).group(0)
     ok("t.role === 'error'" in render, "and it renders through the error path")
-    ok("did not reach the copilot" in render, "which says what actually happened")
+    ok("did not reach Reactor" in render, "which says what actually happened")
     ok("Ask again" in render, "and offers the question back rather than making them retype it")
 
 
@@ -1234,8 +1234,10 @@ def t_one_component_per_role_across_tabs():
        "and no longer borrows the Inbox's empty state")
     ok("el('div', 'disp-subhead', 'On the clock now')" not in SCRIPT,
        "Team uses the page-level heading, not the dispatch modal's field label")
-    ok(SCRIPT.count("el('div', 'section-title', 'Recent sessions')") == 1,
-       "and all three of its headings moved together")
+    # Since 2026-09-23 each of the Work tab's three lists is a titled card, as
+    # the People tab's is.
+    ok("cardOf('Recent sessions'" in SCRIPT and "cardOf('On the clock now')" in SCRIPT
+       and "cardOf('Hours per person')" in SCRIPT, "and all three of its headings moved together")
     banner = re.search(r"\.alerts-banner \{[^}]*\}", HTML).group(0)
     ok("var(--bw-hairline) solid var(--border-default)" in banner,
        "the alerts banner wears the hairline every other tinted notice wears")
@@ -1430,8 +1432,12 @@ def t_the_custom_shipment_queue_speaks_its_own_tab_s_language():
     for borrowed in ("files-list", "files-row", "files-name", "files-meta",
                      "disp-text", "mail-empty"):
         ok(borrowed not in fn, "the queue no longer borrows .%s" % borrowed)
-    for own in ("lbl-row", "lbl-who", "lbl-meta", "lbl-actions", "lbl-find", "lbl-chip bad"):
+    for own in ("lbl-row", "lbl-who", "lbl-meta", "lbl-actions", "lbl-chip bad"):
         ok(own in fn, "it uses the tab's own .%s" % own)
+    # And the page around the list is the other four tabs' page: a card with a
+    # counted title, its actions in the head and the house search (2026-09-23).
+    ok("tableSearch('Search reference, name or tracking'" in fn and "el('div', 'card-head')" in fn
+       and "heroAct(" in fn, "the list sits in a card like the order queues' own")
     ok("margin-left:auto" not in fn, "and the inline one-off layout is gone")
 
 
@@ -1613,7 +1619,7 @@ def t_a_link_is_still_identifiable_without_colour():
     stops being decoration and becomes the entire affordance, which is why the
     reference underlines its links too."""
     style = HTML[HTML.index("<style>"):HTML.index("</style>")]
-    for sel in [".lbl-num-link, .modal-order-link", ".mail-order-name", ".miss-open",
+    for sel in [".lbl-num-link, .modal-order-link, .action-link", ".mail-order-name", ".miss-open",
                 ".seclink", ".sk-more", ".linkish"]:
         i = style.find("\n        " + sel + " {")
         ok(i >= 0, "the %s rule is still there" % sel)
@@ -1903,8 +1909,8 @@ def t_prose_is_capped_to_a_reading_measure():
 
 @test
 def t_the_queue_row_spends_width_on_columns_not_on_a_void():
-    f = re.search(r"@media \(min-width: 1500px\) \{\s*\.lbl-qrow[\s\S]{0,600}?\n        \}", CSS)
-    ok(f, "there is a wide-screen rule for the queue row")
+    f = re.search(r"@container queue \(min-width: 1200px\) \{\s*\.lbl-grid[\s\S]{0,600}?\n        \}", CSS)
+    ok(f, "there is a wide rule for the queue row, keyed to the list's own width")
     ok("display: contents" in f.group(0),
        "the .lbl-who box dissolves so its two lines become two real columns")
     ok(".lbl-row {" not in f.group(0),
@@ -1917,8 +1923,18 @@ def t_six_buttons_never_paint_over_the_date():
     """The rail is a flex item with min-width 0, so it was squeezed to 526px
     while its buttons measured 593px and refused to shrink."""
     ok("min-width: max-content" in CSS, "the rail reserves what it needs")
-    ok("@media (max-width: 1199px) { .lbl-actions .lbl-btn-txt { display: none; }" in CSS,
-       "and below 1200 the buttons drop to icons rather than overlapping")
+    ok("@container queue (max-width: 999px) {\n            .lbl-actions .lbl-btn-txt { display: none; }" in CSS,
+       "and in a list under 1,000px the buttons drop to icons rather than overlapping")
+    # The case the viewport rule could not see: a 1,728px window with the
+    # label preview open leaves the list 900px wide, and the labelled rail
+    # painted over the item line and the date.
+    ok(".lbl-list { container: queue / inline-size; }" in CSS, "the list is the container")
+    ok("const listBox = el('div', 'lbl-list')" in SCRIPT and "split.append(listBox, pane)" in SCRIPT,
+       "with or without the pane beside it")
+    # And one set of tracks for every row: a refunded order's shorter rail or
+    # a wider date moved its own row's columns by up to 121px.
+    ok("grid-template-columns: subgrid" in CSS and ".lbl-grid > * { grid-column: 1 / -1; }" in CSS,
+       "each row is a subgrid of the list, so the columns line up down the queue")
 
 
 @test
@@ -2111,16 +2127,19 @@ def t_the_size_list_tab_is_searchable_and_reads_the_same_sheet_as_the_label():
     ok("words.some(w => w.indexOf(t) === 0)" in SCRIPT, "a token matches the start of a word")
     ok("el('tr', 'ktable-grp')" in fn and "st.folded[it.head] = !folded;" in fn, "rows sit under their maker, and a maker folds")
     ok("az.setAttribute('aria-label', 'Jump to a maker by initial');" in fn, "with an A to Z strip to jump by")
-    ok("list.slice(start, start + st.pageSize)" in fn and "'Page ' + st.page + ' of ' + pages" in fn and "sizesSelect('Rows per page'" in fn,
-       "paged, with previous, next and a page size")
-    ok("['Holder glass, mm', 1], ['Image, mm', 1], ['Produced as, mm', 1], ['Under, mm', 1]" in fn and ".ktable th.num, .ktable td.num { text-align: right; font-variant-numeric: tabular-nums; }" in CSS,
-       "numbers sit in tabular columns with the unit in the heading")
+    ok("slice = list.filter(it => it.pg === st.page - 1)" in fn and "tablePager({ total: modelCount" in fn and "sizes: [100, 250, 500]" in fn,
+       "paged by the house pager, with a page size, counting models rather than lines")
+    ok("Math.ceil(list.length / st.pageSize)" not in fn, "a maker heading does not take a model's place on the page")
+    ok("['Holder glass, mm', 1], ['Image, mm', 1], ['Produced as, mm', 1], ['Status']" in fn and "['Undercut, mm', 1]" in fn
+       and ".ktable th.num, .ktable td.num { text-align: right; font-variant-numeric: tabular-nums; }" in CSS,
+       "numbers sit in tabular columns with the unit in the heading, and the status in its own")
     ok("text-overflow: ellipsis" in CSS.split(".ktable td.sizes-notes {")[1].split("}")[0] and "n.title = r.notes;" in fn, "a note is one line, the whole of it on hover")
     ok("xbtn.onclick = () => sizesExport(rows);" in fn and "a.download = 'size-list.csv';" in SCRIPT, "and the filtered list exports as CSV")
-    ok("el('span', 'lbl-chip made', 'ruling')" in SCRIPT and "'not a gobo'" in SCRIPT, "a ruling and an exclusion read as chips over the sheet's answer")
+    ok("ruled: ['Ruled in the app', 'made']" in SCRIPT and "excluded: ['Not a gobo', 'note']" in SCRIPT,
+       "a ruling and an exclusion read as chips, in the Status filter's words")
     ok("api('/api/gobo-sizes/rule', { op: 'set', manufacturer: r.manufacturer, model: r.model, size: inp.value.trim() })" in SCRIPT,
        "ruling inline writes the same rule the label reads")
-    ok("if (canEdit) {" in SCRIPT.split("function sizesProducedCell")[1][:1400], "and only with the grant")
+    ok("if (canEdit) {" in SCRIPT.split("function sizesProducedCells")[1][:1600], "and only with the grant")
 
 @test
 def t_a_rejected_embed_token_is_retried_once_and_a_dead_session_never_loops():
@@ -2285,11 +2304,15 @@ def t_the_beta_tabs_say_so_everywhere_they_are_named():
     for nav in ("$('nav-recon')", "$('nav-forecast')", "$('nav-crm')", "$('nav-connector')"):
         block = SCRIPT.split(nav)[1][:180]
         ok("beta-tag" in block, nav + " carries the badge in the sidebar")
-    ok("rTitle.append(el('span', 'beta-tag'" in SCRIPT
-       and "cTitle.append(el('span', 'beta-tag'" in SCRIPT
-       and "hTitle.append(el('span', 'beta-tag'" in SCRIPT
-       and "title.append(el('span', 'beta-tag', 'Beta'));" in SCRIPT.split("function renderForecast()")[1],
-       "and all four page headings carry it")
+    # On the page: CRM's own heading carries it; the three Finance tabs carry
+    # it on their own tab, because the 'Finance' heading is shared with
+    # Liability and gained and lost the tag as you moved between the four.
+    ok("cTitle.append(el('span', 'beta-tag'" in SCRIPT, "the CRM heading carries it")
+    ft = fn_src("function financeTabs(")
+    ok("if (BETA_TABS.indexOf(key) >= 0) b.append(el('span', 'beta-tag', 'Beta'));" in ft,
+       "and each Finance tab in beta carries it on the tab")
+    for t in ("rTitle", "hTitle"):
+        ok(t + ".append(el('span', 'beta-tag'" not in SCRIPT, "not on the shared Finance heading (" + t + ")")
     ok("BETA_TABS.indexOf(v) >= 0" in SCRIPT, "and the topbar title does too")
     ok(".beta-tag {" in CSS, "the badge is styled")
 
@@ -2479,10 +2502,11 @@ def t_the_table_toolbar_and_pager_match_the_reference():
     32px, 28px filter and action buttons, and 32px square pager steps at the base
     radius. All four numbers are the reference's own."""
     srch = CSS.split(".tbl-search input {")[1].split("}")[0]
-    ok("height: 28px" in srch and "width: 320px" in srch, "the search field is 28 by 320")
+    ok("height: var(--control-h-md)" in srch and "width: 320px" in srch, "the search field is 28 by 320")
+    ok(re.search(r"--control-h-md:\s*28px", CSS), "the small control token is the reference's 28")
     ok("padding: var(--sp-1) var(--sp-2-5) var(--sp-1) var(--sp-7)" in srch, "with room for the icon on the left")
     btn = CSS.split(".btn-sm {")[1].split("}")[0]
-    ok("min-height: 28px" in btn and "padding: 0 var(--sp-2-5)" in btn, "small buttons are 28px tall")
+    ok("min-height: var(--control-h-md)" in btn and "padding: 0 var(--sp-2-5)" in btn, "small buttons are 28px tall")
     step = CSS.split(".tbl-step {")[1].split("}")[0]
     ok("width: var(--control-h)" in step and "height: var(--control-h)" in step, "pager steps are 32px square")
     ok("border-radius: var(--radius-md)" in step, "at the base radius, not the control radius")
@@ -2598,9 +2622,13 @@ def t_a_missing_figure_is_not_reported_as_zero():
     ok("const liaNum = (v, fmt) =>" in fn, "there is one guard for all six figures")
     ok("typeof v === 'number' && isFinite(v)" in fn, "and it asks whether a number arrived")
     ok("'not reported'" in fn, "saying so plainly when one did not")
-    for field in ("d.total", "d.within", "d.due_soon", "d.overdue",
+    # 'within' is the bucket the legend and the tile's filter show (d.within
+    # also counts what is due soon), read into a local first.
+    for field in ("d.total", "within", "d.due_soon", "d.overdue",
                   "d.overdue_orders", "d.oldest_days"):
         ok("liaNum(" + field + "," in fn, field + " goes through it")
+    ok("const within = (d.buckets && typeof d.buckets.within === 'number') ? d.buckets.within : d.within;" in fn,
+       "the tile reads the same bucket as the legend under it")
     ok("String(d.overdue_orders)" not in fn and "d.oldest_days + ' days'" not in fn,
        "and nothing prints a raw undefined any more")
 
@@ -2816,9 +2844,22 @@ def t_the_chart_legend_belongs_to_the_plot():
     """It was drawn in the card header while the chart reserved 48 units at the
     top of its own plot for it, so a multi-series chart carried a band of
     nothing across the top and named its lines somewhere else."""
-    ok("function chartLegend(series) {" in SCRIPT, "the legend is its own piece")
-    ok("if (multi && series.length > 1) card.append(chartLegend(series));" in SCRIPT,
-       "drawn between the header and the plot, and only when there are lines to tell apart")
+    ok("function chartLegend(series, band) {" in SCRIPT, "the legend is its own piece")
+    ok("if ((multi && series.length > 1) || bandOpt || series.some(s => s.dash)) {" in SCRIPT
+       and "if (lg.children.length > 1 || lg.querySelector('.dash, .band')) card.append(lg);" in SCRIPT,
+       "drawn between the header and the plot, whenever there are marks to tell apart: two lines, "
+       "a dashed line or a shaded range, and never for one plain line")
+    # Each swatch is drawn the way its mark is. The forecast chart keyed a
+    # solid line and a dashed one with two identical black squares.
+    lg = fn_src("function chartLegend(")
+    ok("(sr.dash || (i > 0 && !sr.lead)) ? 'dash' : ''" in lg and "if (band && " in lg,
+       "a dashed or comparison series is keyed dashed, and a band gets a key of its own")
+    ok(".filter(v => v != null).length > 1" in lg, "and only a series that draws something gets a key")
+    ok(".chart-legend .sw.dash {" in CSS and "repeating-linear-gradient" in CSS.split(".chart-legend .sw.dash {")[1].split("}")[0],
+       "painted as a dashed stroke, not a dashed border (the drop-target signal)")
+    # The source line is provenance, not a key: its dot was painted in the
+    # first series' colour and read as a third swatch.
+    ok("src-dot" not in SCRIPT and "src-dot" not in CSS, "the source line carries no coloured dot")
     ok("chart-legend" not in SCRIPT.split("function chartHead(")[1][:1400],
        "and no longer inside the card header")
     # The frame is one definition in :root, read by BOTH charts. It used to be
@@ -3159,7 +3200,7 @@ def t_every_control_is_the_same_height_as_every_other():
     ok("input[type=date], input[type=time] { height: var(--control-h); }" in CSS,
        "and a native date control is pinned, since it carries its own height")
     sm = CSS.split(".btn-sm {")[1].split("}")[0]
-    ok("min-height: 28px" in sm, "the small button stays 28")
+    ok("min-height: var(--control-h-md)" in sm and re.search(r"--control-h-md:\s*28px", CSS), "the small button stays 28")
 
 
 @test
@@ -3279,9 +3320,12 @@ def t_a_rising_number_is_not_congratulated_in_green():
         rule = re.search(sel + r" \{[^}]*\}", CSS)
         ok(rule, "the %s rule is still there" % sel)
         ok("var(--success)" not in rule.group(0), "and %s spends no green on direction alone" % sel)
-    # The product chip's own comparison badge is untouched and stays pinned.
+    # The product list's compare chip is the same kind of mark, so it wears the
+    # same neutral tint: as a filled black pill it was the heaviest thing on
+    # every product row and read as a button (2026-09-23 design sweep).
     cmp_up = re.search(r"\.prod-chip \.cmp\.up \{[^}]*\}", CSS)
-    ok("var(--action-primary)" in cmp_up.group(0), "the product comparison chip keeps the accent pill")
+    ok("var(--surface-sunken)" in cmp_up.group(0) and "var(--action-primary)" not in cmp_up.group(0),
+       "the product comparison chip matches the KPI change chip")
     # The tinted half of the pair stays, because red IS the reference's one tint.
     down = re.search(r"\.delta\.down \{[^}]*\}", CSS)
     ok(down and "var(--error)" in down.group(0),
@@ -3716,10 +3760,12 @@ def t_a_forecast_is_drawn_as_a_range_not_as_three_competing_lines():
     ok("joins(i, r.p10)" in fc and "joins(i, r.p50)" in fc,
        "and both meet the last actual value, so the band pinches to nothing at today")
     # Said in words, because a shaded band explains itself only to somebody who
-    # already reads forecast charts, and this page is read by directors.
-    ok("Solid: money already taken" in fc and "Dashed: expected, not yet certain" in fc
-       and "Shaded: the range it should land in" in fc,
-       "and the plot says in words what its three treatments mean")
+    # already reads forecast charts, and this page is read by directors. Said
+    # ONCE, in the chart's own legend: a second key under the plot repeated it
+    # while the legend above showed two identical squares.
+    ok("name: 'Taken'" in fc and "name: 'Expected'" in fc and "'Likely range, 8 times in 10'" in fc,
+       "and the legend says in words what its three treatments mean")
+    ok("fc-key" not in SCRIPT and "fc-key" not in CSS, "in one key, not two")
 
 
 @test
@@ -3732,7 +3778,7 @@ def t_the_forecast_page_never_dresses_an_estimate_as_a_banked_figure():
     ok("It is an expectation, not a commitment." in ov,
        "and what is forward is labelled as an expectation")
     dr = SCRIPT.split("function fcDriversCard(", 1)[1].split("\n        function ", 1)[0]
-    ok("already taken" in dr and "still expected" in dr,
+    ok("Already taken" in dr and "Still expected" in dr,
        "the driver breakdown splits the month the same way")
     # The honest decomposition. This model forecasts the shop's takings from the
     # shop's own history: there is no invoice ledger behind it, so it must not
@@ -4169,7 +4215,7 @@ def t_the_colour_code_has_a_key_above_the_list_it_explains():
 @test
 def t_an_admin_can_change_someones_colour_from_the_team_tab():
     ok("op: 'colour'" in SCRIPT, "the team panel can set it")
-    seg = SCRIPT[SCRIPT.index("Colour in the Inbox"):][:900]
+    seg = SCRIPT[SCRIPT.index("inbox.append(el('legend', 'tm-legend', 'Inbox'))"):][:900]
     ok("TEAM_TINTS.forEach" in seg, "offering only the known names")
     ok("loadTeam()" in seg, "and the board redraws so the change is visible")
 
@@ -5330,7 +5376,7 @@ def t_auto_run_shows_the_services_state_not_what_this_tab_last_clicked():
     ok(i > 0, "the card is on the page")
     seg = r[i - 400:i + 2600]
     ok("connAuto.enabled" in seg, "and reads the service's own flag")
-    ok("'Auto Run ON'" in seg and "'Auto Run OFF'" in seg,
+    ok("'Auto Run on'" in seg and "'Auto Run off'" in seg,
        "which is spelled out, not left to a toggle's position")
     ok("Nothing runs on its own" in seg,
        "and OFF says what off means, rather than only being unlit")
@@ -5348,7 +5394,7 @@ def t_turning_auto_run_on_says_what_it_will_do_unattended():
     # still contains it and asks nobody anything. The GUARD is the property.
     ok("!on && !await uiConfirm(" in seg,
        "turning it ON is what requires the confirm, and turning it off does not")
-    ok("WITHOUT anyone reviewing" in seg, "that says nobody reviews what it sends")
+    ok("without anyone reviewing" in seg, "that says nobody reviews what it sends")
     ok("until you turn it off" in seg, "and that it does not stop on its own")
     ok("never sent twice" in seg, "and that an order cannot go twice")
     ok("connIsAdmin()" in r[i - 2200:i], "and only an admin sees it")
@@ -5609,7 +5655,7 @@ def t_an_icon_size_comes_from_the_scale_and_not_from_the_rule():
         boxes.append(s2[:44] + " { %spx }" % int(v))
     ok(not boxes, "%d square boxes bypass the scale: %s" % (len(boxes), boxes[:5]))
     for t in ("--box-xs", "--box-sm", "--box-md", "--box-lg", "--box-xl", "--box-2xl",
-              "--dot-sm", "--dot-md", "--dot-lg"):
+              "--dot-md", "--dot-lg"):
         ok(t + ":" in CSS, "the box and dot scales still define " + t)
 
     # A knob inside a switch is DERIVED from its track, like a thumb in a
@@ -5639,17 +5685,19 @@ def t_an_icon_size_comes_from_the_scale_and_not_from_the_rule():
 
 @test
 def t_every_breakpoint_is_on_the_scale():
-    """Seven stops, each with a job: 640 phone, 760 the sidebar collapses, 900
-    tablet, 1100 the KPI row goes to four columns, 1200 the dispatch row goes
-    single-line, 1500 wide, 1800 ultra-wide. There were nineteen distinct
+    """Six stops, each with a job: 640 phone, 760 the sidebar collapses, 900
+    tablet, 1100 the KPI row goes to four columns, 1500 wide, 1800 ultra-wide. There were nineteen distinct
     widths before; the near-misses (560, 600, 620, 700, 720, 960, 2100) folded
     onto their neighbours."""
-    stops = {640, 641, 760, 761, 900, 901, 1100, 1101, 1199, 1200, 1500, 1800}
+    # 1200 was the production queue's own stop; since 2026-09-23 the queue is
+    # laid out by the width of the list itself (@container queue), because a
+    # viewport stop cannot see the label preview taking 476px beside it.
+    stops = {640, 641, 760, 761, 900, 901, 1100, 1101, 1500, 1800}
     widths = set()
     for pre in re.findall(r"@media([^{]+)\{", CSS):
         widths |= {int(w) for w in re.findall(r"(?:min|max)-width:\s*(\d+)px", pre)}
     ok(widths <= stops, "off-scale breakpoints: %s" % sorted(widths - stops))
-    ok({640, 760, 900, 1100, 1200, 1500, 1800} <= widths, "and every stop on the scale is in use: %s" % sorted(widths))
+    ok({640, 760, 900, 1100, 1500, 1800} <= widths, "and every stop on the scale is in use: %s" % sorted(widths))
 
 
 @test
@@ -6026,8 +6074,8 @@ check('keys', (count) => {
 });
 
 check('widths', (count) => {
-  const cases = [[2000, 640, 280, 1], [2000, 641, 280, 4], [300, 641, 280, 2], [1119, 1400, 280, 2],
-                 [1120, 1400, 280, 4], [1120, 375, 280, 1], [960, 961, 240, 4], [959, 961, 240, 2]];
+  const cases = [[2000, 640, 280, 2], [2000, 641, 280, 4], [300, 641, 280, 2], [1119, 1400, 280, 2],
+                 [1120, 1400, 280, 4], [1120, 375, 280, 2], [960, 961, 240, 4], [959, 961, 240, 2]];
   for (const [content, viewport, cell, want] of cases) {
     count();
     const got = W.wgColumns(content, viewport, cell);
@@ -6198,9 +6246,10 @@ def t_a_keyboard_move_goes_one_place_and_stops_at_either_end():
 
 @test
 def t_the_grid_picks_one_two_or_four_columns_at_the_documented_widths():
-    """One column at a 640px viewport and below, the query .ov-wrap already
-    uses; two when the content column is narrower than four cells; four
-    otherwise; never three."""
+    """Two columns at a 640px viewport and below (since 2026-09-23: one per row
+    stacked the Overview's seven KPI tiles a screen and a half deep), so small
+    tiles pair up and wider cards take the row; two when the content column is
+    narrower than four cells; four otherwise; never three."""
     _wg_check("widths", "wgColumns picked the wrong count at a boundary")
 
 
@@ -6478,7 +6527,7 @@ def t_the_customize_copy_says_what_works_without_a_dash():
     layer = _wg_layer()
     copy = ["Drag to rearrange. On a touch screen, press and hold first. With a keyboard, hold Alt and press the arrow keys."]
     ok("'" + copy[0] + "'" in SCRIPT, "the hint says how to move a card with a mouse, a finger and a keyboard")
-    for text in ("'Customize'", "'Show hidden ('", "'Reset'", "'Done'", "' moved to '", "' of '", "' hidden'",
+    for text in ("'Customise'", "'Show hidden ('", "'Reset'", "'Done'", "' moved to '", "' of '", "' hidden'",
                  "' shown'", "'Hide '", "'Layouts are unavailable right now'", "'Loading your layout'",
                  "'Your layout was not saved. Try Done again.'", "'Your layout was not saved'"):
         ok(text in layer, "the layer says " + text)
@@ -7297,7 +7346,7 @@ function renderRunGate(id) { painted.push('gate'); $(id).innerHTML = ''; $(id).a
 """
     got = _run_node(js)
     ok(got["calls"] == 1, "one paid run, not two: %r" % got)
-    ok("RUN GATE" not in got["during"] and "Analyzing" in got["during"],
+    ok("RUN GATE" not in got["during"] and "Working out live metrics" in got["during"],
        "coming back mid-run keeps the loading screen: %r" % got["during"])
     ok(got["painted"] == ["gate", "report", "report"] and got["after"] == "REPORT", got)
     ok(got["idle"] is None, "and the run is let go when it lands")
@@ -7323,7 +7372,7 @@ async function api(path, body) { runs.push(body.segment || SEG_ALL); await new P
 """
     got = _run_node(js)
     ok(got["runs"] == ["Theatre", "Education"], "each sector is one paid run: %r" % got)
-    ok("Analyzing the Theatre sector" in got["busy"], "and a running sector shows its loading screen: %r" % got["busy"])
+    ok("Analysing the Theatre sector" in got["busy"], "and a running sector shows its loading screen: %r" % got["busy"])
     ok(got["left"] == 0, "every run is let go when it lands")
 
 
@@ -7595,6 +7644,142 @@ def t_the_import_report_counts_erased_people_without_naming_them():
     block = SCRIPT[i:i + 700]
     ok("er.people" in block and "er.scrubbed" in block, block)
     ok(".name" not in block and "emails" not in block, "counts only, never a name")
+
+
+@test
+def t_a_forecast_alert_is_a_sentence_not_codes():
+    """Cameron, 2026-09-23: "Worth looking at" read "underrun by -11.2%:
+    projected 27,897 against 31,430, risk watch" - the miss said twice, and an
+    enum on the screen. Run for real, in node."""
+    ok("', risk ' + a.risk" not in SCRIPT and "' by ' + fcPct(" not in SCRIPT, "the codes are gone")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    words = re.search(r"const FC_RISK_WORDS = \{.*?\};", SCRIPT, re.S).group(0)
+    js = ("const fcMoney = (v) => '£' + Math.round(v).toLocaleString('en-GB');\n" + words + "\n"
+          + fn_src("function fcAlertText(a)") + r"""
+console.log(JSON.stringify([
+  fcAlertText({kind: 'sales', projected: 27897, target: 31430, gap_pct: -11.2, risk: 'watch'}),
+  fcAlertText({kind: 'sales', projected: 33944, target: 19698, gap_pct: 72.3, risk: 'secure'}),
+  fcAlertText({kind: 'sales', projected: 9000, target: 12000, gap_pct: -25, risk: 'high'}),
+  fcAlertText({kind: 'cash', verdict: 'below cash buffer', working_capital: 4210}),
+]));
+""")
+    got = _run_node(js)
+    ok(got[0] == "Expected £27,897 against a plan of £31,430, 11.2% short; the plan is still inside the likely range.", got[0])
+    ok(got[1] == "Expected £33,944 against a plan of £19,698, 72.3% ahead; even the bottom of the likely range clears it.", got[1])
+    ok(got[2].endswith("25.0% short; even the top of the likely range falls short of it."), got[2])
+    ok(got[3] == "Working capital drops below the cash buffer, to £4,210.", got[3])
+
+
+@test
+def t_the_month_pill_is_worked_out_from_the_figures_beside_it():
+    """The pill said +72.0% and the alert under it +72.3% for the same month
+    against the same plan: the run's gap_pct arrives rounded to two places."""
+    ov = SCRIPT.split("function fcOverviewCard(", 1)[1].split("\n        function ", 1)[0]
+    ok("(p50 - target) / target" in ov and "(cur.gap_pct || {})[sc]" not in ov,
+       "the overview works its percentage out from the money it prints")
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    ok("r.gap_pct" not in fn and "(r.p50 - t) / t" in fn, "and so does the month table")
+    ok("FC_VERDICT_WORDS[v]" in fn and "FC_BASIS[r.method]" in fn,
+       "whose verdicts and bases are words, not the run's codes")
+
+
+@test
+def t_the_scenario_label_sits_with_its_control():
+    """"Plan scenario" stayed beside the heading, reading as its subtitle,
+    while the strip it names sat 1,300px away: the heading's spacer is an
+    ::after that grows, so the label has to be ordered past it with the
+    control. And the scenarios are called what the workbook calls them."""
+    rule = CSS.split(".fc-seg-lbl {")[1].split("}")[0]
+    ok("order: 1" in rule and "margin-left: auto" not in rule, "the label moves with the control")
+    ok("'Algo '" not in SCRIPT, "Algorithm 1 is not abbreviated to Algo 1")
+
+
+@test
+def t_the_forecast_explains_itself_once_and_in_plain_lines():
+    """The certainty sentence sat alone in a full-width card; the breakdown's
+    key was stranded at the card edge with the amounts in a column of their
+    own between it and the words; and the sentence under it quoted a source
+    description that began "The Theta method again"."""
+    ov = SCRIPT.split("function fcOverviewCard(", 1)[1].split("\n        function ", 1)[0]
+    tail = ov.split("const half = ", 1)[1]
+    ok("el('div', 'card')" not in tail and "box.append(conf)" in tail, "the caveat is a line, not a card")
+    dr = SCRIPT.split("function fcDriversCard(", 1)[1].split("\n        function ", 1)[0]
+    order = [dr.index("'fc-drive-key "), dr.index("'fc-drive-lbl'"), dr.index("'fc-drive-amt'")]
+    ok(order == sorted(order), "key, then words, then the amount at the right of the measure")
+    ok("max-width: 52ch" in CSS.split(".fc-drive {")[1].split("}")[0], "the statement is measured")
+    ok("The days left come from the source in use, " in dr, "and names the source it quotes")
+    simple = open(os.path.join(ROOT, "forecast", "simple.py"), encoding="utf-8").read()
+    ok("The Theta method again" not in simple, "every source description stands on its own")
+
+
+@test
+def t_the_reconciliation_card_keeps_status_and_actions_apart():
+    """Cameron's screenshot, 2026-09-23: two chips, a bare count and three
+    buttons in one wrapping row, Disconnect weighted like Sweep now, and the
+    sweep's notes as form-help lines with a field's gap under each."""
+    fn = fn_src("function renderRecon()")
+    ok("'recon-conn-status'" in fn and "'recon-conn-acts'" in fn, "status on one side, actions on the other")
+    ok("dropMenu(manage, [" in fn and "label: 'Disconnect Xero'" in fn,
+       "disconnecting is in a menu, not a button beside the sweep")
+    ok("el('div', 'field-help', n)" not in fn and "ul.append(el('li', null, n))" in fn,
+       "the notes are one list")
+    ok("danger: true" in fn.split("const disconnect = async")[1][:1400], "and the confirm is marked destructive")
+    ok("text-wrap: pretty" in re.search(r"(?m)^\s*body \{([^}]*)\}", CSS).group(1), "no word stranded on a last line")
+
+
+@test
+def t_a_chart_prints_only_the_dates_it_has_room_for():
+    """At phone width the forecast's day chart printed "25 Se30 Sep": six
+    dates were drawn whatever the plot's width, and the last, anchored flush
+    right, reaches back a whole label width onto the one before it."""
+    fr = fn_src("function drawFrame(")
+    ok("Math.min(c.xEvery || 6, room)" in fr and "labW * 1.5 + 8" in fr,
+       "the date count is capped by the room the plot has")
+
+@test
+def t_the_reviewers_last_findings_stay_closed():
+    """The independent check of the design sweep found seventeen things not
+    fixed and sixteen made worse. Each line here is one of them."""
+    # A product plan opened with an id Refresh can use: the payload has none.
+    op = fn_src("async function openProduct(")
+    ok("renderProductDetail(d, id, title);" in op, "the plan is drawn with the id it was opened by")
+    pd = fn_src("function renderProductDetail(")
+    ok("const pid = id || (d.product && d.product.id)" in pd, "so the plan has its Refresh")
+    # Nobody owing: no toolbar over a list that cannot have a row.
+    li = fn_src("function renderLiability(")
+    i_empty = li.index("if (!(d.customers || []).length) {")
+    ok(i_empty < li.index("lCard.append(tableTools(left, right));"), "the empty book skips the filters")
+    # The recon arithmetic heading is a heading; what it is sits under it.
+    rd = fn_src("function paintReconDetail(")
+    ok("h('The arithmetic');" in rd and "h('The arithmetic (" not in rd, "a plain heading")
+    # The month table keeps a month and its basis to one line each.
+    ok(".fc-months th, .fc-months td:nth-child(-n+2) { white-space: nowrap; }" in CSS
+       and "mc.lastChild.classList.add('fc-months');" in SCRIPT, "the month table does not stack its months")
+    # Settings: the backup buttons on their own line, and copy that matches.
+    ok(".setting-row:has(> .row-acts) { flex-wrap: wrap;" in CSS and "flex: 1 0 100%;" in CSS.split(".setting-row > .row-acts {")[1].split("}")[0],
+       "the backup buttons take their own line under the row's words")
+    ok("['Up to date', 'Not downloaded', 'None']" in SCRIPT and "'Download one'" not in SCRIPT, "a state, not an instruction, in the pill")
+    ok("Back it up below" not in SCRIPT and "(Backups, above)" in SCRIPT, "the storage row points where the buttons are")
+    ok("Everything above except your sign-off waits for Save profile." in HTML, "and the caption excepts the sign-off")
+    # Save and Cancel sit side by side in the size editor.
+    ok("el('div', 'act-row sizes-edit-acts')" in SCRIPT and ".act-row.sizes-edit-acts { flex-wrap: nowrap; }" in CSS,
+       "the size editor's buttons do not stack")
+    # Team: one set of columns, so the master's meta ends where everyone's does.
+    ok("el('div', 'files-list card-bleed tm-list')" in SCRIPT and ".tm-list > .tm-row:not(.tm-new) { display: grid; grid-template-columns: subgrid;" in CSS,
+       "the team list shares its columns")
+    ok(".tm-sign-save { margin-top: var(--sp-2); }" in CSS, "and Save sign-off stands off its field")
+    # CRM Insights: each empty chart says what fills it.
+    ok("function bars(title, desc, rows, fmt, empty) {" in SCRIPT
+       and "'No activity was marked done in the last 30 days.'" in SCRIPT
+       and "'No open deal has an expected close date from this month on.'" in SCRIPT,
+       "each chart's empty line is its own")
+    # The queue shares its tracks from the width the date appears at.
+    ok("@container queue (min-width: 560px) {\n            .lbl-grid { display: grid;" in CSS, "a refunded row's date stays in line on a tablet")
+    # Phone Overview: a sparkline tile takes the row in the widget grid too.
+    ok(".ov-wrap.wgrid > .stat[data-widget]:has(.stat-spark) { grid-column: 1 / -1; }" in CSS, "the phone KPI rule reaches the grid")
+
 
 if __name__ == "__main__":
     print("frontend regressions")

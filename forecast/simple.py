@@ -137,7 +137,7 @@ def statsforecast_models() -> List[Tuple[str, object]]:
         return []
     return [
         ("Auto-fitted level, trend and season", _sf("AutoETS", "AutoETS"),
-         "Tries every combination of level, trend and season, additive or multiplicative, and "
+         "It tries every combination of level, trend and season, additive or multiplicative, and "
          "keeps whichever fits your history best. With only a few years it often concludes "
          "there is no season at all, which is why it can return the same figure every month.",
          "Best at: letting the data decide the shape when nobody is sure what it is."),
@@ -147,10 +147,11 @@ def statsforecast_models() -> List[Tuple[str, object]]:
          "histories and unstable on short ones.",
          "Best at: months that depend closely on the months immediately before them."),
         ("Auto-fitted trend and smoothing", _sf("AutoTheta", "AutoTheta"),
-         "The Theta method again, with its settings chosen automatically rather than fixed.",
+         "It takes the season out, draws a trend through what is left and smooths it, then puts the "
+         "season back, with every setting chosen from your history rather than fixed in advance.",
          "Best at: a steady direction of travel, found without being told what to look for."),
         ("Auto-fitted complex smoothing", _sf("AutoCES", "AutoCES"),
-         "A newer relative of exponential smoothing, built to cope with seasonal patterns that "
+         "It is a newer relative of exponential smoothing, built to cope with seasonal patterns that "
          "change shape from year to year.",
          "Best at: a season whose shape shifts from one year to the next."),
     ]
@@ -162,28 +163,28 @@ def statsforecast_models() -> List[Tuple[str, object]]:
 # the hover text on the source's name.
 MODELS = (
     ("Last year, adjusted for this year", last_year_times_run_rate,
-     "Takes the same month last year and scales it by how this year has been trading against "
+     "It takes the same month last year and scales it by how this year has been trading against "
      "last. It assumes the shape of your year repeats and that the change in level continues. "
      "It misleads when last year's month was itself unusual.",
      "Best at: a repeating yearly shape whose overall level has moved up or down."),
     ("A typical month, shared out", seasonal_share,
-     "Takes an average month from the last year and shares the year out by each month's usual "
+     "It takes an average month from the last year and shares the year out by each month's usual "
      "portion of trade. It assumes a steady business with a repeating season. It misleads when "
      "the level of trading has shifted, because it averages the old level back in.",
      "Best at: a steady business with a strong season and little underlying trend."),
     ("Smoothed level and season", holt_winters_flat,
-     "Exponential smoothing: a level that updates as each month arrives, plus a repeating "
+     "It is exponential smoothing: a level that updates as each month arrives, plus a repeating "
      "seasonal pattern, and no trend. A standard method since the 1960s. It needs several years "
      "of history to learn a season properly.",
      "Best at: a level that drifts gradually, with the same season each year."),
     ("Smoothed level, season and trend", holt_winters_trend,
-     "The same, but also allowed a trend that flattens off rather than running away. More "
-     "responsive when direction changes, and more likely to over-read a short run of good or "
-     "bad months.",
+     "It is exponential smoothing with a level, a season and a trend that flattens off rather "
+     "than running away. More responsive when direction changes, and more likely to over-read "
+     "a short run of good or bad months.",
      "Best at: a business steadily growing or shrinking underneath its season."),
     ("Trend and smoothing, averaged", theta,
-     "The Theta method. It strips the season out, averages a straight-line trend with a simple "
-     "smoothing of the same history, then puts the season back. It won the M3 forecasting "
+     "It takes the season out, averages a straight-line trend with a simple smoothing of the same "
+     "history, then puts the season back. Known as the Theta method, it won the M3 forecasting "
      "competition by being exactly this simple.",
      "Best at: a clear underlying direction with seasonal movement on top of it."),
 )
@@ -210,17 +211,17 @@ def _trimmed(m: np.ndarray) -> np.ndarray:
 
 
 COMBINERS = (
-    ("Average of every source", _mean, "the plain mean of every source above",
-     "The straight average of every source above. Averaging several forecasts usually beats "
+    ("Average of every source", _mean, "the plain mean of every other source",
+     "It is the straight average of every other source. Averaging several forecasts usually beats "
      "most single ones, because their individual mistakes partly cancel out. It cannot correct "
      "a mistake they all share, which is why it is scored here rather than trusted.",
      "Best at: when no single approach is clearly right for the period ahead."),
     ("Middle of every source", _median, "the middle one, so an outlier cannot carry it",
-     "The middle value of all the sources. It ignores how far out the extremes are, so a single "
+     "It takes the middle value of all the sources, ignoring how far out the extremes are, so a single "
      "wild forecast cannot pull the answer towards it.",
      "Best at: when one source is prone to extreme answers."),
     ("Average, extremes removed", _trimmed, "highest and lowest dropped, then averaged",
-     "Drops the highest and the lowest source, then averages what is left. Keeps most of the "
+     "It drops the highest and the lowest source, then averages what is left. That keeps most of the "
      "benefit of averaging while stopping one outlier from carrying the answer.",
      "Best at: when most sources agree and one or two are far out."),
 )
@@ -393,7 +394,7 @@ def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
             vals = sum(stack[idx[n]] * (w / tot) for n, w in usable.items())
             out.append({"name": "Weighted by track record", "kind": "combination",
                         "note": "each source weighted by how right it has been",
-                        "about": "Weights every source by how close it has actually come on the months "
+                        "about": "It weights every source by how close it has actually come on the months "
                                  "that have closed since this started running, not by a backtest. The "
                                  "more months there are, the more this reflects what works for this "
                                  "business rather than what works in general.",

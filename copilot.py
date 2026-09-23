@@ -767,7 +767,7 @@ def _save_customer_segment(seg_key: str, result: dict) -> dict:
 
 _PAGE_LABELS = {
     "overview": "Store Overview",
-    "seo": "SEO and optimization audit",
+    "seo": "SEO and optimisation audit",
     "keywords": "Keyword and CPC analysis",
     "customers": "Customers and retention analysis",
 }
@@ -2330,7 +2330,7 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
     all_tools = data_tools + [PRESENT_RESPONSE_TOOL]
     system = SYSTEM_PROMPT + extra_system
     if emit:
-        await emit({"type": "step", "label": "Analyzing your question"})
+        await emit({"type": "step", "label": "Analysing your question"})
 
     for _ in range(MAX_TOOL_ROUNDS):
         kwargs = {
@@ -2421,9 +2421,19 @@ def _ok(d) -> bool:
     return isinstance(d, dict) and not d.get("_failed")
 
 
+_CURRENCY_SIGNS = {"GBP": "£", "USD": "$", "EUR": "€"}
+
+
 def _money(amount: float, currency: str) -> str:
+    """Whole units the way the page writes money: '£1,735', never '1,735 GBP'.
+    The KPI tiles took this string as it came while the charts, tables and
+    product pages beside them formatted with the page's own £ rule, so one
+    screen printed the same currency two ways."""
     try:
-        return f"{amount:,.0f} {currency}".strip()
+        sign = "-" if amount < 0 else ""
+        sym = _CURRENCY_SIGNS.get((currency or "").upper())
+        body = f"{abs(amount):,.0f}"
+        return f"{sign}{sym}{body}" if sym else f"{sign}{body} {currency}".strip()
     except Exception:
         return f"{amount} {currency}".strip()
 
@@ -2490,7 +2500,7 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
     if orders_ok:
         metrics.append({"label": "Revenue (7d)", "value": _money(rev7, currency), "delta": rev_delta, "trend": rev_trend})
         metrics.append({"label": "Orders (7d)", "value": str(n7), "delta": ord_delta, "trend": ord_trend})
-        metrics.append({"label": "Avg order value", "value": _money(aov, currency)})
+        metrics.append({"label": "Average order value (7d)", "value": _money(aov, currency)})
         metrics.append({"label": "Unfulfilled (7d)", "value": str(unfulfilled), "tone": "warn" if unfulfilled else None})
     else:
         stale.append("orders")
@@ -2667,7 +2677,11 @@ async def _overview_trends(registry: dict) -> dict:
         if any(rev[mk] for mk in months):
             trends["revenue"] = [{"label": mk, "value": round(rev[mk], 2)} for mk in months]
             trends["orders"] = [{"label": mk, "value": cnt[mk]} for mk in months]
-            trends["aov"] = [{"label": mk, "value": round(rev[mk] / cnt[mk], 2) if cnt[mk] else 0} for mk in months]
+            # A month with no orders has no average order value. Zero drew the
+            # line down to the floor for every quiet month, and the card's
+            # mean of monthly ratios counted those zeros: 261 against a real
+            # 1,024 for the year.
+            trends["aov"] = [{"label": mk, "value": round(rev[mk] / cnt[mk], 2) if cnt[mk] else None} for mk in months]
     except Exception:
         logger.exception("overview shopify trends failed")
     # Google Analytics 4: sessions, pageviews, engaged, channel mix (+ revenue fallback).
@@ -3058,10 +3072,16 @@ def _seo_scorecard(signals: dict, rs, ss, pages: list[dict], domain: str | None 
     if any_noindex:        score -= 25; deductions.append({"label": "noindex found on a sampled page", "note": "-25"})
     if not sitemap_ok:     score -= 10; deductions.append({"label": "sitemap.xml missing", "note": "-10"})
     if not robots_ok:      score -= 5;  deductions.append({"label": "robots.txt missing", "note": "-5"})
-    if not has_product_schema: score -= 12; deductions.append({"label": "no Product JSON-LD on the sampled pages", "note": "-12"})
+    # The page checks mark pages. With none sampled there is nothing to mark,
+    # as with a failed product read: say so and deduct nothing, rather than
+    # take 24 points for a schema and meta descriptions nobody looked at.
+    if not pages:
+        deductions.append({"label": "page checks not run: the storefront could not be crawled",
+                           "note": "not scored"})
+    if pages and not has_product_schema: score -= 12; deductions.append({"label": "no Product JSON-LD on the sampled pages", "note": "-12"})
     if alt is not None and alt < 90:
         d = min(15, (90 - alt) // 5 * 2); score -= d; deductions.append({"label": f"image alt coverage {alt}%", "note": f"-{d}"})
-    if md_pct < 90:
+    if pages and md_pct < 90:
         d = min(12, (90 - md_pct) // 10 * 3); score -= d; deductions.append({"label": f"meta descriptions on {md_pct}% of pages", "note": f"-{d}"})
     if thin:
         d = min(10, thin); score -= d; deductions.append({"label": f"{thin} thin product descriptions", "note": f"-{d}"})
@@ -3069,7 +3089,10 @@ def _seo_scorecard(signals: dict, rs, ss, pages: list[dict], domain: str | None 
         d = min(10, dup); score -= d; deductions.append({"label": f"{dup} duplicated product titles", "note": f"-{d}"})
     score = max(0, min(100, score))
     if unread:
-        deductions.append({"label": "product checks not run", "note": unread_note})
+        # The sentence goes in the label: the note is the figure column,
+        # where a sentence sat among the -10s and -5s.
+        deductions.append({"label": "product checks not run: Shopify did not answer the product read",
+                           "note": "not scored"})
 
     def purl(handle):
         return f"https://{domain}/products/{handle}" if (domain and handle) else None
@@ -3090,29 +3113,38 @@ def _seo_scorecard(signals: dict, rs, ss, pages: list[dict], domain: str | None 
                  for i in signals.get("alt_items") or []]
     dup_items = [{"label": g["title"], "note": f"{g['count']} products", "url": purl((g.get("handles") or [None])[0])}
                  for g in signals.get("duplicate_groups") or []]
+    # A fetch that never answered has no status: it read 'HTTP None'.
+    def http(code):
+        return f"HTTP {code}" if code else "No answer"
     site_items = [{"label": f"https://{domain}/sitemap.xml" if domain else "sitemap.xml",
-                   "note": (f"HTTP {ss}" + (f" · {sitemap_locs} locations" if sitemap_ok and sitemap_locs else "")),
+                   "note": (http(ss) + (f" · {sitemap_locs} locations" if sitemap_ok and sitemap_locs else "")),
                    "url": f"https://{domain}/sitemap.xml" if domain else None},
-                  {"label": f"https://{domain}/robots.txt" if domain else "robots.txt", "note": f"HTTP {rs}",
+                  {"label": f"https://{domain}/robots.txt" if domain else "robots.txt", "note": http(rs),
                    "url": f"https://{domain}/robots.txt" if domain else None}]
     n_pages = len(pages)
+    # No page could be sampled: the page checks did not run, and saying '0% of
+    # sampled' in warning colour, over 'Every one of the 0 sampled pages has a
+    # meta description', claimed a result that nobody measured.
+    no_pages = "The storefront could not be crawled, so no pages were sampled."
 
     metrics = [
         {"label": "SEO score", "value": "n/a" if unread else f"{score}/100",
          "tone": "warn" if unread or score < 70 else None,
          "detail": detail("How the score is made", deductions, "No deductions: every check passed.")},
-        {"label": "Indexable", "value": "noindex found" if any_noindex else "Yes",
-         "tone": "warn" if any_noindex else None,
+        {"label": "Indexable", "value": ("Not checked" if not n_pages else "noindex found" if any_noindex else "Yes"),
+         "tone": "unknown" if not n_pages else ("warn" if any_noindex else None),
          "detail": detail("Sampled pages blocked from the index", noindex_pages,
-                          f"All {n_pages} sampled pages are indexable.")},
+                          f"All {n_pages} sampled pages are indexable." if n_pages else no_pages)},
         {"label": "Sitemap", "value": "OK" if sitemap_ok else "Missing", "tone": None if sitemap_ok else "warn",
          "detail": detail("Crawl files", site_items, "")},
-        {"label": "Product schema", "value": "Present" if has_product_schema else "Missing",
-         "tone": None if has_product_schema else "warn",
-         "detail": detail("Structured data on the sampled pages", schema_pages, "No pages were sampled.")},
-        {"label": "Meta descriptions", "value": f"{md_pct}% of sampled", "tone": "warn" if md_pct < 90 else None,
+        {"label": "Product schema", "value": ("Not checked" if not n_pages else "Present" if has_product_schema else "Missing"),
+         "tone": ("unknown" if not n_pages else None if has_product_schema else "warn"),
+         "detail": detail("Structured data on the sampled pages", schema_pages, no_pages)},
+        {"label": "Meta descriptions", "value": f"{md_pct}%" if n_pages else "Not checked",
+         "note": "of sampled pages have one" if n_pages else None,
+         "tone": ("unknown" if not n_pages else "warn" if md_pct < 90 else None),
          "detail": detail("Sampled pages without a meta description", no_meta_pages,
-                          f"Every one of the {n_pages} sampled pages has a meta description.")},
+                          f"Every one of the {n_pages} sampled pages has a meta description." if n_pages else no_pages)},
         {"label": "Image alt", "value": f"{alt}%" if alt is not None else "n/a",
          "tone": "warn" if (alt is not None and alt < 90) else None,
          "detail": detail("Products with images missing alt text", alt_items,
@@ -7536,7 +7568,7 @@ def _mark_chased(key: str, by: str = "") -> dict:
 
 
 def _chase_money(amount: float, currency: str) -> str:
-    sym = {"GBP": "£", "USD": "$", "EUR": "€"}.get((currency or "").upper())
+    sym = _CURRENCY_SIGNS.get((currency or "").upper())
     return (f"{sym}{amount:,.2f}" if sym else f"{amount:,.2f} {currency}".strip())
 
 
@@ -8468,8 +8500,8 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
                  "revenue": round(sum(r["spent"] for r in seg[k]), 2)} for k, n, d in seg_defs]
     metrics = [
         {"label": "Customers", "value": f"{total:,}"},
-        {"label": "Repeat rate", "value": f"{repeat_rate}%"},
-        {"label": "Avg lifetime value", "value": _money(avg_ltv, currency)},
+        {"label": "Repeat rate", "value": (f"{repeat_rate:g}" if float(repeat_rate).is_integer() else f"{repeat_rate:.1f}") + "%"},
+        {"label": "Average lifetime value", "value": _money(avg_ltv, currency)},
         {"label": "New (30d)", "value": f"{new_30:,}"},
         {"label": "At risk", "value": f"{len(seg['at_risk']):,}", "tone": "warn" if seg["at_risk"] else None},
     ]
@@ -8587,7 +8619,7 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
     )
     present = next((b.input for b in resp.content
                     if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
-    structured = _coerce_structured(present or {"summary": "Optimization plan ready."})
+    structured = _coerce_structured(present or {"summary": "Optimisation plan ready."})
     structured.pop("metrics", None)
 
     metrics = []
@@ -13253,7 +13285,9 @@ def _load_changelog() -> list:
             if not isinstance(r, dict) or not r.get("date"):
                 continue
             items = [{"kind": str(i.get("kind") or "improved")[:12],
-                      "text": str(i.get("text") or "")[:400],
+                      # Whole notes: twelve of them ran past 400 characters
+                      # and were cut mid-word on the Guide with no ellipsis.
+                      "text": str(i.get("text") or "")[:4000],
                       "tab": str(i.get("tab") or "")[:20]}
                      for i in (r.get("items") or []) if isinstance(i, dict) and i.get("text")]
             if items:
@@ -19429,7 +19463,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         return Response(buf.getvalue(), media_type="application/zip",
                         headers={**_API_HEADERS,
-                                 "Content-Disposition": f"attachment; filename=store-copilot-backup-{stamp}.zip"})
+                                 "Content-Disposition": f"attachment; filename=reactor-backup-{stamp}.zip"})
 
     @mcp.custom_route("/api/order/edit", methods=["POST"])
     async def order_edit_route(request: Request):

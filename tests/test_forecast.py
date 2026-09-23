@@ -398,6 +398,26 @@ def t_the_band_on_the_page_is_the_error_the_model_actually_earned():
        "the shrink and the widen share one persistence constant")
 
 
+@test
+def t_every_source_blurb_stands_as_its_own_sentence():
+    """The Why card prints a source's blurb straight after its name and a full
+    stop, so a blurb that began 'Takes the season out' or 'The same, but'
+    read as a sentence with no subject, or pointed at a row that is not
+    there."""
+    import inspect
+    import forecast.simple as fs
+    blurbs = [m[2] for m in fs.MODELS] + [c[3] for c in fs.COMBINERS]
+    try:
+        blurbs += [m[2] for m in fs.statsforecast_models()]
+    except Exception:
+        pass
+    for b in blurbs:
+        ok(b.startswith(("It ", "The textbook")), "a subject first: %r" % b[:40])
+        ok(not b.startswith("The same"), "and no pointer to a neighbour: %r" % b[:40])
+    src = inspect.getsource(fs)
+    ok('"about": "It weights every source' in src, "the track-record source too")
+
+
 if __name__ == "__main__":
     passed = 0
     for fn in TESTS:
