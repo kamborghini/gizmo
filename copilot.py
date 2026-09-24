@@ -14,7 +14,7 @@ token (Bearer JWT from App Bridge). There is no password fallback.
 
 Required env vars:
   ANTHROPIC_API_KEY     Claude API key (sk-ant-...). Required to chat.
-  ANTHROPIC_MODEL       Optional. Defaults to claude-sonnet-4-6.
+  ANTHROPIC_MODEL       Optional. Defaults to claude-opus-5-5.
   SHOPIFY_API_KEY       App client ID. Enables App Bridge + session-token auth.
   SHOPIFY_API_SECRET    App client secret. Verifies session tokens.
 """
@@ -84,13 +84,17 @@ def _env_num(cast, raw, default, name):
 # Configuration
 # ---------------------------------------------------------------------------
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
-# Model tiers. Default to Claude Opus 4.8 (most capable) everywhere; the env vars
-# let you re-introduce a faster/cheaper tier (e.g. claude-sonnet-4-6) for chat later.
-MODEL_FAST = os.environ.get("ANTHROPIC_MODEL_FAST") or os.environ.get("ANTHROPIC_MODEL") or "claude-sonnet-4-6"
-MODEL_DEEP = os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-4-8")
-# Effort (Opus-tier knob: low|medium|high|xhigh|max). "max" = maximum capability,
-# at higher latency/cost. Dial down here if responses feel slow.
-ANTHROPIC_EFFORT = os.environ.get("ANTHROPIC_EFFORT", "max")
+# Model tiers. Claude Opus 5.5 everywhere by default; the env vars let a
+# cheaper tier (e.g. claude-sonnet-5) take everyday chat without a code change.
+MODEL_FAST = os.environ.get("ANTHROPIC_MODEL_FAST") or os.environ.get("ANTHROPIC_MODEL") or "claude-opus-5-5"
+MODEL_DEEP = os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-5-5")
+# Effort (low|medium|high|xhigh|max). Opus 5.5 thinks on every request and
+# effort is how much: "high" spends what a task needs and is every call's
+# level; "max" has no limit and is what Deep analysis in chat asks for. Every
+# call stops at MAX_TOKENS with its thinking counted, which "max" can reach
+# on a long report, so the reports stay at the everyday level.
+ANTHROPIC_EFFORT = os.environ.get("ANTHROPIC_EFFORT", "high")
+ANTHROPIC_EFFORT_DEEP = os.environ.get("ANTHROPIC_EFFORT_DEEP", "max")
 # Extended thinking for the interactive chat loop. "adaptive" lets the model
 # decide when and how deeply to reason (fast on simple questions, deep on hard
 # ones). Set ANTHROPIC_THINKING=off to disable if ever needed.
@@ -187,12 +191,16 @@ PRODUCTION_DAYS    = _env_num(int, os.environ.get("PRODUCTION_LABEL_DAYS", "180"
 STOCK_GOBO_TYPE    = "gobo"
 GOBO_SIZES_PATH    = os.environ.get("GOBO_SIZES_PATH",
                                     os.path.join(os.path.dirname(__file__), "data", "gobo-sizes.csv"))
-# Anthropic list prices, $ per 1M tokens (input, output). Cache read ~0.1x input, write ~1.25x input.
+# Anthropic list prices, $ per 1M tokens (input, output). Cache write 1.25x input;
+# cache read 0.1x input unless _CACHE_READ_RATE says otherwise.
 _MODEL_PRICE = {
+    "claude-opus-5-5": (4.0, 20.0),
     "claude-opus-4-8": (5.0, 25.0),
+    "claude-sonnet-5": (2.0, 10.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-haiku-4-5": (1.0, 5.0),
 }
+_CACHE_READ_RATE = {"claude-opus-5-5": 0.05}
 
 _PAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "index.html")
 _page_cache: Optional[str] = None   # the shell: the page with its CSS and JS lifted out
@@ -375,15 +383,17 @@ PRESENT_RESPONSE_TOOL = {
 }
 
 def _pick_model(deep: bool) -> str:
-    """The Deep-analysis toggle is authoritative: on → deep model (Opus 4.8),
-    off → fast model (Sonnet 4.6)."""
+    """The Deep-analysis toggle is authoritative: on → deep model, off → fast
+    model. Both are Opus 5.5 unless a setting says otherwise, and then the
+    toggle is the effort (see _effort_for)."""
     return MODEL_DEEP if deep else MODEL_FAST
 
 
-def _effort_for(model: str) -> str:
-    """effort 'max' and 'xhigh' are Opus-tier only and 400 on Sonnet/Haiku —
-    cap non-Opus models at 'high' so the request never errors."""
-    eff = ANTHROPIC_EFFORT
+def _effort_for(model: str, deep: bool = False) -> str:
+    """The everyday effort, or Deep analysis's. effort 'max' and 'xhigh' are
+    Opus-tier only and 400 on Sonnet/Haiku - cap non-Opus models at 'high' so
+    the request never errors."""
+    eff = ANTHROPIC_EFFORT_DEEP if deep else ANTHROPIC_EFFORT
     if "opus" not in model.lower() and eff in ("max", "xhigh"):
         return "high"
     return eff
@@ -1330,9 +1340,9 @@ async def run_skill_reading(skill: dict, others: list[dict]) -> dict:
            + ":\n<skill>\n" + _skill_safe(content[:60000]) + "\n</skill>\n\nReport how you understand it now.")
     client = _anthropic()
     resp = await _xcreate(client,
-        model=MODEL_DEEP, max_tokens=6000, system=SKILL_READING_SYSTEM,
+        model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=SKILL_READING_SYSTEM,
         tools=[SKILL_READING_TOOL], tool_choice={"type": "tool", "name": SKILL_READING_TOOL["name"]},
-        messages=[{"role": "user", "content": msg}],
+        messages=[{"role": "user", "content": msg}], output_config={"effort": _effort_for(MODEL_DEEP)},
     )
     if getattr(resp, "stop_reason", "") == "max_tokens":
         raise RuntimeError("Reactor ran out of room writing up this skill. Try again, or split the skill.")
@@ -2927,7 +2937,8 @@ _ai_kind: "contextvars.ContextVar[str]" = contextvars.ContextVar("ai_kind", defa
 
 def _price_for(model: str, inp: int, out: int, cache_read: int = 0, cache_write: int = 0) -> float:
     pi, po = _MODEL_PRICE.get(model, (5.0, 25.0))
-    return round((inp * pi + cache_write * pi * 1.25 + cache_read * pi * 0.10 + out * po) / 1_000_000, 6)
+    cr = _CACHE_READ_RATE.get(model, 0.10)
+    return round((inp * pi + cache_write * pi * 1.25 + cache_read * pi * cr + out * po) / 1_000_000, 6)
 
 
 def _log_usage(kind: str, model: str, usage) -> None:
@@ -3005,7 +3016,71 @@ def _spend_guard() -> None:
         )
 
 
+# Models that refuse a forced tool call (tool_choice "tool" or "any") with a
+# 400: Opus 5.5 thinks on every request and chooses its own tools. A model
+# found refusing at run time joins the set, so one pinned by a setting that
+# this list does not know costs one refused request (not billed), not every one.
+_UNFORCED_MODELS: set = {"claude-opus-5-5"}
+
+
+def _can_force_tool(model: str) -> bool:
+    m = (model or "").lower()
+    return not any(x in m for x in _UNFORCED_MODELS)
+
+
+def _forces_tool(kwargs: dict) -> bool:
+    c = kwargs.get("tool_choice")
+    return isinstance(c, dict) and c.get("type") in ("tool", "any")
+
+
+def _unforce(kwargs: dict) -> str:
+    """Turn a forced tool call into one the model accepts: tool_choice goes
+    back to auto and the instructions say which tool carries the answer.
+    Returns the tool's name ("" when any tool would do)."""
+    choice = kwargs.pop("tool_choice", None) or {}
+    name = str(choice.get("name") or "") if choice.get("type") == "tool" else ""
+    ask = (f"Give your answer by calling the {name} tool, once. Do not answer in plain text."
+           if name else "Give your answer by calling one of your tools. Do not answer in plain text.")
+    system = kwargs.get("system")
+    if isinstance(system, list):
+        kwargs["system"] = system + [{"type": "text", "text": ask}]
+    else:
+        kwargs["system"] = ((system or "") + "\n\n" + ask).strip()
+    return name
+
+
 async def _xcreate(client, **kwargs):
+    """Every model call. A forced tool call is asked for in words on a model
+    that refuses to be forced, and asked for once more if the answer came
+    back as prose, so each caller still finds its tool block."""
+    must = None
+    if _forces_tool(kwargs) and not _can_force_tool(kwargs.get("model", "")):
+        must = _unforce(kwargs)
+    try:
+        resp = await _xcreate_once(client, kwargs)
+    except anthropic.BadRequestError as e:
+        model = str(kwargs.get("model") or "").lower()
+        if not (_forces_tool(kwargs) and model and "tool_choice" in str(e)):
+            raise
+        logger.warning("model %s refuses a forced tool; asking for it instead", model)
+        _UNFORCED_MODELS.add(model)
+        must = _unforce(kwargs)
+        resp = await _xcreate_once(client, kwargs)
+    if must is not None and getattr(resp, "stop_reason", "") == "end_turn" and not any(
+            getattr(b, "type", "") == "tool_use" and (not must or getattr(b, "name", "") == must)
+            for b in (getattr(resp, "content", None) or [])):
+        # Its own reply goes back as it came, thinking included: the model
+        # rejects an edited or dropped thinking block.
+        more = dict(kwargs)
+        more["messages"] = list(kwargs.get("messages") or []) + [
+            {"role": "assistant", "content": resp.content},
+            {"role": "user", "content": (f"Send that answer now by calling the {must} tool." if must
+                                         else "Send that answer now by calling one of your tools.")}]
+        resp = await _xcreate_once(client, more)
+    return resp
+
+
+async def _xcreate_once(client, kwargs: dict):
     """Wrapper around messages.create that enforces the daily spend cap, logs
     token usage + cost per call, and turns on prompt caching for every call:
     the big system prompt (profile + memory + skills + store knowledge) and the
@@ -3042,7 +3117,7 @@ def _usage_summary(days: int = 30) -> dict:
         i_, o_, cr, cw = e.get("in", 0), e.get("out", 0), e.get("cache_read", 0), e.get("cache_write", 0)
         b["runs"] += 1; b["in"] += i_; b["out"] += o_; b["cost"] += e.get("cost", 0)
         tot_cost += e.get("cost", 0); tot_in += i_; tot_out += o_
-        cost_sonnet += _price_for("claude-sonnet-4-6", i_, o_, cr, cw)
+        cost_sonnet += _price_for("claude-sonnet-5", i_, o_, cr, cw)
         cost_haiku += _price_for("claude-haiku-4-5", i_, o_, cr, cw)
     for b in by_kind.values():
         b["cost"] = round(b["cost"], 4)
@@ -3280,7 +3355,8 @@ def _chat_after(result: dict, history: list) -> None:
 
 
 async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dict],
-                   model: str, extra_system: str = "", emit: Optional[Callable] = None) -> dict:
+                   model: str, extra_system: str = "", emit: Optional[Callable] = None,
+                   effort: Optional[str] = None) -> dict:
     """Run a multi-step tool-use conversation. The final answer is delivered via
     the present_response tool and returned as a structured dict. If `emit` is given,
     it is awaited with progress events ({"type":"step","label":...}) for live streaming."""
@@ -3303,7 +3379,7 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
         kwargs = {
             "model": model, "max_tokens": MAX_TOKENS, "system": system,
             "tools": all_tools, "messages": messages,
-            "output_config": {"effort": _effort_for(model)},
+            "output_config": {"effort": effort or _effort_for(model)},
         }
         if THINKING_MODE:  # adaptive thinking: deeper reasoning, model self-paces
             kwargs["thinking"] = {"type": THINKING_MODE}
@@ -6604,8 +6680,9 @@ async def _ai_address(text: str) -> dict:
     place. Plain structured output, no tools that touch the store."""
     client = _anthropic()
     resp = await _xcreate(
-        client, model=MODEL_FAST, max_tokens=1024, system=ADDRESS_SYSTEM,
+        client, model=MODEL_FAST, max_tokens=4096, system=ADDRESS_SYSTEM,
         tools=[ADDRESS_TOOL], tool_choice={"type": "tool", "name": ADDRESS_TOOL["name"]},
+        output_config={"effort": "low"},
         messages=[{"role": "user", "content": "Pasted text:\n\n" + str(text or "")[:4000]}],
     )
     got = next((b.input for b in resp.content
@@ -17443,7 +17520,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         return _build_dispatch(chat_registry, lambda: str(uid or ""))
 
     logger.info(f"Copilot enabled — embedded-only; models: fast={MODEL_FAST}, deep={MODEL_DEEP}; "
-                f"effort={ANTHROPIC_EFFORT}; max_tokens={MAX_TOKENS}; tools: {len(tools)}")
+                f"effort={ANTHROPIC_EFFORT}, deep effort={ANTHROPIC_EFFORT_DEEP}; max_tokens={MAX_TOKENS}; tools: {len(tools)}")
     if not ANTHROPIC_API_KEY:
         logger.warning("Copilot: ANTHROPIC_API_KEY not set. Chat will return an error until it is.")
     if not SHOPIFY_API_SECRET:
@@ -17744,20 +17821,23 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if len(json.dumps(history)) > MAX_CHAT_CHARS:
             return _json({"error": "Message too large."}, 413)
 
-        model = _pick_model(bool(body.get("deep")))
+        deep = bool(body.get("deep"))
+        model = _pick_model(deep)
         extra = (_profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
                  + _skills_to_system(_chat_question(history), _picked_skills(body), can_read=True))
         if _is_seo(history):
             extra += "\n\n" + SEO_KNOWLEDGE
         extra += _page_context_to_system(body.get("context"))
         try:
-            result = await run_chat(history, dispatch_for(_who), tools, model, extra)
+            result = await run_chat(history, dispatch_for(_who), tools, model, extra,
+                                    effort=_effort_for(model, deep))
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
         except anthropic.APIError:
             logger.exception("Anthropic API error")
             return _json({"error": "The AI service returned an error. Please try again."}, 502)
         _chat_after(result, history)
+        result["deep"] = deep
         return _json(result)
 
     @mcp.custom_route("/api/chat/stream", methods=["POST"])
@@ -17781,7 +17861,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if len(json.dumps(history)) > MAX_CHAT_CHARS:
             return _json({"error": "Message too large."}, 413)
 
-        model = _pick_model(bool(body.get("deep")))
+        deep = bool(body.get("deep"))
+        model = _pick_model(deep)
         extra = (_profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
                  + _skills_to_system(_chat_question(history), _picked_skills(body), can_read=True))
         if _is_seo(history):
@@ -17793,8 +17874,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         async def runner():
             try:
                 result = await run_chat(history, dispatch_for(_who), tools, model, extra,
-                                        emit=q.put)
+                                        emit=q.put, effort=_effort_for(model, deep))
                 _chat_after(result, history)
+                result["deep"] = deep
                 await q.put({"type": "done", "result": result})
             except anthropic.APIError:
                 logger.exception("Anthropic API error (stream)")
@@ -19122,8 +19204,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not _window_ok(_rl_global, RATE_MAX_GLOBAL, time.monotonic()):
             return _json({"error": "The assistant is busy right now. Please try again shortly."}, 429)
         try:
-            resp = await _xcreate(_anthropic(), model=MODEL_DEEP, max_tokens=1200,
-                                  system=MAIL_DRAFT_SYSTEM,
+            resp = await _xcreate(_anthropic(), model=MODEL_DEEP, max_tokens=8000,
+                                  system=MAIL_DRAFT_SYSTEM, output_config={"effort": _effort_for(MODEL_DEEP)},
                                   messages=[{"role": "user", "content": prompt}])
         except RuntimeError as e:
             return _json({"error": str(e), "hard": True}, 429)

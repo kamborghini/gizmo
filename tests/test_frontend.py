@@ -8545,6 +8545,36 @@ const how = [splitHow('## A\nx'), splitHow('a\n\nb'), splitHow('x'.repeat(50))];
     ok(g["text"] == "\u00a385 caf\u00e9" and g["note"], "Windows text is read as such, and said so: %r" % g)
 
 
+# ---- Claude Opus 5.5, 24 September 2026 --------------------------------------
+
+@test
+def t_deep_analysis_is_tagged_by_the_switch_not_the_model_name():
+    """Every answer is Opus 5.5 now, so 'Deep analysis' drawn for any Opus
+    model would tag them all. The server says whether an answer was deep;
+    answers saved before it did keep the old reading."""
+    for name in ("function chatAnswer(", "function pageAssistant("):
+        fn = fn_src(name)
+        ok("deepTurn(t)" in fn and "/opus/i.test" not in fn, name + " asks deepTurn")
+    ok("model: data.model, deep: data.deep," in SCRIPT and "model: res.model, deep: res.deep," in SCRIPT,
+       "both chat and the page assistant keep what the server said")
+    ok("larger model" not in HTML, "the switch no longer promises a bigger model")
+    if not any(os.access(os.path.join(p, "node"), os.X_OK)
+               for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(fn_src("function deepTurn(") + "\nconsole.log([{deep: true, model: 'claude-opus-5-5'}, "
+                 "{deep: false, model: 'claude-opus-5-5'}, {model: 'claude-opus-4-8'}, {model: 'claude-sonnet-4-6'}, {}]"
+                 ".map(deepTurn).join(' '));\n")
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path], capture_output=True, text=True)
+        ok(r.returncode == 0, "deepTurn failed to run: " + (r.stderr or "")[:200])
+        eq((r.stdout or "").strip(), "true false true false false", "deep by the flag, old answers by their model")
+    finally:
+        os.unlink(path)
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

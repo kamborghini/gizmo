@@ -4542,7 +4542,7 @@
                             <button class="send" id="send" title="Send" aria-label="Send" disabled></button>
                         </div>
                         <div class="row">
-                            <button type="button" class="toggle" id="deep-toggle" role="switch" aria-checked="false" aria-describedby="deep-note" title="Uses the larger model: slower, and costs more. For questions that need several reports at once."><span class="sw"></span> Deep analysis</button>
+                            <button type="button" class="toggle" id="deep-toggle" role="switch" aria-checked="false" aria-describedby="deep-note" title="Reactor thinks for longer before it answers: slower, and costs more. For questions that need several reports at once."><span class="sw"></span> Deep analysis</button>
                             <span class="deep-note" id="deep-note" hidden>Slower, and costs more. Kept for this conversation.</span>
                             <button type="button" class="btn btn-sm skill-pick" id="skill-pick" aria-haspopup="menu"></button>
                             <span class="hint">Enter to send · Shift+Enter for a new line</span>
@@ -7849,12 +7849,18 @@ Projected Image UK"></textarea>
             c.turns.splice(i - 1, 2); save();
             send(q.text, { convo: c, skills: q.skills });
         }
+        /* Whether an answer was a Deep analysis. Answers saved before the
+           server said so were deep when they came from an Opus model; since
+           every answer is Opus 5.5, the model's name no longer tells. */
+        function deepTurn(t) {
+            return t.deep != null ? !!t.deep : !!(t.model && /opus/i.test(t.model));
+        }
         function chatAnswer(c, t, i) {
             const m = el('div', 'msg assistant');
             const head = el('div', 'resp-head');
             const av = el('span', 'av'); av.innerHTML = I.spark; av.setAttribute('aria-hidden', 'true');
             head.append(av, el('h3', 'who', 'Reactor'));
-            if (t.model && /opus/i.test(t.model)) head.append(el('span', 'tag', 'Deep analysis'));
+            if (deepTurn(t)) head.append(el('span', 'tag', 'Deep analysis'));
             if (t.at) head.append(el('span', 'resp-at', chatStamp(t.at)));
             const copy = el('button', 'mem-btn resp-copy'); copy.type = 'button'; copy.innerHTML = I.copy;
             copy.title = 'Copy this answer'; copy.setAttribute('aria-label', 'Copy this answer');
@@ -8128,7 +8134,7 @@ Projected Image UK"></textarea>
             if (fail) c.turns.push({ role: 'error', text: fail.message || String(fail), stopped: !!fail.stopped, at: new Date().toISOString() });
             else {
                 c.turns.push({ role: 'assistant', structured: data.structured || { summary: 'Reactor did not send an answer. Ask again.' },
-                    model: data.model, data_used: data.data_used, at: new Date().toISOString(),
+                    model: data.model, deep: data.deep, data_used: data.data_used, at: new Date().toISOString(),
                     not_kept: data.not_kept, followups_closed: data.followups_closed, followups_maybe: data.followups_maybe });
                 /* Only the notes can have changed, and only when the answer
                    kept or closed one: every answer used to read the notes,
@@ -8285,7 +8291,7 @@ Projected Image UK"></textarea>
             const m = el('div', 'msg assistant');
             const head = el('div', 'resp-head'); const av = el('span', 'av'); av.innerHTML = I.spark;
             head.append(av, el('span', 'who', 'Reactor'));
-            if (t.model && /opus/i.test(t.model)) head.append(el('span', 'tag', 'Deep analysis'));
+            if (deepTurn(t)) head.append(el('span', 'tag', 'Deep analysis'));
             m.append(head);
             renderStructured(m, t.structured || {}, { noFollowups: true });
             if (Array.isArray(t.data_used) && t.data_used.length) m.append(dataDrill(t.data_used));
@@ -8363,7 +8369,7 @@ Projected Image UK"></textarea>
                 let res;
                 try { res = await streamChat(payload, lbl => { const sp = th.querySelector('span'); if (sp && lbl) sp.textContent = lbl; }); }
                 catch (se) { if ((se.message || '') === 'STREAM_TRANSPORT') res = await api('/api/chat', payload); else throw se; }
-                pageThreads[tk].push({ role: 'assistant', structured: res.structured || { summary: 'Reactor did not send an answer. Ask again.' }, model: res.model, data_used: res.data_used });
+                pageThreads[tk].push({ role: 'assistant', structured: res.structured || { summary: 'Reactor did not send an answer. Ask again.' }, model: res.model, deep: res.deep, data_used: res.data_used });
                 loadMemory('notes');
             } catch (e) {
                 // NOT an assistant turn: an answer bubble carrying the words
@@ -20471,7 +20477,7 @@ Projected Image UK"></textarea>
             { id: 'assistant', h: 'Reactor, the assistant', tab: 'chat', body: [
                 ['Chat', 'Ask anything about the store. Reactor reads your live figures (it can never change anything) and answers with findings and next steps. What Reactor read, under an answer, lists what it looked at. You can ask in another conversation while one is working, and Stop one that is taking too long.'],
                 ['Track', 'On a recommended action, Track takes a snapshot of your headline figures and measures the change over the following weeks. Tracked changes are listed on Memory.'],
-                ['Deep analysis', 'Uses the larger model for the conversation it is switched on in: slower, and it costs more. For questions that need several reports at once.'],
+                ['Deep analysis', 'Reactor thinks for longer before it answers, in the conversation it is switched on in: slower, and it costs more. For questions that need several reports at once.'],
                 ['Memory', 'The facts, decisions, preferences, learnings and follow-ups Reactor keeps from chat, and what it learned from the website. Add or correct a note by hand. A rule for how Reactor should work belongs in Skills, and a note that reads like one is offered as a skill.'],
                 ['Skills', 'Your playbooks: a brand voice, a discount policy, how to answer a trade enquiry. Write one, or upload Markdown files (a SKILL.md header gives the title and when it applies). Reactor picks the ones that fit each question, in chat, reports and email drafts, and says under each answer which it followed. Use in chat, or the Skills button beside the question box, applies one whatever the question; a short one can be applied to every answer.'],
                 ['Having a skill read', 'Read and add, or Have Reactor read it, is an AI run in which Reactor reads the skill closely and writes down when it applies, what it will do, and anything unclear. Check it before you rely on the skill, and read it again after you change the skill.'],
@@ -28538,7 +28544,7 @@ Projected Image UK"></textarea>
         window.__demo = function (sample, ov) {
             setView('chat'); newConvo(false);
             active().turns.push({ role: 'user', text: 'How did my store do this week?' });
-            active().turns.push({ role: 'assistant', structured: sample, model: 'claude-opus-4-7' });
+            active().turns.push({ role: 'assistant', structured: sample, model: 'claude-opus-5-5', deep: true });
             renderChat();
             if (ov) { overviewCache = { data: ov, at: Date.now() }; }
         };

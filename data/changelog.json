@@ -2,6 +2,22 @@
  "releases": [
   {
    "date": "2026-09-24",
+   "title": "Reactor runs on Claude Opus 5.5",
+   "items": [
+    {
+     "kind": "improved",
+     "tab": "chat",
+     "text": "Reactor now uses Claude Opus 5.5, Anthropic's newest model, for chat, the AI reports, reading skills, email reply drafts and the reconciliation checks. Everyday chat uses the same model as Deep analysis."
+    },
+    {
+     "kind": "improved",
+     "tab": "chat",
+     "text": "Deep analysis now has Reactor think for longer before it answers, instead of switching to a larger model. It is still slower and costs more, and only answers asked with it switched on are marked Deep analysis."
+    }
+   ]
+  },
+  {
+   "date": "2026-09-24",
    "title": "Skills from Markdown files, read and applied",
    "items": [
     {

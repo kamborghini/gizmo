@@ -20302,7 +20302,7 @@ def t_the_chat_stream_says_it_has_started_before_the_answer():
     done: cut off mid-answer, it was run and billed a second time. The
     stream's first event now says the run is under way."""
     started = []
-    async def slow_answer(history, dispatch, tools, model, extra, emit=None):
+    async def slow_answer(history, dispatch, tools, model, extra, emit=None, effort=None):
         started.append(True)
         return {"structured": {"summary": "hi"}}
     def go():
@@ -22985,6 +22985,153 @@ def t_a_long_thread_lists_its_newest_attachments():
     names = [f["name"] for f in store["threads"]["t2"]["files"]]
     eq(len(names), 20)
     ok("proof-v6-4.pdf" in names and "proof-v1-1.pdf" not in names, names[-3:])
+
+
+# ---------------------------------------------------------------------------
+# Claude Opus 5.5, 24 September 2026: it thinks on every request, refuses a
+# forced tool call and prices cache reads at 0.05x. Pinned by behaviour.
+# ---------------------------------------------------------------------------
+
+class _OpusFake:
+    """A client whose messages.create records each call and answers from a
+    script: a list of replies, or exceptions to raise."""
+    def __init__(self, script):
+        self.calls, self.script = [], list(script)
+        fake = self
+        class _M:
+            async def create(self, **kw):
+                fake.calls.append(kw)
+                nxt = fake.script.pop(0)
+                if isinstance(nxt, Exception):
+                    raise nxt
+                return nxt
+        self.messages = _M()
+
+
+class _OpusBlock:
+    def __init__(self, type_, **kw):
+        self.type = type_
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+class _OpusResp:
+    def __init__(self, blocks, stop="end_turn"):
+        self.content, self.stop_reason, self.usage = blocks, stop, None
+
+
+def _opus_run(model, script, **kw):
+    fake = _OpusFake(script)
+    saved = copilot._spend_guard
+    copilot._spend_guard = lambda: None
+    try:
+        resp = _run(copilot._xcreate(fake, model=model, max_tokens=100, system="Read the order.",
+                                     messages=[{"role": "user", "content": "Order 1"}],
+                                     tools=[{"name": "record", "input_schema": {"type": "object"}}], **kw))
+    finally:
+        copilot._spend_guard = saved
+    return fake, resp
+
+
+@test
+def t_opus_5_5_is_the_default_and_counted_at_its_price():
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    ok('or "claude-opus-5-5"\n' in src and 'os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-5-5")' in src,
+       "both tiers default to Opus 5.5")
+    # $4 in, $20 out, cache reads at 0.05x input, writes at 1.25x.
+    eq(copilot._price_for("claude-opus-5-5", 1_000_000, 1_000_000, 1_000_000, 1_000_000), 4 + 20 + 0.2 + 5.0)
+    eq(copilot._price_for("claude-opus-4-8", 0, 0, 1_000_000, 0), 0.5, "other models keep 0.1x")
+
+
+@test
+def t_a_forced_tool_on_opus_5_5_is_asked_for_in_words():
+    tool = _OpusBlock("tool_use", name="record", input={"total": 5}, id="t1")
+    fake, resp = _opus_run("claude-opus-5-5", [_OpusResp([_OpusBlock("thinking", thinking="", signature="s"), tool], "tool_use")],
+                           tool_choice={"type": "tool", "name": "record"})
+    eq(len(fake.calls), 1)
+    ok("tool_choice" not in fake.calls[0], "Opus 5.5 refuses a forced tool, so none is sent")
+    ok("calling the record tool" in str(fake.calls[0]["system"]), "the instructions name the tool instead")
+    ok(resp.content[1] is tool, "and the caller finds its tool block after the thinking")
+
+
+@test
+def t_a_prose_answer_is_asked_once_more_for_the_tool():
+    think = _OpusBlock("thinking", thinking="", signature="s")
+    prose = _OpusResp([think, _OpusBlock("text", text="The total is 5.")])
+    tool = _OpusResp([_OpusBlock("tool_use", name="record", input={"total": 5}, id="t1")], "tool_use")
+    fake, resp = _opus_run("claude-opus-5-5", [prose, tool], tool_choice={"type": "tool", "name": "record"})
+    eq(len(fake.calls), 2, "one more request, not a failed report")
+    msgs = fake.calls[1]["messages"]
+    ok(msgs[-2]["role"] == "assistant" and msgs[-2]["content"] is prose.content,
+       "its own reply goes back as it came, thinking included")
+    ok("calling the record tool" in msgs[-1]["content"], msgs[-1])
+    ok(resp is tool)
+    # A reply that ran out of room, or refused, is not asked again.
+    fake, resp = _opus_run("claude-opus-5-5", [_OpusResp([think], "max_tokens")],
+                           tool_choice={"type": "tool", "name": "record"})
+    eq(len(fake.calls), 1)
+
+
+@test
+def t_a_model_that_can_be_forced_still_is():
+    fake, _ = _opus_run("claude-opus-4-8", [_OpusResp([_OpusBlock("tool_use", name="record", input={}, id="t")], "tool_use")],
+                        tool_choice={"type": "tool", "name": "record"})
+    eq(fake.calls[0]["tool_choice"], {"type": "tool", "name": "record"})
+    eq(fake.calls[0]["system"], "Read the order.")
+
+
+@test
+def t_a_model_found_refusing_a_forced_tool_is_remembered():
+    import httpx
+    refused = copilot.anthropic.BadRequestError(
+        'tool_choice: type "tool" and "any" are not supported for this model.',
+        response=httpx.Response(400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")), body=None)
+    good = _OpusResp([_OpusBlock("tool_use", name="record", input={}, id="t")], "tool_use")
+    saved = set(copilot._UNFORCED_MODELS)
+    try:
+        fake, resp = _opus_run("claude-next-9", [refused, good], tool_choice={"type": "tool", "name": "record"})
+        eq(len(fake.calls), 2)
+        ok("tool_choice" not in fake.calls[1] and resp is good, "retried without forcing")
+        ok(not copilot._can_force_tool("claude-next-9"), "and not forced again")
+        other = copilot.anthropic.BadRequestError("messages: too long", response=refused.response, body=None)
+        try:
+            _opus_run("claude-next-8", [other], tool_choice={"type": "tool", "name": "record"})
+            ok(False, "any other refusal is raised as before")
+        except copilot.anthropic.BadRequestError:
+            pass
+    finally:
+        copilot._UNFORCED_MODELS.clear(); copilot._UNFORCED_MODELS.update(saved)
+
+
+@test
+def t_deep_analysis_is_more_thinking_and_the_answer_says_it_was_deep():
+    seen = []
+    async def answer(history, dispatch, tools, model, extra, emit=None, effort=None):
+        seen.append((model, effort))
+        return {"structured": {"summary": "hi"}, "model": model}
+    def go():
+        ensure_auth()
+        _a, sess, _p = ready_user("Dee Deep", "deed", role="admin")
+        saved = copilot.run_chat
+        copilot.run_chat = answer
+        copilot._rl_global.clear()
+        try:
+            r = post_s(sess, "/api/chat", {"message": "hello", "deep": True})
+            eq(r.json()["deep"], True)
+            r = post_s(sess, "/api/chat", {"message": "hello"})
+            eq(r.json()["deep"], False)
+            eq(seen[0][1], copilot._effort_for(copilot.MODEL_DEEP, True))
+            eq(seen[1][1], copilot._effort_for(copilot.MODEL_FAST, False))
+            r = post_s(sess, "/api/chat/stream", {"message": "hello", "deep": True})
+            done = [json.loads(l[5:]) for l in r.text.split("\n") if l.startswith("data:")][-1]
+            eq(done["result"]["deep"], True, "the stream's answer says so too")
+        finally:
+            copilot.run_chat = saved
+    with_accounts(go)
+    if not os.environ.get("ANTHROPIC_EFFORT_DEEP") and not os.environ.get("ANTHROPIC_EFFORT"):
+        eq(copilot._effort_for("claude-opus-5-5", True), "max")
+        eq(copilot._effort_for("claude-opus-5-5"), "high")
+
 
 for fn in TESTS:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
