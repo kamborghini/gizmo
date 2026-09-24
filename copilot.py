@@ -769,7 +769,9 @@ def _skill_sections(content: str) -> list[tuple]:
 
 
 def _skill_hash(content: str) -> str:
-    return hashlib.sha1(str(content or "").encode("utf-8")).hexdigest()[:12]
+    """A fingerprint of a skill's text, to tell whether it has changed since
+    it was read; not a secret, but the house scanner rightly refuses SHA-1."""
+    return hashlib.sha256(str(content or "").encode("utf-8")).hexdigest()[:16]
 
 
 _SKILL_INDEX: dict = {}
