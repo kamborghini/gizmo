@@ -8640,8 +8640,9 @@ def t_only_the_master_sees_the_upload_and_a_long_skill_can_be_edited():
     ok("const lim = Math.max(skillCaps.body, s ? String(s.content || '').trim().length : 0);" in ed
        and "over = n - lim" in ed and "nf(lim) + ' characters'" in ed,
        "a long skill the master saved can be edited by anyone without growing")
-    ok("const SKILL_FILE_MAX = 2000000;" in SCRIPT and "f.size > SKILL_FILE_MAX" in fn_src("function readSkillFiles(")
-       and "file.size > SKILL_FILE_MAX" in ed, "a file up to 2 MB is read by both file controls")
+    ok("const SKILL_FILE_MAX = 5 * 1024 * 1024;" in SCRIPT and "f.size > SKILL_FILE_MAX" in fn_src("function readSkillFiles(")
+       and "file.size > SKILL_FILE_MAX" in ed and "'Larger than 5 MB, so it was not read.'" in fn_src("function readSkillFiles("),
+       "a file up to 5 MB is read by both file controls")
     ok(start.index("if (skillsLoadErr)") < start.index("if (!skillCaps.upload)"), "skills not loaded is said before the master rule")
     ok("if (skillCaps.upload) card.classList.add('drop-on');" in fn_src("function renderSkills("),
        "only the master's card lights up for a drop")

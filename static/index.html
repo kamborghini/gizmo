@@ -10350,14 +10350,14 @@ Projected Image UK"></textarea>
             catch (e) { return { text: new TextDecoder('windows-1252').decode(buf), note: 'This file is not UTF-8, so it was read as Windows text: check the £ signs and accents in the preview.' }; }
         }
         const UPLOAD_MAX = 20;
-        const SKILL_FILE_MAX = 2000000;     // bytes, for Upload Markdown and Load from file alike
+        const SKILL_FILE_MAX = 5 * 1024 * 1024;     // bytes, for Upload Markdown and Load from file alike
         async function readSkillFiles(files, room) {
             const all = [...(files || [])];
             const list = all.filter(f => /\.(md|markdown|txt|text)$/i.test(f.name) || /^text\/(markdown|plain|x-markdown)/.test(f.type));
             const take = list.slice(0, Math.max(0, room == null ? UPLOAD_MAX : room));
             const out = [];
             for (const f of take) {
-                if (f.size > SKILL_FILE_MAX) { out.push({ name: f.name, size: f.size, err: 'Larger than 2 MB, so it was not read.' }); continue; }
+                if (f.size > SKILL_FILE_MAX) { out.push({ name: f.name, size: f.size, err: 'Larger than 5 MB, so it was not read.' }); continue; }
                 try {
                     const r = await readTextFile(f);
                     if (!r.text.trim()) { out.push({ name: f.name, size: f.size, err: 'The file is empty.' }); continue; }
@@ -10966,7 +10966,7 @@ Projected Image UK"></textarea>
             ti.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); wh.focus(); } });
             fi.onchange = async () => {
                 const file = fi.files && fi.files[0]; fi.value = ''; if (!file) return;
-                if (file.size > SKILL_FILE_MAX) { toastError('That file is too large. Keep it under 2 MB.'); return; }
+                if (file.size > SKILL_FILE_MAX) { toastError('That file is too large. Keep it under 5 MB.'); return; }
                 if (bo.value.trim() && !await uiConfirm('Replace what is in the box with ' + file.name + '?', { title: 'Load from file', okText: 'Replace' })) return;
                 try {
                     /* A Markdown header fills the title and when it applies. */

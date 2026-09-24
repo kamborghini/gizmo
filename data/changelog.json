@@ -7,7 +7,7 @@
     {
      "kind": "improved",
      "tab": "skills",
-     "text": "The master account can save a skill of up to 200,000 characters, five times what other accounts can, so a long playbook comes in as one skill instead of being split into many, and can upload Markdown files of up to 2 MB, where a file longer than one skill comes in as several. When Reactor reads a skill closely it now reads all of it, and in chat it reads a long skill part by part to the end."
+     "text": "The master account can save a skill of up to 200,000 characters, five times what other accounts can, so a long playbook comes in as one skill instead of being split into many, and can upload Markdown files of up to 5 MB, where a file longer than one skill comes in as several. When Reactor reads a skill closely it now reads all of it, and in chat it reads a long skill part by part to the end."
     },
     {
      "kind": "improved",
