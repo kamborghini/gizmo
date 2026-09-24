@@ -238,7 +238,7 @@ def t_the_guide_is_static_and_covers_the_failure_cases():
     ok(block, "the guide content is a plain constant")
     body = block.group(1)
     ok("api(" not in body and "fetch(" not in body, "it makes no network calls")
-    for must in ["A booking fails", "must go now", "will not print", "Unauthorized",
+    for must in ["A booking fails", "must go now", "will not print", "turns your sign-in down",
                  "customs line shows 0", "Charge you twice"]:
         ok(must in body, "covers: " + must)
     ok("renderGuide" in SCRIPT and "printGuide" in SCRIPT, "it renders and prints")
@@ -425,11 +425,13 @@ def t_the_app_has_its_own_front_door():
     ok("authShow" in SCRIPT and "'/api/auth/login'" in SCRIPT, "the login screen exists")
     ok("'/api/auth/setup'" in SCRIPT, "and the first-run setup screen")
     ok("X-App-Session" in SCRIPT, "the session rides on every api call")
-    ok(re.search(r"setAppSession\(''\);\s*\n\s*clearLocalCache\(\);\s*\n\s*"
+    ok(re.search(r"setAppSession\(''\);\s*\n\s*clearLocalCache\(true\);\s*\n\s*"
                  r"/\*[^/]*?\*/\s*\n(?:\s*(?:let last = 0;|try \{[^\n]*sc_auth_reload[^\n]*|if \(Date\.now\(\) - last > 60000\) \{|"
                  r"try \{ sessionStorage\.setItem\('sc_auth_reload'[^\n]*)\n)*\s*location\.reload\(\)", SCRIPT, re.S),
        "a 401 clears the session AND the cached work, then reloads: showing a "
-       "login screen over the last person's data is not signing them out")
+       "login screen over the last person's data is not signing them out. The "
+       "person's own conversations stay (true); claimLocalCache drops them when "
+       "somebody else signs in")
     ok("authField('Password" in SCRIPT and "'password', 'au-pw'" in SCRIPT,
        "passwords are typed into password fields")
     ok("starter_password" in SCRIPT and "showStarterPw" in SCRIPT,
@@ -1160,17 +1162,18 @@ def t_a_failed_load_is_not_reported_as_an_empty_list():
     forced 500 in the browser: Skills said 'No skills yet'."""
     ok("function loadFailure" in SCRIPT, "one shared notice, so the two tabs cannot drift")
     for name, var in (("loadMemory", "memoryLoadErr"), ("loadSkills", "skillsLoadErr")):
-        fn = re.search(r"async function " + name + r"\(\).*?\n        \}", SCRIPT, re.S).group(0)
+        fn = re.search(r"async function " + name + r"\([a-z]*\).*?\n        \}", SCRIPT, re.S).group(0)
         ok(var + " = ''" in fn, "%s clears the previous failure before it reads" % name)
         ok("catch (e) { " + var in fn or var + " = e.message" in fn,
            "%s records the failure instead of swallowing it" % name)
-    for render, var in (("renderMemory", "memoryLoadErr"), ("renderSkills", "skillsLoadErr")):
+    for render, var in (("paintNotes", "memoryLoadErr"), ("paintSkills", "skillsLoadErr")):
         fn = re.search(r"function " + render + r"\(\).*?\n        \}", SCRIPT, re.S).group(0)
         ok("if (" + var + ")" in fn,
            "%s shows the failure instead of the empty state" % render)
         ok("loadFailure(" in fn, "%s offers the retry" % render)
-    ok("it is unknown" in SCRIPT,
-       "and the copy says the list is unknown rather than empty")
+    ok("Your notes could not be loaded, so they cannot be shown yet." in SCRIPT
+       and "Your skills could not be loaded, so they cannot be shown yet." in SCRIPT,
+       "and the copy says the list could not be read rather than that it is empty")
 
 
 @test
@@ -1341,7 +1344,8 @@ def t_a_tick_box_that_is_a_div_still_answers_the_keyboard():
     the row, so the only way to mark something done was a mouse."""
     ok(SCRIPT.count("ck.setAttribute('role', 'button')") == 2,
        "both action lists give the box a role")
-    ok("ck.setAttribute('aria-pressed', String(row.classList.toggle('done')))" in SCRIPT,
+    ok("ck.setAttribute('aria-pressed', String(row.classList.toggle('done')))" in SCRIPT
+       or "const on = row.classList.toggle('done'); ck.setAttribute('aria-pressed', String(on));" in SCRIPT,
        "and the pressed state follows the row, rather than going stale")
     ok(SCRIPT.count("ck.tabIndex = 0") == 2, "both are reachable")
 
@@ -1353,7 +1357,7 @@ def t_every_status_chip_has_the_same_geometry():
     radius scale's own comment names the three steps card, control, chip, which
     settles which of the two is the chip. Under the neutral system that shape is
     a capsule, --radius-full, and it has to be the SAME capsule everywhere."""
-    chips = ["pill", "mem-tag", "mail-order-stage", "lbl-chip", "fchip", "mail-owner",
+    chips = ["pill", "mail-order-stage", "lbl-chip", "fchip", "mail-owner",
              "mcount", "mrule-tag", "g-badge", "mail-claim", "mail-crmchip"]
     for c in chips:
         rule = re.search(r"\." + c + r" \{[^}]*\}", HTML, re.S)
@@ -1748,10 +1752,11 @@ def t_the_app_can_show_its_own_release_notes_and_take_a_request():
     ok("function paintReleases" in SCRIPT and "function paintRequests" in SCRIPT,
        "What's new and Requests both render")
     ok("function askFeature" in SCRIPT, "and a request can be made")
-    ok("ask-feature" in HTML, "with a button that lives outside any one tab")
-    ok("nav-new-dot" in HTML and "LS_SEEN_REL" in SCRIPT,
-       "unread releases show a quiet dot, remembered per browser")
-    ok("markReleasesSeen" in SCRIPT, "and reading them clears it")
+    ok("const v = currentView(); closeSidebar(); askFeature(v);" in fn_src("function userMenu("),
+       "with a way in that lives outside any one tab: the account menu, on every width")
+    ok("nav-new-dot" in HTML and "op: 'seen'" in SCRIPT,
+       "unread releases show a quiet dot, remembered per account rather than per browser")
+    ok("function markSeen(" in SCRIPT, "and reading them clears it")
 
 
 @test
@@ -1991,9 +1996,9 @@ def t_independent_cards_use_the_width():
        "self-collapsing, so a phone and a printed page get one column, and "
        "auto-FIT so two cards fill the row instead of sitting beside an empty "
        "track (auto-fill keeps its empty tracks)")
-    ok(".span-all" in CSS and "span-all" in SCRIPT,
-       "and the skill being edited takes a full row, because a text area "
-       "squeezed into a 380px column is not a typing surface")
+    ok("function skillEditor(" in SCRIPT and "li.append(skillEditor(s))" in SCRIPT,
+       "and a skill is edited in place in its full-width row of the list, "
+       "because a text area squeezed into a 380px column is not a typing surface")
 
 
 @test
@@ -2334,22 +2339,18 @@ def t_the_sidebar_keeps_one_inset():
     width:100% with no horizontal margin, so it alone ran the full width and
     broke the line the whole column keeps."""
     for sel, why in ((r"\.side-head \{[^}]*\}", "the brand row"),
-                     (r"\.nav-quick \{[^}]*\}", "the primary button"),
                      (r"\.nav \{[^}]*\}", "the nav list"),
                      (r"\.convos \{[^}]*\}", "the conversation list"),
                      (r"\.side-foot \{[^}]*\}", "the footer")):
         block = re.search(sel, CSS).group(0)
         ok("var(--sp-2)" in block, why + " shares the 8px inset: " + block[:90])
-    refresh = re.search(r"\.nav-refresh \{[^}]*\}", CSS)
-    ok(refresh and "width: 100%" in refresh.group(0) and "line-height:" in refresh.group(0),
-       "Refresh all fills its 8px-inset group, with an explicit line-height: `font: inherit` once "
-       "pulled the body's 1.5 and made it 3px taller than its neighbour")
-    ok("var(--action-primary)" in refresh.group(0), "and it is the reference's primary button")
+    # Refresh all spends AI credits and runs four reports, so it sits in those
+    # reports' headers; the support card took a sixth of every sidebar, and its
+    # link lives in the account menu (Cameron's call, 24 Sep 2026).
+    ok('id="refresh-all"' not in HTML and "refreshAllBtn()" in SCRIPT, "Refresh all is on the reports, not the sidebar")
     order = [m.group(1) for m in re.finditer(r'<(?:button|div) class="(nav-quick|nav|convos|side-support|side-user)[" ]', HTML)]
-    ok(order == ["nav-quick", "nav", "convos", "side-support", "side-user"],
-       "primary button, sections, conversations, then the support card and the account row: %s" % order)
-    ok('class="linkish" id="ask-feature"' in HTML,
-       "Ask for a feature is the link in the support card, as the reference's card carries one")
+    ok(order == ["nav", "convos", "side-user"],
+       "sections, conversations, then the account row: %s" % order)
     ok("function userMenu()" in SCRIPT and "$('side-user').onclick = userMenu" in SCRIPT,
        "and the account row opens the menu that holds Settings, the clock and Log out")
 
@@ -2561,7 +2562,7 @@ def t_a_dropdown_menu_can_always_be_got_out_of():
     on Escape, on a click anywhere else, on a second press of its own trigger and
     on scrolling the page under it, and hands focus back each time. Verified in a
     browser as well as here; the suite can only read the source."""
-    fn = SCRIPT.split("function dropMenu(anchor, items) {")[1][:3400]
+    fn = SCRIPT.split("function dropMenu(anchor, items) {")[1][:3800]
     close = SCRIPT.split("function closeDMenu() {")[1][:1200]
     ok("dmenuOpen.anchor === anchor" in fn, "a second press of the trigger closes it")
     ok("e.key === 'Escape'" in fn, "Escape closes it")
@@ -3380,7 +3381,7 @@ def t_no_control_grows_its_way_out_of_the_scale():
     growing it. Three recipes had overridden their way off that scale by
     setting their own vertical padding: the sidebar's two footer buttons at 34,
     the skills input at 39, and the run-gate CTA at 46."""
-    for sel in (r"\.run-gate \.rg-btn", r"\.nav-refresh", r"\.sk-input, \.sk-textarea"):
+    for sel in (r"\.run-gate \.rg-btn", r"\.sk-input, \.sk-textarea"):
         rule = re.search(sel + r" \{[^}]*\}", CSS)
         ok(rule, "the %s rule is still there" % sel)
         pad = re.search(r"padding:\s*(?:var\(--control-pad-y\)|([\d]+)px)", rule.group(0))
@@ -4025,8 +4026,8 @@ def t_money_is_formatted_by_intl_and_survives_a_bad_currency_code():
 def t_the_skills_captions_are_real_labels():
     """They were sibling <label>s with no `for`: visible text that named nothing,
     so both fields announced as bare inputs."""
-    ok(SCRIPT.count("el('label', 'sk-field')") == 4,
-       "both skills forms wrap each of their two fields in the label")
+    ok(SCRIPT.count("el('label', 'sk-field')") == 2,
+       "the one skills editor, for a new skill and an edit alike, wraps each of its two fields in the label")
     ok("el('div', 'sk-field')" not in SCRIPT, "and no orphan caption is left")
 
 
@@ -4063,8 +4064,10 @@ def t_a_half_written_skill_is_not_lost_on_close():
     ok("beforeunload" in SCRIPT, "closing with unsaved work asks first")
     seg = SCRIPT.split("beforeunload")[1][:520]
     ok("dataset.initial" in seg, "measured against the rendered value, not emptiness")
-    ok(SCRIPT.count("dataset.initial =") == 4,
-       "and all four skills fields stamp what they started as")
+    ed = fn_src("function skillEditor(")
+    ok("ti.dataset.initial = ti.value" in ed and "bo.dataset.initial = s ? bo.value : ''" in ed,
+       "and both skills fields stamp what they started as")
+    ok("getClientRects" not in seg, "a skill half written on a tab not being looked at still counts")
 
 
 @test
@@ -7573,7 +7576,7 @@ const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div
 let memories = [], alerts = [], knowledge = { a: 1 }, overviewCache = null; const errors = [];
 async function api() { throw new Error('The server is busy.'); }
 async function uiConfirm() { return true; }
-function toastError(m) { errors.push(m); } function renderMemory() {} function renderOverview() {}
+function toastError(m) { errors.push(m); } function renderMemory() {} function renderOverview() {} function paintMem() {} function paintNotes() {}
 """ + fn_src("async function memOp(") + "\n" + fn_src("async function alertOp(") + "\n" + fn_src("async function deleteKnowledge(") + r"""
 (async () => {
   await memOp({ op: 'delete', id: 'm1' }); await alertOp({ op: 'dismiss', id: 'a1' }); await deleteKnowledge();
@@ -8150,6 +8153,227 @@ def t_the_xero_page_uses_one_set_of_outcome_words():
     ok("voided: n('voided'), keptPaid: n('updateBlocked')" in rc and "if (kind === 'creditNotes') {" in rc,
        "a void and an edit left as posted are counted, and a credit note shows no outcome it cannot have")
     ok(".setup-steps li > .setup-code { white-space: nowrap; word-break: normal; }" in CSS, "a code word in a step never splits")
+
+
+# ---- Workspace pages, 24 September 2026 -------------------------------------
+
+def eq(a, b, msg=""):
+    ok(a == b, "%s: %r != %r" % (msg or "equal", a, b))
+
+
+@test
+def t_the_release_notes_are_ui_copy_and_keep_up_with_the_app():
+    """What's new stopped at 8 Sep while sixty changes shipped, and its notes
+    carried 46 dashes, the code name and developer words. The notes are read
+    on screen, so they keep the house rules, and they cannot fall behind the
+    code again without this failing."""
+    data = json.load(open(os.path.join(ROOT, "data", "changelog.json"), encoding="utf-8"))
+    texts = [r.get("title", "") for r in data["releases"]] + [i["text"] for r in data["releases"] for i in r["items"]]
+    bad = [t[:60] for t in texts if re.search("[‒-―]", t)]
+    ok(not bad, "no em or en dashes in the notes: %s" % bad[:3])
+    ok(not [t for t in texts if re.search(r"\bgizmo\b", t, re.I)], "and no code name")
+    ok(not [t for t in texts if re.search(r"\b(API|webhook|callback URL|JSON)\b", t)], "and no developer words")
+    views = set(re.search(r"const APP_VIEWS = \[([^\]]*)\]", SCRIPT).group(1).replace("'", "").replace(" ", "").split(","))
+    tabs = {i.get("tab") for r in data["releases"] for i in r["items"] if i.get("tab")}
+    ok(tabs <= views, "every note's Open goes to a real page: %s" % (tabs - views))
+    newest = max(r["date"] for r in data["releases"])
+    try:
+        last = subprocess.run(["git", "log", "-1", "--format=%cs", "--", "static/index.html", "copilot.py"],
+                              cwd=ROOT, capture_output=True, text=True, timeout=20).stdout.strip()
+    except Exception:
+        last = ""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", last or ""):
+        ok(newest >= last, "the newest note (%s) is not older than the last change to the app (%s): "
+           "write what changed in data/changelog.json" % (newest, last))
+
+
+@test
+def t_a_chat_follow_up_carries_the_answer_and_a_failed_question_is_not_resent():
+    """A follow-up went without the sections and figures of the answer it
+    followed; a question that failed was sent again, twice, beside its retry;
+    and the title was cut mid-word."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + "const CHAT_KEEP = 30;\n" + fn_src("function apiHistory(") + "\n" + fn_src("function structuredToText(") + "\n" + fn_src("function convoTitle(") + r"""
+const s = { summary: 'Three accounts are quiet.', metrics: [{ label: 'Revenue', value: '£6,420', delta: '+9%' }],
+  sections: [{ title: 'Quiet accounts', body: '- Stage Co 5\n- Stage Co 9' }], actions: [{ text: 'Call them' }], skills_applied: ['Chasing'] };
+const c = { turns: [{ role: 'user', text: 'q1' }, { role: 'assistant', structured: s }, { role: 'user', text: 'q2' }, { role: 'error', text: 'x' }, { role: 'user', text: 'q3' }] };
+const h = apiHistory(c);
+const many = { turns: [] }; for (let i = 0; i < 40; i++) many.turns.push({ role: 'user', text: 'u' + i }, { role: 'assistant', structured: { summary: 'a' + i } });
+console.log(JSON.stringify({ roles: h.map(m => m.role), users: h.filter(m => m.role === 'user').map(m => m.content), text: h[1].content,
+  keep: apiHistory(many).length, first: apiHistory(many)[0].role,
+  title: convoTitle('Can you compare the September 2026 wedding season with last year for monogram gobos please') }));
+"""
+    got = _run_node(js)
+    eq(got["roles"], ["user", "assistant", "user"], "the failed question and its error are left out")
+    eq(got["users"], ["q1", "q3"])
+    for bit in ("Revenue: £6,420 (+9%)", "Quiet accounts", "Stage Co 9", "Followed the skills: Chasing"):
+        ok(bit in got["text"], "the answer as sent carries " + bit)
+    ok(got["keep"] <= 30 and got["first"] == "user", "a long conversation sends its latest messages, starting with a question: %r" % got)
+    ok(got["title"].endswith("…") and not got["title"][:-1].endswith(" ") and len(got["title"]) <= 61, got["title"])
+
+
+@test
+def t_two_tabs_do_not_overwrite_each_others_conversations():
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = "const pending = {}; const goneConvos = new Set();\n" + fn_src("function mergeConvos(") + r"""
+const mine = [{ id: 'a', updated: 5, turns: [1] }, { id: 'b', updated: 1, turns: [1] }];
+const theirs = [{ id: 'b', updated: 9, turns: [1, 2] }, { id: 'c', updated: 7, turns: [1] }, { id: 'gone', updated: 8, turns: [1] }];
+goneConvos.add('gone');
+const m = mergeConvos(mine, theirs);
+pending.a = true;
+const m2 = mergeConvos([{ id: 'a', updated: 1, turns: [1, 2, 3] }], [{ id: 'a', updated: 99, turns: [1] }]);
+console.log(JSON.stringify({ ids: m.map(c => c.id), b: m.find(c => c.id === 'b').turns.length, pend: m2[0].turns.length }));
+"""
+    got = _run_node(js)
+    eq(got["ids"], ["b", "c", "a"], "newest first, the other tab's conversation kept, a deleted one not brought back")
+    eq(got["b"], 2, "the newer copy of a conversation wins")
+    eq(got["pend"], 3, "and one still being answered here is never replaced")
+
+
+@test
+def t_chat_takes_a_refusal_at_its_word():
+    """A 400 or 429 from the streaming route was asked again on the plain
+    route: the same question twice, and a run nobody pressed for."""
+    fn = fn_src("async function streamChat(")
+    ok("why && why.error" in fn and "[404, 405, 502, 503, 504].includes(res.status)" in fn,
+       "only a missing route or a gateway without an answer falls back")
+    ok("signal: signal" in fn and "stopped: true" in fn, "and Stop aborts the run")
+    send = fn_src("async function send(")
+    ok("if (pending[c.id]) { busyNote(); return; }" in send, "a second question in the same conversation says why it waits")
+    ok("role: 'error'" in send and "save();" in send, "a failed question is kept with its reason")
+    ok("if (data.noted || (data.followups_closed || []).length) loadMemory('notes')" in send,
+       "and an answer reads the notes again only when it kept or closed one")
+
+
+@test
+def t_the_memory_page_says_which_notes_reactor_reads():
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = "let memInject = 2;\n" + fn_src("function memSentIds(") + r"""
+let memories = [
+ { id: 'f1', type: 'fact', status: 'open' }, { id: 'f2', type: 'decision', status: 'open' }, { id: 'f3', type: 'fact', status: 'open' },
+ { id: 'u1', type: 'followup', status: 'done' }, { id: 'u2', type: 'followup', status: 'open' },
+ { id: 'p1', type: 'preference', status: 'dismissed' }, { id: 'p2', type: 'preference', status: 'open' }];
+console.log(JSON.stringify([...memSentIds()].sort()));
+"""
+    eq(_run_node(js), ["f2", "f3", "p2", "u2"], "the newest of each kind, as the server's prompt takes them")
+
+
+@test
+def t_a_long_skill_is_split_not_cut():
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = fn_src("function splitSkill(") + r"""
+const paras = []; for (let i = 0; i < 30; i++) paras.push('Step ' + i + ': ' + 'x'.repeat(90));
+const text = paras.join('\n\n');
+const parts = splitSkill(text, 1000);
+console.log(JSON.stringify({ n: parts.length, max: Math.max(...parts.map(p => p.length)), whole: parts.join('\n\n') === text,
+  long: splitSkill('y'.repeat(2500), 1000).map(p => p.length) }));
+"""
+    got = _run_node(js)
+    ok(got["n"] > 1 and got["max"] <= 1000 and got["whole"], "split at paragraph breaks, nothing lost: %r" % got)
+    eq(got["long"], [1000, 1000, 500], "and a paragraph longer than a skill is cut into whole pieces")
+
+
+@test
+def t_an_answer_in_prose_is_drawn_as_prose():
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + "document.createDocumentFragment = () => new Node_('#fragment');\n" + fn_src("function proseNodes(") + "\n" + fn_src("function pipeTable(") + r"""
+const f = proseNodes('## Where it came from\n- **Wedding** gobos\n- Steel\n\n| Product | Orders |\n|---|---|\n| Monogram | 9 |\nThat is all.');
+const tags = f.children.map(n => n.tagName);
+const tbl = f.children.find(n => n.className.includes('ktable-wrap'));
+console.log(JSON.stringify({ tags, text: f.textContent, rows: tbl.children[0].children[1].children.length }));
+"""
+    got = _run_node(js)
+    eq(got["tags"], ["H4", "UL", "DIV", "P"], "a heading, a list, a table and a paragraph")
+    ok("**" not in got["text"] and "##" not in got["text"] and "---" not in got["text"], got["text"])
+    eq(got["rows"], 1, "the rule row under a table's head is not a row")
+
+
+@test
+def t_the_guide_shows_each_person_what_they_can_do():
+    """Members were shown the Cloudflare setup and admin-only steps, and the
+    guide covered seven of nineteen pages."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = re.search(r"        const GUIDE = \[.*?\n        \];", SCRIPT, re.S).group(0) + "\n" + \
+        fn_src("function guideFor(").replace("function guideFor(", "function guideFor(") + r"""
+let teamMe = { role: 'member' }; let allowed = new Set(['labels', 'mail', 'chat', 'files']);
+const guideAdmin = () => !!teamMe && (teamMe.role === 'master' || teamMe.role === 'admin');
+const tabAllowed = (v) => allowed.has(v);
+const member = guideFor();
+teamMe = { role: 'admin' }; allowed = new Set(['labels', 'mail', 'chat', 'files', 'overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'crm', 'loans', 'sizes', 'memory', 'skills']);
+const admin = guideFor();
+const flat = (g) => g.flatMap(s => s.body.map(r => r[0] + ' ' + r[1])).join('\n');
+console.log(JSON.stringify({ mSecs: member.map(s => s.id), aSecs: admin.map(s => s.id), m: flat(member), a: flat(admin) }));
+"""
+    got = _run_node(js)
+    ok("house" not in got["mSecs"] and "house" in got["aSecs"], "housekeeping is for admins")
+    ok("Cloudflare" not in got["m"] and "Cloudflare" in got["a"], "and so is the storage setup")
+    ok("Liability" not in got["m"] and "reports" not in got["mSecs"], "a page someone cannot open is not explained to them")
+    for page in ("Inbox", "CRM", "Loan units", "Liability", "Reconciliation", "Forecast", "Xero sync", "Size list", "Memory", "Skills", "Customise", "Clocking in", "Two-step sign-in", "Deep analysis"):
+        ok(page in got["a"], "the guide covers " + page)
+    body = re.search(r"const GUIDE = \[(.*?)\n        \];", SCRIPT, re.S).group(1)
+    for word in ("Railway", "R2_", "RESEND", "gizmo", "up.railway.app"):
+        ok(word not in body, "no %s in the guide" % word)
+    ok("location.origin + '/dav'" in SCRIPT, "the drive address is where the app is running")
+
+
+@test
+def t_the_guide_tabs_say_which_is_showing_and_keep_focus():
+    seg = fn_src("function paintGuideSeg(")
+    ok("setAttribute('aria-pressed'" in seg, "each tab says whether it is showing")
+    ok("host.replaceChildren()" in seg and "renderGuide();" in seg.split("if (!host)")[1][:40],
+       "a tab repaints what is under the tabs, not the tabs, so focus stays on the one pressed")
+    ok("Date.now() - updAt < 180000" in fn_src("async function loadUpdates("), "and the notes are not fetched again on every switch")
+    ok("op: 'version'" in fn_src("async function updatesBadge("), "the dot reads the counts alone")
+    ask = fn_src("function askFeature(")
+    ok("t.maxLength = 140" in ask and "d.maxLength = 4000" in ask and "markInvalid(t, true)" in ask and "t.focus()" in ask,
+       "the request box says its limits, marks an empty title and is ready to type in")
+    ok("r && r.emailed" in ask, "and promises an email only when one went")
+
+
+@test
+def t_the_skills_and_memory_pages_ask_before_losing_anything():
+    for name in ("function memRow(", "function skillItem("):
+        ok("uiConfirm(" in fn_src(name), name + " asks before a delete")
+    ed = fn_src("function skillEditor(")
+    ok("maxLength = skillCaps.body" not in ed and "over > 0" in ed, "a long skill is not cut at the limit without a word")
+    ok("already have a skill called" in ed, "a title you already have is said before you save")
+    ok("'Split into ' + pieces + ' skills'" in ed, "and a long file can be split")
+    ok("knowledgeRead" in fn_src("function knowledgeParts("), "store knowledge is not called unlearned before it has been read")
+    ok("api('/api/learn/run'" in SCRIPT, "learning the store is its own paid route")
+
+
+@test
+def t_what_the_checker_found_stays_fixed():
+    """The independent check of the Workspace rework (24 Sep) found sixteen
+    regressions; these are the ones a source check can hold."""
+    ok(".btn[hidden], .mem-btn[hidden] { display: none; }" in CSS,
+       "a hidden button is hidden: .btn's own display beat [hidden], so Split into 0 skills showed on every editor")
+    ok("splitSkill(bo.value.trim(), skillCaps.body).length < 2) return;" in fn_src("function skillEditor("),
+       "and Split does nothing unless a new skill really needs splitting")
+    ok(".ktable.mem-table { min-width: 0; }" in CSS, "stacked notes drop the table's 460px floor on a phone")
+    ok("grid-template-columns: minmax(0, 1fr)" in CSS.split(".chat-recent {")[1][:260], "the Recent list fits a phone")
+    ok("if (d.open !== was)" in fn_src("function sectionCard("), "drawing a section open does not save every conversation")
+    ok("if (!tabAllowed('chat')) return;" in fn_src("function useSkillInChat("), "Use in chat without the Chat tab does nothing, rather than throwing")
+    ok("if (finished) return; finished = true;" in fn_src("function chatTitle("), "Escape in the rename keeps the old name")
+    ok("role', 'menuitemcheckbox'" in fn_src("function dropMenu("), "a menu choice that is on or off says so")
+    ok("appBehind(true);" in fn_src("function authShow("), "the page behind the sign-in card is out of reach")
+    ok("closeSidebar(); askFeature(v);" in fn_src("function userMenu("), "a request from the phone drawer closes the drawer")
+    ok("aria-live" not in fn_src("function skillEditor("), "the character count is not read out after every pause")
+    ok("c.id === activeId ? -3 : undefined" in fn_src("function save("), "a full store trims previews before it drops a conversation")
+    ok("if (!skills.length && tabAllowed('skills')) loadSkills();" in SCRIPT, "an applied skill keeps its name after a reload")
+    ok("followups_maybe" in fn_src("function chatAnswer("), "a follow-up the answer only thinks is done is offered, not closed")
 
 
 if __name__ == "__main__":

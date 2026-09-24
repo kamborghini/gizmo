@@ -95,7 +95,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SKILLS_INJECT_CAP` | `"24000"` | copilot | max total skill chars injected |
 | `SKILLS_MAX` | `"200"` | copilot | max stored skills |
 | `SKILLS_PATH` | `"/data/store_skills.json"` | copilot | merchant-authored skills |
-| `SKILL_BODY_CAP` | `"6000"` | copilot | chars per skill body |
+| `SKILL_BODY_CAP` | `"12000"` | copilot | chars per skill body |
 | `SKILL_TITLE_CAP` | `"120"` | copilot | chars per skill title |
 | `STORE_CONTEXT_CAP` | `"4000"` | copilot |  |
 | `TREND_MONTHS` | `"24"` | copilot |  |

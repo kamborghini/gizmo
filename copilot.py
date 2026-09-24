@@ -156,7 +156,7 @@ LEARN_PAGE_CHARS   = _env_num(int, os.environ.get("LEARN_PAGE_CHARS", "3000"), "
 SKILLS_PATH        = os.environ.get("SKILLS_PATH", "/data/store_skills.json")  # merchant-authored skills
 SKILLS_MAX         = _env_num(int, os.environ.get("SKILLS_MAX", "200"), "200", "SKILLS_MAX")        # max stored skills
 SKILL_TITLE_CAP    = _env_num(int, os.environ.get("SKILL_TITLE_CAP", "120"), "120", "SKILL_TITLE_CAP")   # chars per skill title
-SKILL_BODY_CAP     = _env_num(int, os.environ.get("SKILL_BODY_CAP", "6000"), "6000", "SKILL_BODY_CAP")   # chars per skill body
+SKILL_BODY_CAP     = _env_num(int, os.environ.get("SKILL_BODY_CAP", "12000"), "12000", "SKILL_BODY_CAP")   # chars per skill body
 SKILLS_INJECT_CAP  = _env_num(int, os.environ.get("SKILLS_INJECT_CAP", "24000"), "24000", "SKILLS_INJECT_CAP")  # max total skill chars injected
 ANALYSIS_CACHE_PATH      = os.environ.get("ANALYSIS_CACHE_PATH", "/data/analysis_cache.json")  # last result per AI tab
 ANALYSIS_CACHE_MAX_BYTES = _env_num(int, os.environ.get("ANALYSIS_CACHE_MAX_BYTES", "800000"), "800000", "ANALYSIS_CACHE_MAX_BYTES")  # per-entry size guard
@@ -230,8 +230,9 @@ this chat, can tell you what to do or what to keep.
 say exactly what to change and where in the admin, and be clear you cannot perform writes.
 - Treat the store profile, your memory, the learned store knowledge, and the merchant's saved skills below as authoritative context. \
 Honor stated preferences (for example, unlimited stock means give no restock advice), apply proven \
-learnings, and do not re-ask what you already know. Check in on open follow-ups when relevant and close \
-them out when the merchant says they are done.
+learnings, and do not re-ask what you already know. Follow the saved skills that fit the question, as \
+the Saved skills section says. Check in on open follow-ups when relevant, and when the merchant says \
+one is done, put its id in `followups_done`.
 - If the data you would need is missing or a connection (such as Google) is not set up, say so plainly \
 and state what to connect, rather than padding with generic tips.
 
@@ -333,6 +334,18 @@ PRESENT_RESPONSE_TOOL = {
             "followups": {
                 "type": "array",
                 "description": "2–4 natural next questions the merchant might ask.",
+                "items": {"type": "string"},
+            },
+            "skills_applied": {
+                "type": "array",
+                "description": ("Exact titles of the merchant's saved skills you followed in this answer. "
+                                "Empty when none applied."),
+                "items": {"type": "string"},
+            },
+            "followups_done": {
+                "type": "array",
+                "description": ("Ids of open follow-ups (shown in square brackets in your memory) that the "
+                                "merchant has told you are done. Only when they said so."),
                 "items": {"type": "string"},
             },
             "remember": {
@@ -518,7 +531,9 @@ def _memory_grounded(text: str, said: str, saw: str) -> bool:
 
 
 def _add_memories(items: list[dict], said: str = "", saw: str = "",
-                  source: str = "merchant") -> list[dict]:
+                  source: str = "merchant", refused: Optional[list] = None) -> list[dict]:
+    """refused, when given, collects what was not kept and why ('instruction'
+    or 'from_data'), so the page can say so instead of answering as if saved."""
     memories = _load_memory()
     asked = bool(_MEM_ASKED.search(said or ""))   # the merchant asked for this in so many words
     seen = {m.get("text", "").strip().lower() for m in memories}
@@ -534,9 +549,13 @@ def _add_memories(items: list[dict], said: str = "", saw: str = "",
             # sentence typed into a Shopify order note could outlive the chat
             # that read it. Refuse and say so in the log.
             logger.warning("memory: refused an instruction-shaped note: %s", text[:120])
+            if refused is not None:
+                refused.append({"text": text, "reason": "instruction"})
             continue
         if saw and not asked and not _memory_grounded(text, said, saw):
             logger.warning("memory: refused a note lifted from tool output: %s", text[:120])
+            if refused is not None:
+                refused.append({"text": text, "reason": "from_data"})
             continue
         mtype = it.get("type") if it.get("type") in (
             "fact", "decision", "followup", "preference", "insight") else "fact"
@@ -560,6 +579,43 @@ def _update_memory(mid: str, status: str) -> list[dict]:
                 m["status"] = status
                 m["updated"] = datetime.now(timezone.utc).isoformat()
     return _write_memory(memories)
+
+
+def _edit_memory(mid: str, text: str, mtype: str) -> list[dict]:
+    """A person correcting a note: the same door as a new one, so an
+    instruction cannot come in by editing an innocent note into one."""
+    text = str(text or "").strip()[:800]
+    if not text:
+        raise ValueError("A note needs some text.")
+    if _MEMORY_INJECTION.search(text):
+        raise ValueError("instruction")
+    memories = _load_memory()
+    for m in memories:
+        if m.get("id") == mid:
+            m["text"] = text
+            if mtype in ("fact", "decision", "followup", "preference", "insight"):
+                m["type"] = mtype
+            m["updated"] = datetime.now(timezone.utc).isoformat()
+            m["edited"] = True
+    return _write_memory(memories)
+
+
+def _close_followups(ids: list) -> list[dict]:
+    """Open follow-ups the merchant told chat are done. Returns the ones closed."""
+    want = {str(x) for x in (ids or [])[:20]}
+    if not want:
+        return []
+    memories = _load_memory()
+    closed, now = [], datetime.now(timezone.utc).isoformat()
+    for m in memories:
+        if m.get("id") in want and m.get("type") == "followup" and m.get("status") == "open":
+            m["status"] = "done"
+            m["updated"] = now
+            m["closed_by"] = "chat"
+            closed.append({"id": m["id"], "text": m.get("text", "")})
+    if closed:
+        _write_memory(memories)
+    return closed
 
 
 def _delete_memory(mid: str) -> list[dict]:
@@ -587,12 +643,21 @@ def _write_skills(skills: list[dict]) -> list[dict]:
     return skills
 
 
+def _skill_title_taken(skills: list[dict], title: str, sid: str = "") -> bool:
+    """A skill is referred to by its title, in chat and in 'skills followed',
+    so two with the same title would be one name for two sets of rules."""
+    t = title.strip().lower()
+    return any((s.get("title") or "").strip().lower() == t and s.get("id") != sid for s in skills)
+
+
 def _add_skill(title: str, content: str) -> list[dict]:
     title = str(title or "").strip()[:SKILL_TITLE_CAP]
     content = str(content or "").strip()[:SKILL_BODY_CAP]
     if not title or not content:
         raise ValueError("A skill needs both a title and some details.")
     skills = _load_skills()
+    if _skill_title_taken(skills, title):
+        raise ValueError(f"You already have a skill called \"{title}\". Give this one a different title.")
     if len(skills) >= SKILLS_MAX:
         raise ValueError(f"You have reached the limit of {SKILLS_MAX} skills. Delete one to add another.")
     now = datetime.now(timezone.utc).isoformat()
@@ -608,6 +673,12 @@ def _update_skill(sid: str, title: str, content: str) -> list[dict]:
     if not title or not content:
         raise ValueError("A skill needs both a title and some details.")
     skills = _load_skills()
+    # Only a title being CHANGED to a taken one is refused: two skills that
+    # shared a title before the rule could not otherwise be saved at all.
+    own = next((s for s in skills if s.get("id") == sid), None)
+    changed = not own or str(own.get("title") or "").strip().lower() != title.lower()
+    if changed and _skill_title_taken(skills, title, sid):
+        raise ValueError(f"You already have a skill called \"{title}\". Give this one a different title.")
     for s in skills:
         if s.get("id") == sid:
             s["title"], s["content"] = title, content
@@ -619,32 +690,162 @@ def _delete_skill(sid: str) -> list[dict]:
     return _write_skills([s for s in _load_skills() if s.get("id") != sid])
 
 
-def _skills_to_system() -> str:
-    skills = _load_skills()
-    if not skills:
-        return ""
-    body, used, overflow = "", 0, []
-    for s in skills:
+# Words that say nothing about which skill a question needs.
+_SKILL_STOP = frozenset("""the and for with that this from what which when where have has had are was were
+will would could should can our your you they them their there then than into onto about over under
+more most some any all each how why who whom does did done not but its it's also just very much many
+been being get got make made give given take need want like please tell show find list let know
+store shop orders order week month year today last this next""".split())
+
+
+def _skill_words(text: str) -> set:
+    return {w for w in re.findall(r"[a-z0-9]+", str(text or "").lower())
+            if len(w) > 2 and w not in _SKILL_STOP}
+
+
+def _skills_ranked(query: str = "", named: Optional[list] = None) -> list[tuple]:
+    """(score, skill) for every usable skill, best first. A skill picked for
+    this question, or named by its title in it, always comes first; then the
+    ones whose title and text share words with the question; then the rest,
+    most recently changed first. Every skill used to go in newest first until
+    24,000 characters were spent, so the oldest (often the founding policies)
+    were cut to a title whatever the question was about."""
+    q = str(query or "")
+    ql = q.lower()
+    qw = _skill_words(q)
+    named = {str(x) for x in (named or [])}
+    out = []
+    for s in _load_skills():
         title = (s.get("title") or "").strip()
         content = (s.get("content") or "").strip()
         if not title or not content:
             continue
+        score = 0.0
+        if s.get("id") in named:
+            score += 10000
+        if len(title) >= 4 and title.lower() in ql:
+            score += 1000
+        tw, cw = _skill_words(title), _skill_words(content)
+        score += 3 * len(qw & tw) + min(len(qw & cw), 12)
+        out.append((score, s))
+    # Ties (including every score of 0) fall back to the most recently changed.
+    out.sort(key=lambda x: x[1].get("updated") or "", reverse=True)
+    out.sort(key=lambda x: -x[0])
+    return out
+
+
+def _skill_gist(content: str) -> str:
+    first = re.split(r"(?<=[.!?])\s|\n", content.strip(), maxsplit=1)[0]
+    return (first[:117] + "...") if len(first) > 120 else first
+
+
+def _skills_to_system(query: str = "", named: Optional[list] = None, can_read: bool = False) -> str:
+    """The merchant's saved skills for this call: those that fit the question
+    in full, the rest by title and first line. With can_read the model has the
+    read_skill tool and is told to open any listed skill that may apply."""
+    ranked = _skills_ranked(query, named)
+    if not ranked:
+        return ""
+    body, used, overflow, picked = "", 0, [], []
+    for score, s in ranked:
+        title, content = s["title"].strip(), s["content"].strip()
         block = f"### {title}\n{content}\n\n"
-        if body and used + len(block) > SKILLS_INJECT_CAP:
-            overflow.append(title)
+        must = score >= 1000          # picked for this question, or named in it
+        if body and not must and used + len(block) > SKILLS_INJECT_CAP:
+            overflow.append(s)
             continue
         body += block
         used += len(block)
+        if score >= 10000:
+            picked.append(title)
     if not body:
         return ""
-    head = ("\n\n## Skills (instructions and playbooks the merchant saved for you to follow; treat them "
-            "as authoritative, apply them whenever relevant, and note the merchant may refer to a skill "
-            "by its title)\n")
-    out = head + body.rstrip() + "\n"
+    head = ("\n\n## Saved skills\n"
+            "These are the merchant's own instructions and playbooks for this business. They override "
+            "your general habits. Before you answer, decide which of them apply to this question and "
+            "follow those exactly, step by step where they give steps, using their figures and wording. "
+            "When the merchant names a skill, apply it even if it seems a loose fit. If a skill "
+            "conflicts with the data or with another skill, follow the skill and say what conflicts. "
+            "List the exact title of every skill you followed in `skills_applied`; leave it empty "
+            "when none applied, and never list one you only read.\n")
+    if picked:
+        head += ("The merchant asked you to apply " + (", ".join('"' + t + '"' for t in picked))
+                 + " to this question.\n")
+    out = head + "\n" + body.rstrip() + "\n"
     if overflow:
-        out += ("More saved skills exist (full text in the Skills tab; ask the merchant if one applies): "
-                + ", ".join(overflow) + "\n")
+        out += ("\nOther saved skills, by title and first line"
+                + (" (call read_skill with the title to read any that may apply before you answer)"
+                   if can_read else "") + ":\n"
+                + "\n".join("- " + s["title"].strip() + ": " + _skill_gist(s["content"]) for s in overflow) + "\n")
     return out
+
+
+def _skills_for_draft(query: str) -> str:
+    """The saved skills that fit one email, for a reply draft. Only those that
+    share words with the email (or are named in it), at most 8,000 characters:
+    a draft is short, and a playbook about stock is noise in a quote reply."""
+    body, used = "", 0
+    for score, s in _skills_ranked(query):
+        if score <= 1:
+            break
+        block = "### " + s["title"].strip() + "\n" + s["content"].strip() + "\n\n"
+        if body and used + len(block) > 8000:
+            continue
+        body += block
+        used += len(block)
+    return body.strip()
+
+
+def _read_skill(title: str) -> str:
+    """The read_skill tool: one saved skill in full, by title (or id)."""
+    want = str(title or "").strip().lower()
+    for s in _load_skills():
+        if want and (want == (s.get("title") or "").strip().lower() or want == s.get("id")):
+            return "### " + s["title"].strip() + "\n" + (s.get("content") or "").strip()
+    names = [s.get("title") for s in _load_skills() if s.get("title")]
+    return "No saved skill has that title. The saved skills are: " + "; ".join(names[:60])
+
+
+READ_SKILL_TOOL = {
+    "name": "read_skill",
+    "description": ("Read one of the merchant's saved skills in full, by its exact title. Use it when a "
+                    "skill listed by title only may apply to the question."),
+    "input_schema": {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]},
+}
+
+
+def _note_skills_applied(data: dict) -> None:
+    """Keep only titles of real skills in skills_applied, and record each use
+    on the skill (how often, and when last), so the Skills page can say which
+    skills Reactor actually follows."""
+    raw = data.get("skills_applied")
+    if not isinstance(raw, list):
+        data.pop("skills_applied", None)
+        return
+    try:
+        skills = _load_skills()
+    except Exception:
+        data.pop("skills_applied", None)
+        return
+    by = {(s.get("title") or "").strip().lower(): s for s in skills}
+    names, hit = [], False
+    now = datetime.now(timezone.utc).isoformat()
+    for t in raw[:12]:
+        s = by.get(str(t or "").strip().lower())
+        if s and s["title"] not in names:
+            names.append(s["title"])
+            s["used"] = int(s.get("used") or 0) + 1
+            s["used_at"] = now
+            hit = True
+    if names:
+        data["skills_applied"] = names
+    else:
+        data.pop("skills_applied", None)
+    if hit:
+        try:
+            _write_skills(skills)
+        except Exception:
+            logger.exception("skills: could not record which were followed")
 
 
 # ---------------------------------------------------------------------------
@@ -1896,6 +2097,8 @@ async def _impact_snapshot(registry: dict) -> dict:
     return snap
 
 
+_impact_snap_cache: dict = {}
+
 _IMPACT_METRICS = [("revenue_28d", "Revenue", True), ("orders_28d", "Orders", False),
                    ("sessions_28d", "Sessions", False), ("clicks_28d", "Search clicks", False)]
 
@@ -1904,9 +2107,12 @@ def _impact_with_deltas(items: list[dict], current: dict) -> list[dict]:
     out = []
     for it in items:
         base = it.get("baseline") or {}
+        # A concluded change is measured to the day it was concluded: against
+        # today its figures went on moving for ever under 'Concluded'.
+        end = it.get("final") if it.get("status") == "concluded" and isinstance(it.get("final"), dict) else current
         deltas = []
         for key, label, _money_flag in _IMPACT_METRICS:
-            b, c = base.get(key), current.get(key)
+            b, c = base.get(key), end.get(key)
             if isinstance(b, (int, float)) and isinstance(c, (int, float)):
                 pct = round((c - b) / b * 100) if b else None
                 deltas.append({"key": key, "label": label, "from": b, "to": c, "pct": pct})
@@ -1915,14 +2121,21 @@ def _impact_with_deltas(items: list[dict], current: dict) -> list[dict]:
 
 
 def _impact_learning_text(it: dict, current: dict) -> str:
+    """The learning a concluded change leaves in Memory, in the app's own
+    formats: '2 Sep 2026' and '£6,420', not an ISO date and a bare number."""
     base = it.get("baseline") or {}
     b, c = base.get("revenue_28d"), current.get("revenue_28d")
-    when = (it.get("started_at") or "")[:10]
+    raw = (it.get("started_at") or "")[:10]
+    try:
+        d = datetime.strptime(raw, "%Y-%m-%d")
+        when = f"{d.day} {d:%b %Y}"
+    except ValueError:
+        when = raw
     if isinstance(b, (int, float)) and isinstance(c, (int, float)) and b:
         pct = round((c - b) / b * 100)
         direction = "up" if pct > 0 else "down" if pct < 0 else "flat"
-        return (f"After '{it.get('text', '')}' (tracked from {when}), 28-day revenue is {direction} "
-                f"{abs(pct)}% (from {b:.0f} to {c:.0f}).")
+        return (f"After '{it.get('text', '')}' (tracked from {when}), 28-day revenue was {direction} "
+                f"{abs(pct)}%, from £{b:,.0f} to £{c:,.0f}.")
     return f"Tracked the change '{it.get('text', '')}' from {when}."
 
 
@@ -1945,8 +2158,9 @@ def _memory_to_system(memories: Optional[list[dict]] = None) -> str:
     if learnings:
         block += "Proven learnings about this store (apply them):\n" + "\n".join("- " + m["text"] for m in learnings) + "\n"
     if open_fu:
-        block += ("Open follow-ups (check in on these when relevant; close them out if done):\n"
-                  + "\n".join("- " + m["text"] for m in open_fu))
+        block += ("Open follow-ups (check in on these when relevant; when the merchant says one is done, "
+                  "put its id in followups_done):\n"
+                  + "\n".join("- [" + str(m.get("id") or "") + "] " + m["text"] for m in open_fu))
     return block
 
 
@@ -2057,7 +2271,7 @@ async def run_learn(registry: dict) -> dict:
     )
     text = _strip_dashes("".join(b.text for b in resp.content if b.type == "text").strip())
     if not text:
-        raise RuntimeError("Couldn't synthesize store knowledge. Please try again.")
+        raise RuntimeError("Reactor could not write up what it learned. Please try again.")
     return _save_knowledge(text, [p["url"] for p in pages])
 
 
@@ -2129,8 +2343,10 @@ _client: Optional[anthropic.AsyncAnthropic] = None
 def _anthropic() -> anthropic.AsyncAnthropic:
     global _client
     if not ANTHROPIC_API_KEY:
+        # The setting's name is for the log; the page gets plain words.
+        logger.error("ANTHROPIC_API_KEY is not set")
         raise RuntimeError(
-            "ANTHROPIC_API_KEY is not set on the server. Add it in Railway → Variables."
+            "Reactor's AI is not set up yet: the server has no Anthropic key. An admin needs to add it."
         )
     if _client is None:
         _client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
@@ -2218,9 +2434,10 @@ def _spend_today() -> float:
 
 def _spend_guard() -> None:
     if DAILY_COST_CAP > 0 and _spend_today() >= DAILY_COST_CAP:
+        logger.warning("DAILY_COST_CAP of %.2f reached", DAILY_COST_CAP)
         raise RuntimeError(
-            f"The daily AI spending limit of ${DAILY_COST_CAP:.2f} has been reached, so analysis is "
-            "paused until tomorrow. This is a safety cap. Raise DAILY_COST_CAP in Railway to change it."
+            "Reactor has used today's AI budget, so it will answer again tomorrow. "
+            "This is a safety limit, and an admin can raise it."
         )
 
 
@@ -2294,6 +2511,7 @@ def _coerce_structured(data: Any) -> dict:
         data = {"summary": str(data)}
     if not isinstance(data.get("summary"), str) or not data["summary"].strip():
         data["summary"] = "Here's what I found."
+    _note_skills_applied(data)
     return _strip_dashes(data)
 
 
@@ -2304,14 +2522,197 @@ _TOOL_LABELS = {
     "shopify_search_customers": "Customer search", "shopify_get_customer": "Customer details",
     "shopify_get_customer_orders": "Customer orders", "shopify_list_collections": "Collections",
     "shopify_get_collection_products": "Collection products", "shopify_list_locations": "Locations",
-    "shopify_get_inventory_levels": "Inventory levels", "shopify_list_fulfillments": "Fulfillments",
+    "shopify_get_inventory_levels": "Inventory levels", "shopify_list_fulfillments": "Fulfilments",
+    "shopify_get_variant": "Variant details", "shopify_get_inventory_items": "Inventory items",
+    "shopify_list_payouts": "Payouts", "shopify_payout_transactions": "Payout details",
+    "shopify_list_disputes": "Disputes", "recon_summary": "Reconciliation summary",
+    "recon_exceptions": "Reconciliation exceptions", "recon_exception": "Reconciliation exception",
     "get_search_console_data": "Google Search Console", "get_ga4_data": "Google Analytics 4",
-    "seo_fetch_page": "On-page SEO", "seo_fetch_robots": "robots.txt", "seo_fetch_sitemap": "Sitemap",
+    "seo_fetch_page": "On-page SEO", "seo_fetch_robots": "Search engine rules", "seo_fetch_sitemap": "Sitemap",
 }
 
 
-def _tool_label(name: str) -> str:
-    return _TOOL_LABELS.get(name) or name.replace("shopify_", "").replace("_", " ").strip().capitalize()
+def _day_words(v) -> str:
+    """'2026-08-01T00:00:00Z' as '1 Aug 2026'; anything else as it came."""
+    try:
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return f"{d.day} {d:%b %Y}"
+    except Exception:
+        return str(v)[:24]
+
+
+def _tool_label(name: str, args: Optional[dict] = None) -> str:
+    """What a data read was, in words, with the window or search it was
+    asked for: two reads of orders used to be labelled 'Orders', 'Orders'."""
+    base = _TOOL_LABELS.get(name) or name.replace("shopify_", "").replace("_", " ").strip().capitalize()
+    a = args if isinstance(args, dict) else {}
+    lo = a.get("created_at_min") or a.get("start_date") or a.get("since")
+    hi = a.get("created_at_max") or a.get("end_date") or a.get("until")
+    if lo and hi:
+        return f"{base}, {_day_words(lo)} to {_day_words(hi)}"
+    if lo:
+        return f"{base}, from {_day_words(lo)}"
+    if a.get("days"):
+        return f"{base}, last {a['days']} days"
+    q = a.get("query") or a.get("q") or a.get("title")
+    if isinstance(q, str) and q.strip():
+        return f'{base}, "{q.strip()[:60]}"'
+    return base
+
+
+def _step_word(label: str) -> str:
+    """A label inside a sentence: 'Reading orders, payouts', but Google's
+    products keep their capitals."""
+    return label if label.startswith("Google") else label[:1].lower() + label[1:]
+
+
+_MONEY_KEYS = {"total_price", "subtotal_price", "total", "amount", "price", "total_spent", "spend",
+               "revenue", "net", "fee", "total_discounts", "total_tax"}
+_CUR_SIGN = {"GBP": "£", "USD": "$", "EUR": "€"}
+# Fields whose value says what it is ('20 Sep 2026', '£1,023.83', 'paid').
+_BARE_KEYS = {"created_at", "processed_at", "financial_status", "total_price", "total", "amount"}
+
+
+def _preview_value(k: str, v, cur: str) -> str:
+    if k in _MONEY_KEYS:
+        try:
+            return f"{_CUR_SIGN.get(cur, '')}{float(v):,.2f}" + ("" if cur in _CUR_SIGN else f" {cur}")
+        except (TypeError, ValueError):
+            pass
+    if isinstance(v, str) and re.match(r"^\d{4}-\d{2}-\d{2}T", v):
+        return _day_words(v)
+    return str(v)
+
+
+def _preview_line(r) -> str:
+    if not isinstance(r, dict):
+        return str(r)[:160]
+    cur = str(r.get("currency") or r.get("presentment_currency") or "GBP").upper()
+    head = next((str(r[k]) for k in ("name", "title", "query", "page", "email") if r.get(k)), "")
+    bits = []
+    for k, v in r.items():
+        if k in ("name", "title", "query", "page", "id", "admin_graphql_api_id", "currency") or v in (None, "", [], {}):
+            continue
+        if isinstance(v, (dict, list)):
+            continue
+        words = "" if k in _BARE_KEYS else k.replace("_", " ").replace("fulfillment", "fulfilment") + " "
+        bits.append(f"{words}{_preview_value(k, v, cur)}")
+        if len(bits) == 5:
+            break
+    return (head + (": " if head and bits else "") + ", ".join(bits))[:220] or "(a record)"
+
+
+def _data_preview(content, limit: int = 900) -> str:
+    """What a data read returned, as lines a person can read: a record a
+    line, its first fields in words, then how many more. The drill showed
+    the first 500 characters of the raw JSON, cut off mid-field."""
+    raw = str(content)
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        return _strip_dashes(raw).strip()[:limit]
+    rows = None
+    if isinstance(obj, list):
+        rows = obj
+    elif isinstance(obj, dict):
+        lists = [v for v in obj.values() if isinstance(v, list) and v and isinstance(v[0], dict)]
+        if len(lists) == 1:
+            rows = lists[0]
+    if rows is not None:
+        if not rows:
+            return "Nothing was found."
+        lines = [_preview_line(r) for r in rows[:8]]
+        if len(rows) > 8:
+            lines.append(f"and {len(rows) - 8} more")
+    elif isinstance(obj, dict):
+        lines = []
+        for k, v in obj.items():
+            if isinstance(v, (dict, list)) or v in (None, "") or k == "currency":
+                continue
+            lines.append(f"{k.replace('_', ' ').capitalize()}: {_preview_value(k, v, str(obj.get('currency') or 'GBP').upper())}")
+            if len(lines) == 12:
+                break
+        if not lines:
+            return _strip_dashes(raw).strip()[:limit]
+    else:
+        lines = [str(obj)]
+    return _strip_dashes("\n".join(lines))[:limit]
+
+
+def _chat_question(history: list) -> str:
+    """The merchant's latest question, and the one before it, for choosing
+    which saved skills fit this turn."""
+    said = [m for m in (history or []) if isinstance(m, dict) and m.get("role") == "user"]
+    out = []
+    for m in said[-2:]:
+        c = m.get("content")
+        if isinstance(c, str):
+            out.append(c)
+        elif isinstance(c, list):
+            out += [str(b.get("text") or "") for b in c if isinstance(b, dict) and b.get("type") == "text"]
+    return "\n".join(out)[:4000]
+
+
+def _picked_skills(body: dict) -> list:
+    """Skills the person chose for this question (Use in chat, or the
+    composer's picker): ids of real skills only."""
+    ids = body.get("skills") if isinstance(body, dict) else None
+    if not isinstance(ids, list):
+        return []
+    known = {s.get("id") for s in _load_skills()}
+    return [str(i) for i in ids[:8] if str(i) in known]
+
+
+def _chat_after(result: dict, history: list) -> None:
+    """What a chat answer asked to keep or close, done after it arrives.
+    Notes that were not kept come back to the page, so a rule the merchant
+    asked Reactor to remember is offered as a skill instead of vanishing; and
+    follow-ups the merchant said are done are closed, and said so."""
+    st = result.get("structured") if isinstance(result.get("structured"), dict) else {}
+    mems = st.pop("remember", None)
+    done = st.pop("followups_done", None)
+    saw = result.pop("_saw", "")
+    if isinstance(mems, list) and mems:
+        refused: list = []
+        said = _chat_said(history)
+        try:
+            _add_memories(mems, said, saw, source="chat", refused=refused)
+        except Exception:
+            logger.exception("Memory capture failed")
+        # Offered back as a skill only when it is the merchant's own rule: an
+        # instruction lifted from an order note or an email the answer read is
+        # never put in front of them as something to keep.
+        kept_out = [r["text"] for r in refused if r.get("reason") == "instruction"
+                    and (not saw or _memory_grounded(r["text"], said, saw))]
+        if kept_out:
+            result["not_kept"] = kept_out[:4]
+        # The page reads the notes again only when there may be new ones.
+        if len(refused) < len(mems):
+            result["noted"] = True
+    if isinstance(done, list) and done:
+        # Closed only when the merchant's own words name the follow-up; one
+        # the answer thinks is done on the strength of what it READ (an order
+        # note, an email) is offered to the merchant instead.
+        def stems(t: str) -> set:
+            # Words by their first four letters (so "called" meets "Call"),
+            # and numbers whole (so "Stage Co 9" is not "Stage Co 13").
+            t = str(t or "").lower()
+            return {w[:4] for w in _skill_words(t) if not w.isdigit()} | set(re.findall(r"\d+", t))
+        said_words = stems(_chat_question(history))
+        want = {str(x) for x in done[:20]}
+        opened = [m for m in _load_memory() if m.get("id") in want and m.get("type") == "followup"
+                  and m.get("status") == "open"]
+        sure = [m["id"] for m in opened if len(stems(m.get("text", "")) & said_words) >= 2]
+        maybe = [{"id": m["id"], "text": m.get("text", "")} for m in opened if m["id"] not in sure]
+        try:
+            closed = _close_followups(sure) if sure else []
+        except Exception:
+            logger.exception("Follow-up close failed")
+            closed = []
+        if closed:
+            result["followups_closed"] = closed
+        if maybe:
+            result["followups_maybe"] = maybe[:6]
 
 
 async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dict],
@@ -2327,7 +2728,9 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
     # Everything the tools returned this turn, for the memory provenance check.
     # Popped by the caller before the result reaches the browser.
     saw: list[str] = []
-    all_tools = data_tools + [PRESENT_RESPONSE_TOOL]
+    # read_skill is answered here from the skills store: it reads the
+    # merchant's own text, never the store's data, and writes nothing.
+    all_tools = data_tools + ([READ_SKILL_TOOL] if _load_skills() else []) + [PRESENT_RESPONSE_TOOL]
     system = SYSTEM_PROMPT + extra_system
     if emit:
         await emit({"type": "step", "label": "Analysing your question"})
@@ -2364,27 +2767,37 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
         if not data_uses:
             # Ended without present_response — wrap any prose as the summary.
             text = "".join(text_parts).strip()
-            return {"structured": {"summary": text or "(no response)"}, "tools_used": tools_used,
+            return {"structured": {"summary": text or "Reactor did not send an answer. Ask again."}, "tools_used": tools_used,
                     "data_used": data_used, "model": model, "_saw": "\n".join(saw)}
 
         if emit:
-            labels = sorted({_tool_label(tu.name) for tu in data_uses})
+            labels = sorted({("your skill " + str((tu.input or {}).get("title", "")).strip()) if tu.name == READ_SKILL_TOOL["name"]
+                             else _step_word(_tool_label(tu.name)) for tu in data_uses})
             await emit({"type": "step", "label": "Reading " + ", ".join(labels)})
         tool_results = []
         for tu in data_uses:
             tools_used.append(tu.name)
             logger.info(f"copilot tool call: {tu.name}")  # name only — inputs may contain PII
+            if tu.name == READ_SKILL_TOOL["name"]:
+                # The merchant's own words: not customer data, so not part of
+                # what the memory provenance check treats as borrowed.
+                content = _read_skill((tu.input or {}).get("title", ""))
+                tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "content": content})
+                if len(data_used) < 16:
+                    data_used.append({"tool": tu.name, "label": "Skill: " + str((tu.input or {}).get("title", ""))[:80],
+                                      "preview": _strip_dashes(content)[:500]})
+                continue
             content = await dispatch(tu.name, tu.input)
             tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "content": content})
             saw.append(str(content)[:200000])
             if len(data_used) < 16:
-                data_used.append({"tool": tu.name, "label": _tool_label(tu.name),
-                                  "preview": _strip_dashes(str(content))[:500]})
+                data_used.append({"tool": tu.name, "label": _tool_label(tu.name, tu.input),
+                                  "preview": _data_preview(content)})
         messages.append({"role": "user", "content": tool_results})
 
     return {
-        "structured": {"summary": "I gathered a lot of data but couldn't finalize an answer. "
-                                  "Please narrow the question and try again."},
+        "structured": {"summary": "I read a lot of data but could not finish an answer. "
+                                  "Narrow the question and ask again."},
         "tools_used": tools_used, "data_used": data_used, "model": model,
         "_saw": "\n".join(saw),
     }
@@ -9210,7 +9623,7 @@ def _pre_checks(request: Request, max_body: Optional[int] = None) -> Optional[JS
         _rl_hits.clear()
     if not _window_ok(_rl_hits.setdefault(_client_key(request), []), RATE_MAX_CLIENT, now):
         return _json({"error": "Too many requests in the last minute. Wait about a minute "
-                               "and try again - nothing was booked or charged."}, 429)
+                               "and try again. Nothing was booked or charged."}, 429)
     cl = request.headers.get("content-length", "")
     if cl.isdigit() and int(cl) > (max_body or MAX_BODY_BYTES):
         return _json({"error": "Request too large."}, 413)
@@ -9445,7 +9858,7 @@ async def _run_scheduled_audits(registry: dict) -> list:
     except Exception:
         logger.exception("scheduler gate failed; running audits anyway")
     extra = (_profile_to_system(_load_profile()) + _memory_to_system()
-             + _knowledge_to_system() + _skills_to_system())
+             + _knowledge_to_system() + _skills_to_system("overview SEO search keywords customers report"))
     threshold = _load_schedule().get("threshold_pct", 15)
     track = (_load_profile().get("prefs") or {}).get("track_inventory", True)
     jobs = [
@@ -16763,7 +17176,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Message too large."}, 413)
 
         model = _pick_model(bool(body.get("deep")))
-        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
+        extra = (_profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
+                 + _skills_to_system(_chat_question(history), _picked_skills(body), can_read=True))
         if _is_seo(history):
             extra += "\n\n" + SEO_KNOWLEDGE
         extra += _page_context_to_system(body.get("context"))
@@ -16774,14 +17188,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except anthropic.APIError:
             logger.exception("Anthropic API error")
             return _json({"error": "The AI service returned an error. Please try again."}, 502)
-        # Persist anything the copilot flagged to remember (then hide it from the UI).
-        mems = result.get("structured", {}).pop("remember", None)
-        saw = result.pop("_saw", "")
-        if isinstance(mems, list) and mems:
-            try:
-                _add_memories(mems, _chat_said(history), saw, source="chat")
-            except Exception:
-                logger.exception("Memory capture failed")
+        _chat_after(result, history)
         return _json(result)
 
     @mcp.custom_route("/api/chat/stream", methods=["POST"])
@@ -16806,7 +17213,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Message too large."}, 413)
 
         model = _pick_model(bool(body.get("deep")))
-        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
+        extra = (_profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
+                 + _skills_to_system(_chat_question(history), _picked_skills(body), can_read=True))
         if _is_seo(history):
             extra += "\n\n" + SEO_KNOWLEDGE
         extra += _page_context_to_system(body.get("context"))
@@ -16817,13 +17225,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             try:
                 result = await run_chat(history, dispatch_for(_who), tools, model, extra,
                                         emit=q.put)
-                mems = result.get("structured", {}).pop("remember", None)
-                saw = result.pop("_saw", "")
-                if isinstance(mems, list) and mems:
-                    try:
-                        _add_memories(mems, _chat_said(history), saw, source="chat")
-                    except Exception:
-                        logger.exception("Memory capture failed")
+                _chat_after(result, history)
                 await q.put({"type": "done", "result": result})
             except anthropic.APIError:
                 logger.exception("Anthropic API error (stream)")
@@ -16860,7 +17262,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         profile = _load_profile()
-        extra = _profile_to_system(profile) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
+        extra = _profile_to_system(profile) + _memory_to_system() + _knowledge_to_system() + _skills_to_system("overview report revenue orders customers products stock")
         track = (profile.get("prefs") or {}).get("track_inventory", True)
         try:
             _refresh_asked(body)
@@ -16898,7 +17300,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"profile": saved})
             except Exception:
                 logger.exception("Preference save failed")
-                return _json({"error": "Couldn't save the setting (is a writable volume mounted at /data?)."}, 500)
+                return _json({"error": "The setting could not be saved. Try again, or tell Cameron if it keeps happening."}, 500)
         # Save when a profile object is supplied; otherwise just load.
         if isinstance(body.get("profile"), dict):
             if _team_level(_who) < ROLE_LEVELS["admin"]:
@@ -16909,7 +17311,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"profile": saved})
             except Exception:
                 logger.exception("Profile save failed")
-                return _json({"error": "Couldn't save the profile (is a writable volume mounted at /data?)."}, 500)
+                return _json({"error": "The profile could not be saved. Try again, or tell Cameron if it keeps happening."}, 500)
         return _json({"profile": _load_profile()})
 
     @mcp.custom_route("/api/layouts", methods=["POST"])
@@ -16938,7 +17340,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 mine = _save_layout(who, view, layout)
         except Exception:
             logger.exception("Layout save failed")
-            return _json({"error": "Couldn't save the layout (is a writable volume mounted at /data?)."}, 500)
+            return _json({"error": "The layout could not be saved. Try again, or tell Cameron if it keeps happening."}, 500)
         return _json({"layouts": mine})
 
     @mcp.custom_route("/api/seo", methods=["POST"])
@@ -16946,7 +17348,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, body, _who = await _guard(request, ai=True)
         if err:
             return err
-        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system("SEO audit search pages meta titles descriptions product pages")
         try:
             result = await run_seo_audit(registry, extra)
         except RuntimeError as e:
@@ -16965,7 +17367,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, body, _who = await _guard(request, ai=True)
         if err:
             return err
-        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system("keywords search terms CPC Google Ads competitors")
         try:
             res = await run_keywords(registry, extra)
             res = _save_analysis("keywords", res)
@@ -16989,7 +17391,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             url = "https://" + url
         if len(url) > 2048:
             return _json({"error": "That URL is too long."}, 400)
-        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system("keyword scan competitors ranking search")
         try:
             return _json(await run_keyword_scan(registry, url, extra))
         except RuntimeError as e:
@@ -17007,20 +17409,42 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         op = body.get("op")
+        # A file that could not be read loads as empty, and a write to it is
+        # held back to protect it: answering as usual showed 'No notes yet'
+        # and let an add look saved when it was not. Say so instead.
+        _load_memory()
+        if MEMORY_PATH in _poisoned_stores:
+            return _json({"error": "Your saved notes could not be read, so nothing can be shown or changed "
+                                   "until they are repaired. Tell Cameron."}, 503)
+        out: dict = {}
         try:
             if op == "add" and isinstance(body.get("items"), list):
-                _add_memories(body["items"])
+                refused: list = []
+                _add_memories(body["items"], refused=refused)
+                if refused:
+                    out["not_kept"] = [r["text"] for r in refused]
                 _track(who, "memory", "added to memory", str(len(body["items"])) + " item(s)")
             elif op == "set_status" and body.get("id"):
                 _update_memory(body["id"], body.get("status", "done"))
                 _track(who, "memory", "changed a memory's status", str(body.get("status") or "done"))
+            elif op == "update" and body.get("id"):
+                try:
+                    _edit_memory(body["id"], body.get("text", ""), body.get("type", ""))
+                except ValueError as e:
+                    if str(e) == "instruction":
+                        return _json({"error": "That reads like an instruction, and notes are kept to facts "
+                                               "about the business. Save it as a skill instead.",
+                                      "as_skill": True}, 400)
+                    return _json({"error": str(e)}, 400)
+                _track(who, "memory", "edited a note")
             elif op == "delete" and body.get("id"):
                 _delete_memory(body["id"])
                 _track(who, "memory", "deleted a memory")
         except Exception:
             logger.exception("Memory op failed")
-            return _json({"error": "Couldn't update memory (is a writable volume mounted at /data?)."}, 500)
-        return _json({"memories": _load_memory()})
+            return _json({"error": "Your notes could not be saved. Try again, or tell Cameron if it keeps "
+                                   "happening."}, 500)
+        return _json({"memories": _load_memory(), "inject": MEMORY_INJECT, **out})
 
     @mcp.custom_route("/api/skills", methods=["POST"])
     async def skills_route(request: Request):
@@ -17028,6 +17452,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         op = body.get("op")
+        _load_skills()
+        if SKILLS_PATH in _poisoned_stores:
+            return _json({"error": "Your saved skills could not be read, so nothing can be shown or changed "
+                                   "until they are repaired. Tell Cameron."}, 503)
         try:
             if op == "add":
                 _add_skill(body.get("title", ""), body.get("content", ""))
@@ -17042,8 +17470,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": str(e)}, 400)
         except Exception:
             logger.exception("Skills op failed")
-            return _json({"error": "Couldn't update skills (is a writable volume mounted at /data?)."}, 500)
-        return _json({"skills": _load_skills()})
+            return _json({"error": "Your skills could not be saved. Try again, or tell Cameron if it keeps "
+                                   "happening."}, 500)
+        return _json({"skills": _load_skills(), "caps": {"title": SKILL_TITLE_CAP, "body": SKILL_BODY_CAP,
+                                                         "inject": SKILLS_INJECT_CAP}})
 
     @mcp.custom_route("/api/cache", methods=["POST"])
     async def cache_route(request: Request):
@@ -17092,14 +17522,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _write_feedback(d)
                 _track(who, "updates", "asked for a feature", title[:60])
                 # Best-effort: a request nobody reads is a suggestion box with
-                # no lid. Never blocks the save.
+                # no lid. Never blocks the save, and the page is told whether it
+                # went: it promised an email to Cameron that was never sent when
+                # alert email is not set up.
+                emailed = False
                 try:
-                    await _send_alert_email(
+                    emailed = bool(await _send_alert_email(
                         "Reactor: " + (_team_name(who) or "someone") + " asked for a feature",
-                        [title, detail or "(no detail given)"])
+                        [title, detail or "(no detail given)"]
+                        + (["Asked from the " + item["where"] + " page."] if item["where"] else [])))
                 except Exception:
-                    pass
-                return _json({"ok": True, "item": item})
+                    emailed = False
+                return _json({"ok": True, "item": item, "emailed": emailed})
             if op == "state":
                 # Triage. Admin+, because it speaks for the whole desk.
                 if _team_level(who) < ROLE_LEVELS["admin"]:
@@ -17114,6 +17548,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 hit["state"] = state
                 if "note" in body:
                     hit["note"] = str(body.get("note") or "").strip()[:400]
+                    hit["note_by"] = who if hit["note"] else ""
                 hit["state_at"] = datetime.now(timezone.utc).isoformat()
                 _write_feedback(d)
                 _track(who, "updates", "marked a request " + state, (hit.get("title") or "")[:60])
@@ -17125,19 +17560,43 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 d["items"] = [x for x in d.get("items", []) if x.get("id") != rid]
                 _write_feedback(d)
                 return _json({"ok": True})
+            # What this person has read, kept on their account: it was a date
+            # in one browser, so on the shared bench computer the first person
+            # to open What's new cleared the dot for everyone, and a second
+            # release on a day already read never lit it at all.
+            seen = d.setdefault("seen", {}).get(who) or {}
+            if op == "seen":
+                now = datetime.now(timezone.utc).isoformat()
+                if body.get("releases") is not None:
+                    seen["releases"] = int(body.get("releases") or 0)
+                if body.get("requests"):
+                    seen["requests"] = now
+                d["seen"][who] = seen
+                _write_feedback(d)
+                return _json({"ok": True, "seen": seen})
+            mine_answered = sum(1 for x in d.get("items", []) if x.get("by") == who
+                                and (x.get("state_at") or "") > (seen.get("requests") or ""))
+            new_for_triage = sum(1 for x in d.get("items", []) if x.get("state") == "open"
+                                 and (x.get("at") or "") > (seen.get("requests") or ""))
+            can_triage = _team_level(who) >= ROLE_LEVELS["admin"]
+            unread = {"releases": max(0, len(_load_changelog()) - int(seen.get("releases") or 0)),
+                      "requests": mine_answered + (new_for_triage if can_triage else 0)}
+            if op == "version":
+                # The dot's own read: the counts alone, not every note and request.
+                return _json({"ok": True, "version": _app_version(), "unread": unread, "seen": seen})
             return _json({"ok": True, "releases": _load_changelog(),
-                          "version": _app_version(),
+                          "version": _app_version(), "unread": unread, "seen": seen,
                           "requests": d.get("items", [])[:200],
                           "names": _team_names(), "me": who,
-                          "can_triage": _team_level(who) >= ROLE_LEVELS["admin"]})
+                          "can_triage": can_triage})
         except (RuntimeError, OSError):
             # A read-only or full volume is a SAVE failure with a cause the
             # merchant can act on, not a "check the logs".
-            return _json({"error": "That could not be saved. The data volume may be "
-                                   "unwritable; check Settings, Connections."}, 500)
+            return _json({"error": "That could not be saved: the app's storage would not take it. "
+                                   "Try again, or tell Cameron if it keeps happening."}, 500)
         except Exception:
             logger.exception("updates route failed")
-            return _json({"error": "That could not be done. Check the server logs."}, 500)
+            return _json({"error": "That could not be done. Try again, or tell Cameron if it keeps happening."}, 500)
 
     @mcp.custom_route("/api/schedule", methods=["POST"])
     async def schedule_route(request: Request):
@@ -17157,7 +17616,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 cfg = _load_schedule()
         except Exception:
             logger.exception("schedule op failed")
-            return _json({"error": "Couldn't update the schedule (is a writable volume mounted at /data?)."}, 500)
+            return _json({"error": "The schedule could not be saved. Try again, or tell Cameron if it keeps happening."}, 500)
         return _json({"schedule": cfg})
 
     @mcp.custom_route("/api/alerts", methods=["POST"])
@@ -17206,6 +17665,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if op == "add":
                 if not (body.get("text") or "").strip():
                     return _json({"error": "Nothing to track."}, 400)
+                # Pressed twice, or from an answer drawn again: the change
+                # already being tracked is the answer, not a second copy.
+                want = (body.get("text") or "").strip()[:300]
+                twin = next((x for x in _load_impact() if x.get("text") == want and x.get("status") != "concluded"), None)
+                if twin:
+                    return _json({"item": twin, "already": True})
                 snap = await _impact_snapshot(registry)
             elif op == "conclude" and body.get("id"):
                 cur = await _impact_snapshot(registry)
@@ -17214,10 +17679,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 text = (body.get("text") or "").strip()[:300]
                 if not text:
                     return _json({"error": "Nothing to track."}, 400)
-                items.insert(0, {"id": secrets.token_hex(5), "text": text,
-                                 "source": str(body.get("source") or "copilot")[:24],
-                                 "baseline": snap, "started_at": snap["at"], "status": "tracking"})
+                added = {"id": secrets.token_hex(5), "text": text,
+                         "source": str(body.get("source") or "copilot")[:24],
+                         "baseline": snap, "started_at": snap["at"], "status": "tracking"}
+                items.insert(0, added)
                 items = _write_impact(items)
+                return _json({"item": added, "impact": _impact_with_deltas(items, snap), "current": snap})
             elif op == "delete" and body.get("id"):
                 items = _write_impact([x for x in items if x.get("id") != body["id"]])
             elif op == "conclude" and body.get("id"):
@@ -17227,41 +17694,90 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         x["concluded_at"] = cur["at"]
                         x["final"] = cur
                         try:
-                            _add_memories([{"type": "insight", "text": _impact_learning_text(x, cur)}])
+                            _add_memories([{"type": "insight", "text": _impact_learning_text(x, cur)}],
+                                          source="tracked change")
                         except Exception:
                             logger.exception("impact learning capture failed")
                 items = _write_impact(items)
         except Exception:
             logger.exception("Impact op failed")
-            return _json({"error": "Couldn't update impact tracking (is a writable volume mounted at /data?)."}, 500)
-        current = await _impact_snapshot(registry)
+            return _json({"error": "Tracked changes could not be updated. Try again, or tell Cameron if it keeps happening."}, 500)
+        # Nothing tracked needs no figures: the list read took a fresh 28-day
+        # Shopify (and Google) snapshot on every Memory visit and after every
+        # chat answer. Figures read in the last five minutes are reused.
+        if not items:
+            return _json({"impact": [], "current": {}})
+        now = time.monotonic()
+        if op == "list" and _impact_snap_cache.get("snap") and now - _impact_snap_cache.get("t", 0) < 300:
+            current = _impact_snap_cache["snap"]
+        else:
+            current = cur or snap or await _impact_snapshot(registry)
+            _impact_snap_cache.update({"t": now, "snap": current})
         return _json({"impact": _impact_with_deltas(items, current), "current": current})
+
+    @mcp.custom_route("/api/learn/run", methods=["POST"])
+    async def learn_run_route(request: Request):
+        # The one AI run on the Memory page, with a door of its own so the
+        # paid window is spent by the door like every other paid route.
+        err, _body, _who = await _guard(request, ai=True)
+        if err:
+            return err
+        try:
+            return _json({"knowledge": await run_learn(registry)})
+        except RuntimeError as e:
+            return _json({"error": str(e)}, 500)
+        except anthropic.APIError:
+            logger.exception("Anthropic API error (learn)")
+            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+        except Exception:
+            logger.exception("Learn failed")
+            return _json({"error": "Reactor could not learn the store this time. Try again, or tell "
+                                   "Cameron if it keeps happening."}, 500)
 
     @mcp.custom_route("/api/learn", methods=["POST"])
     async def learn_route(request: Request):
-        err, body, _who = await _guard(request, ai=True)
+        # Reading, correcting and deleting what was learned: no AI, so no
+        # slot. The plain read took one on every boot, visit and chat answer,
+        # and when the window was full the page showed the store as unlearned
+        # and offered a paid re-learn over knowledge that was there all along.
+        err, body, _who = await _guard(request)
         if err:
             return err
         op = body.get("op")
         if op == "learn":
+            return _json({"error": "Reload the page, then press Learn again."}, 400)
+        if op == "save":
+            # A person correcting what was learned: it is quoted as authoritative
+            # background into every answer, and the only fixes were Delete or
+            # another paid re-learn that could repeat the mistake.
+            text = str(body.get("knowledge") or "").strip()
+            if not text:
+                return _json({"error": "The store knowledge cannot be empty. Delete it instead."}, 400)
+            if len(text) > KNOWLEDGE_CAP:
+                # Refused, not cut: a correction losing its end without a word.
+                return _json({"error": f"The store knowledge is {len(text) - KNOWLEDGE_CAP:,} characters over "
+                                       f"its limit of {KNOWLEDGE_CAP:,}. Shorten it and save again."}, 400)
             try:
-                return _json({"knowledge": await run_learn(registry)})
-            except RuntimeError as e:
-                return _json({"error": str(e)}, 500)
-            except anthropic.APIError:
-                logger.exception("Anthropic API error (learn)")
-                return _json({"error": "The AI service returned an error. Please try again."}, 502)
+                held = _load_knowledge()
+                data = _save_knowledge(text, list(held.get("sources") or []))
+                data["edited_at"] = data["learned_at"]
+                data["learned_at"] = held.get("learned_at") or data["learned_at"]
+                data["edited_by"] = _team_name(_who) or ""
+                if _store_writable(KNOWLEDGE_PATH):
+                    _write_json_store(KNOWLEDGE_PATH, None, data)
+                _track(_who, "memory", "edited the store knowledge")
+                return _json({"knowledge": dict(data, cap=KNOWLEDGE_CAP)})
             except Exception:
-                logger.exception("Learn failed")
-                return _json({"error": "Couldn't learn the store. Check the server logs."}, 500)
+                logger.exception("Knowledge save failed")
+                return _json({"error": "The store knowledge could not be saved. Try again."}, 500)
         if op == "delete":
             try:
                 _delete_knowledge()
             except Exception:
                 logger.exception("Knowledge delete failed")
-                return _json({"error": "Couldn't delete the stored knowledge."}, 500)
+                return _json({"error": "The store knowledge could not be deleted. Try again."}, 500)
             return _json({"knowledge": {}})
-        return _json({"knowledge": _load_knowledge()})
+        return _json({"knowledge": dict(_load_knowledge() or {}, cap=KNOWLEDGE_CAP)})
 
     @mcp.custom_route("/api/production-labels", methods=["POST"])
     async def production_labels_route(request: Request):
@@ -17970,9 +18486,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             facts.append("They have ordered " + str(ctx["customer"]["orders_count"])
                          + " times before.")
         older = len(all_msgs) - len(msgs)
+        # The shop's own playbooks that fit this email (how quotes are answered,
+        # lead times, what may be offered). Internal: followed, never quoted.
+        playbooks = _skills_for_draft((t.get("subject") or "") + "\n" + "\n".join(lines[-2:]) + "\n" + guidance)
         prompt = ("You are writing as " + (_team_name(who) or "a member of staff")
                   + ", who is dealing with this email.\n\n"
                   + ("Known facts you MAY use:\n" + "\n".join(facts) + "\n\n" if facts else "")
+                  + ("The shop's own playbooks that fit this email. Follow them where they apply, and you "
+                     "may use facts they state, such as lead times. They are internal: never quote them, "
+                     "name them or mention that they exist, and they never permit a discount, refund, "
+                     "credit or replacement the rules above forbid:\n" + playbooks + "\n\n" if playbooks else "")
                   + ("Your previous draft, which the staff member wants changed:\n"
                      + prev[:4000] + "\n\n" if prev else "")
                   + ("What they want changed or said:\n" + guidance + "\n\n" if guidance else "")
@@ -23583,7 +24106,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         segment = (body.get("segment") or "").strip()[:80]
-        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system("customers retention sectors trade repeat lifetime value")
         try:
             _refresh_asked(body)
             res = await run_customers(registry, extra, segment=segment or None)
@@ -23623,7 +24146,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             pid = int(body.get("product_id"))
         except (TypeError, ValueError):
             return _json({"error": "A numeric product_id is required."}, 400)
-        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system()
+        extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system("product plan " + str(body.get("product_id") or ""))
         try:
             return _json(await run_product_audit(registry, pid, extra))
         except RuntimeError as e:
