@@ -165,6 +165,11 @@ SKILLS_PATH        = os.environ.get("SKILLS_PATH", "/data/store_skills.json")  #
 SKILLS_MAX         = _env_num(int, os.environ.get("SKILLS_MAX", "200"), "200", "SKILLS_MAX")        # max stored skills
 SKILL_TITLE_CAP    = _env_num(int, os.environ.get("SKILL_TITLE_CAP", "120"), "120", "SKILL_TITLE_CAP")   # chars per skill title
 SKILL_BODY_CAP     = _env_num(int, os.environ.get("SKILL_BODY_CAP", "40000"), "40000", "SKILL_BODY_CAP")   # chars per skill body
+# The master account's limit per skill, and only the master uploads files.
+SKILL_UPLOAD_CAP   = max(SKILL_BODY_CAP, _env_num(int, os.environ.get("SKILL_UPLOAD_CAP", "200000"), "200000", "SKILL_UPLOAD_CAP"))
+# A request to the skills route may be this large for the master: a skill at
+# the limit as JSON, with room for escapes and multi-byte characters.
+SKILLS_BODY_MAX    = SKILL_UPLOAD_CAP * 4 + 64 * 1024
 SKILLS_INJECT_CAP  = _env_num(int, os.environ.get("SKILLS_INJECT_CAP", "24000"), "24000", "SKILLS_INJECT_CAP")  # max total skill chars injected
 ANALYSIS_CACHE_PATH      = os.environ.get("ANALYSIS_CACHE_PATH", "/data/analysis_cache.json")  # last result per AI tab
 ANALYSIS_CACHE_MAX_BYTES = _env_num(int, os.environ.get("ANALYSIS_CACHE_MAX_BYTES", "800000"), "800000", "ANALYSIS_CACHE_MAX_BYTES")  # per-entry size guard
@@ -661,7 +666,7 @@ def _write_skills(skills: list[dict]) -> list[dict]:
 
 
 SKILL_WHEN_CAP = 400          # chars in a skill's "when it applies" note
-SKILL_READ_CAP = SKILL_BODY_CAP   # read_skill returns a whole skill in one read
+SKILL_READ_CAP = 40000   # read_skill returns at most this much per read; a longer skill is read in parts
 SKILL_ALWAYS_CAP = 4000       # a skill applied to every answer stays this short
 SKILL_ALWAYS_TOTAL = 8000     # and all of them together, since they go into every answer
 _FM_KEYS = ("name", "title", "description", "when", "when_to_use")
@@ -695,6 +700,8 @@ def _split_frontmatter(text: str) -> tuple[dict, str]:
     top = [ln for ln in lines if ln.strip() and not ln.startswith((" ", "\t"))]
     if not top or not all(re.match(r"^[A-Za-z_][\w-]*\s*:", ln) or ln.startswith("#") for ln in top):
         return {}, t
+    # Each value is gathered as a list and joined once: joining on every
+    # line made a long header cost the square of its length.
     raw: dict = {}
     mode: dict = {}
     key = None
@@ -703,11 +710,12 @@ def _split_frontmatter(text: str) -> tuple[dict, str]:
         if kv and not ln.startswith((" ", "\t")):
             key, val = kv.group(1).lower(), kv.group(2).strip()
             mode[key] = val[0] if val in (">", "|", ">-", "|-", ">+", "|+") else "plain"
-            raw[key] = "" if mode[key] != "plain" else val
+            raw[key] = [] if mode[key] != "plain" else ([val] if val else [])
         elif ln.startswith("#") or not key:
             continue
         elif ln.strip() and ln.startswith((" ", "\t")):
-            raw[key] = (raw[key] + ("\n" if mode[key] == "|" else " ") + ln.strip()).strip()
+            raw[key].append(ln.strip())
+    raw = {k: ("\n" if mode[k] == "|" else " ").join(v).strip() for k, v in raw.items()}
     if not any(k in raw for k in _FM_KEYS):
         return {}, t
     meta = {k: (_yaml_scalar(v) if mode[k] == "plain" else v) for k, v in raw.items()}
@@ -792,6 +800,7 @@ def _skill_hash(content: str) -> str:
 
 
 _SKILL_INDEX: dict = {}
+_SKILL_INDEX_CHARS = 0     # text indexed, so long skills cannot grow it without limit
 
 
 def _skill_index(content: str) -> dict:
@@ -811,9 +820,12 @@ def _skill_index(content: str) -> dict:
     idx = {"sections": secs, "heads": _skill_words(" ".join(h for (_l, h, _a, _b) in secs)),
            "words": _skill_words(content), "parts": parts,
            "part_words": [(_skill_words(h), _skill_words(t)) for h, t in parts]}
-    if len(_SKILL_INDEX) > 600:
+    global _SKILL_INDEX_CHARS
+    if len(_SKILL_INDEX) > 600 or _SKILL_INDEX_CHARS + len(content) > 5_000_000:
         _SKILL_INDEX.clear()
+        _SKILL_INDEX_CHARS = 0
     _SKILL_INDEX[key] = idx
+    _SKILL_INDEX_CHARS += len(content)
     return idx
 
 
@@ -831,9 +843,10 @@ def _skill_title_taken(skills: list[dict], title: str, sid: str = "") -> bool:
     return any((s.get("title") or "").strip().lower() == t and s.get("id") != sid for s in skills)
 
 
-def _clean_skill_input(title, content, when) -> tuple[str, str, str]:
+def _clean_skill_input(title, content, when, cap: int = 0) -> tuple[str, str, str]:
     """A skill as typed or uploaded. A pasted file that still starts with a
-    real Markdown header is read the same way an upload is."""
+    real Markdown header is read the same way an upload is. `cap` is the
+    limit for whoever is saving it (the master's is larger)."""
     title, content, when = str(title or "").strip(), str(content or "").strip(), str(when or "").strip()
     meta, _b = _split_frontmatter(content)
     if meta:
@@ -841,9 +854,10 @@ def _clean_skill_input(title, content, when) -> tuple[str, str, str]:
         content = md["content"]
         title = title or md["title"]
         when = when or md["when"]
-    if len(content) > SKILL_BODY_CAP:
-        raise ValueError(f"This skill is {len(content) - SKILL_BODY_CAP:,} characters over the limit of "
-                         f"{SKILL_BODY_CAP:,}. Shorten it, or split it into several skills.")
+    cap = cap or SKILL_BODY_CAP
+    if len(content) > cap:
+        raise ValueError(f"This skill is {len(content) - cap:,} characters over the limit of "
+                         f"{cap:,}. Shorten it, or split it into several skills.")
     return title[:SKILL_TITLE_CAP], content, re.sub(r"\s+", " ", when)[:SKILL_WHEN_CAP]
 
 
@@ -860,8 +874,9 @@ def _skill_always(always, content: str, skills: Optional[list] = None, sid: str 
     return True
 
 
-def _add_skill(title: str, content: str, when: str = "", file: str = "", always: bool = False) -> list[dict]:
-    title, content, when = _clean_skill_input(title, content, when)
+def _add_skill(title: str, content: str, when: str = "", file: str = "", always: bool = False,
+               cap: int = 0) -> list[dict]:
+    title, content, when = _clean_skill_input(title, content, when, cap)
     if not title or not content:
         raise ValueError("A skill needs both a title and some details.")
     skills = _load_skills()
@@ -884,14 +899,34 @@ def _add_skill(title: str, content: str, when: str = "", file: str = "", always:
 
 
 def _update_skill(sid: str, title: str, content: str, when: Optional[str] = None,
-                  always: Optional[bool] = None) -> list[dict]:
-    title, content, when_clean = _clean_skill_input(title, content, when)
+                  always: Optional[bool] = None, cap: int = 0) -> list[dict]:
+    skills = _load_skills()
+    own = next((s for s in skills if s.get("id") == sid), None)
+    # Anyone may edit a skill the master made long, as long as it grows no
+    # longer than it is: only the master brings in more.
+    cap = cap or SKILL_BODY_CAP
+    old = str((own or {}).get("content") or "").strip()
+    limit = max(cap, len(old))
+    try:
+        title, content, when_clean = _clean_skill_input(title, content, when, limit)
+    except ValueError:
+        if limit > cap:
+            raise ValueError("You can change this skill, but not make it longer than it is "
+                             f"({len(old):,} characters). Only the master account can.")
+        raise
     if not title or not content:
         raise ValueError("A skill needs both a title and some details.")
-    skills = _load_skills()
+    if len(old) > cap and len(content) > cap:
+        # A long skill came from the master: anyone may change parts of it,
+        # but a paste over most of it would bring in new text past their own
+        # limit, which only the master may.
+        same = len(os.path.commonprefix([old, content]))
+        tail = len(os.path.commonprefix([old[same:][::-1], content[same:][::-1]]))
+        if len(content) - same - tail > cap:
+            raise ValueError(f"That replaces more than {cap:,} characters of this skill at once, which only the master "
+                             "account can do. Change less of it, or ask the master account to replace it.")
     # Only a title being CHANGED to a taken one is refused: two skills that
     # shared a title before the rule could not otherwise be saved at all.
-    own = next((s for s in skills if s.get("id") == sid), None)
     changed = not own or str(own.get("title") or "").strip().lower() != title.lower()
     if changed and _skill_title_taken(skills, title, sid):
         raise ValueError(f"You already have a skill called \"{title}\". Give this one a different title.")
@@ -928,10 +963,14 @@ def _skills_for_page(skills: Optional[list] = None) -> list[dict]:
     return out
 
 
-def _skills_answer() -> "JSONResponse":
-    return _json({"skills": _skills_for_page(), "caps": {"title": SKILL_TITLE_CAP, "body": SKILL_BODY_CAP,
+def _skills_answer(who: str = "") -> "JSONResponse":
+    """The skills and the limits for the account asking: the master's skill
+    limit is larger, and only the master uploads files."""
+    master = _team_role(who) == "master"
+    return _json({"skills": _skills_for_page(), "caps": {"title": SKILL_TITLE_CAP,
+                                                         "body": SKILL_UPLOAD_CAP if master else SKILL_BODY_CAP,
                                                          "when": SKILL_WHEN_CAP, "always": SKILL_ALWAYS_CAP,
-                                                         "inject": SKILLS_INJECT_CAP}})
+                                                         "inject": SKILLS_INJECT_CAP, "upload": master}})
 
 
 def _delete_skill(sid: str) -> list[dict]:
@@ -1113,7 +1152,8 @@ def _skill_brief_block(s: dict, can_read: bool, query: str = "", part_budget: in
     still gets the section it needs; chat is told to read the rest."""
     content = s["content"].strip()
     rules = [str(x) for x in (_skill_fresh_reading(s).get("rules") or [])][:25]
-    heads = [h for (_l, h, _a, _b) in _skill_sections(content)][:40]
+    all_heads = [h for (_l, h, _a, _b) in _skill_sections(content)]
+    heads = all_heads[:40]
     out = _skill_open(s, ' shown="in brief"')
     if can_read:
         out += ("(" + f"{len(content):,}" + " characters, not shown in full here to save room. "
@@ -1128,7 +1168,9 @@ def _skill_brief_block(s: dict, can_read: bool, query: str = "", part_budget: in
     if rules:
         out += "What it asks, as you read it before:\n" + "\n".join("- " + _skill_safe(x) for x in rules) + "\n"
     if heads:
-        out += "Its sections: " + _skill_safe("; ".join(heads)) + "\n"
+        out += ("Its sections: " + _skill_safe("; ".join(heads))
+                + (" and " + str(len(all_heads) - len(heads)) + " more" + (", found by reading it part by part" if can_read else "")
+                   if len(all_heads) > len(heads) else "") + "\n")
     part = _skill_best_part(content, _skill_words(query), part_budget) if query and part_budget else ""
     if part:
         out += "The parts that fit this question:\n" + _skill_safe(part) + "\n"
@@ -1236,11 +1278,44 @@ def _skills_for_draft(query: str) -> str:
     return body.strip()
 
 
-def _read_skill(title: str, section: str = "") -> str:
+def _read_parts(text: str, cap: int = 0) -> list[str]:
+    """A long text as reads of at most `cap` characters, each ending before a
+    heading, else at a blank line, else at a line break, where one falls in
+    the second half of the read, so a skill longer than one read, or a long
+    stretch of it with no heading, can still be read to its end."""
+    cap = cap or SKILL_READ_CAP
+    out, rest = [], text.strip()
+    while len(rest) > cap:
+        cut = rest[:cap]
+        k = next((i for i in (cut.rfind(sep) for sep in ("\n#", "\n\n", "\n")) if i > cap // 2), cap)
+        out.append(rest[:k].rstrip())
+        rest = rest[k:].lstrip("\n")
+    out.append(rest)
+    return out
+
+
+def _heads_list(secs: list, first: str = "", n: int = 40) -> str:
+    """A skill's headings for read_skill's replies, at most n of them (those
+    sharing a word with `first` ahead), so a long catalogue's thousands of
+    headings cannot make one reply longer than a read."""
+    heads = [x[1] for x in secs]
+    if first:
+        w = _skill_words(first)
+        heads = sorted(heads, key=lambda h: not (_skill_words(h) & w))
+    out = "; ".join(heads[:n])
+    return out + (" and " + f"{len(heads) - n:,}" + " more" if len(heads) > n else "")
+
+
+def _read_skill(title: str, section: str = "", part=None) -> str:
     """The read_skill tool: one saved skill, by title (or id), in full or one
     section of it by heading. A part name that fits several headings lists
-    them rather than guessing."""
+    them rather than guessing. What is longer than one read comes in parts,
+    read one at a time by number."""
     want = str(title or "").strip().lower()
+    try:
+        n = max(1, int(part or 1)) if not isinstance(part, bool) else 1
+    except (TypeError, ValueError, OverflowError):
+        n = 1
     for s in _load_skills():
         if not (want and (want == (s.get("title") or "").strip().lower() or want == s.get("id"))):
             continue
@@ -1249,27 +1324,31 @@ def _read_skill(title: str, section: str = "") -> str:
         if str(section or "").strip():
             w = str(section).strip().lower().lstrip("#").strip()
             exact = [x for x in secs if x[1].lower() == w]
-            part = [x for x in secs if w in x[1].lower()]
-            hit = exact[0] if exact else (part[0] if len(part) == 1 else None)
+            some = [x for x in secs if w in x[1].lower()]
+            hit = exact[0] if exact else (some[0] if len(some) == 1 else None)
             if hit:
-                text = content[hit[2]:hit[3]].strip()
-                more = len(text) > SKILL_READ_CAP
-                return (_skill_open(s, ' section="' + _skill_attr(hit[1]) + '"') + _skill_safe(text[:SKILL_READ_CAP])
-                        + ("\n(The section goes on past one read; read the sections under it by heading.)" if more else "")
+                pieces = _read_parts(content[hit[2]:hit[3]])
+                n = min(n, len(pieces))
+                return (_skill_open(s, ' section="' + _skill_attr(hit[1]) + '"'
+                                    + (' part="' + str(n) + ' of ' + str(len(pieces)) + '"' if len(pieces) > 1 else ""))
+                        + _skill_safe(pieces[n - 1])
+                        + ("\n(The section goes on: read part " + str(n + 1) + " of it with read_skill.)" if n < len(pieces) else "")
                         + "\n</skill>")
-            if len(part) > 1:
+            if len(some) > 1:
                 return _skill_safe("Several sections of \"" + name + "\" fit \"" + str(section).strip() + "\": "
-                                   + "; ".join(x[1] for x in part) + ". Read the one you need by its full heading.")
+                                   + _heads_list(some) + ". Read the one you need by its full heading.")
             return _skill_safe("No section of \"" + name + "\" is called \"" + str(section).strip() + "\". Its sections are: "
-                               + ("; ".join(x[1] for x in secs) or "none, it is one piece of text"))
-        head = _skill_open(s)
-        if len(content) <= SKILL_READ_CAP:
-            return head + _skill_safe(content) + "\n</skill>"
-        cut = content[:SKILL_READ_CAP]
-        k = cut.rfind("\n#")
-        return (head + _skill_safe((cut[:k] if k > SKILL_READ_CAP // 2 else cut).rstrip())
-                + "\n\n(The rest did not fit in one read. Read a section by its heading with read_skill: "
-                + "; ".join(x[1] for x in secs) + ")\n</skill>")
+                               + (_heads_list(secs, str(section)) or "none, it is one piece of text")
+                               + (". Read it by part to see them all" if len(secs) > 40 else ""))
+        pieces = _read_parts(content)
+        if len(pieces) == 1:
+            return _skill_open(s) + _skill_safe(content) + "\n</skill>"
+        n = min(n, len(pieces))
+        return (_skill_open(s, ' part="' + str(n) + ' of ' + str(len(pieces)) + '"') + _skill_safe(pieces[n - 1])
+                + "\n\n(" + ("The rest did not fit in one read. " if n == 1 else "")
+                + ("Read part " + str(n + 1) + " with read_skill for what follows" if n < len(pieces) else "That is the end of it")
+                + ("; or read a section by its heading: " + _heads_list(secs) if secs and n == 1 else "")
+                + ".)\n</skill>")
     names = [s.get("title") for s in _load_skills() if s.get("title")]
     return _skill_safe("No saved skill has that title. The saved skills are: " + "; ".join(names[:60]))
 
@@ -1277,11 +1356,13 @@ def _read_skill(title: str, section: str = "") -> str:
 READ_SKILL_TOOL = {
     "name": "read_skill",
     "description": ("Read one of the merchant's saved skills by its exact title: in full, or just one "
-                    "section of it by heading (for a long skill). Use it when a skill listed by title, "
+                    "section of it by heading (for a long skill). What is longer than one read comes in "
+                    "numbered parts: ask for the next part to read on. Use it when a skill listed by title, "
                     "or shown in brief, may apply to the question."),
     "input_schema": {"type": "object", "properties": {
         "title": {"type": "string", "description": "The skill's exact title."},
-        "section": {"type": "string", "description": "Optional: a heading in the skill, to read that part alone."}},
+        "section": {"type": "string", "description": "Optional: a heading in the skill, to read that part alone."},
+        "part": {"type": "integer", "description": "Optional: which part to read when the skill or section is longer than one read (1 is the first)."}},
         "required": ["title"]},
 }
 
@@ -1344,7 +1425,7 @@ async def run_skill_reading(skill: dict, others: list[dict]) -> dict:
            + "The skill to read, titled \"" + str(skill.get("title") or "") + "\""
            + (" (the merchant says it applies: " + said + ")" if said else "")
            + (". It is long, so up to 25 rules may be needed." if len(content) > 8000 else "")
-           + ":\n<skill>\n" + _skill_safe(content[:60000]) + "\n</skill>\n\nReport how you understand it now.")
+           + ":\n<skill>\n" + _skill_safe(content[:SKILL_UPLOAD_CAP]) + "\n</skill>\n\nReport how you understand it now.")
     client = _anthropic()
     resp = await _xcreate(client,
         model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=SKILL_READING_SYSTEM,
@@ -3110,6 +3191,14 @@ _AI_LAST_FAIL: dict = {}
 _ai_fell_back: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVar("ai_fell_back", default=None)
 
 
+# What each kind of AI call is, in the words Settings shows.
+_AI_KIND_WORDS = {"chat": "answering in Chat", "skill_read": "reading a skill", "learn": "learning the store",
+                  "overview": "the overview", "seo": "the SEO audit", "keywords": "the keyword analysis",
+                  "keyword_scan": "the keyword scan", "customers": "the customer analysis",
+                  "product": "a product plan", "recon": "checking the accounts", "address": "reading an address",
+                  "draft": "drafting an email reply"}
+
+
 def _note_ai_failure(model: str, e: Exception, answered_by: str = "") -> None:
     """Kept for Settings' Claude AI row, and, when no model answered, in the
     app's error store with Anthropic's full reply for the developer."""
@@ -3118,7 +3207,7 @@ def _note_ai_failure(model: str, e: Exception, answered_by: str = "") -> None:
                           "why": _ai_error_words(e, advice=False), "answered_by": _model_name(answered_by) if answered_by else "",
                           "kind": _ai_kind.get("ai")})
     if not answered_by:
-        _record_error("asking the AI (" + str(_ai_kind.get("ai")) + ")", e)
+        _record_error("asking the AI: " + _AI_KIND_WORDS.get(_ai_kind.get("ai"), "an AI task"), e)
 
 
 def _fallback_for(model: str, e: Exception) -> str:
@@ -3162,6 +3251,8 @@ async def _xcreate(client, **kwargs):
             raise
         alt = dict(kwargs)
         alt["model"] = fb
+        if _forces_tool(alt) and not _can_force_tool(fb):
+            must = _unforce(alt)
         oc = alt.get("output_config")
         if isinstance(oc, dict) and oc.get("effort"):
             alt["output_config"] = {**oc, "effort": _cap_effort(fb, oc["effort"])}
@@ -3187,7 +3278,11 @@ async def _xcreate(client, **kwargs):
             {"role": "assistant", "content": resp.content},
             {"role": "user", "content": (f"Send that answer now by calling the {must} tool." if must
                                          else "Send that answer now by calling one of your tools.")}]
-        resp = await _xcreate_once(client, more)
+        try:
+            resp = await _xcreate_once(client, more)
+        except anthropic.APIError as e3:
+            _note_ai_failure(str(kwargs.get("model") or ""), e3)
+            raise
     return resp
 
 
@@ -3465,6 +3560,23 @@ def _chat_after(result: dict, history: list) -> None:
             result["followups_maybe"] = maybe[:6]
 
 
+def _report_answer(resp, what: str) -> dict:
+    """The present_response a report asked for. Opus 5.5 cannot be made to
+    call it, and its thinking counts toward the token limit, so a reply can
+    stop without it: that is an error the page shows, and the last good
+    report is kept, where a stock line used to be saved over it."""
+    present = next((getattr(b, "input", None) for b in (getattr(resp, "content", None) or [])
+                    if getattr(b, "type", "") == "tool_use" and getattr(b, "name", "") == PRESENT_RESPONSE_TOOL["name"]), None)
+    if isinstance(present, dict):
+        return present
+    stop = getattr(resp, "stop_reason", "")
+    if stop == "max_tokens":
+        raise RuntimeError(f"Reactor ran out of room while writing {what}, so the last one is kept. Run it again.")
+    if stop == "refusal":
+        raise RuntimeError(f"Reactor declined to write {what}, so the last one is kept.")
+    raise RuntimeError(f"Reactor did not finish {what}, so the last one is kept. Run it again.")
+
+
 def _fell_back_words() -> dict:
     """For a chat answer the fallback model gave: who answered and why."""
     fell = _ai_fell_back.get()
@@ -3475,7 +3587,7 @@ def _fell_back_words() -> dict:
 
 async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dict],
                    model: str, extra_system: str = "", emit: Optional[Callable] = None,
-                   effort: Optional[str] = None) -> dict:
+                   effort: Optional[str] = None, deep: bool = False) -> dict:
     """Run a multi-step tool-use conversation. The final answer is delivered via
     the present_response tool and returned as a structured dict. If `emit` is given,
     it is awaited with progress events ({"type":"step","label":...}) for live streaming."""
@@ -3536,7 +3648,8 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
             if not text and stop == "max_tokens":
                 # Thinking counts against the limit, and Deep analysis thinks most.
                 text = ("Reactor ran out of room while working this out, before it could answer. "
-                        "Ask again, narrow the question, or switch Deep analysis off for a shorter think.")
+                        + ("Ask again, narrow the question, or switch Deep analysis off for a shorter think." if deep
+                           else "Ask again, or narrow the question."))
             elif not text and stop == "refusal":
                 text = "Reactor declined to answer that. Try asking it another way."
             return {"structured": {"summary": text or "Reactor did not send an answer. Ask again."}, "tools_used": tools_used,
@@ -3554,12 +3667,13 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
                 # The merchant's own words: not customer data, so not part of
                 # what the memory provenance check treats as borrowed.
                 ti = tu.input or {}
-                content = _read_skill(ti.get("title", ""), ti.get("section", ""))
+                content = _read_skill(ti.get("title", ""), ti.get("section", ""), ti.get("part"))
                 tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "content": content})
                 if len(data_used) < 16:
                     plain = re.sub(r"\A<skill[^>]*>\n|\n</skill>\Z", "", content)
                     data_used.append({"tool": tu.name, "label": ("Skill: " + str(ti.get("title", ""))[:80]
-                                      + (", " + str(ti.get("section"))[:60] if ti.get("section") else "")),
+                                      + (", " + str(ti.get("section"))[:60] if ti.get("section") else "")
+                                      + (", part " + str(ti.get("part"))[:4] if str(ti.get("part") or "1") != "1" else "")),
                                       "preview": _strip_dashes(plain)[:900]})
                 continue
             content = await dispatch(tu.name, tu.input)
@@ -3826,9 +3940,7 @@ async def run_overview(registry: dict, extra_system: str = "", track_inventory: 
         _overview_trends(registry),
         _sector_sales(registry),
     )
-    present = next((b.input for b in resp.content
-                    if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
-    structured = _coerce_structured(present or {"summary": "Here's your store overview."})
+    structured = _coerce_structured(_report_answer(resp, "the overview"))
     structured.pop("metrics", None)  # UI shows the computed metrics, not Claude's echo
     currency = (context.get("shop") or {}).get("currency", "")
     return {"metrics": metrics, "structured": structured, "trends": trends,
@@ -4521,9 +4633,7 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
         ),
         google_data.gsc_timeseries(480) if gsc_on else _ret({}),
     )
-    present = next((b.input for b in resp.content
-                    if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
-    structured = _coerce_structured(present or {"summary": "SEO audit complete."})
+    structured = _coerce_structured(_report_answer(resp, "the SEO audit"))
     structured.pop("metrics", None)
     seo_trends: dict = {}
     try:
@@ -4595,9 +4705,7 @@ async def run_keywords(registry: dict, extra_system: str = "") -> dict:
         messages=[{"role": "user", "content": msg}],
         output_config={"effort": _effort_for(MODEL_DEEP)},
     )
-    present = next((b.input for b in resp.content
-                    if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
-    structured = _coerce_structured(present or {"summary": "Keyword analysis ready."})
+    structured = _coerce_structured(_report_answer(resp, "the keyword analysis"))
     structured.pop("metrics", None)
     return {"metrics": metrics, "structured": structured, "currency": currency,
             "keywords": queries, "ads": ads if (ads and not ads.get("error")) else None,
@@ -4629,9 +4737,7 @@ async def run_keyword_scan(registry: dict, url: str, extra_system: str = "") -> 
         messages=[{"role": "user", "content": msg}],
         output_config={"effort": _effort_for(MODEL_DEEP)},
     )
-    present = next((b.input for b in resp.content
-                    if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
-    structured = _coerce_structured(present or {"summary": "Scan complete."})
+    structured = _coerce_structured(_report_answer(resp, "the scan"))
     structured.pop("metrics", None)
     return {"url": final_url, "extracted": extracted, "structured": structured}
 
@@ -6810,6 +6916,7 @@ ADDRESS_SYSTEM = (
 async def _ai_address(text: str) -> dict:
     """Claude's reading of a pasted block, for the ones the local pass could not
     place. Plain structured output, no tools that touch the store."""
+    _ai_kind.set("address")
     client = _anthropic()
     resp = await _xcreate(
         client, model=MODEL_FAST, max_tokens=4096, system=ADDRESS_SYSTEM,
@@ -9740,9 +9847,7 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
         messages=[{"role": "user", "content": msg}],
         output_config={"effort": _effort_for(MODEL_DEEP)},
     )
-    present = next((b.input for b in resp.content
-                    if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
-    structured = _coerce_structured(present or {"summary": "Customer analysis ready."})
+    structured = _coerce_structured(_report_answer(resp, "the customer analysis"))
     structured.pop("metrics", None)
     return {"metrics": metrics, "structured": structured, "currency": currency,
             "segments": segments, "top_customers": top[:25], "trends": trends, "totals": totals,
@@ -9808,9 +9913,7 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
         messages=[{"role": "user", "content": msg}],
         output_config={"effort": _effort_for(MODEL_DEEP)},
     )
-    present = next((b.input for b in resp.content
-                    if b.type == "tool_use" and b.name == PRESENT_RESPONSE_TOOL["name"]), None)
-    structured = _coerce_structured(present or {"summary": "Optimisation plan ready."})
+    structured = _coerce_structured(_report_answer(resp, "the optimisation plan"))
     structured.pop("metrics", None)
 
     metrics = []
@@ -10278,6 +10381,7 @@ async def _recon_ai_call(system: str, messages: list, tools: list, tool_choice: 
     """The one AI entry point the engine gets: read, reason, answer through a
     forced tool. No registry, no writes, no memory - an auditor with a
     document in one hand and nothing in the other."""
+    _ai_kind.set("recon")
     client = _anthropic()
     return await _xcreate(client, model=MODEL_RECON, max_tokens=MAX_TOKENS,
                           system=system, messages=messages, tools=tools,
@@ -17962,7 +18066,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         extra += _page_context_to_system(body.get("context"))
         try:
             result = await run_chat(history, dispatch_for(_who), tools, model, extra,
-                                    effort=_effort_for(model, deep))
+                                    effort=_effort_for(model, deep), deep=deep)
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
         except anthropic.APIError as e:
@@ -18006,7 +18110,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         async def runner():
             try:
                 result = await run_chat(history, dispatch_for(_who), tools, model, extra,
-                                        emit=q.put, effort=_effort_for(model, deep))
+                                        emit=q.put, effort=_effort_for(model, deep), deep=deep)
                 _chat_after(result, history)
                 result["deep"] = deep
                 await q.put({"type": "done", "result": result})
@@ -18158,6 +18262,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except anthropic.APIError as e:
             logger.exception("Anthropic API error (keywords)")
             return _json({"error": _ai_error_words(e)}, 502)
+        except RuntimeError as e:
+            # The day's AI budget, a missing key, or a report that did not finish: said as it is.
+            return _json({"error": str(e)}, 500)
         except Exception:
             logger.exception("Keyword analysis failed")
             return _json({"error": "Couldn't run the keyword analysis. Check the server logs."}, 500)
@@ -18231,10 +18338,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/skills", methods=["POST"])
     async def skills_route(request: Request):
-        err, body, who = await _guard(request)
+        # Room for a skill at the master's limit from anyone: someone else
+        # editing a long skill the master saved sends all of it back. What
+        # may be SAVED is decided by the character limits below.
+        err, body, who = await _guard(request, max_body=SKILLS_BODY_MAX, cap=SKILLS_BODY_MAX)
         if err:
             return err
+        master = _team_role(who) == "master"
+        cap = SKILL_UPLOAD_CAP if master else SKILL_BODY_CAP
         op = body.get("op")
+        if op == "add" and body.get("file") and not master:
+            return _json({"error": "Only the master account can upload skills from files. Write the skill here instead, "
+                                   "or ask the master account to upload it."}, 403)
         _load_skills()
         if SKILLS_PATH in _poisoned_stores:
             return _json({"error": "Your saved skills could not be read, so nothing can be shown or changed "
@@ -18242,12 +18357,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         try:
             if op == "add":
                 _add_skill(body.get("title", ""), body.get("content", ""), body.get("when", ""), body.get("file", ""),
-                           bool(body.get("always")))
+                           bool(body.get("always")), cap=cap)
                 _track(who, "skills", "added a skill", str(body.get("title") or "")[:60])
             elif op == "update" and body.get("id"):
                 _update_skill(body["id"], body.get("title", ""), body.get("content", ""),
                               body.get("when") if "when" in body else None,
-                              bool(body.get("always")) if "always" in body else None)
+                              bool(body.get("always")) if "always" in body else None, cap=cap)
                 _track(who, "skills", "edited a skill", str(body.get("title") or "")[:60])
             elif op == "delete" and body.get("id"):
                 _delete_skill(body["id"])
@@ -18258,7 +18373,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             logger.exception("Skills op failed")
             return _json({"error": "Your skills could not be saved. Try again, or tell Cameron if it keeps "
                                    "happening."}, 500)
-        return _skills_answer()
+        return _skills_answer(who)
 
     @mcp.custom_route("/api/skills/read", methods=["POST"])
     async def skills_read_route(request: Request):
@@ -18286,7 +18401,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except Exception:
             logger.exception("Skill read failed")
             return _json({"error": "Reactor could not read this skill just now. Try again."}, 500)
-        return _skills_answer()
+        return _skills_answer(who)
 
     @mcp.custom_route("/api/cache", methods=["POST"])
     async def cache_route(request: Request):
@@ -19336,6 +19451,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not _window_ok(_rl_global, RATE_MAX_GLOBAL, time.monotonic()):
             return _json({"error": "The assistant is busy right now. Please try again shortly."}, 429)
         try:
+            _ai_kind.set("draft")
             resp = await _xcreate(_anthropic(), model=MODEL_DEEP, max_tokens=8000,
                                   system=MAIL_DRAFT_SYSTEM, output_config={"effort": _effort_for(MODEL_DEEP)},
                                   messages=[{"role": "user", "content": prompt}])
@@ -24937,6 +25053,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except anthropic.APIError as e:
             logger.exception("Anthropic API error (customers)")
             return _json({"error": _ai_error_words(e)}, 502)
+        except RuntimeError as e:
+            # The day's AI budget, a missing key, or a report that did not finish: said as it is.
+            return _json({"error": str(e)}, 500)
         except Exception:
             logger.exception("Customer analysis failed")
             return _json({"error": "Couldn't run the customer analysis. Check the server logs."}, 500)
@@ -25749,7 +25868,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         "scopes": scope_state},
             "ai": {"ok": bool(ANTHROPIC_API_KEY),
                    "models": {"chat": _model_name(MODEL_FAST), "deep": _model_name(MODEL_DEEP),
-                              "fallback": "" if not _fallback_for("", Exception()) else _model_name(MODEL_FALLBACK)},
+                              "fallback": _model_name(_fallback_for(MODEL_DEEP, Exception())
+                                                      or _fallback_for(MODEL_FAST, Exception())) if (
+                                  _fallback_for(MODEL_DEEP, Exception()) or _fallback_for(MODEL_FAST, Exception())) else ""},
                    "last_failure": dict(_AI_LAST_FAIL) or None},
             "google": google_data.status(),
             "gmail": google_mail.status(),

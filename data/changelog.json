@@ -2,6 +2,22 @@
  "releases": [
   {
    "date": "2026-09-24",
+   "title": "Longer skills, uploaded from the master account",
+   "items": [
+    {
+     "kind": "improved",
+     "tab": "skills",
+     "text": "The master account can save a skill of up to 200,000 characters, five times what other accounts can, so a long playbook comes in as one skill instead of being split into many, and can upload Markdown files of up to 2 MB, where a file longer than one skill comes in as several. When Reactor reads a skill closely it now reads all of it, and in chat it reads a long skill part by part to the end."
+    },
+    {
+     "kind": "improved",
+     "tab": "skills",
+     "text": "Only the master account can upload skills from files. Other accounts write skills on the Skills page as before, up to 40,000 characters, and can change a long skill the master account added, but not make it longer or replace most of it."
+    }
+   ]
+  },
+  {
+   "date": "2026-09-24",
    "title": "Reactor runs on Claude Opus 5.5",
    "items": [
     {
@@ -28,6 +44,16 @@
      "kind": "fixed",
      "tab": "chat",
      "text": "A chat question Reactor runs out of room thinking about, which Deep analysis can, now says so and what to try, and one it declines says it declined, instead of \"Reactor did not send an answer\" for both."
+    },
+    {
+     "kind": "fixed",
+     "tab": "overview",
+     "text": "A report that runs out of room while Reactor is thinking, or that Reactor declines, now says so and keeps the last good report, instead of saving a one line placeholder such as \"Keyword analysis ready.\" over it."
+    },
+    {
+     "kind": "fixed",
+     "tab": "chat",
+     "text": "The keyword and customer reports say when the day's AI budget is used up, instead of asking you to check the server logs, and Settings names an AI failure in words, such as reading a skill or drafting an email reply."
     }
    ]
   },

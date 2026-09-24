@@ -3,7 +3,7 @@
 Generated from the code by `tools/env_reference.py`; do not edit by hand.
 `make env-doc` rewrites it, and CI fails when it is stale.
 
-217 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
+218 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
 
 ## server.py
 
@@ -99,6 +99,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SKILLS_PATH` | `"/data/store_skills.json"` | copilot | merchant-authored skills |
 | `SKILL_BODY_CAP` | `"40000"` | copilot | chars per skill body |
 | `SKILL_TITLE_CAP` | `"120"` | copilot | chars per skill title |
+| `SKILL_UPLOAD_CAP` | `"200000"` | copilot |  |
 | `STORE_CONTEXT_CAP` | `"4000"` | copilot |  |
 | `TREND_MONTHS` | `"24"` | copilot |  |
 | `USAGE_MAX` | `"5000"` | copilot | max usage events retained |

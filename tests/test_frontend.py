@@ -8564,13 +8564,14 @@ def t_deep_analysis_is_tagged_by_the_switch_not_the_model_name():
         return
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
         fh.write(fn_src("function deepTurn(") + "\nconsole.log([{deep: true, model: 'claude-opus-5-5'}, "
-                 "{deep: false, model: 'claude-opus-5-5'}, {model: 'claude-opus-4-8'}, {model: 'claude-sonnet-4-6'}, {}]"
-                 ".map(deepTurn).join(' '));\n")
+                 "{deep: false, model: 'claude-opus-5-5'}, {model: 'claude-opus-4-8'}, {model: 'claude-sonnet-4-6'}, {}, "
+                 "{model: 'claude-opus-5-5'}].map(deepTurn).join(' '));\n")
         path = fh.name
     try:
         r = subprocess.run(["node", path], capture_output=True, text=True)
         ok(r.returncode == 0, "deepTurn failed to run: " + (r.stderr or "")[:200])
-        eq((r.stdout or "").strip(), "true false true false false", "deep by the flag, old answers by their model")
+        eq((r.stdout or "").strip(), "true false true false false false",
+           "deep by the flag, old answers by an Opus 4 model, an unflagged Opus 5.5 answer not")
     finally:
         os.unlink(path)
 
@@ -8582,10 +8583,71 @@ def t_an_answer_the_fallback_gave_says_so_and_settings_keeps_the_failure():
     ok("fell_back: data.fell_back" in SCRIPT and "fell_back: res.fell_back" in SCRIPT, "and both keep it with the answer")
     note = fn_src("function fellBackNote(")
     ok("' answered this, because '" in note and "could not. " in note, note)
-    row = fn_src("function aiConnRow(")
-    ok("ai.last_failure" in row and "' Latest failure'" in row and "' answered instead.'" in row and "m.fallback" in row,
-       "Settings' Claude AI row names the model, the fallback and the latest failure")
-    ok("ANTHROPIC_API_KEY" not in SCRIPT, "and no setting name reaches the page")
+    ok("ANTHROPIC_API_KEY" not in SCRIPT, "no setting name reaches the page")
+    if not any(os.access(os.path.join(p, "node"), os.X_OK)
+               for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    stub = ("function el(tag, cls, text) { return { cls: cls, text: text || '', kids: [], append(...k) { this.kids.push(...k); } }; }\n"
+            "function connRow(title, state, sub, words) { return { state: state, sub: sub, pill: state === 'on' ? words[0] : state === 'mid' ? words[1] : words[2] }; }\n")
+    js = stub + fn_src("function fellBackNote(") + "\n" + fn_src("function aiConnRow(") + r"""
+const H = 3600 * 1000, ago = (h) => new Date(Date.now() - h * H).toISOString();
+const m = { chat: 'Claude Opus 5.5', deep: 'Claude Opus 5.5', fallback: 'Claude Opus 4.8' };
+const fail = (h, by) => ({ at: ago(h), model: 'Claude Opus 5.5', why: 'Busy.', answered_by: by || '' });
+const out = {
+  note: fellBackNote({ fell_back: { from: 'Claude Opus 5.5', to: 'Claude Opus 4.8', why: 'Busy.' } }).kids[0].text,
+  none: fellBackNote({}),
+  nokey: aiConnRow({ ok: false }),
+  clean: aiConnRow({ ok: true, models: m }),
+  off: aiConnRow({ ok: true, models: Object.assign({}, m, { fallback: '' }) }),
+  answered: aiConnRow({ ok: true, models: m, last_failure: fail(1, 'Claude Opus 4.8') }),
+  failing: aiConnRow({ ok: true, models: m, last_failure: fail(1) }),
+  old: aiConnRow({ ok: true, models: m, last_failure: fail(30) }),
+};
+console.log(JSON.stringify(out));
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(js)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path], capture_output=True, text=True)
+        ok(r.returncode == 0, "the note and the row failed to run: " + (r.stderr or "")[:300])
+        o = json.loads(r.stdout)
+        eq(o["note"], "Claude Opus 4.8 answered this, because Claude Opus 5.5 could not. Busy.")
+        eq(o["none"], None, "an answer the chosen model gave has no note")
+        eq((o["nokey"]["state"], o["nokey"]["pill"]), ("off", "Not set up"))
+        ok(o["clean"]["state"] == "on" and "When it cannot answer, Claude Opus 4.8 does" in o["clean"]["sub"], o["clean"])
+        ok("When it cannot answer" not in o["off"]["sub"], "no fallback promised when there is none")
+        ok(o["answered"]["state"] == "on" and "Claude Opus 4.8 answered instead." in o["answered"]["sub"], o["answered"])
+        eq((o["failing"]["state"], o["failing"]["pill"]), ("mid", "Recent failure"), "amber for a day after a failure nobody answered")
+        ok(o["old"]["state"] == "on" and "Latest failure" in o["old"]["sub"], "and green again after it, with the failure still said")
+    finally:
+        os.unlink(path)
+
+
+
+# ---- Skills: master-only uploads and the master's larger limit, 24 September 2026
+
+@test
+def t_only_the_master_sees_the_upload_and_a_long_skill_can_be_edited():
+    paint = fn_src("function paintSkills(")
+    ok("if (skillCaps.upload) acts.append(up, fi);" in paint, "Upload Markdown is the master's alone")
+    ok("(skillCaps.upload ? ' Drop Markdown files here to add them.' : '')" in paint, "and the card only offers a drop to the master")
+    start = fn_src("function startUpload(")
+    ok(start.index("if (!skillCaps.upload)") < start.index("readSkillFiles("), "a drop from anyone else reads no file")
+    ed = fn_src("function skillEditor(")
+    ok("if (skillCaps.upload) row.append(fileBtn, fi);" in ed, "Load from file is the master's alone")
+    ok("const lim = Math.max(skillCaps.body, s ? String(s.content || '').trim().length : 0);" in ed
+       and "over = n - lim" in ed and "nf(lim) + ' characters'" in ed,
+       "a long skill the master saved can be edited by anyone without growing")
+    ok("const SKILL_FILE_MAX = 2000000;" in SCRIPT and "f.size > SKILL_FILE_MAX" in fn_src("function readSkillFiles(")
+       and "file.size > SKILL_FILE_MAX" in ed, "a file up to 2 MB is read by both file controls")
+    ok(start.index("if (skillsLoadErr)") < start.index("if (!skillCaps.upload)"), "skills not loaded is said before the master rule")
+    ok("if (skillCaps.upload) card.classList.add('drop-on');" in fn_src("function renderSkills("),
+       "only the master's card lights up for a drop")
+    ok("lim > skillCaps.body ? 'You can change this skill but not make it longer than it is: remove '" in ed,
+       "someone editing a long skill is told the real rule, not to split it")
+    ok("upload: false" in SCRIPT.split("const skillCaps = ")[1][:120], "no upload until the server says so")
 
 
 if __name__ == "__main__":

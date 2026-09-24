@@ -20302,7 +20302,7 @@ def t_the_chat_stream_says_it_has_started_before_the_answer():
     done: cut off mid-answer, it was run and billed a second time. The
     stream's first event now says the run is under way."""
     started = []
-    async def slow_answer(history, dispatch, tools, model, extra, emit=None, effort=None):
+    async def slow_answer(history, dispatch, tools, model, extra, emit=None, effort=None, deep=False):
         started.append(True)
         return {"structured": {"summary": "hi"}}
     def go():
@@ -20669,7 +20669,8 @@ def t_memory_and_skills_routes_edit_refuse_and_fail_honestly():
         eq(r.status_code, 400); ok(r.json().get("as_skill"), "an instruction is pointed at Skills, not stored")
         r = post("/api/skills", {"op": "add", "title": "Quote replies", "content": "Reply the same day."})
         eq(r.status_code, 200, r.text)
-        eq(r.json()["caps"]["body"], copilot.SKILL_BODY_CAP, "the page is told the real limits")
+        eq(r.json()["caps"]["body"], copilot.SKILL_UPLOAD_CAP, "the page is told the real limits: the master's own, larger one")
+        eq(r.json()["caps"]["upload"], True, "and that it may upload files")
         eq(post("/api/skills", {"op": "add", "title": "quote replies", "content": "x"}).status_code, 400, "no duplicate titles")
         with open(copilot.SKILLS_PATH, "w") as fh:
             fh.write("{not json")
@@ -20767,8 +20768,8 @@ def t_a_markdown_skill_file_is_read_as_written():
         eq(r.status_code, 200, r.text)
         sk = r.json()["skills"][0]
         eq((sk["title"], sk["when"][:20]), ("Trade enquiry replies", "Use when answering a"))
-        eq(r.json()["caps"]["body"], copilot.SKILL_BODY_CAP)
-        r = post("/api/skills", {"op": "add", "title": "Big", "content": "x" * (copilot.SKILL_BODY_CAP + 3)})
+        eq(r.json()["caps"]["body"], copilot.SKILL_UPLOAD_CAP)
+        r = post("/api/skills", {"op": "add", "title": "Big", "content": "x" * (copilot.SKILL_UPLOAD_CAP + 3)})
         eq(r.status_code, 400)
         ok("3 characters over the limit" in r.json()["error"], "a skill too long is refused, never cut: " + r.text)
     finally:
@@ -23088,6 +23089,7 @@ def t_a_model_found_refusing_a_forced_tool_is_remembered():
         response=httpx.Response(400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")), body=None)
     good = _OpusResp([_OpusBlock("tool_use", name="record", input={}, id="t")], "tool_use")
     saved = set(copilot._UNFORCED_MODELS)
+    last = dict(copilot._AI_LAST_FAIL)
     try:
         fake, resp = _opus_run("claude-next-9", [refused, good], tool_choice={"type": "tool", "name": "record"})
         eq(len(fake.calls), 2)
@@ -23106,12 +23108,13 @@ def t_a_model_found_refusing_a_forced_tool_is_remembered():
         ok(copilot._can_force_tool("claude-next-8"), "and the model is still forced")
     finally:
         copilot._UNFORCED_MODELS.clear(); copilot._UNFORCED_MODELS.update(saved)
+        copilot._AI_LAST_FAIL.clear(); copilot._AI_LAST_FAIL.update(last)
 
 
 @test
 def t_deep_analysis_is_more_thinking_and_the_answer_says_it_was_deep():
     seen = []
-    async def answer(history, dispatch, tools, model, extra, emit=None, effort=None):
+    async def answer(history, dispatch, tools, model, extra, emit=None, effort=None, deep=False):
         seen.append((model, effort))
         return {"structured": {"summary": "hi"}, "model": model}
     def go():
@@ -23182,7 +23185,11 @@ def t_a_model_that_fails_is_answered_by_the_fallback_and_says_so():
     saved = (copilot.MODEL_FALLBACK, dict(copilot._AI_LAST_FAIL), copilot.ERRORS_PATH)
     try:
         copilot.MODEL_FALLBACK = "claude-opus-4-8"
-        copilot.ERRORS_PATH = SCRATCH + "/app_errors.json"
+        copilot.ERRORS_PATH = SCRATCH + "/app_errors_fallback.json"
+        try:
+            os.remove(copilot.ERRORS_PATH)
+        except FileNotFoundError:
+            pass
         fake, resp = _opus_run("claude-opus-5-5", [_api_status(404, "model: claude-opus-5-5", "not_found_error"), good],
                                tool_choice={"type": "tool", "name": "record"}, output_config={"effort": "max"})
         eq([c["model"] for c in fake.calls], ["claude-opus-5-5", "claude-opus-4-8"])
@@ -23190,6 +23197,7 @@ def t_a_model_that_fails_is_answered_by_the_fallback_and_says_so():
         eq(copilot._AI_LAST_FAIL["model"], "Claude Opus 5.5")
         eq(copilot._AI_LAST_FAIL["answered_by"], "Claude Opus 4.8")
         ok("does not offer that model" in copilot._AI_LAST_FAIL["why"])
+        eq(len(copilot._recent_errors(1)), 0, "a failure another model answered is not an app error")
         # A non-Opus fallback is not sent an effort it would refuse.
         copilot.MODEL_FALLBACK = "claude-sonnet-4-6"
         fake, _ = _opus_run("claude-opus-5-5", [_api_status(529, "Overloaded"), good], output_config={"effort": "max"})
@@ -23216,8 +23224,9 @@ def t_a_model_that_fails_is_answered_by_the_fallback_and_says_so():
         except copilot.anthropic.APIStatusError:
             pass
         # Nobody answered that one, so it is in the app's error store too.
-        ok(any(r["where"].startswith("asking the AI (") and "Overloaded" in r["error"] for r in copilot._recent_errors(1)),
-           "an unanswered failure reaches the app errors")
+        rows = copilot._recent_errors(1)
+        ok(len(rows) == 3 and all(r["where"].startswith("asking the AI: ") and "_" not in r["where"] for r in rows)
+           and "Overloaded" in rows[0]["error"], "each unanswered failure reaches the app errors, labelled in words: %r" % rows)
     finally:
         copilot.MODEL_FALLBACK, copilot.ERRORS_PATH = saved[0], saved[2]
         copilot._AI_LAST_FAIL.clear(); copilot._AI_LAST_FAIL.update(saved[1])
@@ -23257,7 +23266,7 @@ def t_a_chat_that_fell_back_stays_on_the_fallback_and_says_why():
 
 @test
 def t_a_failed_chat_tells_the_page_the_reason():
-    async def refused(history, dispatch, tools, model, extra, emit=None, effort=None):
+    async def refused(history, dispatch, tools, model, extra, emit=None, effort=None, deep=False):
         raise _api_status(400, "messages.0: something the model refused")
     def go():
         ensure_auth()
@@ -23312,6 +23321,290 @@ def t_a_chat_that_ran_out_of_room_or_was_declined_says_so():
             ok(words in r["structured"]["summary"], (stop, r["structured"]))
     finally:
         copilot._client, copilot._spend_guard = saved
+
+
+# Cameron, 24 Sep 2026: "make the size of the uploadable MD skills larger but
+# only allow uploads from the master account".
+
+@test
+def t_only_the_master_uploads_skills_and_its_limit_is_larger():
+    saved = _ws_stores()
+    def go():
+        ensure_auth()
+        _a, sess, _p = ready_user("Mo Member", "momem", role="admin")
+        # An admin who is not the master: the usual limit, and no uploads.
+        r = post_s(sess, "/api/skills", {})
+        eq((r.json()["caps"]["body"], r.json()["caps"]["upload"]), (copilot.SKILL_BODY_CAP, False))
+        r = post_s(sess, "/api/skills", {"op": "add", "title": "From a file", "content": "Reply the same day.", "file": "replies.md"})
+        eq(r.status_code, 403, r.text)
+        ok("Only the master account can upload" in r.json()["error"], r.text)
+        ok(not [x for x in copilot._load_skills() if x["title"] == "From a file"], "nothing was saved")
+        r = post_s(sess, "/api/skills", {"op": "add", "title": "Typed", "content": "Reply the same day."})
+        eq(r.status_code, 200, "writing a skill by hand is unchanged")
+        r = post_s(sess, "/api/skills", {"op": "add", "title": "Too long", "content": "x" * (copilot.SKILL_BODY_CAP + 1)})
+        eq(r.status_code, 400)
+        ok("limit of " + f"{copilot.SKILL_BODY_CAP:,}" in r.json()["error"], r.text)
+        # The master: the larger limit, uploads, and a body over the usual request limit.
+        big = ("## Part\n" + ("Trade £85 " + "£" * 50 + "\n") * 40) * 80
+        big = big[:copilot.SKILL_UPLOAD_CAP - 10].strip()
+        ok(len(json.dumps({"content": big}, ensure_ascii=False).encode("utf-8")) > copilot.MAX_BODY_BYTES
+           and len(big) > copilot.SKILL_BODY_CAP * 4, "over the usual request limit: %d" % len(big))
+        r = post("/api/skills", {"op": "add", "title": "Trade book", "content": big, "file": "trade-book.md"})
+        eq(r.status_code, 200, r.text[:300])
+        sk = [x for x in r.json()["skills"] if x["title"] == "Trade book"][0]
+        eq((len(sk["content"]), sk["file"]), (len(big.strip()), "trade-book.md"))
+        r = post("/api/skills", {"op": "add", "title": "Too big", "content": "x" * (copilot.SKILL_UPLOAD_CAP + 1)})
+        eq(r.status_code, 400)
+        # From anyone else, a body that size is read but not saved: their limit is the usual one.
+        pad = "£\n" * 90000
+        ok(len(json.dumps({"content": pad}, ensure_ascii=False).encode("utf-8")) > copilot.MAX_BODY_BYTES)
+        r = post_s(sess, "/api/skills", {"op": "add", "title": "Padded", "content": pad})
+        eq(r.status_code, 400, r.text[:200])
+        # And nobody sends more than a skill at the master's limit could need.
+        r = post_s(sess, "/api/skills", {"op": "add", "title": "Huge", "content": "x" * (copilot.SKILLS_BODY_MAX + 10)})
+        eq(r.status_code, 413)
+        # Someone else may edit the master's long skill, but not make it longer.
+        sid = sk["id"]
+        r = post_s(sess, "/api/skills", {"op": "update", "id": sid, "title": "Trade book", "content": big.replace("£85", "£90", 1)})
+        eq(r.status_code, 200, r.text[:300])
+        r = post_s(sess, "/api/skills", {"op": "update", "id": sid, "title": "Trade book", "content": big + "\nOne more rule."})
+        eq(r.status_code, 400, "grown past what it was")
+    try:
+        with_accounts(go)
+    finally:
+        _ws_restore(saved)
+
+
+@test
+def t_a_skill_longer_than_one_read_is_read_in_parts_to_the_end():
+    saved = _ws_stores()
+    try:
+        # One long stretch with no headings: it used to stop after one read.
+        text = "\n\n".join("Paragraph %d. Trade gobos take four days." % i for i in range(4000))
+        ok(len(text) > copilot.SKILL_READ_CAP * 3)
+        copilot._add_skill("Long notes", text, cap=copilot.SKILL_UPLOAD_CAP)
+        pieces = copilot._read_parts(text)
+        ok(all(len(p) <= copilot.SKILL_READ_CAP for p in pieces) and len(pieces) >= 4, [len(p) for p in pieces])
+        eq("\n\n".join(pieces), text, "cut at paragraph breaks, nothing lost")
+        one = copilot._read_skill("Long notes")
+        ok('part="1 of ' + str(len(pieces)) + '"' in one and "Read part 2 with read_skill" in one, one[-200:])
+        last = copilot._read_skill("Long notes", "", len(pieces))
+        ok("Paragraph 3999." in last and "That is the end of it" in last, last[-200:])
+        eq(copilot._read_skill("Long notes", "", 999), last, "a part past the end is the last one")
+        eq(copilot._read_skill("Long notes", "", "two"), one, "a part that is not a number is the first")
+        # A section longer than one read, the same way.
+        copilot._add_skill("Sectioned", "# Intro\nShort.\n# Rules\n" + text, cap=copilot.SKILL_UPLOAD_CAP)
+        sec2 = copilot._read_skill("Sectioned", "Rules", 2)
+        ok('section="Rules" part="2 of' in sec2 and "read part 3 of it" in sec2, sec2[:200])
+        ok(not copilot._read_skill("Sectioned", "Intro").count("part="), "a short section has no parts")
+        # The brief says there are more headings than it lists.
+        many = "\n".join("## Heading %d\nRule %d." % (i, i) for i in range(60))
+        copilot._add_skill("Many headings", many)
+        b = copilot._skill_brief_block([x for x in copilot._load_skills() if x["title"] == "Many headings"][0], True, "")
+        ok("and 20 more, found by reading it part by part" in b, b[-300:])
+        ok('"part"' in json.dumps(copilot.READ_SKILL_TOOL), "the tool can be asked for a part")
+    finally:
+        _ws_restore(saved)
+
+
+@test
+def t_the_close_read_sees_all_of_a_long_skill():
+    saved = _ws_stores()
+    seen = {}
+    class _Tu:
+        type, name = "tool_use", "present_skill_reading"
+        def __init__(self, inp): self.input = inp
+    class _R:
+        def __init__(self, blocks): self.content, self.stop_reason = blocks, "tool_use"
+    async def fake_x(client, **kw):
+        seen.update(kw)
+        return _R([_Tu({"when": "Trade.", "rules": ["Quote."], "examples": [], "questions": []})])
+    sx = copilot._xcreate; copilot._xcreate = fake_x
+    try:
+        text = "Opening rule.\n\n" + "Filler line about glass.\n" * 5000 + "\nTHE LAST RULE: never discount steel."
+        ok(len(text) > 100000)
+        copilot._add_skill("Whole manual", text, cap=copilot.SKILL_UPLOAD_CAP)
+        sk = [x for x in copilot._load_skills() if x["title"] == "Whole manual"][0]
+        _run(copilot.run_skill_reading(sk, copilot._load_skills()))
+        ok("THE LAST RULE: never discount steel." in seen["messages"][0]["content"],
+           "the reading is of the whole text it is then marked as having read")
+    finally:
+        copilot._xcreate = sx
+        _ws_restore(saved)
+
+
+
+# The second review of the Opus 5.5 change, and the review of the larger skills.
+
+@test
+def t_a_report_that_did_not_finish_keeps_the_last_one_and_says_why():
+    """Opus 5.5 cannot be made to call present_response and its thinking
+    counts toward the limit: a report that stopped without it saved "Keyword
+    analysis ready." over the last good one, and the page showed no error."""
+    good = _OpusResp([_OpusBlock("thinking", thinking="", signature="s"),
+                      _OpusBlock("tool_use", name="present_response", id="t1",
+                                 input={"summary": "Three keywords carry 60% of clicks."})], "tool_use")
+    saved = (copilot._client, copilot._spend_guard)
+    copilot._spend_guard = lambda: None
+    def go():
+        ensure_auth()
+        _a, sess, _p = ready_user("Kay Words", "kayw", role="admin")
+        copilot._client = _OpusFake([good])
+        eq(post_s(sess, "/api/keywords", {}).status_code, 200)
+        for stop, words in (("max_tokens", "ran out of room"), ("refusal", "declined"), ("end_turn", "did not finish")):
+            copilot._client = _OpusFake([_OpusResp([_OpusBlock("thinking", thinking="", signature="s")], stop)] * 2)
+            r = post_s(sess, "/api/keywords", {})
+            ok(r.status_code == 500 and words in r.json()["error"] and "last one is kept" in r.json()["error"], (stop, r.text[:200]))
+            cache = json.load(open(copilot.ANALYSIS_CACHE_PATH)).get("keywords", {})
+            eq(cache.get("result", {}).get("structured", {}).get("summary"), "Three keywords carry 60% of clicks.",
+               "the last good report is kept")
+        # A budget refusal is said as it is on the keyword and customer reports too.
+        def spent():
+            raise RuntimeError("Reactor has used today's AI budget.")
+        copilot._spend_guard = spent
+        for path in ("/api/keywords", "/api/customers"):
+            r = post_s(sess, path, {})
+            ok("today's AI budget" in r.json().get("error", ""), (path, r.text[:200]))
+    try:
+        with_accounts(go)
+    finally:
+        copilot._client, copilot._spend_guard = saved
+
+
+@test
+def t_the_fallback_is_asked_as_it_can_be_and_a_failed_nudge_is_noted():
+    saved = (copilot.MODEL_FALLBACK, dict(copilot._AI_LAST_FAIL), copilot.ERRORS_PATH, set(copilot._UNFORCED_MODELS))
+    try:
+        copilot.ERRORS_PATH = SCRATCH + "/app_errors_nudge.json"
+        # A fallback that refuses forcing is asked in words, not forced.
+        copilot.MODEL_FALLBACK = "claude-opus-5-5"
+        good = _OpusResp([_OpusBlock("tool_use", name="record", input={}, id="t")], "tool_use")
+        fake, resp = _opus_run("claude-sonnet-4-6", [_api_status(529, "Overloaded"), good],
+                               tool_choice={"type": "tool", "name": "record"})
+        eq([c["model"] for c in fake.calls], ["claude-sonnet-4-6", "claude-opus-5-5"])
+        eq(fake.calls[0]["tool_choice"], {"type": "tool", "name": "record"})
+        ok("tool_choice" not in fake.calls[1] and "calling the record tool" in str(fake.calls[1]["system"]),
+           "the refusing fallback is not forced")
+        # A nudge that fails is noted, and no model is said to have answered.
+        copilot.MODEL_FALLBACK = "claude-opus-4-8"
+        prose = _OpusResp([_OpusBlock("text", text="Five.")])
+        try:
+            _opus_run("claude-opus-5-5", [prose, _api_status(529, "Overloaded")], tool_choice={"type": "tool", "name": "record"})
+            ok(False, "raised")
+        except copilot.anthropic.APIStatusError:
+            pass
+        eq((copilot._AI_LAST_FAIL["model"], copilot._AI_LAST_FAIL["answered_by"]), ("Claude Opus 5.5", ""))
+    finally:
+        copilot.MODEL_FALLBACK, _l, copilot.ERRORS_PATH, _u = saved
+        copilot._AI_LAST_FAIL.clear(); copilot._AI_LAST_FAIL.update(saved[1])
+        copilot._UNFORCED_MODELS.clear(); copilot._UNFORCED_MODELS.update(saved[3])
+
+
+@test
+def t_settings_names_a_fallback_only_where_one_would_be_asked():
+    saved = (copilot.MODEL_FALLBACK, copilot.MODEL_FAST, copilot.MODEL_DEEP)
+    def go():
+        ensure_auth()
+        _a, sess, _p = ready_user("Fen Fallback", "fenf", role="admin")
+        copilot.MODEL_FALLBACK = "off"
+        eq(post_s(sess, "/api/status", {}).json()["ai"]["models"]["fallback"], "")
+        copilot.MODEL_FALLBACK = copilot.MODEL_FAST = copilot.MODEL_DEEP = "claude-opus-4-8"
+        eq(post_s(sess, "/api/status", {}).json()["ai"]["models"]["fallback"], "", "a model is not its own fallback")
+        copilot.MODEL_FAST = copilot.MODEL_DEEP = "claude-opus-5-5"
+        eq(post_s(sess, "/api/status", {}).json()["ai"]["models"]["fallback"], "Claude Opus 4.8")
+    try:
+        with_accounts(go)
+    finally:
+        copilot.MODEL_FALLBACK, copilot.MODEL_FAST, copilot.MODEL_DEEP = saved
+
+
+@test
+def t_out_of_room_advice_matches_the_switch_and_a_fallback_is_said_on_every_ending():
+    saved = (copilot._client, copilot._spend_guard, copilot.MODEL_FALLBACK, dict(copilot._AI_LAST_FAIL))
+    copilot._spend_guard = lambda: None
+    async def dispatch(name, args):
+        return "{}"
+    try:
+        out = lambda: _OpusResp([_OpusBlock("thinking", thinking="", signature="s")], "max_tokens")
+        copilot._client = _OpusFake([out()])
+        r = _run(copilot.run_chat([{"role": "user", "content": "Everything"}], dispatch, [], "claude-opus-5-5"))
+        ok("ran out of room" in r["structured"]["summary"] and "Deep analysis" not in r["structured"]["summary"],
+           "no advice to switch off what is already off")
+        copilot._client = _OpusFake([out()])
+        r = _run(copilot.run_chat([{"role": "user", "content": "Everything"}], dispatch, [], "claude-opus-5-5", deep=True))
+        ok("switch Deep analysis off" in r["structured"]["summary"], r["structured"])
+        copilot.MODEL_FALLBACK = "claude-opus-4-8"
+        copilot._client = _OpusFake([_api_status(529, "Overloaded"), out()])
+        r = _run(copilot.run_chat([{"role": "user", "content": "Everything"}], dispatch, [], "claude-opus-5-5"))
+        eq(r.get("fell_back", {}).get("to"), "Claude Opus 4.8", "the ran-out ending says who answered too")
+    finally:
+        copilot._client, copilot._spend_guard, copilot.MODEL_FALLBACK = saved[:3]
+        copilot._AI_LAST_FAIL.clear(); copilot._AI_LAST_FAIL.update(saved[3])
+
+
+@test
+def t_a_long_catalogue_is_read_in_reads_of_the_stated_size():
+    """A 199,000-character catalogue with thousands of headings sent every
+    heading after part 1, a reply of 143,000 characters."""
+    saved = _ws_stores()
+    try:
+        text = "\n".join("### Gobo GB-%05d\nSteel, 37.5 mm, £%d." % (i, 20 + i % 30) for i in range(5000))[:199000]
+        copilot._add_skill("Catalogue", text, cap=copilot.SKILL_UPLOAD_CAP)
+        for args in (("Catalogue",), ("Catalogue", "", 2), ("Catalogue", "Delivery times"), ("Catalogue", "Gobo GB-000")):
+            got = copilot._read_skill(*args)
+            ok(len(got) <= copilot.SKILL_READ_CAP + 3000, (args, len(got)))
+        miss = copilot._read_skill("Catalogue", "Gobo GB-99999")
+        ok(" more" in miss and "Read it by part to see them all" in miss, miss[-200:])
+        ok(copilot._read_skill("Catalogue", "", float("inf")) == copilot._read_skill("Catalogue"), "a part of infinity is the first")
+        ok(copilot._read_skill("Catalogue", "", True) == copilot._read_skill("Catalogue"), "and so is a part of True")
+    finally:
+        _ws_restore(saved)
+
+
+@test
+def t_someone_else_may_change_a_long_skill_but_not_replace_it():
+    saved = _ws_stores()
+    def go():
+        ensure_auth()
+        _a, sess, _p = ready_user("Rex Replace", "rexr", role="member")
+        manual = "\n\n".join("## Section %d\n%s" % (i, ("Glass gobos take four days. " * 30)) for i in range(200))[:180000]
+        r = post("/api/skills", {"op": "add", "title": "Trade manual", "content": manual, "file": "trade-manual.md"})
+        sid = [x for x in r.json()["skills"] if x["title"] == "Trade manual"][0]["id"]
+        other = ("Discount policy text. " * 9000)[:len(manual.strip()) - 5]
+        r = post_s(sess, "/api/skills", {"op": "update", "id": sid, "title": "Trade manual", "content": other})
+        eq(r.status_code, 400, "a paste over the whole of it is the master's to do")
+        ok("only the master" in r.json()["error"], r.text)
+        edited = manual.replace("four days", "five days", 50)
+        eq(post_s(sess, "/api/skills", {"op": "update", "id": sid, "title": "Trade manual", "content": edited}).status_code, 200,
+           "changing parts of it is fine")
+        r = post_s(sess, "/api/skills", {"op": "update", "id": sid, "title": "Trade manual", "content": edited + "\nMore."})
+        eq(r.status_code, 400)
+        ok("not make it longer than it is" in r.json()["error"], r.text)
+    try:
+        with_accounts(go)
+    finally:
+        _ws_restore(saved)
+
+
+@test
+def t_a_long_header_is_read_in_linear_time_and_the_index_holds_a_bounded_amount():
+    head = "---\nname: x\ndescription: >\n" + " a\n" * 300000 + "---\nBody."
+    t0 = time.time()
+    meta, body = copilot._split_frontmatter(head)
+    ok(time.time() - t0 < 1.0, "a header of 900,000 characters parses in under a second: %.2fs" % (time.time() - t0))
+    eq((meta["name"], body), ("x", "Body."))
+    eq(copilot._split_frontmatter("---\nname: Trade\ndescription: |\n  Line one\n  Line two\n---\nB")[0]["description"],
+       "Line one\nLine two", "a literal value keeps its lines")
+    eq(copilot._split_frontmatter("---\nname: Trade\ndescription: Plain\n  and more\n---\nB")[0]["description"],
+       "Plain and more", "a plain value carried on indented lines is one line")
+    saved = (dict(copilot._SKILL_INDEX), copilot._SKILL_INDEX_CHARS)
+    try:
+        copilot._SKILL_INDEX.clear(); copilot._SKILL_INDEX_CHARS = 0
+        for i in range(30):
+            copilot._skill_index(("Rule %d. " % i) * 30000)
+        ok(copilot._SKILL_INDEX_CHARS <= 5_000_000, copilot._SKILL_INDEX_CHARS)
+    finally:
+        copilot._SKILL_INDEX.clear(); copilot._SKILL_INDEX.update(saved[0]); copilot._SKILL_INDEX_CHARS = saved[1]
 
 for fn in TESTS:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The

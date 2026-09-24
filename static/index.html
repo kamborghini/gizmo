@@ -7850,10 +7850,11 @@ Projected Image UK"></textarea>
             send(q.text, { convo: c, skills: q.skills });
         }
         /* Whether an answer was a Deep analysis. Answers saved before the
-           server said so were deep when they came from an Opus model; since
-           every answer is Opus 5.5, the model's name no longer tells. */
+           server said so were deep when they came from an Opus 4 model; since
+           every answer is Opus 5.5, its name tells nothing, and a tab left
+           open on the old page saved everyday answers under it. */
         function deepTurn(t) {
-            return t.deep != null ? !!t.deep : !!(t.model && /opus/i.test(t.model));
+            return t.deep != null ? !!t.deep : !!(t.model && /opus/i.test(t.model) && !/opus-5/i.test(t.model));
         }
         /* An answer the fallback model gave, because the chosen one failed:
            said under the answer, with the reason, never passed off as it. */
@@ -10193,7 +10194,7 @@ Projected Image UK"></textarea>
         let skillsLoadErr = '';    // a failed read is not an empty list
         /* What the server allows, as it says in every answer; these are only
            the defaults until the first read. */
-        const skillCaps = { title: 120, body: 40000, when: 400, inject: 24000 };
+        const skillCaps = { title: 120, body: 40000, when: 400, inject: 24000, upload: false };
         const skView = { q: '', editId: null, adding: false, draft: null, open: new Set(), readOpen: new Set(), reading: {}, uploads: null, busy: '' };
         const skHost = {};
         async function loadSkills() {
@@ -10349,13 +10350,14 @@ Projected Image UK"></textarea>
             catch (e) { return { text: new TextDecoder('windows-1252').decode(buf), note: 'This file is not UTF-8, so it was read as Windows text: check the £ signs and accents in the preview.' }; }
         }
         const UPLOAD_MAX = 20;
+        const SKILL_FILE_MAX = 2000000;     // bytes, for Upload Markdown and Load from file alike
         async function readSkillFiles(files, room) {
             const all = [...(files || [])];
             const list = all.filter(f => /\.(md|markdown|txt|text)$/i.test(f.name) || /^text\/(markdown|plain|x-markdown)/.test(f.type));
             const take = list.slice(0, Math.max(0, room == null ? UPLOAD_MAX : room));
             const out = [];
             for (const f of take) {
-                if (f.size > 1000000) { out.push({ name: f.name, size: f.size, err: 'Larger than 1 MB, so it was not read.' }); continue; }
+                if (f.size > SKILL_FILE_MAX) { out.push({ name: f.name, size: f.size, err: 'Larger than 2 MB, so it was not read.' }); continue; }
                 try {
                     const r = await readTextFile(f);
                     if (!r.text.trim()) { out.push({ name: f.name, size: f.size, err: 'The file is empty.' }); continue; }
@@ -10370,7 +10372,10 @@ Projected Image UK"></textarea>
             return out;
         }
         function startUpload(files) {
+            /* Not loaded comes first: the upload right arrives with the skills. */
             if (skillsLoadErr) { toastError('Your skills have not loaded yet, so nothing can be added until they do.'); return; }
+            /* The server refuses it too; this says so before any file is read. */
+            if (!skillCaps.upload) { toastError('Only the master account can upload skills from files. Write the skill here instead.'); return; }
             if (skView.busy) { toastError('Wait for these files to be added, then add more.'); return; }
             /* A drop while files are being checked joins them, as More files does. */
             if (!skView.uploads && !skillGuard()) return;
@@ -10392,7 +10397,7 @@ Projected Image UK"></textarea>
             box.classList.toggle('no-intro', !firstPaint('skills'));
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.book;
             const ht = el('div'); ht.append(el('h2', null, 'Skills'),
-                el('p', null, 'Instructions and playbooks Reactor follows: a brand voice, a discount policy, how to answer a trade enquiry. Write one here or upload a Markdown file. Reactor picks the ones that fit each question, in chat, in reports and in email drafts, and says under each answer which it followed.'));
+                el('p', null, 'Instructions and playbooks Reactor follows: a brand voice, a discount policy, how to answer a trade enquiry. Write one here' + (skillCaps.upload ? ' or upload a Markdown file' : '') + '. Reactor picks the ones that fit each question, in chat, in reports and in email drafts, and says under each answer which it followed.'));
             /* The empty action slot is where Customize goes. */
             hero.append(badge, ht, heroAct('')); box.append(hero);
             skHost.card = widget(el('div', 'card sk-card'), 'saved', 'full', 'Skills');
@@ -10401,7 +10406,13 @@ Projected Image UK"></textarea>
             /* Markdown files dropped anywhere on the card come in to be checked. */
             const card = skHost.card;
             const hasFiles = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
-            card.addEventListener('dragover', (e) => { if (!hasFiles(e)) return; e.preventDefault(); card.classList.add('drop-on'); });
+            /* preventDefault for everyone, so a dropped file never opens in place of the page
+               and anyone else is told why it was not taken; the card lights up only for the
+               master account, the one that can upload. */
+            card.addEventListener('dragover', (e) => {
+                if (!hasFiles(e)) return; e.preventDefault();
+                if (skillCaps.upload) card.classList.add('drop-on');
+            });
             card.addEventListener('dragleave', (e) => { if (!card.contains(e.relatedTarget)) card.classList.remove('drop-on'); });
             card.addEventListener('drop', (e) => { if (!hasFiles(e)) return; e.preventDefault(); card.classList.remove('drop-on'); startUpload(e.dataTransfer.files); });
             paintSkills();
@@ -10448,7 +10459,8 @@ Projected Image UK"></textarea>
             card.replaceChildren();
             const head = el('div', 'card-head');
             head.append(el('h3', 'card-title', 'Your skills' + (skills.length ? ' (' + skills.length + ')' : '')),
-                el('p', 'card-desc', 'Rules and playbooks, each with a title and a note of when it applies. Drop Markdown files here to add them.'));
+                el('p', 'card-desc', 'Rules and playbooks, each with a title and a note of when it applies.'
+                    + (skillCaps.upload ? ' Drop Markdown files here to add them.' : '')));
             const acts = el('div', 'card-act');
             const up = el('button', 'btn btn-sm'); up.type = 'button';
             up.append(ico(I.upload), document.createTextNode('Upload Markdown'));
@@ -10463,7 +10475,9 @@ Projected Image UK"></textarea>
                that is already there. */
             add.disabled = up.disabled = !!skillsLoadErr || skView.adding || !!skView.uploads;
             add.onclick = () => { if (!skillGuard()) return; skView.adding = true; skView.editId = null; skView.draft = null; paintSkills(); };
-            acts.append(up, fi, add); head.append(acts); card.append(head);
+            /* Only the master account uploads files. */
+            if (skillCaps.upload) acts.append(up, fi);
+            acts.append(add); head.append(acts); card.append(head);
             paintSkillUse();
             if (skillsLoadErr) {
                 card.append(loadFailure('Your skills could not be loaded, so they cannot be shown yet. '
@@ -10473,7 +10487,7 @@ Projected Image UK"></textarea>
             if (skView.uploads) card.append(skillUploads());
             if (skView.adding) card.append(skillEditor(null));
             if (!skills.length) {
-                if (!skView.adding && !skView.uploads) card.append(el('div', 'empty', 'No skills yet. Write one, or upload a Markdown file. Ideas: a brand voice guide, a discounting policy, an SEO checklist, or how to answer a trade enquiry.'));
+                if (!skView.adding && !skView.uploads) card.append(el('div', 'empty', 'No skills yet. Write one' + (skillCaps.upload ? ', or upload a Markdown file' : '') + '. Ideas: a brand voice guide, a discounting policy, an SEO checklist, or how to answer a trade enquiry.'));
                 return;
             }
             if (skills.length > 4) {
@@ -10924,17 +10938,21 @@ Projected Image UK"></textarea>
             const count = el('div', 'sk-count'); count.id = 'sk-count-' + (s ? s.id : 'new');
             const splitBtn = el('button', 'btn btn-sm'); splitBtn.type = 'button'; splitBtn.hidden = true;
             const say = (node, field, msg) => { node.hidden = !msg; node.textContent = msg || ''; markInvalid(field, !!msg); };
+            /* Anyone may edit a long skill the master saved, but not make it longer. */
+            const lim = Math.max(skillCaps.body, s ? String(s.content || '').trim().length : 0);
             const check = () => {
-                const n = bo.value.trim().length, over = n - skillCaps.body;
-                count.textContent = nf(n) + ' of ' + nf(skillCaps.body) + ' characters';
+                const n = bo.value.trim().length, over = n - lim;
+                count.textContent = nf(n) + ' of ' + nf(lim) + ' characters';
                 count.classList.toggle('over', over > 0);
                 const alwCap = skillCaps.always || 4000, tooLong = n > alwCap;
                 cb.disabled = tooLong && !cb.checked;
                 alwNote.textContent = tooLong ? (cb.checked ? ' Shorten it to ' + nf(alwCap) + ' characters, or turn this off, to save it.' : ' Only for a skill of up to ' + nf(alwCap) + ' characters.')
                     : ' For a short skill such as a brand voice.';
                 alwNote.classList.toggle('over', tooLong && cb.checked);
-                const pieces = over > 0 ? splitSkill(bo.value.trim(), skillCaps.body).length : 0;
-                say(bMsg, bo, over > 0 ? 'This is ' + nf(over) + ' characters over the limit for one skill. Shorten it, or split it into ' + pieces + ' skills.' : '');
+                const pieces = over > 0 ? splitSkill(bo.value.trim(), lim).length : 0;
+                say(bMsg, bo, over <= 0 ? ''
+                    : lim > skillCaps.body ? 'You can change this skill but not make it longer than it is: remove ' + nf(over) + ' characters. Only the master account can.'
+                    : 'This is ' + nf(over) + ' characters over the limit for one skill. Shorten it, or split it into ' + pieces + ' skills.');
                 splitBtn.hidden = !(over > 0) || !!s || pieces < 2;
                 splitBtn.textContent = 'Split into ' + pieces + ' skills';
                 const t = ti.value.trim().toLowerCase();
@@ -10948,7 +10966,7 @@ Projected Image UK"></textarea>
             ti.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); wh.focus(); } });
             fi.onchange = async () => {
                 const file = fi.files && fi.files[0]; fi.value = ''; if (!file) return;
-                if (file.size > 1000000) { toastError('That file is too large. Keep it under 1 MB.'); return; }
+                if (file.size > SKILL_FILE_MAX) { toastError('That file is too large. Keep it under 2 MB.'); return; }
                 if (bo.value.trim() && !await uiConfirm('Replace what is in the box with ' + file.name + '?', { title: 'Load from file', okText: 'Replace' })) return;
                 try {
                     /* A Markdown header fills the title and when it applies. */
@@ -11024,7 +11042,8 @@ Projected Image UK"></textarea>
                     say(bMsg, bo, (made ? made + ' of ' + parts.length + ' parts were saved before this one failed. ' : 'Nothing was saved. ') + (e.message || ''));
                 }
             };
-            row.append(fileBtn, fi, count, spacer, splitBtn, cancel, save);
+            if (skillCaps.upload) row.append(fileBtn, fi);
+            row.append(count, spacer, splitBtn, cancel, save);
             f.append(row);
             check();
             requestAnimationFrame(() => (s ? bo : ti).focus());
@@ -20490,7 +20509,7 @@ Projected Image UK"></textarea>
                 ['Track', 'On a recommended action, Track takes a snapshot of your headline figures and measures the change over the following weeks. Tracked changes are listed on Memory.'],
                 ['Deep analysis', 'Reactor thinks for longer before it answers, in the conversation it is switched on in: slower, and it costs more. For questions that need several reports at once.'],
                 ['Memory', 'The facts, decisions, preferences, learnings and follow-ups Reactor keeps from chat, and what it learned from the website. Add or correct a note by hand. A rule for how Reactor should work belongs in Skills, and a note that reads like one is offered as a skill.'],
-                ['Skills', 'Your playbooks: a brand voice, a discount policy, how to answer a trade enquiry. Write one, or upload Markdown files (a SKILL.md header gives the title and when it applies). Reactor picks the ones that fit each question, in chat, reports and email drafts, and says under each answer which it followed. Use in chat, or the Skills button beside the question box, applies one whatever the question; a short one can be applied to every answer.'],
+                ['Skills', 'Your playbooks: a brand voice, a discount policy, how to answer a trade enquiry. Write one, or, from the master account, which can also save longer skills, upload Markdown files (a SKILL.md header gives the title and when it applies). Reactor picks the ones that fit each question, in chat, reports and email drafts, and says under each answer which it followed. Use in chat, or the Skills button beside the question box, applies one whatever the question; a short one can be applied to every answer.'],
                 ['Having a skill read', 'Read and add, or Have Reactor read it, is an AI run in which Reactor reads the skill closely and writes down when it applies, what it will do, and anything unclear. Check it before you rely on the skill, and read it again after you change the skill.'],
             ]},
             { id: 'never', h: 'What the app will not do', body: [
@@ -27907,7 +27926,7 @@ Projected Image UK"></textarea>
             let sub = m.chat && m.deep && m.chat !== m.deep
                 ? 'Active: ' + m.chat + ' for chat, ' + m.deep + ' for Deep analysis and the reports.'
                 : 'Active, on ' + (m.chat || m.deep || 'Claude') + ' for chat and every report.';
-            if (m.fallback) sub += ' When it cannot answer, ' + m.fallback + ' does, and says so.';
+            if (m.fallback) sub += ' When it cannot answer, ' + m.fallback + ' does, and a chat answer says so under it.';
             const lf = ai.last_failure;
             let failing = false;
             if (lf && lf.at) {
