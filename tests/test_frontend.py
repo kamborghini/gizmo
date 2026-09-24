@@ -8576,15 +8576,16 @@ def t_deep_analysis_is_tagged_by_the_switch_not_the_model_name():
 
 
 @test
-def t_an_answer_the_fallback_gave_says_so_and_the_usage_panel_keeps_the_failure():
+def t_an_answer_the_fallback_gave_says_so_and_settings_keeps_the_failure():
     for name in ("function chatAnswer(", "function pageAssistant("):
         ok("fellBackNote(t)" in fn_src(name), name + " shows who answered when the chosen model failed")
     ok("fell_back: data.fell_back" in SCRIPT and "fell_back: res.fell_back" in SCRIPT, "and both keep it with the answer")
     note = fn_src("function fellBackNote(")
     ok("' answered this, because '" in note and "could not. " in note, note)
-    usage = fn_src("function loadUsage(")
-    ok("u.last_failure" in usage and "'Latest AI failure, '" in usage and "' answered instead.'" in usage,
-       "the admin's usage panel names the latest failure")
+    row = fn_src("function aiConnRow(")
+    ok("ai.last_failure" in row and "' Latest failure'" in row and "' answered instead.'" in row and "m.fallback" in row,
+       "Settings' Claude AI row names the model, the fallback and the latest failure")
+    ok("ANTHROPIC_API_KEY" not in SCRIPT, "and no setting name reaches the page")
 
 
 if __name__ == "__main__":

@@ -27900,6 +27900,25 @@ Projected Image UK"></textarea>
             row.append(left, pill);
             return row;
         }
+        function aiConnRow(ai) {
+            if (!ai.ok) return connRow('Claude AI', 'off', 'Not set up: the server has no Anthropic key. An admin adds it where Reactor is hosted.',
+                ['Active', 'Recent failure', 'Not set up']);
+            const m = ai.models || {};
+            let sub = m.chat && m.deep && m.chat !== m.deep
+                ? 'Active: ' + m.chat + ' for chat, ' + m.deep + ' for Deep analysis and the reports.'
+                : 'Active, on ' + (m.chat || m.deep || 'Claude') + ' for chat and every report.';
+            if (m.fallback) sub += ' When it cannot answer, ' + m.fallback + ' does, and says so.';
+            const lf = ai.last_failure;
+            let failing = false;
+            if (lf && lf.at) {
+                const when = new Date(lf.at);
+                sub += ' Latest failure' + (isNaN(when) ? '' : ', ' + when.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))
+                    + ': ' + (lf.model || 'the AI model') + ' failed. ' + (lf.why || '')
+                    + (lf.answered_by ? ' ' + lf.answered_by + ' answered instead.' : '');
+                failing = !lf.answered_by && !isNaN(when) && Date.now() - when.getTime() < 24 * 3600 * 1000;
+            }
+            return connRow('Claude AI', failing ? 'mid' : 'on', sub, ['Active', 'Recent failure', 'Not set up']);
+        }
         const CR_SEAL = ['Encrypted', 'Partly encrypted', 'Not encrypted'];
         const CR_PERM = ['All granted', 'Not checked', 'Missing'];
         async function loadConnections() {
@@ -28008,9 +28027,8 @@ Projected Image UK"></textarea>
                     + (errs.recent || []).map(e => e.where).filter((v, i, a) => a.indexOf(v) === i).join(', ')
                     + '. Send this to your developer.', ['', 'Failures', '']));
             }
-            // AI
-            host.append(connRow('Claude AI', s.ai && s.ai.ok ? 'on' : 'off',
-                s.ai && s.ai.ok ? 'Active. Powers every analysis and the chat.' : 'Add your ANTHROPIC_API_KEY to enable analysis and chat.'));
+            // AI: which model answers, and the latest failure in words
+            host.append(aiConnRow(s.ai || {}));
             // GA4
             host.append(connRow('Google Analytics 4',
                 g.ga4_ready ? 'on' : (g.connected || g.oauth_client) ? 'mid' : 'off',
@@ -28413,13 +28431,6 @@ Projected Image UK"></textarea>
                 top.append(el('b', null, '$' + (u.cost || 0).toFixed(2)));
                 top.append(document.createTextNode(' across ' + (u.runs || 0) + ' calls. Same volume on Sonnet ≈ $' + (u.cost_if_sonnet || 0).toFixed(2) + ', on Haiku ≈ $' + (u.cost_if_haiku || 0).toFixed(2) + '.'));
                 box.append(top);
-                const lf = u.last_failure;
-                if (lf && lf.at) {
-                    const when = new Date(lf.at);
-                    box.append(el('div', 'setting-sub', 'Latest AI failure, ' + (isNaN(when) ? '' : when.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) + ': '
-                        + (lf.model || 'the AI model') + ' failed. ' + (lf.why || '')
-                        + (lf.answered_by ? ' ' + lf.answered_by + ' answered instead.' : '')));
-                }
                 if (Array.isArray(u.by_kind) && u.by_kind.length) {
                     const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = 'var(--sp-2-5)'; const tbl = el('table', 'ktable');
                     const thead = el('thead'); const htr = el('tr');

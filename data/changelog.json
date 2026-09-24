@@ -22,7 +22,12 @@
     {
      "kind": "improved",
      "tab": "chat",
-     "text": "If Claude Opus 5.5 cannot answer, because it is busy, limited or not available to the account, Claude Opus 4.8 answers instead, and the answer says so and why. Settings shows the latest AI failure under AI usage."
+     "text": "If Claude Opus 5.5 cannot answer, because it is busy, limited or not available to the account, Claude Opus 4.8 answers instead, and the answer says so and why. In Settings, Connections names the model Reactor uses and its latest failure."
+    },
+    {
+     "kind": "fixed",
+     "tab": "chat",
+     "text": "A chat question Reactor runs out of room thinking about, which Deep analysis can, now says so and what to try, and one it declines says it declined, instead of \"Reactor did not send an answer\" for both."
     }
    ]
   },

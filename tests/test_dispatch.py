@@ -23157,7 +23157,8 @@ def t_an_ai_failure_says_what_it_was():
     w = copilot._ai_error_words
     ok("does not offer that model" in w(_api_status(404, "model: claude-opus-5-5", "not_found_error"))
        and "model: claude-opus-5-5" in w(_api_status(404, "model: claude-opus-5-5")), "a model the account cannot use")
-    ok("limit" in w(_api_status(429, "rate limited", "rate_limit_error")))
+    ok("limit" in w(_api_status(429, "rate limited", "rate_limit_error")) and "ask again" in w(_api_status(429)))
+    ok("ask again" not in w(_api_status(429), advice=False), "an answered question is not told to ask again")
     ok("busy or down" in w(_api_status(529, "Overloaded", "overloaded_error")) and "busy or down" in w(_api_status(500)))
     ok("key" in w(_api_status(401, "invalid x-api-key", "authentication_error")))
     ok("Anthropic said: messages.1: bad thing" in w(_api_status(400, "messages.1: bad thing")), "a refused request in Anthropic's words")
@@ -23178,9 +23179,10 @@ def t_an_ai_failure_says_what_it_was():
 @test
 def t_a_model_that_fails_is_answered_by_the_fallback_and_says_so():
     good = _OpusResp([_OpusBlock("tool_use", name="record", input={"total": 5}, id="t")], "tool_use")
-    saved = (copilot.MODEL_FALLBACK, dict(copilot._AI_LAST_FAIL))
+    saved = (copilot.MODEL_FALLBACK, dict(copilot._AI_LAST_FAIL), copilot.ERRORS_PATH)
     try:
         copilot.MODEL_FALLBACK = "claude-opus-4-8"
+        copilot.ERRORS_PATH = SCRATCH + "/app_errors.json"
         fake, resp = _opus_run("claude-opus-5-5", [_api_status(404, "model: claude-opus-5-5", "not_found_error"), good],
                                tool_choice={"type": "tool", "name": "record"}, output_config={"effort": "max"})
         eq([c["model"] for c in fake.calls], ["claude-opus-5-5", "claude-opus-4-8"])
@@ -23213,10 +23215,11 @@ def t_a_model_that_fails_is_answered_by_the_fallback_and_says_so():
             ok(False, "raised")
         except copilot.anthropic.APIStatusError:
             pass
-        # The usage panel is given the latest failure.
-        ok(copilot._usage_summary(30)["last_failure"]["model"] == "Claude Opus 5.5")
+        # Nobody answered that one, so it is in the app's error store too.
+        ok(any(r["where"].startswith("asking the AI (") and "Overloaded" in r["error"] for r in copilot._recent_errors(1)),
+           "an unanswered failure reaches the app errors")
     finally:
-        copilot.MODEL_FALLBACK = saved[0]
+        copilot.MODEL_FALLBACK, copilot.ERRORS_PATH = saved[0], saved[2]
         copilot._AI_LAST_FAIL.clear(); copilot._AI_LAST_FAIL.update(saved[1])
 
 
@@ -23273,6 +23276,42 @@ def t_a_failed_chat_tells_the_page_the_reason():
             copilot.run_chat = saved
     with_accounts(go)
 
+
+
+@test
+def t_settings_is_told_which_model_answers_and_its_latest_failure():
+    saved = dict(copilot._AI_LAST_FAIL)
+    def go():
+        ensure_auth()
+        _a, sess, _p = ready_user("Ada Status", "adas", role="admin")
+        copilot._AI_LAST_FAIL.clear()
+        copilot._AI_LAST_FAIL.update({"at": "2026-09-24T13:05:00+00:00", "model": "Claude Opus 5.5",
+                                      "why": "Reactor has reached the AI service's limit for its account.", "answered_by": "Claude Opus 4.8"})
+        ai = post_s(sess, "/api/status", {}).json()["ai"]
+        eq(ai["models"]["chat"], copilot._model_name(copilot.MODEL_FAST))
+        eq(ai["last_failure"]["answered_by"], "Claude Opus 4.8")
+    try:
+        with_accounts(go)
+    finally:
+        copilot._AI_LAST_FAIL.clear(); copilot._AI_LAST_FAIL.update(saved)
+
+
+@test
+def t_a_chat_that_ran_out_of_room_or_was_declined_says_so():
+    """Opus 5.5 thinks on every request and the thinking counts against the
+    token limit: a Deep analysis that used it all ended as "Reactor did not
+    send an answer", like a refusal did."""
+    saved = (copilot._client, copilot._spend_guard)
+    copilot._spend_guard = lambda: None
+    async def dispatch(name, args):
+        return "{}"
+    try:
+        for stop, words in (("max_tokens", "ran out of room"), ("refusal", "declined to answer")):
+            copilot._client = _OpusFake([_OpusResp([_OpusBlock("thinking", thinking="", signature="s")], stop)])
+            r = _run(copilot.run_chat([{"role": "user", "content": "Everything, in depth"}], dispatch, [], "claude-opus-5-5"))
+            ok(words in r["structured"]["summary"], (stop, r["structured"]))
+    finally:
+        copilot._client, copilot._spend_guard = saved
 
 for fn in TESTS:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The

@@ -3073,33 +3073,37 @@ def _ai_said(e: Exception) -> str:
     return _strip_dashes(msg[:240])
 
 
-def _ai_error_words(e: Exception) -> str:
+def _ai_error_words(e: Exception, advice: bool = True) -> str:
     """What the page says when an AI call failed: which kind of failure it
-    was, with Anthropic's own words where they tell it apart. Every failure
-    used to read "The AI service returned an error", so a refused request, a
-    model the account cannot use and a busy service looked the same."""
+    was, with Anthropic's own words where they tell it apart, and what to do
+    (left off where another model answered, and there is nothing to do).
+    Every failure used to read "The AI service returned an error", so a
+    refused request, a model the account cannot use and a busy service
+    looked the same."""
+    def say(why, then=""):
+        return why + (" " + then if advice and then else "")
     if isinstance(e, anthropic.APITimeoutError):
-        return "The AI service took too long to answer. Please try again."
+        return say("The AI service took too long to answer.", "Please try again.")
     if isinstance(e, anthropic.APIConnectionError):
-        return "Reactor could not reach the AI service. Please try again."
+        return say("Reactor could not reach the AI service.", "Please try again.")
     status = getattr(e, "status_code", 0) or 0
     said = _ai_said(e)
     if status == 401:
-        return "The AI service did not accept Reactor's key. An admin needs to check it."
+        return say("The AI service did not accept Reactor's key.", "An admin needs to check it.")
     if status == 413:
-        return "That was too much to send in one go. Start a new chat, or ask about less at once."
+        return say("That was too much to send in one go.", "Start a new chat, or ask about less at once.")
     if status == 429:
-        return "Reactor has reached the AI service's limit for its account. Wait a minute and ask again."
+        return say("Reactor had reached the AI service's limit for its account.", "Wait a minute and ask again.")
     if status == 529 or status >= 500:
-        return "The AI service is busy or down right now. Please try again shortly."
+        return say("The AI service was busy or down.", "Please try again shortly.")
     if status == 404:
         return "The AI service does not offer that model to Reactor's account. Anthropic said: " + said
     if said:
         return "The AI service refused the request. Anthropic said: " + said
-    return "The AI service returned an error. Please try again."
+    return say("The AI service returned an error.", "Please try again.")
 
 
-# The latest AI failure, for the admin's AI usage panel: the page tells the
+# The latest AI failure, for Settings' Claude AI row: the page tells the
 # person who asked, once; this keeps it for whoever looks next.
 _AI_LAST_FAIL: dict = {}
 # Set by _xcreate when the fallback model answered, for run_chat to say so.
@@ -3107,10 +3111,14 @@ _ai_fell_back: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVar
 
 
 def _note_ai_failure(model: str, e: Exception, answered_by: str = "") -> None:
+    """Kept for Settings' Claude AI row, and, when no model answered, in the
+    app's error store with Anthropic's full reply for the developer."""
     _AI_LAST_FAIL.clear()
     _AI_LAST_FAIL.update({"at": datetime.now(timezone.utc).isoformat(), "model": _model_name(model),
-                          "why": _ai_error_words(e), "answered_by": _model_name(answered_by) if answered_by else "",
+                          "why": _ai_error_words(e, advice=False), "answered_by": _model_name(answered_by) if answered_by else "",
                           "kind": _ai_kind.get("ai")})
+    if not answered_by:
+        _record_error("asking the AI (" + str(_ai_kind.get("ai")) + ")", e)
 
 
 def _fallback_for(model: str, e: Exception) -> str:
@@ -3164,7 +3172,7 @@ async def _xcreate(client, **kwargs):
             _note_ai_failure(model, e)
             raise e
         _note_ai_failure(model, e, fb)
-        _ai_fell_back.set({"from": model, "to": fb, "why": _ai_error_words(e)})
+        _ai_fell_back.set({"from": model, "to": fb, "why": _ai_error_words(e, advice=False)})
         kwargs = alt
     except anthropic.APIError as e:
         _note_ai_failure(str(kwargs.get("model") or ""), e)
@@ -3228,7 +3236,6 @@ def _usage_summary(days: int = 30) -> dict:
     return {"days": days, "runs": len(ev), "cost": round(tot_cost, 4),
             "in": int(tot_in), "out": int(tot_out),
             "cost_if_sonnet": round(cost_sonnet, 4), "cost_if_haiku": round(cost_haiku, 4),
-            "last_failure": dict(_AI_LAST_FAIL) or None,
             "by_kind": sorted(by_kind.values(), key=lambda x: -x["cost"])}
 
 
@@ -3525,6 +3532,13 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
         if not data_uses:
             # Ended without present_response — wrap any prose as the summary.
             text = "".join(text_parts).strip()
+            stop = getattr(resp, "stop_reason", "")
+            if not text and stop == "max_tokens":
+                # Thinking counts against the limit, and Deep analysis thinks most.
+                text = ("Reactor ran out of room while working this out, before it could answer. "
+                        "Ask again, narrow the question, or switch Deep analysis off for a shorter think.")
+            elif not text and stop == "refusal":
+                text = "Reactor declined to answer that. Try asking it another way."
             return {"structured": {"summary": text or "Reactor did not send an answer. Ask again."}, "tools_used": tools_used,
                     "data_used": data_used, "model": model, "_saw": "\n".join(saw), **_fell_back_words()}
 
@@ -25733,7 +25747,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         # performs but the install cannot is invisible until
                         # the moment it matters, which is the wrong moment.
                         "scopes": scope_state},
-            "ai": {"ok": bool(ANTHROPIC_API_KEY)},
+            "ai": {"ok": bool(ANTHROPIC_API_KEY),
+                   "models": {"chat": _model_name(MODEL_FAST), "deep": _model_name(MODEL_DEEP),
+                              "fallback": "" if not _fallback_for("", Exception()) else _model_name(MODEL_FALLBACK)},
+                   "last_failure": dict(_AI_LAST_FAIL) or None},
             "google": google_data.status(),
             "gmail": google_mail.status(),
             "shipping": {"ok": bool(worldoptions and worldoptions.configured()),
