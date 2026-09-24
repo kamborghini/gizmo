@@ -4026,8 +4026,9 @@ def t_money_is_formatted_by_intl_and_survives_a_bad_currency_code():
 def t_the_skills_captions_are_real_labels():
     """They were sibling <label>s with no `for`: visible text that named nothing,
     so both fields announced as bare inputs."""
-    ok(SCRIPT.count("el('label', 'sk-field')") == 2,
-       "the one skills editor, for a new skill and an edit alike, wraps each of its two fields in the label")
+    ed, up = fn_src("function skillEditor("), fn_src("function uploadRow(")
+    ok(ed.count("el('label', 'sk-field')") == 3 and up.count("el('label', 'sk-field')") == 2,
+       "the one skills editor wraps each of its three fields in its label, and so does a file being added")
     ok("el('div', 'sk-field')" not in SCRIPT, "and no orphan caption is left")
 
 
@@ -7546,7 +7547,7 @@ def t_a_half_written_skill_survives_a_tab_switch():
     js = MINIDOM + r"""
 const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
 $('view-skills').classList.add('active');
-let skills = [], skillsLoadErr = '', paints = 0;
+let skills = [], skillsLoadErr = '', paints = 0; const skView = {}; const skillCaps = {};
 async function api() { return { skills: [{ id: 's1', title: 'Promo', content: 'x' }] }; }
 function renderSkills() { paints += 1; }
 const title = el('input'); title.dataset.initial = ''; const body = el('textarea'); body.value = 'x'; body.dataset.initial = 'x';
@@ -8161,6 +8162,14 @@ def eq(a, b, msg=""):
     ok(a == b, "%s: %r != %r" % (msg or "equal", a, b))
 
 
+def md_src():
+    """Every piece of the page's Markdown renderer, for a node harness."""
+    consts = "".join(m.group(0) for m in re.finditer(
+        r"        const (?:MD_LI|mdEsc|mdUnesc|MD_INLINE|MD_FM_KEYS) = [^\n]*\n", SCRIPT))
+    return consts + "\n".join(fn_src(n) for n in ("function yamlScalar(", "function mdFrontmatter(", "function mdInline(",
+                                                   "function mdList(", "function mdNodes(", "function proseNodes(", "function pipeTable("))
+
+
 @test
 def t_the_release_notes_are_ui_copy_and_keep_up_with_the_app():
     """What's new stopped at 8 Sep while sixty changes shipped, and its notes
@@ -8286,12 +8295,13 @@ def t_an_answer_in_prose_is_drawn_as_prose():
     if not _node_ok():
         print("       (node unavailable, skipped)")
         return
-    js = MINIDOM + "document.createDocumentFragment = () => new Node_('#fragment');\n" + fn_src("function proseNodes(") + "\n" + fn_src("function pipeTable(") + r"""
+    js = (MINIDOM + "document.createDocumentFragment = () => new Node_('#fragment');\n" + md_src()
+          + r"""
 const f = proseNodes('## Where it came from\n- **Wedding** gobos\n- Steel\n\n| Product | Orders |\n|---|---|\n| Monogram | 9 |\nThat is all.');
 const tags = f.children.map(n => n.tagName);
 const tbl = f.children.find(n => n.className.includes('ktable-wrap'));
 console.log(JSON.stringify({ tags, text: f.textContent, rows: tbl.children[0].children[1].children.length }));
-"""
+""")
     got = _run_node(js)
     eq(got["tags"], ["H4", "UL", "DIV", "P"], "a heading, a list, a table and a paragraph")
     ok("**" not in got["text"] and "##" not in got["text"] and "---" not in got["text"], got["text"])
@@ -8374,6 +8384,165 @@ def t_what_the_checker_found_stays_fixed():
     ok("c.id === activeId ? -3 : undefined" in fn_src("function save("), "a full store trims previews before it drops a conversation")
     ok("if (!skills.length && tabAllowed('skills')) loadSkills();" in SCRIPT, "an applied skill keeps its name after a reload")
     ok("followups_maybe" in fn_src("function chatAnswer("), "a follow-up the answer only thinks is done is offered, not closed")
+
+
+@test
+def t_a_markdown_skill_file_is_read_as_it_was_written():
+    """Upload Markdown reads a Claude-style SKILL.md the way the server does:
+    its header's name and description, the first heading only when it is the
+    title, the file's name when there is nothing else."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = ("const cap = s => { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); };\n"
+          "const skillCaps = { title: 120, body: 1000, when: 400 };\n"
+          + re.search(r"        const MD_FM_KEYS = [^\n]*\n", SCRIPT).group(0)
+          + "\n".join(fn_src(n) for n in ("function yamlScalar(", "function mdFrontmatter(", "function skillWords(", "function cutWords(",
+                                          "function parseSkillMd(", "function splitSkill(", "function splitTitles("))
+          + r"""
+const md = '---\nname: trade-enquiry-replies\ndescription: >\n  Use when answering a trade enquiry\n  about prices.\nallowed-tools: Read\n---\n\n# Trade enquiry replies\n\n## Prices\n- Glass £85\n';
+const a = parseSkillMd(md, 'x.md');
+const b = parseSkillMd('\ufeffNo header here.', 'discount_policy.md');
+const c = parseSkillMd('---\ntitle: "Brand voice"\ndescription: \'Every customer email\'\n---\nBe warm.', 'b.md');
+const long = '## Pricing\n' + 'p '.repeat(300) + '\n## Lead times\n' + 'l '.repeat(300) + '\n## Tone\n' + 't '.repeat(300);
+const parts = splitSkill(long, 1000);
+console.log(JSON.stringify({ a, b, c, n: parts.length, heads: parts.map(p => p.split('\n')[0]), titles: splitTitles('Wedding', parts),
+  whole: parts.join('\n').replace(/\s+/g, ' ') === long.replace(/\s+/g, ' ').trim() }));
+""")
+    got = _run_node(js)
+    eq(got["a"], {"title": "Trade enquiry replies", "when": "Use when answering a trade enquiry about prices.", "content": "## Prices\n- Glass £85", "cut": []})
+    eq(got["b"]["title"], "Discount policy", "named after the file")
+    eq((got["c"]["title"], got["c"]["when"], got["c"]["content"]), ("Brand voice", "Every customer email", "Be warm."), "quoted values unquoted")
+    eq(got["heads"], ["## Pricing", "## Lead times", "## Tone"], "split at its own headings")
+    eq(got["titles"], ["Wedding: Pricing", "Wedding: Lead times", "Wedding: Tone"], "each part named after its heading")
+    ok(got["whole"], "and nothing lost")
+
+
+@test
+def t_markdown_is_drawn_as_elements_and_never_as_markup():
+    """A skill file is the merchant's, but it is still text from a file: every
+    part of it is set as text, and a link opens only as a web address."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = (MINIDOM + "document.createDocumentFragment = () => new Node_('#fragment');\n" + md_src()
+          + r"""
+const f = mdNodes('---\nname: x\n---\n# Title\n\n1. First\n   - nested **bold**\n2. Second\n\n- [x] done\n- [ ] to do\n\n```\n# not a heading\n<b>raw</b>\n```\n\n> quoted *em*\n\n---\n\n[site](https://projectedimage.co.uk) [bad](javascript:alert(1)) `code` <img src=x onerror=alert(1)>');
+const walk = (n, out) => { out.push(n.tagName + (n.href ? '@' + n.href : '')); n.children.forEach(c => walk(c, out)); return out; };
+const tags = walk(f, []);
+console.log(JSON.stringify({ top: f.children.map(n => n.tagName), tags, text: f.textContent, html: tags.some(t => /IMG|SCRIPT|^B$/.test(t)) }));
+""")
+    got = _run_node(js)
+    eq(got["top"], ["H4", "OL", "UL", "PRE", "BLOCKQUOTE", "HR", "P"], "heading, steps, tick list, code, quote, rule, paragraph")
+    ok("UL" in got["tags"][got["tags"].index("OL"):], "a list inside a step")
+    ok("STRONG" in got["tags"] and "EM" in got["tags"] and "CODE" in got["tags"], "bold, italic and code words")
+    ok("A@https://projectedimage.co.uk" in got["tags"] and not any("javascript" in t for t in got["tags"]), "only a web address is a link")
+    ok(not got["html"] and "<img src=x onerror=alert(1)>" in got["text"] and "<b>raw</b>" in got["text"], "markup in a file stays text")
+    ok("name: x" not in got["text"] and "# not a heading" in got["text"], "the header is dropped; a code block keeps its marks")
+
+
+@test
+def t_skills_can_be_uploaded_read_and_tried():
+    paint = fn_src("function paintSkills(")
+    ok("'Upload Markdown'" in paint and "fi.multiple = true" in paint, "several .md files at once")
+    ok("'drop'" in fn_src("function renderSkills(") and "startUpload(e.dataTransfer.files)" in fn_src("function renderSkills("), "or dropped on the card")
+    up = fn_src("function skillUploads(")
+    ok("Read and add" in up and "AI runs, one for each skill" in up and "Read and add is an AI run" in up,
+       "reading is a button that says how many AI runs it is")
+    ok("'/api/skills/read'" in fn_src("async function readSkill(") and "'/api/skills/read'" in fn_src("async function addUploads("), "one route reads a skill")
+    rp = fn_src("function readingPanel(")
+    for bit in ("'What it will do'", "'Where it would use it'", "'To check'", "'Read again'", "Changed since it was read"):
+        ok(bit in rp, "the reading shows " + bit)
+    ok("useSkillInChat(s.id); $('input').value = q" in rp, "an example question opens chat with the skill applied")
+    ok("mdNodes(s.content" in fn_src("function skillItem("), "a skill is shown as the document it is")
+
+
+@test
+def t_markdown_the_reviewer_found_drawn_wrongly_is_drawn_right():
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = (MINIDOM + "document.createDocumentFragment = () => new Node_('#fragment');\n" + md_src()
+          + r"""
+const draw = (t) => { const f = mdNodes(t); const walk = (n, o) => { o.push(n.tagName + (n.href ? '@' + n.href : '')); n.children.forEach(c => walk(c, o)); return o; }; return { tags: walk(f, []), text: f.textContent, top: f.children.map(n => n.tagName) }; };
+const out = {
+  linkBold: draw('[the **shop**](https://a.test)'),
+  image: draw('![gobo photo](https://a.test/x.png) here'),
+  escaped: draw('\\*not italic\\* and snake_case_word and _em_'),
+  boldItalic: draw('***both***'),
+  table: draw('Gobo | Price\n--- | ---\nGlass | `£85`\nA\\|B | x'),
+  paren: draw('[wiki](https://en.wikipedia.org/wiki/Gobo_(lighting))'),
+  js: draw('[bad](javascript:alert(1))'),
+  cont: draw('- First item\n\n  More about it.\n- Second'),
+  setext: draw('Big title\n===\nText'),
+  comment: draw('Before <!-- hidden --> after'),
+  rule: draw('---\nAlways quote in GBP.\n---\nNever promise dates.'),
+};
+console.log(JSON.stringify(out));
+""")
+    g = _run_node(js)
+    ok("A@https://a.test" in g["linkBold"]["tags"] and "STRONG" in g["linkBold"]["tags"] and "**" not in g["linkBold"]["text"], g["linkBold"])
+    eq(g["image"]["text"], "gobo photo here", "a picture stands as its words")
+    ok(g["escaped"]["text"] == "*not italic* and snake_case_word and em" and g["escaped"]["tags"].count("EM") == 1, g["escaped"])
+    ok("STRONG" in g["boldItalic"]["tags"] and "EM" in g["boldItalic"]["tags"] and "*" not in g["boldItalic"]["text"], g["boldItalic"])
+    ok(g["table"]["top"] == ["DIV"] and "CODE" in g["table"]["tags"] and "A|B" in g["table"]["text"] and "---" not in g["table"]["text"], g["table"])
+    ok("A@https://en.wikipedia.org/wiki/Gobo_(lighting)" in g["paren"]["tags"], g["paren"])
+    ok(not any("javascript" in t for t in g["js"]["tags"]) and g["js"]["text"] == "bad", g["js"])
+    eq(g["cont"]["top"], ["UL"], "an item's carried-on paragraph stays in its list")
+    eq(g["setext"]["top"][0], "H4")
+    eq(g["comment"]["text"], "Before  after")
+    ok("Always quote in GBP." in g["rule"]["text"], "a text that opens with a rule keeps its first paragraph")
+
+
+@test
+def t_adding_files_loses_nothing_and_says_what_it_costs():
+    up = fn_src("function skillUploads(")
+    ok("more.disabled = busy" in up and "cancel.disabled = busy" in up, "nothing in the review can change while it is being added")
+    ok("'Read and add ' + n + ' skills'" in up, "the button counts the skills, which is the number of AI runs")
+    ok("uiConfirm('Leave out" in up, "Cancel asks before throwing a review away")
+    row = fn_src("function uploadRow(")
+    ok("rm.disabled = busy" in row and "ti.readOnly = busy" in row, "and neither can a row")
+    ok("u.saveErr ||" in row and "': added'" in row, "a server's refusal sits under the title with the fields kept, and a saved part says so")
+    add = fn_src("async function addUploads(")
+    ok("(p.u.savedIdx = p.u.savedIdx || []).push(p.j)" in add and "uploadPlan(u).length" in add,
+       "a file stays while any part of it is still to add, and a retry sends only those parts")
+    ok("toastError('Wait for these files to be added" in fn_src("function startUpload(") and "if (!skView.uploads && !skillGuard()) return;" in fn_src("function startUpload("),
+       "a drop during a run is refused with a reason, and during a review it joins it")
+    ok("new TextDecoder('utf-8', { fatal: true })" in fn_src("async function readTextFile(") and "windows-1252" in fn_src("async function readTextFile("),
+       "a file that is not UTF-8 is read as Windows text and said so")
+    ok("had && had !== q && !await uiConfirm(" in fn_src("function readingPanel("), "an example question never overwrites one being typed")
+    ok("'Apply to every answer and email draft'" in fn_src("function skillEditor("), "a short skill can be applied to every answer")
+
+
+@test
+def t_a_retitled_file_adds_only_what_is_left_and_odd_text_is_read():
+    """After part of a long file was added, a new title re-added the saved
+    parts under it; the wording of a split said 'headings' for text with
+    none; and a Windows file lost its pound signs."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = ("const skillCaps = { title: 120, body: 1000, when: 400 };\n"
+          + "\n".join(fn_src(n) for n in ("function splitSkill(", "function splitHow(", "function splitTitles(",
+                                          "function uploadPlan(", "function uploadParts(", "async function readTextFile("))
+          + r"""
+const long = '## Pricing\n' + 'p '.repeat(300) + '\n## Lead times\n' + 'l '.repeat(300) + '\n## Tone\n' + 't '.repeat(300);
+const u = { title: 'Playbook', content: long, savedIdx: [0, 1] };
+const before = uploadPlan(u).map(p => [p.j, p.title]);
+u.title = 'Playbook renamed';
+const after = uploadPlan(u).map(p => [p.j, p.title]);
+const how = [splitHow('## A\nx'), splitHow('a\n\nb'), splitHow('x'.repeat(50))];
+(async () => {
+  const f = { arrayBuffer: async () => new Uint8Array([0xA3, 0x38, 0x35, 0x20, 0x63, 0x61, 0x66, 0xE9]).buffer };
+  const r = await readTextFile(f);
+  console.log(JSON.stringify({ before, after, how, text: r.text, note: !!r.note }));
+})();
+""")
+    g = _run_node(js)
+    eq(g["before"], [[2, "Playbook: Tone"]])
+    eq(g["after"], [[2, "Playbook renamed: Tone"]], "a new title renames only the part still to add")
+    eq(g["how"], ["split at its headings", "split at paragraph breaks", "cut into parts, as it has no headings or paragraph breaks"])
+    ok(g["text"] == "\u00a385 caf\u00e9" and g["note"], "Windows text is read as such, and said so: %r" % g)
 
 
 if __name__ == "__main__":

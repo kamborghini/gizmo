@@ -1564,6 +1564,64 @@
         .sk-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-4); margin-top: var(--sp-2); }
         .sk-more { background: transparent; border: 0; color: var(--action-primary); font: inherit; font-size: var(--text-xs); font-weight: var(--weight-medium); padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
         .sk-meta { font-size: var(--text-xs); color: var(--text-tertiary); }
+        .sk-when { font-size: var(--text-sm); color: var(--text-secondary); margin: var(--sp-1-5) 0 0; max-width: 75ch; line-height: var(--lh-body); }
+        .sk-body.md { white-space: normal; }
+        .sk-foot .sk-read { margin-left: auto; }
+        .sk-when-input { min-height: calc(var(--lh-body) * 1em * 2 + var(--sp-3)); resize: vertical; line-height: var(--lh-body); }
+        /* Files dropped on the card, and the files being checked. */
+        .sk-card.drop-on { box-shadow: var(--ring-action-2); }
+        .sk-upload { display: grid; gap: var(--sp-2); }
+        .sk-upload-note, .sk-upload-cost { font-size: var(--text-sm); color: var(--text-secondary); margin: 0; max-width: 75ch; line-height: var(--lh-body); }
+        .sk-upload-cost { font-size: var(--text-xs); color: var(--text-tertiary); }
+        /* One column that never grows past the card: a preview's table
+           scrolls inside its wrapper instead of pushing the row off screen. */
+        .sk-up-list { display: grid; gap: var(--sp-3); grid-template-columns: minmax(0, 1fr); }
+        .sk-up { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); padding: var(--sp-3); display: grid; gap: var(--sp-1); grid-template-columns: minmax(0, 1fr); }
+        .sk-up-warn { margin: var(--sp-1) 0 0; color: var(--text-primary); }
+        .sk-check { display: flex; align-items: flex-start; gap: var(--sp-2); font-size: var(--text-sm); margin: 0 0 var(--sp-3); flex-wrap: wrap; }
+        .sk-check input { margin-top: var(--sp-0-5); }
+        .sk-check-note { color: var(--text-tertiary); font-size: var(--text-xs); }
+        .sk-check-note.over { color: var(--error); }
+        .sk-head > .sk-always { flex: none; align-self: center; }
+        .sk-up-top { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; margin-bottom: var(--sp-1); }
+        .sk-up-top > .ic svg { width: var(--icon-sm); height: var(--icon-sm); display: block; color: var(--text-tertiary); }
+        .sk-up-name { font-size: var(--text-sm); font-weight: var(--weight-medium); overflow-wrap: anywhere; min-width: 0; }
+        .sk-up-size { font-size: var(--text-xs); color: var(--text-tertiary); white-space: nowrap; margin-right: auto; }
+        .sk-up .sk-field { margin-bottom: var(--sp-2); }
+        .sk-up-stat { font-size: var(--text-xs); color: var(--text-secondary); line-height: var(--lh-body); }
+        .sk-up-parts { margin: var(--sp-1) 0 0; padding-left: var(--sp-5); }
+        .sk-preview summary, .sk-reading summary { font-size: var(--text-sm); font-weight: var(--weight-medium); cursor: pointer;
+            display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); padding-block: var(--sp-1); list-style: none; }
+        .sk-preview summary::-webkit-details-marker, .sk-reading summary::-webkit-details-marker { display: none; }
+        /* A disclosure shows a caret that turns when it opens. */
+        .sk-preview summary::before, .sk-reading summary::before { content: ""; width: 0; height: 0; border-left: var(--sp-1) solid currentColor;
+            border-top: var(--sp-1) solid transparent; border-bottom: var(--sp-1) solid transparent; transition: transform var(--dur) var(--ease); }
+        .sk-preview[open] summary::before, .sk-reading[open] summary::before { transform: rotate(90deg); }
+        .sk-preview-doc { margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: var(--bw-hairline) solid var(--border-default); }
+        /* How Reactor reads a skill: what it will do, where, and what to check. */
+        .sk-reading { margin-top: var(--sp-3); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md); padding: var(--sp-2) var(--sp-3); }
+        .sk-reading-body { display: grid; gap: var(--sp-3); padding: var(--sp-2) 0 var(--sp-1); }
+        .sk-rules, .sk-questions { margin: 0; padding-left: var(--sp-5); display: grid; gap: var(--sp-1); }
+        .sk-examples { display: flex; flex-wrap: wrap; gap: var(--sp-1-5); }
+        .sk-examples .chip { text-align: left; }
+        .sk-reading-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-2); }
+        /* Markdown, drawn: a skill, a prose answer, what Reactor learned. */
+        :is(.md, .prose, .know-text) :is(p, ul, ol, pre, blockquote, .prose-table) { margin: 0 0 var(--sp-2); }
+        :is(.md, .prose, .know-text) :is(ul, ol) { padding-left: var(--sp-5); }
+        :is(.md, .prose, .know-text) li { margin: var(--sp-0-5) 0; }
+        :is(.md, .prose, .know-text) li > :is(ul, ol) { margin: var(--sp-0-5) 0 0; }
+        :is(.md, .prose, .know-text) .md-h { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-primary); margin: var(--sp-4) 0 var(--sp-1); }
+        :is(.md, .prose, .know-text) h5.md-h { color: var(--text-secondary); margin-top: var(--sp-3); }
+        :is(.md, .prose, .know-text) > .md-h:first-child { margin-top: 0; }
+        :is(.md, .prose, .know-text) strong { font-weight: var(--weight-medium); color: var(--text-primary); }
+        .md-ic { font-family: var(--font-mono); font-size: var(--text-xs); background: var(--surface-sunken); border-radius: var(--radius-xs); padding: 0 var(--sp-1); }
+        .md-code { font-family: var(--font-mono); font-size: var(--text-xs); background: var(--surface-sunken); border-radius: var(--radius-sm);
+            padding: var(--sp-2) var(--sp-3); white-space: pre-wrap; overflow-wrap: anywhere; line-height: var(--lh-body); }
+        .md-quote { border-left: var(--bw-hairline) solid var(--border-emphasis); padding-left: var(--sp-3); color: var(--text-secondary); }
+        .md-hr { border: 0; border-top: var(--bw-hairline) solid var(--border-default); margin: var(--sp-3) 0; }
+        .md-a { color: var(--text-primary); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); overflow-wrap: anywhere; }
+        .md-task { color: var(--text-tertiary); }
+        .md .prose-table { max-width: 100%; }
         /* How they are used: a term and its facts, in two columns. */
         .sk-facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-2) var(--sp-4); margin: 0; font-size: var(--text-sm); line-height: var(--lh-body); }
         .sk-facts dt { color: var(--text-tertiary); }
@@ -6805,38 +6863,171 @@ Projected Image UK"></textarea>
             });
             return p;
         }
-        /* An answer written as prose, when the model ended without the
-           answer tool: its headings, lists and tables drawn as such. It was
-           one run-on paragraph with '##', '**' and '|---|' in it. */
-        function proseNodes(text) {
-            const frag = document.createDocumentFragment();
-            const lines = String(text || '').replace(/\*\*|__|`/g, '').split('\n');
-            let i = 0, list = null, para = [];
-            const flush = () => { if (para.length) { frag.append(el('p', null, para.join(' '))); para = []; } };
+        /* ---------- Markdown ----------
+           One renderer for a skill, an answer written as prose and what
+           Reactor learned from the website: headings, paragraphs, lists (one
+           inside another), numbered steps, tick boxes, quotes, code, rules,
+           tables, bold, italic, code words and links. It builds elements and
+           sets only their text, so nothing in a file or an answer can become
+           markup; a link opens only when it is a web address. */
+        const MD_LI = /^(\s*)([-*+•]|\d{1,3}[.)])\s+(.*)$/;
+        /* A character escaped with a backslash stands for itself: it is held
+           as a private-use stand-in while the marks are read, then put back. */
+        const mdEsc = (s) => String(s || '').replace(/\\([\\\x60*_\[\]()#+\-.!|>~])/g, (m, c) => String.fromCharCode(0xE000 + c.charCodeAt(0)));
+        const mdUnesc = (s) => String(s || '').replace(/[-]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xE000));
+        const MD_INLINE = /(\x60+)([^\x60]+?)\1|!\[([^\]]*)\]\((?:[^()\s]|\([^()\s]*\))+\)|\*\*\*([^*]+?)\*\*\*|\*\*([^*]+?)\*\*|(^|[^\w])__([^_]+?)__(?!\w)|\*([^*\s][^*]*?)\*|(^|[^\w])_([^_\s][^_]*?)_(?!\w)|\[((?:[^\[\]]|\[[^\]]*\])+)\]\(((?:[^()\s]|\([^()\s]*\))+)(?:\s+"[^"]*")?\)/g;
+        function mdInline(node, text) {
+            const re = new RegExp(MD_INLINE.source, 'g');
+            let last = 0, m;
+            const s = mdEsc(text);
+            const txt = (t) => document.createTextNode(mdUnesc(t));
+            while ((m = re.exec(s))) {
+                if (m.index > last) node.append(txt(s.slice(last, m.index)));
+                if (m[1]) node.append(el('code', 'md-ic', mdUnesc(m[2])));
+                else if (m[0][0] === '!' && m[3] !== undefined) { if (m[3]) node.append(txt(m[3])); }   /* a picture stands as its words */
+                else if (m[4]) { const b = el('strong'), e = el('em'); mdInline(e, mdUnesc(m[4])); b.append(e); node.append(b); }
+                else if (m[5]) { const b = el('strong'); mdInline(b, mdUnesc(m[5])); node.append(b); }
+                else if (m[7]) { node.append(txt(m[6])); const b = el('strong'); mdInline(b, mdUnesc(m[7])); node.append(b); }
+                else if (m[8]) { const e = el('em'); mdInline(e, mdUnesc(m[8])); node.append(e); }
+                else if (m[10]) { node.append(txt(m[9])); const e = el('em'); mdInline(e, mdUnesc(m[10])); node.append(e); }
+                else if (m[11]) {
+                    const href = mdUnesc(m[12]);
+                    if (/^https?:\/\//i.test(href)) { const a = el('a', 'md-a'); mdInline(a, mdUnesc(m[11])); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; node.append(a); }
+                    else mdInline(node, mdUnesc(m[11]));
+                }
+                last = re.lastIndex;
+            }
+            if (last < s.length) node.append(txt(s.slice(last)));
+            return node;
+        }
+        const mdIndent = (l) => (l.match(/^\s*/)[0]).replace(/\t/g, '    ').length;
+        function mdList(lines, i, indent) {
+            const first = lines[i].match(MD_LI);
+            const ordered = /\d/.test(first[2]);
+            const list = el(ordered ? 'ol' : 'ul', 'md-list');
+            if (ordered && parseInt(first[2], 10) > 1) list.start = parseInt(first[2], 10);
+            let li = null;
             while (i < lines.length) {
-                const t = lines[i].trim();
+                const line = lines[i];
+                if (!line.trim()) {
+                    /* A blank line inside a list keeps it going when the list,
+                       or the item's own carried-on text, resumes. */
+                    let j = i + 1; while (j < lines.length && !lines[j].trim()) j++;
+                    const nx = j < lines.length && lines[j].match(MD_LI);
+                    const nInd = nx ? nx[1].replace(/\t/g, '    ').length : -1;
+                    const under = j < lines.length && !nx && li && mdIndent(lines[j]) > indent;
+                    /* Only the same list, or one inside it: a bulleted list
+                       after a numbered one is a list of its own. */
+                    if (under || (nx && (nInd > indent || (nInd === indent && /\d/.test(nx[2]) === ordered)))) { i = j; continue; }
+                    break;
+                }
+                const m = line.match(MD_LI);
+                const ind = mdIndent(line);
+                if (!m) {
+                    /* A line indented under an item carries it on, after a
+                       blank line too: it split the list in two. */
+                    if (li && ind > indent) {
+                        if (i > 0 && !lines[i - 1].trim()) li.append(el('br')); else li.append(document.createTextNode(' '));
+                        mdInline(li, line.trim()); i++; continue;
+                    }
+                    break;
+                }
+                if (ind < indent || (ind === indent && /\d/.test(m[2]) !== ordered)) break;
+                if (ind > indent) {
+                    const r = mdList(lines, i, ind);
+                    (li || list).append(r[0]); i = r[1]; continue;
+                }
+                li = el('li');
+                let body = m[3];
+                const task = body.match(/^\[( |x|X)\]\s+(.*)$/);
+                if (task) { li.append(el('span', 'md-task', task[1].trim() ? '☑ ' : '☐ ')); body = task[2]; }
+                mdInline(li, body); list.append(li); i++;
+            }
+            return [list, i];
+        }
+        const mdTableRule = (l) => /\|/.test(l) && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(l);
+        function mdNodes(text) {
+            const frag = document.createDocumentFragment();
+            let src = String(text || '').replace(/\r\n?/g, '\n');
+            /* A file's header is not part of what it says (only a real one:
+               a text that opens with a rule keeps its first paragraph), and
+               a comment is for the writer. */
+            const fmx = mdFrontmatter(src);
+            if (Object.keys(fmx.meta).length) src = fmx.body;
+            src = src.replace(/<!--[\s\S]*?-->/g, '');
+            const lines = src.split('\n');
+            let i = 0, para = [];
+            /* A line break a person typed stays a line break: a skill
+               written as 'Step 1 ... Step 2 ...' on lines of their own ran
+               together as one paragraph. */
+            const flush = () => {
+                if (!para.length) return;
+                const p = el('p');
+                para.forEach((ln, k) => { if (k) p.append(el('br')); mdInline(p, ln); });
+                frag.append(p); para = [];
+            };
+            while (i < lines.length) {
+                const raw = lines[i], t = raw.trim();
+                const fence = t.match(/^(\x60{3,}|~{3,})/);
+                if (fence) {
+                    flush();
+                    const mark = fence[1], code = []; i++;
+                    /* It closes only on the kind and length that opened it. */
+                    while (i < lines.length && !(lines[i].trim().startsWith(mark[0].repeat(mark.length)) && !lines[i].trim().replace(/^[\x60~]+/, '').trim())) { code.push(lines[i]); i++; }
+                    i++;
+                    const pre = el('pre', 'md-code'); pre.append(el('code', null, code.join('\n'))); frag.append(pre);
+                    continue;
+                }
+                if (!t) { flush(); i++; continue; }
+                const h = t.match(/^(#{1,6})\s+(.*?)\s*#*$/);
+                if (h) { flush(); const n = el(h[1].length <= 2 ? 'h4' : 'h5', 'md-h'); mdInline(n, h[2]); frag.append(n); i++; continue; }
+                /* A line underlined with '===' is a heading. */
+                if (!para.length && i + 1 < lines.length && /^\s*={3,}\s*$/.test(lines[i + 1])) {
+                    const n = el('h4', 'md-h'); mdInline(n, t); frag.append(n); i += 2; continue;
+                }
+                /* A table, with or without pipes at its edges: its second line
+                   is the '---|---' rule. */
+                if (/\|/.test(t) && i + 1 < lines.length && mdTableRule(lines[i + 1])) {
+                    flush();
+                    const rows = [];
+                    while (i < lines.length && lines[i].trim() && /\|/.test(lines[i])) { rows.push(lines[i].trim()); i++; }
+                    frag.append(pipeTable(rows)); continue;
+                }
                 if (/^\|.*\|$/.test(t)) {
-                    flush(); list = null;
+                    flush();
                     const rows = [];
                     while (i < lines.length && /^\|.*\|$/.test(lines[i].trim())) { rows.push(lines[i].trim()); i++; }
                     frag.append(pipeTable(rows)); continue;
                 }
-                const h = t.match(/^#{1,6}\s+(.*)$/);
-                const b = t.match(/^(?:[-*\u2022]|\d{1,2}[.)])\s+(.*)$/);
-                if (h) { flush(); list = null; frag.append(el('h4', 'prose-h', h[1])); }
-                else if (b) { flush(); if (!list) { list = el(/^\d/.test(t) ? 'ol' : 'ul'); frag.append(list); } list.append(el('li', null, b[1])); }
-                else { list = null; if (t) para.push(t); else flush(); }
-                i++;
+                if (/^(-\s*){3,}$|^(\*\s*){3,}$|^(_\s*){3,}$/.test(t)) { flush(); frag.append(el('hr', 'md-hr')); i++; continue; }
+                if (t.startsWith('>')) {
+                    flush();
+                    const q = [];
+                    while (i < lines.length && lines[i].trim().startsWith('>')) { q.push(lines[i].trim().replace(/^>\s?/, '')); i++; }
+                    const bq = el('blockquote', 'md-quote'); bq.append(mdNodes(q.join('\n'))); frag.append(bq);
+                    continue;
+                }
+                if (MD_LI.test(raw)) {
+                    flush();
+                    const r = mdList(lines, i, mdIndent(raw));
+                    frag.append(r[0]); i = r[1]; continue;
+                }
+                para.push(t); i++;
             }
             flush();
             return frag;
         }
+        /* An answer written as prose, when the model ended without the
+           answer tool: its headings, lists and tables drawn as such. It was
+           one run-on paragraph with '##', '**' and '|---|' in it. */
+        function proseNodes(text) { return mdNodes(text); }
         function pipeTable(rows) {
-            const cells = (r) => r.replace(/^\||\|$/g, '').split('|').map(x => x.trim());
-            const body = rows.filter(r => !/^\|[\s:|-]+\|$/.test(r));
+            /* Cells split on unescaped pipes: 'a\|b' is one cell. */
+            const cells = (r) => r.trim().replace(/\\\|/g, '').replace(/^\||\|$/g, '').split('|').map(x => x.trim().replace(//g, '|'));
+            const body = rows.filter(r => !mdTableRule(r));
             const wrap = el('div', 'ktable-wrap prose-table'); const tbl = el('table', 'ktable');
             const thead = el('thead'), tbody = el('tbody');
-            body.forEach((r, k) => { const tr = el('tr'); cells(r).forEach(x => tr.append(el(k === 0 ? 'th' : 'td', null, x))); (k === 0 ? thead : tbody).append(tr); });
+            body.forEach((r, k) => { const tr = el('tr'); cells(r).forEach(x => tr.append(mdInline(el(k === 0 ? 'th' : 'td'), x))); (k === 0 ? thead : tbody).append(tr); });
             tbl.append(thead, tbody); wrap.append(tbl);
             return wrap;
         }
@@ -9674,15 +9865,7 @@ Projected Image UK"></textarea>
         /* The learned profile is written in short headed sections, and came
            out with its '## ' and '**' showing. Headings become headings and
            the emphasis marks go; the rest is paragraphs and bullets. */
-        function knowNodes(text) {
-            const frag = document.createDocumentFragment();
-            String(text || '').replace(/\*\*(.+?)\*\*/g, '$1').split(/\n(?=#{1,6}\s)/).forEach(block => {
-                const m = block.match(/^#{1,6}\s+(.*)(?:\n|$)/);
-                if (m) { frag.append(el('h4', 'know-h', m[1].trim())); block = block.slice(m[0].length); }
-                frag.append(bodyToNodes(block));
-            });
-            return frag;
-        }
+        function knowNodes(text) { return mdNodes(text); }
         /* Store knowledge as a card of the house kind. Its read failing is not
            'unlearned': that state offered a paid re-learn over knowledge that
            was there all along. */
@@ -9984,17 +10167,17 @@ Projected Image UK"></textarea>
         }
 
         /* ---------- skills ----------
-           One card: the skills first, with search and New skill, each able to
-           be opened, corrected, used in chat or deleted in place. The form
-           used to sit above them all, a full re-render on every change threw
-           away whatever was being typed, a file over 6,000 characters was cut
-           without a word, and Delete asked nothing. */
+           One card: the skills first, with search, New skill and Upload
+           Markdown, each able to be opened, corrected, read by Reactor, used
+           in chat, downloaded or deleted in place. A skill is Markdown: it is
+           shown as a document, and a .md file (a Claude-style SKILL.md with its
+           name and description header included) comes in as it was written. */
         let skills = [];
         let skillsLoadErr = '';    // a failed read is not an empty list
         /* What the server allows, as it says in every answer; these are only
            the defaults until the first read. */
-        const skillCaps = { title: 120, body: 12000, inject: 24000 };
-        const skView = { q: '', editId: null, adding: false, draft: null, open: new Set() };
+        const skillCaps = { title: 120, body: 40000, when: 400, inject: 24000 };
+        const skView = { q: '', editId: null, adding: false, draft: null, open: new Set(), readOpen: new Set(), reading: {}, uploads: null, busy: '' };
         const skHost = {};
         async function loadSkills() {
             skillsLoadErr = '';
@@ -10008,7 +10191,7 @@ Projected Image UK"></textarea>
                typing) was wiped, though a page unload already asked first. */
             const dirty = [...document.querySelectorAll('#skills-content .sk-input, #skills-content .sk-textarea')]
                 .some(f => f.value !== (f.dataset.initial || ''));
-            if ($('view-skills').classList.contains('active') && !dirty) renderSkills();
+            if ($('view-skills').classList.contains('active') && !dirty && !skView.uploads && !skView.busy) renderSkills();
             if ($('view-chat').classList.contains('active')) syncComposer();
         }
         async function skillOp(payload) {
@@ -10023,17 +10206,187 @@ Projected Image UK"></textarea>
             return 'Followed in ' + n + (n === 1 ? ' answer' : ' answers') + (s.used_at ? ', last on ' + fmtDate(s.used_at) : '');
         };
         const nf = (n) => Number(n || 0).toLocaleString('en-GB');
+        const kb = (n) => n < 1024 ? nf(n) + ' bytes' : nf(Math.round(n / 1024)) + ' KB';
+
+        /* ---- a Markdown skill file ---- */
+        /* A leading block is a header only when every line starting at the
+           margin is 'key: value' (or a comment) and one key names the skill
+           or says when it applies: a skill that opens with a '---' rule lost
+           its first paragraph as a 'header'. The server reads it the same way. */
+        const MD_FM_KEYS = ['name', 'title', 'description', 'when', 'when_to_use'];
+        function yamlScalar(v) {
+            v = String(v || '').trim();
+            if (v.length >= 2 && v[0] === "'" && v[v.length - 1] === "'") return v.slice(1, -1).replace(/''/g, "'");
+            if (v.length >= 2 && v[0] === '"' && v[v.length - 1] === '"') return v.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+            return v;
+        }
+        function mdFrontmatter(text) {
+            const t = String(text || '').replace(/\r\n?/g, '\n').replace(/^\ufeff/, '');
+            const m = t.match(/^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/);
+            if (!m) return { meta: {}, body: t };
+            const lines = m[1].split('\n');
+            const top = lines.filter(l => l.trim() && !/^[ \t]/.test(l));
+            if (!top.length || !top.every(l => /^[A-Za-z_][\w-]*\s*:/.test(l) || l[0] === '#')) return { meta: {}, body: t };
+            const raw = {}, mode = {}; let key = null;
+            lines.forEach(line => {
+                const kv = line.match(/^([A-Za-z_][\w-]*)\s*:\s*(.*)$/);
+                if (kv && !/^[ \t]/.test(line)) {
+                    key = kv[1].toLowerCase(); const v = kv[2].trim();
+                    mode[key] = /^[>|][+-]?$/.test(v) ? v[0] : 'plain';
+                    raw[key] = mode[key] === 'plain' ? v : '';
+                } else if (line[0] === '#' || !key) {
+                    /* a comment, or nothing to carry on */
+                } else if (line.trim() && /^[ \t]/.test(line)) {
+                    raw[key] = (raw[key] + (mode[key] === '|' ? '\n' : ' ') + line.trim()).trim();
+                }
+            });
+            if (!MD_FM_KEYS.some(k => k in raw)) return { meta: {}, body: t };
+            const meta = {};
+            Object.keys(raw).forEach(k => { meta[k] = mode[k] === 'plain' ? yamlScalar(raw[k]) : raw[k]; });
+            return { meta, body: t.slice(m[0].length) };
+        }
+        function skillWords(t) {
+            /* A 'trade-enquiry-replies' name, or a file's name, read as words;
+               an all lower case one gets a capital, 'SEO-checklist' keeps its. */
+            t = String(t || '').trim();
+            if (/^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)+$/.test(t)) {
+                t = t.replace(/[-_]+/g, ' ');
+                if (t === t.toLowerCase()) t = cap(t);
+            }
+            return t;
+        }
+        /* Cut at a word, and say so: a 600-character description was cut
+           mid-word at 400 without a sign. */
+        function cutWords(s, n) {
+            s = String(s || '').trim();
+            if (s.length <= n) return { text: s, cut: false };
+            let c = s.slice(0, n); const k = c.lastIndexOf(' ');
+            if (k > n * 0.6) c = c.slice(0, k);
+            return { text: c.replace(/[ ,;:]+$/, ''), cut: true };
+        }
+        function parseSkillMd(text, filename) {
+            const fm = mdFrontmatter(text);
+            let body = fm.body.trim();
+            const rawName = String(fm.meta.name || '').trim();
+            let title = String(fm.meta.title || '').trim() || skillWords(rawName);
+            const h1 = body.match(/^#\s+(.+?)\s*#*\s*(?:\n|$)/);
+            if (!title && h1) title = h1[1].trim();
+            if (h1 && title && [title.toLowerCase(), rawName.toLowerCase()].includes(h1[1].trim().toLowerCase())) body = body.slice(h1[0].length).trim();
+            if (!title && filename) title = skillWords(String(filename).replace(/\.(md|markdown|txt|text)$/i, ''));
+            const when = String(fm.meta.description || fm.meta.when || fm.meta.when_to_use || '').replace(/\s+/g, ' ').trim();
+            const tc = cutWords(title, skillCaps.title), wc = cutWords(when, skillCaps.when);
+            return { title: tc.text, when: wc.text, content: body, cut: [tc.cut ? 'title' : '', wc.cut ? 'when it applies' : ''].filter(Boolean) };
+        }
+        /* A long document is split at its own headings, each part keeping its
+           heading and named after it; only a section still too long is split
+           at paragraphs, and only a paragraph too long is cut. */
+        function splitSkill(text, cap) {
+            const pack = (pieces, sep) => {
+                const out = []; let cur = '';
+                pieces.forEach(p => {
+                    if (cur && cur.length + sep.length + p.length > cap) { out.push(cur); cur = p; }
+                    else cur = cur ? cur + sep + p : p;
+                });
+                if (cur.trim()) out.push(cur);
+                return out;
+            };
+            const paras = (sec) => {
+                const bits = [];
+                sec.split(/\n{2,}/).forEach(p => { while (p.length > cap) { bits.push(p.slice(0, cap)); p = p.slice(cap); } bits.push(p); });
+                return pack(bits, '\n\n');
+            };
+            const secs = String(text).split(/\n(?=#{1,2}\s)/);
+            const pieces = [];
+            secs.forEach(sec => { if (sec.length <= cap) pieces.push(sec); else pieces.push(...paras(sec)); });
+            return pack(pieces, '\n').map(x => x.trim()).filter(Boolean);
+        }
+        /* How a long text will be divided, in words that are true of it. */
+        function splitHow(text) {
+            if (/^#{1,2}\s/m.test(text)) return 'split at its headings';
+            if (/\n\s*\n/.test(text)) return 'split at paragraph breaks';
+            return 'cut into parts, as it has no headings or paragraph breaks';
+        }
+        function splitTitles(title, parts) {
+            /* Each part named by its first heading when it starts with one, so
+               the parts can be told apart and picked for the right question. */
+            const seen = new Set();
+            return parts.map((p, k) => {
+                /* A part holding several sections is named by its first and
+                   last: 'Pricing to Lead times', not 'Pricing' alone. */
+                const hs = [...p.matchAll(/^#{1,2}\s+(.+?)\s*#*\s*$/gm)].map(m => m[1].trim());
+                const h = p.match(/^#{1,3}\s+(.+?)\s*#*\s*(?:\n|$)/);
+                let t = h ? title + ': ' + h[1].trim() + (hs.length > 1 && hs[hs.length - 1] !== h[1].trim() ? ' to ' + hs[hs.length - 1] : '')
+                          : title + ' (' + (k + 1) + ' of ' + parts.length + ')';
+                t = t.slice(0, skillCaps.title);
+                if (seen.has(t.toLowerCase())) t = (title + ' (' + (k + 1) + ' of ' + parts.length + ')').slice(0, skillCaps.title);
+                seen.add(t.toLowerCase());
+                return t;
+            });
+        }
+        /* Read as UTF-8, and when a file is not (an older Windows or Mac
+           export), as Windows text with a warning: a £ became a question
+           mark without a word. */
+        async function readTextFile(f) {
+            const buf = await f.arrayBuffer();
+            try { return { text: new TextDecoder('utf-8', { fatal: true }).decode(buf), note: '' }; }
+            catch (e) { return { text: new TextDecoder('windows-1252').decode(buf), note: 'This file is not UTF-8, so it was read as Windows text: check the £ signs and accents in the preview.' }; }
+        }
+        const UPLOAD_MAX = 20;
+        async function readSkillFiles(files, room) {
+            const all = [...(files || [])];
+            const list = all.filter(f => /\.(md|markdown|txt|text)$/i.test(f.name) || /^text\/(markdown|plain|x-markdown)/.test(f.type));
+            const take = list.slice(0, Math.max(0, room == null ? UPLOAD_MAX : room));
+            const out = [];
+            for (const f of take) {
+                if (f.size > 1000000) { out.push({ name: f.name, size: f.size, err: 'Larger than 1 MB, so it was not read.' }); continue; }
+                try {
+                    const r = await readTextFile(f);
+                    if (!r.text.trim()) { out.push({ name: f.name, size: f.size, err: 'The file is empty.' }); continue; }
+                    const p = parseSkillMd(r.text, f.name);
+                    out.push(Object.assign({ name: f.name, size: f.size, note: r.note, orig: { title: p.title, when: p.when }, saved: [] }, p));
+                } catch (e) { out.push({ name: f.name, size: f.size, err: 'The file could not be read.' }); }
+            }
+            const other = all.length - list.length, over = list.length - take.length;
+            if (other) toastError(other + (other === 1 ? ' file is' : ' files are') + ' not Markdown or text, so '
+                + (other === 1 ? 'it was' : 'they were') + ' left out. A skill comes from a .md, .markdown or .txt file.');
+            if (over) toastError('Up to ' + UPLOAD_MAX + ' files at a time: ' + over + (over === 1 ? ' was' : ' were') + ' left out. Add them once these are in.');
+            return out;
+        }
+        function startUpload(files) {
+            if (skillsLoadErr) { toastError('Your skills have not loaded yet, so nothing can be added until they do.'); return; }
+            if (skView.busy) { toastError('Wait for these files to be added, then add more.'); return; }
+            /* A drop while files are being checked joins them, as More files does. */
+            if (!skView.uploads && !skillGuard()) return;
+            const have = (skView.uploads || []).length;
+            readSkillFiles(files, UPLOAD_MAX - have).then(items => {
+                if (!items.length) return;
+                skView.uploads = (skView.uploads || []).concat(items);
+                skView.adding = false; skView.editId = null;
+                paintSkills();
+                /* The first of the files just added, so Tab walks on through the rest. */
+                const row = skHost.card.querySelectorAll('.sk-upload .sk-up')[have];
+                const f = row && (row.querySelector('.sk-input') || row.querySelector('.mem-btn'));
+                if (f) f.focus();
+            });
+        }
+
         function renderSkills() {
             const box = $('skills-content'); box.innerHTML = '';
             box.classList.toggle('no-intro', !firstPaint('skills'));
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.book;
             const ht = el('div'); ht.append(el('h2', null, 'Skills'),
-                el('p', null, 'Instructions and playbooks Reactor follows: a brand voice, a discount policy, how to answer a trade enquiry. It picks the ones that fit each question, in chat, in reports and in email drafts, and says under each answer which it followed.'));
+                el('p', null, 'Instructions and playbooks Reactor follows: a brand voice, a discount policy, how to answer a trade enquiry. Write one here or upload a Markdown file. Reactor picks the ones that fit each question, in chat, in reports and in email drafts, and says under each answer which it followed.'));
             /* The empty action slot is where Customize goes. */
             hero.append(badge, ht, heroAct('')); box.append(hero);
             skHost.card = widget(el('div', 'card sk-card'), 'saved', 'full', 'Skills');
             skHost.use = widget(el('div', 'card sk-use'), 'usage', 'full', 'How they are used');
             box.append(skHost.card, skHost.use);
+            /* Markdown files dropped anywhere on the card come in to be checked. */
+            const card = skHost.card;
+            const hasFiles = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+            card.addEventListener('dragover', (e) => { if (!hasFiles(e)) return; e.preventDefault(); card.classList.add('drop-on'); });
+            card.addEventListener('dragleave', (e) => { if (!card.contains(e.relatedTarget)) card.classList.remove('drop-on'); });
+            card.addEventListener('drop', (e) => { if (!hasFiles(e)) return; e.preventDefault(); card.classList.remove('drop-on'); startUpload(e.dataTransfer.files); });
             paintSkills();
         }
         /* What the answers have actually followed: the skills followed most,
@@ -10048,25 +10401,28 @@ Projected Image UK"></textarea>
             const chars = skills.reduce((n, x) => n + String(x.content || '').length, 0);
             head.append(el('h3', 'card-title', 'How they are used'),
                 el('p', 'card-desc', 'With each question Reactor reads in full the skills that fit it best, up to ' + nf(skillCaps.inject)
-                    + ' characters in all, and sees the titles of the rest so it can open one when it needs it. Yours come to ' + nf(chars) + ' characters.'));
+                    + ' characters in all, and any marked for every answer. A skill too long for that is given as what it asks, its headings and the parts that fit: in chat Reactor reads the section it needs, and reports and email drafts get the parts that match. The titles of the rest are there for chat to open when one fits. Yours come to ' + nf(chars) + ' characters.'));
             card.append(head);
             const used = skills.filter(x => Number(x.used || 0) > 0).sort((a, b) => (b.used || 0) - (a.used || 0));
             const never = skills.filter(x => !Number(x.used || 0));
+            const unread = skills.filter(x => !x.reading || x.reading.stale);
             const facts = el('dl', 'sk-facts');
             const fact = (k, v) => { facts.append(el('dt', null, k), el('dd', null, v)); };
             fact('Followed most', used.length ? used.slice(0, 3).map(x => x.title + ' (' + x.used + ')').join(', ') : 'None yet: answers name the skills they follow from now on.');
             if (never.length && used.length) fact('Not followed yet', never.slice(0, 5).map(x => x.title).join(', ') + (never.length > 5 ? ' and ' + (never.length - 5) + ' more' : '')
-                + '. A clearer title helps Reactor see where one fits, or pick it with Skills when you ask.');
+                + '. A clear note of when each applies helps Reactor see where one fits, or pick it with Skills when you ask.');
+            if (unread.length) fact('Not read by Reactor', unread.slice(0, 5).map(x => x.title).join(', ') + (unread.length > 5 ? ' and ' + (unread.length - 5) + ' more' : '')
+                + '. Having it read shows you what Reactor will do with each, and gives it a short version to use when a skill is too long to show in full.');
             card.append(facts);
         }
         function skillsDirty() {
             const f = skHost.card && [...skHost.card.querySelectorAll('.sk-input, .sk-textarea')];
-            return !!(f && f.some(x => x.value !== (x.dataset.initial || '')));
+            return !!(f && f.some(x => x.value !== (x.dataset.initial || ''))) || !!(skView.uploads && skView.uploads.length);
         }
         /* One editor at a time, and never over typing that is not saved. */
         function skillGuard() {
             if (!skillsDirty()) return true;
-            toastError('Save or cancel the skill you are writing first.');
+            toastError(skView.uploads && skView.uploads.length ? 'Add or cancel the files you are checking first.' : 'Save or cancel the skill you are writing first.');
             const f = skHost.card.querySelector('.sk-input, .sk-textarea'); if (f) f.focus();
             return false;
         }
@@ -10075,24 +10431,32 @@ Projected Image UK"></textarea>
             card.replaceChildren();
             const head = el('div', 'card-head');
             head.append(el('h3', 'card-title', 'Your skills' + (skills.length ? ' (' + skills.length + ')' : '')),
-                el('p', 'card-desc', 'Rules and playbooks, each with a title that says when it applies.'));
+                el('p', 'card-desc', 'Rules and playbooks, each with a title and a note of when it applies. Drop Markdown files here to add them.'));
             const acts = el('div', 'card-act');
+            const up = el('button', 'btn btn-sm'); up.type = 'button';
+            up.append(ico(I.upload), document.createTextNode('Upload Markdown'));
+            up.title = 'Add skills from .md files, such as a SKILL.md';
+            const fi = el('input'); fi.type = 'file'; fi.multiple = true; fi.hidden = true;
+            fi.accept = '.md,.markdown,.txt,.text,text/markdown,text/plain';
+            fi.onchange = () => { const fs = fi.files; startUpload(fs); fi.value = ''; };
+            up.onclick = () => fi.click();
             const add = el('button', 'btn btn-sm btn-primary'); add.type = 'button';
             add.append(ico(I.plus), document.createTextNode('New skill'));
             /* Not while the list is unknown: a skill added blind may be one
                that is already there. */
-            add.disabled = !!skillsLoadErr || skView.adding;
+            add.disabled = up.disabled = !!skillsLoadErr || skView.adding || !!skView.uploads;
             add.onclick = () => { if (!skillGuard()) return; skView.adding = true; skView.editId = null; skView.draft = null; paintSkills(); };
-            acts.append(add); head.append(acts); card.append(head);
+            acts.append(up, fi, add); head.append(acts); card.append(head);
             paintSkillUse();
             if (skillsLoadErr) {
                 card.append(loadFailure('Your skills could not be loaded, so they cannot be shown yet. '
                     + skillsLoadErr + ' New skill waits until they load, so nothing is added twice.', loadSkills));
                 return;
             }
+            if (skView.uploads) card.append(skillUploads());
             if (skView.adding) card.append(skillEditor(null));
             if (!skills.length) {
-                if (!skView.adding) card.append(el('div', 'empty', 'No skills yet. Ideas: a brand voice guide, a discounting policy, an SEO checklist, or how to answer a trade enquiry.'));
+                if (!skView.adding && !skView.uploads) card.append(el('div', 'empty', 'No skills yet. Write one, or upload a Markdown file. Ideas: a brand voice guide, a discounting policy, an SEO checklist, or how to answer a trade enquiry.'));
                 return;
             }
             if (skills.length > 4) {
@@ -10107,13 +10471,310 @@ Projected Image UK"></textarea>
             const list = skHost.list; if (!list) return;
             list.replaceChildren();
             const q = skView.q.trim().toLowerCase();
-            const rows = skills.filter(s => !q || ((s.title || '') + '\n' + (s.content || '')).toLowerCase().includes(q));
+            const rows = skills.filter(s => !q || ((s.title || '') + '\n' + (s.when || '') + '\n' + (s.content || '')).toLowerCase().includes(q));
             if (!rows.length) { list.append(el('li', 'empty', 'No skills match.')); return; }
             rows.forEach(s => {
-                const li = el('li', 'sk-item');
+                const li = el('li', 'sk-item'); li.dataset.id = s.id;
                 if (skView.editId === s.id) li.append(skillEditor(s)); else skillItem(li, s);
                 list.append(li);
             });
+        }
+
+        /* ---- files being added ----
+           Every file is shown before it is saved: its title, when it applies
+           (from its header when it has one), how long it is, and the document
+           itself; a file too long for one skill is shown as the parts it will
+           become. Read and add has Reactor read each one as it is saved. While
+           they are being added nothing in the review can change, and a file
+           or part that fails stays in the review with its reason and Retry. */
+        const uploadGood = () => (skView.uploads || []).filter(u => !u.err);
+        /* The parts still to add. Saved parts are kept by their place in the
+           file, not their title, so changing the title after a part has gone
+           in retitles only what is left: it added the saved parts again. */
+        function uploadPlan(u) {
+            const parts = uploadParts(u);
+            const titles = parts ? splitTitles(u.title.trim(), parts) : [u.title.trim()];
+            return (parts || [u.content]).map((c, j) => ({ u, j, title: titles[j], content: c }))
+                .filter(p => !(u.savedIdx || []).includes(p.j));
+        }
+        function uploadButtons() {
+            /* The count on the button and the cost line follow the review as it changes. */
+            const box = skHost.card && skHost.card.querySelector('.sk-upload'); if (!box || skView.busy) return;
+            const n = uploadGood().reduce((k, u) => k + uploadPlan(u).length, 0);
+            const read = box.querySelector('.sk-form-row .btn-primary'), plain = read && read.previousElementSibling;
+            if (read) { read.lastChild.textContent = n === 1 ? 'Read and add' : 'Read and add ' + n + ' skills'; read.disabled = !n; }
+            if (plain) plain.disabled = !n;
+            const cost = box.querySelector('.sk-upload-cost');
+            if (cost) cost.textContent = (n > 1 ? 'Read and add is ' + n + ' AI runs, one for each skill. ' : 'Read and add is an AI run. ')
+                + 'Add without reading saves them as they are; each can be read later from the skill.';
+        }
+        function skillUploads() {
+            const items = skView.uploads;
+            const busy = !!skView.busy;
+            const box = el('div', 'sk-upload'); box.setAttribute('role', 'group'); box.setAttribute('aria-label', 'Files to add as skills');
+            const good = uploadGood();
+            const n = good.reduce((k, u) => k + uploadPlan(u).length, 0);
+            box.append(el('h4', 'sk-form-title', items.length === 1 ? 'Add a skill from a file' : 'Add skills from ' + items.length + ' files'));
+            box.append(el('p', 'sk-upload-note', 'Check each title and when it applies. Read and add has Reactor read each skill closely as it is saved and write down what it will do, so you can see it has understood before it relies on it.'));
+            const list = el('div', 'sk-up-list');
+            items.forEach((u, k) => list.append(uploadRow(u, k, busy)));
+            box.append(list);
+            const row = el('div', 'sk-form-row');
+            const more = el('button', 'btn btn-sm'); more.type = 'button'; more.append(ico(I.plus), document.createTextNode('More files'));
+            const fi = el('input'); fi.type = 'file'; fi.multiple = true; fi.hidden = true; fi.accept = '.md,.markdown,.txt,.text,text/markdown,text/plain';
+            fi.onchange = () => { const fs = fi.files; startUpload(fs); fi.value = ''; };
+            more.onclick = () => fi.click();
+            more.disabled = busy || items.length >= UPLOAD_MAX;
+            if (items.length >= UPLOAD_MAX) more.title = 'Up to ' + UPLOAD_MAX + ' files at a time';
+            const spacer = el('div', 'sk-spacer');
+            const cancel = el('button', 'btn btn-sm'); cancel.type = 'button'; cancel.textContent = 'Cancel';
+            cancel.disabled = busy;
+            cancel.onclick = async () => {
+                if (skView.busy) return;
+                const edited = items.some(u => !u.err && u.orig && (u.title !== u.orig.title || u.when !== u.orig.when));
+                if ((items.length > 1 || edited) && !await uiConfirm('Leave out ' + (items.length === 1 ? 'this file' : 'these ' + items.length + ' files') + '? Nothing from them has been added.',
+                    { title: 'Cancel adding files', okText: 'Leave them out', cancelText: 'Keep checking' })) return;
+                skView.uploads = null; paintSkills();
+                const up = skHost.card.querySelector('.card-act .btn'); if (up) up.focus();
+            };
+            const plain = el('button', 'btn btn-sm'); plain.type = 'button'; plain.textContent = 'Add without reading';
+            const read = el('button', 'btn btn-sm btn-primary'); read.type = 'button';
+            read.append(ico(I.book), document.createTextNode(n === 1 ? 'Read and add' : 'Read and add ' + n + ' skills'));
+            read.title = n === 1 ? 'An AI run: Reactor reads the skill and writes down when it applies and what it will do.'
+                : n + ' AI runs, one for each skill: Reactor reads each and writes down when it applies and what it will do.';
+            plain.disabled = read.disabled = !n || busy;
+            plain.onclick = () => addUploads(false);
+            read.onclick = () => addUploads(true);
+            if (busy) { setBusy(read, true); read.lastChild.textContent = skView.busy; }
+            row.append(more, fi, spacer, cancel, plain, read);
+            box.append(row);
+            box.append(el('p', 'sk-upload-cost', (n > 1 ? 'Read and add is ' + n + ' AI runs, one for each skill. ' : 'Read and add is an AI run. ')
+                + 'Add without reading saves them as they are; each can be read later from the skill.'));
+            return box;
+        }
+        function uploadParts(u) {
+            if (u.err || u.content.length <= skillCaps.body) return null;
+            return splitSkill(u.content, skillCaps.body);
+        }
+        function uploadClash(u, k) {
+            const plan = uploadPlan(u).map(p => p.title.toLowerCase());
+            const taken = skills.find(x => plan.includes(String(x.title || '').trim().toLowerCase()));
+            if (taken) return 'You already have a skill called "' + taken.title + '". Give this one a different title.';
+            const twin = skView.uploads.find((o, j) => j !== k && !o.err && o.title.trim().toLowerCase() === u.title.trim().toLowerCase());
+            if (twin && u.title.trim()) return 'Another file here has the same title.';
+            return '';
+        }
+        function uploadRow(u, k, busy) {
+            const r = el('div', 'sk-up');
+            const top = el('div', 'sk-up-top');
+            top.append(ico(I.book), el('span', 'sk-up-name', u.name), el('span', 'sk-up-size', kb(u.size || 0)));
+            const rm = el('button', 'mem-btn'); rm.type = 'button'; rm.append(ico(I.x));
+            rm.title = 'Leave this file out'; rm.setAttribute('aria-label', 'Leave out ' + u.name);
+            rm.disabled = busy;
+            rm.onclick = () => {
+                if (skView.busy) return;
+                skView.uploads.splice(k, 1);
+                if (!skView.uploads.length) skView.uploads = null;
+                paintSkills();
+                const next = skHost.card.querySelectorAll('.sk-upload .sk-up')[Math.min(k, (skView.uploads || []).length - 1)];
+                const f = next && (next.querySelector('.sk-input') || next.querySelector('.mem-btn'));
+                if (f) f.focus(); else { const b = skHost.card.querySelector('.card-act .btn'); if (b) b.focus(); }
+            };
+            top.append(rm); r.append(top);
+            if (u.err) { const m = el('div', 'field-msg'); m.textContent = u.err; r.append(m); return r; }
+            const f1 = el('label', 'sk-field'); f1.append(el('span', null, 'Title'));
+            const ti = el('input', 'sk-input'); ti.maxLength = skillCaps.title; ti.value = u.title; ti.dataset.initial = ''; ti.readOnly = busy;
+            const tMsg = el('div', 'field-msg'); tMsg.hidden = true; tMsg.id = 'sk-up-t-' + k; ti.setAttribute('aria-describedby', tMsg.id);
+            f1.append(ti, tMsg);
+            const f2 = el('label', 'sk-field'); f2.append(el('span', null, 'When it applies'));
+            const wh = el('textarea', 'sk-input sk-when-input'); wh.rows = 2; wh.maxLength = skillCaps.when; wh.value = u.when; wh.dataset.initial = ''; wh.readOnly = busy;
+            wh.placeholder = 'e.g. Replying to a trade customer about prices or lead times. Reactor can write this when it reads the skill.';
+            f2.append(wh);
+            const stat = el('div', 'sk-up-stat');
+            const paint = () => {
+                const parts = uploadParts(u);
+                const msg = u.saveErr || (!ti.value.trim() ? 'Give the skill a title.' : uploadClash(u, k));
+                tMsg.hidden = !msg; tMsg.textContent = msg; markInvalid(ti, !!msg);
+                stat.replaceChildren();
+                stat.append(document.createTextNode(nf(u.content.length) + ' characters'
+                    + (parts ? ', more than one skill holds (' + nf(skillCaps.body) + '), so it will be added as ' + parts.length + ' skills, '
+                        + splitHow(u.content) + ':' : '.')));
+                if (parts) {
+                    const ul = el('ul', 'sk-up-parts');
+                    splitTitles(ti.value.trim() || u.title, parts).forEach((t, j) => {
+                        const done = (u.savedIdx || []).includes(j);
+                        ul.append(el('li', null, (done ? (u.savedTitles || {})[j] || t : t) + ' (' + nf(parts[j].length) + ' characters)' + (done ? ': added' : '')));
+                    });
+                    stat.append(ul);
+                }
+                if (u.note) stat.append(el('p', 'sk-up-warn', u.note));
+                if ((u.cut || []).length) stat.append(el('p', 'sk-up-warn', 'Its ' + u.cut.join(' and ') + ' was longer than a skill holds, so it was shortened at a word. Check it above.'));
+            };
+            ti.addEventListener('input', () => { u.title = ti.value; u.saveErr = ''; paint(); uploadButtons(); });
+            wh.addEventListener('input', () => { u.when = wh.value; });
+            paint();
+            const pv = el('details', 'sk-preview');
+            const sum = el('summary'); sum.textContent = 'Preview the document';
+            const doc = el('div', 'md sk-preview-doc');
+            pv.addEventListener('toggle', () => { if (pv.open && !doc.childNodes.length) doc.append(mdNodes(u.content)); });
+            pv.append(sum, doc);
+            r.append(f1, f2, stat, pv);
+            return r;
+        }
+        async function addUploads(read) {
+            const rows = uploadGood();
+            const bad = rows.find((u) => !u.title.trim() || uploadClash(u, skView.uploads.indexOf(u)));
+            if (bad) {
+                paintSkills();
+                const f = skHost.card.querySelector('.sk-upload [aria-invalid="true"]'); if (f) f.focus();
+                toastError('Give every file a title of its own first.');
+                return;
+            }
+            const plan = [];
+            rows.forEach(u => { u.saveErr = ''; plan.push(...uploadPlan(u)); });
+            if (!plan.length) return;
+            const say = (t) => { skView.busy = t; const b = skHost.card.querySelector('.sk-upload .btn-primary'); if (b && b.lastChild) b.lastChild.textContent = t; };
+            say('Adding 1 of ' + plan.length + '…'); paintSkills();
+            const made = [], failed = [];
+            for (let i = 0; i < plan.length; i++) {
+                const p = plan[i];
+                say('Adding ' + (i + 1) + ' of ' + plan.length + '…');
+                try {
+                    await skillOp({ op: 'add', title: p.title, content: p.content, when: p.u.when.trim(), file: p.u.name });
+                    const s = skills.find(x => (x.title || '').trim().toLowerCase() === p.title.toLowerCase());
+                    if (s) made.push(s.id);
+                    (p.u.savedIdx = p.u.savedIdx || []).push(p.j);
+                    (p.u.savedTitles = p.u.savedTitles || {})[p.j] = p.title;
+                } catch (e) {
+                    failed.push(p.title);
+                    const m = e.message || 'Not saved.';
+                    p.u.saveErr = (p.u.saveErr ? p.u.saveErr + ' ' : '') + (uploadParts(p.u) ? '"' + p.title + '" was not added: ' : '') + m;
+                }
+            }
+            const whyNot = {};
+            if (read) {
+                for (let i = 0; i < made.length; i++) {
+                    say('Reading ' + (i + 1) + ' of ' + made.length + '…');
+                    try {
+                        const d = await api('/api/skills/read', { id: made[i] });
+                        if (d && Array.isArray(d.skills)) skills = d.skills;
+                        skView.readOpen.add(made[i]);
+                    } catch (e) { const w = e.message || 'It could not be read.'; (whyNot[w] = whyNot[w] || []).push((skills.find(x => x.id === made[i]) || {}).title); }
+                }
+            }
+            skView.busy = '';
+            /* A file stays while any part of it is still to add; files that
+               could not be read are named and go. */
+            const unreadable = skView.uploads.filter(u => u.err).map(u => u.name);
+            skView.uploads = skView.uploads.filter(u => !u.err && uploadPlan(u).length);
+            if (!skView.uploads.length) skView.uploads = null;
+            paintSkills();
+            const n = made.length, unread = Object.values(whyNot).reduce((a, b) => a + b.length, 0);
+            if (n) toastOk((n === 1 ? 'One skill added' : n + ' skills added') + (read && !unread
+                ? (n === 1 ? ' and read. Check what Reactor will do under it.' : ' and read. Check what Reactor will do under each.') : '.'));
+            Object.keys(whyNot).forEach(w => {
+                const k = whyNot[w].length;
+                /* One reason, said once, in words that fit however many it stopped. */
+                let why = w.replace(/\s*Try again\.?\s*$/i, '').replace(/\.+$/, '');
+                if (k > 1) why = why.replace(/\bthis skill\b/gi, 'them');
+                toastError((k === 1 ? '"' + whyNot[w][0] + '" was' : k + ' skills were') + ' added but not read: ' + why + '. '
+                    + (k === 1 ? 'It can be read from the skill.' : 'Each can be read from its skill.'));
+            });
+            if (failed.length) toastError((failed.length === 1 ? 'One skill was' : failed.length + ' skills were') + ' not added. The reason is under the file, which stays here to try again.');
+            if (unreadable.length) toastError('Not added, as ' + (unreadable.length === 1 ? 'it' : 'they') + ' could not be read: ' + unreadable.join(', ') + '.');
+            const first = n && skHost.card.querySelector('.sk-item[data-id="' + made[0] + '"] .sk-title');
+            const again = skHost.card.querySelector('.sk-upload [aria-invalid="true"]');
+            if (again) again.focus();
+            else if (first) { first.tabIndex = -1; first.focus(); first.scrollIntoView({ block: 'nearest' }); }
+        }
+
+        /* Reactor reads one skill closely and writes down how it understands
+           it: when it applies, what it will do, where it would use it and
+           what is unclear. An AI run, started only by its button. */
+        async function readSkill(id, btn) {
+            if (skView.reading[id]) return;
+            skView.reading[id] = true; if (btn) setBusy(btn, true);
+            let ok = false;
+            try {
+                const d = await api('/api/skills/read', { id: id });
+                if (d && Array.isArray(d.skills)) skills = d.skills;
+                skView.readOpen.add(id); ok = true;
+            } catch (e) { toastError('Not read. ' + (e.message || '')); }
+            delete skView.reading[id]; if (btn) setBusy(btn, false);
+            if (!ok) return;
+            toastOk('Reactor has read it. What it will do is under the skill.');
+            const li = skHost.list && skHost.list.querySelector('.sk-item[data-id="' + id + '"]');
+            const s = skills.find(x => x.id === id);
+            /* Only that skill is drawn again, so nothing being written elsewhere is lost. */
+            if (li && s && skView.editId !== id) { li.replaceChildren(); skillItem(li, s); const r = li.querySelector('.sk-reading summary'); if (r) r.focus(); }
+            paintSkillUse();
+        }
+        function readingPanel(s) {
+            const r = s.reading;
+            const d = el('details', 'sk-reading');
+            if (skView.readOpen.has(s.id)) d.open = true;
+            d.addEventListener('toggle', () => { if (d.open) skView.readOpen.add(s.id); else skView.readOpen.delete(s.id); });
+            const sum = el('summary');
+            sum.append(document.createTextNode('How Reactor reads it'));
+            if (r.stale) sum.append(el('span', 'lbl-chip note', 'Changed since it was read'));
+            const qn = (r.questions || []).length;
+            if (qn) sum.append(el('span', 'lbl-chip note', qn === 1 ? '1 point to check' : qn + ' points to check'));
+            d.append(sum);
+            const body = el('div', 'sk-reading-body');
+            const dl = el('dl', 'sk-facts');
+            if (r.when) dl.append(el('dt', null, 'Applies when'), el('dd', null, r.when));
+            if ((r.rules || []).length) {
+                const ol = el('ol', 'sk-rules'); r.rules.forEach(x => ol.append(el('li', null, x)));
+                const dd = el('dd'); dd.append(ol);
+                dl.append(el('dt', null, 'What it will do'), dd);
+            }
+            if ((r.examples || []).length) {
+                const dd = el('dd', 'sk-examples');
+                r.examples.forEach(q => {
+                    if (tabAllowed('chat')) {
+                        /* Try it: a conversation with the skill applied and
+                           the question in the box, ready to send or change. */
+                        const b = el('button', 'chip'); b.type = 'button'; b.append(ico(I.chat), document.createTextNode(q));
+                        b.title = 'Ask this in chat with the skill applied';
+                        b.onclick = async () => {
+                            /* Never over a question already half typed. */
+                            const had = $('input').value.trim();
+                            if (had && had !== q && !await uiConfirm('Replace the question already in the chat box with "' + q + '"?', { title: 'Try this question', okText: 'Replace it' })) return;
+                            useSkillInChat(s.id); $('input').value = q; $('input').dispatchEvent(new Event('input')); $('input').focus();
+                        };
+                        dd.append(b);
+                    } else dd.append(el('span', 'sk-example', q));
+                });
+                dl.append(el('dt', null, 'Where it would use it'), dd);
+            }
+            if (qn) {
+                const ul = el('ul', 'sk-questions'); r.questions.forEach(x => ul.append(el('li', null, x)));
+                const dd = el('dd'); dd.append(ul);
+                dl.append(el('dt', null, 'To check'), dd);
+            }
+            body.append(dl);
+            const foot = el('div', 'sk-reading-foot');
+            foot.append(el('span', 'sk-meta', 'Read ' + fmtDate(r.at) + (r.by ? ' for ' + r.by : '')
+                + (r.stale ? '. The skill has changed since, so read it again before relying on this.' : '.')));
+            const again = el('button', 'btn btn-sm'); again.type = 'button';
+            again.append(ico(I.rotate), document.createTextNode('Read again'));
+            again.title = 'An AI run: Reactor reads the skill as it is now.';
+            again.onclick = () => readSkill(s.id, again);
+            foot.append(again);
+            body.append(foot);
+            d.append(body);
+            return d;
+        }
+        function downloadSkill(s) {
+            /* YAML single quotes, a quote inside doubled, so the same title
+               comes back when the file is uploaded again. */
+            const q = (v) => "'" + String(v || '').replace(/\n/g, ' ').replace(/'/g, "''") + "'";
+            const text = '---\ntitle: ' + q(s.title) + (s.when ? '\ndescription: ' + q(s.when) : '') + '\n---\n\n# ' + s.title + '\n\n' + (s.content || '') + '\n';
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
+            a.download = (String(s.title || 'skill').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'skill') + '.md';
+            document.body.append(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 2000);
         }
         function skillItem(li, s) {
             const head = el('div', 'sk-head');
@@ -10124,6 +10785,9 @@ Projected Image UK"></textarea>
             use.title = 'Ask a question with this skill applied';
             use.onclick = () => useSkillInChat(s.id);
             use.hidden = !tabAllowed('chat');
+            const dl = el('button', 'mem-btn'); dl.type = 'button'; dl.append(ico(I.download)); dl.title = 'Download as Markdown';
+            dl.setAttribute('aria-label', 'Download ' + (s.title || 'skill') + ' as Markdown');
+            dl.onclick = () => downloadSkill(s);
             const edit = el('button', 'mem-btn'); edit.type = 'button'; edit.innerHTML = I.edit; edit.title = 'Edit';
             edit.setAttribute('aria-label', 'Edit ' + (s.title || 'skill'));
             edit.onclick = () => { if (!skillGuard()) return; skView.editId = s.id; skView.adding = false; paintSkills(); };
@@ -10149,8 +10813,18 @@ Projected Image UK"></textarea>
                 li.remove();
                 const h = skHost.card.querySelector('.card-title'); if (h) h.textContent = 'Your skills (' + skills.length + ')';
             };
-            acts.append(use, edit, del); head.append(t, acts); li.append(head);
-            const body = el('div', 'sk-body'); body.textContent = s.content || '';
+            acts.append(use, dl, edit, del);
+            head.append(t);
+            if (s.always) head.append(el('span', 'lbl-chip note sk-always', 'Every answer'));
+            head.append(acts); li.append(head);
+            const when = s.when || (s.reading && s.reading.when) || '';
+            /* Said whose words they are: Reactor's reading fills it until
+               the merchant writes one. */
+            if (when) li.append(el('p', 'sk-when', (s.when_from === 'reading' || !s.when ? 'When it applies, as Reactor read it: ' : 'When it applies: ') + when));
+            /* The skill as the document it is: headings, lists, tables and
+               emphasis, not the marks that make them. */
+            const body = el('div', 'sk-body md');
+            body.append(mdNodes(s.content || ''));
             body.id = 'skb-' + s.id;
             const long = (s.content || '').length > 320 || (s.content || '').split('\n').length > 6;
             const open = skView.open.has(s.id);
@@ -10171,23 +10845,20 @@ Projected Image UK"></textarea>
                 foot.append(more);
             }
             const meta = [skillUse(s)];
-            const when = s.updated || s.created;
-            if (when) meta.push((s.updated && s.updated !== s.created ? 'edited ' : 'added ') + fmtDate(when));
+            const stamp = s.updated || s.created;
+            if (stamp) meta.push((s.updated && s.updated !== s.created ? 'edited ' : 'added ') + fmtDate(stamp));
+            if (s.file) meta.push('from ' + s.file);
             foot.append(el('span', 'sk-meta', meta.join(' · ')));
+            if (!s.reading) {
+                const rd = el('button', 'btn btn-sm sk-read'); rd.type = 'button';
+                rd.append(ico(I.book), document.createTextNode('Have Reactor read it'));
+                rd.title = 'An AI run: Reactor reads the skill closely and writes down when it applies and what it will do.';
+                if (skView.reading[s.id]) setBusy(rd, true);
+                rd.onclick = () => readSkill(s.id, rd);
+                foot.append(rd);
+            }
             li.append(foot);
-        }
-        /* A long document is split at paragraph breaks into pieces the server
-           will keep whole, each titled with its place, rather than cut at the
-           limit without a word. */
-        function splitSkill(text, cap) {
-            const parts = []; let cur = '';
-            String(text).split(/\n{2,}/).forEach(p => {
-                while (p.length > cap) { if (cur) { parts.push(cur); cur = ''; } parts.push(p.slice(0, cap)); p = p.slice(cap); }
-                if ((cur ? cur.length + 2 : 0) + p.length > cap) { parts.push(cur); cur = p; }
-                else cur = cur ? cur + '\n\n' + p : p;
-            });
-            if (cur.trim()) parts.push(cur);
-            return parts.map(x => x.trim()).filter(Boolean);
+            if (s.reading) li.append(readingPanel(s));
         }
         function autoGrow(ta) {
             const fit = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, Math.round(window.innerHeight * 0.7)) + 'px'; };
@@ -10205,9 +10876,23 @@ Projected Image UK"></textarea>
             const tMsg = el('div', 'field-msg'); tMsg.id = 'sk-tmsg-' + (s ? s.id : 'new'); tMsg.hidden = true;
             ti.setAttribute('aria-describedby', tMsg.id);
             f1.append(ti, tMsg); f.append(f1);
+            const fw = el('label', 'sk-field'); fw.append(el('span', null, 'When it applies (optional)'));
+            const wh = el('textarea', 'sk-input sk-when-input'); wh.rows = 2; wh.maxLength = skillCaps.when;
+            wh.placeholder = 'e.g. Replying to a trade customer about prices or lead times. It helps Reactor pick the skill for the right question.';
+            wh.value = s ? (s.when || '') : ((skView.draft && skView.draft.when) || ''); wh.dataset.initial = s ? wh.value : '';
+            fw.append(wh); f.append(fw);
+            /* For a short skill that belongs in every answer, such as a
+               brand voice: it matched few questions by its words, and never
+               reached an email draft. */
+            const alw = el('label', 'sk-check');
+            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!(s && s.always);
+            cb.dataset.initial = cb.checked ? '1' : '';
+            const alwNote = el('span', 'sk-check-note');
+            alw.append(cb, el('span', null, 'Apply to every answer and email draft'), alwNote);
+            f.append(alw);
             const f2 = el('label', 'sk-field'); f2.append(el('span', null, 'What Reactor should do'));
             const bo = el('textarea', 'sk-textarea');
-            bo.placeholder = 'The instructions, rules or reference text to follow. Plain text works best; a line starting "- " is a bullet.';
+            bo.placeholder = 'The instructions, rules or reference text to follow. Markdown works: # headings, - lists, **bold**, tables.';
             bo.value = s ? (s.content || '') : ((skView.draft && skView.draft.content) || ''); bo.dataset.initial = s ? bo.value : '';
             if (!s && skView.draft && skView.draft.title) ti.value = skView.draft.title;
             const bMsg = el('div', 'field-msg'); bMsg.id = 'sk-bmsg-' + (s ? s.id : 'new'); bMsg.hidden = true;
@@ -10217,7 +10902,7 @@ Projected Image UK"></textarea>
             const row = el('div', 'sk-form-row');
             const fileBtn = el('button', 'btn btn-sm'); fileBtn.type = 'button';
             fileBtn.append(ico(I.upload), document.createTextNode('Load from file'));
-            const fi = el('input'); fi.type = 'file'; fi.accept = '.txt,.md,.markdown,.csv,.text'; fi.hidden = true;
+            const fi = el('input'); fi.type = 'file'; fi.accept = '.md,.markdown,.txt,.text,text/markdown,text/plain'; fi.hidden = true;
             fileBtn.onclick = () => fi.click();
             const count = el('div', 'sk-count'); count.id = 'sk-count-' + (s ? s.id : 'new');
             const splitBtn = el('button', 'btn btn-sm'); splitBtn.type = 'button'; splitBtn.hidden = true;
@@ -10226,6 +10911,11 @@ Projected Image UK"></textarea>
                 const n = bo.value.trim().length, over = n - skillCaps.body;
                 count.textContent = nf(n) + ' of ' + nf(skillCaps.body) + ' characters';
                 count.classList.toggle('over', over > 0);
+                const alwCap = skillCaps.always || 4000, tooLong = n > alwCap;
+                cb.disabled = tooLong && !cb.checked;
+                alwNote.textContent = tooLong ? (cb.checked ? ' Shorten it to ' + nf(alwCap) + ' characters, or turn this off, to save it.' : ' Only for a skill of up to ' + nf(alwCap) + ' characters.')
+                    : ' For a short skill such as a brand voice.';
+                alwNote.classList.toggle('over', tooLong && cb.checked);
                 const pieces = over > 0 ? splitSkill(bo.value.trim(), skillCaps.body).length : 0;
                 say(bMsg, bo, over > 0 ? 'This is ' + nf(over) + ' characters over the limit for one skill. Shorten it, or split it into ' + pieces + ' skills.' : '');
                 splitBtn.hidden = !(over > 0) || !!s || pieces < 2;
@@ -10235,39 +10925,43 @@ Projected Image UK"></textarea>
                 say(tMsg, ti, clash ? 'You already have a skill called "' + clash.title + '". Give this one a different title.'
                     : (ti.value.length >= skillCaps.title - 20 ? nf(ti.value.length) + ' of ' + nf(skillCaps.title) + ' characters.' : ''));
                 if (!clash) markInvalid(ti, false);
-                return !clash && over <= 0;
+                return !clash && over <= 0 && !(cb.checked && n > (skillCaps.always || 4000));
             };
-            bo.addEventListener('input', check); ti.addEventListener('input', check);
-            ti.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); bo.focus(); } });
+            bo.addEventListener('input', check); ti.addEventListener('input', check); cb.addEventListener('change', check);
+            ti.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); wh.focus(); } });
             fi.onchange = async () => {
                 const file = fi.files && fi.files[0]; fi.value = ''; if (!file) return;
-                if (file.size > 300000) { toastError('That file is too large. Keep it under 300 KB.'); return; }
+                if (file.size > 1000000) { toastError('That file is too large. Keep it under 1 MB.'); return; }
                 if (bo.value.trim() && !await uiConfirm('Replace what is in the box with ' + file.name + '?', { title: 'Load from file', okText: 'Replace' })) return;
-                const r = new FileReader();
-                r.onload = () => {
-                    bo.value = String(r.result || '');
-                    if (!ti.value) ti.value = file.name.replace(/\.[^.]+$/, '').slice(0, skillCaps.title);
+                try {
+                    /* A Markdown header fills the title and when it applies. */
+                    const rd = await readTextFile(file);
+                    if (rd.note) toastError(rd.note);
+                    const p = parseSkillMd(rd.text, file.name);
+                    bo.value = p.content;
+                    if (!ti.value) ti.value = p.title;
+                    if (!wh.value && p.when) wh.value = p.when;
                     bo.dispatchEvent(new Event('input'));
-                };
-                r.onerror = () => toastError('That file could not be read.');
-                r.readAsText(file);
+                } catch (e) { toastError('That file could not be read.'); }
             };
             const spacer = el('div', 'sk-spacer');
             const cancel = el('button', 'btn btn-sm'); cancel.type = 'button'; cancel.textContent = 'Cancel';
             cancel.onclick = async () => {
-                const dirty = ti.value !== ti.dataset.initial || bo.value !== bo.dataset.initial;
+                const dirty = ti.value !== ti.dataset.initial || bo.value !== bo.dataset.initial || wh.value !== wh.dataset.initial || (cb.checked ? '1' : '') !== cb.dataset.initial;
                 if (dirty && !await uiConfirm('Discard this skill? What you have written is not saved.', { title: 'Discard changes', okText: 'Discard' })) return;
-                ti.dataset.initial = ti.value; bo.dataset.initial = bo.value;
+                ti.dataset.initial = ti.value; bo.dataset.initial = bo.value; wh.dataset.initial = wh.value;
                 skView.editId = null; skView.adding = false; skView.draft = null; paintSkills();
             };
             const save = el('button', 'btn btn-sm btn-primary'); save.type = 'button'; save.textContent = s ? 'Save changes' : 'Add skill';
             const done = (msg) => {
                 const name = ti.value.trim();
-                ti.dataset.initial = ti.value; bo.dataset.initial = bo.value;
+                ti.dataset.initial = ti.value; bo.dataset.initial = bo.value; wh.dataset.initial = wh.value;
                 skView.editId = null; skView.adding = false; skView.draft = null; paintSkills(); toastOk(msg);
-                /* Focus lands on the skill just saved, not on the page. */
-                const h = [...skHost.card.querySelectorAll('.sk-title')].find(x => x.textContent === name || x.textContent.indexOf(name + ' (1 of') === 0)
-                    || skHost.card.querySelector('.sk-title');
+                /* Focus lands on the skill just saved, found by its id, not on the page. */
+                const low = name.toLowerCase();
+                const hit = s || skills.find(x => { const t = String(x.title || '').toLowerCase(); return t === low || t.indexOf(low + ':') === 0 || t.indexOf(low + ' (1 of') === 0; });
+                const li = hit && skHost.card.querySelector('.sk-item[data-id="' + hit.id + '"]');
+                const h = (li && li.querySelector('.sk-title')) || skHost.card.querySelector('.sk-title');
                 if (h) { h.tabIndex = -1; h.focus(); }
             };
             save.onclick = async () => {
@@ -10278,8 +10972,12 @@ Projected Image UK"></textarea>
                 if (!check()) { (tMsg.hidden ? bo : ti).focus(); return; }
                 setBusy(save, true);
                 try {
-                    await skillOp(s ? { op: 'update', id: s.id, title: title, content: content } : { op: 'add', title: title, content: content });
-                    done(s ? 'Skill saved. Reactor follows the new version from the next answer.' : 'Skill added. Reactor follows it from the next answer where it fits.');
+                    const changed = s && s.reading && content !== (s.content || '').trim();
+                    await skillOp(s ? { op: 'update', id: s.id, title: title, content: content, when: wh.value.trim(), always: cb.checked }
+                                    : { op: 'add', title: title, content: content, when: wh.value.trim(), always: cb.checked });
+                    done(s ? (changed ? 'Skill saved. What Reactor read of it is now out of date: read it again from the skill.'
+                                      : 'Skill saved. Reactor follows the new version from the next answer.')
+                           : 'Skill added. Reactor follows it from the next answer where it fits.');
                 } catch (e) {
                     setBusy(save, false);
                     const m = e.message || 'The skill was not saved.';
@@ -10293,13 +10991,14 @@ Projected Image UK"></textarea>
                 const title = ti.value.trim();
                 if (!title) { say(tMsg, ti, 'Give the skill a title first; each part is named after it.'); ti.focus(); return; }
                 const parts = splitSkill(bo.value.trim(), skillCaps.body);
-                if (!await uiConfirm('Save this as ' + parts.length + ' skills, "' + title + ' (1 of ' + parts.length + ')" and on? Each part is split at a paragraph break.',
+                const titles = splitTitles(title, parts);
+                if (!await uiConfirm('Save this as ' + parts.length + ' skills, ' + splitHow(bo.value) + ': ' + titles.map(x => '"' + x + '"').join(', ') + '?',
                     { title: 'Split into skills', okText: 'Save ' + parts.length + ' skills' })) return;
                 setBusy(splitBtn, true); setBusy(save, true);
                 let made = 0;
                 try {
                     for (let i = 0; i < parts.length; i++) {
-                        await skillOp({ op: 'add', title: (title + ' (' + (i + 1) + ' of ' + parts.length + ')').slice(0, skillCaps.title), content: parts[i] });
+                        await skillOp({ op: 'add', title: titles[i], content: parts[i], when: wh.value.trim() });
                         made += 1;
                     }
                     done('Saved as ' + parts.length + ' skills.');
@@ -10308,8 +11007,8 @@ Projected Image UK"></textarea>
                     say(bMsg, bo, (made ? made + ' of ' + parts.length + ' parts were saved before this one failed. ' : 'Nothing was saved. ') + (e.message || ''));
                 }
             };
-            row.append(fileBtn, count, spacer, splitBtn, cancel, save);
-            f.append(fi, row);
+            row.append(fileBtn, fi, count, spacer, splitBtn, cancel, save);
+            f.append(row);
             check();
             requestAnimationFrame(() => (s ? bo : ti).focus());
             return f;
@@ -19774,7 +20473,8 @@ Projected Image UK"></textarea>
                 ['Track', 'On a recommended action, Track takes a snapshot of your headline figures and measures the change over the following weeks. Tracked changes are listed on Memory.'],
                 ['Deep analysis', 'Uses the larger model for the conversation it is switched on in: slower, and it costs more. For questions that need several reports at once.'],
                 ['Memory', 'The facts, decisions, preferences, learnings and follow-ups Reactor keeps from chat, and what it learned from the website. Add or correct a note by hand. A rule for how Reactor should work belongs in Skills, and a note that reads like one is offered as a skill.'],
-                ['Skills', 'Your playbooks: a brand voice, a discount policy, how to answer a trade enquiry. Give each a title that says when it applies. Reactor picks the ones that fit each question, in chat, reports and email drafts, and says under each answer which it followed. Use in chat, or the Skills button beside the question box, applies one whatever the question.'],
+                ['Skills', 'Your playbooks: a brand voice, a discount policy, how to answer a trade enquiry. Write one, or upload Markdown files (a SKILL.md header gives the title and when it applies). Reactor picks the ones that fit each question, in chat, reports and email drafts, and says under each answer which it followed. Use in chat, or the Skills button beside the question box, applies one whatever the question; a short one can be applied to every answer.'],
+                ['Having a skill read', 'Read and add, or Have Reactor read it, is an AI run in which Reactor reads the skill closely and writes down when it applies, what it will do, and anything unclear. Check it before you rely on the skill, and read it again after you change the skill.'],
             ]},
             { id: 'never', h: 'What the app will not do', body: [
                 ['Charge you twice', 'A booking is refused if the order already has a live label. If the result of a booking is unknown, the app says so and will not book again rather than risk a second charge.'],

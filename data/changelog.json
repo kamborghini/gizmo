@@ -2,6 +2,32 @@
  "releases": [
   {
    "date": "2026-09-24",
+   "title": "Skills from Markdown files, read and applied",
+   "items": [
+    {
+     "kind": "added",
+     "tab": "skills",
+     "text": "Upload Markdown on the Skills page adds skills from .md files, several at once or dropped on the page, including Claude-style SKILL.md files: the name and description in a file's header become the title and when it applies. Each file is shown before it is saved, with its title, when it applies and a preview, and one too long for a single skill is split at its headings, or at paragraph breaks when it has none."
+    },
+    {
+     "kind": "added",
+     "tab": "skills",
+     "text": "Read and add, or Have Reactor read it on a skill, has Reactor read the skill closely (an AI run) and write down when it applies, what it will do, questions where it would use it, and anything unclear or beyond what it can do. It shows under the skill, says when the skill has changed since, and its example questions open Chat with the skill applied."
+    },
+    {
+     "kind": "improved",
+     "tab": "skills",
+     "text": "Reactor picks skills by their title, when they apply, their headings and example questions, with plurals matched and words every skill uses ignored. A long skill is given as what it asks and the sections that fit the question, and in chat Reactor reads the section it needs. Email drafts use a skill's own reply templates, and a short skill such as a brand voice can be applied to every answer and draft."
+    },
+    {
+     "kind": "improved",
+     "tab": "skills",
+     "text": "Skills show as the documents they are: headings, lists, tables, bold and links, with the line breaks you typed. Each can be downloaded as a .md file and has a note of when it applies."
+    }
+   ]
+  },
+  {
+   "date": "2026-09-24",
    "title": "The assistant follows your skills, and the Workspace pages are rebuilt",
    "items": [
     {
