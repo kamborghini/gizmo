@@ -13,6 +13,16 @@
      "kind": "improved",
      "tab": "chat",
      "text": "Deep analysis now has Reactor think for longer before it answers, instead of switching to a larger model. It is still slower and costs more, and only answers asked with it switched on are marked Deep analysis."
+    },
+    {
+     "kind": "fixed",
+     "tab": "chat",
+     "text": "When the AI service fails a question, Reactor says why, in plain words and with Anthropic's own reason, instead of \"The AI service returned an error\" for every failure. The same goes for the reports, skill reading and email drafts."
+    },
+    {
+     "kind": "improved",
+     "tab": "chat",
+     "text": "If Claude Opus 5.5 cannot answer, because it is busy, limited or not available to the account, Claude Opus 4.8 answers instead, and the answer says so and why. Settings shows the latest AI failure under AI usage."
     }
    ]
   },

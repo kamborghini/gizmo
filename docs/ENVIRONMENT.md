@@ -3,7 +3,7 @@
 Generated from the code by `tools/env_reference.py`; do not edit by hand.
 `make env-doc` rewrites it, and CI fails when it is stale.
 
-216 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
+217 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
 
 ## server.py
 
@@ -47,6 +47,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `ANTHROPIC_EFFORT_DEEP` | `"max"` | copilot |  |
 | `ANTHROPIC_MODEL` | `None` | copilot |  |
 | `ANTHROPIC_MODEL_DEEP` | `"claude-opus-5-5"` | copilot |  |
+| `ANTHROPIC_MODEL_FALLBACK` | `"claude-opus-4-8"` | copilot |  |
 | `ANTHROPIC_MODEL_FAST` | `None` | copilot |  |
 | `ANTHROPIC_THINKING` | `"adaptive"` | copilot |  |
 | `APP_BASE_URL` | `""` | copilot |  |

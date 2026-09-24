@@ -8575,6 +8575,18 @@ def t_deep_analysis_is_tagged_by_the_switch_not_the_model_name():
         os.unlink(path)
 
 
+@test
+def t_an_answer_the_fallback_gave_says_so_and_the_usage_panel_keeps_the_failure():
+    for name in ("function chatAnswer(", "function pageAssistant("):
+        ok("fellBackNote(t)" in fn_src(name), name + " shows who answered when the chosen model failed")
+    ok("fell_back: data.fell_back" in SCRIPT and "fell_back: res.fell_back" in SCRIPT, "and both keep it with the answer")
+    note = fn_src("function fellBackNote(")
+    ok("' answered this, because '" in note and "could not. " in note, note)
+    usage = fn_src("function loadUsage(")
+    ok("u.last_failure" in usage and "'Latest AI failure, '" in usage and "' answered instead.'" in usage,
+       "the admin's usage panel names the latest failure")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

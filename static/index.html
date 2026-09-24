@@ -7855,6 +7855,15 @@ Projected Image UK"></textarea>
         function deepTurn(t) {
             return t.deep != null ? !!t.deep : !!(t.model && /opus/i.test(t.model));
         }
+        /* An answer the fallback model gave, because the chosen one failed:
+           said under the answer, with the reason, never passed off as it. */
+        function fellBackNote(t) {
+            const f = t.fell_back;
+            if (!f || !f.to) return null;
+            const n = el('div', 'resp-note');
+            n.append(el('span', null, f.to + ' answered this, because ' + (f.from || 'the usual model') + ' could not. ' + (f.why || '')));
+            return n;
+        }
         function chatAnswer(c, t, i) {
             const m = el('div', 'msg assistant');
             const head = el('div', 'resp-head');
@@ -7868,6 +7877,7 @@ Projected Image UK"></textarea>
             head.append(copy);
             m.append(head);
             renderStructured(m, t.structured || {}, { chat: { c: c, t: t } });
+            const fb = fellBackNote(t); if (fb) m.append(fb);
             if (Array.isArray(t.not_kept) && t.not_kept.length) {
                 const n = el('div', 'resp-note');
                 n.append(el('span', null, 'Not kept as a note, because it reads as an instruction: "' + t.not_kept[0] + '"'
@@ -8134,7 +8144,7 @@ Projected Image UK"></textarea>
             if (fail) c.turns.push({ role: 'error', text: fail.message || String(fail), stopped: !!fail.stopped, at: new Date().toISOString() });
             else {
                 c.turns.push({ role: 'assistant', structured: data.structured || { summary: 'Reactor did not send an answer. Ask again.' },
-                    model: data.model, deep: data.deep, data_used: data.data_used, at: new Date().toISOString(),
+                    model: data.model, deep: data.deep, fell_back: data.fell_back, data_used: data.data_used, at: new Date().toISOString(),
                     not_kept: data.not_kept, followups_closed: data.followups_closed, followups_maybe: data.followups_maybe });
                 /* Only the notes can have changed, and only when the answer
                    kept or closed one: every answer used to read the notes,
@@ -8294,6 +8304,7 @@ Projected Image UK"></textarea>
             if (deepTurn(t)) head.append(el('span', 'tag', 'Deep analysis'));
             m.append(head);
             renderStructured(m, t.structured || {}, { noFollowups: true });
+            const fb = fellBackNote(t); if (fb) m.append(fb);
             if (Array.isArray(t.data_used) && t.data_used.length) m.append(dataDrill(t.data_used));
             const fu = (t.structured && t.structured.followups) || [];
             if (fu.length) m.append(followupChips(fu.slice(0, 4), q => pageAsk(page, q, data)));
@@ -8369,7 +8380,7 @@ Projected Image UK"></textarea>
                 let res;
                 try { res = await streamChat(payload, lbl => { const sp = th.querySelector('span'); if (sp && lbl) sp.textContent = lbl; }); }
                 catch (se) { if ((se.message || '') === 'STREAM_TRANSPORT') res = await api('/api/chat', payload); else throw se; }
-                pageThreads[tk].push({ role: 'assistant', structured: res.structured || { summary: 'Reactor did not send an answer. Ask again.' }, model: res.model, deep: res.deep, data_used: res.data_used });
+                pageThreads[tk].push({ role: 'assistant', structured: res.structured || { summary: 'Reactor did not send an answer. Ask again.' }, model: res.model, deep: res.deep, fell_back: res.fell_back, data_used: res.data_used });
                 loadMemory('notes');
             } catch (e) {
                 // NOT an assistant turn: an answer bubble carrying the words
@@ -28402,6 +28413,13 @@ Projected Image UK"></textarea>
                 top.append(el('b', null, '$' + (u.cost || 0).toFixed(2)));
                 top.append(document.createTextNode(' across ' + (u.runs || 0) + ' calls. Same volume on Sonnet ≈ $' + (u.cost_if_sonnet || 0).toFixed(2) + ', on Haiku ≈ $' + (u.cost_if_haiku || 0).toFixed(2) + '.'));
                 box.append(top);
+                const lf = u.last_failure;
+                if (lf && lf.at) {
+                    const when = new Date(lf.at);
+                    box.append(el('div', 'setting-sub', 'Latest AI failure, ' + (isNaN(when) ? '' : when.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) + ': '
+                        + (lf.model || 'the AI model') + ' failed. ' + (lf.why || '')
+                        + (lf.answered_by ? ' ' + lf.answered_by + ' answered instead.' : '')));
+                }
                 if (Array.isArray(u.by_kind) && u.by_kind.length) {
                     const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = 'var(--sp-2-5)'; const tbl = el('table', 'ktable');
                     const thead = el('thead'); const htr = el('tr');

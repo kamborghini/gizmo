@@ -88,6 +88,10 @@ ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 # cheaper tier (e.g. claude-sonnet-5) take everyday chat without a code change.
 MODEL_FAST = os.environ.get("ANTHROPIC_MODEL_FAST") or os.environ.get("ANTHROPIC_MODEL") or "claude-opus-5-5"
 MODEL_DEEP = os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-5-5")
+# Asked once, with the same request, when the model above fails at Anthropic
+# (unavailable to the account, overloaded, limited, or refusing the request),
+# so a question is answered and says so rather than failing. "off" disables.
+MODEL_FALLBACK = os.environ.get("ANTHROPIC_MODEL_FALLBACK", "claude-opus-4-8")
 # Effort (low|medium|high|xhigh|max). Opus 5.5 thinks on every request and
 # effort is how much: "high" spends what a task needs and is every call's
 # level; "max" has no limit and is what Deep analysis in chat asks for. Every
@@ -393,8 +397,11 @@ def _effort_for(model: str, deep: bool = False) -> str:
     """The everyday effort, or Deep analysis's. effort 'max' and 'xhigh' are
     Opus-tier only and 400 on Sonnet/Haiku - cap non-Opus models at 'high' so
     the request never errors."""
-    eff = ANTHROPIC_EFFORT_DEEP if deep else ANTHROPIC_EFFORT
-    if "opus" not in model.lower() and eff in ("max", "xhigh"):
+    return _cap_effort(model, ANTHROPIC_EFFORT_DEEP if deep else ANTHROPIC_EFFORT)
+
+
+def _cap_effort(model: str, eff: str) -> str:
+    if "opus" not in (model or "").lower() and eff in ("max", "xhigh"):
         return "high"
     return eff
 
@@ -3049,23 +3056,119 @@ def _unforce(kwargs: dict) -> str:
     return name
 
 
+def _model_name(model: str) -> str:
+    """claude-opus-5-5 as the page writes it: Claude Opus 5.5."""
+    m = re.fullmatch(r"(?:anthropic\.)?claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:[-@]\d{8})?", (model or "").strip().lower())
+    if not m:
+        return model or "the AI model"
+    return "Claude " + m.group(1).title() + " " + m.group(2) + ("." + m.group(3) if m.group(3) else "")
+
+
+def _ai_said(e: Exception) -> str:
+    """Anthropic's own message for a failed call, on one line and short."""
+    body = getattr(e, "body", None)
+    err = body.get("error") if isinstance(body, dict) else None
+    msg = err.get("message", "") if isinstance(err, dict) else ""
+    msg = re.sub(r"\s+", " ", str(msg or getattr(e, "message", "") or e)).strip()
+    return _strip_dashes(msg[:240])
+
+
+def _ai_error_words(e: Exception) -> str:
+    """What the page says when an AI call failed: which kind of failure it
+    was, with Anthropic's own words where they tell it apart. Every failure
+    used to read "The AI service returned an error", so a refused request, a
+    model the account cannot use and a busy service looked the same."""
+    if isinstance(e, anthropic.APITimeoutError):
+        return "The AI service took too long to answer. Please try again."
+    if isinstance(e, anthropic.APIConnectionError):
+        return "Reactor could not reach the AI service. Please try again."
+    status = getattr(e, "status_code", 0) or 0
+    said = _ai_said(e)
+    if status == 401:
+        return "The AI service did not accept Reactor's key. An admin needs to check it."
+    if status == 413:
+        return "That was too much to send in one go. Start a new chat, or ask about less at once."
+    if status == 429:
+        return "Reactor has reached the AI service's limit for its account. Wait a minute and ask again."
+    if status == 529 or status >= 500:
+        return "The AI service is busy or down right now. Please try again shortly."
+    if status == 404:
+        return "The AI service does not offer that model to Reactor's account. Anthropic said: " + said
+    if said:
+        return "The AI service refused the request. Anthropic said: " + said
+    return "The AI service returned an error. Please try again."
+
+
+# The latest AI failure, for the admin's AI usage panel: the page tells the
+# person who asked, once; this keeps it for whoever looks next.
+_AI_LAST_FAIL: dict = {}
+# Set by _xcreate when the fallback model answered, for run_chat to say so.
+_ai_fell_back: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVar("ai_fell_back", default=None)
+
+
+def _note_ai_failure(model: str, e: Exception, answered_by: str = "") -> None:
+    _AI_LAST_FAIL.clear()
+    _AI_LAST_FAIL.update({"at": datetime.now(timezone.utc).isoformat(), "model": _model_name(model),
+                          "why": _ai_error_words(e), "answered_by": _model_name(answered_by) if answered_by else "",
+                          "kind": _ai_kind.get("ai")})
+
+
+def _fallback_for(model: str, e: Exception) -> str:
+    """The model to ask instead, or "" when asking another cannot help: a key
+    the service refused, or a request too big for any model."""
+    fb = (MODEL_FALLBACK or "").strip()
+    if not fb or fb.lower() in ("off", "none", "0") or fb.lower() == (model or "").lower():
+        return ""
+    if (getattr(e, "status_code", 0) or 0) in (401, 413):
+        return ""
+    return fb
+
+
 async def _xcreate(client, **kwargs):
     """Every model call. A forced tool call is asked for in words on a model
     that refuses to be forced, and asked for once more if the answer came
-    back as prose, so each caller still finds its tool block."""
+    back as prose, so each caller still finds its tool block. A call the
+    model fails at Anthropic is asked of the fallback model once, and the
+    failure is kept for the usage panel either way."""
     must = None
     if _forces_tool(kwargs) and not _can_force_tool(kwargs.get("model", "")):
         must = _unforce(kwargs)
     try:
-        resp = await _xcreate_once(client, kwargs)
-    except anthropic.BadRequestError as e:
-        model = str(kwargs.get("model") or "").lower()
-        if not (_forces_tool(kwargs) and model and "tool_choice" in str(e)):
+        try:
+            resp = await _xcreate_once(client, kwargs)
+        except anthropic.BadRequestError as e:
+            model = str(kwargs.get("model") or "").lower()
+            if not (_forces_tool(kwargs) and model and "tool_choice" in str(e)):
+                raise
+            logger.warning("model %s refuses a forced tool; asking for it instead", model)
+            _UNFORCED_MODELS.add(model)
+            must = _unforce(kwargs)
+            resp = await _xcreate_once(client, kwargs)
+    except anthropic.APIStatusError as e:
+        model = str(kwargs.get("model") or "")
+        fb = _fallback_for(model, e)
+        logger.warning("model %s failed (%s): %s%s", model, getattr(e, "status_code", ""), _ai_said(e),
+                       "; asking " + fb if fb else "")
+        if not fb:
+            _note_ai_failure(model, e)
             raise
-        logger.warning("model %s refuses a forced tool; asking for it instead", model)
-        _UNFORCED_MODELS.add(model)
-        must = _unforce(kwargs)
-        resp = await _xcreate_once(client, kwargs)
+        alt = dict(kwargs)
+        alt["model"] = fb
+        oc = alt.get("output_config")
+        if isinstance(oc, dict) and oc.get("effort"):
+            alt["output_config"] = {**oc, "effort": _cap_effort(fb, oc["effort"])}
+        try:
+            resp = await _xcreate_once(client, alt)
+        except anthropic.APIError as e2:
+            logger.warning("fallback %s failed too: %s", fb, _ai_said(e2))
+            _note_ai_failure(model, e)
+            raise e
+        _note_ai_failure(model, e, fb)
+        _ai_fell_back.set({"from": model, "to": fb, "why": _ai_error_words(e)})
+        kwargs = alt
+    except anthropic.APIError as e:
+        _note_ai_failure(str(kwargs.get("model") or ""), e)
+        raise
     if must is not None and getattr(resp, "stop_reason", "") == "end_turn" and not any(
             getattr(b, "type", "") == "tool_use" and (not must or getattr(b, "name", "") == must)
             for b in (getattr(resp, "content", None) or [])):
@@ -3125,6 +3228,7 @@ def _usage_summary(days: int = 30) -> dict:
     return {"days": days, "runs": len(ev), "cost": round(tot_cost, 4),
             "in": int(tot_in), "out": int(tot_out),
             "cost_if_sonnet": round(cost_sonnet, 4), "cost_if_haiku": round(cost_haiku, 4),
+            "last_failure": dict(_AI_LAST_FAIL) or None,
             "by_kind": sorted(by_kind.values(), key=lambda x: -x["cost"])}
 
 
@@ -3354,6 +3458,14 @@ def _chat_after(result: dict, history: list) -> None:
             result["followups_maybe"] = maybe[:6]
 
 
+def _fell_back_words() -> dict:
+    """For a chat answer the fallback model gave: who answered and why."""
+    fell = _ai_fell_back.get()
+    if not fell:
+        return {}
+    return {"fell_back": {"from": _model_name(fell["from"]), "to": _model_name(fell["to"]), "why": fell["why"]}}
+
+
 async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dict],
                    model: str, extra_system: str = "", emit: Optional[Callable] = None,
                    effort: Optional[str] = None) -> dict:
@@ -3361,6 +3473,7 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
     the present_response tool and returned as a structured dict. If `emit` is given,
     it is awaited with progress events ({"type":"step","label":...}) for live streaming."""
     _ai_kind.set("chat")
+    _ai_fell_back.set(None)
     client = _anthropic()
     messages = list(history)
     tools_used: list[str] = []
@@ -3379,11 +3492,16 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
         kwargs = {
             "model": model, "max_tokens": MAX_TOKENS, "system": system,
             "tools": all_tools, "messages": messages,
-            "output_config": {"effort": effort or _effort_for(model)},
+            "output_config": {"effort": _cap_effort(model, effort) if effort else _effort_for(model)},
         }
         if THINKING_MODE:  # adaptive thinking: deeper reasoning, model self-paces
             kwargs["thinking"] = {"type": THINKING_MODE}
         resp = await _xcreate(client,**kwargs)
+        fell = _ai_fell_back.get()
+        if fell:
+            # The rest of this answer stays with the model that answered:
+            # asking the failed one again each round only fails again.
+            model = fell["to"]
 
         data_uses: list[Any] = []
         present: Optional[dict] = None
@@ -3402,13 +3520,13 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
 
         if present is not None:
             return {"structured": _coerce_structured(present), "tools_used": tools_used,
-                    "data_used": data_used, "model": model, "_saw": "\n".join(saw)}
+                    "data_used": data_used, "model": model, "_saw": "\n".join(saw), **_fell_back_words()}
 
         if not data_uses:
             # Ended without present_response — wrap any prose as the summary.
             text = "".join(text_parts).strip()
             return {"structured": {"summary": text or "Reactor did not send an answer. Ask again."}, "tools_used": tools_used,
-                    "data_used": data_used, "model": model, "_saw": "\n".join(saw)}
+                    "data_used": data_used, "model": model, "_saw": "\n".join(saw), **_fell_back_words()}
 
         if emit:
             labels = sorted({("your skill " + str((tu.input or {}).get("title", "")).strip()) if tu.name == READ_SKILL_TOOL["name"]
@@ -3442,7 +3560,7 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
         "structured": {"summary": "I read a lot of data but could not finish an answer. "
                                   "Narrow the question and ask again."},
         "tools_used": tools_used, "data_used": data_used, "model": model,
-        "_saw": "\n".join(saw),
+        "_saw": "\n".join(saw), **_fell_back_words(),
     }
 
 
@@ -17833,9 +17951,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                     effort=_effort_for(model, deep))
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
-        except anthropic.APIError:
+        except anthropic.APIError as e:
             logger.exception("Anthropic API error")
-            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+            return _json({"error": _ai_error_words(e)}, 502)
         _chat_after(result, history)
         result["deep"] = deep
         return _json(result)
@@ -17878,9 +17996,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _chat_after(result, history)
                 result["deep"] = deep
                 await q.put({"type": "done", "result": result})
-            except anthropic.APIError:
+            except anthropic.APIError as e:
                 logger.exception("Anthropic API error (stream)")
-                await q.put({"type": "error", "error": "The AI service returned an error. Please try again."})
+                await q.put({"type": "error", "error": _ai_error_words(e)})
             except RuntimeError as e:
                 await q.put({"type": "error", "error": str(e)})
             except Exception:
@@ -17920,9 +18038,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             result = await run_overview(registry, extra, bool(track))
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
-        except anthropic.APIError:
+        except anthropic.APIError as e:
             logger.exception("Anthropic API error (overview)")
-            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+            return _json({"error": _ai_error_words(e)}, 502)
         except Exception:
             logger.exception("Overview failed")
             return _json({"error": "Couldn't build the overview. Check the server logs."}, 500)
@@ -18004,9 +18122,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             result = await run_seo_audit(registry, extra)
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
-        except anthropic.APIError:
+        except anthropic.APIError as e:
             logger.exception("Anthropic API error (seo)")
-            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+            return _json({"error": _ai_error_words(e)}, 502)
         except Exception:
             logger.exception("SEO audit failed")
             return _json({"error": "Couldn't run the SEO audit. Check the server logs."}, 500)
@@ -18023,9 +18141,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             res = await run_keywords(registry, extra)
             res = _save_analysis("keywords", res)
             return _json(res)
-        except anthropic.APIError:
+        except anthropic.APIError as e:
             logger.exception("Anthropic API error (keywords)")
-            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+            return _json({"error": _ai_error_words(e)}, 502)
         except Exception:
             logger.exception("Keyword analysis failed")
             return _json({"error": "Couldn't run the keyword analysis. Check the server logs."}, 500)
@@ -18047,9 +18165,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json(await run_keyword_scan(registry, url, extra))
         except RuntimeError as e:
             return _json({"error": str(e)}, 400)
-        except anthropic.APIError:
+        except anthropic.APIError as e:
             logger.exception("Anthropic API error (keyword-scan)")
-            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+            return _json({"error": _ai_error_words(e)}, 502)
         except Exception:
             logger.exception("Keyword scan failed")
             return _json({"error": "Couldn't scan that URL. Check that it is a public web page."}, 500)
@@ -18148,9 +18266,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             _track(who, "skills", "had a skill read", str(hit.get("title") or "")[:60])
         except (RuntimeError, ValueError) as e:
             return _json({"error": str(e)}, 400 if isinstance(e, ValueError) else 500)
-        except anthropic.APIError:
+        except anthropic.APIError as e:
             logger.exception("Anthropic API error (skill read)")
-            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+            return _json({"error": _ai_error_words(e)}, 502)
         except Exception:
             logger.exception("Skill read failed")
             return _json({"error": "Reactor could not read this skill just now. Try again."}, 500)
@@ -18407,9 +18525,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"knowledge": await run_learn(registry)})
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
-        except anthropic.APIError:
+        except anthropic.APIError as e:
             logger.exception("Anthropic API error (learn)")
-            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+            return _json({"error": _ai_error_words(e)}, 502)
         except Exception:
             logger.exception("Learn failed")
             return _json({"error": "Reactor could not learn the store this time. Try again, or tell "
@@ -19209,9 +19327,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                   messages=[{"role": "user", "content": prompt}])
         except RuntimeError as e:
             return _json({"error": str(e), "hard": True}, 429)
-        except anthropic.APIError:
+        except anthropic.APIError as e:
             logger.exception("mail draft AI error")
-            return _json({"error": "The AI service returned an error. Try again."}, 502)
+            return _json({"error": _ai_error_words(e)}, 502)
         draft = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
         if not draft:
             return _json({"error": "The AI returned nothing. Try again."}, 502)
@@ -24802,9 +24920,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json(res, 502)      # nothing worked out, nothing saved
             res = _save_customer_segment(segment or "__all__", res)
             return _json(res)
-        except anthropic.APIError:
+        except anthropic.APIError as e:
             logger.exception("Anthropic API error (customers)")
-            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+            return _json({"error": _ai_error_words(e)}, 502)
         except Exception:
             logger.exception("Customer analysis failed")
             return _json({"error": "Couldn't run the customer analysis. Check the server logs."}, 500)
@@ -24841,9 +24959,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json(await run_product_audit(registry, pid, extra))
         except RuntimeError as e:
             return _json({"error": str(e)}, 400)
-        except anthropic.APIError:
+        except anthropic.APIError as e:
             logger.exception("Anthropic API error (product)")
-            return _json({"error": "The AI service returned an error. Please try again."}, 502)
+            return _json({"error": _ai_error_words(e)}, 502)
         except Exception:
             logger.exception("Product audit failed")
             return _json({"error": "Couldn't analyze this product. Check the server logs."}, 500)

@@ -23094,11 +23094,16 @@ def t_a_model_found_refusing_a_forced_tool_is_remembered():
         ok("tool_choice" not in fake.calls[1] and resp is good, "retried without forcing")
         ok(not copilot._can_force_tool("claude-next-9"), "and not forced again")
         other = copilot.anthropic.BadRequestError("messages: too long", response=refused.response, body=None)
+        fb = copilot.MODEL_FALLBACK
+        copilot.MODEL_FALLBACK = "off"
         try:
             _opus_run("claude-next-8", [other], tool_choice={"type": "tool", "name": "record"})
-            ok(False, "any other refusal is raised as before")
+            ok(False, "any other refusal is not taken for a forced-tool one")
         except copilot.anthropic.BadRequestError:
             pass
+        finally:
+            copilot.MODEL_FALLBACK = fb
+        ok(copilot._can_force_tool("claude-next-8"), "and the model is still forced")
     finally:
         copilot._UNFORCED_MODELS.clear(); copilot._UNFORCED_MODELS.update(saved)
 
@@ -23131,6 +23136,142 @@ def t_deep_analysis_is_more_thinking_and_the_answer_says_it_was_deep():
     if not os.environ.get("ANTHROPIC_EFFORT_DEEP") and not os.environ.get("ANTHROPIC_EFFORT"):
         eq(copilot._effort_for("claude-opus-5-5", True), "max")
         eq(copilot._effort_for("claude-opus-5-5"), "high")
+
+
+
+# A chat question failed on Opus 5.5 with "The AI service returned an error"
+# and nothing said why. Each failure now says what it was, and a request the
+# chosen model fails at Anthropic is asked of the fallback model once.
+
+def _api_status(code, message="nope", err_type="invalid_request_error"):
+    import httpx
+    resp = httpx.Response(code, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+    body = {"type": "error", "error": {"type": err_type, "message": message}}
+    cls = {400: copilot.anthropic.BadRequestError, 401: copilot.anthropic.AuthenticationError,
+           404: copilot.anthropic.NotFoundError, 429: copilot.anthropic.RateLimitError}.get(code, copilot.anthropic.APIStatusError)
+    return cls(message, response=resp, body=body)
+
+
+@test
+def t_an_ai_failure_says_what_it_was():
+    w = copilot._ai_error_words
+    ok("does not offer that model" in w(_api_status(404, "model: claude-opus-5-5", "not_found_error"))
+       and "model: claude-opus-5-5" in w(_api_status(404, "model: claude-opus-5-5")), "a model the account cannot use")
+    ok("limit" in w(_api_status(429, "rate limited", "rate_limit_error")))
+    ok("busy or down" in w(_api_status(529, "Overloaded", "overloaded_error")) and "busy or down" in w(_api_status(500)))
+    ok("key" in w(_api_status(401, "invalid x-api-key", "authentication_error")))
+    ok("Anthropic said: messages.1: bad thing" in w(_api_status(400, "messages.1: bad thing")), "a refused request in Anthropic's words")
+    ok("—" not in w(_api_status(400, "a — b")), "no dash reaches the page")
+    import httpx
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    ok("too long" in w(copilot.anthropic.APITimeoutError(request=req)))
+    ok("could not reach" in w(copilot.anthropic.APIConnectionError(request=req)))
+    eq(copilot._model_name("claude-opus-5-5"), "Claude Opus 5.5")
+    eq(copilot._model_name("claude-sonnet-5"), "Claude Sonnet 5")
+    eq(copilot._model_name("claude-haiku-4-5-20251001"), "Claude Haiku 4.5")
+    eq(copilot._model_name("anthropic.claude-opus-4-8"), "Claude Opus 4.8")
+    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    ok('"The AI service returned an error. Please try again."}' not in src and src.count("_ai_error_words(e)}") >= 11,
+       "every AI route says the reason")
+
+
+@test
+def t_a_model_that_fails_is_answered_by_the_fallback_and_says_so():
+    good = _OpusResp([_OpusBlock("tool_use", name="record", input={"total": 5}, id="t")], "tool_use")
+    saved = (copilot.MODEL_FALLBACK, dict(copilot._AI_LAST_FAIL))
+    try:
+        copilot.MODEL_FALLBACK = "claude-opus-4-8"
+        fake, resp = _opus_run("claude-opus-5-5", [_api_status(404, "model: claude-opus-5-5", "not_found_error"), good],
+                               tool_choice={"type": "tool", "name": "record"}, output_config={"effort": "max"})
+        eq([c["model"] for c in fake.calls], ["claude-opus-5-5", "claude-opus-4-8"])
+        ok(resp is good, "the fallback's answer is the answer")
+        eq(copilot._AI_LAST_FAIL["model"], "Claude Opus 5.5")
+        eq(copilot._AI_LAST_FAIL["answered_by"], "Claude Opus 4.8")
+        ok("does not offer that model" in copilot._AI_LAST_FAIL["why"])
+        # A non-Opus fallback is not sent an effort it would refuse.
+        copilot.MODEL_FALLBACK = "claude-sonnet-4-6"
+        fake, _ = _opus_run("claude-opus-5-5", [_api_status(529, "Overloaded"), good], output_config={"effort": "max"})
+        eq(fake.calls[1]["output_config"], {"effort": "high"})
+        # Both fail: the chosen model's failure is the one raised.
+        copilot.MODEL_FALLBACK = "claude-opus-4-8"
+        try:
+            _opus_run("claude-opus-5-5", [_api_status(404, "model: claude-opus-5-5"), _api_status(529, "Overloaded")])
+            ok(False, "raised")
+        except copilot.anthropic.APIStatusError as e:
+            eq(e.status_code, 404)
+        eq(copilot._AI_LAST_FAIL["answered_by"], "")
+        # A refused key is refused by any model: no second request.
+        try:
+            _opus_run("claude-opus-5-5", [_api_status(401, "invalid x-api-key")])
+            ok(False, "raised")
+        except copilot.anthropic.AuthenticationError:
+            pass
+        # Switched off, a failure is raised as it came.
+        copilot.MODEL_FALLBACK = "off"
+        try:
+            fake, _ = _opus_run("claude-opus-5-5", [_api_status(529, "Overloaded")])
+            ok(False, "raised")
+        except copilot.anthropic.APIStatusError:
+            pass
+        # The usage panel is given the latest failure.
+        ok(copilot._usage_summary(30)["last_failure"]["model"] == "Claude Opus 5.5")
+    finally:
+        copilot.MODEL_FALLBACK = saved[0]
+        copilot._AI_LAST_FAIL.clear(); copilot._AI_LAST_FAIL.update(saved[1])
+
+
+@test
+def t_a_chat_that_fell_back_stays_on_the_fallback_and_says_why():
+    fake = _OpusFake([
+        _api_status(404, "model: claude-opus-5-5", "not_found_error"),
+        _OpusResp([_OpusBlock("thinking", thinking="", signature="s"),
+                   _OpusBlock("tool_use", name="shopify_get_shop", input={}, id="tu1")], "tool_use"),
+        _OpusResp([_OpusBlock("tool_use", name="present_response", input={"summary": "Fine."}, id="tu2")], "tool_use"),
+    ])
+    saved = (copilot._client, copilot._spend_guard, copilot.MODEL_FALLBACK, dict(copilot._AI_LAST_FAIL))
+    copilot._client, copilot._spend_guard, copilot.MODEL_FALLBACK = fake, (lambda: None), "claude-opus-4-8"
+    async def dispatch(name, args):
+        return '{"name": "Shop"}'
+    try:
+        r = _run(copilot.run_chat([{"role": "user", "content": "How is the shop?"}], dispatch,
+                                  [{"name": "shopify_get_shop", "input_schema": {"type": "object"}}], "claude-opus-5-5",
+                                  effort="max"))
+        eq([c["model"] for c in fake.calls], ["claude-opus-5-5", "claude-opus-4-8", "claude-opus-4-8"],
+           "the failed model is not asked again every round")
+        eq(r["structured"]["summary"], "Fine.")
+        eq(r["model"], "claude-opus-4-8")
+        eq(r["fell_back"]["to"], "Claude Opus 4.8")
+        eq(r["fell_back"]["from"], "Claude Opus 5.5")
+        ok("does not offer that model" in r["fell_back"]["why"], r["fell_back"])
+        # A run that did not fall back says nothing about it.
+        fake.script = [_OpusResp([_OpusBlock("tool_use", name="present_response", input={"summary": "Hi."}, id="t")], "tool_use")]
+        r = _run(copilot.run_chat([{"role": "user", "content": "Hi"}], dispatch, [], "claude-opus-5-5"))
+        ok("fell_back" not in r, r)
+    finally:
+        copilot._client, copilot._spend_guard, copilot.MODEL_FALLBACK = saved[:3]
+        copilot._AI_LAST_FAIL.clear(); copilot._AI_LAST_FAIL.update(saved[3])
+
+
+@test
+def t_a_failed_chat_tells_the_page_the_reason():
+    async def refused(history, dispatch, tools, model, extra, emit=None, effort=None):
+        raise _api_status(400, "messages.0: something the model refused")
+    def go():
+        ensure_auth()
+        _a, sess, _p = ready_user("Rae Reason", "raer", role="admin")
+        saved = copilot.run_chat
+        copilot.run_chat = refused
+        copilot._rl_global.clear()
+        try:
+            r = post_s(sess, "/api/chat", {"message": "hello"})
+            eq(r.status_code, 502)
+            ok("Anthropic said: messages.0: something the model refused" in r.json()["error"], r.json())
+            r = post_s(sess, "/api/chat/stream", {"message": "hello"})
+            last = [json.loads(l[5:]) for l in r.text.split("\n") if l.startswith("data:")][-1]
+            ok(last["type"] == "error" and "Anthropic said" in last["error"], last)
+        finally:
+            copilot.run_chat = saved
+    with_accounts(go)
 
 
 for fn in TESTS:
