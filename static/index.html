@@ -276,7 +276,7 @@
                it slides off by its own width and the page takes the room. */
             background: var(--surface-secondary); border-right: var(--bw-hairline) solid var(--border-default);
             display: flex; flex-direction: column; transition: margin-left .2s ease; }
-        @media (min-width: 761px) { body.sidebar-collapsed .sidebar { margin-left: calc(-1 * var(--sidebar-w)); } }
+        @media (min-width: 821px) { body.sidebar-collapsed .sidebar { margin-left: calc(-1 * var(--sidebar-w)); } }
         /* Header, body, footer. The body is the one scroller, so a long list of
            conversations scrolls under a brand row and an account row that stay. */
         .side-head { padding: var(--sp-2); flex: none; }
@@ -331,7 +331,7 @@
         .coll-row .linkish { align-self: flex-start; }
         .coll-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: var(--sp-2) var(--sp-4); margin-top: var(--sp-2); }
-        @media (max-width: 760px) { .coll-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 820px) { .coll-grid { grid-template-columns: 1fr; } }
         /* Foreground at 70% over the sidebar, which lands on this palette's
            --text-secondary. It was a step lighter, which let the groups fade out. */
         .nav-group { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-secondary);
@@ -445,6 +445,12 @@
         /* The page list behind the search: an input on top, the pages under it
            grouped as the sidebar groups them. */
         .dpanel-search { padding: var(--sp-1); gap: var(--sp-1); min-width: 320px; }
+        /* One width, set before it opens and kept while typing: .dpanel's
+           min-width beat the 320 above, the palette opened 248px wide and was
+           clamped for that, then grew to 302 as results painted, 30px past
+           the window's right edge on every page. */
+        .dpanel.dpanel-search { min-width: 0; width: min(340px, calc(100vw - 16px)); }
+        .dsearch-list .dmenu-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
         .dpanel-search input { width: 100%; height: var(--control-h); border: 0; border-bottom: var(--bw-hairline) solid var(--border-default);
             border-radius: 0; padding: var(--sp-1) var(--sp-2); }
         .dpanel-search input:focus { box-shadow: none; border-color: var(--border-default); }
@@ -637,7 +643,10 @@
             /* 32px gutters spend 64px of a 390px screen on nothing. */
             .ov-wrap { padding: var(--sp-4) var(--sp-4) calc(var(--sp-8) + var(--sp-4)); --page-rhythm: var(--sp-4); }
             .ov-hero { flex-wrap: wrap; gap: var(--sp-3); }
-            .ov-hero > div:not(.badge) { flex: 1 1 200px; min-width: 0; }
+            .ov-hero > div:not(.badge):not(.ov-hero-act) { flex: 1 1 200px; min-width: 0; }
+            .ov-hero > .ov-hero-act { flex: 1 1 100%; }
+            /* The stamp takes its own line; the buttons stay together under it. */
+            .ov-hero-act > .ov-updated { flex: 1 1 100%; }
             /* The 56px was clearing the hero badge, which is display: none on
                every page. It left the stamp hanging on its own row, indented
                against nothing, while the title and the sentence started at the
@@ -651,7 +660,7 @@
                stamp takes what is left, and in Customize mode, with Reset and
                Done as well, the buttons that do not fit wrap under it. */
             .ov-hero-act:has(> [data-wg-control]) { flex-wrap: wrap; }
-            .ov-hero-act:has(> [data-wg-control]) > .ov-updated { flex: 1 1 auto; }
+            .ov-hero-act:has(> [data-wg-control]) > .ov-updated { flex: 1 1 100%; }
             .ov-hero-act:has(> [data-wg-control]) > .btn { flex: none; }
         }
         /* KPI cards: uppercase micro-label + large figure + colored delta */
@@ -764,7 +773,21 @@
            Z strip to jump by, and a paging rail in the footer. */
         .ktable th.num, .ktable td.num { text-align: right; font-variant-numeric: tabular-nums; }
         .ktable td.sizes-model { font-weight: var(--weight-medium); min-width: calc(var(--sp-8) * 6); }
-        .ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); max-width: calc(var(--sp-8) * 11); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        /* Notes takes what the other columns leave (max-width 0 with width
+           100% in an auto table): at a fixed 440px the table never fitted its
+           card, Undercut was cut mid-number at 1280 and even 1728 scrolled. */
+        .ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); max-width: 0; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        /* The list fits its card: a heading over a column of numbers takes
+           two lines rather than 137px, and a card under 860px gives the model
+           8rem and puts the notes away (they were 63px of '...' there; each
+           is on its model's hover). At 1280 the table was 996px in 913 and
+           Undercut was cut mid-figure at the card's edge. */
+        .ktable.sizes-table th { white-space: normal; }
+        .ktable-wrap:has(> .sizes-table) { container: sizes / inline-size; }
+        @container sizes (max-width: 860px) {
+            .ktable.sizes-table td.sizes-model { min-width: 8rem; }
+            .ktable.sizes-table thead th:last-child, .ktable.sizes-table td.sizes-notes { display: none; }
+        }
         .ktable tr.ktable-grp th { background: var(--surface-secondary); color: var(--text-primary); font-weight: var(--weight-medium); font-size: var(--text-sm); padding: var(--sp-2) var(--sp-4); cursor: pointer; }
         .ktable tr.ktable-grp:hover th { background: var(--surface-tertiary); }
         .ktable tr.ktable-grp .grp-n { color: var(--text-tertiary); font-weight: var(--weight-regular); margin-left: var(--sp-2); }
@@ -789,6 +812,9 @@
            row read as a layout that had run out of data. Under 1100 the shared
            breakpoints take it to two and then one, which divide six as well. */
         @media (min-width: 1101px) { .metrics.metrics-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        /* Two columns below that: the third tile takes the row, not a half
+           with an empty cell beside it that reads as a tile that failed. */
+        @media (max-width: 1100px) { .metrics.metrics-3 > :nth-child(3):last-child { grid-column: 1 / -1; } }
         /* One frame, every row of it full. The strip is sixty tracks so any
            count divides: four across by default, five or six across when there
            are five or six (three across for six on a narrower page), and a
@@ -951,7 +977,7 @@
            its corner takes the card's radius less that inset and the two
            curves stay parallel. It carries its own ground because it sits
            over whatever the card draws there. */
-        .ov-wrap.wg-editing > [data-widget] > .wg-hide { position: absolute; top: var(--sp-2); right: var(--sp-2); z-index: 1;
+        .ov-wrap.wg-editing > [data-widget] > .wg-hide { position: absolute; top: calc(-1 * var(--sp-3)); right: calc(-1 * var(--sp-3)); z-index: 1;
             margin: 0; padding: var(--sp-1); background: var(--surface-primary); box-shadow: var(--ring-default);
             border-radius: calc(var(--radius-lg) - var(--sp-2)); cursor: pointer; }
         .ov-wrap.wg-editing > [data-widget] > .wg-hide:hover { background: var(--surface-tertiary); }
@@ -1011,6 +1037,10 @@
             .section-title > span { flex: 1 1 100%; }
             .section-title::after { content: none; }
         }
+        /* Up to 1100 a heading's controls may wrap under it: 'Cash in' broke
+           into two lines beside its range tabs, and 'Algorithm 1' inside its
+           own button. */
+        @media (max-width: 1100px) { .section-title { flex-wrap: wrap; row-gap: var(--sp-2); } }
         /* 16px, the inset every other card on the page uses, because this is
            the topmost card and an 8px step at the top of a column is the first
            thing the eye tracks down. The bottom margin is gone as well: the
@@ -1087,7 +1117,13 @@
         /* .btn sets its own display, which beats the browser's [hidden]: a
            Split into 0 skills and a Save as a skill showed on every editor. */
         .btn[hidden], .mem-btn[hidden] { display: none; }
-        @media (max-width: 640px) {
+        /* The note keeps a readable column: on an iPad it was a 54px ribbon,
+           one word a line, and the table scrolled its buttons out of view.
+           The stacked rows below are chosen by the card's width, not the
+           window's. */
+        .mem-card-list { container: memcard / inline-size; }
+        .ktable.mem-table td.mem-note { min-width: 14rem; }
+        @container memcard (max-width: 620px) {
             /* A row stacks: kind and actions, the note across, then when and from. */
             .mem-table thead { display: none; }
             .mem-table, .mem-table tbody { display: block; }
@@ -1100,7 +1136,7 @@
             .ktable.mem-table td { display: block; border: 0; padding: 0; }
             .ktable.mem-table td.mem-kind { grid-area: kind; }
             .ktable.mem-table td.mem-acts-cell { grid-area: acts; width: auto; padding: 0; }
-            .ktable.mem-table td.mem-note { grid-area: note; padding-block: var(--sp-1) var(--sp-1-5); }
+            .ktable.mem-table td.mem-note { grid-area: note; padding-block: var(--sp-1) var(--sp-1-5); min-width: 0; }
             /* When and from are one quiet line under the note. */
             .ktable.mem-table td.mem-at, .ktable.mem-table td.mem-from { display: none; }
             .mem-table .mem-when { display: block; }
@@ -1150,7 +1186,7 @@
         .card > .ptools { margin-bottom: 0; }
         .tbl-tools .seg { padding: var(--sp-0-5); }
         .back-btn { margin-bottom: var(--sp-4); }
-        @media (max-width: 640px) { .prod-chips { gap: var(--sp-3); } .prod-chip.rev { display: none; } }
+        @media (max-width: 640px) { .prod-chips { gap: var(--sp-3); } .prod-chip.units { display: none; } }
         /* A product row was a thumbnail, one very wide cell holding a title,
            and a cluster of numbers pushed to the far edge. On a wide screen
            the title cell reached 830px for a line of text that needs a third
@@ -1200,7 +1236,7 @@
         .bartrack { height: 8px; background: var(--surface-sunken); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--ring-default); }
         .bartrack > i { display: block; height: 100%; background: var(--action-active); border-radius: var(--radius-lg); }
         .barrow .bv { text-align: right; font-weight: var(--weight-medium); }
-        @media (max-width: 640px) { .barrow { grid-template-columns: 110px 1fr 80px; } }
+        @media (max-width: 640px) { .barrow { grid-template-columns: 1fr 80px; } .barrow .bn { grid-column: 1 / -1; } }
 
         /* ---------- Structured response components ---------- */
         .insights { display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -1225,6 +1261,9 @@
         .card { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default);
             border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
             padding: var(--sp-4) 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+        /* .card's display beat the browser's [hidden]: an empty Skills page
+           drew the hidden 'How they are used' card as a bare 34px box. */
+        .card[hidden] { display: none; }
         .card > * { padding-left: var(--sp-4); padding-right: var(--sp-4); }
         /* A holder that is empty for now (a filters panel not yet opened, a
            chip row with nothing in it) still costs the card's 16px gap on
@@ -1250,6 +1289,11 @@
         .act-row.sizes-edit-acts { flex-wrap: nowrap; }
         /* The forecast month table: a month and its basis on one line each. */
         .fc-months th, .fc-months td:nth-child(-n+2) { white-space: nowrap; }
+        /* A drawer's text may break anywhere, but a figure may not: '£293,02'
+           over '8' and '+4.0' over '%' read as other numbers. The table
+           already scrolls, so a whole figure only makes it wider. */
+        details.sect .body .ktable :is(th, td) { overflow-wrap: normal; }
+        details.sect .body .ktable td:not(:first-child) { white-space: nowrap; }
         .act-row[hidden] { display: none; }
         /* Setup instructions: numbered steps at the body size, each carrying
            its own controls, rather than 12px form-help lines. */
@@ -1398,6 +1442,7 @@
             line-height: var(--lh-control); margin: 0; }
         /* The reference's orders card head: a quiet title, a big counted line,
            and a muted line under it. */
+        .card-head-stat > .card-act { grid-row: 1; align-self: start; }
         .card-head-stat .card-title { font-size: var(--text-sm); font-weight: var(--weight-regular); color: var(--text-tertiary); }
         .card-head-stat .card-desc { font-size: var(--text-xl); color: var(--text-primary); line-height: var(--lh-none); letter-spacing: -.025em; }
         .card-sub { grid-column: 1; margin: 0; font-size: var(--text-sm); color: var(--text-tertiary); line-height: var(--lh-control); }
@@ -1521,7 +1566,6 @@
                text shrinks until the rail is already hard right and the buttons
                already line up, so the padded pill only costs the text 24px and
                a fourth wrapped line. It goes back to its label width. */
-            .action .pill { min-width: 0; }
         }
 
         .followups { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
@@ -1648,10 +1692,18 @@
         .sk-facts dd { margin: 0; color: var(--text-primary); max-width: 75ch; }
         @media (max-width: 640px) { .sk-facts { grid-template-columns: 1fr; gap: var(--sp-1); } .sk-facts dd + dt { margin-top: var(--sp-2); } }
         @media (max-width: 640px) {
-            .sk-head { flex-wrap: wrap; }
-            .sk-title { flex-basis: 100%; }
             .sk-form-row .sk-spacer { display: none; }
             .sk-form-row .sk-count { flex-basis: 100%; order: -1; }
+        }
+        /* By the card's width: on an iPad the titles were squeezed to 60px
+           beside their buttons while a 640 window gave them a line each. */
+        /* Read and add, the review's main button, stays at the right when the
+           row wraps, not alone at the left under the others. */
+        .sk-upload .sk-form-row .btn-primary { margin-left: auto; }
+        .sk-card { container: skcard / inline-size; }
+        @container skcard (max-width: 600px) {
+            .sk-head { flex-wrap: wrap; }
+            .sk-title { flex-basis: 100%; }
         }
         @keyframes navspin { to { transform: rotate(360deg); } }
         /* per-page ask panel. No margin of its own: it is always a direct
@@ -1716,7 +1768,8 @@
         .conn-pairs { display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-1-5) var(--sp-4);
             font-size: var(--text-xs); margin: var(--sp-3) 0; }
         .conn-pairs dt { color: var(--text-tertiary); }
-        .conn-pairs dd { margin: 0; }
+        .conn-pairs dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+        .conn-pairs { grid-template-columns: minmax(0, max-content) minmax(0, 1fr); }
         /* The Xero sync page: the ways in as tiles, the Auto Run state as one
            row, the state chips as one row. */
         /* Three across when the card has room for three, otherwise one per
@@ -1782,7 +1835,8 @@
            and its amount, then the outcome and Open. As a table it scrolled
            sideways with the amount and Open off the screen and the outcome
            squeezed to four lines. The tabs scroll instead of wrapping. */
-        @media (max-width: 640px) {
+        .card:has(.cx-docs) { container: cxcard / inline-size; }
+        @container cxcard (max-width: 560px) {
             .ktable.cx-docs { min-width: 0; display: block; }
             .cx-docs tbody { display: block; }
             .cx-docs thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -1910,6 +1964,16 @@
            finished loading. The name takes the slack instead. */
         .loan-row .lr-what { flex: 1 1 auto; min-width: 0; }
         .loan-row .lr-what > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        /* The unit's name gave way first and on an iPad it went to nothing,
+           with the status chip cut to 'On the' (an Inbox rule reached it) and
+           the bin hanging out of the row. By the card's width, a narrow card
+           puts the name on its own line and the chip and buttons under it. */
+        .card:has(> .loan-row) { container: loans / inline-size; }
+        @container loans (max-width: 620px) {
+            .loan-row { flex-wrap: wrap; }
+            .loan-row .lr-what { flex: 1 1 100%; }
+            .loan-row .lbl-actions { margin-left: auto; }
+        }
         .lbl-row.is-late { border-color: var(--error); box-shadow: inset var(--bw-marker) 0 0 var(--error); }
         .lbl-row.is-due { border-color: var(--warning); box-shadow: inset var(--bw-marker) 0 0 var(--warning); }
         .lbl-row.is-late .lbl-meta { color: var(--error); }
@@ -1980,6 +2044,9 @@
            class took it off the phone entirely with nowhere else to read it. */
         @media (max-width: 900px) {
             .lbl-rows .lbl-row { flex-wrap: wrap; }
+            /* The middle block always shares the first line, so rows in one
+               list do not zig-zag by the width of their chips. */
+            .lbl-rows .lbl-who { flex: 1 1 0; }
             .lbl-rows .lbl-meta { width: 100%; order: 3; margin-top: var(--sp-1); text-align: left; }
         }
         /* THE QUEUE IS LAID OUT BY ITS OWN WIDTH, NOT THE WINDOW'S.
@@ -2032,7 +2099,10 @@
             .lbl-grid > * { grid-column: 1 / -1; }
             .lbl-qrow { display: grid; grid-template-columns: subgrid; align-items: center; }
             .lbl-qrow .lbl-meta { justify-self: end; padding-right: var(--sp-3); }
-            .lbl-qrow .lbl-actions { justify-self: end; }
+            /* From the column's start: right-aligned, a refunded order's
+               shorter rail put Preview and Print a button to the right of
+               the rows around it. */
+            .lbl-qrow .lbl-actions { justify-self: start; }
             /* The date and the buttons are the last two columns of the first
                line, whatever else a row carries: auto-placed, a row with one
                item too many wrapped its buttons into the 100px number column,
@@ -2143,6 +2213,8 @@
         .lbl-size:hover { background-color: var(--surface-sunken); border-color: var(--border-emphasis); }
         .lbl-find { min-width: 190px; font-weight: var(--weight-regular); }
         .lbl-nameline { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; max-width: 100%; }
+        /* In lists, chips that do not fit beside a title go under it, as in the queues. */
+        .lbl-rows .lbl-nameline { flex-wrap: wrap; row-gap: var(--sp-1); }
         /* The customer name gives way first; status chips must never be cut in half. */
         .lbl-nameline > .lbl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
         /* 20px, set rather than inherited from line box + padding, which gave
@@ -2259,12 +2331,15 @@
         .disp-num { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-md);
             color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-2); line-height: var(--lh-control);
             min-height: var(--control-h); width: 100%; }
+        /* The stage editor's number boxes are number-sized; the stage's name takes the rest. */
+        .crm-focus .disp-boxrow > .disp-num { flex: 0 0 4.5rem; }
         .disp-subhead { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: var(--weight-medium); margin-bottom: var(--sp-1); }
         /* Custom address shipment: the paste box and the fields it fills. */
         .disp-paste { width: 100%; box-sizing: border-box; min-height: 84px; resize: vertical;
             background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm);
             color: var(--text-primary); font: inherit; font-size: var(--text-sm); line-height: var(--lh-body); padding: var(--sp-2-5) var(--sp-3); }
-        .disp-addr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2-5); margin: var(--sp-3) 0 var(--sp-1); }
+        .disp-addr-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2-5); margin: var(--sp-3) 0 var(--sp-1); }
+        .disp-addr-grid select { max-width: 100%; }
         .disp-addr-f { display: flex; flex-direction: column; gap: var(--sp-1); }
         .disp-addr-f > .field-help { margin: 0; }
         .disp-addr-lab { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: var(--weight-medium); }
@@ -2287,6 +2362,7 @@
             border-radius: var(--radius-md); background: var(--surface-primary); display: flex;
             flex-direction: column; gap: var(--sp-2); }
         .lia-chase-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .lia-chase-head .sub { min-width: 0; overflow-wrap: anywhere; }
         .lia-chase-body { width: 100%; box-sizing: border-box; resize: vertical;
             background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm);
             color: var(--text-primary); font: inherit; font-size: var(--text-sm); line-height: var(--lh-body); padding: var(--sp-2-5) var(--sp-3); }
@@ -2400,6 +2476,9 @@
         .guide-d .setup-code { word-break: break-all; }
         .guide-copy { margin-left: var(--sp-1); vertical-align: middle; }
         .guide-tools { display: grid; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+        /* Stretched by the grid, the search's box ran the width of the page
+           and its clear button sat at the far end, 605px from the field. */
+        .guide-tools > .tbl-search { justify-self: start; }
         .guide-toc { display: flex; flex-wrap: wrap; gap: var(--sp-1-5); }
         .guide-card h3:focus { outline: 0; }
         .guide-none[hidden] { display: none; }
@@ -2453,7 +2532,7 @@
             padding: var(--sp-4); margin: 0 var(--sp-3) var(--sp-3); box-shadow: var(--shadow-sm); cursor: grab; }
         .crm-card:hover { border-color: var(--border-emphasis); }
         .crm-card.rotten { background: var(--error-bg); border-color: var(--border-strong); }
-        .crm-card-t { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-primary); }
+        .crm-card-t { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-primary); overflow-wrap: anywhere; }
         .crm-card-who { font-size: var(--text-sm); color: var(--text-tertiary); margin-top: var(--sp-px); }
         .crm-card-bot { display: flex; align-items: center; gap: var(--sp-1-5); margin-top: var(--sp-2); font-size: var(--text-sm); }
         .crm-card-val { font-weight: var(--weight-medium); }
@@ -2488,6 +2567,8 @@
         .mail-who-card { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-2);
             background: var(--surface-tertiary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg);
             padding: var(--sp-1-5) var(--sp-3); font-size: var(--text-xs); }
+        .mail-who-card { max-width: 100%; min-width: 0; }
+        .mail-who-card .mail-who-name, .mail-who-card .mail-who-load { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .mail-who-name { font-weight: var(--weight-medium); color: var(--text-primary); }
         .mail-who-load { color: var(--text-tertiary); }
         /* Hollow, because the card already carries a solid one. Two 8px discs
@@ -2556,9 +2637,10 @@
         .mail-msg-head { display: flex; gap: var(--sp-2); font-size: var(--text-xs); margin-bottom: var(--sp-1); }
         .mail-msg-from { font-weight: var(--weight-medium); color: var(--text-primary); }
         .mail-msg-at { margin-left: auto; color: var(--text-tertiary); }
-        .mail-msg-snip { font-size: var(--text-xs); color: var(--text-secondary); }
+        .mail-msg-snip { font-size: var(--text-xs); color: var(--text-secondary); overflow-wrap: anywhere; }
         .mail-msg-full { font-size: var(--text-xs); color: var(--text-secondary); line-height: var(--lh-body);
             white-space: pre-wrap; word-break: break-word; }
+        .mail-msg-full { overflow-wrap: anywhere; }
         .mail-note { background: var(--warning-bg); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm);
             padding: var(--sp-2) var(--sp-2-5); font-size: var(--text-xs); margin-bottom: var(--sp-1-5); }
         .mail-note-meta { color: var(--text-tertiary); font-size: var(--text-xs); margin-bottom: var(--sp-0-5); }
@@ -2566,10 +2648,11 @@
         .mail-crmchip { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--text-xs);
             background: var(--action-soft); border: var(--bw-hairline) solid var(--action-line); color: var(--action-primary);
             border-radius: var(--radius-full); padding: var(--sp-0-5) var(--sp-2); }
-        .mail-statebar { display: flex; gap: var(--sp-1-5); flex-wrap: wrap; margin: var(--sp-2-5) 0; }
+        .mail-statebar { display: flex; gap: var(--sp-1-5); flex-wrap: wrap; margin: var(--sp-2-5) 0; align-items: center; }
         .mail-labelerr { font-size: var(--text-xs); color: var(--warning); }
         /* ---- the list: an inbox reads as rows, not columns ---- */
-        .mlist { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-primary); overflow: hidden; }
+        .mlist { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-primary); overflow: hidden;
+            container: mlist / inline-size; }
         /* The reference's mail row: 12px on every side, a full hairline rather
            than the half-pixel one (which lands on a device pixel on some
            screens and vanishes on others), and the row's own text at 14px. */
@@ -2685,7 +2768,7 @@
            and the Claim button are different widths and a row carries one or
            neither, so the last thing before the age wandered down the list and
            dragged the subject's truncation edge 16px with it. */
-        .mown-slot { flex: 0 0 88px; display: flex; align-items: center; min-width: 0; }
+        .mown-slot { flex: 0 0 auto; min-width: 88px; max-width: 150px; display: flex; align-items: center; }
         .mage { flex: 0 0 46px; text-align: right; font-size: var(--text-xs); color: var(--text-tertiary); }
         .mage.hot { color: var(--error); font-weight: var(--weight-medium); }
         .mage.warm { color: var(--warning); font-weight: var(--weight-medium); }
@@ -2713,11 +2796,12 @@
             border-radius: var(--radius-sm); border-color: var(--border-default); font-weight: var(--weight-medium); }
         .mail-bulkbar.armed { border-color: var(--action-line); background: var(--action-soft);
             color: var(--action-primary); }
-        .mail-bulk-hint { color: inherit; flex: 1 1 0; min-width: 0; }
+        .mail-bulk-hint { color: inherit; flex: 1 1 8rem; min-width: 0; }
         .mail-files { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3);
             margin: var(--sp-3) 0; background: var(--surface-tertiary); }
         .mail-file { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs);
             border-top: var(--bw-hairline) solid var(--border-default); padding: var(--sp-1-5) 0 var(--sp-1); }
+        .mail-file > :not(.mail-file-name) { flex: none; white-space: nowrap; }
         .mail-file:first-of-type { border-top: 0; padding-top: 0; }
         .mail-file-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
             text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-weight: var(--weight-medium); }
@@ -2761,6 +2845,8 @@
         .mrule-tag { flex: none; overflow: hidden; text-overflow: ellipsis;
             white-space: nowrap; font-size: var(--text-xs); color: var(--text-tertiary); background: var(--surface-sunken);
             border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-full); padding: 0 var(--sp-1); font-weight: var(--weight-medium); height: 20px; display: inline-flex; align-items: center; }
+        /* A loan's status chip never shrinks: the Inbox's rules for this chip cut it to 'On the'. */
+        .loan-row .mrule-tag { flex: none; }
         .mail-draft { border: var(--bw-hairline) solid var(--action-line); background: var(--action-soft);
             border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3); margin: var(--sp-3) 0; }
         .mail-draft-text { width: 100%; box-sizing: border-box; font: inherit; font-size: var(--text-sm);
@@ -2790,14 +2876,24 @@
             .mfrom { flex: 0 1 148px; min-width: 76px; }
             .mrule-tag { flex: 0 1 auto; min-width: 40px; }
         }
+        /* Two lines by the list's own width: from 821 to 900 with the sidebar
+           docked the row stayed on one line and the subject, the thing a row
+           is for, was a word or two. */
+        @container mlist (max-width: 560px) {
+            .mrow { flex-wrap: wrap; }
+            .msubj { flex: 1 1 55%; order: 5; }
+            .mrow .mrule-tag, .mrow .mnote, .mrow .mail-labelerr { order: 6; }
+            .mrow .mrule-tag { max-width: 60px; }
+            .mfrom { min-width: 0; flex: 1 1 56px; }
+        }
         /* Narrow rows have to give something up, and it was the owner, which
            left the 10% tint as the only thing saying whose the email is. The
            key to that tint is the strip at the top of the card, off screen by
            the time the list is being read, so the row said nothing. The count
            goes instead: it repeats a number the thread itself shows.
            The same row on a WIDER screen is no better off. The sidebar is
-           off canvas up to 760, so a 760px window gives the row 665px; at 761
-           the 272px sidebar docks and the same row gets 394 - narrower than
+           off canvas up to 820, so an 820px window gives the row 725px; at 821
+           the 272px sidebar docks and the same row gets 450 - narrower than
            any phone reaches, and every subject in the list went to zero. The
            row stays narrow up to the 900 tablet stop, so one query covers
            both. */
@@ -2827,7 +2923,7 @@
             padding-bottom: calc(var(--sp-3) + env(safe-area-inset-bottom, 0px));
             background: var(--surface-primary); border-top: var(--bw-hairline) solid var(--border-default);
             box-shadow: var(--shadow-lg); z-index: 60; }
-        @media (min-width: 761px) { body:not(.sidebar-collapsed) .crm-dropbar { left: var(--sidebar-w); } }
+        @media (min-width: 821px) { body:not(.sidebar-collapsed) .crm-dropbar { left: var(--sidebar-w); } }
         .crm-dropbar.show { display: flex; }
         .crm-zone { flex: 1; text-align: center; padding: var(--sp-4) 0; border-radius: var(--radius-sm);
             border: var(--bw-strong) dashed var(--border-emphasis); font-weight: var(--weight-medium); font-size: var(--text-sm); color: var(--text-secondary); }
@@ -2863,6 +2959,7 @@
         .crm-act-list .crm-group { margin: var(--sp-3) 0 0; }
         /* The same swap for the leads list: rows on a card, not a stack of
            bordered boxes inside a bordered box. */
+        .crm-lead-list .lbl-who .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .card-bleed.crm-lead-list > .lbl-row { border: 0; border-radius: 0; margin-bottom: 0;
             border-bottom: var(--bw-hairline) solid var(--border-default); }
         .card-bleed.crm-lead-list > .lbl-row:last-child { border-bottom: 0; }
@@ -2905,7 +3002,7 @@
         .crm-bar-val { width: 90px; flex: none; font-weight: var(--weight-medium); }
         .crm-focus { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-lg); padding: var(--sp-3); margin: var(--sp-3) 0; }
         .crm-focus.plain { border: 0; padding: 0; }
-        .crm-hist-row { padding: var(--sp-2) 0; border-bottom: var(--bw-hairline) solid var(--border-default); font-size: var(--text-sm); }
+        .crm-hist-row { padding: var(--sp-2) 0; border-bottom: var(--bw-hairline) solid var(--border-default); font-size: var(--text-sm); overflow-wrap: anywhere; }
         .crm-hist-row:last-child { border-bottom: 0; }
         .crm-hist-row.pinned { background: var(--surface-tertiary); border-radius: var(--radius-sm); padding: var(--sp-2); }
         .crm-hist-when { font-size: var(--text-xs); color: var(--text-tertiary); }
@@ -2940,7 +3037,7 @@
         .crm-ta-sub { font-size: var(--text-xs); color: var(--text-tertiary); }
         .crm-cline { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1-5) 0; font-size: var(--text-sm); }
         .crm-cline svg { width: var(--icon-md); height: var(--icon-md); color: var(--text-tertiary); flex: none; }
-        .crm-cline a { color: var(--action-primary); text-decoration: underline; word-break: break-all; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
+        .crm-cline a { color: var(--action-primary); text-decoration: underline; word-break: normal; overflow-wrap: anywhere; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
         .crm-cf { display: grid; grid-template-columns: minmax(90px, 150px) 1fr; gap: var(--sp-1) var(--sp-2-5);
             font-size: var(--text-sm); }
         .crm-cf-k { color: var(--text-tertiary); font-size: var(--text-xs); padding-top: var(--sp-0-5); }
@@ -3083,7 +3180,8 @@
         .disp-opt:focus-within { border-color: var(--action-primary); box-shadow: var(--focus-ring); }
         .disp-opt > input[type=radio] { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
         .disp-opt-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-        .disp-opt-top { grid-column: 1; grid-row: 1; display: flex; align-items: baseline; gap: var(--sp-1); min-width: 0; }
+        .disp-opt-top { grid-column: 1; grid-row: 1; display: flex; align-items: baseline; gap: var(--sp-1); min-width: 0;
+            flex-wrap: wrap; row-gap: var(--sp-1); }
         /* The courier's own name leads: a product code told the operator nothing. */
         .disp-opt-prov { font-weight: var(--weight-medium); color: var(--text-primary); flex: none; }
         .disp-opt-prov.disp-opt-unknown { color: var(--warning); font-weight: var(--weight-medium); }
@@ -3222,7 +3320,7 @@
            ellipsing, so one long account name pushed its row's second column
            256px right of every other row's and the declared ellipsis never
            fired. Every row's name now starts and ends at the same x. */
-        .lia-name { font-size: var(--text-sm); font-weight: var(--weight-medium); flex: 0 0 150px; width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .lia-name { font-size: var(--text-sm); font-weight: var(--weight-medium); flex: 0 1 auto; min-width: 150px; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .lbl-chip.deep { background: var(--error-bg); color: var(--error); border-color: var(--error); }
         .cov-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
         .cov-head h3 { font-size: var(--text-sm); font-weight: var(--weight-medium); }
@@ -3349,7 +3447,14 @@
         .card-bleed .ktable th:last-child, .card-bleed .ktable td:last-child { padding-right: var(--sp-4); }
         .ktable-wrap .ktable tr:last-child td { border-bottom: 0; }
         .ktable-wrap .ktable:not(:has(tbody tr)) th { border-bottom: 0; }
-        .ktable { width: 100%; border-collapse: collapse; font-size: var(--text-sm); background: var(--surface-primary); min-width: 460px; }
+        .ktable { width: 100%; border-collapse: collapse; font-size: var(--text-sm); background: var(--surface-primary); min-width: min(460px, 100%); }
+        /* A figure is never split, the name column keeps 10ch, and an email
+           under a name wraps: in a 435px card on an iPad the numbers were cut
+           mid-figure at the card's edge ('£1,00', '12.') while the names were
+           four-line ribbons beside them. */
+        .ktable td.num { white-space: nowrap; }
+        .ktable td.kw { min-width: 10ch; }
+        .ktable td.kw .prod-sub { overflow-wrap: anywhere; }
         /* 12px on every side, header and body alike: the reference pads its cells
            square, and the row height comes from the content rather than the cell. */
         .ktable th { text-align: left; font-size: var(--text-sm); text-transform: none; letter-spacing: normal; color: var(--text-primary); font-weight: var(--weight-medium); padding: var(--sp-3); line-height: var(--lh-control); border-bottom: var(--bw-hairline) solid var(--border-default); white-space: nowrap; height: 44px; }
@@ -3363,7 +3468,16 @@
            it. Scoped, because the file browser's rows are built to their own
            reference at a deliberately denser 45px. */
         .ktable.crm-table th { padding: 0 var(--sp-4); }
-        .ktable.crm-table td { padding: var(--sp-4); }
+        .ktable.crm-table td { padding: var(--sp-4); overflow-wrap: anywhere; }
+        /* One unbroken email set a 400px column and every other went to its
+           narrowest: titles over four lines, a phone number over three, and
+           the table scrolled its last columns out of the card. */
+        .ktable-wrap:has(> .crm-table) { container: crmtable / inline-size; }
+        @container crmtable (max-width: 640px) {
+            .ktable.crm-table th { padding: 0 var(--sp-2); }
+            .ktable.crm-table td { padding: var(--sp-2-5) var(--sp-2); }
+            .ktable.crm-deals-table :is(th, td):nth-child(5), .ktable.crm-deals-table :is(th, td):nth-child(6) { display: none; }
+        }
         /* Restated after the pair above, or the shorthand there would put 16px
            back on the right of a column whose whole content is a 16px box. */
         .ktable.crm-table th.tick, .ktable.crm-table td.tick { padding-right: 0; }
@@ -3491,6 +3605,12 @@
             background: var(--surface-primary); border-radius: var(--radius-md);
             box-shadow: var(--shadow-md);
             max-height: 70vh; overflow-y: auto; }
+        /* A menu is as wide as its longest item, up to the window: the Skills
+           picker grew to 666px for one long title, over the conversation list,
+           and ran 284px off a phone. */
+        .dmenu { max-width: min(420px, calc(100vw - 16px)); }
+        .dmenu-item > span:not(.ic):not(.dmenu-tick) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+        .dmenu-tick { flex: none; }
         /* 12px, the size of the trigger it hangs off. Every menu in the app is
            opened by a .btn-sm filter chip; at 14 the label grew two steps
            between the button and its own list, so the control changed scale the
@@ -3524,6 +3644,7 @@
         .dpanel-row > span { flex: 1 1 auto; font-size: var(--text-xs); color: var(--text-tertiary); }
         .dpanel input, .dpanel select { height: 28px; padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm);
             font-size: var(--text-sm); line-height: var(--lh-control); }
+        .dpanel select { padding-right: var(--chevron-room); }
         /* The page-level tab strip. The reference marks the live page by ink
            alone: no track behind the row, no pill under the tab. 14px here,
            against the 12px of a filter tab inside a card. */
@@ -3531,7 +3652,7 @@
         /* On a phone the four tabs and their Beta marks do not fit: the marks
            go (the sidebar still carries them) and the strip scrolls rather
            than cutting off the last tab. */
-        @media (max-width: 640px) { .ptab .beta-tag { display: none; } .ptabs { overflow-x: auto; } }
+        @media (max-width: 900px) { .ptab .beta-tag { display: none; } .ptabs { overflow-x: auto; } }
         .ptab { height: 25px; padding: var(--sp-0-5) var(--sp-1-5); border: 0; background: none;
             border-radius: var(--radius-sm); font: inherit; font-size: var(--text-sm);
             font-weight: var(--weight-medium); color: var(--text-tertiary); cursor: pointer;
@@ -3550,6 +3671,10 @@
            the live one by ink alone; its inactive tabs are the foreground at
            60%, which over white is this palette's muted ink to within a shade. */
         .ftabs { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        @media (max-width: 640px) {
+            .lbl-seg, .ftabs { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+            .lbl-seg > *, .ftabs > * { flex: none; }
+        }
         .ftab { height: var(--control-h-sm); padding: var(--sp-0-5) var(--sp-1-5); border: 0; background: none;
             border-radius: var(--radius-sm); font: inherit; font-size: var(--text-xs);
             font-weight: var(--weight-medium); color: var(--text-tertiary); cursor: pointer;
@@ -3581,7 +3706,7 @@
         .kchips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
         .kchip { background: var(--surface-sunken); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-lg); padding: var(--sp-1) var(--sp-3); font-size: var(--text-xs); color: var(--text-secondary); }
         .kchip b { color: var(--text-primary); font-weight: var(--weight-medium); }
-        .kmeta { font-size: var(--text-xs); color: var(--text-secondary); margin: var(--sp-1) 0 var(--sp-0-5); word-break: break-all; } .kmeta b { color: var(--text-primary); }
+        .kmeta { font-size: var(--text-xs); color: var(--text-secondary); margin: var(--sp-1) 0 var(--sp-0-5); word-break: normal; overflow-wrap: anywhere; } .kmeta b { color: var(--text-primary); }
         /* ---------- Impact tracking ---------- */
         .track-btn { border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-tertiary); color: var(--text-secondary); font: inherit; font-size: var(--text-xs); font-weight: var(--weight-medium); padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); display: inline-flex; align-items: center; gap: var(--sp-1); flex: none; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
         .track-btn:hover { color: var(--text-primary); border-color: var(--border-emphasis); }
@@ -3746,6 +3871,8 @@
            line breaks after the separator instead, which is where a reader
            expects a meta line to fold. */
         .chart-head .cs .cs-period { white-space: nowrap; }
+        /* On a phone a 60-character source line ran off the card and scrolled the page. */
+        @media (max-width: 640px) { .chart-head .cs .cs-period { white-space: normal; } }
         .chart-wrap .axis-title { fill: var(--text-tertiary); font-size: var(--text-xs); font-family: var(--font-sans); text-transform: none; letter-spacing: normal; }
         .chart-avg { stroke: var(--text-secondary); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; opacity: .5; }
         .chart-avg-label, .chart-peak-label { fill: var(--text-tertiary); font-size: var(--text-xs); font-family: var(--font-sans); font-weight: var(--weight-medium); }
@@ -3807,7 +3934,7 @@
            beside a hole, which reads as a chart that failed to render. */
         .charts-grid > .chart-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
         /* One column on a phone, where the page's own block rhythm drops to 16. */
-        @media (max-width: 760px) { .charts-grid { grid-template-columns: 1fr; row-gap: var(--sp-4); } }
+        @media (max-width: 820px) { .charts-grid { grid-template-columns: 1fr; row-gap: var(--sp-4); } }
         .chart-anim { animation: chartIn .5s ease backwards; }
         @keyframes chartIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
         @keyframes chartDraw { to { stroke-dashoffset: 0; } }
@@ -3835,6 +3962,7 @@
            of a section heading and rendered 44px there against 34px in a
            toolbar. 20 + 4 + 4 is the 28px every small control in the app is. */
         .seg button { border: 0; background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); line-height: var(--lh-control); padding: var(--sp-0-5) var(--sp-1-5); border-radius: calc(var(--track-r) - var(--track-pad)); transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+        .seg button { white-space: nowrap; }
         .seg button:hover { color: var(--text-primary); }        .seg button:is(.on, [aria-pressed="true"]) { background: var(--surface-primary); color: var(--text-primary); box-shadow: var(--ring-default); font-weight: var(--weight-medium); }
         .seg button:active { background: var(--surface-sunken); }
 
@@ -3887,7 +4015,8 @@
         .send { width: var(--box-xl); height: var(--box-xl); border-radius: var(--radius-sm); border: 0; background: var(--action-primary); color: var(--text-on-action); display: grid; place-items: center; flex-shrink: 0; transition: background var(--dur) var(--ease); }
         .send:hover { background: var(--action-hover); } .send:active { background: var(--action-active); } .send:disabled { background: var(--surface-tertiary); color: var(--text-disabled); cursor: not-allowed; }
         .send svg { width: var(--icon-lg); height: var(--icon-lg); }
-        .composer .row { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); padding: 0 var(--sp-1); }
+        .composer .row { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); padding: 0 var(--sp-1);
+            flex-wrap: wrap; row-gap: var(--sp-1); }
         .toggle { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); color: var(--text-secondary); cursor: pointer; user-select: none; }
         /* The knob is not a box on the box scale: its size is DECIDED by the
            track it slides in (track height, less the inset on each side). It
@@ -3903,7 +4032,11 @@
         .composer .hint { margin-left: auto; font-size: var(--text-xs); color: var(--text-tertiary); }
         /* Deep analysis is a real switch now, so it drops the button's own box. */
         #deep-toggle { border: 0; background: none; padding: 0; font: inherit; font-size: var(--text-xs); color: var(--text-secondary); }
-        .deep-note { font-size: var(--text-xs); color: var(--text-tertiary); }
+        .deep-note { font-size: var(--text-xs); color: var(--text-tertiary); flex: 1 1 14rem; }
+        /* Squeezed as a flex item, the switch's track went from 32px to 23
+           and its knob stood out past the end; the label broke in two. */
+        .toggle .sw { flex: none; }
+        #deep-toggle { flex: none; white-space: nowrap; }
         .deep-note[hidden] { display: none; }
         /* The skills this conversation applies to every question. */
         .composer-skills { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1-5); margin-bottom: var(--sp-2); }
@@ -3939,7 +4072,8 @@
             font-size: var(--text-sm); color: var(--text-secondary); line-height: var(--lh-body); }
         .resp-note > span { flex: 1 1 24ch; }
         .resp-again { margin-top: var(--sp-3); }
-        .followed { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--sp-1); font-size: var(--text-xs); color: var(--text-tertiary); margin: var(--sp-3) 0 0; line-height: var(--lh-body); }
+        .followed { display: block; font-size: var(--text-xs); color: var(--text-tertiary); margin: var(--sp-3) 0 0; line-height: var(--lh-body); }
+        .followed > * { vertical-align: middle; }
         .followed > .ic { display: grid; place-items: center; margin-right: var(--sp-0-5); }
         .followed > .ic svg { width: var(--icon-xs); height: var(--icon-xs); display: block; }
         .followed-link { color: var(--text-secondary); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); cursor: pointer; }
@@ -3971,7 +4105,7 @@
         .chat-recent-row .ic svg { width: var(--icon-sm); height: var(--icon-sm); display: block; color: var(--text-tertiary); }
         .crr-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .crr-at { font-size: var(--text-xs); color: var(--text-tertiary); flex: none; }
-        @media (max-width: 760px) {
+        @media (max-width: 820px) {
             .chat-inner { padding-inline: var(--sp-4); }
             .composer-wrap { padding-inline: var(--sp-4); }
         }
@@ -3979,8 +4113,12 @@
         @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
         /* ---------- Responsive ---------- */
+        /* The sidebar is a drawer up to 820px. It docked from 761, so an iPad
+           held upright (768, 810 or 820) kept 272px of sidebar and gave every
+           page 496px, less than a 640px window gets, and showed the worst of
+           every squeeze in the app. */
         .backdrop { display: none; }
-        @media (max-width: 760px) {
+        @media (max-width: 820px) {
             .sidebar { position: fixed; z-index: 30; height: 100%; box-shadow: var(--shadow-lg); margin-left: calc(-1 * var(--sidebar-w));
                 padding-top: env(safe-area-inset-top, 0px);
                 padding-bottom: env(safe-area-inset-bottom, 0px); }
@@ -4049,6 +4187,8 @@
         .fpick-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; text-align: left;
             border: 0; background: none; font: inherit; font-size: var(--text-sm); color: var(--text-primary);
             padding: var(--sp-2) var(--sp-2-5); border-radius: var(--radius-xs); cursor: pointer; }
+        /* A folder name with no spaces wraps rather than running past its row. */
+        .fpick-row { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
         .fpick-row:hover { background: var(--surface-tertiary); }
         .fpick-row span { display: flex; flex: none; }
         .fpick-row svg { width: var(--icon-md); height: var(--icon-md); color: var(--action-primary); }
@@ -4213,9 +4353,9 @@
            900px window leaves this list 535px and a 768px window 403px - a
            phone's list inside a desktop window. The cells step down under the
            name for the same reason they do at 640, rather than squeezing a
-           date into 24px or taking the name to nothing. Under 761 the sidebar
-           becomes an overlay and the list is 550px again, so it tables. */
-        @media (min-width: 761px) and (max-width: 900px) {
+           date into 24px or taking the name to nothing. Up to 820 the sidebar
+           is a drawer and the list has the width again, so it tables. */
+        @media (min-width: 821px) and (max-width: 900px) {
             #files-content .files-row { flex-wrap: wrap; }
             #files-content .files-name { flex: 1 1 0; }
             #files-content .files-acts { order: 2; }
@@ -4253,6 +4393,16 @@
             font-size: var(--text-sm); color: var(--text-secondary); border: var(--bw-hairline) solid var(--border-default);
             border-radius: var(--radius-md); background: var(--surface-secondary); }
         .tm-row .files-meta { white-space: normal; }
+        /* A name being renamed stays in its own cell. */
+        .tm-list .files-rename { width: 100%; min-width: 0; }
+        /* Team's cards are spaced like every page's: the Work tab's three sat
+           edge to edge in plain divs. */
+        #team-content .card + .card { margin-top: var(--sp-4); }
+        /* An activity line wraps rather than ending in '...' with no way to
+           read the rest, and the hours stay on one line in a table that
+           already scrolls. */
+        #team-content .tm-row:not(.tm-day) > .files-name.still { white-space: normal; overflow-wrap: anywhere; }
+        #team-content .ktable :is(td:not(:first-child), th) { white-space: nowrap; }
         /* One set of columns for every person, name | meta | actions, each
            row a subgrid of it: the master's one-chip rail ended its meta
            line 300px right of everyone else's. Chosen by the LIST'S width,
@@ -4261,7 +4411,8 @@
            name went to 0px and Tabs and Delete account ran off the card. */
         .card:has(> .tm-list) { container: team / inline-size; }
         @container team (min-width: 900px) {
-            .tm-list { display: grid; grid-template-columns: minmax(0, 1fr) auto max-content; column-gap: var(--sp-2-5); }
+            .tm-list { display: grid; grid-template-columns: minmax(9rem, 1fr) auto fit-content(60%); column-gap: var(--sp-2-5); }
+            .tm-list .files-acts { flex-wrap: wrap; justify-content: flex-end; }
             .tm-list > * { grid-column: 1 / -1; }
             .tm-list > .tm-row:not(.tm-new) { display: grid; grid-template-columns: subgrid; flex-wrap: nowrap; }
             .tm-list > .tm-row > .files-meta { justify-self: end; text-align: right; }
@@ -4288,13 +4439,17 @@
         .tm-group { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
         .tm-legend { display: flex; align-items: center; gap: var(--sp-3); padding: 0; margin-bottom: var(--sp-2);
             font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-primary); }
-        .tm-picks { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-1); }
-        .tm-sub { flex: 0 0 calc(var(--sp-8) * 3); font-size: var(--text-xs); color: var(--text-tertiary); }
+        .tm-picks { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-1);
+            padding-left: calc(var(--sp-8) * 3 + var(--sp-1)); }
+        /* The group's name hangs in the indent, so ticks that wrap line up
+           under the other ticks rather than under 'Operations'. */
+        .tm-sub { flex: 0 0 calc(var(--sp-8) * 3); font-size: var(--text-xs); color: var(--text-tertiary);
+            margin-left: calc(-1 * (var(--sp-8) * 3 + var(--sp-1))); margin-right: var(--sp-1); }
         .tm-note { margin: 0; font-size: var(--text-sm); color: var(--text-secondary); }
         .tm-colour { max-width: calc(var(--sp-8) * 6); }
         .tm-panel .pfield textarea { width: 100%; max-width: 60ch; }
         .tm-sign-save { margin-top: var(--sp-2); }
-        @media (max-width: 640px) { .tm-sub { flex-basis: 100%; } }
+        @media (max-width: 640px) { .tm-sub { flex-basis: 100%; margin: 0; } .tm-picks { padding-left: 0; } }
         .tm-tabpick { display: inline-flex; align-items: center; gap: var(--sp-1-5); margin: 0 var(--sp-2-5) var(--sp-2) 0;
             cursor: pointer; font-size: var(--text-sm); color: var(--text-secondary); min-height: var(--control-h); }
         .tm-tabpick input { width: var(--box-xs); height: var(--box-xs); accent-color: var(--action-primary); cursor: pointer; }
@@ -4305,6 +4460,7 @@
             .files-name { flex: 1 1 0; }
             .files-acts { order: 2; }
             .files-meta { order: 3; flex: 1 1 100%; margin: 0 0 0 var(--sp-6); }
+            .tm-row .files-acts { order: 4; }
             /* The cells step down a line under the name, packed rather than
                tracked: fixed columns are for a list wide enough to have them,
                and the header that names them is dropped with them. */
@@ -4346,6 +4502,12 @@
             border-radius: var(--radius-md); padding: var(--sp-3) var(--sp-4); box-shadow: var(--shadow-lg);
             font-size: var(--text-sm); color: var(--text-primary); line-height: var(--lh-snug); }
         .build-bar span { flex: 1 1 100%; }
+        /* Anchored to the window's corner it lay over the sidebar's account
+           row (the only way to Settings and Log out) and over Chat's composer,
+           the whole of it on a phone, with no margin on the right. */
+        .build-bar { max-width: min(460px, calc(100vw - 32px)); }
+        @media (min-width: 821px) { body:not(.sidebar-collapsed) .build-bar { left: calc(var(--sidebar-w) + 16px); } }
+        body:has(#view-chat.active) .build-bar { bottom: calc(16px + env(safe-area-inset-bottom, 0px) + 170px); }
         @media print { .build-bar { display: none !important; } }
         /* Nothing pinned to the viewport prints, in either mode. Label mode
            hides #app, but a fixed element outside it, or one that happens to
@@ -4392,7 +4554,11 @@
         .setting-row { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-3) 0; border-top: var(--bw-hairline) solid var(--border-default); }
         .setting-row:has(> .row-acts) { flex-wrap: wrap; row-gap: var(--sp-3); }
         .setting-row > .row-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); flex: 1 0 100%; }
-        .setting-row > div:first-child { flex: 1; }
+        .setting-row > div:first-child { flex: 1 1 12rem; }
+        /* The text keeps 12rem; a row too narrow for that and its controls
+           puts them under it. The Shipping row with its badge and button was
+           a 124px column on a phone. */
+        .setting-row { flex-wrap: wrap; }
         .setting-title { font-size: var(--text-sm); font-weight: var(--weight-medium); }
         .setting-sub { font-size: var(--text-xs); color: var(--text-secondary); margin-top: var(--sp-1); line-height: var(--lh-body); }
         .modal-foot { display: flex; justify-content: flex-end; gap: var(--sp-2); padding: var(--sp-4);
@@ -6541,7 +6707,8 @@ Projected Image UK"></textarea>
                 /* The tick sits in the 32px the reference reserves on the right,
                    so a list of choices does not jump sideways when one is made. */
                 if (it.checked) { const t = el('span', 'dmenu-tick'); t.append(ico(I.check)); b.append(t); }
-                if (it.title) b.title = it.title;
+                /* A long label is shortened by the menu's width; its whole text is on hover. */
+                if (it.title) b.title = it.title; else if (String(it.label || '').length > 40) b.title = it.label;
                 if (it.disabled) b.disabled = true;
                 else b.onclick = () => { closeDMenu(); it.onClick(); };
                 panel.append(b);
@@ -6816,13 +6983,19 @@ Projected Image UK"></textarea>
             const frag = document.createDocumentFragment();
             const lines = String(text || '').split('\n');
             let ul = null;
-            lines.forEach(line => {
-                const t = line.trim();
+            for (let i = 0; i < lines.length; i++) {
+                const t = lines[i].trim();
+                /* A Markdown table is a table: it showed as rows of pipes. */
+                if (t.startsWith('|') && i + 1 < lines.length && mdTableRule(lines[i + 1].trim())) {
+                    const rows = [];
+                    while (i < lines.length && lines[i].trim().startsWith('|')) rows.push(lines[i++].trim());
+                    i--; ul = null; frag.append(pipeTable(rows)); continue;
+                }
                 if (t.startsWith('- ') || t.startsWith('• ')) {
                     if (!ul) { ul = el('ul'); frag.append(ul); }
                     ul.append(el('li', null, t.slice(2)));
                 } else { ul = null; if (t) frag.append(el('p', null, t)); }
-            });
+            }
             return frag;
         }
         function sectionCard(s, open, onToggle) {
@@ -9594,7 +9767,7 @@ Projected Image UK"></textarea>
                     const bits = [P_STATUS[p.status] || cap(p.status || '')]; if (p.price) bits.push(fmtMoney(p.price, cur)); if (p.product_type) bits.push(p.product_type); if (p.vendor) bits.push(p.vendor);
                     main.append(el('div', 'prod-sub', bits.filter(Boolean).join(' · ')));
                     const chips = el('div', 'prod-chips');
-                    const c1 = el('div', 'prod-chip'); c1.append(el('div', 'n', r.units.toLocaleString()), el('div', 'l', 'units'));
+                    const c1 = el('div', 'prod-chip units'); c1.append(el('div', 'n', r.units.toLocaleString()), el('div', 'l', 'units'));
                     const c2 = el('div', 'prod-chip rev'); c2.append(el('div', 'n', fmtMoney(r.revenue, cur)), el('div', 'l', 'revenue'));
                     if (pState.compare && r.prevRevenue != null) { const d = pctDelta(r.revenue, r.prevRevenue); c2.append(el('span', 'cmp ' + d.cls, d.txt)); }
                     chips.append(c1, c2);
@@ -10664,7 +10837,7 @@ Projected Image UK"></textarea>
             const tMsg = el('div', 'field-msg'); tMsg.hidden = true; tMsg.id = 'sk-up-t-' + k; ti.setAttribute('aria-describedby', tMsg.id);
             f1.append(ti, tMsg);
             const f2 = el('label', 'sk-field'); f2.append(el('span', null, 'When it applies'));
-            const wh = el('textarea', 'sk-input sk-when-input'); wh.rows = 2; wh.maxLength = skillCaps.when; wh.value = u.when; wh.dataset.initial = ''; wh.readOnly = busy;
+            const wh = el('textarea', 'sk-input sk-when-input'); wh.rows = 3; wh.maxLength = skillCaps.when; wh.value = u.when; wh.dataset.initial = ''; wh.readOnly = busy;
             wh.placeholder = 'e.g. Replying to a trade customer about prices or lead times. Reactor can write this when it reads the skill.';
             f2.append(wh);
             const stat = el('div', 'sk-up-stat');
@@ -11490,7 +11663,7 @@ Projected Image UK"></textarea>
                     const row = el('div', 'lbl-row' + (liaOpen === key ? ' on' : ''));
                     row.setAttribute('role', 'button'); row.tabIndex = 0;
                     row.addEventListener('keydown', (e) => { if (e.target !== row) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
-                    row.append(el('div', 'lia-name', c.name));
+                    const ln = el('div', 'lia-name', c.name); ln.title = c.name; row.append(ln);
                     const mid = el('div', 'lbl-who');
                     const line = el('span', 'lbl-nameline');
                     /* Exact, like the figure at the end of the same row and
@@ -13839,6 +14012,7 @@ Projected Image UK"></textarea>
                 qCard.append(qHead);
                 const qHost = el('div'); qCard.append(qHost);
                 if (connQuar === false) qHost.append(el('div', 'sub', 'The quarantine list could not be read.'));
+                else if (connQuar && !connQuar.length) qHost.append(el('div', 'sub', 'The list is empty now. Refresh to update the count.'));
                 else if (connQuar) {
                     const rows = connQuar;
                     const wrapT = el('div', 'ktable-wrap');
@@ -15277,7 +15451,7 @@ Projected Image UK"></textarea>
                 }
                 const r = it.row; const tr = el('tr');
                 if (!grouped) tr.append(el('td', null, r.manufacturer));
-                tr.append(el('td', 'sizes-model', r.model));
+                const mTd = el('td', 'sizes-model', r.model); if (r.notes) mTd.title = r.notes; tr.append(mTd);
                 const g = el('td', 'num', r.glass || ''); const im = el('td', 'num', r.image || '');
                 tr.append(g, im, ...sizesProducedCells(r, !!c.can_edit));
                 tr.append(el('td', 'num', r.undercut && r.undercut !== '0' ? r.undercut : ''));
@@ -16558,8 +16732,7 @@ Projected Image UK"></textarea>
                     const lines = [[sh.carrier, sh.service, sh.tracking].filter(Boolean).join('  ·  '), sh.contents || '']
                         .filter(Boolean);
                     const sub = el('span', 'sub');
-                    if (lines.length > 1) lines.forEach(t => { const ln = el('span', 'sub-line', t); ln.title = t; sub.append(ln); });
-                    else sub.textContent = lines[0] || '';
+                    lines.forEach(t => { const ln = el('span', 'sub-line', t); ln.title = t; sub.append(ln); });
                     who.append(sub);
                     row.append(who);
                     row.append(el('div', 'lbl-meta', [sh.at ? fmtDate(sh.at) : '',
@@ -16568,7 +16741,7 @@ Projected Image UK"></textarea>
                     const acts = el('div', 'lbl-actions');
                     if (!sh.canceled && sh.tracking) {
                         const cp = el('button', 'btn btn-sm');
-                        cp.textContent = 'Copy tracking';
+                        cp.title = 'Copy tracking'; cp.append(ico(I.copy), el('span', 'lbl-btn-txt', 'Copy tracking'));
                         cp.onclick = async () => {
                             try { await navigator.clipboard.writeText(sh.tracking); toastOk('Tracking copied'); }
                             catch (e) { toastError('Could not copy it.'); }
@@ -16576,7 +16749,8 @@ Projected Image UK"></textarea>
                         acts.append(cp);
                     }
                     const rp = el('button', 'btn btn-sm btn-primary');
-                    rp.append(ico(I.printer), document.createTextNode('Reprint label'));
+                    rp.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Reprint label'));
+                    rp.title = 'Reprint label';
                     if (sh.has_label === false) {
                         rp.disabled = true;
                         rp.title = 'No stored label for this one. It is in your World Options '
@@ -17011,7 +17185,9 @@ Projected Image UK"></textarea>
                     const p2 = el('button', 'btn btn-primary'); p2.append(ico(I.printer), document.createTextNode('Print this label'));
                     p2.onclick = () => printLabels([o]);
                     act.append(p2); wrap.append(act);
-                    (pane || box).append(wrap);
+                    /* Beside the queue from 1500px; below that under its own row,
+                       where it is seen, not after the whole queue card. */
+                    if (pane) pane.append(wrap); else row.after(wrap);
                     // Must run after it is in the document, or there is nothing to measure.
                     // Re-measured once the label typeface arrives: until then the metrics
                     // are the fallback font's and the shrink figure would be wrong.
@@ -21803,7 +21979,7 @@ Projected Image UK"></textarea>
         function paintList(host) {
             const deals = crmVisibleDeals().sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
             if (!deals.length) { host.append(el('div', 'empty', 'No deals match.')); return; }
-            const wrap = el('div', 'ktable-wrap'); const tb = el('table', 'ktable crm-table');
+            const wrap = el('div', 'ktable-wrap'); const tb = el('table', 'ktable crm-table crm-deals-table');
             tb.innerHTML = '<thead><tr><th>Deal</th><th>Contact</th><th class="num">Value</th>'
                 + '<th>Stage</th><th>Next activity</th><th>Status</th></tr></thead>';
             const stages = {}; crmCache.stages.forEach(s => stages[s.id] = s.name);
@@ -27587,6 +27763,7 @@ Projected Image UK"></textarea>
                 const line = el('span', 'files-name'); line.classList.add('still');
                 line.textContent = nm + ' ' + e.action + (e.detail ? ': ' + e.detail : '')
                     + (e.ws ? ' · on the clock' : '');
+                line.title = line.textContent;
                 row.append(line);
                 row.append(el('span', 'files-meta',
                     (TEAM_AREAS.find(a => a[0] === e.area) || ['', e.area])[1]));
@@ -27748,7 +27925,7 @@ Projected Image UK"></textarea>
             const was = $('sidebar').classList.contains('open');
             $('sidebar').classList.remove('open'); $('backdrop').classList.remove('show');
             $('main').inert = false;
-            if (window.matchMedia('(max-width: 760px)').matches) $('menu-btn').setAttribute('aria-expanded', 'false');
+            if (window.matchMedia('(max-width: 820px)').matches) $('menu-btn').setAttribute('aria-expanded', 'false');
             if (was && $('sidebar').contains(document.activeElement)) $('menu-btn').focus({ preventScroll: true });
         }
         document.addEventListener('keydown', (e) => {
@@ -27759,7 +27936,7 @@ Projected Image UK"></textarea>
            the width, and the choice is remembered. Cmd+B does the same. */
         const LS_SIDEBAR = 'sc_sidebar_v1';
         function toggleSidebar() {
-            if (window.matchMedia('(max-width: 760px)').matches) {
+            if (window.matchMedia('(max-width: 820px)').matches) {
                 if ($('sidebar').classList.contains('open')) closeSidebar(); else openSidebar();
                 return;
             }
@@ -27950,7 +28127,7 @@ Projected Image UK"></textarea>
         })();
         $('menu-btn').onclick = toggleSidebar; $('backdrop').onclick = closeSidebar;
         try { if (localStorage.getItem(LS_SIDEBAR) === 'closed') document.body.classList.add('sidebar-collapsed'); } catch (e) {}
-        $('menu-btn').setAttribute('aria-expanded', String(!(document.body.classList.contains('sidebar-collapsed') || window.matchMedia('(max-width: 760px)').matches)));
+        $('menu-btn').setAttribute('aria-expanded', String(!(document.body.classList.contains('sidebar-collapsed') || window.matchMedia('(max-width: 820px)').matches)));
         document.querySelector('.side-body').addEventListener('scroll', syncSideFade, { passive: true });
         window.addEventListener('resize', syncSideFade);
         if (window.ResizeObserver) new ResizeObserver(syncSideFade).observe(document.querySelector('.nav'));

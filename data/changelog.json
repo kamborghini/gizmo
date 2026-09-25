@@ -28,6 +28,26 @@
      "kind": "fixed",
      "tab": "team",
      "text": "On a tablet the Team page showed no names and cut Tabs and Delete account off the edge of each person's row. The row now puts the buttons on their own line when the list is too narrow for one line."
+    },
+    {
+     "kind": "improved",
+     "tab": "overview",
+     "text": "An iPad held upright now gets the whole screen, with the sidebar opening from the menu button as it does on a phone. With the sidebar fixed open, every page had less room on an iPad than in a small window."
+    },
+    {
+     "kind": "fixed",
+     "tab": "labels",
+     "text": "Lists and tables fit their card on every screen. Loan units, Inbox, Memory, Skills, CRM, the Size list and the report tables no longer squeeze names and subjects to nothing, cut figures off at the card's edge or break a number over two lines, and the courier options no longer print their notes over the price on a phone."
+    },
+    {
+     "kind": "fixed",
+     "tab": "chat",
+     "text": "The search box, and menus such as the Skills picker, stay inside the window; the reminder that Reactor has been updated no longer covers the sidebar's account button or the question box; and the Deep analysis switch keeps its shape."
+    },
+    {
+     "kind": "fixed",
+     "tab": "forecast",
+     "text": "Smaller layout fixes across the app: a card's hide button in Customise no longer covers the card's own controls, long email addresses and links wrap inside their boxes, tab strips scroll on a phone instead of leaving one tab on a line of its own, and a table written in a report now shows as a table."
     }
    ]
   },

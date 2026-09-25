@@ -1948,8 +1948,8 @@ def t_the_label_preview_sits_beside_the_queue_on_a_wide_screen():
     ok(".lbl-split" in CSS and ".lbl-pane" in CSS, "the split layout is styled")
     ok("lbl-split" in SCRIPT and "lbl-pane" in SCRIPT, "and built by the renderer")
     ok("matchMedia('(min-width: 1500px)')" in SCRIPT, "decided once, above 1500")
-    ok("(pane || box).append(wrap)" in SCRIPT,
-       "and it still falls back to inline where there is no room for a pane")
+    ok("if (pane) pane.append(wrap); else row.after(wrap);" in SCRIPT,
+       "and it still falls back to inline where there is no room for a pane, under its own row")
 
 
 @test
@@ -5568,9 +5568,9 @@ def t_the_header_is_one_implementation_with_one_collapse_point():
         while i < len(CSS) and depth:
             depth += {"{": 1, "}": -1}.get(CSS[i], 0); i += 1
         ok(".menu-btn" not in CSS[m.end():i], "and no breakpoint hides or reveals it: " + m.group(0))
-    ok(re.search(r"@media \(max-width: 760px\)[^@]*?\.sidebar \{ position: fixed;", CSS),
-       "the sidebar leaves the flow at 760 and only there")
-    ok("@media (min-width: 761px) { body.sidebar-collapsed .sidebar { margin-left: calc(-1 * var(--sidebar-w)); } }" in CSS,
+    ok(re.search(r"@media \(max-width: 820px\)[^@]*?\.sidebar \{ position: fixed;", CSS),
+       "the sidebar leaves the flow at 820 and only there (a portrait iPad gets the whole width)")
+    ok("@media (min-width: 821px) { body.sidebar-collapsed .sidebar { margin-left: calc(-1 * var(--sidebar-w)); } }" in CSS,
        "and folds away by its own width above it")
     ok("function toggleSidebar()" in SCRIPT and "k === 'b'" in SCRIPT, "one toggle serves the trigger and Cmd+B")
 
@@ -5690,19 +5690,19 @@ def t_an_icon_size_comes_from_the_scale_and_not_from_the_rule():
 
 @test
 def t_every_breakpoint_is_on_the_scale():
-    """Six stops, each with a job: 640 phone, 760 the sidebar collapses, 900
+    """Six stops, each with a job: 640 phone, 820 the sidebar collapses (760 until a portrait iPad kept it docked), 900
     tablet, 1100 the KPI row goes to four columns, 1500 wide, 1800 ultra-wide. There were nineteen distinct
     widths before; the near-misses (560, 600, 620, 700, 720, 960, 2100) folded
     onto their neighbours."""
     # 1200 was the production queue's own stop; since 2026-09-23 the queue is
     # laid out by the width of the list itself (@container queue), because a
     # viewport stop cannot see the label preview taking 476px beside it.
-    stops = {640, 641, 760, 761, 900, 901, 1100, 1101, 1500, 1800}
+    stops = {640, 641, 820, 821, 900, 901, 1100, 1101, 1500, 1800}
     widths = set()
     for pre in re.findall(r"@media([^{]+)\{", CSS):
         widths |= {int(w) for w in re.findall(r"(?:min|max)-width:\s*(\d+)px", pre)}
     ok(widths <= stops, "off-scale breakpoints: %s" % sorted(widths - stops))
-    ok({640, 760, 900, 1100, 1500, 1800} <= widths, "and every stop on the scale is in use: %s" % sorted(widths))
+    ok({640, 820, 900, 1100, 1500, 1800} <= widths, "and every stop on the scale is in use: %s" % sorted(widths))
 
 
 @test
@@ -8709,6 +8709,62 @@ def t_headers_and_team_rows_lay_out_by_the_room_they_have():
        and "@container team (max-width: 899px) {\n            .tm-row .files-meta { margin-left: 0; }\n            .tm-row .files-acts { flex: 1 1 100%; flex-wrap: wrap; }" in CSS,
        "the Team rows choose their layout by the list's width")
     ok("@media (min-width: 641px) {\n            .tm-list { display: grid" not in CSS, "not the window's")
+
+
+
+@test
+def t_the_app_wide_layout_sweep_holds():
+    """25 Sep 2026, Cameron: "we need to fix any nonsense like this app wide".
+    An audit of every page at 11 sizes and three reviewers by eye found 65
+    faults of the same kind as the Production Manager's. Each fix is pinned
+    by the rule that makes it; the measurements are in the commit."""
+    rules = {
+        # the portrait iPad gets the whole width: the sidebar is a drawer to 820
+        "@media (max-width: 820px) {\n            .sidebar { position: fixed;": "the sidebar is a drawer up to 820",
+        # search palette and menus stay inside the window
+        ".dpanel.dpanel-search { min-width: 0; width: min(340px, calc(100vw - 16px)); }": "the search palette has one width",
+        ".dmenu { max-width: min(420px, calc(100vw - 16px)); }": "a menu is never wider than the window",
+        ".card[hidden] { display: none; }": "a hidden card is hidden",
+        ".guide-tools > .tbl-search { justify-self: start; }": "the guide search's clear button is in its field",
+        ".setting-row > div:first-child { flex: 1 1 12rem; }": "a settings row keeps 12rem of words",
+        ".build-bar { max-width: min(460px, calc(100vw - 32px)); }": "the update bar fits a phone",
+        ".toggle .sw { flex: none; }": "the Deep analysis switch never squeezes",
+        "@container skcard (max-width: 600px)": "skill titles by the card's width",
+        "@container memcard (max-width: 620px)": "notes stack by the card's width",
+        ".ktable.mem-table td.mem-note { min-width: 14rem; }": "a note keeps a readable column",
+        ".tm-list { display: grid; grid-template-columns: minmax(9rem, 1fr) auto fit-content(60%);": "a person's name keeps 9rem",
+        "#team-content .card + .card { margin-top: var(--sp-4); }": "Team's cards are spaced",
+        # operations
+        "flex-wrap: wrap; row-gap: var(--sp-1); }": "courier chips wrap",
+        "@container loans (max-width: 620px)": "loan rows by the card's width",
+        "@container mlist (max-width: 560px)": "Inbox rows by the list's width",
+        ".mail-bulk-hint { color: inherit; flex: 1 1 8rem; min-width: 0; }": "the bulk hint wraps before it goes to nothing",
+        ".ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); max-width: 0; width: 100%;": "size notes take what is left",
+        "@container crmtable (max-width: 640px)": "CRM tables come in on a narrow card",
+        "word-break: normal; overflow-wrap: anywhere; text-underline-offset: 2px;": "contact lines break between words",
+        ".mown-slot { flex: 0 0 auto; min-width: 88px; max-width: 150px;": "owner chips show a short name whole",
+        ".lbl-seg, .ftabs { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }": "phone tab strips scroll",
+        "@media (max-width: 1100px) { .metrics.metrics-3 > :nth-child(3):last-child { grid-column: 1 / -1; } }": "a third tile takes the row",
+        ".lbl-qrow .lbl-actions { justify-self: start; }": "queue buttons line up",
+        # dashboards and finance
+        "details.sect .body .ktable :is(th, td) { overflow-wrap: normal; }": "a figure in a drawer stays whole",
+        ".ktable { width: 100%; border-collapse: collapse; font-size: var(--text-sm); background: var(--surface-primary); min-width: min(460px, 100%); }": "a table fits a narrow card",
+        ".ktable td.num { white-space: nowrap; }": "figures keep one line",
+        ".ktable.sizes-table th { white-space: normal; }": "the size list's headings wrap",
+        "@container cxcard (max-width: 560px) {\n            .ktable.cx-docs { min-width: 0; display: block; }": "Xero results stack by the card's width",
+        ".conn-pairs { grid-template-columns: minmax(0, max-content) minmax(0, 1fr); }": "a value never runs out of its panel",
+        ".lbl-rows .lbl-nameline { flex-wrap: wrap; row-gap: var(--sp-1); }": "chips go under a title in lists",
+        "top: calc(-1 * var(--sp-3)); right: calc(-1 * var(--sp-3)); z-index: 1;": "a card's hide button is off its controls",
+        ".dpanel select { padding-right: var(--chevron-room); }": "a filter select's chevron is clear of its label",
+    }
+    for rule, why in rules.items():
+        ok(rule in CSS, why)
+    ok("window.matchMedia('(max-width: 760px)')" not in SCRIPT and SCRIPT.count("window.matchMedia('(max-width: 820px)')") == 3,
+       "the script's sidebar checks moved with the stop")
+    ok("if (pane) pane.append(wrap); else row.after(wrap);" in SCRIPT, "a label preview opens under its own row")
+    body = fn_src("function bodyToNodes(")
+    ok("mdTableRule(lines[i + 1].trim())" in body and "pipeTable(rows)" in body, "a Markdown table in a report is a table")
+    ok("else if (connQuar && !connQuar.length) qHost.append(" in SCRIPT, "an empty quarantine list says so")
 
 
 if __name__ == "__main__":
