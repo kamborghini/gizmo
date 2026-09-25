@@ -37,7 +37,7 @@
     {
      "kind": "improved",
      "tab": "overview",
-     "text": "An iPad held upright now gets the whole screen, with the sidebar opening from the menu button as it does on a phone. With the sidebar fixed open, every page had less room on an iPad than in a small window."
+     "text": "An iPad held upright, and any window up to 900 pixels wide, now gets the whole screen, with the sidebar opening from the menu button as it does on a phone, and closing by itself if the iPad is turned. With the sidebar fixed open, every page had less room on an iPad than in a small window."
     },
     {
      "kind": "fixed",

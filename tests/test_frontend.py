@@ -5568,9 +5568,9 @@ def t_the_header_is_one_implementation_with_one_collapse_point():
         while i < len(CSS) and depth:
             depth += {"{": 1, "}": -1}.get(CSS[i], 0); i += 1
         ok(".menu-btn" not in CSS[m.end():i], "and no breakpoint hides or reveals it: " + m.group(0))
-    ok(re.search(r"@media \(max-width: 820px\)[^@]*?\.sidebar \{ position: fixed;", CSS),
-       "the sidebar leaves the flow at 820 and only there (a portrait iPad gets the whole width)")
-    ok("@media (min-width: 821px) { body.sidebar-collapsed .sidebar { margin-left: calc(-1 * var(--sidebar-w)); } }" in CSS,
+    ok(re.search(r"@media \(max-width: 900px\)[^@]*?\.sidebar \{ position: fixed;", CSS),
+       "the sidebar leaves the flow at 900 and only there (every portrait iPad gets the whole width)")
+    ok("@media (min-width: 901px) { body.sidebar-collapsed .sidebar { margin-left: calc(-1 * var(--sidebar-w)); } }" in CSS,
        "and folds away by its own width above it")
     ok("function toggleSidebar()" in SCRIPT and "k === 'b'" in SCRIPT, "one toggle serves the trigger and Cmd+B")
 
@@ -5690,19 +5690,19 @@ def t_an_icon_size_comes_from_the_scale_and_not_from_the_rule():
 
 @test
 def t_every_breakpoint_is_on_the_scale():
-    """Six stops, each with a job: 640 phone, 820 the sidebar collapses (760 until a portrait iPad kept it docked), 900
+    """Five stops, each with a job: 640 phone, 900 tablet and the sidebar becomes a drawer (760, then 820, until portrait iPads kept it docked), 900
     tablet, 1100 the KPI row goes to four columns, 1500 wide, 1800 ultra-wide. There were nineteen distinct
     widths before; the near-misses (560, 600, 620, 700, 720, 960, 2100) folded
     onto their neighbours."""
     # 1200 was the production queue's own stop; since 2026-09-23 the queue is
     # laid out by the width of the list itself (@container queue), because a
     # viewport stop cannot see the label preview taking 476px beside it.
-    stops = {640, 641, 820, 821, 900, 901, 1100, 1101, 1500, 1800}
+    stops = {640, 641, 900, 901, 1100, 1101, 1500, 1800}
     widths = set()
     for pre in re.findall(r"@media([^{]+)\{", CSS):
         widths |= {int(w) for w in re.findall(r"(?:min|max)-width:\s*(\d+)px", pre)}
     ok(widths <= stops, "off-scale breakpoints: %s" % sorted(widths - stops))
-    ok({640, 820, 900, 1100, 1500, 1800} <= widths, "and every stop on the scale is in use: %s" % sorted(widths))
+    ok({640, 900, 1100, 1500, 1800} <= widths, "and every stop on the scale is in use: %s" % sorted(widths))
 
 
 @test
@@ -8741,7 +8741,7 @@ def t_the_app_wide_layout_sweep_holds():
     by the rule that makes it; the measurements are in the commit."""
     rules = {
         # the portrait iPad gets the whole width: the sidebar is a drawer to 820
-        "@media (max-width: 820px) {\n            .sidebar { position: fixed;": "the sidebar is a drawer up to 820",
+        "@media (max-width: 900px) {\n            .sidebar { position: fixed;": "the sidebar is a drawer up to 900",
         # search palette and menus stay inside the window
         ".dpanel.dpanel-search { min-width: 0; width: min(340px, calc(100vw - 16px)); }": "the search palette has one width",
         ".dmenu { max-width: min(420px, calc(100vw - 16px)); }": "a menu is never wider than the window",
@@ -8751,36 +8751,42 @@ def t_the_app_wide_layout_sweep_holds():
         ".build-bar { max-width: min(460px, calc(100vw - 32px)); }": "the update bar fits a phone",
         ".toggle .sw { flex: none; }": "the Deep analysis switch never squeezes",
         "@container skcard (max-width: 600px)": "skill titles by the card's width",
-        "@container memcard (max-width: 620px)": "notes stack by the card's width",
-        ".ktable.mem-table td.mem-note { min-width: 14rem; }": "a note keeps a readable column",
+        "@container memcard (max-width: 700px)": "notes stack by the card's width",
+        ".ktable.mem-table td.mem-note { min-width: 12rem; }": "a note keeps a readable column",
         ".tm-list { display: grid; grid-template-columns: minmax(9rem, 1fr) auto fit-content(60%);": "a person's name keeps 9rem",
+        ".ktable.crm-table td.crm-phone { white-space: nowrap; }": "a phone number is never split",
+        ".crm-focus .disp-boxrow > .disp-text { flex: 1 1 8rem; min-width: 7rem; }": "a stage's name keeps 7rem",
+        ".followed > .ic { display: inline-grid; }": "the book icon leads its line",
+        ".lia-name { font-size: var(--text-sm); font-weight: var(--weight-medium); flex: 0 0 clamp(150px, 30%, 320px);": "one name width per list",
+        "body:has(#view-chat.active) .build-bar { bottom: auto; top: calc(var(--topbar-h) + 12px); }": "the update bar is clear of the composer on Chat",
         "#team-content .card + .card { margin-top: var(--sp-4); }": "Team's cards are spaced",
         # operations
         "flex-wrap: wrap; row-gap: var(--sp-1); }": "courier chips wrap",
         "@container loans (max-width: 620px)": "loan rows by the card's width",
         "@container mlist (max-width: 560px)": "Inbox rows by the list's width",
-        ".mail-bulk-hint { color: inherit; flex: 1 1 8rem; min-width: 0; }": "the bulk hint wraps before it goes to nothing",
+        ".mail-bulk-hint { color: inherit; flex: 1 1 0; min-width: 7rem; }": "the bulk hint gives way before the buttons wrap",
         ".ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); max-width: 0; width: 100%;": "size notes take what is left",
         "@container crmtable (max-width: 640px)": "CRM tables come in on a narrow card",
         "word-break: normal; overflow-wrap: anywhere; text-underline-offset: 2px;": "contact lines break between words",
         ".mown-slot { flex: 0 0 auto; min-width: 88px; max-width: 150px;": "owner chips show a short name whole",
-        ".lbl-seg, .ftabs { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }": "phone tab strips scroll",
+        ".lbl-seg > * { flex: 1 1 auto; }": "a phone tab strip that wraps fills its lines",
         "@media (max-width: 1100px) { .metrics.metrics-3 > :nth-child(3):last-child { grid-column: 1 / -1; } }": "a third tile takes the row",
         ".lbl-qrow .lbl-actions { justify-self: start; }": "queue buttons line up",
         # dashboards and finance
         "details.sect .body .ktable :is(th, td) { overflow-wrap: normal; }": "a figure in a drawer stays whole",
         ".ktable { width: 100%; border-collapse: collapse; font-size: var(--text-sm); background: var(--surface-primary); min-width: min(460px, 100%); }": "a table fits a narrow card",
         ".ktable td.num { white-space: nowrap; }": "figures keep one line",
-        ".ktable.sizes-table th { white-space: normal; }": "the size list's headings wrap",
+        "@container sizes (max-width: 1000px) { .ktable.sizes-table th { white-space: normal; } }": "the size list's headings wrap only in a narrow card",
         "@container cxcard (max-width: 560px) {\n            .ktable.cx-docs { min-width: 0; display: block; }": "Xero results stack by the card's width",
-        ".conn-pairs { grid-template-columns: minmax(0, max-content) minmax(0, 1fr); }": "a value never runs out of its panel",
+        ".conn-pairs { grid-template-columns: fit-content(40%) minmax(0, 1fr); }": "a value never runs out of its panel or goes to 0px",
         ".lbl-rows .lbl-nameline { flex-wrap: wrap; row-gap: var(--sp-1); }": "chips go under a title in lists",
         "top: calc(-1 * var(--sp-3)); right: calc(-1 * var(--sp-3)); z-index: 1;": "a card's hide button is off its controls",
         ".dpanel select { padding-right: var(--chevron-room); }": "a filter select's chevron is clear of its label",
     }
     for rule, why in rules.items():
         ok(rule in CSS, why)
-    ok("window.matchMedia('(max-width: 760px)')" not in SCRIPT and SCRIPT.count("window.matchMedia('(max-width: 820px)')") == 3,
+    ok("window.matchMedia('(max-width: 760px)')" not in SCRIPT and SCRIPT.count("window.matchMedia('(max-width: 900px)')") == 5
+       and "window.innerWidth > 760" not in SCRIPT,
        "the script's sidebar checks moved with the stop")
     ok("if (pane) pane.append(wrap); else row.after(wrap);" in SCRIPT, "a label preview opens under its own row")
     body = fn_src("function bodyToNodes(")
