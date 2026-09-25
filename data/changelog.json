@@ -2,7 +2,7 @@
  "releases": [
   {
    "date": "2026-09-25",
-   "title": "Production Manager rows that fit every screen",
+   "title": "Every page fits every screen",
    "items": [
     {
      "kind": "fixed",
@@ -13,6 +13,21 @@
      "kind": "fixed",
      "tab": "labels",
      "text": "On a tablet, or a narrower window, the order queues no longer squeeze the customer's name to nothing. A long courier chip such as Dispatched, Parcelforce Worldwide took the whole name column, and on a tablet the buttons did: the name now shows in full when it fits, chips that do not fit go under it, the buttons take their own line when the list is narrow, and the queue's description is no longer squeezed into a thin column beside its buttons."
+    },
+    {
+     "kind": "fixed",
+     "tab": "overview",
+     "text": "On a tablet or a narrower window, a page's heading no longer squeezes its introduction into a thin column beside Updated, Refresh all and Customise, and those no longer hang out of the heading: they move under the introduction when there is no room beside it."
+    },
+    {
+     "kind": "fixed",
+     "tab": "crm",
+     "text": "A card's buttons take at most half its header and wrap there, so the title and description beside them keep their room. CRM, Inbox, Skills, Xero sync and the Production Manager all had a description squeezed into a column about 80 to 160 pixels wide."
+    },
+    {
+     "kind": "fixed",
+     "tab": "team",
+     "text": "On a tablet the Team page showed no names and cut Tabs and Delete account off the edge of each person's row. The row now puts the buttons on their own line when the list is too narrow for one line."
     }
    ]
   },

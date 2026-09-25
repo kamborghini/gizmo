@@ -615,6 +615,19 @@
         .ov-updated { font-size: var(--text-xs); color: var(--text-tertiary); margin-left: auto; white-space: nowrap; padding-top: var(--sp-1-5); }
         .ov-hero-act { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); flex: none; padding-top: var(--sp-1); }
         .ov-hero-act .ov-updated { margin-left: 0; padding-top: 0; font-size: var(--text-sm); }
+        /* Above a phone the rail kept its full width and the page's intro
+           gave way: at 768 on a tablet Overview's sentence was a column 122px
+           wide, SEO's 71px and Size list's 56px, and the rail's last button
+           hung up to 79px out of the header. The header wraps now: the text
+           keeps at least 22rem, a rail that does not fit beside it takes the
+           line below, still at the right, and a rail wider than the header
+           wraps inside itself, a long stamp included. */
+        @media (min-width: 641px) {
+            .ov-hero { flex-wrap: wrap; }
+            .ov-hero > div:not(.badge):not(.ov-hero-act):not(.ov-updated) { flex: 1 1 22rem; min-width: 0; }
+            .ov-hero-act { max-width: 100%; flex-wrap: wrap; justify-content: flex-end; }
+            .ov-hero-act > .ov-updated { white-space: normal; text-align: right; }
+        }
         /* An icon-only small button is the reference's icon-sm: a 28px square. */
         .btn-sm.btn-icon { width: 28px; padding: 0; justify-content: center; }
         /* On a phone the badge, the gaps and this stamp left the heading and
@@ -629,7 +642,7 @@
                every page. It left the stamp hanging on its own row, indented
                against nothing, while the title and the sentence started at the
                page inset. */
-            .ov-updated { margin-left: 0; padding-top: 0; flex-basis: 100%; }
+            .ov-updated { margin-left: 0; padding-top: 0; flex-basis: 100%; white-space: normal; }
             .ov-hero-act { margin-left: 0; flex-basis: 100%; padding-top: 0; }
             /* With the widget grid's Customize beside Refresh the row is
                fuller than the stamp's full-width basis leaves room for, and the
@@ -1391,10 +1404,13 @@
         .card-sub b { color: var(--text-primary); font-weight: var(--weight-medium); }
         .card-act { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center;
             gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
-        /* The queue card's four header buttons asked for 430px, and the title
-           and its description were left a column 80px wide. The rail has at
-           most half the head, and its buttons wrap inside it. */
-        @media (min-width: 641px) { .q-card > .card-head { grid-template-columns: 1fr fit-content(50%); } }
+        /* A header's button rail has at most half the head, and its buttons
+           wrap inside it. As an auto column it took all it asked for: the
+           Production Manager's four buttons left the title and description a
+           column 80px wide, CRM's Contacts 82px, Deals 116px, and Skills,
+           Inbox and Xero sync 146 to 165px at 768. A rail that cannot wrap
+           still gets its narrowest width, so it never lies over the title. */
+        @media (min-width: 641px) { .card-head { grid-template-columns: 1fr fit-content(50%); } }
         @media (max-width: 640px) {
             .card-head { grid-template-columns: 1fr; }
             .card-act { grid-column: 1; grid-row: auto; justify-content: flex-start; }
@@ -4239,19 +4255,24 @@
         .tm-row .files-meta { white-space: normal; }
         /* One set of columns for every person, name | meta | actions, each
            row a subgrid of it: the master's one-chip rail ended its meta
-           line 300px right of everyone else's. A phone keeps the wrapping
-           flex row below. */
-        @media (min-width: 641px) {
+           line 300px right of everyone else's. Chosen by the LIST'S width,
+           not the window's: switched at a 641px window, a 768 tablet with the
+           sidebar open gave the list 400px, the button column wanted 580, the
+           name went to 0px and Tabs and Delete account ran off the card. */
+        .card:has(> .tm-list) { container: team / inline-size; }
+        @container team (min-width: 900px) {
             .tm-list { display: grid; grid-template-columns: minmax(0, 1fr) auto max-content; column-gap: var(--sp-2-5); }
             .tm-list > * { grid-column: 1 / -1; }
             .tm-list > .tm-row:not(.tm-new) { display: grid; grid-template-columns: subgrid; flex-wrap: nowrap; }
             .tm-list > .tm-row > .files-meta { justify-self: end; text-align: right; }
         }
-        @media (max-width: 640px) { .tm-row .files-meta { margin-left: 0; } }
-        /* On a phone a person's actions take their own line and wrap: in one
+        /* Narrower, a person's actions take their own line and wrap: in one
            unbroken row, Tabs and Delete account sat past the card's clipped
            edge, where no finger could reach them. */
-        @media (max-width: 640px) { .tm-row .files-acts { flex: 1 1 100%; flex-wrap: wrap; } }
+        @container team (max-width: 899px) {
+            .tm-row .files-meta { margin-left: 0; }
+            .tm-row .files-acts { flex: 1 1 100%; flex-wrap: wrap; }
+        }
         /* A text field that matches the height of .lbl-size selects, so a row
            mixing inputs, a select and a button lines up. */
         .tm-field { flex: 1 1 120px; min-width: 0; background: var(--surface-primary); color: var(--text-primary);

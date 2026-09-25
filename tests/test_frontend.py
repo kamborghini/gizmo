@@ -7312,8 +7312,8 @@ def t_a_sent_reply_with_a_warning_shows_the_warning():
 def t_team_actions_wrap_onto_their_own_line_on_a_phone():
     """A30 in the 2026-09-22 bug audit. Tabs and Delete account sat in one
     unbroken row past the card's clipped edge on a phone."""
-    ok(re.search(r"@media \(max-width: 640px\) \{ \.tm-row \.files-acts \{ flex: 1 1 100%; flex-wrap: wrap; \} \}", HTML),
-       "a person's actions take their own line and wrap at phone width")
+    ok("@container team (max-width: 899px) {\n            .tm-row .files-meta { margin-left: 0; }\n            .tm-row .files-acts { flex: 1 1 100%; flex-wrap: wrap; }" in CSS,
+       "a person's actions take their own line and wrap whenever the list is narrow, a phone's included")
 
 
 @test
@@ -8685,8 +8685,30 @@ def t_a_queue_row_never_squeezes_the_customer_name_to_nothing():
     narrow = CSS[CSS.index("@container queue (max-width: 559px) {\n"):][:400]
     ok(".lbl-qrow { flex-wrap: wrap; }" in narrow and ".lbl-qrow .lbl-actions { flex: 1 1 100%; justify-content: flex-start; }" in narrow,
        "a list as narrow as a phone's puts the buttons on their own line, whatever the window")
-    ok("@media (min-width: 641px) { .q-card > .card-head { grid-template-columns: 1fr fit-content(50%); } }" in CSS
-       and "const qCard = el('div', 'card q-card');" in SCRIPT, "the queue card's buttons wrap within half its header")
+    ok("@media (min-width: 641px) { .card-head { grid-template-columns: 1fr fit-content(50%); } }" in CSS
+       and ".q-card > .card-head" not in CSS, "every card's buttons wrap within half its header, the queue's included")
+
+
+
+@test
+def t_headers_and_team_rows_lay_out_by_the_room_they_have():
+    """The app-wide sweep of 25 Sep 2026: page headers above a phone kept their
+    action rail whole and squeezed the intro to a 56 to 122px ribbon at 768,
+    the rail's last button hanging out of the header; and the Team rows chose
+    their one-line grid by the window, so a tablet with the sidebar open gave
+    the names 0px and cut Tabs and Delete account off the card."""
+    i = CSS.index("@media (min-width: 641px) {\n            .ov-hero { flex-wrap: wrap; }")
+    block = CSS[i:i + 600]
+    ok(".ov-hero > div:not(.badge):not(.ov-hero-act):not(.ov-updated) { flex: 1 1 22rem; min-width: 0; }" in block
+       and ".ov-hero-act { max-width: 100%; flex-wrap: wrap; justify-content: flex-end; }" in block
+       and ".ov-hero-act > .ov-updated { white-space: normal; text-align: right; }" in block,
+       "the header wraps, the text keeps 22rem, and a wide rail wraps inside itself")
+    ok(".ov-updated { margin-left: 0; padding-top: 0; flex-basis: 100%; white-space: normal; }" in CSS, "a long stamp wraps on a phone")
+    ok(".card:has(> .tm-list) { container: team / inline-size; }" in CSS
+       and "@container team (min-width: 900px) {\n            .tm-list { display: grid;" in CSS
+       and "@container team (max-width: 899px) {\n            .tm-row .files-meta { margin-left: 0; }\n            .tm-row .files-acts { flex: 1 1 100%; flex-wrap: wrap; }" in CSS,
+       "the Team rows choose their layout by the list's width")
+    ok("@media (min-width: 641px) {\n            .tm-list { display: grid" not in CSS, "not the window's")
 
 
 if __name__ == "__main__":
