@@ -8689,6 +8689,27 @@ def t_a_queue_row_never_squeezes_the_customer_name_to_nothing():
        and ".q-card > .card-head" not in CSS, "every card's buttons wrap within half its header, the queue's included")
 
 
+@test
+def t_a_stat_header_keeps_its_count_beside_its_buttons():
+    """Every card header measured at eleven window sizes, 390 to 1728 (25 Sep
+    2026): half the header for the rail fixed the thin columns, but Products,
+    a count and one short line, was fine at 700 and 900, and there half
+    wrapped its three buttons and pushed the count away from its title. Held
+    to the title's row instead, the rail made every stat header 14px taller at
+    every width, Xero sync's Connection included, and put the buttons above
+    the title on a phone."""
+    general = CSS.index("@media (min-width: 641px) { .card-head { grid-template-columns: 1fr fit-content(50%); } }")
+    i = CSS.index("@media (min-width: 641px) {\n            .card-head-stat {")
+    block = CSS[i:CSS.index("}\n        }", i) + 1]
+    ok(general < i, "after the rule for every header, so a stat header's own wins")
+    ok(".card-head-stat { grid-template-columns: 1fr fit-content(max(50%, 100% - 12.5rem - var(--sp-4))); }" in block,
+       "a stat header's text keeps 12.5rem, or half on a narrow header")
+    ok(".card-head-stat:has(> .card-sub) > .card-act { grid-row: 1 / span 3; }" in block,
+       "its rail spans the summary row, so wrapped buttons do not spread the count from its title")
+    ok(not re.search(r"\.card-head-stat > \.card-act \{[^}]*grid-row: 1;", CSS),
+       "and the rail is never held to the title's row, which pushed the count down and, on a phone, the buttons above the title")
+
+
 
 @test
 def t_headers_and_team_rows_lay_out_by_the_room_they_have():

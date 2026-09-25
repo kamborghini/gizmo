@@ -26,6 +26,11 @@
     },
     {
      "kind": "fixed",
+     "tab": "products",
+     "text": "The Products header keeps its buttons on one line whenever there is room, with its count straight under its title. On some tablet and laptop sizes the buttons wrapped onto two lines with room to spare and pushed the count down, the count sat lower than it should on every screen, as it did on Xero sync's Connection card, and on a phone the buttons had moved above the title."
+    },
+    {
+     "kind": "fixed",
      "tab": "team",
      "text": "On a tablet the Team page showed no names and cut Tabs and Delete account off the edge of each person's row. The row now puts the buttons on their own line when the list is too narrow for one line."
     },

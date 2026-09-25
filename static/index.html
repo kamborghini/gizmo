@@ -1442,7 +1442,6 @@
             line-height: var(--lh-control); margin: 0; }
         /* The reference's orders card head: a quiet title, a big counted line,
            and a muted line under it. */
-        .card-head-stat > .card-act { grid-row: 1; align-self: start; }
         .card-head-stat .card-title { font-size: var(--text-sm); font-weight: var(--weight-regular); color: var(--text-tertiary); }
         .card-head-stat .card-desc { font-size: var(--text-xl); color: var(--text-primary); line-height: var(--lh-none); letter-spacing: -.025em; }
         .card-sub { grid-column: 1; margin: 0; font-size: var(--text-sm); color: var(--text-tertiary); line-height: var(--lh-control); }
@@ -1456,6 +1455,18 @@
            Inbox and Xero sync 146 to 165px at 768. A rail that cannot wrap
            still gets its narrowest width, so it never lies over the title. */
         @media (min-width: 641px) { .card-head { grid-template-columns: 1fr fit-content(50%); } }
+        /* A stat head's text is a count and one short line, so it keeps
+           12.5rem and its rail has the rest. At half, Products' three buttons
+           wrapped at 700 and at 821 to 900 with the count already on one
+           line. Its rail spans the summary row as well, so buttons that do
+           wrap sit beside all three lines rather than pushing the count away
+           from its title. Held to the title's row instead, a rail one button
+           tall pushed every stat head's count down 14px, Connection's on Xero
+           sync included, and on a phone it put the buttons above the title. */
+        @media (min-width: 641px) {
+            .card-head-stat { grid-template-columns: 1fr fit-content(max(50%, 100% - 12.5rem - var(--sp-4))); }
+            .card-head-stat:has(> .card-sub) > .card-act { grid-row: 1 / span 3; }
+        }
         @media (max-width: 640px) {
             .card-head { grid-template-columns: 1fr; }
             .card-act { grid-column: 1; grid-row: auto; justify-content: flex-start; }
