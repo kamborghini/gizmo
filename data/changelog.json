@@ -1,6 +1,17 @@
 {
  "releases": [
   {
+   "date": "2026-09-25",
+   "title": "Custom shipments keep their buttons in the row",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "labels",
+     "text": "On a wide screen, a custom shipment with its contents noted showed Copy tracking and Reprint label on a second line, hanging out of the row over the sidebar. The contents now sit under the carrier line, the buttons stay at the end of the row, and a long contents line is shortened, with the whole of it shown when you point at it."
+    }
+   ]
+  },
+  {
    "date": "2026-09-24",
    "title": "Longer skills, uploaded from the master account",
    "items": [

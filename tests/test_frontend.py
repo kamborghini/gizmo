@@ -8651,6 +8651,25 @@ def t_only_the_master_sees_the_upload_and_a_long_skill_can_be_edited():
     ok("upload: false" in SCRIPT.split("const skillCaps = ")[1][:120], "no upload until the server says so")
 
 
+
+@test
+def t_a_queue_row_keeps_its_buttons_in_the_last_column():
+    """Custom shipments put the contents in a second line under the name. In
+    the widest layout every child of that box is a column of the queue's grid,
+    so a shipment with contents had six items for five columns and its buttons
+    wrapped into the 100px number column, right-aligned, hanging out of the
+    row over the sidebar (Cameron's screenshot, 25 Sep 2026)."""
+    ok(".lbl-qrow > .lbl-meta { grid-row: 1; grid-column: -3 / -2; }" in CSS
+       and ".lbl-qrow > .lbl-actions { grid-row: 1; grid-column: -2 / -1; }" in CSS,
+       "the date and the buttons are pinned to the last two columns of the first line")
+    i = SCRIPT.index("No shipments booked to a pasted address yet.")
+    body = SCRIPT[i:i + 4000]
+    ok("if (sh.contents) who.append(el('span', 'sub', sh.contents));" not in body
+       and body.count("el('span', 'sub')") == 1 and "'sub-line'" in body,
+       "a shipment's carrier line and contents are one item under the name")
+    ok(".lbl-who .sub > .sub-line { display: block; overflow: hidden; text-overflow: ellipsis; }" in CSS, "each line is shortened on its own")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

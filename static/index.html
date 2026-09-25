@@ -1946,6 +1946,7 @@
            A floor it can still fall below when the row is tight. */
         .lbl-who { flex: 1 1 auto; min-width: 0; font-size: var(--text-sm); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .lbl-who .sub { display: block; font-size: var(--text-xs); color: var(--text-tertiary); }
+        .lbl-who .sub > .sub-line { display: block; overflow: hidden; text-overflow: ellipsis; }
         .lbl-meta { font-size: var(--text-xs); color: var(--text-tertiary); white-space: nowrap; }
         /* The row's own figure, one treatment on both finance pages: the money
            ends the row at the right edge in 14px medium ink. The meta column's
@@ -1997,6 +1998,12 @@
             .lbl-qrow { display: grid; grid-template-columns: subgrid; align-items: center; }
             .lbl-qrow .lbl-meta { justify-self: end; padding-right: var(--sp-3); }
             .lbl-qrow .lbl-actions { justify-self: end; }
+            /* The date and the buttons are the last two columns of the first
+               line, whatever else a row carries: auto-placed, a row with one
+               item too many wrapped its buttons into the 100px number column,
+               right-aligned, so they hung out of the row over the sidebar. */
+            .lbl-qrow > .lbl-meta { grid-row: 1; grid-column: -3 / -2; }
+            .lbl-qrow > .lbl-actions { grid-row: 1; grid-column: -2 / -1; }
         }
         @container queue (min-width: 860px) {
             .lbl-qrow .lbl-who { overflow: visible; white-space: normal; }
@@ -16504,9 +16511,17 @@ Projected Image UK"></textarea>
                     if (sh.customer) nameLine.append(el('span', 'lbl-name' + (sh.canceled ? ' is-cancelled' : ''), sh.customer));
                     if (sh.canceled) nameLine.append(el('span', 'lbl-chip bad', 'Cancelled'));
                     who.append(nameLine);
-                    who.append(el('span', 'sub', [sh.carrier, sh.service, sh.tracking]
-                        .filter(Boolean).join('  ·  ')));
-                    if (sh.contents) who.append(el('span', 'sub', sh.contents));
+                    /* The carrier line and the contents are ONE item under the
+                       name: in the widest layout each child of this box is a
+                       column of the queue's grid, and a second line here made
+                       six items for five columns, so the buttons wrapped into
+                       the 100px number column and hung out over the sidebar. */
+                    const lines = [[sh.carrier, sh.service, sh.tracking].filter(Boolean).join('  ·  '), sh.contents || '']
+                        .filter(Boolean);
+                    const sub = el('span', 'sub');
+                    if (lines.length > 1) lines.forEach(t => { const ln = el('span', 'sub-line', t); ln.title = t; sub.append(ln); });
+                    else sub.textContent = lines[0] || '';
+                    who.append(sub);
                     row.append(who);
                     row.append(el('div', 'lbl-meta', [sh.at ? fmtDate(sh.at) : '',
                         sh.amount != null ? fmtPrice(sh.amount, sh.currency) : '']
