@@ -2531,7 +2531,7 @@ def t_the_production_toolbar_is_sorted_not_shortened():
     that sorting them did not quietly lose any of them."""
     fn = SCRIPT.split("function renderLabels() {")[1]
     fn = fn[:fn.index("\n        function ")]
-    ok("const qCard = el('div', 'card')" in fn, "the queue is a card, header and all")
+    ok("const qCard = el('div', 'card q-card')" in fn, "the queue is a card, header and all")
     ok("tableTools([findWrap, filtTabs]" in fn, "search and filters on the toolbar")
     ok("filterTabs([['all'" in fn, "the filters are counted tabs, not a segmented control")
     # The two page-level rails are unstyled holders now: their children are
@@ -8668,6 +8668,25 @@ def t_a_queue_row_keeps_its_buttons_in_the_last_column():
        and body.count("el('span', 'sub')") == 1 and "'sub-line'" in body,
        "a shipment's carrier line and contents are one item under the name")
     ok(".lbl-who .sub > .sub-line { display: block; overflow: hidden; text-overflow: ellipsis; }" in CSS, "each line is shortened on its own")
+
+
+
+@test
+def t_a_queue_row_never_squeezes_the_customer_name_to_nothing():
+    """Checked across the four order queues at 13 window sizes (25 Sep 2026):
+    no row's buttons left it, but the customer's name went to 0px. Chips
+    never shrink, so a dispatched order's courier chip took the whole name
+    column below 860px of list, and on a tablet the buttons kept their width
+    beside the name ("C"). The queue card's header rail also left the title
+    and description a column 80px wide."""
+    i = CSS.index(".lbl-qrow .lbl-nameline { flex-wrap: wrap; row-gap: var(--sp-1); }")
+    ok(CSS.rfind("@container", 0, i) < CSS.rfind("}", 0, i), "the name line wraps at every width, not only from 860px")
+    ok(CSS.count(".lbl-qrow .lbl-nameline { flex-wrap: wrap;") == 1, "one rule, not two")
+    narrow = CSS[CSS.index("@container queue (max-width: 559px) {\n"):][:400]
+    ok(".lbl-qrow { flex-wrap: wrap; }" in narrow and ".lbl-qrow .lbl-actions { flex: 1 1 100%; justify-content: flex-start; }" in narrow,
+       "a list as narrow as a phone's puts the buttons on their own line, whatever the window")
+    ok("@media (min-width: 641px) { .q-card > .card-head { grid-template-columns: 1fr fit-content(50%); } }" in CSS
+       and "const qCard = el('div', 'card q-card');" in SCRIPT, "the queue card's buttons wrap within half its header")
 
 
 if __name__ == "__main__":

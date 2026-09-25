@@ -2,12 +2,17 @@
  "releases": [
   {
    "date": "2026-09-25",
-   "title": "Custom shipments keep their buttons in the row",
+   "title": "Production Manager rows that fit every screen",
    "items": [
     {
      "kind": "fixed",
      "tab": "labels",
      "text": "On a wide screen, a custom shipment with its contents noted showed Copy tracking and Reprint label on a second line, hanging out of the row over the sidebar. The contents now sit under the carrier line, the buttons stay at the end of the row, and a long contents line is shortened, with the whole of it shown when you point at it."
+    },
+    {
+     "kind": "fixed",
+     "tab": "labels",
+     "text": "On a tablet, or a narrower window, the order queues no longer squeeze the customer's name to nothing. A long courier chip such as Dispatched, Parcelforce Worldwide took the whole name column, and on a tablet the buttons did: the name now shows in full when it fits, chips that do not fit go under it, the buttons take their own line when the list is narrow, and the queue's description is no longer squeezed into a thin column beside its buttons."
     }
    ]
   },

@@ -1391,6 +1391,10 @@
         .card-sub b { color: var(--text-primary); font-weight: var(--weight-medium); }
         .card-act { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center;
             gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
+        /* The queue card's four header buttons asked for 430px, and the title
+           and its description were left a column 80px wide. The rail has at
+           most half the head, and its buttons wrap inside it. */
+        @media (min-width: 641px) { .q-card > .card-head { grid-template-columns: 1fr fit-content(50%); } }
         @media (max-width: 640px) {
             .card-head { grid-template-columns: 1fr; }
             .card-act { grid-column: 1; grid-row: auto; justify-content: flex-start; }
@@ -1978,6 +1982,21 @@
         /* Below the shared tracks the row is flex: the rail reserves what it
            needs and the name ellipsises instead. */
         @container queue (max-width: 559px) { .lbl-qrow .lbl-meta { display: none; } .lbl-qrow .lbl-actions { min-width: max-content; } }
+        /* A list this narrow is a phone's, whatever the window: a tablet with
+           the sidebar open gave the list 435px, the buttons kept their full
+           width beside the name, and the customer's name showed as "C". The
+           buttons take their own line, as they do on a phone. */
+        @container queue (max-width: 559px) {
+            .lbl-qrow { flex-wrap: wrap; }
+            .lbl-qrow .lbl-actions { flex: 1 1 100%; justify-content: flex-start; }
+        }
+        /* The name never gives way to nothing. Kept to one line below 860px
+           of list, a dispatched order's courier chip ("Dispatched, Parcelforce
+           Worldwide") took the whole column, and from 900 to 1,100px, and on a
+           tablet, the customer's name was 0px wide. The name line wraps at
+           every width, as it already did from 860px: the name shows in full
+           when it fits, and chips that do not fit beside it go under it. */
+        .lbl-qrow .lbl-nameline { flex-wrap: wrap; row-gap: var(--sp-1); }
         /* Below 1,000px of list, the buttons drop to icons: every one keeps its
            title, the row stays one line, and nothing overlaps. They are the
            small control (28px, 36px on touch) like every button beside them
@@ -2007,7 +2026,6 @@
         }
         @container queue (min-width: 860px) {
             .lbl-qrow .lbl-who { overflow: visible; white-space: normal; }
-            .lbl-qrow .lbl-nameline { flex-wrap: wrap; row-gap: var(--sp-1); }
         }
         /* The queue and the label preview, side by side. The pane sticks so the
            label stays in view while you work down a long queue, and the list
@@ -16790,7 +16808,7 @@ Projected Image UK"></textarea>
                It was twenty controls across two bars, which is the same as no
                order at all: everything looked equally important, so nothing
                did. Nothing has been taken away, only sorted. */
-            const qCard = el('div', 'card');
+            const qCard = el('div', 'card q-card');
             const qHead = el('div', 'card-head');
             qHead.append(el('h3', 'card-title', data.single
                 ? 'One order'
