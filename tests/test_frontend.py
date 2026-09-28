@@ -2139,12 +2139,48 @@ def t_the_size_list_tab_is_searchable_and_reads_the_same_sheet_as_the_label():
        and ".ktable th.num, .ktable td.num { text-align: right; font-variant-numeric: tabular-nums; }" in CSS,
        "numbers sit in tabular columns with the unit in the heading, and the status in its own")
     ok("text-overflow: ellipsis" in CSS.split(".ktable td.sizes-notes {")[1].split("}")[0] and "n.title = r.notes;" in fn, "a note is one line, the whole of it on hover")
-    ok("xbtn.onclick = () => sizesExport(rows);" in fn and "a.download = 'size-list.csv';" in SCRIPT, "and the filtered list exports as CSV")
+    ok("xbtn.onclick = () => sizesExport(sizesRows());" in fn and "a.download = 'size-list.csv';" in SCRIPT, "and the filtered list exports as CSV")
     ok("ruled: ['Ruled in the app', 'made']" in SCRIPT and "excluded: ['Not a gobo', 'note']" in SCRIPT,
        "a ruling and an exclusion read as chips, in the Status filter's words")
     ok("api('/api/gobo-sizes/rule', { op: 'set', manufacturer: r.manufacturer, model: r.model, size: inp.value.trim() })" in SCRIPT,
        "ruling inline writes the same rule the label reads")
     ok("if (canEdit) {" in SCRIPT.split("function sizesProducedCells")[1][:1600], "and only with the grant")
+
+@test
+def t_a_list_search_takes_every_letter_typed():
+    """Cameron: "i dont like how when you search one letter it stops you from
+    typing". Each pause in typing on the Size list repainted the whole tab,
+    its search box included, and the new box had neither the focus nor
+    anything after the first letter. The box now sits in a shell the search
+    never repaints (on an iPad the keyboard closes with the box it types
+    into), and no list search anywhere repaints the renderer that built it.
+    The Production Manager's Find, which does repaint its queue and puts the
+    caret back, hands the new box the text as typed, or a pause after a space
+    dropped the space."""
+    fn = SCRIPT.split("function renderSizes()")[1].split("\n        function paintSizesList()")[0]
+    ok("tableSearch('Search maker or model…', st.q, (v) => { st.q = v; st.page = 1; paintSizesList(); });" in fn,
+       "the Size list search repaints the list, not the tab")
+    ok("sizesPane = { box, card, tools, desc, sub };" in fn, "the shell keeps what the list painter needs")
+    paint = SCRIPT.split("function paintSizesList()")[1].split("\n        async function showReconView")[0]
+    ok("while (tools.nextSibling) tools.nextSibling.remove();" in paint and "renderSizes()" in paint.split("const { box, card, tools } = P;")[0],
+       "the list is what follows the toolbar, and a shell that has gone is painted whole")
+    ok("renderSizes()" not in paint.split("const { box, card, tools } = P;")[1], "the list painter never repaints the shell")
+    find = SCRIPT.split("const findWrap = tableSearch('Find order, customer or tracking'")[1][:1400]
+    ok("typed = find.value; renderLabels();" in find and "again.value = typed; again.focus();" in find,
+       "the queue's Find keeps the text as typed across its repaint")
+    # Every list search with a handler of its own: the handler must not call
+    # the function that built the box, or typing ends after the first pause.
+    seen = 0
+    for m in re.finditer(r"= tableSearch\(", SCRIPT):
+        builder = re.findall(r"function (\w+)\(", SCRIPT[:m.start()])[-1]
+        rest = SCRIPT[m.end():m.end() + 400]
+        cb = re.search(r"\(v\) => \{(.*?)\}\);", rest, re.S)
+        if not cb:
+            continue
+        seen += 1
+        ok(builder + "(" not in cb.group(1), builder + "'s search repaints " + builder + ", its own search box with it")
+    ok(seen >= 9, "every list search with a handler was looked at (%d)" % seen)
+
 
 @test
 def t_a_rejected_embed_token_is_retried_once_and_a_dead_session_never_loops():

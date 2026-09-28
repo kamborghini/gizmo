@@ -1,6 +1,22 @@
 {
  "releases": [
   {
+   "date": "2026-09-28",
+   "title": "Searching the size list",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "sizes",
+     "text": "The Size list's search takes everything you type. It kept the first letter and nothing after it, because each pause in typing redrew the page and the search box with it. Now only the list under the box changes as you type, so the box keeps your words and your place, and on an iPad the keyboard stays open."
+    },
+    {
+     "kind": "fixed",
+     "tab": "labels",
+     "text": "The Production Manager's Find box keeps a space you pause after, so a search for two words no longer runs them together."
+    }
+   ]
+  },
+  {
    "date": "2026-09-25",
    "title": "Every page fits every screen",
    "items": [

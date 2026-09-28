@@ -15372,8 +15372,16 @@ Projected Image UK"></textarea>
             const row = el('div', 'act-row sizes-edit-acts'); row.append(save, cancel); act.append(row);
             inp.focus(); inp.select();
         }
+        /* The shell and the list are painted apart. The search box sits in
+           the shell, and a search repaints only what is under the toolbar:
+           every pause in typing repainted the whole tab, search box
+           included, and the new box had neither the focus nor anything typed
+           after the first letter, so the search took one letter and no more.
+           Handing the focus back to a new box is not enough on an iPad, where
+           the keyboard closes with the box it was typing into. */
+        let sizesPane = null;
         function renderSizes() {
-            const box = $('sizes-content'); box.innerHTML = '';
+            const box = $('sizes-content'); box.innerHTML = ''; sizesPane = null;
             const c = sizesCache; const st = sizesState; const painting = !!c && !c.error;
             box.classList.toggle('no-intro', !(painting && firstPaint('sizes')));
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.check;
@@ -15389,27 +15397,21 @@ Projected Image UK"></textarea>
             if (!c) { box.append(el('div', 'empty', 'Loading…')); return; }
             if (c.error) { box.append(loadFailure('The size list could not be read. ' + c.error, refreshSizes), null); return; }
             const all = c.rows || [];
-            const rows = sizesRows();
             const grouped = st.group && st.sort === 'maker';
             /* facets from the whole sheet, so a filter never hides its own options */
             const makerCounts = {}; all.forEach(r => { makerCounts[r.manufacturer] = (makerCounts[r.manufacturer] || 0) + 1; });
             const makers = Object.keys(makerCounts).sort((a, b) => a.localeCompare(b));
             const sizeSet = {}; all.forEach(r => { const v = r.ruling && r.ruling !== 'exclude' ? r.ruling : r.produced; if (v) sizeSet[v] = (sizeSet[v] || 0) + 1; });
             const sizes = Object.keys(sizeSet).sort((a, b) => parseFloat(a) - parseFloat(b));
-            const nMakers = new Set(rows.map(r => r.manufacturer)).size;
-            const nReview = rows.filter(r => { const s = sizesStatusOf(r); return s === 'review' || s === 'nosize'; }).length;
             const card = el('div', 'card');
             /* card-head as well, or the head's grid gap never applies and the
                title sat on the figure with no space. The figure is the count
                alone, under its quiet title, not 'Models' over '1,946 models'. */
             const head = el('div', 'card-head card-head-stat');
-            head.append(el('div', 'card-title', 'Models'));
-            head.append(el('div', 'card-desc', (rows.length === all.length ? all.length.toLocaleString() : rows.length.toLocaleString() + ' of ' + all.length.toLocaleString())));
-            head.append(el('div', 'card-sub', nMakers + ' maker' + (nMakers === 1 ? '' : 's')
-                + (c.rulings ? ' · ' + c.rulings + ' ruling' + (c.rulings === 1 ? '' : 's') + ' made in the app' : '')
-                + (nReview ? ' · ' + nReview + ' to review' : '')));
+            const desc = el('div', 'card-desc'), sub = el('div', 'card-sub');
+            head.append(el('div', 'card-title', 'Models'), desc, sub);
             card.append(head);
-            const search = tableSearch('Search maker or model…', st.q, (v) => { st.q = v; st.page = 1; renderSizes(); });
+            const search = tableSearch('Search maker or model…', st.q, (v) => { st.q = v; st.page = 1; paintSizesList(); });
             const makerSel = sizesSelect('Maker', [['', 'All makers']].concat(makers.map(m => [m, m + ' (' + makerCounts[m] + ')'])), st.maker, (v) => { st.maker = v; st.page = 1; renderSizes(); });
             const sizeSel = sizesSelect('Produced size', [['', 'All sizes']].concat(sizes.map(s => [s, s + ' mm (' + sizeSet[s] + ')'])), st.size, (v) => { st.size = v; st.page = 1; renderSizes(); });
             const statusSel = sizesSelect('Status', SIZES_STATUS, st.status, (v) => { st.status = v; st.page = 1; renderSizes(); });
@@ -15419,10 +15421,32 @@ Projected Image UK"></textarea>
             gbtn.disabled = st.sort !== 'maker'; if (gbtn.disabled) gbtn.title = 'Grouping follows the maker sort';
             gbtn.onclick = () => { st.group = !st.group; st.page = 1; renderSizes(); };
             const xbtn = el('button', 'btn btn-sm'); xbtn.append(ico(I.download), document.createTextNode('Export CSV'));
-            xbtn.onclick = () => sizesExport(rows);
-            card.append(tableTools([search, makerSel, sizeSel, statusSel], [sortSel, gbtn, xbtn]));
+            xbtn.onclick = () => sizesExport(sizesRows());
+            const tools = tableTools([search, makerSel, sizeSel, statusSel], [sortSel, gbtn, xbtn]);
+            card.append(tools);
+            box.append(card);
+            sizesPane = { box, card, tools, desc, sub };
+            paintSizesList();
+        }
+        /* Everything under the toolbar, and the counts in the head. The list
+           stays the card's own children, as the card's rules expect. */
+        function paintSizesList() {
+            const P = sizesPane;
+            if (!P || !P.card.isConnected) { renderSizes(); return; }
+            const { box, card, tools } = P;
+            const c = sizesCache; const st = sizesState;
+            const all = c.rows || [];
+            const rows = sizesRows();
+            const grouped = st.group && st.sort === 'maker';
+            const nMakers = new Set(rows.map(r => r.manufacturer)).size;
+            const nReview = rows.filter(r => { const s = sizesStatusOf(r); return s === 'review' || s === 'nosize'; }).length;
+            P.desc.textContent = rows.length === all.length ? all.length.toLocaleString() : rows.length.toLocaleString() + ' of ' + all.length.toLocaleString();
+            P.sub.textContent = nMakers + ' maker' + (nMakers === 1 ? '' : 's')
+                + (c.rulings ? ' · ' + c.rulings + ' ruling' + (c.rulings === 1 ? '' : 's') + ' made in the app' : '')
+                + (nReview ? ' · ' + nReview + ' to review' : '');
+            while (tools.nextSibling) tools.nextSibling.remove();
             const chips = sizesChips(); if (chips) card.append(chips);
-            if (!rows.length) { card.append(el('div', 'empty', st.q ? 'No model matches “' + st.q + '”.' : 'Nothing matches those filters.')); box.append(card); return; }
+            if (!rows.length) { card.append(el('div', 'empty', st.q ? 'No model matches “' + st.q + '”.' : 'Nothing matches those filters.')); return; }
             /* the list to page: a folded maker keeps one line, its heading */
             const list = [];
             let prevMaker = null;
@@ -15449,7 +15473,7 @@ Projected Image UK"></textarea>
                 ['#'].concat('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')).forEach(L => {
                     const b = el('button', null, L); b.type = 'button';
                     if (!(L in firstAt)) b.disabled = true;
-                    else b.onclick = () => { st.page = firstAt[L] + 1; renderSizes(); requestAnimationFrame(() => { const t = box.querySelector('tr[data-letter="' + L + '"]'); if (t) t.scrollIntoView({ block: 'start' }); }); };
+                    else b.onclick = () => { st.page = firstAt[L] + 1; paintSizesList(); requestAnimationFrame(() => { const t = box.querySelector('tr[data-letter="' + L + '"]'); if (t) t.scrollIntoView({ block: 'start' }); }); };
                     az.append(b);
                 });
                 card.append(az);
@@ -15473,7 +15497,7 @@ Projected Image UK"></textarea>
                     th.append(caret, document.createTextNode(it.head), el('span', 'grp-n', it.n + ' model' + (it.n === 1 ? '' : 's') + (folded ? ' · folded' : '')));
                     tr.append(th);
                     tr.setAttribute('aria-expanded', folded ? 'false' : 'true'); tr.tabIndex = 0; tr.setAttribute('role', 'button');
-                    tr.onclick = () => { st.folded[it.head] = !folded; renderSizes(); };
+                    tr.onclick = () => { st.folded[it.head] = !folded; paintSizesList(); };
                     tr.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); tr.click(); } };
                     tb.append(tr); return;
                 }
@@ -15502,10 +15526,9 @@ Projected Image UK"></textarea>
                     : (shownRows ? ((start + 1).toLocaleString() + ' to ' + (start + shownRows).toLocaleString() + ' of '
                                     + modelCount.toLocaleString() + ' models') : 'Every maker folded')
                       + (folded ? ', ' + folded.toLocaleString() + ' folded away' : ''),
-                onPage: (n) => { st.page = n; renderSizes(); },
-                onSize: (n) => { st.pageSize = n; st.page = 1; renderSizes(); } });
+                onPage: (n) => { st.page = n; paintSizesList(); },
+                onSize: (n) => { st.pageSize = n; st.page = 1; paintSizesList(); } });
             card.append(foot);
-            box.append(card);
         }
         async function showReconView() { renderRecon(); refreshRecon(); }
         let reconListSeq = 0;   // the latest list read; see refreshReconList
@@ -16939,14 +16962,17 @@ Projected Image UK"></textarea>
             find.classList.add('lbl-find');
             /* Debounced, and the caret is put back where it was: this repaints
                the whole queue, and a search that loses its own cursor after
-               every letter cannot be typed into. */
+               every letter cannot be typed into. The new box is given the text
+               as typed, not the trimmed search it was built from, or a pause
+               after a space dropped the space and 'clay paky' became
+               'claypaky'. */
             find.oninput = () => {
                 labelsSearch = find.value.trim();
                 clearTimeout(find._t);
                 find._t = setTimeout(() => {
-                    const at = find.selectionStart; renderLabels();
+                    const at = find.selectionStart, typed = find.value; renderLabels();
                     const again = document.querySelector('.lbl-find');
-                    if (again) { again.focus(); try { again.setSelectionRange(at, at); } catch (e) {} }
+                    if (again) { again.value = typed; again.focus(); try { again.setSelectionRange(at, at); } catch (e) {} }
                 }, 180);
             };
             const oldf = el('button', 'btn btn-sm' + (labelsOldest ? ' on' : ''));
