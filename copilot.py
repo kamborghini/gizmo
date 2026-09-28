@@ -5437,7 +5437,7 @@ def _gobo_sizes() -> dict:
         sheet_at = datetime.fromtimestamp(os.path.getmtime(sizes_path), timezone.utc).isoformat()
     except OSError:
         sheet_at = None
-    _gobo_cache.update({"mtime": mtime, "lookup_memo": {},
+    _gobo_cache.update({"mtime": mtime, "lookup_memo": {}, "maker_keys": None,
                         "by_mm": by_mm, "by_model": by_model,
                         "by_mm_loose": by_mm_loose, "by_model_loose": by_model_loose,
                         "by_mm_digit": by_mm_digit, "by_model_digit": by_model_digit,
@@ -5648,6 +5648,7 @@ def _gobo_sheet_listing(who: Optional[str] = None) -> dict:
     except OSError:
         updated = None
     return {"rows": rows, "aliases": aliases, "count": len(rows),
+            "shorthand": {"makers": _GOBO_MAKER_SHORT, "words": _GOBO_WORD_GROUPS},
             "rulings": len(sets) + len(excl) + sum(len(v) for v in domains.values()),
             "sheet": {"live": path == GOBO_SIZES_LIVE, "updated": updated},
             "can_edit": _may_edit_sizes(who)}
@@ -5677,6 +5678,118 @@ def _gobo_domain_size(manufacturer: str, model: str, entry, domain: str, cache: 
         if r["domain"] == domain and r["key"] in keys:
             return r["size"]
     return None
+
+
+# Shorthand the trade writes for makers and words, for the Size list's search
+# and for reading a maker off the front of a typed name. The store's own
+# spellings of a model belong in the aliases file instead, where the label
+# reads them too: nothing here changes what a label prints.
+# Not "vl" for Vari-Lite: it starts their models (VL2500), and "vl 2500 spot"
+# was read as maker Vari-Lite, model "2500 spot", which found another row.
+_GOBO_MAKER_SHORT = {"adj": "American DJ", "hes": "High End Systems", "glp": "German Light Products",
+                     "rj": "Robert Juliat", "cp": "Clay Paky"}
+# Words written either way: any one of a group finds the others.
+_GOBO_WORD_GROUPS = [["jr", "jnr", "junior"], ["s4", "source four"],
+                     ["1", "one"], ["2", "two"], ["3", "three"], ["4", "four"], ["5", "five"],
+                     ["6", "six"], ["7", "seven"], ["8", "eight"], ["9", "nine"], ["10", "ten"]]
+
+
+def _gobo_maker_keys(cache: dict) -> dict:
+    """Loose key -> sheet maker, for every way a typed name can start with a
+    maker: its whole name, run together ("claypaky"), a shorthand ("adj"), or
+    the first words of its name when no other maker starts the same way
+    ("martin" for Martin Professional, "high end" for High End Systems; not
+    "light", which starts two) and no model on the sheet has those words
+    ("studio" is in High End Systems' Studio Spot 575, so it is not read as
+    Studio Due). Built once per sheet snapshot."""
+    keys = cache.get("maker_keys")
+    if keys is not None:
+        return keys
+    makers = sorted({e["manufacturer"] for _lm, _w, e in (cache.get("rows") or []) if e.get("manufacturer")})
+    by_loose = {_loose_key(m): m for m in makers if _loose_key(m)}
+    starts: dict = {}
+    for lk in by_loose:
+        w = lk.split()
+        for n in range(1, len(w)):
+            if len(w[0]) >= 3:
+                starts.setdefault(" ".join(w[:n]), set()).add(lk)
+    keys = {}
+    for lk, m in by_loose.items():
+        keys[lk] = m
+        keys.setdefault(lk.replace(" ", ""), m)
+    in_models = {" " + " ".join(w) + " " for _lm, w, _e in (cache.get("rows") or [])}
+    for pre, owners in starts.items():
+        if len(owners) == 1 and pre not in keys and not any(" " + pre + " " in t for t in in_models):
+            keys[pre] = by_loose[next(iter(owners))]
+    model_words = {x for _lm, w, _e in (cache.get("rows") or []) for x in w}
+    for short, m in _GOBO_MAKER_SHORT.items():
+        # A shorthand that starts a model's word is that model's, not a maker.
+        if _loose_key(m) in by_loose and not any(x.startswith(short) and x != short for x in model_words):
+            keys.setdefault(short, by_loose[_loose_key(m)])
+    cache["maker_keys"] = keys
+    return keys
+
+
+def _gobo_split_maker(q: str, cache: dict):
+    """(maker, model) when the typed name starts with a maker, the longest one
+    that fits, leaving the model as it was written; ("", q) otherwise. At
+    least one word is always left for the model."""
+    words = _loose_key(q).split()
+    keys = _gobo_maker_keys(cache)
+    # A maker's name alone ("clay paky") names no model: "clay" and "paky"
+    # would be read as a maker and a model.
+    if " ".join(words) in keys:
+        return "", q
+    for n in range(min(4, len(words) - 1), 0, -1):
+        maker = keys.get(" ".join(words[:n]))
+        if not maker:
+            continue
+        toks, used, i = q.split(), 0, 0
+        while i < len(toks) and used < n:
+            used += len(_loose_key(toks[i]).split())
+            i += 1
+        # A typed word that runs over the maker's end ("High-EndSolaSpot")
+        # cannot be cut cleanly: read the whole name as the model instead.
+        if used == n and i < len(toks):
+            return maker, " ".join(toks[i:])
+    return "", q
+
+
+def _gobo_check(q: str) -> dict:
+    """What a label prints for a fixture named in free text, through the very
+    lookup the labels print with. The whole name is tried as a model first:
+    a maker's name also starts other makers' models (Showtec's Infinity IS
+    100, Mad's EVL Pro 250), and the sheet knows those as models. Then the
+    maker read off the front and the rest as its model. The first that finds
+    a row answers; if none does, the maker's reading gives the reason, being
+    the more particular. A name ruled not a gobo is said to be, beside what
+    the label prints for it: the label does not read those rulings, only the
+    size check does. The sizes set for one customer come with the answer."""
+    cache = _gobo_sizes()
+    # A memo of its own: a typed name is not an order line, and the label's
+    # memo would keep every name anyone typed until the sheet next reloads.
+    view = dict(cache)
+    view["lookup_memo"] = {}
+    q = re.sub(r"\s+", " ", str(q or "")).strip()[:120]
+    maker, model = _gobo_split_maker(q, cache)
+    got = None
+    for mfr, mdl in [("", q)] + ([(maker, model)] if maker else []):
+        entry, reason = _gobo_lookup(mfr, mdl, cache=view)
+        if entry:
+            got = (mfr, mdl, entry, reason)
+            break
+        if got is None or mfr:
+            got = (mfr, mdl, entry, reason)
+    mfr, mdl, entry, reason = got
+    excluded = bool(maker) and (_norm_key(maker), _norm_key(model)) in (cache.get("excludes") or set())
+    keys = {(_norm_key(mfr), _norm_key(mdl))}
+    if entry:
+        keys.add((_norm_key(entry["manufacturer"]), _norm_key(entry["model"])))
+    domains = [{"domain": r["domain"], "size": r["size"]} for r in cache.get("domain_rules") or [] if r["key"] in keys]
+    return {"q": q, "manufacturer": mfr, "model": mdl,
+            "match": ({"manufacturer": entry["manufacturer"], "model": entry["model"]} if entry else None),
+            "size": (entry["production_size"] if entry and not reason else ""),
+            "reason": reason or "", "excluded": excluded, "domains": domains}
 
 
 def _item_prop(li: dict, name: str) -> str:
@@ -18840,6 +18953,22 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except Exception:
             logger.exception("gobo list read failed")
             return _json({"error": "Couldn't read the size list."}, 500)
+
+    @mcp.custom_route("/api/gobo-sizes/check", methods=["POST"])
+    async def gobo_check_route(request: Request):
+        """What a label prints for a fixture named in free text, for the Size
+        list's search. Read only, and open to anyone who can see the tab."""
+        err, body, _who = await _guard(request)
+        if err:
+            return err
+        q = str(body.get("q") or "").strip()
+        if len(q) < 2:
+            return _json({"error": "Type at least two letters of a fixture."}, 400)
+        try:
+            return _json(_gobo_check(q))
+        except Exception:
+            logger.exception("gobo check failed")
+            return _json({"error": "Couldn't check that name against the size list."}, 500)
 
     @mcp.custom_route("/api/gobo-sizes/models", methods=["POST"])
     async def gobo_models_route(request: Request):

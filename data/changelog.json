@@ -2,12 +2,47 @@
  "releases": [
   {
    "date": "2026-09-28",
-   "title": "Searching the size list",
+   "title": "Finding a fixture on the size list",
    "items": [
+    {
+     "kind": "improved",
+     "tab": "sizes",
+     "text": "The Size list finds a fixture however it is written. Punctuation, accents and spaces no longer matter, so claypaky finds Clay Paky, e100z the EVE E-100Z and huracan the Huracán. The names the store sells a model under are searched too, so S4 Jr finds the Source Four Jr, as does Source 4 Jr. Shorthand works: ADJ for American DJ, and 4 for Four. The best match comes first, the words that matched are highlighted, and one wrong letter is put right, with a line saying so."
+    },
+    {
+     "kind": "added",
+     "tab": "sizes",
+     "text": "Type a size, such as 66mm, to see everything the bench cuts at that size. A size the bench does not cut names the nearest ones it does."
+    },
+    {
+     "kind": "added",
+     "tab": "sizes",
+     "text": "Type a maker and a model and a line over the list says what the label prints for an order with that name: the size it is cut at, or that the label will say CHECK and why, with any size set for one customer. It asks the label's own lookup, so the list and the label cannot disagree, and the row it picks is marked The label's match."
+    },
+    {
+     "kind": "added",
+     "tab": "sizes",
+     "text": "Click or tap a model to open everything the list knows about it: the size to cut and where it comes from, the holder and the image, the whole note, why it needs review, the other names it sells under and any size for one customer. Set size is in there now, rather than a button on every row, and all of it works by touch."
+    },
+    {
+     "kind": "improved",
+     "tab": "sizes",
+     "text": "On a phone each model is a card with the size to cut large on the right, instead of a table whose sizes were off the edge of the screen. On any screen the table no longer scrolls sideways when a model carries several labels."
+    },
+    {
+     "kind": "added",
+     "tab": "",
+     "text": "The Search box in the top bar finds fixtures as well as pages, for anyone who can open the Size list. Choosing one opens the Size list at that model with its details showing."
+    },
     {
      "kind": "fixed",
      "tab": "sizes",
      "text": "The Size list's search takes everything you type. It kept the first letter and nothing after it, because each pause in typing redrew the page and the search box with it. Now only the list under the box changes as you type, so the box keeps your words and your place, and on an iPad the keyboard stays open."
+    },
+    {
+     "kind": "fixed",
+     "tab": "",
+     "text": "Leaving a list's search box no longer runs the search a second time. On the Size list that redrew the rows under your finger, and the first tap on a row after typing did nothing."
     },
     {
      "kind": "fixed",

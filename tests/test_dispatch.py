@@ -13074,6 +13074,72 @@ def t_the_size_list_tab_reads_the_whole_sheet_with_the_rulings_over_it():
     eq(r.status_code, 403, "and the rule route says so")
 
 @test
+def t_the_size_list_asks_the_label_what_a_typed_name_prints():
+    """Cameron: "do them all", of the Size list improvements. The line over
+    the list is the label's own lookup's answer for a name typed in free text:
+    the maker read off the front (its whole name, run together, a shorthand,
+    or the first words no other maker starts with), then the model alone, as
+    an order whose maker the sheet does not know is looked up. It says CHECK
+    as the label does, names a model ruled not a gobo, and brings the sizes
+    set for one customer. The shorthand table travels with the listing, so
+    the page's search and this read one table."""
+    ensure_auth()
+    chk = lambda q: post("/api/gobo-sizes/check", {"q": q}).json()
+    for q in ("ETC Source 4 Jr", "Source 4 Jr", "S4 Jr"):
+        j = chk(q)
+        eq(j["match"], {"manufacturer": "ETC", "model": "Source Four Jr"}, q + ": the alias the label reads")
+        ok(j["size"] and not j["reason"], q + ": with the size the label prints")
+    eq(chk("ETC Source 4 Jr")["manufacturer"], "ETC", "the maker read off the front")
+    eq(chk("Source 4 Jr")["manufacturer"], "", "and none when none is there")
+    for q, maker, model in (("claypaky sharpy x spot", "Clay Paky", "sharpy x spot"),
+                            ("ADJ Focus Spot Two", "American DJ", "Focus Spot Two"),
+                            ("Martin MAC 700", "Martin Professional", "MAC 700"),
+                            ("High End Systems Sola Spot 2000", "High End Systems", "Sola Spot 2000")):
+        j = chk(q)
+        eq((j["manufacturer"], j["model"]), (maker, model), q + ": run together, shorthand, first word, whole name")
+        ok(j["match"] is not None, q + ": and the label finds it")
+    j = chk("Light Sky Spot")
+    ok(j["manufacturer"] in ("Light Sky", ""), "'light' starts two makers, so it alone reads as no maker")
+    eq(copilot._gobo_split_maker("light fantastic", copilot._gobo_sizes()), ("", "light fantastic"), "a shared first word is no maker")
+    eq(copilot._gobo_split_maker("ETC", copilot._gobo_sizes()), ("", "ETC"), "a maker alone leaves no model, so it is read as the model")
+    j = chk("Chauvet Rogue R2 Spot Metal")
+    hit, why = copilot._gobo_lookup("Chauvet", "Rogue R2 Spot Metal")
+    ok(j["excluded"], "a model ruled not a gobo says so")
+    eq((j["match"] or {}).get("model"), hit and hit["model"], "beside what the label prints for it, which does not read that ruling")
+    eq(j["size"], (hit["production_size"] if hit and not why else ""), "at the label's own size")
+    for q, maker, model in (("Studio Spot 575", "High End Systems", "Studio Spot 575"),
+                            ("EVL Pro 250", "Mad", "EVL Pro 250"), ("Infinity IS 100", "Showtec", "Infinity IS 100")):
+        eq(chk(q)["match"], {"manufacturer": maker, "model": model}, q + ": a maker's name that starts another maker's model is read as the model")
+    keys = copilot._gobo_maker_keys(copilot._gobo_sizes())
+    ok("studio" not in keys and "martin" in keys and "high end" in keys, "a first word that is in a model is no maker's")
+    ok("vl" not in keys and "vl" not in copilot._GOBO_MAKER_SHORT, "'vl' starts Vari-Lite's models, so it is no maker's shorthand")
+    eq(copilot._gobo_split_maker("clay paky", copilot._gobo_sizes()), ("", "clay paky"), "a maker's name alone names no model")
+    j = chk("vl 2500 spot")
+    ok(j["manufacturer"] == "" and (j["match"] is None or "VL2500" in j["match"]["model"]), "and 'vl 2500 spot' is not read as maker Vari-Lite")
+    before = len(copilot._gobo_sizes().get("lookup_memo") or {})
+    for n in range(20):
+        chk("never an order line %d" % n)
+    eq(len(copilot._gobo_sizes().get("lookup_memo") or {}), before, "typed names are not kept in the label's memo")
+    j = chk("Ayrton Diablo")
+    ok({"domain": "dbnaudile.co.uk", "size": "25"} in j["domains"], "with the size set for one customer's orders")
+    j = chk("Clay Paky Sharpy")
+    ok(j["match"] and not j["size"] and j["reason"], "a match the label flags: no size, and the reason it prints")
+    j = chk("nothing like this on any sheet")
+    ok(j["match"] is None and j["reason"] == "Model not found in the size list", "a miss in the label's own words")
+    eq(post("/api/gobo-sizes/check", {"q": "x"}).status_code, 400, "two letters at least")
+    eq(len(chk("a" * 500)["q"]), 120, "a long name is cut to size before it is looked up")
+    lst = post("/api/gobo-sizes/list", {}).json()
+    eq(lst["shorthand"]["makers"]["adj"], "American DJ", "the shorthand travels with the listing")
+    ok(["4", "four"] in lst["shorthand"]["words"], "number words too")
+    for short, maker in copilot._GOBO_MAKER_SHORT.items():
+        ok(any(r["manufacturer"] == maker for r in lst["rows"]), short + " names a maker on the sheet")
+    owen, sess, _pw = ready_user("Olive", "olive")
+    eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["sizes"]}).status_code, 200)
+    eq(post_s(sess, "/api/gobo-sizes/check", {"q": "S4 Jr"}).status_code, 200, "anyone with the Size list may ask")
+    eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["crm"]}).status_code, 200)
+    eq(post_s(sess, "/api/gobo-sizes/check", {"q": "S4 Jr"}).status_code, 403, "and nobody without it")
+
+@test
 def t_a_refused_request_says_why_so_the_page_can_answer_it():
     """A colleague saw a flashing login screen and "asked for too much": a
     stale Shopify embed token (his PC clock) drew a bare 401, the page took

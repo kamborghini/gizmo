@@ -2125,11 +2125,11 @@ def t_the_size_list_tab_is_searchable_and_reads_the_same_sheet_as_the_label():
     ok("if (v === 'sizes') showSizesView();" in SCRIPT, "opening it loads the sheet")
     ok("api('/api/gobo-sizes/list', {})" in SCRIPT, "from the listing route")
     fn = SCRIPT.split("function renderSizes()")[1].split("\n        async function showReconView")[0]
-    ok("tableSearch('Search maker or model" in fn and "sizesSelect('Maker'" in fn and "sizesSelect('Produced size'" in fn
+    ok("tableSearch('Search maker, model or size" in fn and "sizesSelect('Maker'" in fn and "sizesSelect('Produced size'" in fn
        and "sizesSelect('Status', SIZES_STATUS" in fn, "a search box and maker, size and status filters in the house table tools")
     ok("sizesSelect('Sort', SIZES_SORTS" in fn and "gbtn.textContent = 'Group by maker';" in fn, "a sort and a grouping toggle")
     ok("const chips = sizesChips(); if (chips) card.append(chips);" in fn, "the active filters read as chips, each removable")
-    ok("words.some(w => w.indexOf(t) === 0)" in SCRIPT, "a token matches the start of a word")
+    ok("else if (m.startsWith(w)) pick(5, 'model')" in SCRIPT, "a token matches the start of a word")
     ok("el('tr', 'ktable-grp')" in fn and "st.folded[it.head] = !folded;" in fn, "rows sit under their maker, and a maker folds")
     ok("az.setAttribute('aria-label', 'Jump to a maker by initial');" in fn, "with an A to Z strip to jump by")
     ok("slice = list.filter(it => it.pg === st.page - 1)" in fn and "tablePager({ total: modelCount" in fn and "sizes: [100, 250, 500]" in fn,
@@ -2144,7 +2144,7 @@ def t_the_size_list_tab_is_searchable_and_reads_the_same_sheet_as_the_label():
        "a ruling and an exclusion read as chips, in the Status filter's words")
     ok("api('/api/gobo-sizes/rule', { op: 'set', manufacturer: r.manufacturer, model: r.model, size: inp.value.trim() })" in SCRIPT,
        "ruling inline writes the same rule the label reads")
-    ok("if (canEdit) {" in SCRIPT.split("function sizesProducedCells")[1][:1600], "and only with the grant")
+    ok("if (canEdit) {" in SCRIPT.split("function sizesDetail(")[1][:2400], "and only with the grant")
 
 @test
 def t_a_list_search_takes_every_letter_typed():
@@ -2158,9 +2158,14 @@ def t_a_list_search_takes_every_letter_typed():
     caret back, hands the new box the text as typed, or a pause after a space
     dropped the space."""
     fn = SCRIPT.split("function renderSizes()")[1].split("\n        function paintSizesList()")[0]
-    ok("tableSearch('Search maker or model…', st.q, (v) => { st.q = v; st.page = 1; paintSizesList(); });" in fn,
+    ok("tableSearch('Search maker, model or size…', st.q, (v) => { st.q = v; st.page = 1; paintSizesList(); });" in fn,
        "the Size list search repaints the list, not the tab")
-    ok("sizesPane = { box, card, tools, desc, sub };" in fn, "the shell keeps what the list painter needs")
+    ok("sizesPane = { box, card, tools, desc, sub, syncSort };" in fn, "the shell keeps what the list painter needs")
+    tsearch = SCRIPT.split("function tableSearch(")[1].split("function tableTools(")[0]
+    ok("inp._t = setTimeout(() => { inp._t = null; if (inp.isConnected) oninput(inp.value.trim()); }, 150);" in tsearch
+       and "if (inp._t) { clearTimeout(inp._t); inp._t = null; oninput(inp.value.trim()); }" in tsearch,
+       "a finished run leaves no timer, and a box no longer on the page runs nothing")
+    ok("search.input.onchange = null;" in fn, "the Size list does not run its search again on leaving the box, so a quick tap is kept")
     paint = SCRIPT.split("function paintSizesList()")[1].split("\n        async function showReconView")[0]
     ok("while (tools.nextSibling) tools.nextSibling.remove();" in paint and "renderSizes()" in paint.split("const { box, card, tools } = P;")[0],
        "the list is what follows the toolbar, and a shell that has gone is painted whole")
@@ -2180,6 +2185,126 @@ def t_a_list_search_takes_every_letter_typed():
         seen += 1
         ok(builder + "(" not in cb.group(1), builder + "'s search repaints " + builder + ", its own search box with it")
     ok(seen >= 9, "every list search with a handler was looked at (%d)" % seen)
+
+
+@test
+def t_the_size_list_finds_a_fixture_however_it_is_written():
+    """Cameron: "we need to make improvements to the usability and search
+    ability of the gobo size list", then "do them all". Measured before: 'source
+    4 jr', 's4 jr', 'claypaky sharpy', 'e100z', 'high-end solaspot', '64mm' and
+    'chauvett' found nothing, and 'adj' found 5 of American DJ's 89. The search
+    folds accents and punctuation, matches a word typed across a name's words
+    (but not one letter into the next, or 'chauvett' found Chauvet Trackscan),
+    reads the aliases file as the label does, takes the trade's shorthand from
+    the server's table, finds a figure as a size, ranks best first, marks what
+    matched and puts one wrong letter right, saying so."""
+    blk = SCRIPT.split("/* ---------- Size list search ----------")[1].split("function sizesChips()")[0]
+    ok(".normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')" in blk, "accents and punctuation fold away")
+    ok("match(/[a-z]+|[0-9]+/g)" in SCRIPT, "words split where letters meet figures, as the label's digit key splits them ('vl 2500')")
+    ok("const sizesCut = (r) => r.ruling === 'exclude' ? '' : sizesEff(r);" in SCRIPT and "size: sizesNum(sizesCut(r))" in blk
+       and "if (st.size && sizesCut(r) !== st.size) return false;" in blk, "a model ruled not a gobo is cut at no size")
+    ok("const lead = (L) => L.indexOf(qc) >= 0 ? 2 :" in blk, "the name typed scores by whole words from its start ('robe' is Robe's)")
+    ok("parts: parts.length > 1 ? parts : null, alts: [] };" in blk and "if (!tk.sizeOnly) (tk.parts ?" in blk,
+       "a figure in mm finds a name with those words, and is never matched in the notes")
+    ok("function sizesRun(words, k, w)" in blk and "rest >= Math.min(2, wd.length)" in blk, "a word typed across words takes two letters of the last")
+    ok("(byMM[nk(a.manufacturer) + '|' + t] || byM[t] || [])" in blk, "the aliases, read the way the label reads them")
+    ok("(sh.words || []).concat(Object.keys(sh.makers || {})" in blk, "shorthand from the server's table, not a second copy")
+    ok("if (x.size === tk.num) pick(6, 'size'); else if (x.glass === tk.num) pick(3, 'size');" in blk
+       and "last.sizeOnly = true" in blk, "a figure is a size, and 'mm' makes it only a size")
+    ok("match: (a, b) => (b._score - a._score) || byName(a, b)" in blk and "const by = st.q.trim() ? st.qsort : st.sort;" in blk,
+       "a search is ranked best first, in an order kept apart from browsing")
+    ok("frag.append(el('mark', 'sizes-hit', buf))" in blk and "mark.sizes-hit { background: var(--warning-bg);" in CSS, "what matched is marked")
+    ok("const lim = w.length >= 8 ? 2 : 1;" in blk and "if (!hits.length && toks.length) {" in blk, "a word that matches nowhere is put right, only when nothing is found")
+    ok("if (!tk.sizeOnly && !(n && /[.,]/.test(n[1]))) tk.alts = ix.same[w] || [w];" in blk
+       and "const at = (words, k) => tk.parts.every(" in blk, "a decimal is its words in order ('2.0'), never '20' run together")
+    ok("text: ' ' + sizesWords((r.notes || '') + ' ' + (r.review || '')).join(' ') + ' '," in blk
+       and "(tk.parts ? [tk.parts.join(' ')] : tk.alts).forEach(w =>" in blk, "the notes are searched as words, so 'M-size' meets 'M-size'")
+    paint = SCRIPT.split("function paintSizesList()")[1].split("\n        async function showReconView")[0]
+    ok("'Nothing has ' + said + ', so these are the models with ' + meant + '.'" in paint, "and the list says it put it right")
+    ok("const told = sizesLast.fixed.filter(f => !f[0].startsWith(f[1]));" in paint, "but not for a word still being typed ('clayp')")
+    none = SCRIPT.split("function sizesNone(toks)")[1][:1600]
+    ok("'Nothing is cut at ' + n + ' mm, and no holder takes ' + n + ' mm glass.'" in none and "st.q = v + 'mm';" in none,
+       "a size the bench does not cut names the nearest it does, each a search")
+    ok("const SIZES_QSORTS = [['match', 'Best match']].concat(SIZES_SORTS);" in SCRIPT, "Best match is offered while searching")
+    ok("defs.push(['Search: ' + st.q" not in SCRIPT, "the search is in its box, not repeated as a chip")
+    ok("\"shorthand\": {\"makers\": _GOBO_MAKER_SHORT, \"words\": _GOBO_WORD_GROUPS}" in open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read(), "the listing carries the shorthand table")
+
+
+@test
+def t_the_size_list_says_what_the_label_will_print():
+    """The line over the list is the label's own lookup's answer for the name
+    typed, from the server, so the list and the label cannot disagree. It is
+    asked once typing settles, only for a name of two words or more and not
+    for a word the search put right, never twice for the same name, and again
+    after a ruling. The row it picks is tagged, and its name opens that row
+    whatever the filters hid."""
+    blk = SCRIPT.split("const sizesCheck = {")[1].split("function sizesChips()")[0]
+    ok("if (w.length < 2) return false;" in blk and "if (ix.makers.has(qc)) return false;" in blk
+       and "return sizesWords(w[w.length - 1]).join('').length > 1 || ix.names.has(qc);" in blk
+       and "if (!sizesCheckable(q) || sizesLast.fixed.length)" in blk, "a name, not a word, a maker alone, a half-typed word or a typo")
+    ok("'Checking what the label prints…'" in blk and "@media (max-width: 640px) { .sizes-label-line { min-height:" in CSS,
+       "the line's place is kept from the moment the list changes, so the answer never moves the rows")
+    ok("api('/api/gobo-sizes/check', { q })" in blk and "}, 400);" in blk, "the label's answer, once typing settles")
+    ok("if (sizesCheck.want === q) return;" in blk, "paging while it is on its way does not ask again")
+    ok("sizesCheck.q = ''; sizesCheck.res = null; sizesCheck.want = '';" in SCRIPT.split("async function refreshSizes()")[1][:400],
+       "a new ruling asks again")
+    ok("txt.append('The label prints ', name(), ' at ' + res.size + ' mm.')" in blk and "' but says CHECK: ' + res.reason + '.'" in blk
+       and "'The label says CHECK: '" in blk, "each of the label's answers in words, CHECK as the label prints it")
+    ok("txt.append(' No ' + res.manufacturer + ' model has that name.');" in blk, "another maker's model is said to be")
+    ok("if (res.excluded) txt.append(' The name is ruled not a gobo.');" in blk and "is ruled not a gobo, so its label carries no size" not in blk,
+       "a name ruled not a gobo still says what the label prints for it, which does not read that ruling")
+    ok("clearTimeout(sizesCheck.t); sizesCheck.seq++; sizesCheck.want = '';\n                host.append(sizesLabelLine(sizesCheck.res)); return;" in blk,
+       "going back to a name already answered drops a newer question still on its way")
+    ok("' For ' + d.domain + ': ' + d.size + ' mm.'" in blk, "with the sizes set for one customer")
+    ok("'The label’s match'" in blk and "b.onclick = () => sizesReveal(res.match);" in blk, "the row is tagged, and its name opens it")
+    ok("if (!shown) return el('b', null, label);" in blk, "a link only to a row in the list: going elsewhere threw away the search")
+    ok("res = { failed: e.message }" in blk and "The label’s answer could not be read: " in blk, "a failed answer says so")
+
+
+@test
+def t_a_size_list_row_opens_in_place_and_fits_a_phone():
+    """Hover was the only way to read a note or why a row needs review, and a
+    tablet has none; under 860px the notes were not on screen. On a phone the
+    table put Produced as off the card's edge. A row now opens in place, from
+    a button a keyboard reaches, with all the list knows about the model and
+    Set size in it; a narrow card reads each model as a card with the size to
+    cut large at its right."""
+    paint = SCRIPT.split("function paintSizesList()")[1].split("\n        async function showReconView")[0]
+    ok("const ob = el('button', 'sizes-open');" in paint and "ob.setAttribute('aria-expanded', open ? 'true' : 'false');" in paint
+       and "ob.setAttribute('aria-controls', 'sizes-d-' + r._i);" in paint, "the model is the row's button")
+    ok("if (now) tr.after(sizesDetail(r, cols.length, canEdit));" in paint and "if (open) tb.append(sizesDetail(r, cols.length, canEdit));" in paint,
+       "it opens in place and stays open across a repaint")
+    det = SCRIPT.split("function sizesDetail(")[1][:2600]
+    for k in ("'Cut at'", "'Ruling'", "'Holder glass'", "'Image'", "'Undercut'", "'Needs review'", "'Notes'", "'Also sold as'", "'One customer'"):
+        ok(k in det, "the details say " + k)
+    ok("setBtn.onclick = () => sizesInlineRule(acts, r, setBtn);" in det, "Set size is in the details")
+    ok("['Status']" in paint and "['']" not in paint.split("const cols =")[1][:300], "and no longer a column of buttons")
+    q = CSS.split("@container sizes (max-width: 520px) {")[1].split("\n        }")[0]
+    ok('grid-template-areas: "model fig" "maker fig" "status fig";' in q and ".ktable.sizes-table thead { display: none; }" in q,
+       "a narrow card reads each model as a card")
+    ok(".ktable.sizes-table tr.sizes-row > :is(td.sizes-glass, td.sizes-image, td.sizes-under, td.sizes-notes) { display: none; }" in q,
+       "the other figures go to the details, at a weight that beats the card's own cells")
+    ok(".ktable.sizes-table td.sizes-fig .sizes-unit { display: inline;" in q and ".sizes-unit { display: none; }" in CSS,
+       "the size carries its unit where the heading is gone")
+    ok(".ktable td.sizes-status { white-space: normal; }" in CSS, "status chips wrap rather than widen the table")
+    ok("st.reveal = null;\n            P.rows = rows;" in paint, "a reveal is spent on the paint it was for, found or not")
+    ok("st.focus = { maker: it.head }; paintSizesList();" in paint and "sizesState.focus = { key: sizesKey(r) };" in SCRIPT,
+       "focus comes back to a folded maker, and to the row a size was set on")
+
+
+@test
+def t_the_top_bar_search_finds_fixtures():
+    """'sharpy' from any page lands on the Sharpy with its details open, for
+    anyone who can open the Size list; the sheet is read the first time it is
+    asked for."""
+    fn = SCRIPT.split("function openSearch()")[1][:5200]
+    ok("const fixtures = entries.some(e => e.view === 'sizes');" in fn and "'Go to a page, find a fixture or search the guide'" in fn,
+       "for anyone who can open the Size list, and the box says so")
+    ok("sizesEnsure().then(() => { if (inp.isConnected) paint(); });" in fn and "sizesFind(inp.value, 5)" in fn, "read once, five best")
+    ok("b.onclick = () => { close(); openSizeRow(inp.value, r); };" in fn, "choosing one opens it")
+    ok(".dmenu-item > .dsearch-sub { flex: none;" in CSS, "a long name gives way to the size beside it")
+    ok("sizesState.open[key] = true; sizesState.reveal = key;" in SCRIPT.split("function openSizeRow(")[1][:400],
+       "open, and shown on its page")
 
 
 @test
@@ -3104,8 +3229,8 @@ def t_search_repaints_are_debounced_everywhere():
     debounce went in, and seven other searches still repainted synchronously.
     The shared factory debounces for everyone now, and the two hand-rolled
     repainting searches got their own."""
-    fn = SCRIPT.split("function tableSearch(")[1][:900]
-    ok("setTimeout(() => oninput(inp.value.trim()), 150)" in fn,
+    fn = SCRIPT.split("function tableSearch(")[1][:1100]
+    ok("setTimeout(() => { inp._t = null; if (inp.isConnected) oninput(inp.value.trim()); }, 150)" in fn,
        "the factory debounces its callers")
     ok("search._t = setTimeout(paintMailBody, 150)" in SCRIPT, "the mail search too")
     # The deals search was the second hand-rolled one; it is the factory's now,
