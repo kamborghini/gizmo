@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-09-28",
+   "title": "Labels size from the maker named",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "labels",
+     "text": "An order for a Robe Spot now prints Robe's size, 26.5 mm, not 37.5 mm from Vari-Lite's VL4000 Beamwash, Spot. When the model named matched another maker's model exactly, the label took that one, even though the maker on the order had models starting with the same words. It now takes the named maker's own models first, and says CHECK if they disagree on size. The same fault gave Martin Proscan Coemar's size and a Chauvet SX Robert Juliat's. Every model name on the size list, every alternative name and every ruling is sized exactly as before."
+    }
+   ]
+  },
+  {
+   "date": "2026-09-28",
    "title": "Labels respect a not a gobo ruling",
    "items": [
     {

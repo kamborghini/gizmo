@@ -13181,6 +13181,52 @@ def t_a_model_ruled_not_a_gobo_prints_no_size_on_its_label():
     ok("ruled_out" in open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read(), "the size check keeps its own count")
 
 @test
+def t_an_order_is_sized_from_its_own_makers_models_before_another_makers():
+    """Cameron: "make "robe spot" print Robe's size, not Vari-Lite's". An
+    order for Robe 'Spot' printed 37.5, the size of Vari-Lite's 'VL4000
+    Beamwash, Spot', because an exact model-only match was tried before Robe's
+    own Spot 160, Spot 250 and Spot 575, all 26.5. Another maker's model by
+    the same name now gives way to the named maker's models that start with
+    the words named. Nothing else moves: every name on the sheet, every alias
+    and every ruling answers as before; a name that stayed with its own maker
+    (Clay Paky 'Profile') still says CHECK; and a store maker that is a
+    product family still reaches the family's row under its real maker."""
+    look = lambda m, x: copilot._gobo_lookup(m, x)
+    hit, why = look("Robe", "Spot")
+    ok(hit and hit["manufacturer"] == "Robe" and hit["model"].startswith("Spot") and not why, "Robe's own Spot series: %r %r" % (hit, why))
+    eq(hit["production_size"], "26.5", "at Robe's size")
+    hit, why = look("Robe", "Robe Spot")
+    ok(hit and hit["manufacturer"] == "Robe" and hit["production_size"] == "26.5", "and with the maker typed into the model")
+    for m in ("Elinchrom", "German Light Products", "Multiblitz", "Profoto", "Techlumen"):
+        hit, why = look(m, "Spot")
+        ok(hit is None or hit["manufacturer"] == m, m + " 'Spot' is not Vari-Lite's")
+    hit, why = look("Martin Professional", "Proscan")
+    ok(hit and hit["manufacturer"] == "Martin Professional", "Martin's Proscan, not Coemar's")
+    hit, why = look("Chauvet", "LED")
+    ok(hit is None and why == "More than one production size listed for this model",
+       "the maker's own models that disagree say CHECK, not another maker's size")
+    hit, why = look("Clay Paky", "Profile")
+    ok(hit is None and why, "a name that stayed with its own maker answers as it did: CHECK")
+    hit, why = look("EVL", "EVL Pro 250")
+    ok(hit and (hit["manufacturer"], hit["model"]) == ("Mad", "EVL Pro 250"), "a product family as the maker still reaches the family's row")
+    hit, why = look("Equinox", "Fusion 200 Spot")
+    ok(hit and hit["manufacturer"] == "Prolight Concepts", "and the aliases still do")
+    # Every name on the sheet still finds its own row, under its own maker.
+    import csv as _csv
+    sheet = list(_csv.DictReader(open(copilot._sizes_path(), encoding="utf-8-sig")))
+    bad = []
+    for r in sheet:
+        m, x = r["Manufacturer"].strip(), r["Model"].strip()
+        if (copilot._norm_key(m), copilot._norm_key(x)) in copilot._gobo_sizes()["excludes"]:
+            continue
+        hit, why = look(m, x)
+        if hit is not None and copilot._loose_key(hit["manufacturer"]) != copilot._loose_key(m):
+            bad.append((m, x, hit["manufacturer"]))
+    eq(bad, [], "no sheet name is sized from another maker")
+    j = post("/api/gobo-sizes/check", {"q": "robe spot"}).json()
+    ok(j["match"] and j["match"]["manufacturer"] == "Robe" and j["size"] == "26.5", "and the Size list's label line says so")
+
+@test
 def t_a_refused_request_says_why_so_the_page_can_answer_it():
     """A colleague saw a flashing login screen and "asked for too much": a
     stale Shopify embed token (his PC clock) drew a bare 401, the page took

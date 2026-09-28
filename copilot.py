@@ -5459,13 +5459,16 @@ _GOBO_INDEXES = {"strict": ("by_mm", "by_model"), "loose": ("by_mm_loose", "by_m
                  "digit": ("by_mm_digit", "by_model_digit")}
 
 
-def _gobo_resolve_key(cache: dict, manufacturer: str, key: str, which: str):
+def _gobo_resolve_key(cache: dict, manufacturer: str, key: str, which: str, own_only: bool = False):
     """Entries for one candidate key, or ("ambiguous"|None). Manufacturer+model
-    first; model alone only when every row with that model is from one maker."""
+    first; model alone only when every row with that model is from one maker,
+    and not at all when own_only asks for the maker's own rows alone."""
     mm_name, bm_name = _GOBO_INDEXES[which]
     entries = cache[mm_name].get((manufacturer, key)) if manufacturer else None
     if entries:
         return entries, None
+    if own_only:
+        return None, None
     candidates = cache[bm_name].get(key) or []
     keyfn = _norm_key if which == "strict" else _loose_key
     makers = {keyfn(e["manufacturer"]) for e in candidates}
@@ -5498,29 +5501,54 @@ def _gobo_contain(cache: dict, lmfr: str, words: tuple):
 def _gobo_resolve_part(cache: dict, nmfr: str, lmfr: str, part: str, notes: set):
     """One store-written model name -> matching sheet rows, trying exact keys
     (strict, punctuation-insensitive, digit-boundary), then parenthetical and
-    manufacturer-prefix stripping, then word-run containment."""
+    manufacturer-prefix stripping, then word-run containment.
+
+    The order's own maker comes first. Its exact keys are tried before any
+    other maker's, and another maker's model by the same name gives way to
+    the maker's own models that START with the words named: 'Robe' 'Spot'
+    printed Vari-Lite's 'VL4000 Beamwash, Spot' at 37.5, over Robe's own Spot
+    160, Spot 250 and Spot 575 at 26.5 (Cameron: "make "robe spot" print
+    Robe's size, not Vari-Lite's"). That is all that changed: a name that
+    stayed with its own maker answers as it did, so 'Clay Paky' 'Profile'
+    still says CHECK rather than pick Profile Plus SV from the many that
+    contain the word; and a maker's own models that merely contain the words
+    stay after the other maker's exact name, as a store maker can be a
+    product family ('EVL' 'EVL Pro 250' is Mad's). Rows that disagree on
+    size come back together, so the label says CHECK rather than guess."""
     variants = [(_norm_key(part), "strict"), (_loose_key(part), "loose"), (_digit_key(part), "digit")]
     stripped = re.sub(r"\([^)]*\)", " ", part)
     if stripped.strip() and stripped != part:
         variants += [(_norm_key(stripped), "strict"), (_loose_key(stripped), "loose"),
                      (_digit_key(stripped), "digit")]
     lpart = _loose_key(part)
-    if lmfr and lpart.startswith(lmfr + " "):
-        variants.append((lpart[len(lmfr):].strip(), "loose"))
-    seen = set()
-    for key, which in variants:
-        if not key or (key, which) in seen:
-            continue
-        seen.add((key, which))
+    unprefixed = lpart[len(lmfr):].strip() if lmfr and lpart.startswith(lmfr + " ") else ""
+    if unprefixed:
+        variants.append((unprefixed, "loose"))
+    keys = [kw for kw in dict.fromkeys(variants) if kw[0]]
+    cands = [tuple(c.split()) for c in dict.fromkeys([lpart, _loose_key(stripped)]) if c]
+    own_head = None
+    if lmfr:
+        for key, which in keys:
+            entries, _note = _gobo_resolve_key(cache, nmfr if which == "strict" else lmfr, key, which, own_only=True)
+            if entries:
+                return entries
+        own = [(rw, e) for lm, rw, e in cache["rows"] if lm == lmfr]
+        # The maker's name typed into the model ('Robe Spot') is searched without it too.
+        own_cands = cands + ([tuple(unprefixed.split())] if unprefixed and tuple(unprefixed.split()) not in cands else [])
+        for words in own_cands:
+            own_head = [e for rw, e in own if rw[:len(words)] == words] or None
+            if own_head:
+                break
+    for key, which in keys:
         entries, note = _gobo_resolve_key(cache, nmfr if which == "strict" else lmfr, key, which)
         if entries:
+            if own_head and any(_loose_key(e["manufacturer"]) != lmfr for e in entries):
+                return own_head
             return entries
         if note == "ambiguous":
             notes.add("ambiguous")
-    for cand in dict.fromkeys([lpart, _loose_key(stripped)]):
-        if not cand:
-            continue
-        entries, note = _gobo_contain(cache, lmfr, tuple(cand.split()))
+    for words in cands:
+        entries, note = _gobo_contain(cache, lmfr, words)
         if entries:
             return entries
         if note == "ambiguous":
