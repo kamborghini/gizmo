@@ -2251,8 +2251,8 @@ def t_the_size_list_says_what_the_label_will_print():
     ok("txt.append('The label prints ', name(), ' at ' + res.size + ' mm.')" in blk and "' but says CHECK: ' + res.reason + '.'" in blk
        and "'The label says CHECK: '" in blk, "each of the label's answers in words, CHECK as the label prints it")
     ok("txt.append(' No ' + res.manufacturer + ' model has that name.');" in blk, "another maker's model is said to be")
-    ok("if (res.excluded) txt.append(' The name is ruled not a gobo.');" in blk and "is ruled not a gobo, so its label carries no size" not in blk,
-       "a name ruled not a gobo still says what the label prints for it, which does not read that ruling")
+    ok("if (res.excluded) txt.append('The label prints no size and no CHECK: the name is ruled not a gobo.');" in blk,
+       "a name ruled not a gobo prints no size, as the label now shapes it")
     ok("clearTimeout(sizesCheck.t); sizesCheck.seq++; sizesCheck.want = '';\n                host.append(sizesLabelLine(sizesCheck.res)); return;" in blk,
        "going back to a name already answered drops a newer question still on its way")
     ok("' For ' + d.domain + ': ' + d.size + ' mm.'" in blk, "with the sizes set for one customer")
@@ -2305,6 +2305,19 @@ def t_the_top_bar_search_finds_fixtures():
     ok(".dmenu-item > .dsearch-sub { flex: none;" in CSS, "a long name gives way to the size beside it")
     ok("sizesState.open[key] = true; sizesState.reveal = key;" in SCRIPT.split("function openSizeRow(")[1][:400],
        "open, and shown on its page")
+
+
+@test
+def t_a_not_a_gobo_line_is_left_off_the_day_sheet():
+    """The label now prints a line ruled not a gobo by name, with no size and
+    no CHECK. The day sheet cuts nothing for it and does not count it among
+    the CHECK-flagged, which it was, having no size; it says how many it left
+    off. Resolve says what the ruling now does to a label."""
+    ds = SCRIPT.split("function printDaySheet()")[1].split("function ")[0]
+    ok("if (it.not_gobo) { notGobo += it.quantity || 1; return; }" in ds, "not cut, not flagged")
+    ok("' ruled not a gobo, so not in this list.'" in ds, "and the sheet says how many it left off")
+    ok("and their labels print no size and no CHECK." in SCRIPT, "Resolve says what the ruling does to a label")
+    ok("'Nothing: it is ruled not a gobo, so its label prints no size and no CHECK.'" in SCRIPT, "and so does the Size list")
 
 
 @test

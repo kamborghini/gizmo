@@ -5762,9 +5762,9 @@ def _gobo_check(q: str) -> dict:
     100, Mad's EVL Pro 250), and the sheet knows those as models. Then the
     maker read off the front and the rest as its model. The first that finds
     a row answers; if none does, the maker's reading gives the reason, being
-    the more particular. A name ruled not a gobo is said to be, beside what
-    the label prints for it: the label does not read those rulings, only the
-    size check does. The sizes set for one customer come with the answer."""
+    the more particular. A name ruled not a gobo prints no size, as the label
+    shapes it, and is said to be. The sizes set for one customer come with
+    the answer."""
     cache = _gobo_sizes()
     # A memo of its own: a typed name is not an order line, and the label's
     # memo would keep every name anyone typed until the sheet next reloads.
@@ -5772,6 +5772,9 @@ def _gobo_check(q: str) -> dict:
     view["lookup_memo"] = {}
     q = re.sub(r"\s+", " ", str(q or "")).strip()[:120]
     maker, model = _gobo_split_maker(q, cache)
+    if maker and (_norm_key(maker), _norm_key(model)) in (cache.get("excludes") or set()):
+        return {"q": q, "manufacturer": maker, "model": model, "match": None, "size": "",
+                "reason": "", "excluded": True, "domains": []}
     got = None
     for mfr, mdl in [("", q)] + ([(maker, model)] if maker else []):
         entry, reason = _gobo_lookup(mfr, mdl, cache=view)
@@ -5781,7 +5784,6 @@ def _gobo_check(q: str) -> dict:
         if got is None or mfr:
             got = (mfr, mdl, entry, reason)
     mfr, mdl, entry, reason = got
-    excluded = bool(maker) and (_norm_key(maker), _norm_key(model)) in (cache.get("excludes") or set())
     keys = {(_norm_key(mfr), _norm_key(mdl))}
     if entry:
         keys.add((_norm_key(entry["manufacturer"]), _norm_key(entry["model"])))
@@ -5789,7 +5791,7 @@ def _gobo_check(q: str) -> dict:
     return {"q": q, "manufacturer": mfr, "model": mdl,
             "match": ({"manufacturer": entry["manufacturer"], "model": entry["model"]} if entry else None),
             "size": (entry["production_size"] if entry and not reason else ""),
-            "reason": reason or "", "excluded": excluded, "domains": domains}
+            "reason": reason or "", "excluded": False, "domains": domains}
 
 
 def _item_prop(li: dict, name: str) -> str:
@@ -6625,8 +6627,14 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
             continue    # refunded or edited off the order: nothing to make
         mfr = _strip_price(_item_prop(li, "Manufacturer"))
         model = _strip_price(_item_model(li, mfr))
-        entry, reason = _gobo_lookup(mfr, model, cache=cache)
-        dsize = _gobo_domain_size(mfr, model, entry, domain, cache=cache)
+        # A model ruled not a gobo (Resolve, in the Size check) is not cut:
+        # no size and no CHECK, printed by its name as a stock gobo is, with a
+        # line saying why. The lookup does not read those rulings, and its
+        # word-run step found a neighbouring row: Chauvet Rogue R2 Spot Metal,
+        # ruled not a gobo, printed 26.5, the Rogue R2 Spot's size.
+        not_gobo = bool(model) and (_norm_key(mfr), _norm_key(model)) in (cache.get("excludes") or set())
+        entry, reason = (None, "") if not_gobo else _gobo_lookup(mfr, model, cache=cache)
+        dsize = None if not_gobo else _gobo_domain_size(mfr, model, entry, domain, cache=cache)
         title = str(li.get("title") or li.get("name") or "Item").strip()
         # A stock gobo IS its name. Its fixture usually arrives as free text
         # (Item Notes) or not at all, so "No model specified" put a CHECK on
@@ -6649,10 +6657,11 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
             "glass_type": _item_glass(li),
             "price": str(li.get("price") or ""),
             "production_size": dsize or (entry["production_size"] if (entry and not reason) else ""),
-            "size_note": ("Size for this customer" if dsize
+            "size_note": ("Not a gobo" if not_gobo else "Size for this customer" if dsize
                           else (entry["review"] if entry and entry["production_size"] and entry["review"] else "")),
             "review_reason": "" if dsize else (reason or ""),
             "stock": stock,
+            "not_gobo": not_gobo,
         })
     return {
         "id": o.get("id"),
@@ -9433,6 +9442,10 @@ def _usage_lines(shaped_order: dict) -> list:
     day's making consumed."""
     out = []
     for it in shaped_order.get("items", []):
+        # Ruled not a gobo: nothing is cut, so no glass is used and there is
+        # nothing to resolve. Not a line of any kind, here or in the stock app.
+        if it.get("not_gobo"):
+            continue
         qty = int(it.get("quantity") or 1)
         # Original vs Copy is the same physical blank: group stock by the
         # glass family ("Mono - Original" and "Mono - Copy" -> "Mono").

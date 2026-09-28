@@ -13103,10 +13103,8 @@ def t_the_size_list_asks_the_label_what_a_typed_name_prints():
     eq(copilot._gobo_split_maker("light fantastic", copilot._gobo_sizes()), ("", "light fantastic"), "a shared first word is no maker")
     eq(copilot._gobo_split_maker("ETC", copilot._gobo_sizes()), ("", "ETC"), "a maker alone leaves no model, so it is read as the model")
     j = chk("Chauvet Rogue R2 Spot Metal")
-    hit, why = copilot._gobo_lookup("Chauvet", "Rogue R2 Spot Metal")
-    ok(j["excluded"], "a model ruled not a gobo says so")
-    eq((j["match"] or {}).get("model"), hit and hit["model"], "beside what the label prints for it, which does not read that ruling")
-    eq(j["size"], (hit["production_size"] if hit and not why else ""), "at the label's own size")
+    ok(j["excluded"] and j["match"] is None and j["size"] == "" and j["reason"] == "",
+       "a model ruled not a gobo prints no size and no CHECK, as the label shapes it")
     for q, maker, model in (("Studio Spot 575", "High End Systems", "Studio Spot 575"),
                             ("EVL Pro 250", "Mad", "EVL Pro 250"), ("Infinity IS 100", "Showtec", "Infinity IS 100")):
         eq(chk(q)["match"], {"manufacturer": maker, "model": model}, q + ": a maker's name that starts another maker's model is read as the model")
@@ -13138,6 +13136,49 @@ def t_the_size_list_asks_the_label_what_a_typed_name_prints():
     eq(post_s(sess, "/api/gobo-sizes/check", {"q": "S4 Jr"}).status_code, 200, "anyone with the Size list may ask")
     eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["crm"]}).status_code, 200)
     eq(post_s(sess, "/api/gobo-sizes/check", {"q": "S4 Jr"}).status_code, 403, "and nobody without it")
+
+@test
+def t_a_model_ruled_not_a_gobo_prints_no_size_on_its_label():
+    """Cameron: "make the label respect the not a gobo rulings". Resolve's
+    third answer, 'It is not a gobo, stop reporting it', reached only the size
+    check. The label still looked the model up, and its word-run step found a
+    neighbouring row: Chauvet Rogue R2 Spot Metal, ruled not a gobo, printed
+    26.5, the Rogue R2 Spot's size. Now it prints by name with no size and no
+    CHECK and a line saying why, uses no glass on the day sheets or in the
+    stock app, and a size set for one customer does not bring a size back."""
+    P = lambda **kv: [{"name": k, "value": v} for k, v in kv.items()]
+    cache = copilot._gobo_sizes()
+    ok(("chauvet", "rogue r2 spot metal") in cache["excludes"], "the seed rules it not a gobo")
+    hit, why = copilot._gobo_lookup("Chauvet", "Rogue R2 Spot Metal", cache=cache)
+    ok(hit is not None and hit["production_size"], "the lookup alone would size it from a neighbour, which is the fault")
+    order = {"id": 7, "name": "#7", "order_number": 7, "note": "", "tags": "IP", "email": "a@example.com",
+             "line_items": [
+                 {"title": "Custom Gobo", "quantity": 2, "product_id": 1,
+                  "properties": P(Manufacturer="Chauvet", Model="Rogue R2 Spot Metal", Glass="Monochrome Glass - Original")},
+                 {"title": "Custom Gobo", "quantity": 1, "product_id": 1,
+                  "properties": P(Manufacturer="Chauvet", Model="Rogue R2 Spot")},
+             ]}
+    ruled, plain = copilot._shape_label_order(order, {}, cache=cache)["items"]
+    eq((ruled["production_size"], ruled["review_reason"]), ("", ""), "no size and no CHECK")
+    ok(ruled["not_gobo"] is True and ruled["size_note"] == "Not a gobo", "said, on the label, under its name")
+    eq(ruled["quantity"], 2, "the line is still on the label")
+    ok(plain["not_gobo"] is False and plain["production_size"] == hit["production_size"], "its neighbour keeps its own size")
+    lines = copilot._usage_lines({"items": [ruled, plain]})
+    eq(lines, [{"size": plain["production_size"], "family": "(type not recorded)", "qty": 1}],
+       "no glass used, and nothing 'to resolve', on the day sheets or in the stock app")
+    # A size for one customer does not undo the ruling.
+    rows = copilot._gobo_rule_rows("override")
+    added = {"Manufacturer": "Chauvet", "Model": "Rogue R2 Spot Metal", "Customer Email Domain": "example.com",
+             "Production Size (mm)": "25"}
+    copilot._write_gobo_rule_rows("override", rows + [added])
+    try:
+        again = copilot._shape_label_order(order, {}, cache=copilot._gobo_sizes())["items"][0]
+        eq((again["production_size"], again["review_reason"], again["not_gobo"]), ("", "", True),
+           "the ruling wins over a size for one customer")
+    finally:
+        copilot._write_gobo_rule_rows("override", rows)
+    # The size check still counts it apart, as before.
+    ok("ruled_out" in open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read(), "the size check keeps its own count")
 
 @test
 def t_a_refused_request_says_why_so_the_page_can_answer_it():

@@ -15647,7 +15647,7 @@ Projected Image UK"></textarea>
         }
         function sizesLabelLine(res) {
             // A name the label cannot place is often one still being typed: said quietly.
-            const p = el('p', 'sizes-label-line' + (!res.match ? ' quiet' : ''));
+            const p = el('p', 'sizes-label-line' + (!res.match && !res.excluded ? ' quiet' : ''));
             p.append(ico(I.printer));
             /* Short, so the answer fits the place kept for it: at 110
                characters it took a second line at 1024 and a third on a
@@ -15663,7 +15663,8 @@ Projected Image UK"></textarea>
                 const b = el('button', 'seclink', label); b.type = 'button';
                 b.title = 'Show it in the list'; b.onclick = () => sizesReveal(res.match); return b;
             };
-            if (res.match && res.size) txt.append('The label prints ', name(), ' at ' + res.size + ' mm.');
+            if (res.excluded) txt.append('The label prints no size and no CHECK: the name is ruled not a gobo.');
+            else if (res.match && res.size) txt.append('The label prints ', name(), ' at ' + res.size + ' mm.');
             else if (res.match) txt.append('The label finds ', name(), ' but says CHECK: ' + res.reason + '.');
             else txt.append('The label says CHECK: ' + (res.reason || 'Model not found in the size list') + '.');
             /* The label's lookup takes a model with no maker's name on it when
@@ -15671,9 +15672,6 @@ Projected Image UK"></textarea>
             if (res.match && res.manufacturer && res.match.manufacturer !== res.manufacturer)
                 txt.append(' No ' + res.manufacturer + ' model has that name.');
             (res.domains || []).forEach(d => txt.append(' For ' + d.domain + ': ' + d.size + ' mm.'));
-            /* The label does not read a not-a-gobo ruling (only the Size check
-               does), so an excluded name still prints what the lookup finds. */
-            if (res.excluded) txt.append(' The name is ruled not a gobo.');
             p.append(txt);
             return p;
         }
@@ -15774,7 +15772,7 @@ Projected Image UK"></textarea>
             const dl = el('dl', 'sizes-dl');
             const add = (k, v) => { if (v) dl.append(el('dt', null, k), el('dd', null, v)); };
             const v = sizesEff(r);
-            add('Cut at', r.ruling === 'exclude' ? 'Nothing from this row: it is ruled not a gobo, so the label never reads it.' : v ? v + ' mm' : 'No size yet, so its label says CHECK.');
+            add('Cut at', r.ruling === 'exclude' ? 'Nothing: it is ruled not a gobo, so its label prints no size and no CHECK.' : v ? v + ' mm' : 'No size yet, so its label says CHECK.');
             if (r.ruling) add('Ruling', 'Made in the app. ' + (r.off_sheet ? 'This model is not on the sheet.'
                 : r.produced ? 'The sheet says ' + r.produced + ' mm.' : 'The sheet has no size for it.'));
             add('Holder glass', r.glass && r.glass + ' mm');
@@ -18059,7 +18057,8 @@ Projected Image UK"></textarea>
             opt('exclude', 'It is not a gobo, stop reporting it', (pane) => {
                 pane.append(el('div', 'field-help',
                     'Items on this model stop counting towards size-list coverage, so it '
-                    + 'will not be reported again. It does not change anything already printed.'));
+                    + 'will not be reported again, and their labels print no size and no CHECK. '
+                    + 'It does not change anything already printed.'));
             });
 
             choose('set');
@@ -18670,8 +18669,10 @@ Projected Image UK"></textarea>
             if (!orders.length) { addToast('Nothing to make: every live order is marked made.'); return; }
             const agg = {};
             const stock = {};
-            let flagged = 0;
+            let flagged = 0, notGobo = 0;
             orders.forEach(o => (o.items || []).forEach(it => {
+                // Ruled not a gobo: nothing to cut, and nothing to put right.
+                if (it.not_gobo) { notGobo += it.quantity || 1; return; }
                 /* A stock gobo is named, not sized: it is not summed by size
                    and it is not a problem, so it is not counted as
                    CHECK-flagged either. It joins the same tick list, by name. */
@@ -18710,6 +18711,8 @@ Projected Image UK"></textarea>
             tb.append(tbody); ds.append(tb);
             if (flagged) ds.append(el('div', 'ds-flag', flagged + (flagged === 1 ? ' item is' : ' items are')
                 + ' CHECK-flagged and not in this list. Resolve them on the Labels tab first.'));
+            if (notGobo) ds.append(el('div', 'ds-orders', notGobo + (notGobo === 1 ? ' item is' : ' items are')
+                + ' ruled not a gobo, so not in this list.'));
             ds.append(el('div', 'ds-orders', 'Orders: ' + orders.map(o => orderNo(o)).join('   ')));
             box.append(ds);
             let rule = $('label-page-rule');

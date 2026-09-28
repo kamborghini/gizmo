@@ -2,6 +2,27 @@
  "releases": [
   {
    "date": "2026-09-28",
+   "title": "Labels respect a not a gobo ruling",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "labels",
+     "text": "A model ruled not a gobo with Resolve no longer gets a size on its label. The ruling only stopped the Size check reporting it, and the label went on looking the model up and sometimes found a neighbouring model's size: Chauvet Rogue R2 Spot Metal printed 26.5 mm, the Rogue R2 Spot's size. Its label now prints the item by name with no size and no CHECK, and a line saying Not a gobo."
+    },
+    {
+     "kind": "fixed",
+     "tab": "labels",
+     "text": "The day sheet leaves an item ruled not a gobo out of the cut list, rather than counting it as CHECK-flagged, and says how many it left out. Nor is it counted as glass used on the day's stock sheet or sent to the stock app."
+    },
+    {
+     "kind": "improved",
+     "tab": "sizes",
+     "text": "The Size list's label line and a model's details say the same: a model ruled not a gobo is cut at nothing and its label prints no size."
+    }
+   ]
+  },
+  {
+   "date": "2026-09-28",
    "title": "Finding a fixture on the size list",
    "items": [
     {
