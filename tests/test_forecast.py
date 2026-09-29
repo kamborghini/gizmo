@@ -240,35 +240,122 @@ def t_the_shop_is_named_the_same_either_way():
 
 
 @test
-def t_a_run_takes_either_shopify_credential_and_prefers_the_static_one():
-    """Reactor holds no static token: it holds a client id and secret and mints
-    a short-lived one, so `${{gizmo.SHOPIFY_ACCESS_TOKEN}}` resolved to nothing
-    and the first real run stopped at `missing: SHOPIFY_FORECAST_TOKEN`. The
-    service now takes either shape. A static token wins when set, so adding the
-    pair to a working deployment changes nothing, which is the same rule the
-    connector follows."""
-    from forecast.ingest import access_token
-    assert access_token("projectedimage.myshopify.com", "shpat_static", "id", "secret") == "shpat_static"
+def t_the_job_reads_the_store_through_reactor_and_holds_no_shopify_secret():
+    """The job used to take Reactor's client id and secret and mint its own
+    Admin API token. That secret also signs every webhook Reactor trusts, so
+    a copy on this service was a way to forge a shop/redact and erase
+    Reactor's stores (the audit's R-C1). The job now asks Reactor, with the
+    FORECAST_INGEST_TOKEN it already holds, and the secret is never read:
+    a service that still has it logs that it should go, and it is not
+    enough on its own to run."""
+    import io, json as _json, logging, urllib.error
+    import forecast.ingest as ing
+    import forecast.nightly as nightly
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "forecast", "ingest.py"), encoding="utf-8").read()
+    assert "client_credentials" not in src and not hasattr(ing, "access_token"), \
+        "no path mints a token from the app's secret"
+    # ReactorStore: the hook, the token in its header, the op in the body.
+    seen = []
+
+    class _Resp(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def fake(req, timeout=None):
+        seen.append((req.full_url, dict(req.header_items()), _json.loads(req.data)))
+        return _Resp(_json.dumps({"data": {"edges": [{"node": {"id": "gid://shopify/Product/1",
+                                                                 "productType": "Gobo"}}],
+                                            "pageInfo": {"hasNextPage": False, "endCursor": None}}}).encode())
+    saved = ing.urllib.request.urlopen
+    ing.urllib.request.urlopen = fake
     try:
-        access_token("projectedimage.myshopify.com", "", "", "")
+        got = ing.fetch_products(ing.ReactorStore("https://reactor.example/", "tok-123"))
+    finally:
+        ing.urllib.request.urlopen = saved
+    assert got == {"gid://shopify/Product/1": {"product_type": "Gobo"}}, got
+    url, headers, body = seen[0]
+    assert url == "https://reactor.example/hooks/forecast/shopify", url
+    assert headers.get("X-forecast-token") == "tok-123", headers
+    assert body == {"op": "products", "after": None}, body
+    # A refusal is an error with Reactor's own words, never an empty store.
+    def refuse(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {},
+                                     io.BytesIO(b'{"error": "Unauthorized"}'))
+    ing.urllib.request.urlopen = refuse
+    try:
+        ing.ReactorStore("https://reactor.example", "wrong").products_page(None)
     except RuntimeError as e:
-        assert "SHOPIFY_CLIENT_ID" in str(e)
+        assert "401" in str(e) and "Unauthorized" in str(e), e
     else:
-        raise AssertionError("no credential at all has to be an error, not a silent empty token")
+        raise AssertionError("a refused read has to fail the run")
+    finally:
+        ing.urllib.request.urlopen = saved
+    # The run: the secret alone is not enough, and it is named for removal.
+    records = []
+
+    class _Keep(logging.Handler):
+        def emit(self, r): records.append(r.getMessage())
+    h = _Keep()
+    nightly.log.addHandler(h)
+    saved_env = dict(os.environ)
+    try:
+        for k in ("REACTOR_URL", "FORECAST_INGEST_TOKEN", "SHOPIFY_FORECAST_TOKEN"):
+            os.environ.pop(k, None)
+        os.environ.update({"SHOP": "projectedimage.myshopify.com",
+                           "SHOPIFY_CLIENT_ID": "id", "SHOPIFY_CLIENT_SECRET": "secret"})
+        assert nightly.main() == 2, "Reactor's id and secret do not make a run"
+    finally:
+        os.environ.clear(); os.environ.update(saved_env)
+        nightly.log.removeHandler(h)
+    text = " ".join(records)
+    assert "SHOPIFY_CLIENT_SECRET" in text and "not used" in text and "rotate" in text, text
+    assert "REACTOR_URL" in text and "FORECAST_INGEST_TOKEN" in text, text
+    nsrc = open(os.path.join(root, "forecast", "nightly.py"), encoding="utf-8").read()
+    body = nsrc.split("try:", 1)[1]
+    # Chosen inside the try, so a refusal is posted to the tab.
+    assert "ShopifyStore(shop, stoken) if stoken else ReactorStore(base, token)" in body
+    assert "run_bulk_orders(store, since)" in nsrc and "fetch_products(store)" in nsrc
 
 
 @test
-def t_the_nightly_job_names_both_credential_shapes_when_it_has_neither():
-    """The message a person reads at 03:00. Naming only one of the two shapes
-    is what sent this session looking for a variable that does not exist."""
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    src = open(os.path.join(root, "forecast", "nightly.py"), encoding="utf-8").read()
-    assert "SHOPIFY_FORECAST_TOKEN, or SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET" in src
-    # The grant runs inside the try, so a refusal is posted to the tab.
-    body = src.split("try:", 1)[1]
-    assert "access_token(shop, stoken, cid, csec)" in body
-    assert "run_bulk_orders(shop, api_token, since)" in src
-    assert "fetch_products(shop, api_token)" in src
+def t_a_bulk_pull_runs_the_same_through_either_store():
+    """run_bulk_orders does not know which store it was handed: it starts the
+    bulk query, polls it BY ID, downloads the file, and fills the refunds in
+    from their own paged read."""
+    import io, json as _json
+    import forecast.ingest as ing
+    calls = []
+
+    class _Store:
+        def bulk_start(self, since):
+            calls.append(("start", since.isoformat()))
+            return {"bulkOperation": {"id": "gid://shopify/BulkOperation/7", "status": "CREATED"},
+                    "userErrors": []}
+
+        def bulk_status(self, op_id):
+            calls.append(("status", op_id))
+            return {"status": "COMPLETED", "url": "https://files.example/bulk.jsonl", "objectCount": 2}
+
+        def refunds_page(self, since, after):
+            calls.append(("refunds", after))
+            return {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}
+
+    class _Resp(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    lines = [{"id": "gid://shopify/Order/1", "name": "#1", "createdAt": "2026-09-01T10:00:00Z",
+              "currentTotalPriceSet": {"shopMoney": {"amount": "12.00"}}},
+             {"id": "gid://shopify/LineItem/9", "__parentId": "gid://shopify/Order/1", "quantity": 1,
+              "originalUnitPriceSet": {"shopMoney": {"amount": "10.00"}}}]
+    saved = ing.urllib.request.urlopen
+    ing.urllib.request.urlopen = lambda url, timeout=None: _Resp("\n".join(_json.dumps(l) for l in lines).encode())
+    try:
+        orders = ing.run_bulk_orders(_Store(), date(2026, 1, 1), poll_seconds=0)
+    finally:
+        ing.urllib.request.urlopen = saved
+    assert calls == [("start", "2026-01-01"), ("status", "gid://shopify/BulkOperation/7"), ("refunds", None)], calls
+    assert len(orders) == 1 and orders[0]["order_total"] == 12.0 and len(orders[0]["line_items"]) == 1, orders
 
 
 @test

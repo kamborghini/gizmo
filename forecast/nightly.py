@@ -3,12 +3,13 @@ service on this repo with a cron schedule.
 
   REACTOR_URL             https://<the app's domain>
   FORECAST_INGEST_TOKEN   the shared secret, the same value Reactor holds
-  SHOP                    <store>.myshopify.com
-  and ONE Shopify credential, the second preferred because it is the app's own
-  and there is then one thing to rotate rather than two:
-  SHOPIFY_FORECAST_TOKEN  a static Admin API token with read_all_orders + read_products
-  SHOPIFY_CLIENT_ID       Reactor's client id and secret, exchanged for a
-  SHOPIFY_CLIENT_SECRET   short-lived token that carries the app's own scopes
+  No Shopify credential: the store is read through Reactor, which makes four
+  fixed read-only queries with its own (/hooks/forecast/shopify). Optionally:
+  SHOPIFY_FORECAST_TOKEN  a read-only Admin API token of the job's own
+  SHOP                    <store>.myshopify.com, with the token above
+  Never Reactor's SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET: that secret
+  signs every webhook Reactor trusts. A run that finds them says so and does
+  not use them.
   FORECAST_SCENARIO       optional: which scenario feeds the baseline feature
   FORECAST_HISTORY_DAYS   optional, default 900
   FORECAST_HORIZON        optional, default 90
@@ -190,12 +191,18 @@ def main() -> int:
     base = env.get("REACTOR_URL", "").rstrip("/")
     token = env.get("FORECAST_INGEST_TOKEN", "")
     shop, stoken = env.get("SHOP", ""), env.get("SHOPIFY_FORECAST_TOKEN", "")
-    cid, csec = env.get("SHOPIFY_CLIENT_ID", ""), env.get("SHOPIFY_CLIENT_SECRET", "")
-    missing = [k for k, v in (("REACTOR_URL", base), ("FORECAST_INGEST_TOKEN", token),
-                              ("SHOP", shop)) if not v]
-    # Either credential shape will do, so neither name alone is missing.
-    if not stoken and not (cid and csec):
-        missing.append("SHOPIFY_FORECAST_TOKEN, or SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET")
+    missing = [k for k, v in (("REACTOR_URL", base), ("FORECAST_INGEST_TOKEN", token)) if not v]
+    if stoken and not shop:
+        missing.append("SHOP (the store SHOPIFY_FORECAST_TOKEN belongs to)")
+    # Reactor's own secret, handed to this service by an older setup. It is
+    # never read: it signs every webhook Reactor trusts, so a copy here is a
+    # second place it can leak from. Saying so each night is how it gets
+    # removed rather than forgotten.
+    held = [k for k in ("SHOPIFY_CLIENT_SECRET", "SHOPIFY_API_SECRET", "SHOPIFY_CLIENT_ID") if env.get(k)]
+    if held:
+        log.warning("%s %s set on this service and not used: remove %s, and rotate the app's "
+                    "secret if this service ever held it", ", ".join(held),
+                    "is" if len(held) == 1 else "are", "it" if len(held) == 1 else "them")
     if missing:
         log.error("missing: %s", ", ".join(missing))
         return 2
@@ -218,7 +225,7 @@ def main() -> int:
     try:
         from .cashflow import CashFlowModel
         from .config import Config
-        from .ingest import (access_token, daily_cash, fetch_products, monthly_cash,
+        from .ingest import (ReactorStore, ShopifyStore, daily_cash, fetch_products, monthly_cash,
                              orders_to_rows, run_bulk_orders, to_daily_panel)
         from .simple import daily_frame, pick_opinions, sanity_forecasts
         from .variance import VarianceEngine
@@ -229,12 +236,12 @@ def main() -> int:
                                            "error": "No cash flow workbook has been uploaded in the Forecast tab yet."})
                 return 0
             cf = CashFlowModel.from_workbook(wb)
-            # Inside the try: a refused grant is a run that failed, and the tab
+            # Inside the try: a refused read is a run that failed, and the tab
             # should say so rather than the service exiting quietly.
-            api_token = access_token(shop, stoken, cid, csec)
+            store = ShopifyStore(shop, stoken) if stoken else ReactorStore(base, token)
             since = as_of - timedelta(days=int(env.get("FORECAST_HISTORY_DAYS", "900")))
-            log.info("pulling orders since %s", since)
-            orders = run_bulk_orders(shop, api_token, since)
+            log.info("pulling orders since %s (%s)", since, "own token" if stoken else "through Reactor")
+            orders = run_bulk_orders(store, since)
             cfg = Config(as_of=as_of, horizon_days=int(env.get("FORECAST_HORIZON", "90")))
 
             # THE FORECAST. Five plain models on the monthly total, ranked by
@@ -315,7 +322,7 @@ def main() -> int:
                                use_catboost=env.get("FORECAST_CATBOOST", "1") != "0")
                 log.info("m5 models: lightgbm%s%s", "+catboost" if m5cfg.use_catboost else "",
                          "+nbeats" if m5cfg.use_nbeats else "")
-                products = fetch_products(shop, api_token)
+                products = fetch_products(store)
                 panel = to_daily_panel(orders_to_rows(orders, m5cfg, products), as_of)
                 runner = Runner(m5cfg, panel, cf, Path(tmp) / "out",
                                 scenario=env.get("FORECAST_SCENARIO") or None)

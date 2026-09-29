@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """
-Shopify MCP Server — Full Admin API access via FastMCP.
-Provides tools for managing products, orders, customers, collections,
-inventory, and fulfillments through the Shopify Admin REST API.
+Shopify MCP Server: READ-ONLY Admin API tools via FastMCP, plus Reactor.
+The /mcp tools read products, orders, customers, collections, inventory,
+fulfilments, payouts and webhooks through the Shopify Admin REST API. They
+do not write: the create, update, delete, close, cancel, set-inventory and
+create-webhook tools were removed on 29 September 2026 (security audit
+R-002, chains R-C2 and R-C8). /mcp sits behind one shared bearer token and
+outside Reactor's accounts, so a leaked token or a desktop AI steered by an
+order note could cancel orders or add a webhook that copies every order out
+of the business. The app's own print, Mark made and Dispatch flows make
+every Shopify write Reactor needs, through functions handed to copilot.
 
 Token Management:
   - Uses client_credentials grant to auto-generate and refresh tokens
@@ -10,6 +17,8 @@ Token Management:
   - Falls back to static SHOPIFY_ACCESS_TOKEN if client credentials not set
 """
 import gzip
+import re
+import urllib.parse
 import json
 import os
 import logging
@@ -75,7 +84,67 @@ mcp = FastMCP("shopify_mcp", host="0.0.0.0", port=PORT, json_response=True)
 # It must never be open to the internet. Without MCP_BEARER_TOKEN set, /mcp is
 # LOCKED. When set, callers (e.g. the Claude.ai integration) must send
 # `Authorization: Bearer <MCP_BEARER_TOKEN>`.
-MCP_BEARER_TOKEN = os.environ.get("MCP_BEARER_TOKEN", "")
+# Stripped: a value of spaces was truthy, so it counted as set, and a request
+# sending the same spaces passed the gate (audit R-025).
+MCP_BEARER_TOKEN = os.environ.get("MCP_BEARER_TOKEN", "").strip()
+# A JSON-RPC body past this is passed through unread rather than parsed for
+# the call record; the tools take a handful of small arguments.
+MCP_NOTE_MAX_BYTES = 1024 * 1024
+
+
+async def _mcp_note_calls(receive):
+    """Read a POST's JSON-RPC body, record each tools/call in Reactor's
+    activity ledger by tool name, and return (a receive that replays it, 0),
+    or (None, status) for a body the caller refuses: 413 past
+    MCP_NOTE_MAX_BYTES, 400 when it is not JSON. Either would otherwise run
+    with no record (padding a call with a megabyte of spaces was enough to
+    hide it), and no real client sends one.
+
+    /mcp never enters Reactor's _guard, so until this nothing anywhere said a
+    tool had been called, or which (audit R-038). The name only: arguments
+    can carry customer search terms, and the ledger is visible to admins."""
+    messages, size, more = [], 0, True
+    while more:
+        msg = await receive()
+        messages.append(msg)
+        if msg.get("type") != "http.request":
+            break
+        size += len(msg.get("body") or b"")
+        more = bool(msg.get("more_body"))
+        if size > MCP_NOTE_MAX_BYTES:
+            return None, 413
+    if not more:
+        try:
+            body = json.loads(b"".join(m.get("body") or b"" for m in messages if m.get("type") == "http.request") or b"null")
+        except ValueError:
+            logger.warning("mcp: refused a request body that could not be read for the call record")
+            return None, 400
+        if not isinstance(body, dict):
+            # One message per request: the transport refuses a batch anyway,
+            # and one array of eight thousand calls wrote eight thousand rows,
+            # pushing every other record out of the ledger.
+            logger.warning("mcp: refused a request that was not one JSON-RPC message")
+            return None, 400
+        names = []
+        if body.get("method") == "tools/call":
+            raw = (body["params"] if isinstance(body.get("params"), dict) else {}).get("name")
+            # The name only, and only as a tool name looks: any 80 characters
+            # the sender liked went into a ledger admins read.
+            names = [raw if isinstance(raw, str) and re.fullmatch(r"[A-Za-z0-9_.\-]{1,64}", raw) else "?"]
+        for n in names:
+            logger.info("mcp: tool call %s", n)   # the log line stands if the ledger write fails
+            try:
+                import copilot as _c
+                _c._track(None, "mcp", "the desktop AI called a tool", n)
+            except Exception:
+                logger.exception("mcp: the call record could not be written")
+    pending = list(messages)
+
+    async def replay():
+        if pending:
+            return pending.pop(0)
+        return await receive()
+    return replay, 0
 
 
 class MCPAuthMiddleware:
@@ -102,6 +171,13 @@ class MCPAuthMiddleware:
                 if not (provided and secrets.compare_digest(provided, f"Bearer {MCP_BEARER_TOKEN}")):
                     await JSONResponse({"error": "Unauthorized"}, status_code=401)(scope, receive, send)
                     return
+                if scope.get("method") == "POST":
+                    replay, refused = await _mcp_note_calls(receive)
+                    if replay is None:
+                        await JSONResponse({"error": "Request too large." if refused == 413
+                                            else "Send one JSON-RPC message per request."}, status_code=refused)(scope, receive, send)
+                        return
+                    receive = replay
         await self.app(scope, receive, send)
 
 
@@ -228,6 +304,12 @@ def _boot_report() -> None:
     if not getattr(_c, "SHOPIFY_API_SECRET", ""):
         gaps.append("SHOPIFY_API_SECRET: session tokens and webhook signatures cannot be verified, "
                     "so the embedded app and the webhooks are off")
+    try:
+        vol = _c._data_volume_warning()
+        if vol:
+            gaps.append("storage: " + vol)
+    except Exception:
+        logger.exception("config: the storage check failed")
     for g in gaps:
         logger.warning("config: %s", g)
     if not gaps:
@@ -603,85 +685,6 @@ async def shopify_get_product(params: GetProductInput) -> str:
         return _error(e)
 
 
-class CreateProductInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    title:        str                        = Field(..., min_length=1, description="Product title")
-    body_html:    Optional[str]              = Field(default=None, description="HTML description")
-    vendor:       Optional[str]              = Field(default=None)
-    product_type: Optional[str]              = Field(default=None)
-    tags:         Optional[str]              = Field(default=None, description="Comma-separated tags")
-    status:       Optional[str]              = Field(default="draft", description="active, archived, or draft")
-    variants:     Optional[List[Dict[str, Any]]] = Field(default=None, description="Variant objects with price, sku, etc.")
-    options:      Optional[List[Dict[str, Any]]] = Field(default=None, description="Product options (Size, Color, etc.)")
-    images:       Optional[List[Dict[str, Any]]] = Field(default=None, description="Image objects with src URL")
-
-
-@mcp.tool(
-    name="shopify_create_product",
-    annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
-)
-async def shopify_create_product(params: CreateProductInput) -> str:
-    """Create a new product in the Shopify store."""
-    try:
-        product: Dict[str, Any] = {"title": params.title}
-        for field in ["body_html", "vendor", "product_type", "tags", "status", "variants", "options", "images"]:
-            val = getattr(params, field)
-            if val is not None:
-                product[field] = val
-        data = await _request("POST", "products.json", body={"product": product})
-        return _fmt(data.get("product", data))
-    except Exception as e:
-        return _error(e)
-
-
-class UpdateProductInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    product_id:   int            = Field(..., description="Product ID to update")
-    title:        Optional[str]  = Field(default=None)
-    body_html:    Optional[str]  = Field(default=None)
-    vendor:       Optional[str]  = Field(default=None)
-    product_type: Optional[str]  = Field(default=None)
-    tags:         Optional[str]  = Field(default=None)
-    status:       Optional[str]  = Field(default=None, description="active, archived, or draft")
-    variants:     Optional[List[Dict[str, Any]]] = Field(default=None)
-
-
-@mcp.tool(
-    name="shopify_update_product",
-    annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
-)
-async def shopify_update_product(params: UpdateProductInput) -> str:
-    """Update an existing product. Only provided fields are changed."""
-    try:
-        product: Dict[str, Any] = {}
-        for field in ["title", "body_html", "vendor", "product_type", "tags", "status", "variants"]:
-            val = getattr(params, field)
-            if val is not None:
-                product[field] = val
-        data = await _request("PUT", f"products/{params.product_id}.json", body={"product": product})
-        return _fmt(data.get("product", data))
-    except Exception as e:
-        return _error(e)
-
-
-class DeleteProductInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    product_id: int = Field(..., description="Product ID to delete")
-
-
-@mcp.tool(
-    name="shopify_delete_product",
-    annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": True},
-)
-async def shopify_delete_product(params: DeleteProductInput) -> str:
-    """Permanently delete a product. This cannot be undone."""
-    try:
-        await _request("DELETE", f"products/{params.product_id}.json")
-        return f"Product {params.product_id} deleted."
-    except Exception as e:
-        return _error(e)
-
-
 class ProductCountInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     status:       Optional[str] = Field(default=None, description="active, archived, or draft")
@@ -785,50 +788,6 @@ async def shopify_count_orders(params: OrderCountInput) -> str:
         return _error(e)
 
 
-class CloseOrderInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    order_id: int = Field(..., description="Order ID to close")
-
-
-@mcp.tool(
-    name="shopify_close_order",
-    annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
-)
-async def shopify_close_order(params: CloseOrderInput) -> str:
-    """Close an order (marks it as completed)."""
-    try:
-        data = await _request("POST", f"orders/{params.order_id}/close.json")
-        return _fmt(data.get("order", data))
-    except Exception as e:
-        return _error(e)
-
-
-class CancelOrderInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    order_id: int            = Field(..., description="Order ID to cancel")
-    reason:   Optional[str]  = Field(default=None, description="customer, fraud, inventory, declined, other")
-    email:    Optional[bool] = Field(default=True,  description="Send cancellation email to customer")
-    restock:  Optional[bool] = Field(default=False, description="Restock line items")
-
-
-@mcp.tool(
-    name="shopify_cancel_order",
-    annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": True},
-)
-async def shopify_cancel_order(params: CancelOrderInput) -> str:
-    """Cancel an order. Optionally restock items and notify the customer."""
-    try:
-        body: Dict[str, Any] = {}
-        for field in ["reason", "email", "restock"]:
-            val = getattr(params, field)
-            if val is not None:
-                body[field] = val
-        data = await _request("POST", f"orders/{params.order_id}/cancel.json", body=body)
-        return _fmt(data.get("order", data))
-    except Exception as e:
-        return _error(e)
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # CUSTOMERS
 # ═══════════════════════════════════════════════════════════════════════════
@@ -895,65 +854,6 @@ async def shopify_get_customer(params: GetCustomerInput) -> str:
     """Retrieve a single customer by ID."""
     try:
         data = await _request("GET", f"customers/{params.customer_id}.json")
-        return _fmt(data.get("customer", data))
-    except Exception as e:
-        return _error(e)
-
-
-class CreateCustomerInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    first_name:         Optional[str]  = Field(default=None)
-    last_name:          Optional[str]  = Field(default=None)
-    email:              Optional[str]  = Field(default=None)
-    phone:              Optional[str]  = Field(default=None)
-    tags:               Optional[str]  = Field(default=None)
-    note:               Optional[str]  = Field(default=None)
-    addresses:          Optional[List[Dict[str, Any]]] = Field(default=None)
-    send_email_invite:  Optional[bool] = Field(default=False)
-
-
-@mcp.tool(
-    name="shopify_create_customer",
-    annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
-)
-async def shopify_create_customer(params: CreateCustomerInput) -> str:
-    """Create a new customer."""
-    try:
-        customer: Dict[str, Any] = {}
-        for field in ["first_name", "last_name", "email", "phone", "tags", "note", "addresses", "send_email_invite"]:
-            val = getattr(params, field)
-            if val is not None:
-                customer[field] = val
-        data = await _request("POST", "customers.json", body={"customer": customer})
-        return _fmt(data.get("customer", data))
-    except Exception as e:
-        return _error(e)
-
-
-class UpdateCustomerInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    customer_id: int           = Field(..., description="Customer ID to update")
-    first_name:  Optional[str] = Field(default=None)
-    last_name:   Optional[str] = Field(default=None)
-    email:       Optional[str] = Field(default=None)
-    phone:       Optional[str] = Field(default=None)
-    tags:        Optional[str] = Field(default=None)
-    note:        Optional[str] = Field(default=None)
-
-
-@mcp.tool(
-    name="shopify_update_customer",
-    annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
-)
-async def shopify_update_customer(params: UpdateCustomerInput) -> str:
-    """Update an existing customer. Only provided fields are changed."""
-    try:
-        customer: Dict[str, Any] = {}
-        for field in ["first_name", "last_name", "email", "phone", "tags", "note"]:
-            val = getattr(params, field)
-            if val is not None:
-                customer[field] = val
-        data = await _request("PUT", f"customers/{params.customer_id}.json", body={"customer": customer})
         return _fmt(data.get("customer", data))
     except Exception as e:
         return _error(e)
@@ -1117,32 +1017,6 @@ async def shopify_get_inventory_items(params: GetInventoryItemsInput) -> str:
         return _error(e)
 
 
-class SetInventoryLevelInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    inventory_item_id: int = Field(..., description="Inventory item ID")
-    location_id:       int = Field(..., description="Location ID")
-    available:         int = Field(..., description="Available quantity to set")
-
-
-@mcp.tool(
-    name="shopify_set_inventory_level",
-    annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
-)
-async def shopify_set_inventory_level(params: SetInventoryLevelInput) -> str:
-    """Set the available inventory for an item at a location."""
-    try:
-        body = {
-            "inventory_item_id": params.inventory_item_id,
-            "location_id":       params.location_id,
-            "available":         params.available,
-        }
-        # An absolute set, not an increment: safe to repeat.
-        data = await _request("POST", "inventory_levels/set.json", body=body, idempotent=True)
-        return _fmt(data.get("inventory_level", data))
-    except Exception as e:
-        return _error(e)
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # FULFILLMENTS
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1286,27 +1160,6 @@ async def shopify_list_webhooks(params: ListWebhooksInput) -> str:
         return _error(e)
 
 
-class CreateWebhookInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    topic:   str           = Field(..., description="Webhook topic, e.g. orders/create, products/update")
-    address: str           = Field(..., description="URL to receive the webhook POST")
-    format:  Optional[str] = Field(default="json", description="json or xml")
-
-
-@mcp.tool(
-    name="shopify_create_webhook",
-    annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
-)
-async def shopify_create_webhook(params: CreateWebhookInput) -> str:
-    """Create a new webhook subscription."""
-    try:
-        webhook = {"topic": params.topic, "address": params.address, "format": params.format}
-        data    = await _request("POST", "webhooks.json", body={"webhook": webhook})
-        return _fmt(data.get("webhook", data))
-    except Exception as e:
-        return _error(e)
-
-
 # ---------------------------------------------------------------------------
 # Reactor — embedded Claude chat UI (adds GET / and POST /api/chat)
 # ---------------------------------------------------------------------------
@@ -1394,6 +1247,159 @@ async def shopify_granted_scopes(max_age: float = 900.0) -> dict:
             return {"scopes": [], "missing": {}, "error": str(e)[:200]}
     return {"scopes": got, "error": "",
             "missing": {k: v for k, v in REQUIRED_WRITE_SCOPES.items() if k not in got}}
+
+
+# The forecast job's reads of the store, made here with the app's own credential
+# so that job holds none of Shopify's. It used to hold the app's client id and
+# secret, and that secret also signs every webhook: whoever read it off the
+# second service could post a shop/redact and erase nine stores. These are the
+# same queries as forecast/ingest.py (a test holds them equal), and they carry
+# no customer's name, email or address: totals, tags and line items only.
+FORECAST_BULK_ORDERS_QUERY = """
+{
+  orders(query: "created_at:>=%s") {
+    edges { node {
+      id name createdAt cancelledAt displayFinancialStatus test tags
+      currentTotalPriceSet { shopMoney { amount } }
+      customer { tags }
+      lineItems { edges { node {
+        id sku quantity title variantTitle
+        originalUnitPriceSet { shopMoney { amount } }
+        totalDiscountSet { shopMoney { amount } }
+        discountAllocations { allocatedAmountSet { shopMoney { amount } } }
+        variant { id product { id productType } }
+      } } }
+    } }
+  }
+}
+"""
+
+FORECAST_REFUNDED_ORDERS_QUERY = """
+query($q: String!, $after: String) {
+  orders(first: 50, after: $after, query: $q) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      id
+      refunds {
+        id createdAt
+        refundLineItems(first: 100) {
+          nodes { quantity subtotalSet { shopMoney { amount } } lineItem { id } }
+        }
+      }
+    }
+  }
+}
+"""
+
+FORECAST_PRODUCTS_QUERY = """
+query($after: String) {
+  products(first: 250, after: $after) {
+    edges { node { id productType } }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+"""
+
+FORECAST_REFUNDS_FILTER = ("created_at:>=%s AND "
+                           "(financial_status:refunded OR financial_status:partially_refunded)")
+
+_FORECAST_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+_FORECAST_BULK_ID = re.compile(r"gid://shopify/BulkOperation/\d{1,20}")
+_FORECAST_CURSOR = re.compile(r"[A-Za-z0-9+/=_\-]{1,400}")
+
+
+async def forecast_store_read(op: str, args: dict) -> dict:
+    """{"data": ...} or {"error": str, "status": int}. One of four fixed reads,
+    each answering in the shape forecast/ingest.py's own store answers in:
+
+      bulk_start   {"since": "YYYY-MM-DD"}   start the orders bulk query
+      bulk_status  {"id": BulkOperation gid} how it is going, and its file
+      refunds      {"since", "after"}        one page of refunded orders
+      products     {"after"}                 one page of product types
+
+    Nothing the caller sends becomes query text except a date, an id and a
+    cursor, each checked against its own shape first."""
+    since = str(args.get("since") or "")
+    after = args.get("after")
+    if after is not None and not (isinstance(after, str) and _FORECAST_CURSOR.fullmatch(after)):
+        return {"error": "That page cursor is not one Shopify gave.", "status": 400}
+    if op in ("bulk_start", "refunds") and not _FORECAST_DAY.fullmatch(since):
+        return {"error": "A start date (YYYY-MM-DD) is required.", "status": 400}
+    if op == "bulk_start":
+        query = ("mutation($q: String!) { bulkOperationRunQuery(query: $q) {"
+                 " bulkOperation { id status } userErrors { field message } } }")
+        variables, pick, read = {"q": FORECAST_BULK_ORDERS_QUERY % since}, "bulkOperationRunQuery", False
+    elif op == "bulk_status":
+        op_id = str(args.get("id") or "")
+        if not _FORECAST_BULK_ID.fullmatch(op_id):
+            return {"error": "That is not a bulk operation id.", "status": 400}
+        query = ("query($id: ID!) { node(id: $id) { ... on BulkOperation {"
+                 " status url errorCode objectCount } } }")
+        variables, pick, read = {"id": op_id}, "node", True
+    elif op == "refunds":
+        variables, pick, read = {"q": FORECAST_REFUNDS_FILTER % since, "after": after}, "orders", True
+        query = FORECAST_REFUNDED_ORDERS_QUERY
+    elif op == "products":
+        query, variables, pick, read = FORECAST_PRODUCTS_QUERY, {"after": after}, "products", True
+    else:
+        return {"error": "Unknown read.", "status": 400}
+    try:
+        # Starting a bulk query is not repeated after an ambiguous failure: a
+        # second one would run beside the first. The three reads are.
+        payload = await _request("POST", "graphql.json", idempotent=read,
+                                 body={"query": query, "variables": variables})
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code if e.response is not None else 0
+        return {"error": f"Shopify answered {code}.", "status": 502}
+    except Exception as e:
+        return {"error": f"Shopify could not be reached ({type(e).__name__}).", "status": 502}
+    if payload.get("errors"):
+        return {"error": str(payload["errors"])[:500], "status": 502}
+    return {"data": (payload.get("data") or {}).get(pick)}
+
+
+_GRANT_REFUSED = re.compile(r"Token refresh failed \((400|401|403)\)")
+
+
+async def shopify_install_state(timeout: float = 4.0) -> str:
+    """"installed", "gone" or "unknown": does Shopify still honour this app's
+    credential for the store?
+
+    Asked before a shop/redact erases anything. That webhook is signed with
+    the app's secret, so anyone holding the secret can post one; a genuine
+    one arrives 48 hours after an uninstall, when Shopify has already stopped
+    honouring the app's token. "gone" is only ever Shopify refusing the
+    credential outright (401, 403, 404, or the token grant refused); a
+    timeout, a throttle or an outage is "unknown", and erases nothing.
+
+    One quick attempt, no retry loop: it answers a webhook Shopify waits five
+    seconds for."""
+    async def ask() -> int:
+        headers = await _headers()
+        resp = await _http().post(f"{_base_url()}/graphql.json", headers=headers,
+                                  json={"query": "{ shop { id } }"}, timeout=timeout)
+        if resp.status_code == 200:
+            try:
+                shop = ((resp.json().get("data") or {}).get("shop") or {}).get("id")
+            except Exception:
+                shop = None
+            return 200 if shop else 0
+        return resp.status_code
+
+    try:
+        code = await asyncio.wait_for(ask(), timeout + 1)
+        if code == 401 and token_manager._use_client_credentials:
+            # A token minted before an uninstall is revoked by it; so is one
+            # minted before the secret was rotated. Ask for a fresh one once.
+            await asyncio.wait_for(token_manager.force_refresh(), timeout)
+            code = await asyncio.wait_for(ask(), timeout + 1)
+    except RuntimeError as e:
+        return "gone" if _GRANT_REFUSED.match(str(e)) else "unknown"
+    except Exception:
+        return "unknown"
+    if code == 200:
+        return "installed"
+    return "gone" if code in (401, 403, 404) else "unknown"
 
 
 async def shopify_order_tax_id(order_id: int) -> dict:
@@ -1828,6 +1834,29 @@ def _app_public_url() -> str:
     return f"https://{dom}" if dom else ""
 
 
+# Hosts besides this deployment's own whose order webhooks the hourly repair
+# keeps: a second copy of Reactor (staging) on the same Shopify credentials
+# would otherwise delete this one's subscriptions every hour, and this one
+# its. Everything else pointing away from Reactor is removed (audit R-C2).
+def _webhook_host(value: str) -> str:
+    """The host name an address or a bare host names, compared as Shopify
+    and the network do: case, port, user part and a trailing dot aside. ''
+    for anything that names no https or http host (an EventBridge ARN, say)."""
+    v = str(value or "").strip()
+    if "://" not in v:
+        v = "https://" + v
+    try:
+        u = urllib.parse.urlparse(v)
+        if u.scheme not in ("https", "http"):
+            return ""
+        return (u.hostname or "").rstrip(".").lower()
+    except ValueError:
+        return ""
+
+
+WEBHOOK_ALLOWED_HOSTS = {_webhook_host(h) for h in os.environ.get("WEBHOOK_ALLOWED_HOSTS", "").split(",") if _webhook_host(h)}  # comma-separated host names or addresses (a staging copy of Reactor) whose webhooks the hourly repair keeps
+
+
 async def ensure_order_webhooks() -> dict:
     """Make sure the order webhooks exist and point at this deployment.
 
@@ -1839,12 +1868,40 @@ async def ensure_order_webhooks() -> dict:
     if not base:
         return {"ok": False, "detail": "No public URL (APP_URL/RAILWAY_PUBLIC_DOMAIN unset)."}
     address = base + "/webhooks/orders"
+    ours = {_webhook_host(base)} | WEBHOOK_ALLOWED_HOSTS
+    dom = _webhook_host(os.environ.get("RAILWAY_PUBLIC_DOMAIN", ""))
+    if dom:
+        ours.add(dom)
+    ours.discard("")
+    foreign_removed: list = []
     try:
         data = await _request("GET", "webhooks.json", params={"limit": 250})
         have = {}
         for w in data.get("webhooks", []):
             if str(w.get("address") or "") == address:
                 have[str(w.get("topic") or "")] = w
+                continue
+            # This list holds only subscriptions made with THIS app's
+            # credentials, so one pointing at another host was made with them
+            # too: through /mcp's old create-webhook tool, or by whoever held
+            # a token, and it copies every order it names out of the business
+            # (audit chain R-C2). Removed and reported. Shopify's three
+            # compliance topics are managed by the app's own configuration
+            # and never touched here.
+            # Anything that is not an https or http address on one of our own
+            # hosts goes, an address with no host at all (an event bus, say)
+            # included: none of it is Reactor's.
+            host = _webhook_host(str(w.get("address") or ""))
+            topic = str(w.get("topic") or "")
+            if host not in ours and not topic.startswith(("customers/data_request", "customers/redact", "shop/redact")) \
+                    and w.get("id"):
+                shown = host or str(w.get("address") or "")[:80] or "an address with no host"
+                try:
+                    await _request("DELETE", f"webhooks/{int(w['id'])}.json")
+                    foreign_removed.append(f"{topic} to {shown}")
+                    logger.warning("webhooks: removed a %s subscription pointing at %s", topic, shown)
+                except Exception as e:
+                    logger.warning("webhooks: could not remove the %s subscription at %s: %s", topic, shown, e)
         made = 0
         for topic, w in list(have.items()):
             if topic not in WEBHOOK_TOPICS and w.get("id"):
@@ -1864,9 +1921,14 @@ async def ensure_order_webhooks() -> dict:
             made += 1
         if made:
             logger.info("webhooks: registered %d subscription(s) at %s", made, address)
-        return {"ok": True, "address": address, "topics": sorted(WEBHOOK_TOPICS)}
+        return {"ok": True, "address": address, "topics": sorted(WEBHOOK_TOPICS),
+                "foreign_removed": foreign_removed}
     except Exception as e:
         logger.warning("webhooks: could not ensure subscriptions: %s", e)
+        if foreign_removed:
+            # A later step failing must not lose the report of what was
+            # already removed: next hour it is gone, and never said.
+            return {"ok": False, "detail": str(e)[:200], "foreign_removed": foreign_removed}
         return {"ok": False, "detail": f"{type(e).__name__}: {e}"[:200]}
 
 
@@ -1984,7 +2046,9 @@ try:
                        payment_terms_writer=set_order_payment_terms_net30,
                        scope_reader=shopify_granted_scopes,
                        tax_id_reader=shopify_order_tax_id,
-                       order_writer=update_order_fields)
+                       order_writer=update_order_fields,
+                       forecast_reader=forecast_store_read,
+                       install_checker=shopify_install_state)
 except Exception as e:
     # The whole app is these routes, not just the chat: say so, with the cause.
     logger.exception(f"Reactor could not start (every page and route is missing): {e}")

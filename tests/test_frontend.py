@@ -2948,7 +2948,7 @@ def t_the_files_browser_is_composed_like_the_reference():
     fn = SCRIPT.split("function renderFilesBrowser(host) {")[1]
     fn = fn[:fn.index("\n        function ")]
     ok("const fCard = el('div', 'card')" in fn, "the browser is a card")
-    ok("filesHeroAct.append(nf, up, fi)" in fn, "New folder and Upload are page-header actions, in the hero's slot")
+    ok("filesHeroAct.append(drv, nf, up, fi)" in fn, "Finder drive, New folder and Upload are page-header actions, in the hero's slot")
     ok("fCard.append(tableTools([qWrap], [srt]))" in fn, "search left, sort right")
     ok("filterChip('Sort'" in fn, "the sort is a chip that says what it is set to")
     ok("el('div', 'lbl-toolbar')" not in fn, "the old four-control row is gone")
@@ -7127,7 +7127,7 @@ def t_a_held_enter_signs_in_once():
     # live again, and each repeat was another failed attempt on the account.
     for site in ("inCode.onkeydown = (e) => { if (e.key === 'Enter' && !e.repeat) submit(); };",
                  "[inUser, inPw].forEach(i => i.onkeydown = (e) => { if (e.key === 'Enter' && !e.repeat) submit(); });",
-                 "[inName, inUser, inPw].forEach(i => i.onkeydown = e => { if (e.key === 'Enter' && !e.repeat) go.click(); });",
+                 "[inCode, inName, inUser, inPw].forEach(i => i.onkeydown = e => { if (e.key === 'Enter' && !e.repeat) go.click(); });",
                  "[inCur, inNew].forEach(i => i.onkeydown = e => { if (e.key === 'Enter' && !e.repeat) go.click(); });"):
         ok(site in SCRIPT, "a held Enter is one press: " + site[:60])
 
@@ -8342,6 +8342,27 @@ def md_src():
         r"        const (?:MD_LI|mdEsc|mdUnesc|MD_INLINE|MD_FM_KEYS) = [^\n]*\n", SCRIPT))
     return consts + "\n".join(fn_src(n) for n in ("function yamlScalar(", "function mdFrontmatter(", "function mdInline(",
                                                    "function mdList(", "function mdNodes(", "function proseNodes(", "function pipeTable("))
+
+
+@test
+def t_members_see_only_the_memory_buttons_the_server_allows():
+    """Found verifying R-003 (29 September 2026). The server lets a member
+    tick off, reopen or dismiss only a follow-up an admin kept, and reopen
+    only one ticked off; the page offered Reopen on every closed follow-up
+    and the buttons on a member's never-kept note, each answered 403. Keep
+    on a waiting note, Conclude and Delete on someone else's tracked change,
+    and a skill's reading are an admin's."""
+    row = fn_src("function memRow(")
+    ok("const unkept = !!m.by && !m.kept;" in row, "a member's never-kept note is known")
+    ok("if (admin) btn(I.check, 'Keep'" in row, "Keep is an admin's")
+    ok("if (admin || !unkept) {" in row, "Mark done and Dismiss only on a kept follow-up")
+    ok("if (admin || (m.status === 'done' && !unkept))" in row, "Reopen only from done, for a member")
+    imp = fn_src("function impactRow(")
+    ok("const mayAct = canEditInstructions() || (!!it.by_uid && !!teamMe && it.by_uid === String(teamMe.id || ''));" in imp,
+       "Conclude and Delete for the tracker or an admin")
+    ok("if (mayAct) acts.append(del);" in imp and "' Tracked by ' + it.by" in imp, "and it says who tracked it")
+    ok("if (!s.reading && canEditInstructions()) {" in SCRIPT and "if (canEditInstructions()) foot.append(again);" in SCRIPT,
+       "a skill's reading is run by an admin")
 
 
 @test

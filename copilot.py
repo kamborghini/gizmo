@@ -33,6 +33,7 @@ import hashlib
 import socket
 import unicodedata
 import bisect
+import types
 import asyncio
 import logging
 import secrets
@@ -155,6 +156,12 @@ PROFILE_FIELD_CAP  = _env_num(int, os.environ.get("PROFILE_FIELD_CAP", "6000"), 
 MEMORY_PATH        = os.environ.get("MEMORY_PATH", "/data/store_memory.json")
 MEMORY_MAX         = _env_num(int, os.environ.get("MEMORY_MAX", "500"), "500", "MEMORY_MAX")    # max stored memories
 MEMORY_INJECT      = _env_num(int, os.environ.get("MEMORY_INJECT", "40"), "40", "MEMORY_INJECT")  # max of each kind injected into prompts
+# Notes waiting for an admin are held to their own small allowance, and are
+# the first to go when the store is full: counted in with the rest, a member
+# asking chat to remember a few hundred things pushed out, for good, the notes
+# an admin had kept (found verifying R-003).
+MEMORY_PENDING_MAX = 50
+MEMORY_HELD_PER_ANSWER = 12
 KNOWLEDGE_PATH     = os.environ.get("KNOWLEDGE_PATH", "/data/store_knowledge.json")
 KNOWLEDGE_CAP      = _env_num(int, os.environ.get("KNOWLEDGE_CAP", "8000"), "8000", "KNOWLEDGE_CAP")     # max stored knowledge chars
 IMPACT_PATH        = os.environ.get("IMPACT_PATH", "/data/impact.json")  # tracked-action impact log
@@ -553,18 +560,39 @@ def _memory_grounded(text: str, said: str, saw: str) -> bool:
 
 
 def _add_memories(items: list[dict], said: str = "", saw: str = "",
-                  source: str = "merchant", refused: Optional[list] = None) -> list[dict]:
+                  source: str = "merchant", refused: Optional[list] = None,
+                  asked_in: Optional[str] = None, held: bool = False, by: str = "",
+                  kept: Optional[list] = None) -> list[dict]:
     """refused, when given, collects what was not kept and why ('instruction'
-    or 'from_data'), so the page can say so instead of answering as if saved."""
+    or 'from_data'), so the page can say so instead of answering as if saved;
+    kept, when given, collects the text of each note that was.
+
+    `held` saves each note as waiting for an admin (status "pending", with
+    `by` naming who it came from): a member's chat or tracked change. Notes
+    go into every account's answers, so a member could otherwise put a false
+    "fact" (new bank details, say) in front of everyone (audit R-003).
+
+    `asked_in` is the message being answered. Only there does "remember"
+    lift the provenance check: read over the whole conversation, one
+    "remember to chase Acme" early on let every later note through, however
+    much of it was lifted from an order note or an email (audit R-015)."""
     memories = _load_memory()
-    asked = bool(_MEM_ASKED.search(said or ""))   # the merchant asked for this in so many words
-    seen = {m.get("text", "").strip().lower() for m in memories}
+    asked = bool(_MEM_ASKED.search(said if asked_in is None else asked_in or ""))
+    seen = {m.get("text", "").strip().lower(): m for m in memories}
     now = datetime.now(timezone.utc).isoformat()
-    for it in (items or []):
+    for it in (items or [])[:MEMORY_HELD_PER_ANSWER if held else None]:
         if not isinstance(it, dict):
             continue
         text = str(it.get("text", "")).strip()[:800]
-        if not text or text.lower() in seen:
+        if not text:
+            continue
+        twin = seen.get(text.lower())
+        # An admin's own note that says what a member's waiting note says
+        # keeps it (skipped as a duplicate, the only copy stayed unread), but
+        # only once it has passed the same checks as a new note: text lifted
+        # from what an admin's chat READ must not promote a planted one.
+        promote = twin is not None and not held and twin.get("status") == "pending"
+        if twin is not None and not promote:
             continue
         if _MEMORY_INJECTION.search(text):
             # Persistent, cross-session and cross-user: the one place where a
@@ -579,18 +607,44 @@ def _add_memories(items: list[dict], said: str = "", saw: str = "",
             if refused is not None:
                 refused.append({"text": text, "reason": "from_data"})
             continue
+        if promote:
+            twin["status"], twin["kept"], twin["updated"] = "open", now, now
+            if kept is not None:
+                kept.append(text)
+            continue
         mtype = it.get("type") if it.get("type") in (
             "fact", "decision", "followup", "preference", "insight") else "fact"
-        memories.append({"id": secrets.token_hex(5), "type": mtype, "text": text,
-                         "status": "open", "created": now, "updated": now,
-                         "source": source})
-        seen.add(text.lower())
-    if len(memories) > MEMORY_MAX:  # keep open follow-ups + the most recent of everything else
-        keep = [m for m in memories if m.get("type") == "followup" and m.get("status") == "open"][:MEMORY_MAX]
-        rest = [m for m in memories if not (m.get("type") == "followup" and m.get("status") == "open")]
-        slots = max(0, MEMORY_MAX - len(keep))
-        memories = keep + (rest[-slots:] if slots else [])  # slots==0 must yield [], not rest[-0:]
+        note = {"id": secrets.token_hex(5), "type": mtype, "text": text,
+                "status": "pending" if held else "open", "created": now, "updated": now,
+                "source": source}
+        if held and by:
+            note["by"] = str(by)[:80]
+        memories.append(note)
+        seen[text.lower()] = note
+        if kept is not None:
+            kept.append(text)
+    memories = _prune_memories(memories)
+    if kept is not None:
+        # Only what is actually there is reported kept.
+        there = {m.get("text", "").strip().lower() for m in memories}
+        kept[:] = [t for t in kept if t.lower() in there]
     return _write_memory(memories)
+
+
+def _prune_memories(memories: list) -> list:
+    """Kept notes within MEMORY_MAX (open follow-ups first, then the newest
+    of the rest), and notes waiting for an admin within an allowance of their
+    own, MEMORY_PENDING_MAX, the newest kept. Neither costs the other a
+    place: counted together, waiting notes pushed kept ones out, and a store
+    full of kept ones left a member's note nowhere to wait."""
+    live = [m for m in memories if m.get("status") != "pending"]
+    pend = [m for m in memories if m.get("status") == "pending"][-MEMORY_PENDING_MAX:]
+    if len(live) > MEMORY_MAX:
+        keep = [m for m in live if m.get("type") == "followup" and m.get("status") == "open"][:MEMORY_MAX]
+        rest = [m for m in live if not (m.get("type") == "followup" and m.get("status") == "open")]
+        slots = max(0, MEMORY_MAX - len(keep))
+        live = keep + (rest[-slots:] if slots else [])   # slots==0 must yield [], not rest[-0:]
+    return live + pend
 
 
 def _update_memory(mid: str, status: str) -> list[dict]:
@@ -598,9 +652,25 @@ def _update_memory(mid: str, status: str) -> list[dict]:
     if status in ("open", "done", "dismissed"):
         for m in memories:
             if m.get("id") == mid:
+                # Opening a member's note that was never kept (waiting, or
+                # dismissed from waiting) is keeping it; only an admin gets here.
+                if status == "open" and (m.get("status") == "pending" or (m.get("by") and not m.get("kept"))):
+                    m["kept"] = datetime.now(timezone.utc).isoformat()
                 m["status"] = status
                 m["updated"] = datetime.now(timezone.utc).isoformat()
     return _write_memory(memories)
+
+
+def _member_may_set(note: Optional[dict], status: str) -> bool:
+    """What a member may do to a note's status: tick off a follow-up, reopen
+    one ticked off, or dismiss one that is open. Nothing that puts words back
+    in front of everyone: not a dismissed follow-up, and not one that came
+    from a member and was never kept by an admin."""
+    if not note or note.get("type") != "followup" or status not in ("open", "done", "dismissed"):
+        return False
+    if note.get("status") == "pending" or (note.get("by") and not note.get("kept")):
+        return False
+    return (note.get("status"), status) in (("open", "done"), ("open", "dismissed"), ("done", "open"))
 
 
 def _edit_memory(mid: str, text: str, mtype: str) -> list[dict]:
@@ -2805,7 +2875,10 @@ def _memory_to_system(memories: Optional[list[dict]] = None) -> str:
     memories = _load_memory() if memories is None else memories
     if not memories:
         return ""
-    active = [m for m in memories if m.get("status") != "dismissed"]
+    # A note waiting for an admin ("pending") came from a member's chat or
+    # tracked change, and is read into nobody's answer until an admin keeps
+    # it: what is here reaches every account (audit R-003).
+    active = [m for m in memories if m.get("status") not in ("dismissed", "pending")]
     open_fu = [m for m in active if m.get("type") == "followup" and m.get("status") == "open"][-MEMORY_INJECT:]
     facts = [m for m in active if m.get("type") in ("fact", "decision")][-MEMORY_INJECT:]
     prefs = [m for m in active if m.get("type") == "preference"][-MEMORY_INJECT:]
@@ -2962,6 +3035,10 @@ def _build_tools(registry: dict) -> list[dict]:
 _TOOL_TABS = {
     "shopify_list_customers": "customers", "shopify_search_customers": "customers",
     "shopify_get_customer": "customers", "shopify_get_customer_orders": "customers",
+    # An order carries its customer's name, email, phone and addresses, and
+    # list_orders takes any `fields`: without these the Customers gate was
+    # one tool call wide (audit R-004).
+    "shopify_list_orders": "customers", "shopify_get_order": "customers",
     "recon_summary": "recon", "recon_exceptions": "recon", "recon_exception": "recon",
     # Payouts and disputes are the books: the same tab as reconciliation.
     "shopify_list_payouts": "recon", "shopify_payout_transactions": "recon",
@@ -3029,8 +3106,10 @@ def _price_for(model: str, inp: int, out: int, cache_read: int = 0, cache_write:
     return round((inp * pi + cache_write * pi * 1.25 + cache_read * pi * cr + out * po) / 1_000_000, 6)
 
 
-def _log_usage(kind: str, model: str, usage) -> None:
-    """Append one model call's token usage + estimated cost. Best-effort; never raises."""
+def _log_usage(kind: str, model: str, usage, estimated: bool = False) -> None:
+    """Append one model call's token usage + estimated cost. Best-effort; never raises.
+    `estimated` marks a call that was sent and never answered, charged from
+    its size (see _xcreate_once)."""
     if usage is None:
         return
     try:
@@ -3041,6 +3120,8 @@ def _log_usage(kind: str, model: str, usage) -> None:
         rec = {"at": datetime.now(timezone.utc).isoformat(), "kind": kind, "model": model,
                "in": inp, "out": out, "cache_read": cr, "cache_write": cw,
                "cost": _price_for(model, inp, out, cr, cw)}
+        if estimated:
+            rec["estimated"] = True
         _spend_today()                      # ensure the day bucket is current
         _spend["cost"] += rec["cost"]       # keep the daily cap in sync without re-reading
         events = _load_json_store(USAGE_PATH, "events", [])
@@ -3095,8 +3176,73 @@ def _spend_today() -> float:
     return _spend["cost"]
 
 
-def _spend_guard() -> None:
-    if DAILY_COST_CAP > 0 and _spend_today() >= DAILY_COST_CAP:
+# What the calls sent and not yet answered may cost, held against the cap
+# while they run (audit R-005, chain R-C3). The cap was read before a call
+# and charged after it, so twenty calls sent together all passed at $24.99,
+# and a call cancelled on the way (the browser closing a chat stream) was
+# never charged at all.
+_spend_pending = {"cost": 0.0}
+
+
+# A document or image is billed by what it shows, not by the size of its
+# base64: a PDF page is its text plus a picture of the page, and an image is
+# scaled down before it is read. Counting a scan's base64 as text reserved
+# $15 for one 8 MB invoice and turned everyone's chat away while it was read.
+PDF_PAGE_TOKENS = 3000       # generous: a dense page's text and its image
+PDF_BYTES_PER_PAGE = 60_000  # when the page count cannot be read from the file
+PDF_MAX_PAGES = 100          # the most pages one request may carry
+IMAGE_TOKENS = 1600          # the most an image costs once scaled to fit
+_PDF_PAGE_OBJ = re.compile(rb"/Type\s*/Page(?![A-Za-z])")
+
+
+def _media_tokens(block: dict) -> int:
+    """Input tokens for one image or document block, estimated from what it is."""
+    if block.get("type") == "image":
+        return IMAGE_TOKENS
+    src = block.get("source") if isinstance(block.get("source"), dict) else {}
+    data = src.get("data")
+    if src.get("type") == "text" and isinstance(data, str):
+        return len(data) // 3
+    if src.get("type") == "base64" and isinstance(data, str):
+        try:
+            raw = base64.b64decode(data, validate=False)
+        except (ValueError, TypeError):
+            raw = b""
+        # A scan's pages sit in compressed object streams, where they cannot
+        # be counted; its size stands in, generously.
+        pages = len(_PDF_PAGE_OBJ.findall(raw)) or -(-len(raw) // PDF_BYTES_PER_PAGE)
+        return max(1, min(PDF_MAX_PAGES, pages)) * PDF_PAGE_TOKENS
+    return 20 * PDF_PAGE_TOKENS   # a file by reference: size unknown
+
+
+def _estimate_chars(v, media: list) -> int:
+    """Characters of everything sent, with each image and document counted
+    into `media` as tokens instead of by its encoded bytes."""
+    if isinstance(v, dict):
+        if v.get("type") in ("image", "document") and isinstance(v.get("source"), dict):
+            media.append(_media_tokens(v))
+            return 0
+        return sum(len(str(k)) + _estimate_chars(x, media) for k, x in v.items())
+    if isinstance(v, (list, tuple)):
+        return sum(_estimate_chars(x, media) for x in v)
+    if isinstance(v, str):
+        return len(v)
+    return len(str(v)) if v is not None else 0
+
+
+def _call_estimate(kwargs: dict) -> tuple:
+    """(input tokens, cost) as an upper estimate for one call: three
+    characters to a token over the text sent, documents and images by what
+    they show, and the whole output allowance."""
+    media: list = []
+    chars = sum(_estimate_chars(kwargs.get(k), media) for k in ("system", "messages", "tools"))
+    inp = chars // 3 + sum(media)
+    out = int(kwargs.get("max_tokens") or MAX_TOKENS)
+    return inp, _price_for(kwargs.get("model", ""), inp, out)
+
+
+def _spend_guard(reserve: float = 0.0) -> None:
+    if DAILY_COST_CAP > 0 and _spend_today() + _spend_pending["cost"] + reserve > DAILY_COST_CAP:
         logger.warning("DAILY_COST_CAP of %.2f reached", DAILY_COST_CAP)
         raise RuntimeError(
             "Reactor has used today's AI budget, so it will answer again tomorrow. "
@@ -3292,15 +3438,32 @@ async def _xcreate_once(client, kwargs: dict):
     the big system prompt (profile + memory + skills + store knowledge) and the
     tool schemas are identical across the many rounds of a chat loop, so caching
     them stops the same tokens being bought again on every round."""
-    _spend_guard()
+    est_in, est = _call_estimate(kwargs)
+    _spend_guard(est)
     system = kwargs.get("system")
     if isinstance(system, str) and len(system) > 2048:
         kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
     tools = kwargs.get("tools")
     if isinstance(tools, list) and tools and isinstance(tools[-1], dict) and "cache_control" not in tools[-1]:
         kwargs["tools"] = tools[:-1] + [{**tools[-1], "cache_control": {"type": "ephemeral"}}]
-    resp = await getattr(client.messages, "create")(**kwargs)
-    _log_usage(_ai_kind.get("ai"), kwargs.get("model", ""), getattr(resp, "usage", None))
+    kind, model = _ai_kind.get("ai"), kwargs.get("model", "")
+    _spend_pending["cost"] += est
+    try:
+        resp = await getattr(client.messages, "create")(**kwargs)
+    except (asyncio.CancelledError, anthropic.APIConnectionError, anthropic.APITimeoutError) as e:
+        # Sent and not answered: it may still have been run and billed, so
+        # the cap counts what was sent. A timeout is counted in full, output
+        # allowance and all: it comes after the service has worked for
+        # minutes, very likely to the end. A stop or a dropped line counts
+        # its input only, or pressing Stop would spend the day's allowance.
+        # A refusal the service answered with (an APIStatusError) is not
+        # billed, and is not counted.
+        out = int(kwargs.get("max_tokens") or MAX_TOKENS) if isinstance(e, anthropic.APITimeoutError) else 0
+        _log_usage(kind, model, types.SimpleNamespace(input_tokens=est_in, output_tokens=out), estimated=True)
+        raise
+    finally:
+        _spend_pending["cost"] = max(0.0, _spend_pending["cost"] - est)
+    _log_usage(kind, model, getattr(resp, "usage", None))
     return resp
 
 
@@ -3508,11 +3671,12 @@ def _picked_skills(body: dict) -> list:
     return [str(i) for i in ids[:8] if str(i) in known]
 
 
-def _chat_after(result: dict, history: list) -> None:
+def _chat_after(result: dict, history: list, held: bool = False, by: str = "") -> None:
     """What a chat answer asked to keep or close, done after it arrives.
     Notes that were not kept come back to the page, so a rule the merchant
     asked Reactor to remember is offered as a skill instead of vanishing; and
-    follow-ups the merchant said are done are closed, and said so."""
+    follow-ups the merchant said are done are closed, and said so. `held`
+    (a member's chat) keeps notes waiting for an admin, and says so."""
     st = result.get("structured") if isinstance(result.get("structured"), dict) else {}
     mems = st.pop("remember", None)
     done = st.pop("followups_done", None)
@@ -3520,10 +3684,15 @@ def _chat_after(result: dict, history: list) -> None:
     if isinstance(mems, list) and mems:
         refused: list = []
         said = _chat_said(history)
+        last = [m for m in (history or []) if isinstance(m, dict) and m.get("role") == "user"][-1:]
+        kept: list = []
         try:
-            _add_memories(mems, said, saw, source="chat", refused=refused)
+            _add_memories(mems, said, saw, source="chat", refused=refused, asked_in=_chat_said(last),
+                          held=held, by=by, kept=kept)
         except Exception:
             logger.exception("Memory capture failed")
+        if held and kept:
+            result["held"] = kept[:4]
         # Offered back as a skill only when it is the merchant's own rule: an
         # instruction lifted from an order note or an email the answer read is
         # never put in front of them as something to keep.
@@ -5909,6 +6078,8 @@ _order_tag_writer = None
 _payment_terms_writer = None
 _scope_reader = None
 _tax_id_reader = None
+_forecast_reader = None   # the forecast job's four store reads, made with the app's credential
+_install_checker = None   # "installed" / "gone" / "unknown": asked before a shop/redact erases
 _order_writer = None
 # The tag that marks an order sold on account: releasing one to production is
 # the moment its 30-day clock should start ticking in Shopify.
@@ -10951,11 +11122,29 @@ async def _watchdog_tick(registry: dict) -> bool:
             state["shopify_down"] = datetime.now(timezone.utc).isoformat()
             _add_alerts([{"tab": "settings", "tab_label": "Connections",
                           "metric": "Shopify connection is failing; data may be stale", "pct": None}])
-            await _send_alert_email("Reactor: Shopify connection is failing",
-                                    ["The app has not been able to read your store for 3 hours.",
-                                     "Data and labels may be stale, and scheduled audits are paused",
-                                     "until the connection recovers (this usually means the access",
-                                     "token was rotated or Shopify had an outage)."])
+            refused = False
+            if _install_checker is not None:
+                try:
+                    refused = (await _install_checker()) == "gone"
+                except Exception:
+                    refused = False
+            if refused:
+                # Shopify turning the app's own credential away is what an
+                # uninstall looks like, and two days after one Shopify has
+                # Reactor erase the shop's data: say so while there is time.
+                await _send_alert_email("Reactor: Shopify is refusing the app's access to your store",
+                                        ["For 3 hours Shopify has refused Reactor's access to your store.",
+                                         "If the app was uninstalled, reinstall it now: two days after an",
+                                         "uninstall, Shopify has Reactor erase the shop's data from the app.",
+                                         "If nobody here uninstalled it, someone holding the app's secret may",
+                                         "have: reinstall it and change the secret. If the secret or token was",
+                                         "just changed on purpose, give Reactor the new one."])
+            else:
+                await _send_alert_email("Reactor: Shopify connection is failing",
+                                        ["The app has not been able to read your store for 3 hours.",
+                                         "Data and labels may be stale, and scheduled audits are paused",
+                                         "until the connection recovers (this usually means the access",
+                                         "token was rotated or Shopify had an outage)."])
         if up and state.get("shopify_down"):
             state.pop("shopify_down", None)
             await _send_alert_email("Reactor: Shopify connection recovered",
@@ -10994,6 +11183,19 @@ async def _watchdog_tick(registry: dict) -> bool:
         if up and _webhook_ensurer is not None:
             try:
                 _webhook_state["ensured"] = await _webhook_ensurer()
+                gone = (_webhook_state["ensured"] or {}).get("foreign_removed") or []
+                if gone:
+                    # A subscription made with this app's credentials and
+                    # pointing at another host copies orders out of the
+                    # business: removed by the repair, and said loudly.
+                    _track(None, "settings", "removed order webhooks pointing outside Reactor", "; ".join(gone))
+                    await _send_alert_email("Reactor: removed store notifications that pointed outside the app",
+                                            gone + ["", "Each was made with Reactor's own Shopify credentials. "
+                                                    "If one was a second copy of Reactor, such as a staging copy, "
+                                                    "allow its host name (for example staging.example.com) in the "
+                                                    "server's settings. If nobody here made it, treat those "
+                                                    "credentials as leaked: change the desktop AI token and the "
+                                                    "app secret."])
             except Exception:
                 logger.exception("webhook registration failed")
         # Stock-bridge retries: bookings that failed to reach the stock app.
@@ -11032,6 +11234,12 @@ async def _watchdog_tick(registry: dict) -> bool:
             _events_flush()   # belt for the debounced ledger writes
         except Exception:
             logger.exception("team register check failed")
+        # A shop/redact still owed, tried again against this tick's own record
+        # of how long the store has been out of reach.
+        try:
+            await _shop_redact_retry(state.get("shopify_down"))
+        except Exception:
+            logger.exception("shop/redact retry failed")
         # Files trash past its 30-day window, and uploads that never finished.
         # Not gated on Shopify: the bucket is a different service entirely.
         # Under the store lock: the purge is a read-modify-write like any route.
@@ -12789,6 +12997,7 @@ def _mail_sender(t: dict, mailbox_addr: str) -> tuple:
 
 
 _erased_rx_cache: dict = {}
+MAIL_HEADER_SCRUB_MAX = 20_000
 
 
 def _mail_erased_rx(erased: set, header: bool = False):
@@ -12800,7 +13009,10 @@ def _mail_erased_rx(erased: set, header: bool = False):
         alts = "|".join(re.escape(a) for a in key[0] if a) or r"(?!)"
         core = r"(?<![\w.+-])(?:" + alts + r")(?![\w-]|\.\w)"
         if header:
-            core = r'(?:"[^"]*"\s*|[^,<>"\s][^,<>"]*)?<\s*' + core + r"\s*>|" + core
+            # The display name is bounded: unbounded, a long To or Cc with an
+            # erased address in it was walked from every character, the square
+            # of its length, inside the mail sync.
+            core = r'(?:"[^"]{0,300}"\s*|[^,<>"\s][^,<>"]{0,300})?<\s*' + core + r"\s*>|" + core
         # One entry per form (header and body): clearing on every build made
         # the two alternate, and each thread rebuilt both.
         for k in [k for k in _erased_rx_cache if k[1] == header]:
@@ -12833,7 +13045,15 @@ def _mail_apply_thread(store: dict, full: dict, mailbox_addr: str,
         # which Reply all reads): scrubbed on the way in, every time.
         rx = _mail_erased_rx(erased)
         hx = _mail_erased_rx(erased, header=True)
-        msgs = [{**m, **{f: (hx if f != "snippet" else rx).sub("[erased]", str(m.get(f)))
+
+        def scrub(f, v):
+            # A header past 20,000 characters is not a real address list, and
+            # the display-name half of the pattern would be walked from each
+            # of its characters: it goes whole.
+            if f != "snippet" and len(v) > MAIL_HEADER_SCRUB_MAX:
+                return "[erased]"
+            return (hx if f != "snippet" else rx).sub("[erased]", v)
+        msgs = [{**m, **{f: scrub(f, str(m.get(f)))
                          for f in ("snippet", "to", "cc", "reply_to")
                          if m.get(f) and rx.search(str(m.get(f)))}} for m in msgs]
     first = msgs[0]   # who started it, read before the cut keeps only the latest
@@ -14826,7 +15046,14 @@ def _redact_shop() -> dict:
     a minute of the privacy log recording the erasure, and reconnecting is
     one sign-in by the master. Xero and the courier stay: neither holds the
     shop's data, and the courier key is typed in, with nowhere to get it
-    back from after a misfire."""
+    back from after a misfire.
+
+    No archive, no erasure: {"wiped": 0, "refused": "archive"}. The caller
+    has confirmed the uninstall with Shopify first (the webhook is signed
+    with the app's secret, and a holder of that secret can post one), but a
+    confirmation can still be wrong, and an erasure with no copy is the one
+    mistake nobody can undo. The webhook answers so that Shopify sends it
+    again, and each delivery tries the archive again."""
     kept = ""
     try:
         buf, added = _build_backup_zip()
@@ -14838,10 +15065,10 @@ def _redact_shop() -> dict:
             fh.write(buf.getvalue())
         logger.warning("shop/redact: archived %d files to %s before erasing", added, kept)
     except Exception:
-        # A backup that cannot be written must NOT cancel the erasure - the
-        # obligation is Shopify's, not conditional on our disk. It is logged
-        # loudly instead, because that is the case where a misfire is final.
-        logger.exception("shop/redact: could not archive before erasing")
+        logger.exception("shop/redact: could not archive, so nothing was erased")
+        _privacy_note("shop/redact", "", "",
+                      "not erased yet: the archive taken first could not be written")
+        return {"wiped": 0, "archive": "", "refused": "archive"}
     wiped = 0
     stores = (CRM_PATH, MAILBOX_PATH, DISPATCH_STATE_PATH, CHASE_LOG_PATH,
               COLLECTIONS_PATH, CUSTOMS_MEMORY_PATH, PRODUCTION_STATE_PATH,
@@ -14870,6 +15097,185 @@ def _redact_shop() -> dict:
                   f"the archive is deleted after {REDACT_ARCHIVE_DAYS} days, and weekly "
                   f"snapshots are kept for {BACKUP_KEEP} weeks")
     return {"wiped": wiped, "archive": kept}
+
+
+# How long Reactor's own reads of the store must already have been refused
+# before a shop/redact may erase. A genuine one comes 48 hours after the
+# uninstall, by which time the watchdog (three failed hourly probes) has
+# recorded the outage for at least 45; a secret being rotated, or an app made
+# to uninstall itself by whoever holds the secret, has no such history yet,
+# and the outage email has said "reinstall it" for most of those hours.
+SHOP_REDACT_DOWN_HOURS = 40
+# A request that could not be acted on yet is owed, kept in the privacy log
+# and tried again every hour, so a Shopify outage at the wrong moment cannot
+# lose it; the webhook answers 200 once it is recorded.
+SHOP_REDACT_MAIL_HOURS = 6
+_shop_redact_said: dict = {}   # outcome -> monotonic time it was last emailed / logged
+
+
+def _shop_owed_set(value: Optional[dict]) -> bool:
+    """Record, or clear, the one shop/redact still owed (in the privacy log,
+    which survives a restart). False when it could not be written: an
+    unreadable log, or a full disk."""
+    try:
+        d = _load_privacy_log()
+        if value is None:
+            d.pop("shop_owed", None)
+        else:
+            d["shop_owed"] = value
+        if not _store_writable(PRIVACY_LOG_PATH):
+            return False
+        _write_json_store(PRIVACY_LOG_PATH, None, d)
+        return True
+    except Exception:
+        logger.exception("shop/redact: the owed record could not be written")
+        return False
+
+
+async def _shop_redact_attempt(down_since) -> str:
+    """One try at an owed shop/redact: 'installed', 'unknown', 'recent',
+    'archive' or 'erased'. Erases only when Shopify refuses the app's
+    credential AND the app's own reads have been refused for
+    SHOP_REDACT_DOWN_HOURS AND the archive was written first."""
+    state = "unknown"
+    if _install_checker is not None:
+        try:
+            state = await _install_checker()
+        except Exception:
+            logger.exception("shop/redact: the install check failed")
+    if state == "installed":
+        return "installed"
+    if state != "gone":
+        return "unknown"
+    try:
+        since = datetime.fromisoformat(str(down_since or ""))
+        if datetime.now(timezone.utc) - since < timedelta(hours=SHOP_REDACT_DOWN_HOURS):
+            return "recent"
+    except (ValueError, TypeError):
+        return "recent"
+    return "archive" if _redact_shop().get("refused") else "erased"
+
+
+_SHOP_REDACT_WORDS = {
+    "installed": ("refused: the app is still installed, so this did not follow an uninstall; nothing was erased",
+                  "Reactor: refused a request to erase the shop's data",
+                  ["A signed request asked Reactor to erase the shop's data, but Shopify says the app",
+                   "is still installed, so it did not come from an uninstall. Nothing was erased.",
+                   "", "Only someone holding the app's secret can sign one. Change the app's secret,",
+                   "and give Reactor the new one straight away."]),
+    "recent": ("waiting: Shopify refuses the app's access, but not yet for long enough to be an uninstall "
+               "two days old; nothing erased, tried again every hour",
+               "Reactor: holding a request to erase the shop's data",
+               ["Shopify asked Reactor to erase the shop's data, which it does two days after the app",
+                "is uninstalled. Shopify is refusing Reactor's access to the store, but not for long",
+                "enough yet, so nothing is erased. Reactor checks every hour, and erases only once the",
+                "store has been out of its reach for most of two days.",
+                "", "If the app should still be installed, reinstall it now. If its secret was just",
+                "changed, give Reactor the new one."]),
+    "unknown": ("waiting: Shopify could not be asked whether the app is still installed; nothing erased, "
+                "tried again every hour",
+                "Reactor: holding a request to erase the shop's data",
+                ["Shopify asked Reactor to erase the shop's data, but Reactor could not ask Shopify",
+                 "whether the app is still installed, so nothing is erased yet. It asks again every hour."]),
+    "unrecorded": ("not recorded: the privacy log could not be written; nothing erased, Shopify asked to send it again",
+                   "Reactor: could not record a request to erase the shop's data",
+                   ["Shopify asked Reactor to erase the shop's data, but Reactor could not record the",
+                    "request, so nothing was erased and Shopify was asked to send it again. Check the",
+                    "server's storage: until it can be written, the request is not kept."]),
+    "archive": ("waiting: the archive taken first could not be written; nothing erased, tried again every hour",
+                "Reactor: the shop's data was not erased yet",
+                ["Shopify asked for the shop's data to be erased after the app was uninstalled, but the",
+                 "archive taken first could not be written, so nothing was erased. Reactor tries again",
+                 "every hour; check the server's storage."]),
+}
+
+
+def _shop_redact_settle(outcome: str) -> None:
+    """Clear what was owed, or keep it, and say so: in the privacy log and by
+    email, each at most once per outcome every SHOP_REDACT_MAIL_HOURS, so a
+    stream of signed forgeries can neither flood the log nor spend the email
+    allowance the real warnings need."""
+    if outcome in ("installed", "erased"):
+        _shop_owed_set(None)
+    if outcome == "erased":
+        return      # _redact_shop wrote its own record
+    words = _SHOP_REDACT_WORDS.get(outcome) or _SHOP_REDACT_WORDS["unknown"]
+    now = time.monotonic()
+    last = _shop_redact_said.get(outcome)
+    if last is not None and now - last < SHOP_REDACT_MAIL_HOURS * 3600:
+        logger.warning("shop/redact: %s (said already)", outcome)
+        return
+    _shop_redact_said[outcome] = now
+    logger.warning("shop/redact: %s", outcome)
+    _privacy_note("shop/redact", "", "", words[0])
+    _spawn_bg(_send_alert_email(words[1], words[2]))
+
+
+async def _shop_redact_checked(delivery: str) -> Response:
+    """shop/redact, erased only once Shopify has confirmed the uninstall.
+
+    The webhook is signed with the app's secret, and so is every forgery by
+    anyone holding it: before this, one forged post erased nine stores and
+    disconnected both mailboxes. A genuine one arrives 48 hours after an
+    uninstall, when Shopify has long stopped honouring the app's credential,
+    so the app records the request as owed, then asks Shopify:
+
+      still installed  refused, and the master is emailed: a signed request
+                       that did not follow an uninstall means the secret is
+                       out; nothing is owed
+      not installed    archived, then erased, but only when the app's own
+                       reads have been refused for SHOP_REDACT_DOWN_HOURS
+                       and the archive was written
+      anything else    owed, said, and tried again every hour by the
+                       watchdog (_shop_redact_retry), which a Shopify outage,
+                       a restart or a full disk cannot lose
+
+    Answered 200 once the request is recorded: the record, not Shopify's few
+    retries, is what makes sure it is honoured. When it cannot be recorded
+    (an unreadable privacy log, a full disk) and was not settled at once, it
+    is answered 503 with the delivery forgotten, so Shopify sends it again."""
+    recorded = False
+    try:
+        d = _load_privacy_log()
+        recorded = isinstance(d.get("shop_owed"), dict) and PRIVACY_LOG_PATH not in _poisoned_stores
+        if not recorded:
+            recorded = _shop_owed_set({"since": datetime.now(timezone.utc).isoformat(), "tries": 0,
+                                       "delivery": str(delivery or "")[:80]})
+        w = _load_watch()
+        outcome = await _shop_redact_attempt((w if isinstance(w, dict) else {}).get("shopify_down"))
+    except Exception:
+        logger.exception("shop/redact: the check failed")
+        outcome = "unknown"
+    if not recorded and outcome not in ("installed", "erased"):
+        if delivery:
+            _webhook_seen.pop(delivery, None)
+        _shop_redact_settle("unrecorded")
+        return PlainTextResponse("retry", status_code=503)
+    _shop_redact_settle(outcome)
+    return PlainTextResponse("ok", status_code=200)
+
+
+async def _shop_redact_retry(down_since) -> Optional[str]:
+    """The hourly second attempt at an owed shop/redact; its outcome, or None
+    when nothing is owed."""
+    d = _load_privacy_log()
+    owed = d.get("shop_owed")
+    if not isinstance(owed, dict):
+        return None
+    try:
+        outcome = await _shop_redact_attempt(down_since)
+    except Exception:
+        logger.exception("shop/redact retry failed")
+        outcome = "unknown"
+    if outcome not in ("installed", "erased"):
+        d = _load_privacy_log()
+        if isinstance(d.get("shop_owed"), dict):
+            d["shop_owed"] = {**d["shop_owed"], "tries": int(d["shop_owed"].get("tries") or 0) + 1,
+                              "last": outcome, "last_at": datetime.now(timezone.utc).isoformat()}
+            if _store_writable(PRIVACY_LOG_PATH):
+                _write_json_store(PRIVACY_LOG_PATH, None, d)
+    _shop_redact_settle(outcome)
+    return outcome
 
 
 def _crm_erase_links(d: dict, pids: set, orgs_touched=()) -> tuple:
@@ -16258,6 +16664,37 @@ def _team_setup_needed() -> bool:
     return not any(not u.get("deleted") for u in _load_users()["users"].values())
 
 
+# First-run setup makes the master account, and it opens whenever the accounts
+# register holds no live account: a new environment, a volume that is missing
+# or replaced, a restore of an unrecognised register. It asked for nothing but
+# a Shopify staff session, so whichever staff member opened the app first in
+# that window became master: the backup, every role, the mailboxes (audit
+# chain R-C5). It now also needs this code, set on the server by whoever runs
+# it and removed after setup. Unset, setup stays locked.
+SETUP_CODE = os.environ.get("SETUP_CODE", "").strip()  # set only while first-run setup is needed, then remove; unset locks setup
+
+
+def _data_volume_warning() -> str:
+    """'' when the data folder sits on a mounted volume, or when the app is
+    not running on Railway at all; otherwise what is wrong, in words.
+
+    Nothing checked that the stores were on the durable volume. Without it
+    the app runs on the container's own disk, looks healthy, and loses every
+    account, dispatch record and note at the next deploy (audit R-018). A
+    folder on a volume has the mount point at or above it."""
+    if not (os.environ.get("RAILWAY_ENVIRONMENT")  # set by Railway; the volume check runs only there
+            or os.environ.get("RAILWAY_PROJECT_ID")):  # set by Railway; the volume check runs only there
+        return ""
+    d = os.path.realpath(os.path.dirname(USERS_PATH) or "/data")
+    p = d
+    while p and p != os.path.dirname(p):
+        if os.path.ismount(p):
+            return ""
+        p = os.path.dirname(p)
+    return ("The data folder is not on a mounted volume, so accounts, dispatch records and everything else "
+            "saved here are lost at the next deploy. Attach the volume to this service at " + d + ".")
+
+
 def _user_public(uid: str, u: dict) -> dict:
     """Everything about an account EXCEPT anything derived from its password."""
     return {"id": uid, "name": u.get("name") or "", "username": u.get("username") or "",
@@ -16455,7 +16892,7 @@ def _team_counts(events: list, days: int = 30) -> dict:
 _dav_auth_cache: dict = {}
 
 
-_dav_fail_cache: dict = {}    # username -> (fail_count, blocked_until_ts): DAV's own throttle
+_dav_fail_cache: dict = {}    # ("davwhy", uid, reason) -> when that refusal was last put in the ledger
 
 
 def _dav_check_auth(header: str):
@@ -16465,9 +16902,11 @@ def _dav_check_auth(header: str):
     so revoking access or resetting a password takes effect at once, not after
     the cache expires.
 
-    DAV failures are throttled on their OWN counter, never the web login's, so
-    a Finder mount retrying a stale keychain password cannot lock a person out
-    of the app itself."""
+    Wrong drive passwords never lock anything by username, the drive's or the
+    web login's: a drive password is random and 24 characters long, so a lock
+    by name guarded nothing and let anyone who knew a username keep that
+    person's Finder shut (audit R-C4). Guessing is slowed per client address
+    by the route instead (DAV_FAIL_PER_MIN)."""
     if not header.startswith("Basic "):
         return None, 401
     try:
@@ -16477,9 +16916,6 @@ def _dav_check_auth(header: str):
         return None, 401
     username = username.strip().lower()
     now = time.time()
-    blocked = _dav_fail_cache.get(username)
-    if blocked and blocked[1] > now:
-        return None, 401       # too many wrong tries at the drive: pause it alone
     d = _load_users()
     uid = next((k for k, u in d["users"].items()
                 if not u.get("deleted") and u.get("username") == username), None)
@@ -16490,16 +16926,14 @@ def _dav_check_auth(header: str):
         mark = ("davwhy", uid, reason)
         last = _dav_fail_cache.get(mark)
         if not last or last < now - 300:
+            if len(_dav_fail_cache) > 500:
+                _dav_fail_cache.clear()
             _dav_fail_cache[mark] = now
             _track(uid, "auth", "drive refused", reason)
     def level(code):
-        """Refuse having spent what a real password check costs.
-
-        An unknown username used to return before anything was hashed, while a
-        live account paid for scrypt - and that difference in timing answers
-        the question the 401 refuses to: does this account exist? The web login
-        levels itself the same way, with the same dummy hash."""
-        _check_pw(pw, _PW_DUMMY)
+        """Refuse having spent what a real check costs: one SHA-256, the same
+        whether or not the account exists, so the timing says nothing."""
+        hmac.compare_digest(hashlib.sha256(pw.encode("utf-8")).hexdigest(), "0" * 64)
         return None, code
     # Every live gate, checked every time -- the cache below only vouches for
     # the password, nothing else.
@@ -16507,9 +16941,10 @@ def _dav_check_auth(header: str):
         if u is not None:
             refused("their access is switched off")
         return level(401)
-    if str(u.get("lock_until") or "") > datetime.now(timezone.utc).isoformat():
-        refused("their sign-in is paused after wrong passwords")
-        return level(401)
+    # The web sign-in's lock after wrong passwords is not checked here: it
+    # guards the account password, which the drive no longer takes, and
+    # checking it let anyone who knew a username shut that person's Finder
+    # with five wrong web passwords (audit R-C4).
     if _user_tabs(uid) is not None and "files" not in (_user_tabs(uid) or []):
         refused("the Files tab is switched off for their account")
         return level(403)
@@ -16518,25 +16953,19 @@ def _dav_check_auth(header: str):
         # the drive. Once they have chosen their own, the drive opens.
         refused("they have not chosen their own password in the app yet")
         return level(401)
-    key = hashlib.sha256(raw.encode()).hexdigest()
-    hit = _dav_auth_cache.get(key)
-    if hit and hit[1] > now:
-        return uid, None
-    if not _check_pw(pw, u.get("pw") or ""):
-        cnt = (_dav_fail_cache.get(username) or (0, 0))[0] + 1
-        _dav_fail_cache[username] = (cnt, now + LOGIN_LOCK_MINUTES * 60 if cnt >= LOGIN_FAIL_LIMIT else 0)
-        if len(_dav_fail_cache) > 500:
-            _dav_fail_cache.clear()
-        _track_login_refusal(uid, "wrong password at the file drive")
+    # The drive takes its own password, never the account's (audit R-007,
+    # chains R-C4 and R-C6). /dav sits outside the Shopify login, so the
+    # account password alone opened Files from anywhere, skipped sign-in
+    # codes, and paid scrypt on the event loop for every guess. A drive
+    # password is made on the Files page after a full sign-in, is random and
+    # long, so a SHA-256 of it is enough to check, in microseconds, every
+    # request, with nothing cached.
+    if not u.get("dav_pw"):
+        refused("they have not made a drive password on the Files page")
+        return level(401)
+    if not hmac.compare_digest(hashlib.sha256(pw.encode("utf-8")).hexdigest(), str(u.get("dav_pw"))):
+        _track_login_refusal(uid, "wrong drive password at the file drive")
         return None, 401
-    _dav_fail_cache.pop(username, None)
-    if len(_dav_auth_cache) > 500:
-        _dav_auth_cache.clear()
-    # An hour, not ten minutes: the cache only vouches for the password, the
-    # live gates run every request, and a password change or revocation drops
-    # the entry at once -- so the long life costs nothing but saves the mount
-    # from paying scrypt again all day.
-    _dav_auth_cache[key] = (uid, now + 3600)
     return uid, None
 
 
@@ -17849,13 +18278,17 @@ def _gmail_fin_redirect_uri(request: Request) -> str:
 def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=None,
                fulfillment_canceler=None, webhook_ensurer=None,
                payment_terms_writer=None, order_writer=None,
-               scope_reader=None, tax_id_reader=None) -> None:
+               scope_reader=None, tax_id_reader=None, forecast_reader=None,
+               install_checker=None) -> None:
     # The write capabilities the server hands over. None of them ever joins any
     # tool registry: the AI can read the store; only the app's own print / Mark
     # made / Dispatch actions can touch tags or fulfillments.
     global _order_tag_writer, _fulfillment_writer, _fulfillment_canceler, _webhook_ensurer
-    global _payment_terms_writer, _order_writer, _scope_reader, _tax_id_reader
+    global _payment_terms_writer, _order_writer, _scope_reader, _tax_id_reader, _forecast_reader
+    global _install_checker
     _scope_reader = scope_reader
+    _forecast_reader = forecast_reader
+    _install_checker = install_checker
     _tax_id_reader = tax_id_reader
     _order_tag_writer = order_tag_writer
     _fulfillment_writer = fulfillment_writer
@@ -18090,6 +18523,30 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         led = led if isinstance(led, dict) else {}
         return _json({"results": (led.get("results") or [])[-36:]})
 
+    @mcp.custom_route("/hooks/forecast/shopify", methods=["POST"])
+    async def forecast_shopify_hook(request: Request):
+        """The service's reads of the store, made here with the app's own
+        credential, so the service holds no Shopify credential at all. It once
+        held the app's client secret, which also signs every webhook this app
+        trusts. Four fixed reads (see server.forecast_store_read), nothing
+        else: the token that opens them cannot write, and cannot choose what
+        is read beyond a date and a page."""
+        if not FORECAST_INGEST_TOKEN:
+            return _json({"error": "The forecast hook is switched off: set FORECAST_INGEST_TOKEN."}, 503)
+        if not _forecast_token_ok(request):
+            return _json({"error": "Unauthorized"}, 401)
+        body = await _read_json_capped(request, cap=4096)
+        if body is None:
+            return _json({"error": "Request too large."}, 413)
+        if not isinstance(body, dict):
+            return _json({"error": "A JSON object is required."}, 400)
+        if _forecast_reader is None:
+            return _json({"error": "The store is not connected."}, 503)
+        out = await _forecast_reader(str(body.get("op") or ""), body)
+        if out.get("error"):
+            return _json({"error": out["error"]}, int(out.get("status") or 502))
+        return _json({"data": out.get("data")})
+
     @mcp.custom_route("/api/forecast", methods=["POST"])
     async def forecast_route(request: Request):
         """What the tab shows: the latest run, the last failure if the latest
@@ -18154,10 +18611,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         subscription, and for these topics that is a compliance failure rather
         than a missed refresh. So the work happens behind a try and the ack does
         not depend on it - but it is logged, because an unrecorded redaction is
-        indistinguishable from one that never ran."""
+        indistinguishable from one that never ran. A shop/redact the app
+        cannot act on yet is recorded as owed and tried again every hour
+        (see _shop_redact_checked)."""
         raw, err = await _webhook_body(request)
         if err is not None:
             return err
+        # The hourly retry of an owed erasure lives in the scheduler, and an
+        # uninstalled app is not opened, so nothing else may have started it.
+        _ensure_scheduler(registry)
         topic = str(request.headers.get("x-shopify-topic") or "")
         delivery = str(request.headers.get("x-shopify-webhook-id") or "")
         if delivery and not _webhook_note_delivery(delivery):
@@ -18178,7 +18640,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _privacy_note(topic, email, cid,
                               "customer asked for their data; supply it within 30 days")
             elif topic == "shop/redact":
-                _redact_shop()
+                return await _shop_redact_checked(delivery)
             else:
                 _privacy_note(topic or "(none)", email, cid, "unrecognised privacy topic")
         except Exception:
@@ -18226,7 +18688,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except anthropic.APIError as e:
             logger.exception("Anthropic API error")
             return _json({"error": _ai_error_words(e)}, 502)
-        _chat_after(result, history)
+        _chat_after(result, history, held=_team_level(_who) < ROLE_LEVELS["admin"], by=_team_name(_who))
         result["deep"] = deep
         return _json(result)
 
@@ -18265,7 +18727,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             try:
                 result = await run_chat(history, dispatch_for(_who), tools, model, extra,
                                         emit=q.put, effort=_effort_for(model, deep), deep=deep)
-                _chat_after(result, history)
+                _chat_after(result, history, held=_team_level(_who) < ROLE_LEVELS["admin"],
+                            by=_team_name(_who))
                 result["deep"] = deep
                 await q.put({"type": "done", "result": result})
             except anthropic.APIError as e:
@@ -18461,6 +18924,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Your saved notes could not be read, so nothing can be shown or changed "
                                    "until they are repaired. Tell Cameron."}, 503)
         out: dict = {}
+        # Notes are read into every answer and report for every account, so
+        # adding, correcting and deleting them is an admin's call. Marking a
+        # follow-up done changes no words, and stays open (audit R-003).
+        if op in ("add", "update", "delete") and _team_level(who) < ROLE_LEVELS["admin"]:
+            return _json({"error": "Only an admin can add, correct or delete notes."}, 403)
         try:
             if op == "add" and isinstance(body.get("items"), list):
                 refused: list = []
@@ -18469,8 +18937,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     out["not_kept"] = [r["text"] for r in refused]
                 _track(who, "memory", "added to memory", str(len(body["items"])) + " item(s)")
             elif op == "set_status" and body.get("id"):
-                _update_memory(body["id"], body.get("status", "done"))
-                _track(who, "memory", "changed a memory's status", str(body.get("status") or "done"))
+                status = str(body.get("status") or "done")
+                if _team_level(who) < ROLE_LEVELS["admin"]:
+                    # Dismissing takes a note out of every answer, and keeping
+                    # or reopening one puts it in (audit R-003).
+                    note = next((m for m in _load_memory() if m.get("id") == str(body["id"])), None)
+                    if not _member_may_set(note, status):
+                        return _json({"error": "Only an admin can change that note."}, 403)
+                was = next((m.get("status") for m in _load_memory() if m.get("id") == str(body["id"])), None)
+                _update_memory(body["id"], status)
+                _track(who, "memory", "kept a note waiting for an admin" if was == "pending" and status == "open"
+                       else "changed a memory's status", status)
             elif op == "update" and body.get("id"):
                 try:
                     _edit_memory(body["id"], body.get("text", ""), body.get("type", ""))
@@ -18501,6 +18978,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         master = _team_role(who) == "master"
         cap = SKILL_UPLOAD_CAP if master else SKILL_BODY_CAP
         op = body.get("op")
+        # Skills run as instructions in every admin's chat, every report and
+        # every email draft, so writing one is an admin's call (audit R-003).
+        if op in ("add", "update", "delete") and _team_level(who) < ROLE_LEVELS["admin"]:
+            return _json({"error": "Only an admin can add, change or delete skills."}, 403)
         if op == "add" and body.get("file") and not master:
             return _json({"error": "Only the master account can upload skills from files. Write the skill here instead, "
                                    "or ask the master account to upload it."}, 403)
@@ -18533,7 +19014,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def skills_read_route(request: Request):
         # Reactor reads one skill closely and says how it understands it: an
         # AI run, so it has its own door and spends the AI window there.
-        err, body, who = await _guard(request, ai=True)
+        # An admin's to run: the reading's rules and when-note go into every
+        # account's answers, like the skill itself (found verifying R-003).
+        err, body, who = await _guard(request, ai=True, min_level=ROLE_LEVELS["admin"])
         if err:
             return err
         skills = _load_skills()
@@ -18736,7 +19219,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/impact", methods=["POST"])
     async def impact_route(request: Request):
-        err, body, _who = await _guard(request)
+        err, body, who = await _guard(request)
         if err:
             return err
         op = body.get("op") or "list"
@@ -18744,6 +19227,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # Snapshots take seconds; take them BEFORE loading the list so the
             # load-mutate-write has no await inside it to lose concurrent changes.
             snap = cur = None
+            out_held = False
             if op == "add":
                 if not (body.get("text") or "").strip():
                     return _json({"error": "Nothing to track."}, 400)
@@ -18763,11 +19247,20 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     return _json({"error": "Nothing to track."}, 400)
                 added = {"id": secrets.token_hex(5), "text": text,
                          "source": str(body.get("source") or "copilot")[:24],
-                         "baseline": snap, "started_at": snap["at"], "status": "tracking"}
+                         "baseline": snap, "started_at": snap["at"], "status": "tracking",
+                         "by_uid": str(who or ""), "by": _team_name(who) if who else ""}
                 items.insert(0, added)
                 items = _write_impact(items)
                 return _json({"item": added, "impact": _impact_with_deltas(items, snap), "current": snap})
-            elif op == "delete" and body.get("id"):
+            elif op in ("delete", "conclude") and body.get("id"):
+                # Yours, or an admin's to settle: a member could otherwise
+                # drop an admin's change, or conclude it into a note that
+                # waits, where the admin's own Conclude could no longer reach.
+                mine = next((x for x in items if x.get("id") == body["id"]), None)
+                if mine is not None and _team_level(who) < ROLE_LEVELS["admin"] \
+                        and not (mine.get("by_uid") and mine.get("by_uid") == str(who or "")):
+                    return _json({"error": "Only an admin or the person who tracked it can change that."}, 403)
+            if op == "delete" and body.get("id"):
                 items = _write_impact([x for x in items if x.get("id") != body["id"]])
             elif op == "conclude" and body.get("id"):
                 for x in items:
@@ -18776,8 +19269,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         x["concluded_at"] = cur["at"]
                         x["final"] = cur
                         try:
+                            # The learning quotes the change's own words, so
+                            # it waits for an admin when a member wrote them
+                            # or concluded it; a change from before anyone
+                            # was recorded waits too (R-003).
+                            tracker = str(x.get("by_uid") or "")
+                            held = (_team_level(who) < ROLE_LEVELS["admin"]
+                                    or not tracker or _team_level(tracker) < ROLE_LEVELS["admin"])
                             _add_memories([{"type": "insight", "text": _impact_learning_text(x, cur)}],
-                                          source="tracked change")
+                                          source="tracked change", held=held,
+                                          by=(x.get("by") or _team_name(who) or "a tracked change") if held else "")
+                            if held:
+                                out_held = True
                         except Exception:
                             logger.exception("impact learning capture failed")
                 items = _write_impact(items)
@@ -18788,20 +19291,20 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # Shopify (and Google) snapshot on every Memory visit and after every
         # chat answer. Figures read in the last five minutes are reused.
         if not items:
-            return _json({"impact": [], "current": {}})
+            return _json({"impact": [], "current": {}, "held": out_held})
         now = time.monotonic()
         if op == "list" and _impact_snap_cache.get("snap") and now - _impact_snap_cache.get("t", 0) < 300:
             current = _impact_snap_cache["snap"]
         else:
             current = cur or snap or await _impact_snapshot(registry)
             _impact_snap_cache.update({"t": now, "snap": current})
-        return _json({"impact": _impact_with_deltas(items, current), "current": current})
+        return _json({"impact": _impact_with_deltas(items, current), "current": current, "held": out_held})
 
     @mcp.custom_route("/api/learn/run", methods=["POST"])
     async def learn_run_route(request: Request):
         # The one AI run on the Memory page, with a door of its own so the
         # paid window is spent by the door like every other paid route.
-        err, _body, _who = await _guard(request, ai=True)
+        err, _body, _who = await _guard(request, ai=True, min_level=ROLE_LEVELS["admin"])
         if err:
             return err
         try:
@@ -18828,6 +19331,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         op = body.get("op")
         if op == "learn":
             return _json({"error": "Reload the page, then press Learn again."}, 400)
+        # Quoted as authoritative background into every answer: an admin's to change (audit R-003).
+        if op in ("save", "delete") and _team_level(_who) < ROLE_LEVELS["admin"]:
+            return _json({"error": "Only an admin can change the store knowledge."}, 403)
         if op == "save":
             # A person correcting what was learned: it is quoted as authoritative
             # background into every answer, and the only fixes were Delete or
@@ -21009,6 +21515,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _write_sessions({})
         _dav_auth_cache.clear()
         restored_names = []
+        # Live state, not data: an erasure owed now and how long the store
+        # has been out of reach now. Restoring the pre-redact archive brought
+        # back the owed record it was taken under, and the old outage stamp,
+        # and the next hour erased the restored data again.
+        live_owed = _load_privacy_log().get("shop_owed")
+        live_watch = _load_watch()
+        live_watch = live_watch if isinstance(live_watch, dict) else {}
         def _drop_all_caches():
             global _events_dirty
             # Every memory copy, from the one list: the loan register was
@@ -21063,6 +21576,24 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _write_files(fd)
             except Exception:
                 logger.exception("restore: files-clock normalisation failed")
+            try:
+                pl = _load_privacy_log()
+                if isinstance(live_owed, dict):
+                    pl["shop_owed"] = live_owed
+                else:
+                    pl.pop("shop_owed", None)
+                if _store_writable(PRIVACY_LOG_PATH):
+                    _write_json_store(PRIVACY_LOG_PATH, None, pl)
+                w = _load_watch()
+                w = w if isinstance(w, dict) else {}
+                for k in ("shopify_down", "probe_fails"):
+                    if k in live_watch:
+                        w[k] = live_watch[k]
+                    else:
+                        w.pop(k, None)
+                _save_watch(w)
+            except Exception:
+                logger.exception("restore: keeping the live erasure and outage records failed")
         restored = len(restored_names)
         # Every memory copy now lies; drop them all and start from disk truth.
         _drop_all_caches()
@@ -22227,6 +22758,42 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
 
 
+    @mcp.custom_route("/api/files/drive", methods=["POST"])
+    async def files_drive_route(request: Request):
+        """The Finder drive's own password: made, replaced and removed here,
+        after a full sign-in (codes included), shown once, kept as a SHA-256.
+        The account password no longer opens /dav (audit R-007)."""
+        err, body, who = await _files_guard(request)
+        if err:
+            return err
+        op = str(body.get("op") or "")
+        d = _load_users()
+        u = d["users"].get(who)
+        if not u:
+            return _json({"error": "Your account could not be found."}, 404)
+        if op in ("create", "remove"):
+            if USERS_PATH in _poisoned_stores:
+                return _json({"error": "The accounts could not be read, so nothing can change until they are repaired."}, 503)
+            pw = ""
+            if op == "create":
+                pw = secrets.token_urlsafe(18)
+                u["dav_pw"] = hashlib.sha256(pw.encode("utf-8")).hexdigest()
+                u["dav_pw_at"] = datetime.now(timezone.utc).isoformat()
+            else:
+                u.pop("dav_pw", None)
+                u.pop("dav_pw_at", None)
+            try:
+                _write_users(d)
+            except RuntimeError:
+                return _json({"error": "The drive password could not be saved. Try again."}, 500)
+            _dav_drop_cache(who)
+            _track(who, "files", "made a drive password" if pw else "removed their drive password")
+            if pw:
+                return _json({"ok": True, "has": True, "made_at": u["dav_pw_at"], "username": u.get("username") or "",
+                              "password": pw})
+        return _json({"ok": True, "has": bool(u.get("dav_pw")), "made_at": u.get("dav_pw_at") or "",
+                      "username": u.get("username") or ""})
+
     @mcp.custom_route("/api/files/tree", methods=["POST"])
     async def files_tree_route(request: Request):
         err, _body, _who = await _files_guard(request)
@@ -22613,6 +23180,19 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return err
         if not _team_setup_needed():
             return _json({"error": "The app is already set up."}, 400)
+        # The sign-in form's own ceiling applies: the code is a password.
+        if len(_login_hits) > 5000:
+            _login_hits.clear()
+        if not _window_ok(_login_hits.setdefault(_client_key(request), []),
+                          LOGIN_MAX_PER_MIN, time.monotonic()):
+            return _json({"error": "Too many attempts from here. Wait a minute and try again."}, 429)
+        if not SETUP_CODE:
+            return _json({"error": "First-time setup is locked. Whoever runs the server sets a one-time setup "
+                                   "code first, then you type it here.", "reason": "setup_locked"}, 403)
+        if not hmac.compare_digest(str(body.get("setup_code") or "").strip().encode("utf-8"),
+                                   SETUP_CODE.encode("utf-8")):
+            logger.warning("first-run setup refused: wrong setup code")
+            return _json({"error": "That setup code is not right."}, 403)
         name = str(body.get("name") or "").strip()[:60]
         username = _clean_username(body.get("username"))
         pw = str(body.get("password") or "")
@@ -22641,7 +23221,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"ok": True, "session": token, "me": _auth_me(uid, d["users"][uid])})
         except RuntimeError:
             return _json({"error": "The account could not be saved. The data volume may be "
-                                   "unwritable; check the Railway service."}, 500)
+                                   "unwritable; check the server's storage."}, 500)
 
     @mcp.custom_route("/api/auth/login", methods=["POST"])
     async def auth_login_route(request: Request):
@@ -22906,6 +23486,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # left behind, the master's chosen password would stop working half
             # an hour later and lock them out of their own app.
             d["users"][uid].pop("pw_expires_at", None)
+            # A new password retires the drive's too: if the old one was known,
+            # a drive password may have been made with it.
+            d["users"][uid].pop("dav_pw", None)
+            d["users"][uid].pop("dav_pw_at", None)
             _write_users(d)
         except RuntimeError:
             return _json({"error": "The change could not be saved. The data volume may be "
@@ -23156,6 +23740,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # it does not expire - and it must not inherit an expiry left
                 # behind by an earlier break-glass reset.
                 u.pop("pw_expires_at", None)
+                u.pop("dav_pw", None)            # and the drive password with them
+                u.pop("dav_pw_at", None)
                 _write_users(d)
                 _drop_sessions(uid=target)       # the old password's sessions die
                 _dav_drop_cache(target)
@@ -23226,9 +23812,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not _window_ok(_rl_hits.setdefault("dav:" + _client_key(request), []),
                           max(RATE_MAX_CLIENT, 300), time.monotonic()):
             return Response(status_code=429, headers=hdrs)
-        # Every wrong password costs one scrypt on the event loop, and the
-        # ceiling above is generous on purpose. Twenty misses a minute from one
-        # client is not Finder retrying a keychain entry: refuse before hashing.
+        # The ceiling above is generous on purpose. Twenty misses a minute
+        # from one client is not Finder retrying a keychain entry: refuse
+        # before checking. This, not a lock by username, is what slows guessing.
         auth_hdr = request.headers.get("authorization", "")
         fails = _rl_hits.setdefault("davfail:" + _client_key(request), [])
         if auth_hdr.startswith("Basic ") and _window_hits(fails, time.monotonic()) >= DAV_FAIL_PER_MIN:
@@ -26080,4 +26666,5 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                        "recent": _recent_errors(24)[:5]},
             "size_list": health,
             "coverage": {"at": watch.get("coverage_at"), "pct": watch.get("coverage_pct")},
+            "storage": {"warning": _data_volume_warning()},
         })

@@ -23,6 +23,7 @@ Env:
 
 Unconfigured -> connected() is False and the Inbox tab shows a connect card.
 """
+import asyncio
 import os
 import re
 import html as _htm
@@ -595,15 +596,39 @@ def _walk_body(part: dict, out: dict) -> None:
         out["html"] = text
 
 
+# Enough HTML for any real email's words; the text is cut to a few thousand
+# characters after this anyway.
+STRIP_HTML_CAP = 300_000
+STRIP_HTML_RAW_CAP = 5_000_000   # read at most this much HTML, then drop inline data before the cap above
+
+
 def _strip_html(html: str) -> str:
+    """Readable text from an email's HTML, in time linear in its length.
+
+    The body comes from anyone who can send the shop an email. `<[^>]+>`
+    walked to the end of the text from every `<` with no later `>`, so a
+    body ending in a long run of `<` took the square of its length: 160 KB
+    held the one event loop, and with it every page, webhook and the mail
+    loop, for six seconds, and a few MB for as long as the sender liked.
+    A tag here cannot contain `<`, so each scan stops at the next one, and
+    the input is capped before any of it runs. Inline `data:` images go
+    before the cap, or one embedded picture ahead of the words filled all
+    of it and the message read as base64."""
     import re as _re
     import html as _html
-    txt = html or ""
+    txt = (html or "")[:STRIP_HTML_RAW_CAP]
+    # A data URI has a media type and a comma before its payload
+    # (data:image/png;base64,...); "data:" in a sentence has neither. Every
+    # part before the payload is bounded: unbounded, a parameter run crossed
+    # every later "data:a/b;" looking for its comma, and a body of those
+    # took the square of its length (288 KB, 37 seconds) on the one loop.
+    txt = _re.sub(r"(?i)\bdata:[a-z]{1,20}/[a-z0-9.+-]{1,64}(?:;[^,\s\"'<>()]{0,60})?,[^\s\"'<>()]*",
+                  "", txt)[:STRIP_HTML_CAP]
     # Unterminated script/style must not survive as readable text, so drop
     # from the opening tag to the end when there is no closing tag.
-    txt = _re.sub(r"(?is)<(script|style)[^>]*>.*?(</\1>|$)", " ", txt)
+    txt = _re.sub(r"(?is)<(script|style)[^<>]*>.*?(</\1>|$)", " ", txt)
     txt = _re.sub(r"(?i)<br\s*/?>|</p>|</div>|</tr>", "\n", txt)
-    txt = _re.sub(r"<[^>]+>", " ", txt)
+    txt = _re.sub(r"<[^<>]+>", " ", txt)
     # unescape AFTER tags are gone, and handle every entity rather than six:
     # &pound; and &#163; are the ones that matter on a quote.
     txt = _html.unescape(txt)
@@ -624,7 +649,8 @@ async def read_thread(thread_id: str, per_msg_chars: int = 4000) -> dict:
         payload = m.get("payload") or {}
         found: dict = {}
         _walk_body(payload, found)
-        text = found.get("plain") or _strip_html(found.get("html") or "")
+        # Off the loop: a stranger's HTML, up to megabytes of it.
+        text = found.get("plain") or await asyncio.to_thread(_strip_html, found.get("html") or "")
         name, email = parseaddr(_header(m, "From"))
         msgs.append({
             "id": str(m.get("id") or ""),
@@ -651,7 +677,7 @@ async def draft_body(draft_id: str) -> str:
     payload = ((data.get("message") or {}).get("payload")) or {}
     found: dict = {}
     _walk_body(payload, found)
-    return (found.get("plain") or _strip_html(found.get("html") or "") or "").strip()
+    return (found.get("plain") or await asyncio.to_thread(_strip_html, found.get("html") or "") or "").strip()
 
 
 async def delete_draft(draft_id: str) -> None:

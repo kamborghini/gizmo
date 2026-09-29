@@ -11,6 +11,8 @@ SECRET = "testsecret-long-enough-for-hmac-please-32b"
 os.environ.update({
     "SHOPIFY_STORE": "test-store", "SHOPIFY_ACCESS_TOKEN": "shpat_x", "ANTHROPIC_API_KEY": "x",
     "SHOPIFY_API_SECRET": SECRET,
+    # First-run setup needs the one-time code set on the server (audit chain R-C5).
+    "SETUP_CODE": "harness-setup-code-0123456789",
     "SHIPPING_PATH": SCRATCH + "/shipping.json",
     "WO_SECRET_PATH": SCRATCH + "/wo_secret.json",
     "DISPATCH_STATE_PATH": SCRATCH + "/dispatch_state.json",
@@ -231,6 +233,12 @@ worldoptions._soap_call = fake_soap_call
 # The app AS SERVED, middleware and all - not a bare inner app that would let
 # the suite pass over a stack the merchant never runs.
 client = TestClient(server.build_app())
+# The real install check asks Shopify whether the app is installed; the suite
+# never does (with a network it got 401 for the dummy token and read it as an
+# uninstall). A test that needs an answer sets its own.
+async def _install_unknown():
+    return "unknown"
+copilot._install_checker = _install_unknown
 APP_AUTH = {"session": "", "master": ""}
 MASTER_PW = "test-password-123"
 def ensure_auth():
@@ -243,7 +251,8 @@ def ensure_auth():
     st = client.post("/api/auth/state", json={}, headers=h).json()
     if st.get("setup"):
         r = client.post("/api/auth/setup", json={"name": "Cameron", "username": "cameron",
-                                                 "password": MASTER_PW}, headers=h).json()
+                                                 "password": MASTER_PW,
+                                                 "setup_code": os.environ["SETUP_CODE"]}, headers=h).json()
     else:
         r = client.post("/api/auth/login", json={"username": "cameron",
                                                  "password": MASTER_PW}, headers=h).json()
@@ -4862,10 +4871,18 @@ def t_shop_redact_takes_a_backup_before_it_erases_anything():
     data erased. For a single-merchant app that is the merchant's own dispatch
     and customs history, so an uninstall during testing would destroy it. The
     erasure is real; the backup is what makes a misfire survivable."""
+    from datetime import datetime, timedelta, timezone
     copilot._webhook_seen.clear()
     calls = []
-    real = copilot._build_backup_zip
+    real, checker = copilot._build_backup_zip, copilot._install_checker
     copilot._build_backup_zip = lambda *a, **k: (calls.append(1), real(*a, **k))[1]
+
+    async def gone():
+        return "gone"
+    copilot._install_checker = gone   # Shopify has confirmed the uninstall
+    w = copilot._load_watch()         # ...and the store has been unreadable for two days
+    w["shopify_down"] = (datetime.now(timezone.utc) - timedelta(hours=46)).isoformat()
+    copilot._save_watch(w)
     raw = json.dumps({"shop_domain": "test-store.myshopify.com"}).encode()
     try:
         r = client.post("/webhooks/privacy", content=raw,
@@ -4873,7 +4890,10 @@ def t_shop_redact_takes_a_backup_before_it_erases_anything():
         eq(r.status_code, 200, r.text)
         ok(calls, "a backup was taken before anything was erased")
     finally:
-        copilot._build_backup_zip = real
+        copilot._build_backup_zip, copilot._install_checker = real, checker
+        w = copilot._load_watch()
+        w.pop("shopify_down", None)
+        copilot._save_watch(w)
 
 
 @test
@@ -4962,8 +4982,10 @@ def t_webhook_registration_is_a_standing_repair():
         ok(res["ok"], str(res))
         eq(sorted(calls["made"]), ["orders/updated"],
            "only the missing topics were created, at the current address")
-        eq(calls.get("deleted"), ["webhooks/3.json"],
-           "and a topic the endpoint refuses (A20: refunds/create, 422 on every delivery) is removed")
+        eq(sorted(calls.get("deleted") or []), ["webhooks/2.json", "webhooks/3.json"],
+           "a topic the endpoint refuses (A20: refunds/create, 422 on every delivery) is removed, and so is "
+           "the subscription at another host (audit R-C2: made with this app's credentials, it copies orders out)")
+        eq(res.get("foreign_removed"), ["orders/updated to old.example.test"], "and the removal is reported")
         # Every topic registered here is one the receiver accepts.
         for topic in server.WEBHOOK_TOPICS:
             raw = json.dumps({"id": 1}).encode()
@@ -6779,6 +6801,13 @@ def login(username, pw):
     actually exercised."""
     return bare("/api/auth/login", {"username": username, "password": pw})
 
+def drive_pw(session):
+    """Make the account's Finder drive password and return it (audit R-007:
+    the account password no longer opens /dav)."""
+    r = post_s(session, "/api/files/drive", {"op": "create"})
+    eq(r.status_code, 200, r.text)
+    return r.json()["password"]
+
 def ready_user(name, username, role="member", pw="chosen-pw-123456"):
     """Create an account and take it THROUGH the forced first-password change,
     returning (uid, session, pw) ready for normal use."""
@@ -6797,13 +6826,15 @@ def t_auth_first_run_creates_the_master_and_bricks_the_door():
     def go():
         st = bare("/api/auth/state", {}).json()
         ok(st["setup"], "an empty app asks to be set up")
-        eq(bare("/api/auth/setup", {"name": "C", "username": "c", "password": "short"}).status_code,
+        code = os.environ["SETUP_CODE"]
+        eq(bare("/api/auth/setup", {"name": "C", "username": "c", "password": "short", "setup_code": code}).status_code,
            400, "8 characters minimum")
         r = bare("/api/auth/setup", {"name": "Cameron", "username": "cameron",
-                                     "password": MASTER_PW})
+                                     "password": MASTER_PW, "setup_code": code})
         eq(r.status_code, 200, r.text)
         eq(r.json()["me"]["role"], "master")
-        eq(bare("/api/auth/setup", {"name": "X", "username": "x", "password": "longenough1"}).status_code,
+        eq(bare("/api/auth/setup", {"name": "X", "username": "x", "password": "longenough1",
+                                    "setup_code": code}).status_code,
            400, "setup runs exactly once")
         st2 = bare("/api/auth/state", {}).json()
         ok(not st2["setup"] and not st2["logged_in"], "a session cookie is not implied")
@@ -7379,7 +7410,7 @@ def t_dav_speaks_finder_with_the_apps_own_accounts():
         try:
             import base64 as b64
             _, _sess, ppw = ready_user("Poppy", "poppy", role="parttime")
-            auth = {"Authorization": "Basic " + b64.b64encode(f"poppy:{ppw}".encode()).decode()}
+            auth = {"Authorization": "Basic " + b64.b64encode(f"poppy:{drive_pw(_sess)}".encode()).decode()}
             bad = {"Authorization": "Basic " + b64.b64encode(b"poppy:wrong-password").decode()}
             r = client.request("PROPFIND", "/dav/", headers={"Depth": "1"})
             eq(r.status_code, 401, "no credentials, no listing")
@@ -7469,9 +7500,13 @@ def t_audit_dav_cache_respects_revocation_and_own_lockout():
                "must-change accounts cannot open the drive")
             sess = login("poppy", starter).json()["session"]
             post_s(sess, "/api/auth/password", {"current": starter, "new": "poppys-own-pw-9"})
-            auth = {"Authorization": "Basic " + b64.b64encode(b"poppy:poppys-own-pw-9").decode()}
+            own = {"Authorization": "Basic " + b64.b64encode(b"poppy:poppys-own-pw-9").decode()}
+            eq(client.request("PROPFIND", "/dav/", headers={**own, "Depth": "0"}).status_code, 401,
+               "the account password no longer opens the drive (audit R-007)")
+            sess = login("poppy", "poppys-own-pw-9").json()["session"]
+            auth = {"Authorization": "Basic " + b64.b64encode(("poppy:" + drive_pw(sess)).encode()).decode()}
             eq(client.request("PROPFIND", "/dav/", headers={**auth, "Depth": "0"}).status_code, 207,
-               "the chosen password mounts it")
+               "the drive password mounts it")
             # cache is warm; now switch the account off -> next request refused AT ONCE
             post("/api/team/user", {"op": "active", "id": pt, "active": False})
             eq(client.request("PROPFIND", "/dav/", headers={**auth, "Depth": "0"}).status_code, 401,
@@ -7636,14 +7671,15 @@ def t_dav_refusals_explain_themselves_and_caches_die_with_the_password():
             # choose a real password; the drive opens and caches the credential
             s0 = login("owen", starter).json()["session"]
             post_s(s0, "/api/auth/password", {"current": starter, "new": "owens-own-pw-1"})
-            a1 = {"Authorization": "Basic " + b64.b64encode(b"owen:owens-own-pw-1").decode()}
+            s1 = login("owen", "owens-own-pw-1").json()["session"]
+            a1 = {"Authorization": "Basic " + b64.b64encode(("owen:" + drive_pw(s1)).encode()).decode()}
             eq(client.request("PROPFIND", "/dav/", headers={**a1, "Depth": "0"}).status_code, 207)
             # change the password again: the OLD credential must die at once
-            s1 = login("owen", "owens-own-pw-1").json()["session"]
             post_s(s1, "/api/auth/password", {"current": "owens-own-pw-1", "new": "owens-own-pw-2"})
             eq(client.request("PROPFIND", "/dav/", headers={**a1, "Depth": "0"}).status_code, 401,
                "the drive's cached credential dies with the password")
-            a2 = {"Authorization": "Basic " + b64.b64encode(b"owen:owens-own-pw-2").decode()}
+            s2 = login("owen", "owens-own-pw-2").json()["session"]
+            a2 = {"Authorization": "Basic " + b64.b64encode(("owen:" + drive_pw(s2)).encode()).decode()}
             eq(client.request("PROPFIND", "/dav/", headers={**a2, "Depth": "0"}).status_code, 207,
                "and the new one mounts")
         finally:
@@ -7691,7 +7727,8 @@ def t_restore_is_master_only_and_round_trips_the_volume():
         copilot._events_dirty = False
         APP_AUTH["session"] = APP_AUTH["master"] = ""
         # first-run setup on the "new region", then restore
-        r = bare("/api/auth/setup", {"name": "Temp", "username": "temp", "password": "temporary-123"})
+        r = bare("/api/auth/setup", {"name": "Temp", "username": "temp", "password": "temporary-123",
+                                     "setup_code": os.environ["SETUP_CODE"]})
         eq(r.status_code, 200, r.text)
         temp_sess = r.json()["session"]
         rr = post_s(temp_sess, "/api/restore", {"zip": blob})
@@ -7739,14 +7776,15 @@ def t_dav_refusals_explain_themselves_and_caches_die_with_the_password():
             ok("not chosen their own password" in reasons[0]["detail"], reasons[0]["detail"])
             s0 = login("owen", starter).json()["session"]
             post_s(s0, "/api/auth/password", {"current": starter, "new": "owens-own-pw-1"})
-            a1 = {"Authorization": "Basic " + b64.b64encode(b"owen:owens-own-pw-1").decode()}
+            s1 = login("owen", "owens-own-pw-1").json()["session"]
+            a1 = {"Authorization": "Basic " + b64.b64encode(("owen:" + drive_pw(s1)).encode()).decode()}
             eq(client.request("PROPFIND", "/dav/", headers={**a1, "Depth": "0"}).status_code, 207,
                "a chosen password mounts")
-            s1 = login("owen", "owens-own-pw-1").json()["session"]
             post_s(s1, "/api/auth/password", {"current": "owens-own-pw-1", "new": "owens-own-pw-2"})
             eq(client.request("PROPFIND", "/dav/", headers={**a1, "Depth": "0"}).status_code, 401,
                "the drive's cached credential dies with the password")
-            a2 = {"Authorization": "Basic " + b64.b64encode(b"owen:owens-own-pw-2").decode()}
+            s2 = login("owen", "owens-own-pw-2").json()["session"]
+            a2 = {"Authorization": "Basic " + b64.b64encode(("owen:" + drive_pw(s2)).encode()).decode()}
             eq(client.request("PROPFIND", "/dav/", headers={**a2, "Depth": "0"}).status_code, 207,
                "and the new one mounts at once")
         finally:
@@ -12843,7 +12881,7 @@ def t_the_bulk_query_carries_no_connection_inside_a_list():
     ok("financial_status:refunded" in ingest and "financial_status:partially_refunded" in ingest,
        "and reads only the orders that have a refund")
     run = ingest.split("def run_bulk_orders(", 1)[1].split("\ndef ", 1)[0]
-    ok("fetch_refunds(shop, token, since, api_version)" in run,
+    ok("fetch_refunds(store, since)" in run,
        "a run stitches the two halves together before anyone sees the orders")
     ok('o["refunds"] = refunds.get(o["id"], [])' in run,
        "every order ends up with the refunds field the panel builder reads")
@@ -12878,9 +12916,11 @@ def t_a_nightly_run_can_be_watched_and_cannot_hang():
     ok("currentBulkOperation" not in code,
        "the deprecated, ambiguous field is not how a run watches its own operation")
     ok("currentBulkOperation" in bulk, "and the comment says why, so nobody puts it back")
-    ok('op_id = started["bulkOperationRunQuery"]["bulkOperation"]["id"]' in bulk,
+    ok('op_id = started["bulkOperation"]["id"]' in bulk,
        "the id of the operation this run started is captured")
-    ok('{"id": op_id}' in bulk, "and it is what the poll asks about")
+    ok("store.bulk_status(op_id)" in bulk, "and it is what the poll asks about")
+    ok('{"id": op_id}' in ingest.split("def bulk_status(", 1)[1].split("\n    def ", 1)[0],
+       "by id, when the job reads the store with a token of its own")
     ok(bulk.count("log.info(") >= 3,
        "the poll speaks each tick, so silence means stopped rather than working")
 
@@ -12906,37 +12946,37 @@ def t_a_nightly_run_can_be_watched_and_cannot_hang():
 
 
 @test
-def t_the_nightly_service_takes_either_shopify_credential():
-    """Reactor holds NO static Shopify token. It holds SHOPIFY_CLIENT_ID and
-    SHOPIFY_CLIENT_SECRET and mints a short-lived one, which is why a
-    forecast service pointed at `${{gizmo.SHOPIFY_ACCESS_TOKEN}}` came up
-    empty and the first real run stopped at `missing: SHOPIFY_FORECAST_TOKEN`
-    after Cameron had done everything right.
-
-    So the nightly job takes either shape, a static token winning when both
-    are set, exactly as the Xero connector does: one credential for the shop,
-    one thing to rotate. This lives in the CI suite rather than beside the
-    other forecast guards because those need pandas and skip themselves."""
+def t_the_nightly_service_holds_no_shopify_secret():
+    """Reactor holds no static Shopify token, so the forecast service was once
+    given Reactor's own SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET to mint
+    one. That secret also signs every webhook Reactor trusts, so a copy on a
+    second service, running its own dependencies, could forge a shop/redact
+    (the audit's R-C1). The service now reads the store through Reactor's
+    /hooks/forecast/shopify with the token it already holds, or with a
+    read-only token of its own; the secret is never read, and a service that
+    still has it is told to remove it. This lives in the CI suite rather than
+    beside the other forecast guards because those need pandas and skip
+    themselves."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     nightly = open(os.path.join(root, "forecast", "nightly.py"), encoding="utf-8").read()
     ingest = open(os.path.join(root, "forecast", "ingest.py"), encoding="utf-8").read()
-    ok("SHOPIFY_FORECAST_TOKEN, or SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET" in nightly,
-       "a run with no credential names BOTH shapes, not just the one that is absent")
-    ok('env.get("SHOPIFY_CLIENT_ID", "")' in nightly and 'env.get("SHOPIFY_CLIENT_SECRET", "")' in nightly,
-       "the pair is read from the environment")
+    ok("client_credentials" not in ingest and "def access_token(" not in ingest,
+       "no path mints a token from the app's secret")
+    ok('env.get("SHOPIFY_CLIENT_SECRET"' not in nightly and 'env.get("SHOPIFY_CLIENT_ID"' not in nightly,
+       "the pair is not read for use")
+    ok('held = [k for k in ("SHOPIFY_CLIENT_SECRET", "SHOPIFY_API_SECRET", "SHOPIFY_CLIENT_ID") if env.get(k)]'
+       in nightly and "rotate the app's" in nightly,
+       "a service that still holds it is told to remove it and rotate")
     body = nightly.split("try:", 1)[1]
-    ok("access_token(shop, stoken, cid, csec)" in body,
-       "the grant runs inside the try, so a refusal reaches the tab as a failed run")
-    ok("run_bulk_orders(shop, api_token, since)" in nightly
-       and "fetch_products(shop, api_token)" in nightly,
-       "both Shopify reads use the minted token, never the raw variable")
-    ok('"grant_type": "client_credentials"' in ingest,
-       "the exchange is the client_credentials grant the app itself uses")
-    ok("if token:\n        return token" in ingest,
-       "a static token still wins, so adding the pair to a working service changes nothing")
+    ok("ShopifyStore(shop, stoken) if stoken else ReactorStore(base, token)" in body,
+       "the store is chosen inside the try, so a refused read reaches the tab as a failed run")
+    ok("run_bulk_orders(store, since)" in nightly and "fetch_products(store)" in nightly,
+       "both Shopify reads go through the store chosen")
+    ok('"/hooks/forecast/shopify"' in ingest and '"/hooks/forecast/shopify"' in
+       open(os.path.join(root, "copilot.py"), encoding="utf-8").read(),
+       "the job and Reactor name the same hook")
     ok("def shop_host(" in ingest and 'shop if "." in shop else shop + ".myshopify.com"' in ingest,
        "either spelling of the shop reaches Shopify at the same address")
-
 
 @test
 def t_the_forecast_hook_takes_only_its_token_and_the_tab_reads_the_run():
@@ -13225,6 +13265,948 @@ def t_an_order_is_sized_from_its_own_makers_models_before_another_makers():
     eq(bad, [], "no sheet name is sized from another maker")
     j = post("/api/gobo-sizes/check", {"q": "robe spot"}).json()
     ok(j["match"] and j["match"]["manufacturer"] == "Robe" and j["size"] == "26.5", "and the Size list's label line says so")
+
+@test
+def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
+    """Audit R-001 and R-016 (29 September 2026). HTML from any sender was
+    stripped with `<[^>]+>`, which walks to the end of the text from every
+    `<` with no later `>`: a body ending in a long run of `<` took the square
+    of its length on the one event loop, so every page, webhook and the mail
+    loop waited (160 KB six seconds, a few MB as long as the sender liked).
+    Reconciliation's amount pattern did the same on a PDF's '1,111,111...',
+    and the erased-address scrub on a long To or Cc. Each is linear now, and
+    capped."""
+    import google_mail as _gm, pipedrive as _pd, recon as _rc
+    def secs(fn, *a):
+        t0 = time.perf_counter(); fn(*a); return time.perf_counter() - t0
+    ok(secs(_gm._strip_html, "<p>x</p>" + "<" * 2_000_000) < 0.5, "a 2 MB run of '<' is stripped at once")
+    ok(secs(_gm._strip_html, "<p>" + "<script" * 200_000) < 0.5, "and a run of unclosed script openings")
+    ok(secs(_pd._strip_note, "<p>x</p>" + "<" * 400_000) < 0.5, "a Pipedrive note the same")
+    ok(secs(_rc._AMOUNT_RE.findall, "1" + ",111" * 100_000) < 0.5, "a PDF's endless thousands groups")
+    eq(_gm._strip_html("<p>Hello <b>there</b></p><script>bad()</script>"), "Hello there", "ordinary mail reads as before")
+    eq(_gm._strip_html("<p>left <script>evil()"), "left", "an unclosed script still goes")
+    eq(_rc._AMOUNT_RE.findall("Total 1,234.56 and \u00a399.00 then 12,345,678.90"),
+       ["1,234.56", "99.00", "12,345,678.90"], "amounts are found as before")
+    # Found exactly as the unbounded pattern found them, comma-joined text included.
+    old_rx = re.compile(r"(?<![\d.])(\d{1,3}(?:,\d{3})*\.\d{2})(?!\d)")
+    for text in ("INV-0142,1,234.56", "Paid 1,234.56,2,000.00", "a1,234,56.78", "x,1,234.56",
+                 "999,999,999,999,999.99", "12,34.56", "1.5,234.56"):
+        eq(_rc._AMOUNT_RE.findall(text), old_rx.findall(text), text)
+    # An inline picture ahead of the words no longer fills the cap.
+    pic = '<img src="data:image/png;base64,' + "QUJD" * 90_000 + '">'
+    eq(_gm._strip_html("<p>" + pic + "Please send the invoice.</p>"), "Please send the invoice.",
+       "a big inline image before the text")
+    eq(_gm._strip_html("<p>The metadata: kept</p>"), "The metadata: kept", "and a word ending in data is left alone")
+    eq(_gm._strip_html("<p>Payment data:1,234.56 received</p>"), "Payment data:1,234.56 received",
+       "and data: in a sentence is not an inline image")
+    eq(_gm._strip_html('<div style="background:url(data:image/png;base64,QUJD)">Hello</div>'), "Hello",
+       "one in a style goes with the tag")
+    ok(secs(_gm._strip_html, "data:" + "a" * 3_000_000) < 0.5, "a long data run is dropped at once")
+    ok(secs(_gm._strip_html, "data:a/b;" * 300_000) < 1.0,
+       "and 2.7 MB of 'data:a/b;' is linear too (unbounded, 288 KB of it took 37 seconds)")
+    import inspect as _ins
+    ok("asyncio.to_thread(_strip_html" in _ins.getsource(_gm.read_thread), "and it is stripped off the loop")
+    ok("DOC_TEXT_CAP" in open(os.path.join(HERE, "recon.py"), encoding="utf-8").read()
+       and "await asyncio.to_thread(parse_doc_text," in open(os.path.join(HERE, "recon.py"), encoding="utf-8").read(),
+       "a document's text is capped and read off the loop")
+    gone = {"jo@x.com"}
+    head = copilot._mail_erased_rx(gone, header=True)
+    ok(secs(head.sub, "[erased]", "a" * 20_000 + " <jo@x.com>") < 0.5, "a long header with an erased address")
+    store = {"threads": {}, "redacted": ["jo@x.com"]}
+    msg = {"id": "m1", "from_email": "ann@z.com", "to": "a" * 30_000 + " <jo@x.com>", "cc": "", "snippet": "hi",
+           "at": "2026-09-29T10:00:00+00:00", "subject": "s"}
+    copilot._mail_apply_thread(store, {"id": "t1", "messages": [msg]}, "shop@example.com")
+    t = (store.get("threads") or {}).get("t1") or {}
+    ok("jo@x.com" not in json.dumps(t), "an overlong header naming an erased address is erased whole")
+
+@test
+def t_the_desktop_ai_endpoint_reads_and_every_call_is_recorded():
+    """Audit R-002, R-025, R-038 and chains R-C2, R-C8 (29 September 2026).
+    /mcp published nine Shopify write tools behind one shared bearer token,
+    outside Reactor's accounts and its activity ledger: cancel or close any
+    order, create a webhook that copies every order out of the business, and
+    more, with no record. It now publishes reads only, a token of spaces no
+    longer counts as set, every tool call is recorded by name, and the hourly
+    webhook repair removes subscriptions pointing at another host."""
+    import server
+    names = {t.name for t in run(server.mcp.list_tools())}
+    writers = {"shopify_create_product", "shopify_update_product", "shopify_delete_product",
+               "shopify_close_order", "shopify_cancel_order", "shopify_create_customer",
+               "shopify_update_customer", "shopify_set_inventory_level", "shopify_create_webhook"}
+    eq(names & writers, set(), "no write tool is published")
+    ok(all(n.startswith(("shopify_list_", "shopify_get_", "shopify_count_", "shopify_search_", "shopify_payout_"))
+           for n in names), "every published tool reads: " + ", ".join(sorted(names)))
+    src = open(os.path.join(HERE, "server.py"), encoding="utf-8").read()
+    ok('MCP_BEARER_TOKEN = os.environ.get("MCP_BEARER_TOKEN", "").strip()' in src, "a token of spaces is no token")
+    saved = server.MCP_BEARER_TOKEN
+    try:
+        server.MCP_BEARER_TOKEN = ""
+        eq(client.post("/mcp", json={}, headers={"Authorization": "Bearer "}).status_code, 503, "no token, locked")
+        server.MCP_BEARER_TOKEN = "t" * 40
+        eq(client.post("/mcp", json={}, headers={"Authorization": "Bearer wrong"}).status_code, 401, "wrong token refused")
+        before = len(copilot._load_events())
+        call = {"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                "params": {"name": "shopify_get_shop", "arguments": {"secret_search": "jo@example.com"}}}
+        try:
+            # The MCP app itself needs its session manager, which the test
+            # client does not start; the record is made before it is reached.
+            client.post("/mcp", json=call, headers={"Authorization": "Bearer " + "t" * 40,
+                                                    "Accept": "application/json, text/event-stream"})
+        except RuntimeError:
+            pass
+        new = [e for e in copilot._load_events()[before:] if e.get("area") == "mcp"]
+        eq([e["detail"] for e in new], ["shopify_get_shop"], "the call is in the ledger, by tool name")
+        ok("jo@example.com" not in json.dumps(new), "and never with its arguments")
+        # A call no record could be made of is not run: padded past the
+        # reader's limit, or not JSON at all (the review's bypass).
+        auth = {"Authorization": "Bearer " + "t" * 40, "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream"}
+        padded = json.dumps(call).encode() + b" " * (server.MCP_NOTE_MAX_BYTES + 10)
+        eq(client.post("/mcp", content=padded, headers=auth).status_code, 413, "padded past the limit: refused")
+        eq(client.post("/mcp", content=b'{"jsonrpc": "2.0", "method": "tools/call", ', headers=auth).status_code, 400,
+           "unreadable: refused")
+        odd = {"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": ["shopify_get_shop"]}
+        try:
+            r = client.post("/mcp", json=odd, headers=auth)
+            ok(r.status_code != 500, "positional params are read, not a crash")
+        except RuntimeError:
+            pass
+        eq([e["detail"] for e in copilot._load_events()[before:] if e.get("area") == "mcp"],
+           ["shopify_get_shop", "?"], "and recorded, nameless")
+        # One message per request: a batch of thousands wrote thousands of
+        # rows and pushed every other record out of the ledger.
+        n0 = len(copilot._load_events())
+        batch = json.dumps([call] * 500).encode()
+        eq(client.post("/mcp", content=batch, headers=auth).status_code, 400, "a batch is refused")
+        eq(len(copilot._load_events()), n0, "and writes nothing")
+        weird = dict(call, params={"name": "shopify_get_shop <script>alert(1)</script> " + "x" * 90})
+        try:
+            client.post("/mcp", json=weird, headers=auth)
+        except RuntimeError:
+            pass
+        eq(copilot._load_events()[-1]["detail"], "?", "a name that is not a tool's name is not copied in")
+    finally:
+        server.MCP_BEARER_TOKEN = saved
+
+@test
+def t_only_admins_write_the_instructions_everyone_reads():
+    """Audit R-003 (29 September 2026). Skills, notes and the store knowledge
+    run as instructions or authoritative background in every admin's chat,
+    every report and every email draft, and any member could add, change or
+    delete them. Now only an admin writes them; a member reads them and can
+    still mark a follow-up done."""
+    def go():
+        ensure_auth()
+        _uid, mem, _pw = ready_user("Mo", "mo_instr")
+        _aid, adm, _pw = ready_user("Ada", "ada_instr", role="admin")
+        for body in ({"op": "add", "title": "Discounts", "content": "Never more than 10%."},
+                     {"op": "update", "id": "x", "title": "t", "content": "c"}, {"op": "delete", "id": "x"}):
+            r = post_s(mem, "/api/skills", body)
+            eq(r.status_code, 403, "member " + body["op"] + " skill: " + r.text[:80])
+        eq(post_s(mem, "/api/skills", {}).status_code, 200, "a member still reads the skills")
+        eq(post_s(adm, "/api/skills", {"op": "add", "title": "Discounts", "content": "Never more than 10%."}).status_code,
+           200, "an admin adds one")
+        for body in ({"op": "add", "items": [{"type": "fact", "text": "We close at five."}]},
+                     {"op": "update", "id": "x", "text": "t"}, {"op": "delete", "id": "x"}):
+            eq(post_s(mem, "/api/memory", body).status_code, 403, "member " + body["op"] + " note")
+        r = post_s(adm, "/api/memory", {"op": "add", "items": [{"type": "followup", "text": "Chase Acme on Friday."}]})
+        eq(r.status_code, 200, r.text[:120])
+        fid = [m["id"] for m in r.json()["memories"] if m["text"] == "Chase Acme on Friday."][0]
+        eq(post_s(mem, "/api/memory", {"op": "set_status", "id": fid, "status": "done"}).status_code, 200,
+           "a member can still mark a follow-up done")
+        for body in ({"op": "save", "knowledge": "We sell gobos."}, {"op": "delete"}):
+            eq(post_s(mem, "/api/learn", body).status_code, 403, "member " + body["op"] + " knowledge")
+        eq(post_s(mem, "/api/learn", {}).status_code, 200, "a member still reads it")
+        eq(post_s(mem, "/api/learn/run", {}).status_code, 403, "and cannot re-learn it")
+        page = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+        ok("function canEditInstructions()" in page and page.count("canEditInstructions()") >= 8,
+           "the page offers the editing controls to admins only")
+    saved = (copilot.SKILLS_PATH, copilot.MEMORY_PATH)
+    copilot.SKILLS_PATH, copilot.MEMORY_PATH = SCRATCH + "/instr_skills.json", SCRATCH + "/instr_memory.json"
+    try:
+        with_accounts(go)
+    finally:
+        copilot.SKILLS_PATH, copilot.MEMORY_PATH = saved
+
+
+@test
+def t_remember_counts_only_in_the_message_being_answered():
+    """Audit R-015. "remember" anywhere in the conversation lifted the check
+    that keeps text lifted from tool output (an order note, an email) out of
+    permanent memory, so one early "remember to chase Acme" let every later
+    note through. It counts only in the message being answered now."""
+    saw = "order note: the customer says deliveries must always go to the rear gate by the canal"
+    note = [{"type": "fact", "text": "deliveries must always go to the rear gate by the canal"}]
+    said = "remember to chase Acme on Friday\nwhat does order 1001 say about delivery?"
+    refused = []
+    saved = copilot.MEMORY_PATH
+    copilot.MEMORY_PATH = SCRATCH + "/remember_memory.json"
+    copilot._write_memory([])
+    copilot._add_memories(note, said, saw, source="chat", refused=refused, asked_in="what does order 1001 say about delivery?")
+    eq([r["reason"] for r in refused], ["from_data"], "an earlier 'remember' no longer lets tool text in")
+    refused = []
+    copilot._add_memories(note, said, saw, source="chat", refused=refused,
+                          asked_in="remember what order 1001 says about delivery")
+    eq(refused, [], "asked for in the message itself, it is kept")
+    copilot._write_memory([])
+    copilot.MEMORY_PATH = saved
+
+
+@test
+def t_the_order_tools_need_the_customers_page():
+    """Audit R-004. The chat refused the four customer tools to someone
+    without the Customers page, but an order carries the same name, email,
+    phone and addresses, and list_orders takes any fields."""
+    eq(copilot._TOOL_TABS.get("shopify_list_orders"), "customers")
+    eq(copilot._TOOL_TABS.get("shopify_get_order"), "customers")
+    async def fake(_p):
+        return "the order"
+    reg = {"shopify_get_order": (fake, lambda **k: {})}
+    saved = copilot._user_tabs
+    try:
+        copilot._user_tabs = lambda uid: {"labels", "chat"}
+        out = run_async(copilot._build_dispatch(reg, uid_of=lambda: "u1")("shopify_get_order", {"order_id": 1}))
+        ok(out.startswith("Refused") and "the order" not in out, out)
+        copilot._user_tabs = lambda uid: {"customers", "chat"}
+        eq(run_async(copilot._build_dispatch(reg, uid_of=lambda: "u1")("shopify_get_order", {"order_id": 1})), "the order")
+    finally:
+        copilot._user_tabs = saved
+
+
+@test
+def t_the_ai_budget_holds_under_concurrency_and_cancellation():
+    """Audit R-005 and chain R-C3. The cap was read before a call and charged
+    after it, so calls sent together all passed it, and a call cancelled on
+    the way (the browser closing a chat stream) was never charged at all. A
+    call now reserves its estimate before it is sent, and one cut off after
+    sending is charged from its size."""
+    import types as _t
+    class Msgs:
+        def __init__(self, gate): self.gate, self.sent = gate, 0
+        async def create(self, **kw):
+            self.sent += 1
+            await self.gate.wait()
+            return _t.SimpleNamespace(usage=_t.SimpleNamespace(input_tokens=10, output_tokens=10,
+                                                                cache_read_input_tokens=0, cache_creation_input_tokens=0))
+    saved = (copilot.DAILY_COST_CAP, dict(copilot._spend), dict(copilot._spend_pending))
+    try:
+        kw = {"model": "claude-opus-5-5", "max_tokens": 16000, "messages": [{"role": "user", "content": "x" * 3000}]}
+        _in, est = copilot._call_estimate(kw)
+        copilot.DAILY_COST_CAP = est * 3.5                  # room for three calls in flight, not twenty
+        copilot._spend.update({"day": copilot._utc_day(), "cost": 0.0}); copilot._spend_pending["cost"] = 0.0
+        async def burst():
+            gate = asyncio.Event(); msgs = Msgs(gate); client_ = _t.SimpleNamespace(messages=msgs)
+            tasks = [asyncio.ensure_future(copilot._xcreate_once(client_, dict(kw))) for _ in range(20)]
+            await asyncio.sleep(0.05)
+            gate.set()
+            res = await asyncio.gather(*tasks, return_exceptions=True)
+            return msgs.sent, res
+        sent, res = run_async(burst())
+        eq(sent, 3, "only the calls the cap has room for are sent")
+        ok(sum(isinstance(r, RuntimeError) for r in res) == 17, "the rest are refused before they are sent")
+        eq(copilot._spend_pending["cost"], 0.0, "and nothing is left reserved")
+        # A call cancelled after it was sent is charged from its size.
+        copilot._spend.update({"day": copilot._utc_day(), "cost": 0.0})
+        copilot.DAILY_COST_CAP = 100.0
+        async def cancelled():
+            gate = asyncio.Event(); client_ = _t.SimpleNamespace(messages=Msgs(gate))
+            t = asyncio.ensure_future(copilot._xcreate_once(client_, dict(kw)))
+            await asyncio.sleep(0.05); t.cancel()
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
+        run_async(cancelled())
+        ok(copilot._spend["cost"] > 0, "a cancelled call counts against the cap")
+        eq(copilot._spend_pending["cost"], 0.0, "and its reservation is released")
+        stopped = copilot._spend["cost"]
+        # A timeout comes after minutes of work, very likely to the end: it
+        # is counted in full, the output allowance included; a stop is not.
+        import httpx as _hx
+        class Slow:
+            async def create(self, **kw):
+                raise copilot.anthropic.APITimeoutError(request=_hx.Request("POST", "https://api.anthropic.test/v1/messages"))
+        copilot._spend.update({"day": copilot._utc_day(), "cost": 0.0})
+        try:
+            run_async(copilot._xcreate_once(_t.SimpleNamespace(messages=Slow()), dict(kw)))
+        except copilot.anthropic.APITimeoutError:
+            pass
+        ok(abs(copilot._spend["cost"] - est) < 1e-6, "a timeout is charged its whole estimate: %.4f vs %.4f"
+           % (copilot._spend["cost"], est))
+        ok(stopped < est, "a stopped call only what it sent")
+    finally:
+        copilot.DAILY_COST_CAP = saved[0]; copilot._spend.update(saved[1]); copilot._spend_pending.update(saved[2])
+
+@test
+def t_first_run_setup_needs_the_servers_setup_code():
+    """Audit chain R-C5 and R-018 (29 September 2026). First-run setup makes
+    the master account and opens whenever the accounts register is empty (a
+    new environment, a missing volume, a restore of an unrecognised register),
+    and it asked for nothing but a Shopify staff session: whoever opened the
+    app first became master. It now needs a one-time code set on the server;
+    unset, it stays locked. And the app says when its data folder is not on a
+    mounted volume, where everything saved would be lost at the next deploy."""
+    def go():
+        st = bare("/api/auth/state", {}).json()
+        ok(st["setup"], "an empty register asks to be set up")
+        body = {"name": "Eve", "username": "eve", "password": "long-enough-123"}
+        r = bare("/api/auth/setup", body)
+        eq(r.status_code, 403, "no code, no master: " + r.text[:80])
+        eq(bare("/api/auth/setup", dict(body, setup_code="guess")).status_code, 403, "a wrong code is refused")
+        saved = copilot.SETUP_CODE
+        try:
+            copilot.SETUP_CODE = ""
+            r = bare("/api/auth/setup", dict(body, setup_code=""))
+            eq((r.status_code, r.json().get("reason")), (403, "setup_locked"), "with no code set, setup is locked")
+        finally:
+            copilot.SETUP_CODE = saved
+        ok(bare("/api/auth/state", {}).json()["setup"], "and nobody became master")
+    with_accounts(go)
+    page = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    ok("setup_code: inCode.value" in page, "the setup screen asks for the code")
+    saved_env = {k: os.environ.pop(k, None) for k in ("RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID")}
+    try:
+        eq(copilot._data_volume_warning(), "", "off Railway, nothing to say")
+        os.environ["RAILWAY_ENVIRONMENT"] = "production"
+        ok("not on a mounted volume" in copilot._data_volume_warning(), "on Railway, a scratch folder is not a volume")
+        saved_p = copilot.USERS_PATH
+        copilot.USERS_PATH = "/dev/users.json"
+        try:
+            eq(copilot._data_volume_warning(), "", "a folder on a mount point is on a volume")
+            copilot.USERS_PATH = "/users.json"
+            ok(copilot._data_volume_warning(), "the container's own root disk is not")
+        finally:
+            copilot.USERS_PATH = saved_p
+    finally:
+        os.environ.pop("RAILWAY_ENVIRONMENT", None)
+        for k, v in saved_env.items():
+            if v is not None:
+                os.environ[k] = v
+
+@test
+def t_the_finder_drive_takes_a_password_of_its_own():
+    """Audit R-007 and chains R-C4, R-C6 (29 September 2026). /dav sits
+    outside the Shopify login and took the account password alone, so a
+    password opened Files from anywhere, skipped sign-in codes, and paid
+    scrypt on the event loop for every guess. The drive now takes a random
+    password made on the Files page after a full sign-in, shown once and kept
+    only as a SHA-256; removing it closes the drive at once."""
+    import base64 as b64, hashlib
+    def go():
+        ensure_auth()
+        uid, sess, pw = ready_user("Ivy", "ivy_drive")
+        st = post_s(sess, "/api/files/drive", {}).json()
+        eq((st["has"], st["username"]), (False, "ivy_drive"), "no drive password to begin with")
+        r = post_s(sess, "/api/files/drive", {"op": "create"}).json()
+        dpw = r["password"]
+        ok(len(dpw) >= 20, "a long random password")
+        stored = copilot._load_users()["users"][uid]
+        eq(stored["dav_pw"], hashlib.sha256(dpw.encode()).hexdigest(), "kept only as its SHA-256")
+        ok(dpw not in json.dumps(stored), "never in plain text")
+        ok("password" not in post_s(sess, "/api/files/drive", {}).json(), "and shown only once")
+        hdr = lambda secret: {"Authorization": "Basic " + b64.b64encode(("ivy_drive:" + secret).encode()).decode()}
+        ok(copilot._dav_check_auth(hdr(dpw)["Authorization"])[0] == uid, "the drive password opens the drive")
+        eq(copilot._dav_check_auth(hdr(pw)["Authorization"]), (None, 401), "the account password does not")
+        # Wrong guesses under someone's name do not shut their drive: a
+        # random 24-character password needs no lock, and one let anyone
+        # who knew a username keep that person's Finder closed (R-C4).
+        for _ in range(copilot.LOGIN_FAIL_LIMIT * 3):
+            eq(copilot._dav_check_auth(hdr("guess")["Authorization"]), (None, 401))
+        ok(copilot._dav_check_auth(hdr(dpw)["Authorization"])[0] == uid, "the right one still opens it")
+        # Nor do wrong web passwords: that lock guards the account password,
+        # which the drive does not take.
+        for _ in range(copilot.LOGIN_FAIL_LIMIT + 1):
+            login("ivy_drive", "wrong-password-000")
+        ok(copilot._load_users()["users"][uid].get("lock_until"), "the web sign-in is paused")
+        ok(copilot._dav_check_auth(hdr(dpw)["Authorization"])[0] == uid, "the drive is not")
+        copilot._login_hits.clear()
+        post_s(sess, "/api/files/drive", {"op": "remove"})
+        eq(copilot._dav_check_auth(hdr(dpw)["Authorization"]), (None, 401), "removed, it stops at once")
+        copilot._dav_fail_cache.clear()
+    with_accounts(go)
+
+@test
+def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall():
+    """R-C1. The webhook is signed with the app's secret, so anyone holding the
+    secret could post one, and one post erased nine stores and disconnected
+    both mailboxes. A genuine one comes 48 hours after an uninstall, when
+    Shopify no longer honours the app's credential. So a request is recorded
+    as owed, then: still installed is refused, emailed about and no longer
+    owed; anything short of a confirmed uninstall (Shopify cannot be asked,
+    the store out of reach for less than SHOP_REDACT_DOWN_HOURS, the archive
+    not written) stays owed and is tried again every hour; and only a
+    confirmed uninstall with an archive erases. Every request is answered
+    200 once recorded: the record, not Shopify's few retries, is what makes
+    sure it is honoured. The alerts are said once per outcome per six hours,
+    so forgeries cannot flood the privacy log or the email allowance."""
+    from datetime import datetime, timedelta, timezone
+    copilot._webhook_seen.clear()
+    saved = (copilot._install_checker, copilot._spawn_bg, copilot._build_backup_zip)
+    spawned = []
+
+    def spawn(coro):
+        spawned.append((coro.cr_code.co_name, dict(coro.cr_frame.f_locals)))
+        coro.close()
+        return True
+    verdict = {"v": "installed"}
+
+    async def checker():
+        return verdict["v"]
+    copilot._install_checker, copilot._spawn_bg = checker, spawn
+    copilot._shop_redact_said.clear()
+    saved_watch = copilot._load_watch()
+    raw = json.dumps({"shop_id": 1, "shop_domain": "test-store.myshopify.com"}).encode()
+
+    def seed():
+        copilot._write_json_store(copilot.CRM_PATH, "crm", {"contacts": {"c1": {"name": "Kept"}}})
+        return os.path.isfile(copilot.CRM_PATH)
+
+    def redact(delivery):
+        return client.post("/webhooks/privacy", content=raw,
+                           headers=wh_headers(raw, topic="shop/redact", delivery=delivery))
+
+    def owed():
+        return copilot._load_privacy_log().get("shop_owed")
+
+    def down(hours):
+        w = copilot._load_watch()
+        if hours is None:
+            w.pop("shopify_down", None)
+        else:
+            w["shopify_down"] = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        copilot._save_watch(w)
+        return w.get("shopify_down")
+
+    def mails():
+        return [a for n, a in spawned if n == "_send_alert_email"]
+    try:
+        copilot._shop_owed_set(None)
+        ok(seed(), "a store to lose")
+        eq(copilot.SHOP_REDACT_DOWN_HOURS, 40, "most of the two days, with hours to spare")
+        # Still installed: refused, said once, and nothing is owed.
+        eq(redact("rc1-a").status_code, 200, "answered")
+        ok(os.path.isfile(copilot.CRM_PATH), "installed: nothing erased")
+        eq(owed(), None, "and nothing owed")
+        eq(len(mails()), 1, "the master is told")
+        ok("refused" in mails()[0]["subject"] and "Change the app's secret" in " ".join(mails()[0]["lines"]), mails()[0])
+        for k in range(20):
+            redact("rc1-flood-%d" % k)
+        eq(len(mails()), 1, "twenty more forgeries: not twenty more emails")
+        eq(sum(1 for e in copilot._load_privacy_log()["events"] if e.get("detail", "").startswith("refused")), 1,
+           "nor twenty more privacy records")
+        # Cannot tell: owed, and tried again every hour.
+        verdict["v"] = "unknown"
+        eq(redact("rc1-b").status_code, 200)
+        ok(os.path.isfile(copilot.CRM_PATH), "cannot tell: nothing erased")
+        ok(isinstance(owed(), dict), "but it is owed, and kept where a restart cannot lose it")
+        eq(run(copilot._shop_redact_retry(None)), "unknown", "the hourly attempt still cannot tell")
+        eq(owed().get("tries"), 1, "and counts its tries")
+        # Refused, but not yet for long enough: still owed.
+        verdict["v"] = "gone"
+        eq(run(copilot._shop_redact_retry(down(None))), "recent", "no outage on record: not an uninstall")
+        eq(run(copilot._shop_redact_retry(down(30))), "recent", "thirty hours: not yet")
+        ok(os.path.isfile(copilot.CRM_PATH), "the stores are all there")
+        ok(any("holding" in a["subject"] for a in mails()), mails())
+        # The app is reinstalled: whatever was owed is dropped.
+        verdict["v"] = "installed"
+        eq(run(copilot._shop_redact_retry(None)), "installed")
+        eq(owed(), None, "an app still installed owes nothing")
+        # A genuine request, two days on: owed, then the archive fails, then it erases.
+        verdict["v"] = "gone"
+        down(46)
+
+        def no_disk(*a, **k):
+            raise OSError("volume full")
+        copilot._build_backup_zip = no_disk
+        spawned.clear()
+        eq(redact("rc1-c").status_code, 200)
+        ok(os.path.isfile(copilot.CRM_PATH), "no archive, no erasure")
+        ok(isinstance(owed(), dict), "still owed")
+        ok(any("not erased" in a["subject"] for a in mails()), mails())
+        copilot._build_backup_zip = saved[2]
+        eq(run(copilot._shop_redact_retry(copilot._load_watch().get("shopify_down"))), "erased",
+           "the next hour, with the disk back, it erases")
+        ok(not os.path.isfile(copilot.CRM_PATH), "a confirmed uninstall with an archive erases")
+        eq(owed(), None, "and nothing is owed")
+        ok(any(e.get("topic") == "shop/redact" and "erased" in e.get("detail", "")
+               for e in copilot._load_privacy_log()["events"]), "and says so")
+        eq(run(copilot._shop_redact_retry(None)), None, "nothing owed, nothing tried")
+        # No way to ask Shopify is no confirmation; a broken watch record is
+        # not an erasure either.
+        copilot._install_checker = None
+        ok(seed(), "reseeded")
+        eq(redact("rc1-d").status_code, 200)
+        ok(os.path.isfile(copilot.CRM_PATH) and isinstance(owed(), dict), "not erased, owed")
+        copilot._install_checker = checker
+        copilot._save_watch(["not", "an", "object"])
+        eq(redact("rc1-e").status_code, 200, "answered, not a crash")
+        ok(os.path.isfile(copilot.CRM_PATH), "and not erased")
+        # The watchdog tries it every hour, against its own record of the outage.
+        src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+        ok('await _shop_redact_retry(state.get("shopify_down"))' in src, "the hourly tick tries what is owed")
+        ok("_ensure_scheduler(registry)" in src.split("async def privacy_webhook", 1)[1][:1500],
+           "and a privacy request starts the scheduler, as an uninstalled app is never opened")
+        # A request that cannot be recorded is sent back for Shopify to retry.
+        copilot._shop_owed_set(None)
+        copilot._save_watch({})
+        verdict["v"] = "unknown"
+        good = open(copilot.PRIVACY_LOG_PATH, "rb").read()
+        open(copilot.PRIVACY_LOG_PATH, "w").write("{not json")     # a log that no longer parses
+        copilot._json_cache.clear()
+        try:
+            eq(redact("rc1-f").status_code, 503, "not recorded: Shopify is asked to send it again")
+            ok("rc1-f" not in copilot._webhook_seen, "and the retry is not taken for a duplicate")
+        finally:
+            open(copilot.PRIVACY_LOG_PATH, "wb").write(good)
+            copilot._json_cache.clear()
+            copilot._poisoned_stores.discard(copilot.PRIVACY_LOG_PATH)
+    finally:
+        copilot._install_checker, copilot._spawn_bg, copilot._build_backup_zip = saved
+        copilot._webhook_seen.clear()
+        copilot._shop_redact_said.clear()
+        copilot._shop_owed_set(None)
+        copilot._save_watch(saved_watch if isinstance(saved_watch, dict) else {})
+        try:
+            os.remove(copilot.CRM_PATH)
+        except FileNotFoundError:
+            pass
+        copilot._forget_store(copilot.CRM_PATH)
+
+@test
+def t_the_install_check_calls_only_an_outright_refusal_gone():
+    """What decides an erasure. Only Shopify refusing the app's credential
+    (401, 403, 404, or the token grant refused) reads as uninstalled; a
+    throttle, an outage, a timeout or a missing setting is unknown, and
+    unknown erases nothing."""
+    import httpx as _hx
+    saved = (server._http, server._headers, server.token_manager._use_client_credentials,
+             server.token_manager.force_refresh)
+    answers = []
+
+    class _Resp:
+        def __init__(self, code, body):
+            self.status_code, self._b = code, body
+
+        def json(self):
+            return self._b
+
+    class _Client:
+        async def post(self, url, headers=None, json=None, timeout=None):
+            a = answers.pop(0)
+            if isinstance(a, Exception):
+                raise a
+            return a
+    hdr = {"raise": None}
+
+    async def headers():
+        if hdr["raise"]:
+            raise hdr["raise"]
+        return {}
+    server._http, server._headers = (lambda: _Client()), headers
+    server.token_manager._use_client_credentials = False
+    try:
+        def state(*seq):
+            answers[:] = list(seq)
+            return run_async(server.shopify_install_state(timeout=1.0))
+        eq(state(_Resp(200, {"data": {"shop": {"id": "gid://shopify/Shop/1"}}})), "installed")
+        eq(state(_Resp(200, {"data": {"shop": None}})), "unknown", "a 200 that names no shop proves nothing")
+        for code in (401, 403, 404):
+            eq(state(_Resp(code, {})), "gone", code)
+        for code in (402, 423, 429, 500, 503):
+            eq(state(_Resp(code, {})), "unknown", code)
+        eq(state(_hx.ConnectError("down")), "unknown", "an outage")
+        for msg, want in (("Token refresh failed (401). Check it.", "gone"),
+                          ("Token refresh failed (400). Check it.", "gone"),
+                          ("Token refresh failed (500). Check it.", "unknown"),
+                          ("No valid token available. Set it.", "unknown")):
+            hdr["raise"] = RuntimeError(msg)
+            eq(state(), want, msg)
+        hdr["raise"] = None
+        # A token minted before the uninstall: one fresh grant decides it.
+        server.token_manager._use_client_credentials = True
+
+        async def refused():
+            raise RuntimeError("Token refresh failed (401). Check it.")
+        server.token_manager.force_refresh = refused
+        eq(state(_Resp(401, {})), "gone", "the fresh grant is refused too")
+
+        async def fine():
+            return "tok"
+        server.token_manager.force_refresh = fine
+        eq(state(_Resp(401, {}), _Resp(200, {"data": {"shop": {"id": "x"}}})), "installed",
+           "a stale token after a rotation is not an uninstall")
+    finally:
+        (server._http, server._headers, server.token_manager._use_client_credentials,
+         server.token_manager.force_refresh) = saved
+
+
+@test
+def t_the_forecast_job_reads_the_store_through_four_fixed_reads():
+    """R-C1. The forecast job held Reactor's client id and secret to mint its
+    own Admin API token, and that secret signs every webhook. It now asks
+    Reactor, with the token it already holds, and Reactor runs one of four
+    fixed read-only queries: nothing the job sends becomes query text except
+    a date, a bulk operation id and a page cursor, each checked first."""
+    import ast
+    ensure_auth()
+    saved = (copilot.FORECAST_INGEST_TOKEN, server._request)
+    sent = []
+    reply = {"v": None}
+
+    async def fake_request(method, path, params=None, body=None, _retried=False, idempotent=None):
+        sent.append({"path": path, "body": body, "idempotent": idempotent})
+        return reply["v"]
+    try:
+        copilot.FORECAST_INGEST_TOKEN = ""
+        eq(client.post("/hooks/forecast/shopify", json={"op": "products"}).status_code, 503,
+           "no secret configured: off")
+        copilot.FORECAST_INGEST_TOKEN = "forecast-secret-for-tests"
+        eq(client.post("/hooks/forecast/shopify", json={"op": "products"},
+                       headers={"X-Forecast-Token": "wrong"}).status_code, 401, "a wrong token is refused")
+        server._request = fake_request
+        h = {"X-Forecast-Token": "forecast-secret-for-tests"}
+
+        def ask(body, data=None):
+            reply["v"] = data
+            sent.clear()
+            return client.post("/hooks/forecast/shopify", json=body, headers=h)
+        r = ask({"op": "bulk_start", "since": "2024-04-01"},
+                {"data": {"bulkOperationRunQuery": {"bulkOperation": {"id": "gid://shopify/BulkOperation/5"},
+                                                    "userErrors": []}}})
+        eq(r.status_code, 200, r.text)
+        eq(r.json()["data"]["bulkOperation"]["id"], "gid://shopify/BulkOperation/5",
+           "answered in the shape the job's own store answers in")
+        ok("bulkOperationRunQuery" in sent[0]["body"]["query"], sent)
+        ok('created_at:>=2024-04-01' in sent[0]["body"]["variables"]["q"], sent)
+        eq(sent[0]["idempotent"], False, "a bulk start is not repeated after an ambiguous failure")
+        r = ask({"op": "bulk_status", "id": "gid://shopify/BulkOperation/5"},
+                {"data": {"node": {"status": "COMPLETED", "url": "https://x/y"}}})
+        eq(r.json()["data"]["status"], "COMPLETED")
+        eq(sent[0]["idempotent"], True, "a read may be retried")
+        r = ask({"op": "refunds", "since": "2024-04-01", "after": "eyJsYXN0X2lkIjoxfQ=="},
+                {"data": {"orders": {"nodes": [], "pageInfo": {"hasNextPage": False}}}})
+        eq(r.status_code, 200, r.text)
+        ok("financial_status:refunded" in sent[0]["body"]["variables"]["q"], sent)
+        r = ask({"op": "products"}, {"data": {"products": {"edges": [], "pageInfo": {"hasNextPage": False}}}})
+        eq(r.status_code, 200, r.text)
+        # Anything else is refused before Shopify is asked.
+        for bad in ({"op": "orders_with_addresses"}, {"op": "bulk_start"},
+                    {"op": "bulk_start", "since": '2024-01-01") { id } customers { edges { node { email } } } #'},
+                    {"op": "bulk_status", "id": "gid://shopify/Customer/1"},
+                    {"op": "products", "after": "abc def"},
+                    {"op": "products", "after": {"$ne": 1}}):
+            r = ask(bad)
+            eq(r.status_code, 400, bad)
+            eq(sent, [], "and Shopify is never asked: %r" % (bad,))
+        r = ask({"op": "products"}, {"errors": [{"message": "Throttled"}]})
+        eq(r.status_code, 502, "Shopify's own refusal is an error, not an empty store")
+        r = client.post("/hooks/forecast/shopify", content=b"x" * 5000, headers=h)
+        eq(r.status_code, 413, "a small body or none")
+        # The same queries the job would run with a token of its own.
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tree = ast.parse(open(os.path.join(root, "forecast", "ingest.py"), encoding="utf-8").read())
+        consts = {n.targets[0].id: n.value.value for n in tree.body
+                  if isinstance(n, ast.Assign) and len(n.targets) == 1
+                  and isinstance(n.targets[0], ast.Name) and isinstance(n.value, ast.Constant)
+                  and isinstance(n.value.value, str)}
+        eq(server.FORECAST_BULK_ORDERS_QUERY, consts["BULK_ORDERS_QUERY"])
+        eq(server.FORECAST_REFUNDS_FILTER, consts["REFUNDS_FILTER"])
+        eq(server.FORECAST_REFUNDED_ORDERS_QUERY, consts["REFUNDED_ORDERS_QUERY"])
+        eq(server.FORECAST_PRODUCTS_QUERY, consts["PRODUCTS_QUERY"])
+        for field in ("email", "phone", "address", "firstName", "lastName"):
+            ok(field not in server.FORECAST_BULK_ORDERS_QUERY, "no customer's %s leaves the store" % field)
+    finally:
+        copilot.FORECAST_INGEST_TOKEN, server._request = saved
+
+
+@test
+def t_a_members_notes_wait_for_an_admin_before_any_answer_reads_them():
+    """R-003, as the independent review found it still open (29 September
+    2026). Members could no longer add notes on the Memory page, but a
+    member's chat ("remember that our bank details are ...") and a tracked
+    change they concluded still wrote notes straight into every account's
+    answers, and "dismissed" took any note out of them. A member's note now
+    waits, read by nobody, until an admin keeps it; a member may only tick
+    off, reopen or dismiss a follow-up."""
+    saved = _ws_stores()
+    saved_imp, real_snap = copilot.IMPACT_PATH, copilot._impact_snapshot
+    copilot.IMPACT_PATH = SCRATCH + "/impact_" + secrets.token_hex(3) + ".json"
+
+    async def fake_snap(reg):
+        return {"at": "2026-09-24T10:00:00+00:00", "revenue_28d": 100.0}
+    copilot._impact_snapshot = fake_snap
+    copilot._impact_snap_cache.clear()
+
+    def go():
+        ensure_auth()
+        _a, msess, _p = ready_user("Mo Member", "mo_notes", role="member")
+        # A member's chat: kept, waiting, and said so under the answer.
+        result = {"structured": {"summary": "Noted.", "remember": [
+            {"type": "fact", "text": "Our new bank account is sort code 11-22-33, account 12345678."}]}}
+        history = [{"role": "user", "content": "remember that our new bank account is sort code 11-22-33, account 12345678"}]
+        copilot._chat_after(result, history, held=True, by="Mo Member")
+        note = [m for m in copilot._load_memory() if "bank account" in m["text"]][0]
+        eq((note["status"], note.get("by")), ("pending", "Mo Member"), "kept waiting, with who it came from")
+        ok(result.get("held") and "bank account" in result["held"][0], "and the answer says so")
+        ok("bank account" not in copilot._memory_to_system(), "no answer reads it yet")
+        # An admin's chat is kept as before.
+        result2 = {"structured": {"summary": "Noted.", "remember": [{"type": "fact", "text": "Trade orders ship on Tuesdays."}]}}
+        copilot._chat_after(result2, [{"role": "user", "content": "remember that trade orders ship on Tuesdays"}])
+        ok("Trade orders ship on Tuesdays." in copilot._memory_to_system(), "an admin's note is read at once")
+        ok(not result2.get("held"), "and nothing is said to be waiting")
+        # The chat route decides by who is asking.
+        src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+        eq(src.count('_chat_after(result, history, held=_team_level(_who) < ROLE_LEVELS["admin"]'), 2,
+           "both chat routes hold a member's notes")
+        # A member cannot keep it, nor dismiss someone else's fact.
+        pid = note["id"]
+        fact = [m for m in copilot._load_memory() if m["text"] == "Trade orders ship on Tuesdays."][0]
+        eq(post_s(msess, "/api/memory", {"op": "set_status", "id": pid, "status": "open"}).status_code, 403,
+           "a member cannot keep their own waiting note")
+        eq(post_s(msess, "/api/memory", {"op": "set_status", "id": fact["id"], "status": "dismissed"}).status_code, 403,
+           "nor take an admin's note out of every answer")
+        ok("Trade orders ship on Tuesdays." in copilot._memory_to_system(), "which is still read")
+        # A follow-up is theirs to tick off, reopen or dismiss.
+        copilot._add_memories([{"type": "followup", "text": "Call Stage Co about the loan unit"}])
+        fu = [m for m in copilot._load_memory() if m["type"] == "followup"][0]
+        for st in ("done", "open", "dismissed"):
+            eq(post_s(msess, "/api/memory", {"op": "set_status", "id": fu["id"], "status": st}).status_code, 200, st)
+        # An admin keeps the waiting note, and from then on it is read.
+        r = post("/api/memory", {"op": "set_status", "id": pid, "status": "open"})
+        eq(r.status_code, 200, r.text)
+        ok("bank account" in copilot._memory_to_system(), "kept by an admin, it is read")
+        ok(any(e.get("action") == "kept a note waiting for an admin" for e in copilot._load_events()[-5:]),
+           "and the ledger says who kept it")
+        # A tracked change a member concludes leaves a waiting learning.
+        item = post_s(msess, "/api/impact", {"op": "add", "text": "Raise the gobo holder price"}).json()["item"]
+        eq(post_s(msess, "/api/impact", {"op": "conclude", "id": item["id"]}).status_code, 200)
+        learn = [m for m in copilot._load_memory() if "gobo holder" in m["text"]]
+        eq([(m["type"], m["status"]) for m in learn], [("insight", "pending")], "a member's learning waits too")
+        ok("gobo holder" not in copilot._memory_to_system(), "and is not read")
+        item2 = post("/api/impact", {"op": "add", "text": "Free delivery over 100"}).json()["item"]
+        post("/api/impact", {"op": "conclude", "id": item2["id"]})
+        ok("Free delivery over 100" in copilot._memory_to_system(), "an admin's is read at once")
+
+        # --- What the second, adversarial check found ---
+        # An admin concluding a member's change: the learning quotes the
+        # member's words, so it waits too, whoever pressed Conclude.
+        item3 = post_s(msess, "/api/impact", {"op": "add", "text": "Pay suppliers to sort code 99-88-77"}).json()["item"]
+        eq(item3.get("by"), "Mo Member", "a tracked change says who tracked it")
+        r = post("/api/impact", {"op": "conclude", "id": item3["id"]})
+        eq(r.status_code, 200, r.text)
+        ok(r.json().get("held"), "and the page is told it waits")
+        ok("99-88-77" not in copilot._memory_to_system(), "a member's words wait, even concluded by an admin")
+        # A member cannot settle an admin's change, either way.
+        item4 = post("/api/impact", {"op": "add", "text": "Raised the trade price list"}).json()["item"]
+        for op in ("conclude", "delete"):
+            eq(post_s(msess, "/api/impact", {"op": op, "id": item4["id"]}).status_code, 403, op)
+        ok(any(x["id"] == item4["id"] and x.get("status") != "concluded" for x in copilot._load_impact()),
+           "the admin's change is untouched")
+        # A member cannot reopen a dismissed follow-up, nor one of their own
+        # that an admin never kept.
+        copilot._add_memories([{"type": "followup", "text": "Chase the Acme invoice"}])
+        fu2 = [m for m in copilot._load_memory() if m["text"] == "Chase the Acme invoice"][0]
+        post("/api/memory", {"op": "set_status", "id": fu2["id"], "status": "dismissed"})
+        eq(post_s(msess, "/api/memory", {"op": "set_status", "id": fu2["id"], "status": "open"}).status_code, 403,
+           "an admin's dismissal stands")
+        copilot._add_memories([{"type": "followup", "text": "Pay the new account"}], held=True, by="Mo Member")
+        fu3 = [m for m in copilot._load_memory() if m["text"] == "Pay the new account"][0]
+        post("/api/memory", {"op": "set_status", "id": fu3["id"], "status": "done"})
+        eq(post_s(msess, "/api/memory", {"op": "set_status", "id": fu3["id"], "status": "open"}).status_code, 403,
+           "a member's note an admin closed without keeping stays closed")
+        ok("Pay the new account" not in copilot._memory_to_system())
+        # An admin saying what a waiting note says keeps it.
+        copilot._add_memories([{"type": "fact", "text": "Trade orders ship on Mondays."}], held=True, by="Mo Member")
+        kept_now: list = []
+        copilot._add_memories([{"type": "fact", "text": "Trade orders ship on Mondays."}], kept=kept_now)
+        eq(kept_now, ["Trade orders ship on Mondays."], "said by an admin, it is kept")
+        ok("Trade orders ship on Mondays." in copilot._memory_to_system(), "and read")
+        # A skill's reading is an admin's to run.
+        sk = post("/api/skills", {"op": "add", "title": "Quoting glass", "content": "Glass takes four days."}).json()
+        sid = [x for x in sk["skills"] if x["title"] == "Quoting glass"][0]["id"]
+        eq(post_s(msess, "/api/skills/read", {"id": sid}).status_code, 403, "a member cannot re-run a skill's reading")
+        # The real chat route, as a member: its notes wait.
+        async def answer(history, dispatch, tools, model, extra, emit=None, effort=None, deep=False):
+            return {"structured": {"summary": "Noted.", "remember": [
+                {"type": "fact", "text": "Samples go out second class."}]}}
+        real_chat = copilot.run_chat
+        copilot.run_chat = answer
+        copilot._rl_global.clear()
+        try:
+            r = post_s(msess, "/api/chat", {"message": "remember that samples go out second class"})
+            eq(r.status_code, 200, r.text[:200])
+            eq(r.json().get("held"), ["Samples go out second class."], "the chat route holds a member's note")
+            r = post_s(msess, "/api/chat/stream", {"message": "remember that samples go out second class"})
+            ok(r.status_code == 200, r.text[:200])
+        finally:
+            copilot.run_chat = real_chat
+        ok("Samples go out second class." not in copilot._memory_to_system(), "and no answer reads it")
+    try:
+        with_accounts(go)
+    finally:
+        _ws_restore(saved)
+        copilot.IMPACT_PATH, copilot._impact_snapshot = saved_imp, real_snap
+        copilot._impact_snap_cache.clear()
+
+
+@test
+def t_waiting_notes_never_cost_a_kept_note_its_place():
+    """Counted in with the rest, a member asking chat to remember sixty
+    things nine times deleted, for good, every note an admin had kept: the
+    store was cut back to its limit with the waiting notes as the newest.
+    Waiting notes now have an allowance of their own, a few per answer, and
+    go first when the store is full."""
+    saved = _ws_stores()
+    cap = copilot.MEMORY_MAX
+    try:
+        copilot.MEMORY_MAX = 30
+        copilot._add_memories([{"type": "fact", "text": "Kept fact number %d." % i} for i in range(25)])
+        for k in range(9):
+            copilot._add_memories([{"type": "fact", "text": "Member note %d-%d." % (k, i)} for i in range(60)],
+                                  held=True, by="Mo")
+        mem = copilot._load_memory()
+        eq(sum(1 for m in mem if m["text"].startswith("Kept fact")), 25, "every kept note is still there")
+        ok(sum(1 for m in mem if m["status"] != "pending") <= copilot.MEMORY_MAX, len(mem))
+        pend = [m for m in mem if m["status"] == "pending"]
+        ok(len(pend) <= copilot.MEMORY_PENDING_MAX, "waiting notes keep to their own allowance")
+        copilot.MEMORY_MAX = cap
+        copilot._add_memories([{"type": "fact", "text": "Burst %d." % i} for i in range(60)], held=True, by="Mo")
+        eq(sum(1 for m in copilot._load_memory() if m["text"].startswith("Burst")),
+           copilot.MEMORY_HELD_PER_ANSWER, "and one answer holds only a few")
+        # A store full of kept notes still has room for one to wait.
+        copilot.MEMORY_MAX = 25
+        _ws_restore(_ws_stores())
+        copilot._add_memories([{"type": "fact", "text": "Full fact %d." % i} for i in range(25)])
+        kept_now: list = []
+        copilot._add_memories([{"type": "fact", "text": "A member's own note."}], held=True, by="Mo", kept=kept_now)
+        eq(kept_now, ["A member's own note."], "said to wait")
+        ok(any(m["text"] == "A member's own note." and m["status"] == "pending" for m in copilot._load_memory()),
+           "and it does, in a store already full of kept notes")
+        eq(sum(1 for m in copilot._load_memory() if m["text"].startswith("Full fact")), 25, "none of which went")
+        # Text an admin's chat only READ does not keep a waiting note by
+        # matching it: the same provenance check as a new note comes first.
+        planted = "Suppliers are now paid to sort code 11-22-33 account 44556677."
+        copilot._add_memories([{"type": "fact", "text": planted}], held=True, by="Mo")
+        refused: list = []
+        copilot._add_memories([{"type": "fact", "text": planted}], said="summarise the latest emails please",
+                              saw="From a supplier: " + planted, source="chat", refused=refused,
+                              asked_in="summarise the latest emails please")
+        eq([r["reason"] for r in refused], ["from_data"], "refused as lifted from what was read")
+        ok(any(m["text"] == planted and m["status"] == "pending" for m in copilot._load_memory()), "still waiting")
+        ok("44556677" not in copilot._memory_to_system(), "and read by nobody")
+    finally:
+        copilot.MEMORY_MAX = cap
+        _ws_restore(saved)
+
+
+@test
+def t_a_scanned_pdf_reserves_what_it_will_cost_not_its_base64():
+    """The review's M3. The reservation counted a document's base64 as text,
+    three characters a token: an 8 MB scan reserved $15 of a $25 day, turned
+    everyone's chat away while it was read, and on a cancelled call wrote the
+    $15 into the usage log. A document now counts by its pages (from the
+    file, or its size when a scan hides them), an image at the most one
+    costs, and text as before."""
+    import base64 as b64
+    def doc(raw):
+        return {"model": "claude-opus-5-5", "max_tokens": 4000, "messages": [{"role": "user", "content": [
+            {"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
+                                            "data": b64.b64encode(raw).decode()}},
+            {"type": "text", "text": "Read this invoice."}]}]}
+    three = b"%PDF-1.4\n" + b"1 0 obj << /Type /Pages >> endobj\n" + b"".join(
+        b"%d 0 obj << /Type /Page /Parent 1 0 R >> endobj\n" % i for i in range(2, 5)) + b"x" * 7_000_000
+    inp, cost = copilot._call_estimate(doc(three))
+    eq(inp // copilot.PDF_PAGE_TOKENS, 3, "three pages, read from the file, whatever its size")
+    scan = b"%PDF-1.5\n" + b"\x00" * 8_000_000
+    inp, cost = copilot._call_estimate(doc(scan))
+    ok(inp <= copilot.PDF_MAX_PAGES * copilot.PDF_PAGE_TOKENS + 100, "a scan with hidden pages is capped at the page limit")
+    ok(cost < 3.0, "an 8 MB scan reserves %.2f, not 15" % cost)
+    img = {"model": "claude-opus-5-5", "max_tokens": 100, "messages": [{"role": "user", "content": [
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "A" * 4_000_000}}]}]}
+    ok(abs(copilot._call_estimate(img)[0] - copilot.IMAGE_TOKENS) < 20, "an image at the most one costs, plus its framing")
+    text = {"model": "claude-opus-5-5", "max_tokens": 100, "system": "s" * 3000,
+            "messages": [{"role": "user", "content": "q" * 3000}]}
+    ok(abs(copilot._call_estimate(text)[0] - 2000) < 50, "text is three characters a token, as before")
+
+
+@test
+def t_the_webhook_repair_reads_hosts_as_hosts():
+    """Found verifying R-C2. Hosts were compared as raw text, so our own
+    address with a port or a trailing dot read as foreign and was removed
+    with a 'your credentials leaked' email, a staging host given as a full
+    address never matched, an address with no host (an event bus) was kept
+    and never reported, and a removal was not reported at all when a later
+    step of the same repair failed."""
+    import server
+    saved_req, saved_allow = server._request, set(server.WEBHOOK_ALLOWED_HOSTS)
+    subs = [{"id": 1, "topic": "orders/create", "address": "https://app.example.test/webhooks/orders"},
+            {"id": 2, "topic": "orders/updated", "address": "https://APP.example.test:443/webhooks/orders"},
+            {"id": 3, "topic": "orders/paid", "address": "https://app.example.test./other"},
+            {"id": 4, "topic": "orders/updated", "address": "https://staging.example.test/webhooks/orders"},
+            {"id": 5, "topic": "orders/create", "address": "arn:aws:events:eu-west-2::event-source/aws.partner/x"},
+            {"id": 6, "topic": "orders/create", "address": "https:evil.example/x"},
+            {"id": 7, "topic": "customers/redact", "address": "https://elsewhere.example/p"}]
+    deleted, fail_create = [], {"on": False}
+
+    async def fake_request(method, path, params=None, body=None, **kw):
+        if method == "GET":
+            return {"webhooks": subs}
+        if method == "DELETE":
+            deleted.append(path)
+            return {}
+        if method == "POST":
+            if fail_create["on"]:
+                raise RuntimeError("Shopify answered 503")
+            return {"webhook": {"id": 99, **body["webhook"]}}
+        raise AssertionError(method + " " + path)
+    server._request = fake_request
+    os.environ["APP_URL"] = "https://app.example.test"
+    try:
+        server.WEBHOOK_ALLOWED_HOSTS.clear()
+        server.WEBHOOK_ALLOWED_HOSTS.add(server._webhook_host("https://staging.example.test/webhooks/orders"))
+        res = run(server.ensure_order_webhooks())
+        eq(sorted(deleted), ["webhooks/5.json", "webhooks/6.json"],
+           "our own host however written, and the allowed staging copy, stay; an address with no host goes")
+        eq(len(res["foreign_removed"]), 2, res)
+        deleted.clear()
+        fail_create["on"] = True
+        subs[:] = [{"id": 8, "topic": "orders/create", "address": "https://exfil.example/x"}]
+        res = run(server.ensure_order_webhooks())
+        eq(res.get("ok"), False, "the recreate failed")
+        eq(res.get("foreign_removed"), ["orders/create to exfil.example"], "but what was removed is still said")
+        eq(server._webhook_host("Staging.Example.Test."), "staging.example.test", "a bare host, any case")
+    finally:
+        server._request = saved_req
+        server.WEBHOOK_ALLOWED_HOSTS.clear(); server.WEBHOOK_ALLOWED_HOSTS.update(saved_allow)
+
+
+@test
+def t_restoring_the_pre_redact_archive_does_not_erase_again():
+    """Found verifying R-C1. The pre-redact archive is taken while the
+    erasure is owed and the store is out of reach, and restoring it (its
+    whole purpose, after a misfire) brought both back: the next hour either
+    erased the restored data again or, the app reinstalled, raised a false
+    forged-request alarm. What is owed now, and how long the store has been
+    out of reach now, are live state: a restore keeps them as they are."""
+    import base64 as b64
+    from datetime import datetime, timedelta, timezone
+    def go():
+        ensure_auth()
+        old = (datetime.now(timezone.utc) - timedelta(hours=46)).isoformat()
+        copilot._shop_owed_set({"since": old, "tries": 0})
+        w = copilot._load_watch(); w["shopify_down"] = old; copilot._save_watch(w)
+        buf, _added = copilot._build_backup_zip()
+        blob = b64.b64encode(buf.getvalue()).decode()
+        copilot._shop_owed_set(None)                     # settled since
+        w = copilot._load_watch(); w.pop("shopify_down", None); copilot._save_watch(w)
+        r = post("/api/restore", {"zip": blob})
+        eq(r.status_code, 200, r.text[:200])
+        eq(copilot._load_privacy_log().get("shop_owed"), None, "nothing owed comes back with the archive")
+        eq(copilot._load_watch().get("shopify_down"), None, "nor the old outage")
+        li = login("cameron", MASTER_PW)
+        APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
+    with_accounts(go)
+
 
 @test
 def t_a_refused_request_says_why_so_the_page_can_answer_it():
@@ -15238,11 +16220,15 @@ def t_a_real_route_comes_back_compressed():
     the stack the merchant's requests go through, which is a different claim and
     the one that was silently false while the suite built its own bare app."""
     def go():
-        # Enough contacts to clear the 1 KB floor comfortably.
+        # Enough people to clear the 1 KB floor comfortably. `person_add`: the
+        # route has no "create", and asking for it only ever passed on whatever
+        # earlier tests had left in the store.
         for i in range(60):
-            post("/api/crm/contact", {"op": "create", "name": "Contact %d" % i,
-                                      "email": "c%d@example.com" % i,
-                                      "notes": "Repeat customer, gobo orders " * 6})
+            r = post("/api/crm/contact", {"op": "person_add",
+                                          "name": "Contact %d, repeat customer for gobo orders" % i,
+                                          "emails": ["c%d@example.com" % i],
+                                          "job_title": "Lighting designer, touring and theatre"})
+            eq(r.status_code, 200, r.text[:120])
         copilot._rl_hits.clear(); copilot._rl_global.clear()
         r = client.post("/api/crm/board", json={},
                         headers={"Authorization": "Bearer " + tok(),
@@ -17002,8 +17988,10 @@ def t_the_password_register_is_as_private_as_the_tokens_beside_it():
 def t_the_drive_door_does_not_answer_whether_a_username_exists():
     """An unknown username returned before the password was ever hashed while
     a real one paid for scrypt, and that difference answers the question the
-    401 refuses to. The web login already levels it with a dummy verify.
-    Counted rather than timed: a clock makes a flaky test, the work does not."""
+    401 refuses to. Since audit R-007 the drive takes its own random password,
+    checked with one SHA-256, so it runs scrypt for nobody: known, unknown and
+    switched-off accounts all cost the same, and a flood of guesses cannot
+    hold the event loop on password hashing (chain R-C4). Counted, not timed."""
     import base64
     ensure_auth()
     uid, _sess, _pw = ready_user("Dee", "dee-dav")
@@ -17018,7 +18006,7 @@ def t_the_drive_door_does_not_answer_whether_a_username_exists():
             return len(spent)
         known = knock("dee-dav", "not-the-password")
         unknown = knock("no-such-person-at-all", "not-the-password")
-        ok(known >= 1, "a real username is checked against its stored hash")
+        eq(known, 0, "a real username runs no scrypt at the drive")
         eq(unknown, known, "and an unknown one costs exactly the same work")
         off = copilot._load_users()
         off["users"][uid]["active"] = False
@@ -18514,7 +19502,8 @@ def t_a_chunked_drive_upload_cannot_spool_past_the_quota():
             _pt, starter = make_user("Pat", "pat")
             sess = login("pat", starter).json()["session"]
             post_s(sess, "/api/auth/password", {"current": starter, "new": "pats-own-pw-91"})
-            auth = {"Authorization": "Basic " + b64.b64encode(b"pat:pats-own-pw-91").decode()}
+            sess = login("pat", "pats-own-pw-91").json()["session"]
+            auth = {"Authorization": "Basic " + b64.b64encode(("pat:" + drive_pw(sess)).encode()).decode()}
             r = client.put("/dav/big.pdf", headers=auth, content=body())
             eq(r.status_code, 507, "refused for space, not accepted and then refused")
             ok(spooled["n"] <= 16 * 1024,
@@ -20211,7 +21200,7 @@ def t_a_finder_rename_keeps_the_sidecar_a_sidecar():
         ensure_auth()
         import base64 as b64
         owen, _sess, pw = ready_user("Owen", "owen")
-        auth = {"Authorization": "Basic " + b64.b64encode(f"owen:{pw}".encode()).decode()}
+        auth = {"Authorization": "Basic " + b64.b64encode(f"owen:{drive_pw(_sess)}".encode()).decode()}
         copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
         d = copilot._load_files()
         now = "2026-09-01T00:00:00+00:00"
@@ -23077,7 +24066,7 @@ def t_a_folder_holding_only_finders_sidecars_can_be_deleted():
             ensure_auth()
             copilot._dav_auth_cache.clear()
             _u, _s, pw = ready_user("Poppy", "poppy", role="member")
-            auth = {"Authorization": "Basic " + _b64.b64encode(("poppy:" + pw).encode()).decode()}
+            auth = {"Authorization": "Basic " + _b64.b64encode(("poppy:" + drive_pw(_s)).encode()).decode()}
             client.request("MKCOL", "/dav/Old job", headers=auth)
             client.put("/dav/Old job/.DS_Store", headers=auth, content=b"\x00\x00\x00\x01Bud1" + b"\x00" * 60)
             tree = post("/api/files/tree", {}).json()["store"]
@@ -23177,7 +24166,7 @@ class _OpusResp:
 def _opus_run(model, script, **kw):
     fake = _OpusFake(script)
     saved = copilot._spend_guard
-    copilot._spend_guard = lambda: None
+    copilot._spend_guard = lambda *a, **k: None
     try:
         resp = _run(copilot._xcreate(fake, model=model, max_tokens=100, system="Read the order.",
                                      messages=[{"role": "user", "content": "Order 1"}],
@@ -23394,7 +24383,7 @@ def t_a_chat_that_fell_back_stays_on_the_fallback_and_says_why():
         _OpusResp([_OpusBlock("tool_use", name="present_response", input={"summary": "Fine."}, id="tu2")], "tool_use"),
     ])
     saved = (copilot._client, copilot._spend_guard, copilot.MODEL_FALLBACK, dict(copilot._AI_LAST_FAIL))
-    copilot._client, copilot._spend_guard, copilot.MODEL_FALLBACK = fake, (lambda: None), "claude-opus-4-8"
+    copilot._client, copilot._spend_guard, copilot.MODEL_FALLBACK = fake, (lambda *a, **k: None), "claude-opus-4-8"
     async def dispatch(name, args):
         return '{"name": "Shop"}'
     try:
@@ -23464,7 +24453,7 @@ def t_a_chat_that_ran_out_of_room_or_was_declined_says_so():
     token limit: a Deep analysis that used it all ended as "Reactor did not
     send an answer", like a refusal did."""
     saved = (copilot._client, copilot._spend_guard)
-    copilot._spend_guard = lambda: None
+    copilot._spend_guard = lambda *a, **k: None
     async def dispatch(name, args):
         return "{}"
     try:
@@ -23598,7 +24587,7 @@ def t_a_report_that_did_not_finish_keeps_the_last_one_and_says_why():
                       _OpusBlock("tool_use", name="present_response", id="t1",
                                  input={"summary": "Three keywords carry 60% of clicks."})], "tool_use")
     saved = (copilot._client, copilot._spend_guard)
-    copilot._spend_guard = lambda: None
+    copilot._spend_guard = lambda *a, **k: None
     def go():
         ensure_auth()
         _a, sess, _p = ready_user("Kay Words", "kayw", role="admin")
@@ -23612,7 +24601,7 @@ def t_a_report_that_did_not_finish_keeps_the_last_one_and_says_why():
             eq(cache.get("result", {}).get("structured", {}).get("summary"), "Three keywords carry 60% of clicks.",
                "the last good report is kept")
         # A budget refusal is said as it is on the keyword and customer reports too.
-        def spent():
+        def spent(*a, **k):
             raise RuntimeError("Reactor has used today's AI budget.")
         copilot._spend_guard = spent
         for path in ("/api/keywords", "/api/customers"):
@@ -23674,7 +24663,7 @@ def t_settings_names_a_fallback_only_where_one_would_be_asked():
 @test
 def t_out_of_room_advice_matches_the_switch_and_a_fallback_is_said_on_every_ending():
     saved = (copilot._client, copilot._spend_guard, copilot.MODEL_FALLBACK, dict(copilot._AI_LAST_FAIL))
-    copilot._spend_guard = lambda: None
+    copilot._spend_guard = lambda *a, **k: None
     async def dispatch(name, args):
         return "{}"
     try:
@@ -23716,10 +24705,11 @@ def t_a_long_catalogue_is_read_in_reads_of_the_stated_size():
 
 @test
 def t_someone_else_may_change_a_long_skill_but_not_replace_it():
+    # An admin: members no longer write skills at all (audit R-003).
     saved = _ws_stores()
     def go():
         ensure_auth()
-        _a, sess, _p = ready_user("Rex Replace", "rexr", role="member")
+        _a, sess, _p = ready_user("Rex Replace", "rexr", role="admin")
         manual = "\n\n".join("## Section %d\n%s" % (i, ("Glass gobos take four days. " * 30)) for i in range(200))[:180000]
         r = post("/api/skills", {"op": "add", "title": "Trade manual", "content": manual, "file": "trade-manual.md"})
         sid = [x for x in r.json()["skills"] if x["title"] == "Trade manual"][0]["id"]

@@ -1282,7 +1282,15 @@ CHECK_KINDS = {
 _FIN_WORDS = re.compile(
     r"(?i)\b(remittance|invoice|statement|credit note|payment advice|"
     r"payment confirmation|purchase order|receipt|refund)\b")
-_AMOUNT_RE = re.compile(r"(?<![\d.])(\d{1,3}(?:,\d{3})*\.\d{2})(?!\d)")
+# At most five thousands groups (999 trillion). Unbounded, an attempt from
+# every comma walked to the end of the run, so a text layer of
+# "1,111,111,..." with no pence took the square of its length on the event
+# loop; bounded, each attempt is a few characters. A document from any
+# sender reaches this. (Refusing to start after "digit," was tried and lost
+# real amounts: "INV-0142,1,234.56" read as nothing.)
+_AMOUNT_RE = re.compile(r"(?<![\d.])(\d{1,3}(?:,\d{3}){0,5}\.\d{2})(?!\d)")
+# Twelve pages of text is far more than a remittance or invoice holds.
+DOC_TEXT_CAP = 200_000
 # A number may be segmented: INV-2026-0142, SI/24/0088. The whole run is one
 # number; taken piecewise it became "INV-2026" and "0142", neither of which is
 # in Xero, and a bill that WAS there was reported missing at critical.
@@ -1513,16 +1521,20 @@ async def extract_doc(candidate: dict, known_docs: Optional[dict] = None) -> Opt
     candidate = {**candidate, "sha1": digest}
     # OFF the event loop: pypdfium2 chewing an 8MB scan is pure CPU, and this
     # process also answers Shopify's order webhook inside a 5-second window.
-    text = await asyncio.to_thread(_pdf_text, data)
+    text = (await asyncio.to_thread(_pdf_text, data))[:DOC_TEXT_CAP]
     if len(text.strip()) >= 120:
-        parsed = parse_doc_text(text, candidate.get("subject", ""), candidate.get("from", ""))
+        # Off the loop too: the patterns are linear now, but this is a stranger's text.
+        parsed = await asyncio.to_thread(parse_doc_text, text, candidate.get("subject", ""),
+                                         candidate.get("from", ""))
         # The text layer told us the type; a remittance's allocation table is
         # worth an AI read even when text exists, because its rows are the one
         # structure regex cannot be trusted to pair up correctly.
         if parsed["doc_type"] == "remittance" and _ai_call is not None:
             ai = await _ai_extract(data, text)
             if ai:
-                parsed = _merge_extractions(parsed, ai, text)
+                # Off the loop: it searches the whole text again for every
+                # line the AI returned (four seconds at a thousand lines).
+                parsed = await asyncio.to_thread(_merge_extractions, parsed, ai, text)
             else:
                 # The allocation lines were not read: keep what the text gave,
                 # and read it again with the AI on a later day (the sweep's

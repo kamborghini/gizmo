@@ -3,7 +3,7 @@
 Generated from the code by `tools/env_reference.py`; do not edit by hand.
 `make env-doc` rewrites it, and CI fails when it is stale.
 
-218 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
+222 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
 
 ## server.py
 
@@ -18,6 +18,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SHOPIFY_API_VERSION` | `"2026-07"` | server |  |
 | `SHOPIFY_MAX_CONCURRENCY` | `"4"` | server |  |
 | `TOKEN_REFRESH_BUFFER` | `"1800"` | server |  |
+| `WEBHOOK_ALLOWED_HOSTS` | `""` | server | comma-separated host names or addresses (a staging copy of Reactor) whose webhooks the hourly repair keeps |
 
 ## copilot.py - CRM: the sales desk, modelled on Pipedrive
 
@@ -168,6 +169,9 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `LOANS_PATH` | `"/data/loans.json"` | copilot |  |
+| `RAILWAY_ENVIRONMENT` | `None` | copilot | set by Railway; the volume check runs only there |
+| `RAILWAY_PROJECT_ID` | `None` | copilot | set by Railway; the volume check runs only there |
+| `SETUP_CODE` | `""` | copilot | set only while first-run setup is needed, then remove; unset locks setup |
 | `WORK_ARCHIVE_PATH` | `os.path.join(os.path.dirname(WORK_PATH) or ".", "worklog_...` | copilot |  |
 | `WORK_KEEP` | `"2000"` | copilot |  |
 | `WORK_MIN_SECS` | `"60"` | copilot |  |

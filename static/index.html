@@ -3741,6 +3741,13 @@
             min-width: 240px; }
         .dpanel-row { display: flex; align-items: center; gap: var(--sp-2); }
         .dpanel-row > span { flex: 1 1 auto; font-size: var(--text-xs); color: var(--text-tertiary); }
+        .dpanel.drive-panel { width: min(360px, calc(100vw - 16px)); }
+        .drive-title { margin: 0; font-size: var(--text-sm); font-weight: var(--weight-medium); }
+        .drive-p, .drive-note { margin: 0; font-size: var(--text-sm); line-height: var(--lh-body); color: var(--text-secondary); }
+        .drive-p b { color: var(--text-primary); font-weight: var(--weight-medium); overflow-wrap: anywhere; }
+        .drive-pw { display: flex; align-items: center; gap: var(--sp-2); }
+        .drive-pw code { flex: 1 1 auto; min-width: 0; padding: var(--sp-1-5) var(--sp-2); border: var(--bw-hairline) solid var(--border-default);
+            border-radius: var(--radius-sm); background: var(--surface-secondary); font-size: var(--text-sm); overflow-wrap: anywhere; user-select: all; }
         .dpanel input, .dpanel select { height: 28px; padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm);
             font-size: var(--text-sm); line-height: var(--lh-control); }
         .dpanel select { padding-right: var(--chevron-room); }
@@ -4978,6 +4985,7 @@ Projected Image UK"></textarea>
         const I = {
             mail: SV('<rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>'),
             clip: SV('<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>'),
+            hardDrive: SV('<line x1="22" y1="12" x2="2" y2="12"></line><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path><line x1="6" y1="16" x2="6.01" y2="16"></line><line x1="10" y1="16" x2="10.01" y2="16"></line>'),
             copy: SV('<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>'),
             phone: SV('<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>'),
             cal: SV('<rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line>'),
@@ -8199,7 +8207,17 @@ Projected Image UK"></textarea>
                     + (t.not_kept.length > 1 ? ' and ' + (t.not_kept.length - 1) + ' more' : '') + '. Instructions belong in Skills, where Reactor follows them.'));
                 const b = el('button', 'btn btn-sm'); b.type = 'button'; b.textContent = 'Save as a skill';
                 b.onclick = () => openSkillDraft(t.not_kept.join('\n\n'));
-                n.append(b); m.append(n);
+                if (canEditInstructions()) n.append(b);
+                m.append(n);
+            }
+            /* A member's note is kept waiting: an admin decides whether
+               Reactor reads it with everyone's answers. */
+            if (Array.isArray(t.held) && t.held.length) {
+                const n = el('div', 'resp-note');
+                n.append(el('span', null, 'Noted for an admin to check: "' + t.held[0] + '"'
+                    + (t.held.length > 1 ? ' and ' + (t.held.length - 1) + ' more' : '')
+                    + '. Reactor uses it in answers once an admin keeps it in Memory.'));
+                m.append(n);
             }
             if (Array.isArray(t.followups_closed) && t.followups_closed.length) {
                 const n = el('div', 'resp-note');
@@ -8460,7 +8478,7 @@ Projected Image UK"></textarea>
             else {
                 c.turns.push({ role: 'assistant', structured: data.structured || { summary: 'Reactor did not send an answer. Ask again.' },
                     model: data.model, deep: data.deep, fell_back: data.fell_back, data_used: data.data_used, at: new Date().toISOString(),
-                    not_kept: data.not_kept, followups_closed: data.followups_closed, followups_maybe: data.followups_maybe });
+                    not_kept: data.not_kept, held: data.held, followups_closed: data.followups_closed, followups_maybe: data.followups_maybe });
                 /* Only the notes can have changed, and only when the answer
                    kept or closed one: every answer used to read the notes,
                    the store knowledge and a fresh 28-day snapshot. */
@@ -10101,7 +10119,11 @@ Projected Image UK"></textarea>
             try {
                 const d = await api('/api/impact', payload);
                 if (d && Array.isArray(d.impact)) impact = d.impact;
-                if (payload.op === 'conclude') { toastOk('Concluded. What it came to is saved as a learning in your notes.'); loadMemory('notes'); }
+                if (payload.op === 'conclude') {
+                    toastOk(d && d.held ? 'Concluded. What it came to waits in your notes for an admin to keep it.'
+                        : 'Concluded. What it came to is saved as a learning in your notes.');
+                    loadMemory('notes');
+                }
             } catch (e) { toastError('That change was not saved. ' + (e.message || '')); }
             if (btn) setBusy(btn, false);
             paintImpact();
@@ -10125,7 +10147,9 @@ Projected Image UK"></textarea>
             const top = el('div', 'impact-top');
             top.append(el('div', 'impact-text', it.text || ''));
             const acts = el('div', 'impact-acts');
-            if (it.status !== 'concluded') {
+            /* Yours to settle, or an admin's: the server says the same. */
+            const mayAct = canEditInstructions() || (!!it.by_uid && !!teamMe && it.by_uid === String(teamMe.id || ''));
+            if (it.status !== 'concluded' && mayAct) {
                 const cc = el('button', 'btn btn-sm'); cc.append(ico(I.check), document.createTextNode('Conclude'));
                 cc.title = 'Stop measuring and keep what it came to as a learning';
                 cc.onclick = () => impactOp({ op: 'conclude', id: it.id }, cc);
@@ -10138,15 +10162,16 @@ Projected Image UK"></textarea>
                     { title: 'Delete tracked change', okText: 'Delete' })) return;
                 impactOp({ op: 'delete', id: it.id });
             };
-            acts.append(del);
+            if (mayAct) acts.append(del);
             top.append(acts); row.append(top);
             /* Measured to the day it was concluded (the server keeps those
                figures), and said so: 'since then' read as counting from the
                conclusion. */
             const from = fmtDate(it.started_at);
+            const who = it.by ? ' Tracked by ' + it.by + '.' : '';
             row.append(el('div', 'impact-sub', it.status === 'concluded'
-                ? 'Measured from ' + from + ' to ' + fmtDate(it.concluded_at) + '.'
-                : 'Tracking since ' + from + '. Change in your headline figures since then:'));
+                ? 'Measured from ' + from + ' to ' + fmtDate(it.concluded_at) + '.' + who
+                : 'Tracking since ' + from + '.' + who + ' Change in your headline figures since then:'));
             const chips = el('div', 'impact-deltas');
             (it.deltas || []).forEach(d => {
                 const cls = d.pct == null ? 'flat' : d.pct > 0 ? 'up' : d.pct < 0 ? 'down' : 'flat';
@@ -10218,13 +10243,14 @@ Projected Image UK"></textarea>
                     + (knowledge.edited_at ? ', corrected' + (knowledge.edited_by ? ' by ' + knowledge.edited_by : '') + ' on ' + fmtDate(knowledge.edited_at) : '')
                     + '. Reactor reads it with every answer.';
             } else desc = 'Reactor can read your homepage, pages and blog and keep what it learns about the business. It reads it with every answer until you delete it.';
+            if (!canEditInstructions()) desc += ' Only an admin can change it.';
             head.append(el('p', 'card-desc', desc));
             const acts = el('div', 'card-act');
             if (learning) {
                 const b = el('button', 'btn btn-sm'); b.textContent = 'Learning'; setBusy(b, true); acts.append(b);
             } else if (knowledgeErr) {
                 const b = el('button', 'btn btn-sm'); b.append(ico(I.rotate), document.createTextNode('Try again')); b.onclick = () => loadMemory(); acts.append(b);
-            } else if (learned && !knowEditing) {
+            } else if (learned && !knowEditing && canEditInstructions()) {
                 const ed = el('button', 'btn btn-sm'); ed.append(ico(I.edit), document.createTextNode('Correct'));
                 ed.title = 'Fix a detail it got wrong'; ed.onclick = () => { knowEditing = true; paintMem('knowledge'); };
                 const re = el('button', 'btn btn-sm'); re.append(ico(I.rotate), document.createTextNode('Learn again'));
@@ -10235,7 +10261,7 @@ Projected Image UK"></textarea>
                 };
                 const del = el('button', 'btn btn-sm'); del.append(ico(I.trash), document.createTextNode('Delete')); del.onclick = deleteKnowledge;
                 acts.append(ed, re, del);
-            } else if (!learned && knowledgeRead) {
+            } else if (!learned && knowledgeRead && canEditInstructions()) {
                 const b = el('button', 'btn btn-sm btn-primary'); b.append(ico(I.book), document.createTextNode('Learn my store'));
                 b.title = 'Reads up to 12 pages of your website. An AI run.'; b.onclick = () => learnStore(b); acts.append(b);
             }
@@ -10306,14 +10332,16 @@ Projected Image UK"></textarea>
            server puts in every answer (_memory_to_system). */
         function memSentIds() {
             const sent = new Set();
+            const live = m => m.status !== 'dismissed' && m.status !== 'pending';
             const kinds = [['followup', m => m.type === 'followup' && m.status === 'open'],
-                           ['facts', m => (m.type === 'fact' || m.type === 'decision') && m.status !== 'dismissed'],
-                           ['preference', m => m.type === 'preference' && m.status !== 'dismissed'],
-                           ['insight', m => m.type === 'insight' && m.status !== 'dismissed']];
+                           ['facts', m => (m.type === 'fact' || m.type === 'decision') && live(m)],
+                           ['preference', m => m.type === 'preference' && live(m)],
+                           ['insight', m => m.type === 'insight' && live(m)]];
             kinds.forEach(([, f]) => memories.filter(f).slice(-memInject).forEach(m => sent.add(m.id)));
             return sent;
         }
         function memGroup(m) {
+            if (m.status === 'pending') return 'pending';
             if (m.type === 'followup') return m.status === 'open' ? 'followup' : 'closed';
             return m.type;
         }
@@ -10324,12 +10352,16 @@ Projected Image UK"></textarea>
             if (open && open.value !== (open.dataset.initial || '')) { memDeferred = true; return; }
             memDeferred = false;
             host.replaceChildren();
+            const waitingN = memories.filter(m => m.status === 'pending').length;
             const head = el('div', 'card-head');
             head.append(el('h3', 'card-title', 'Notes' + (memories.length ? ' (' + memories.length + ')' : '')),
-                el('p', 'card-desc', 'What Reactor keeps from chat, and what you add here. It reads the newest ' + memInject
-                    + ' of each kind with every answer. Rules for how to work belong in Skills.'));
+                el('p', 'card-desc', 'What Reactor keeps from chat, and what ' + (canEditInstructions() ? 'you add' : 'an admin adds') + ' here. It reads the newest ' + memInject
+                    + ' of each kind with every answer. Rules for how to work belong in Skills.'
+                    + (canEditInstructions()
+                        ? (waitingN ? ' ' + (waitingN === 1 ? 'One note from a member waits' : waitingN + ' notes from members wait') + ' under Waiting until you keep ' + (waitingN === 1 ? 'it.' : 'them.') : '')
+                        : ' Only an admin can add, correct or delete a note, and a note from your chats or tracked changes waits for an admin to keep it.')));
             const acts = el('div', 'card-act');
-            if (!memoryLoadErr) {
+            if (!memoryLoadErr && canEditInstructions()) {
                 const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('Add a note'));
                 add.onclick = () => { memView.adding = true; memView.editId = null; paintNotes(); };
                 acts.append(add);
@@ -10338,12 +10370,13 @@ Projected Image UK"></textarea>
             if (memoryLoadErr) { host.append(loadFailure('Your notes could not be loaded, so they cannot be shown yet. ' + memoryLoadErr, () => loadMemory('notes'))); return; }
             if (memView.adding) host.append(memEditor(null));
             if (!memories.length) {
-                if (!memView.adding) host.append(el('div', 'empty', 'No notes yet. Reactor keeps a note when something in a chat is worth remembering, and you can add one here.'));
+                if (!memView.adding) host.append(el('div', 'empty', 'No notes yet. Reactor keeps a note when something in a chat is worth remembering'
+                    + (canEditInstructions() ? ', and you can add one here.' : '.')));
                 return;
             }
-            const groups = { all: memories.length, followup: 0, preference: 0, insight: 0, fact: 0, decision: 0, closed: 0 };
+            const groups = { all: memories.length, pending: 0, followup: 0, preference: 0, insight: 0, fact: 0, decision: 0, closed: 0 };
             memories.forEach(m => { groups[memGroup(m)]++; });
-            const F = [['all', 'All'], ['followup', 'Follow-ups'], ['preference', 'Preferences'], ['insight', 'Learnings'],
+            const F = [['all', 'All'], ['pending', 'Waiting'], ['followup', 'Follow-ups'], ['preference', 'Preferences'], ['insight', 'Learnings'],
                 ['fact', 'Facts'], ['decision', 'Decisions'], ['closed', 'Closed']].filter(([k]) => k === 'all' || groups[k]);
             if (!F.some(([k]) => k === memView.f)) memView.f = 'all';
             const search = tableSearch('Search notes…', memView.q, (v) => { memView.q = v; memView.page = 1; paintNotesList(); });
@@ -10387,14 +10420,16 @@ Projected Image UK"></textarea>
                 onSize: (k) => { memView.size = k; memView.page = 1; paintNotesList(); } }));
         }
         function memRow(m, sent) {
+            const waiting = m.status === 'pending';
             const tr = el('tr', m.status === 'done' ? 'done' : null);
             const k = el('td', 'mem-kind'); k.append(el('span', 'lbl-chip note', MEM_WORDS[m.type] || cap(String(m.type || ''))));
             const t = el('td', 'mem-note');
             const tx = el('div', 'mem-text', m.text || ''); tx.id = 'mem-' + m.id; t.append(tx);
             const bits = [];
-            if (m.type === 'followup' && m.status !== 'open') bits.push((m.status === 'done' ? 'Done' : 'Dismissed') + ' ' + fmtDate(m.updated || m.created) + (m.closed_by === 'chat' ? ' in chat' : ''));
+            if (waiting) bits.push('Waiting for an admin to keep it' + (m.by ? ', from ' + m.by : '') + '. Reactor does not read it yet');
+            if (m.type === 'followup' && m.status !== 'open' && !waiting) bits.push((m.status === 'done' ? 'Done' : 'Dismissed') + ' ' + fmtDate(m.updated || m.created) + (m.closed_by === 'chat' ? ' in chat' : ''));
             if (m.edited) bits.push('corrected');
-            if (!sent.has(m.id) && !(m.type === 'followup' && m.status !== 'open')) bits.push('not read with answers: older than the newest ' + memInject + ' of its kind');
+            if (!waiting && !sent.has(m.id) && !(m.type === 'followup' && m.status !== 'open')) bits.push('not read with answers: older than the newest ' + memInject + ' of its kind');
             if (m.status === 'dismissed' && m.type !== 'followup') bits.push('dismissed');
             if (bits.length) t.append(el('div', 'mem-meta', cap(bits.join(' · '))));
             const fromWord = MEM_FROM[m.source] || (m.source ? cap(m.source) : 'Added here');
@@ -10408,14 +10443,24 @@ Projected Image UK"></textarea>
                 const b = el('button', 'mem-btn' + (cls ? ' ' + cls : '')); b.type = 'button'; b.append(ico(icon)); b.title = verb;
                 b.setAttribute('aria-label', label(verb)); b.onclick = fn; box.append(b); return b;
             };
-            if (m.type === 'followup' && m.status === 'open') {
-                btn(I.check, 'Mark done', 'ok', () => memOp({ op: 'set_status', id: m.id, status: 'done' }));
-                btn(I.x, 'Dismiss', '', () => memOp({ op: 'set_status', id: m.id, status: 'dismissed' }));
+            /* Only what the server allows this account (_member_may_set): a
+               member ticks off, reopens or dismisses a follow-up an admin
+               kept, and reopens only one ticked off, never one dismissed. */
+            const admin = canEditInstructions();
+            const unkept = !!m.by && !m.kept;
+            if (waiting) {
+                if (admin) btn(I.check, 'Keep', 'ok', () => memOp({ op: 'set_status', id: m.id, status: 'open' }));
+            } else if (m.type === 'followup' && m.status === 'open') {
+                if (admin || !unkept) {
+                    btn(I.check, 'Mark done', 'ok', () => memOp({ op: 'set_status', id: m.id, status: 'done' }));
+                    btn(I.x, 'Dismiss', '', () => memOp({ op: 'set_status', id: m.id, status: 'dismissed' }));
+                }
             } else if (m.type === 'followup') {
-                btn(I.rotate, 'Reopen', '', () => memOp({ op: 'set_status', id: m.id, status: 'open' }));
+                if (admin || (m.status === 'done' && !unkept))
+                    btn(I.rotate, 'Reopen', '', () => memOp({ op: 'set_status', id: m.id, status: 'open' }));
             }
-            btn(I.edit, 'Correct', '', () => { if (memGuard()) { memView.editId = m.id; memView.adding = false; paintNotesList(); } });
-            btn(I.trash, 'Delete', 'del', async () => {
+            if (canEditInstructions()) btn(I.edit, 'Correct', '', () => { if (memGuard()) { memView.editId = m.id; memView.adding = false; paintNotesList(); } });
+            if (canEditInstructions()) btn(I.trash, 'Delete', 'del', async () => {
                 if (!await uiConfirm('Delete the note "' + String(m.text || '').slice(0, 90) + '"? Reactor stops using it straight away.',
                     { title: 'Delete note', okText: 'Delete' })) return;
                 memOp({ op: 'delete', id: m.id });
@@ -10485,7 +10530,8 @@ Projected Image UK"></textarea>
             box.classList.toggle('no-intro', !firstPaint('memory'));
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.bookmark;
             const htext = el('div'); htext.append(el('h2', null, 'Memory'),
-                el('p', null, 'What Reactor keeps in mind with every answer: what it learned from your website, and the notes it keeps from chat or that you add here. Correct or remove anything.'));
+                el('p', null, 'What Reactor keeps in mind with every answer: what it learned from your website, and the notes it keeps from chat or that '
+                    + (canEditInstructions() ? 'you add here. Correct or remove anything.' : 'an admin adds here.')));
             /* Under the header every block is a card the grid can move, each
                spanning the row; the empty action slot is where Customize goes. */
             hero.append(badge, htext, heroAct('')); box.append(hero);
@@ -10711,7 +10757,7 @@ Projected Image UK"></textarea>
             box.classList.toggle('no-intro', !firstPaint('skills'));
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.book;
             const ht = el('div'); ht.append(el('h2', null, 'Skills'),
-                el('p', null, 'Instructions and playbooks Reactor follows: a brand voice, a discount policy, how to answer a trade enquiry. Write one here' + (skillCaps.upload ? ' or upload a Markdown file' : '') + '. Reactor picks the ones that fit each question, in chat, in reports and in email drafts, and says under each answer which it followed.'));
+                el('p', null, 'Instructions and playbooks Reactor follows: a brand voice, a discount policy, how to answer a trade enquiry. ' + (canEditInstructions() ? 'Write one here' + (skillCaps.upload ? ' or upload a Markdown file' : '') + '. ' : 'An admin writes them here. ') + 'Reactor picks the ones that fit each question, in chat, in reports and in email drafts, and says under each answer which it followed.'));
             /* The empty action slot is where Customize goes. */
             hero.append(badge, ht, heroAct('')); box.append(hero);
             skHost.card = widget(el('div', 'card sk-card'), 'saved', 'full', 'Skills');
@@ -10774,7 +10820,8 @@ Projected Image UK"></textarea>
             const head = el('div', 'card-head');
             head.append(el('h3', 'card-title', 'Your skills' + (skills.length ? ' (' + skills.length + ')' : '')),
                 el('p', 'card-desc', 'Rules and playbooks, each with a title and a note of when it applies.'
-                    + (skillCaps.upload ? ' Drop Markdown files here to add them.' : '')));
+                    + (skillCaps.upload ? ' Drop Markdown files here to add them.' : '')
+                    + (canEditInstructions() ? '' : ' Only an admin can add, change or delete a skill.')));
             const acts = el('div', 'card-act');
             const up = el('button', 'btn btn-sm'); up.type = 'button';
             up.append(ico(I.upload), document.createTextNode('Upload Markdown'));
@@ -10791,7 +10838,8 @@ Projected Image UK"></textarea>
             add.onclick = () => { if (!skillGuard()) return; skView.adding = true; skView.editId = null; skView.draft = null; paintSkills(); };
             /* Only the master account uploads files. */
             if (skillCaps.upload) acts.append(up, fi);
-            acts.append(add); head.append(acts); card.append(head);
+            if (canEditInstructions()) acts.append(add);
+            head.append(acts); card.append(head);
             paintSkillUse();
             if (skillsLoadErr) {
                 card.append(loadFailure('Your skills could not be loaded, so they cannot be shown yet. '
@@ -10801,7 +10849,9 @@ Projected Image UK"></textarea>
             if (skView.uploads) card.append(skillUploads());
             if (skView.adding) card.append(skillEditor(null));
             if (!skills.length) {
-                if (!skView.adding && !skView.uploads) card.append(el('div', 'empty', 'No skills yet. Write one' + (skillCaps.upload ? ', or upload a Markdown file' : '') + '. Ideas: a brand voice guide, a discounting policy, an SEO checklist, or how to answer a trade enquiry.'));
+                if (!skView.adding && !skView.uploads) card.append(el('div', 'empty', canEditInstructions()
+                    ? 'No skills yet. Write one' + (skillCaps.upload ? ', or upload a Markdown file' : '') + '. Ideas: a brand voice guide, a discounting policy, an SEO checklist, or how to answer a trade enquiry.'
+                    : 'No skills yet. An admin can write one: a brand voice guide, a discounting policy, or how to answer a trade enquiry.'));
                 return;
             }
             if (skills.length > 4) {
@@ -11105,7 +11155,7 @@ Projected Image UK"></textarea>
             again.append(ico(I.rotate), document.createTextNode('Read again'));
             again.title = 'An AI run: Reactor reads the skill as it is now.';
             again.onclick = () => readSkill(s.id, again);
-            foot.append(again);
+            if (canEditInstructions()) foot.append(again);
             body.append(foot);
             d.append(body);
             return d;
@@ -11158,7 +11208,8 @@ Projected Image UK"></textarea>
                 li.remove();
                 const h = skHost.card.querySelector('.card-title'); if (h) h.textContent = 'Your skills (' + skills.length + ')';
             };
-            acts.append(use, dl, edit, del);
+            acts.append(use, dl);
+            if (canEditInstructions()) acts.append(edit, del);
             head.append(t);
             if (s.always) head.append(el('span', 'lbl-chip note sk-always', 'Every answer'));
             head.append(acts); li.append(head);
@@ -11194,7 +11245,7 @@ Projected Image UK"></textarea>
             if (stamp) meta.push((s.updated && s.updated !== s.created ? 'edited ' : 'added ') + fmtDate(stamp));
             if (s.file) meta.push('from ' + s.file);
             foot.append(el('span', 'sk-meta', meta.join(' · ')));
-            if (!s.reading) {
+            if (!s.reading && canEditInstructions()) {
                 const rd = el('button', 'btn btn-sm sk-read'); rd.type = 'button';
                 rd.append(ico(I.book), document.createTextNode('Have Reactor read it'));
                 rd.title = 'An AI run: Reactor reads the skill closely and writes down when it applies and what it will do.';
@@ -12739,6 +12790,13 @@ Projected Image UK"></textarea>
                      quarantined: n('quarantined'), failed: n('failed') };
         }
         function connIsAdmin() {
+            return !teamMe || ({ master: 3, admin: 2 }[teamMe.role] || 0) >= 2;
+        }
+        /* Skills, notes and the store knowledge are read into every admin's
+           answers, reports and drafts, so only an admin changes them; everyone
+           reads them. The server is the real gate; this stops offering buttons
+           it would refuse. */
+        function canEditInstructions() {
             return !teamMe || ({ master: 3, admin: 2 }[teamMe.role] || 0) >= 2;
         }
 
@@ -21339,9 +21397,9 @@ Projected Image UK"></textarea>
                 ['Chat', 'Ask anything about the store. Reactor reads your live figures (it can never change anything) and answers with findings and next steps. What Reactor read, under an answer, lists what it looked at. You can ask in another conversation while one is working, and Stop one that is taking too long.'],
                 ['Track', 'On a recommended action, Track takes a snapshot of your headline figures and measures the change over the following weeks. Tracked changes are listed on Memory.'],
                 ['Deep analysis', 'Reactor thinks for longer before it answers, in the conversation it is switched on in: slower, and it costs more. For questions that need several reports at once.'],
-                ['Memory', 'The facts, decisions, preferences, learnings and follow-ups Reactor keeps from chat, and what it learned from the website. Add or correct a note by hand. A rule for how Reactor should work belongs in Skills, and a note that reads like one is offered as a skill.'],
-                ['Skills', 'Your playbooks: a brand voice, a discount policy, how to answer a trade enquiry. Write one, or, from the master account, which can also save longer skills, upload Markdown files (a SKILL.md header gives the title and when it applies). Reactor picks the ones that fit each question, in chat, reports and email drafts, and says under each answer which it followed. Use in chat, or the Skills button beside the question box, applies one whatever the question; a short one can be applied to every answer.'],
-                ['Having a skill read', 'Read and add, or Have Reactor read it, is an AI run in which Reactor reads the skill closely and writes down when it applies, what it will do, and anything unclear. Check it before you rely on the skill, and read it again after you change the skill.'],
+                ['Memory', 'The facts, decisions, preferences, learnings and follow-ups Reactor keeps from chat, and what it learned from the website. An admin can add or correct a note by hand. A rule for how Reactor should work belongs in Skills, and a note that reads like one is offered as a skill.'],
+                ['Skills', 'Your playbooks: a brand voice, a discount policy, how to answer a trade enquiry. An admin writes one, or, from the master account, which can also save longer skills, upload Markdown files (a SKILL.md header gives the title and when it applies). Reactor picks the ones that fit each question, in chat, reports and email drafts, and says under each answer which it followed. Use in chat, or the Skills button beside the question box, applies one whatever the question; a short one can be applied to every answer.'],
+                ['Having a skill read', 'Read and add, or Have Reactor read it (an admin\u2019s to run), is an AI run in which Reactor reads the skill closely and writes down when it applies, what it will do, and anything unclear. Check it before you rely on the skill, and read it again after you change the skill.'],
             ]},
             { id: 'never', h: 'What the app will not do', body: [
                 ['Charge you twice', 'A booking is refused if the order already has a live label. If the result of a booking is unknown, the app says so and will not book again rather than risk a second charge.'],
@@ -21353,8 +21411,8 @@ Projected Image UK"></textarea>
             { id: 'files', h: 'Files', tab: 'files', body: [
                 ['What it is', 'A shared file store for the whole team, reachable anywhere the app is. Uploads and downloads go straight between your browser and the storage, so big files move at full speed.'],
                 ['Using it', 'Drag files, or whole folders, onto the list to upload them where you are; a dropped folder keeps its structure. Click a picture or PDF to preview it; other files download. Tick the box over a file’s icon to select several, then move or trash them together; Move works where dragging cannot, on a phone too. Uploading a name that already exists replaces it, with the old version kept in the trash. The trash keeps a file for 30 days.'],
-                ['Files in Finder', 'On a Mac, the file store opens as a network drive: in Finder press Command K, enter {dav} and sign in with your own username and password. Everything lands in the same folders the Files page shows, and deleting there is the same 30-day trash. Use your own sign-in: the drive records who did what.'],
-                ['If Finder keeps asking for the password', 'The drive opens only once you have chosen your own password in the app, so a new account, or one an admin has just reset, must sign in to Reactor first. An admin can see why someone was refused on Team, Activity.'],
+                ['Files in Finder', 'On a Mac, the file store opens as a network drive: in Finder press Command K, enter {dav} and sign in with your own username and a drive password. Make the drive password with Finder drive on the Files page; your Reactor password does not open the drive. Everything lands in the same folders the Files page shows, and deleting there is the same 30-day trash. Use your own sign-in: the drive records who did what.'],
+                ['If Finder keeps asking for the password', 'The drive takes the drive password made on the Files page, not your Reactor password. Changing your Reactor password, or an admin resetting it, removes the drive password, so make a new one. An admin can see why someone was refused on Team, Activity.'],
                 ['Setting it up', 'Files needs a Cloudflare R2 storage account, connected once by whoever looks after the app’s hosting. Settings, Connections shows whether it is connected. It costs about 60p a month at 50 GB.', { admin: true }],
             ]},
             { id: 'team', h: 'The team', body: [
@@ -26649,6 +26707,57 @@ Projected Image UK"></textarea>
            ================================================================== */
         let filesCache = null, filesFolder = '', filesQ = '', filesSeg = 'files';
         let filesHeroAct = null;   // the page header's action slot, filled by the browser
+        /* The Finder drive takes a password of its own, made here after a full
+           sign-in and shown once. The Reactor password no longer opens it: the
+           drive sits outside the Shopify login, so that password alone opened
+           Files from anywhere and skipped sign-in codes. */
+        function openDrivePanel(anchor) {
+            dropPanel(anchor, (body, close) => {
+                body.classList.add('drive-panel');
+                const paint = (st, fresh) => {
+                    body.replaceChildren();
+                    body.append(el('h4', 'drive-title', 'Open Files in Finder'));
+                    const how = el('p', 'drive-p');
+                    how.append('In Finder, press Command K and enter ', el('b', null, davAddress()), '. Sign in as ',
+                        el('b', null, st.username || 'your username'), ' with a drive password made here. Your Reactor password does not open the drive.');
+                    body.append(how);
+                    if (fresh) {
+                        const box = el('div', 'drive-pw');
+                        const code = el('code', null, fresh);
+                        const cp = el('button', 'btn btn-sm'); cp.type = 'button'; cp.append(ico(I.copy), document.createTextNode('Copy'));
+                        cp.onclick = () => copyText(fresh, 'Drive password copied.');
+                        box.append(code, cp);
+                        body.append(box, el('p', 'drive-note', 'Shown once. Let Finder keep it in your keychain; if it is lost, make a new one.'));
+                    } else {
+                        body.append(el('p', 'drive-note', st.has ? 'Your drive password was made on ' + fmtDate(st.made_at) + '.'
+                                                                  : 'You have no drive password yet.'));
+                    }
+                    const acts = el('div', 'dpanel-row');
+                    const make = el('button', 'btn btn-sm btn-primary', st.has ? 'Make a new one' : 'Make a drive password');
+                    make.type = 'button';
+                    make.onclick = async () => {
+                        if (st.has && !await uiConfirm('Make a new drive password? The old one stops working, so Finder will ask for the new one.',
+                            { title: 'New drive password', okText: 'Make a new one' })) return;
+                        setBusy(make, true);
+                        try { const r = await api('/api/files/drive', { op: 'create' }); paint(r, r.password); }
+                        catch (e) { toastError(e.message); setBusy(make, false); }
+                    };
+                    acts.append(make);
+                    if (st.has) {
+                        const rm = el('button', 'btn btn-sm', 'Remove'); rm.type = 'button';
+                        rm.onclick = async () => {
+                            setBusy(rm, true);
+                            try { paint(await api('/api/files/drive', { op: 'remove' })); toastOk('Drive password removed. Finder can no longer open the drive as you.'); }
+                            catch (e) { toastError(e.message); setBusy(rm, false); }
+                        };
+                        acts.append(rm);
+                    }
+                    body.append(acts);
+                };
+                body.append(el('p', 'drive-note', 'Loading…'));
+                api('/api/files/drive', {}).then(st => paint(st), e => { body.replaceChildren(el('p', 'drive-note', e.message)); });
+            });
+        }
         /* How many search hits are painted at a time. The remainder is never
            hidden: the count of what is left sits on the Show more button. */
         const FILES_HIT_STEP = 60;
@@ -26997,7 +27106,10 @@ Projected Image UK"></textarea>
             };
             const nf = el('button', 'btn'); nf.append(ico(I.folderPlus), document.createTextNode('New folder'));
             nf.onclick = () => { filesNewFolder = true; paintList(); };
-            if (filesHeroAct) { filesHeroAct.innerHTML = ''; filesHeroAct.append(nf, up, fi); }
+            const drv = el('button', 'btn'); drv.append(ico(I.hardDrive), document.createTextNode('Finder drive'));
+            drv.title = 'Open these files as a drive on a Mac';
+            drv.onclick = () => openDrivePanel(drv);
+            if (filesHeroAct) { filesHeroAct.innerHTML = ''; filesHeroAct.append(drv, nf, up, fi); }
             fCard.append(fHead);
             const qWrap = tableSearch('Search files…', filesQ, null);
             const q = qWrap.input;
@@ -27692,22 +27804,28 @@ Projected Image UK"></textarea>
             if (mode === 'setup') {
                 card.append(el('h2', null, 'Set up Reactor'),
                     el('p', 'auth-sub', 'The app keeps its own accounts. Create the master '
-                        + 'admin account first: it controls everything, including the other accounts.'));
+                        + 'admin account first: it controls everything, including the other accounts. '
+                        + 'You need the one-time setup code from whoever runs the server.'));
+                /* Setup opens whenever the accounts are gone, so a Shopify login
+                   alone is not enough to become master: the code is set on the
+                   server, where only whoever runs it can see it. */
+                const [fcode, inCode] = authField('Setup code', 'password', 'au-setup-code');
+                inCode.autocomplete = 'off';
                 const [fn, inName] = authField('Your name', 'text', 'au-name');
                 const [fu, inUser] = authField('Username', 'text', 'au-user');
                 const [fp, inPw] = authField('Password (8 characters or more)', 'password', 'au-pw');
                 inPw.autocomplete = 'new-password'; inPw.name = 'new-password';
                 inPw.placeholder = 'Password (8+ characters)';   // the full wording fits a phone only as the label
                 const go = el('button', 'btn btn-primary auth-go', 'Create the master account');
-                [inName, inUser, inPw].forEach(i => i.onkeydown = e => { if (e.key === 'Enter' && !e.repeat) go.click(); });
+                [inCode, inName, inUser, inPw].forEach(i => i.onkeydown = e => { if (e.key === 'Enter' && !e.repeat) go.click(); });
                 go.onclick = async () => {
                     go.disabled = true; err.textContent = '';
                     try {
                         finish(await authApi('/api/auth/setup',
-                            { name: inName.value, username: inUser.value, password: inPw.value }));
+                            { setup_code: inCode.value, name: inName.value, username: inUser.value, password: inPw.value }));
                     } catch (e) { err.textContent = e.message; go.disabled = false; }
                 };
-                card.append(fn, fu, fp, err, go);
+                card.append(fcode, fn, fu, fp, err, go);
             } else if (mode === 'change') {
                 card.append(el('h2', null, 'Choose your own password'),
                     el('p', 'auth-sub', 'The starter password was only for getting in. Set your '
@@ -27837,7 +27955,7 @@ Projected Image UK"></textarea>
         }
         const TEAM_AREAS = [['production', 'Production'], ['dispatch', 'Dispatch'], ['files', 'Files'],
                             ['crm', 'Sales desk'], ['chase', 'Chasing'], ['sizes', 'Size list'],
-                            ['settings', 'Settings'], ['team', 'Team']];
+                            ['settings', 'Settings'], ['team', 'Team'], ['mcp', 'Desktop AI']];
         function renderTeam() {
             const box = $('team-content'); box.innerHTML = '';
             const d = teamCache;
@@ -28956,6 +29074,9 @@ Projected Image UK"></textarea>
                 shRow.append(mng);
             }
             host.append(shRow);
+            /* Only when something is wrong: a data folder that is not on the
+               volume loses everything at the next deploy. */
+            if (s.storage && s.storage.warning) host.append(connRow('Storage', 'off', s.storage.warning, ['', '', 'Not on the volume']));
             // Size list health
             const sl = s.size_list || {};
             if (sl.models) {

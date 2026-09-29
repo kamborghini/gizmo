@@ -661,12 +661,14 @@ async def export(progress=None) -> dict:
 
 
 def _strip_note(html_text) -> str:
-    """Pipedrive notes are HTML. gizmo stores plain text."""
+    """Pipedrive notes are HTML. gizmo stores plain text. Linear in the
+    note's length, for the reason google_mail._strip_html gives: a tag cannot
+    contain `<`, and the input is capped first."""
     import re as _re
     import html as _html
-    t = str(html_text or "")
-    t = _re.sub(r"(?is)<(script|style)[^>]*>.*?(</\1>|$)", " ", t)
+    t = str(html_text or "")[:100_000]
+    t = _re.sub(r"(?is)<(script|style)[^<>]*>.*?(</\1>|$)", " ", t)
     t = _re.sub(r"(?i)<br\s*/?>|</p>|</div>|</li>|</tr>", "\n", t)
-    t = _re.sub(r"<[^>]+>", " ", t)
+    t = _re.sub(r"<[^<>]+>", " ", t)
     t = _html.unescape(t)
     return _re.sub(r"[ \t]{2,}", " ", _re.sub(r"\n{3,}", "\n\n", t)).strip()[:20000]

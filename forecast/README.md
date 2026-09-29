@@ -111,14 +111,17 @@ CatBoost and PyTorch are optional: drop them from the requirements and pass
 ## Running
 
 Pull the orders. The bulk GraphQL puller in `forecast/ingest.py`
-(`run_bulk_orders`) needs a shop domain and an Admin API access token with
-`read_orders`; keep the token in the environment, never in a file:
+(`run_bulk_orders`) takes a store: a `ShopifyStore` (a shop domain and a
+read-only Admin API token with `read_orders`) or a `ReactorStore` (Reactor's
+URL and `FORECAST_INGEST_TOKEN`). Keep tokens in the environment, never in a
+file:
 
 ```python
 import json, os
 from datetime import date
-from forecast.ingest import run_bulk_orders
-orders = run_bulk_orders(os.environ["SHOP"], os.environ["SHOPIFY_ADMIN_TOKEN"], date(2024, 5, 1))
+from forecast.ingest import ShopifyStore, run_bulk_orders
+store = ShopifyStore(os.environ["SHOP"], os.environ["SHOPIFY_ADMIN_TOKEN"])
+orders = run_bulk_orders(store, date(2024, 5, 1))
 json.dump({"orders": orders}, open("orders.json", "w"))
 ```
 
@@ -162,7 +165,7 @@ reaches the next run without a deploy.
   Reactor (the app)                              reactor-forecast (nightly service)
   Forecast tab ---- upload workbook ---->        cron 03:00: python -m forecast nightly
   /hooks/forecast/workbook  <---- GET ---------  fetch the workbook
-                                                 bulk-pull orders + products (read-only token)
+  /hooks/forecast/shopify   <---- POST --------  bulk-pull orders + products (Reactor reads them)
                                                  run the pipeline as of yesterday
   /hooks/forecast/results   <---- POST --------  post the payload (or {"error": ...})
   /api/forecast  ---- the tab reads it
@@ -175,21 +178,21 @@ Setting it up, once:
 2. **A second Railway service** on the same repository, named
    `reactor-forecast`: Dockerfile path `forecast/Dockerfile`, cron schedule
    `0 3 * * *`, and these variables:
-   `REACTOR_URL` (the app's https URL), `FORECAST_INGEST_TOKEN` (the same
-   value as Reactor's), `SHOP` (the myshopify domain, e.g.
-   `projectedimage.myshopify.com`), and ONE Shopify credential.
+   `REACTOR_URL` (the app's https URL) and `FORECAST_INGEST_TOKEN` (the same
+   value as Reactor's). No Shopify credential: the service asks Reactor for
+   the orders and products through `/hooks/forecast/shopify`, and Reactor
+   runs four fixed read-only queries with its own, `read_all_orders`
+   included, which is what lets a run read past the sixty days a plain
+   `read_orders` token can see (900 days is the default history).
 
-   Prefer the app's own, because Reactor holds NO static token to lend and a
-   second Shopify app would be a second thing to rotate:
+   Never give this service Reactor's `SHOPIFY_CLIENT_ID` and
+   `SHOPIFY_CLIENT_SECRET`. That secret also signs every webhook Reactor
+   trusts, so a copy here could post a `shop/redact` and erase Reactor's
+   stores. A run that finds them says so in its log and does not use them;
+   remove them, and rotate the app's secret if the service ever held it.
 
-       SHOPIFY_CLIENT_ID=${{gizmo.SHOPIFY_CLIENT_ID}}
-       SHOPIFY_CLIENT_SECRET=${{gizmo.SHOPIFY_CLIENT_SECRET}}
-
-   The service exchanges those for a short-lived token that carries the app's
-   own scopes, `read_all_orders` among them. That scope is what lets a run
-   read past the sixty days a plain `read_orders` token can see, and 900 days
-   is the default history. A static `SHOPIFY_FORECAST_TOKEN` still wins if it
-   is set, so adding the pair to a working service changes nothing. Optional:
+   A read-only token of the service's own still works and skips Reactor:
+   `SHOPIFY_FORECAST_TOKEN` with `SHOP` (the myshopify domain). Optional:
    `FORECAST_SCENARIO`, `FORECAST_HISTORY_DAYS` (900), `FORECAST_HORIZON` (90).
 3. **In the Forecast tab**, as an admin, upload the cash flow workbook.
 

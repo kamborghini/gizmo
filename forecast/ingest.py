@@ -14,7 +14,6 @@ import logging
 import re
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta
 from typing import Dict, Iterable, List, Mapping, Optional
@@ -214,7 +213,79 @@ query($q: String!, $after: String) {
 """
 
 
-def fetch_refunds(shop: str, token: str, since: date, api_version: str = "2026-07") -> Dict[str, list]:
+REFUNDS_FILTER = ("created_at:>=%s AND "
+                  "(financial_status:refunded OR financial_status:partially_refunded)")
+
+
+class ShopifyStore:
+    """A read-only Admin API token of the job's own (SHOPIFY_FORECAST_TOKEN),
+    used directly. Each method answers in the shape ReactorStore answers in,
+    so the pullers below do not know which one they were handed."""
+
+    def __init__(self, shop: str, token: str, api_version: str = "2026-07"):
+        self.shop, self.token, self.api_version = shop, token, api_version
+
+    def _gql(self, query: str, variables: Optional[dict] = None) -> dict:
+        return _gql(self.shop, self.token, self.api_version, query, variables)
+
+    def bulk_start(self, since: date) -> dict:
+        mutation = """mutation($q: String!) { bulkOperationRunQuery(query: $q) {
+            bulkOperation { id status } userErrors { field message } } }"""
+        return self._gql(mutation, {"q": BULK_ORDERS_QUERY % since.isoformat()})["bulkOperationRunQuery"]
+
+    def bulk_status(self, op_id: str) -> dict:
+        watch = """query($id: ID!) { node(id: $id) { ... on BulkOperation {
+            status url errorCode objectCount } } }"""
+        return self._gql(watch, {"id": op_id})["node"]
+
+    def refunds_page(self, since: date, after: Optional[str]) -> dict:
+        return self._gql(REFUNDED_ORDERS_QUERY, {"q": REFUNDS_FILTER % since.isoformat(), "after": after})["orders"]
+
+    def products_page(self, after: Optional[str]) -> dict:
+        return self._gql(PRODUCTS_QUERY, {"after": after})["products"]
+
+
+class ReactorStore:
+    """The store as Reactor reads it, through /hooks/forecast/shopify with the
+    FORECAST_INGEST_TOKEN the job already holds. The default: the job then
+    holds no Shopify credential at all. It once held Reactor's own client id
+    and secret, and that secret also signs every webhook Reactor trusts, so
+    whoever read it off this service could have posted a shop/redact and
+    erased Reactor's stores. Reactor runs the same four queries as below and
+    nothing else."""
+
+    def __init__(self, base: str, token: str):
+        self.url, self.token = base.rstrip("/") + "/hooks/forecast/shopify", token
+
+    def _ask(self, op: str, **args) -> dict:
+        req = urllib.request.Request(
+            self.url, data=json.dumps({"op": op, **args}).encode(),
+            headers={"Content-Type": "application/json", "X-Forecast-Token": self.token})
+        try:
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                body = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            try:
+                said = (json.loads(e.read()) or {}).get("error") or ""
+            except Exception:
+                said = ""
+            raise RuntimeError(f"Reactor refused the {op} read ({e.code}): {said}".rstrip(": ")) from None
+        return body.get("data")
+
+    def bulk_start(self, since: date) -> dict:
+        return self._ask("bulk_start", since=since.isoformat())
+
+    def bulk_status(self, op_id: str) -> dict:
+        return self._ask("bulk_status", id=op_id)
+
+    def refunds_page(self, since: date, after: Optional[str]) -> dict:
+        return self._ask("refunds", since=since.isoformat(), after=after)
+
+    def products_page(self, after: Optional[str]) -> dict:
+        return self._ask("products", after=after)
+
+
+def fetch_refunds(store, since: date) -> Dict[str, list]:
     """{order gid: [refund, ...]} for the orders that have any.
 
     A refund is a negative row on the day it was raised, keyed to the line it
@@ -222,13 +293,11 @@ def fetch_refunds(shop: str, token: str, since: date, api_version: str = "2026-0
     sale that never happened. Bulk cannot carry that shape, and searching for
     the orders that HAVE refunds keeps this to a page or two instead of
     re-reading the whole history."""
-    q = (f"created_at:>={since.isoformat()} AND "
-         "(financial_status:refunded OR financial_status:partially_refunded)")
     out: Dict[str, list] = {}
     after = None
     pages = 0
     while True:
-        data = _gql(shop, token, api_version, REFUNDED_ORDERS_QUERY, {"q": q, "after": after})["orders"]
+        data = store.refunds_page(since, after)
         for n in data["nodes"]:
             refunds = []
             for rf in n.get("refunds") or []:
@@ -258,39 +327,6 @@ def shop_host(shop: str) -> str:
     return shop if "." in shop else shop + ".myshopify.com"
 
 
-def access_token(shop: str, token: str = "", client_id: str = "", client_secret: str = "") -> str:
-    """The Admin API credential, however this deployment holds one.
-
-    A static token wins when it is set. Otherwise the client id and secret are
-    exchanged for a short-lived one through the client_credentials grant, which
-    is what Reactor itself does: the app has no static token to lend, so a
-    second Shopify app would be a second credential to rotate for no gain. The
-    token that comes back carries the app's own scopes, `read_all_orders`
-    included, which is what lets a run reach past the sixty days a plain
-    `read_orders` token can see."""
-    if token:
-        return token
-    if not (client_id and client_secret):
-        raise RuntimeError("no Shopify credential: set SHOPIFY_FORECAST_TOKEN, "
-                           "or SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET")
-    body = urllib.parse.urlencode({"grant_type": "client_credentials",
-                                   "client_id": client_id,
-                                   "client_secret": client_secret}).encode()
-    req = urllib.request.Request(
-        f"https://{shop_host(shop)}/admin/oauth/access_token", data=body,
-        headers={"Content-Type": "application/x-www-form-urlencoded"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"the client_credentials grant was refused ({e.code}): "
-                           "check SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET") from None
-    tok = data.get("access_token")
-    if not tok:
-        raise RuntimeError("the client_credentials grant returned no access_token")
-    return tok
-
-
 def _gql(shop: str, token: str, api_version: str, query: str, variables: Optional[dict] = None) -> dict:
     req = urllib.request.Request(
         f"https://{shop_host(shop)}/admin/api/{api_version}/graphql.json",
@@ -303,30 +339,26 @@ def _gql(shop: str, token: str, api_version: str, query: str, variables: Optiona
     return body["data"]
 
 
-def run_bulk_orders(shop: str, token: str, since: date, api_version: str = "2026-07",
-                    poll_seconds: int = 5, timeout_s: int = 1800) -> List[dict]:
+def run_bulk_orders(store, since: date, poll_seconds: int = 5, timeout_s: int = 1800) -> List[dict]:
     """Full history through a bulk operation (the only sane way past a few
     thousand orders). Returns orders in the Admin shape read_orders_json accepts.
+    `store` is a ShopifyStore or a ReactorStore.
     Network code: exercised against a store, not in the unit tests."""
-    mutation = """mutation($q: String!) { bulkOperationRunQuery(query: $q) {
-        bulkOperation { id status } userErrors { field message } } }"""
-    started = _gql(shop, token, api_version, mutation, {"q": BULK_ORDERS_QUERY % since.isoformat()})
-    errs = started["bulkOperationRunQuery"]["userErrors"]
+    started = store.bulk_start(since)
+    errs = started["userErrors"]
     if errs:
         raise RuntimeError(str(errs))
-    op_id = started["bulkOperationRunQuery"]["bulkOperation"]["id"]
+    op_id = started["bulkOperation"]["id"]
     log.info("bulk operation %s started, polling every %ss", op_id, poll_seconds)
     # BY ID, not `currentBulkOperation`. Shopify has allowed five concurrent
     # bulk queries per app since 2026-01, and that field is both deprecated and
     # ambiguous once more than one exists: a run whose container was killed
     # leaves its operation going, and the next run polling "current" can watch
     # the wrong one and download a different date range believing it is its own.
-    watch = """query($id: ID!) { node(id: $id) { ... on BulkOperation {
-        status url errorCode objectCount } } }"""
     url = None
     deadline = time.time() + timeout_s
     while time.time() < deadline:
-        cur = _gql(shop, token, api_version, watch, {"id": op_id})["node"]
+        cur = store.bulk_status(op_id)
         if cur["status"] == "COMPLETED":
             log.info("bulk operation completed: %s objects", cur.get("objectCount"))
             url = cur["url"]; break
@@ -343,7 +375,7 @@ def run_bulk_orders(shop: str, token: str, since: date, api_version: str = "2026
     orders = _assemble_bulk(lines)
     log.info("assembled %d orders", len(orders))
     # The half the bulk query is not allowed to carry.
-    refunds = fetch_refunds(shop, token, since, api_version)
+    refunds = fetch_refunds(store, since)
     for o in orders:
         o["refunds"] = refunds.get(o["id"], [])
     return orders
@@ -359,12 +391,12 @@ query($after: String) {
 """
 
 
-def fetch_products(shop: str, token: str, api_version: str = "2026-07") -> Dict[str, dict]:
+def fetch_products(store) -> Dict[str, dict]:
     """{product gid: {"product_type": ...}} for the category, paged 250 at a time."""
     out: Dict[str, dict] = {}
     after = None
     while True:
-        data = _gql(shop, token, api_version, PRODUCTS_QUERY, {"after": after})["products"]
+        data = store.products_page(after)
         for e in data["edges"]:
             n = e["node"]
             out[n["id"]] = {"product_type": n.get("productType") or ""}

@@ -1,6 +1,59 @@
 {
  "releases": [
   {
+   "date": "2026-09-29",
+   "title": "Five security fixes from the September review",
+   "items": [
+    {
+     "kind": "fixed",
+     "text": "A request to erase the shop's data now erases nothing until Shopify confirms the app has really been uninstalled, the store has been out of the app's reach for most of two days, and a full copy has been saved. Before, anyone holding the app's secret could send one and wipe the dispatch record, the customer records, the Inbox and the files list. A request that arrives while the app is still installed is refused and emailed to you, and one that cannot be settled yet is kept and checked again every hour, so none is lost. If Shopify starts refusing the app's access, the email now says the app may have been uninstalled and to reinstall it."
+    },
+    {
+     "kind": "improved",
+     "tab": "forecast",
+     "text": "The nightly forecast now reads your store through Reactor and holds no Shopify key of its own. It used to hold the app's own secret, which is also what proves a message really came from Shopify."
+    },
+    {
+     "kind": "fixed",
+     "tab": "mail",
+     "text": "An email or PDF built to be slow to read can no longer stall the app. Messages from outside are read in a bounded time, and PDFs are read to one side, so every other page keeps answering while one is opened. An email with a large picture inside it also shows its words again, rather than the picture's code."
+    },
+    {
+     "kind": "fixed",
+     "tab": "team",
+     "text": "The desktop AI connection now only reads the store. It can no longer create, change or delete products, customers, orders, stock or store notifications, and every tool it uses is now in the activity log under Desktop AI. A request too large to record, or holding more than one call, is refused."
+    },
+    {
+     "kind": "fixed",
+     "text": "Reactor now removes any order notification that sends orders somewhere other than the app, and emails you when it does. One made with the app's own Shopify access could copy every new order out of the business. A second copy of Reactor, such as a staging copy, can be allowed on the server so the two do not remove each other's."
+    },
+    {
+     "kind": "fixed",
+     "text": "Setting up the first account now needs a setup code as well as a Shopify staff sign in, so whoever happens to open a fresh copy of the app first no longer becomes the master account. Settings also warns when saved data is not on the server's permanent storage and would be lost at the next update."
+    },
+    {
+     "kind": "improved",
+     "tab": "files",
+     "text": "Files in Finder now takes a drive password of its own, made with Finder drive on the Files page, instead of your account password. Changing or resetting your account password removes it. Anyone who connected Finder before needs to make one and sign in with it. Wrong guesses under someone's name, at the drive or at the sign in, no longer shut their drive."
+    },
+    {
+     "kind": "fixed",
+     "tab": "skills",
+     "text": "Only admins and the master can now add, change or delete skills, notes and the store knowledge the assistant reads, or have Reactor read a skill again. A note from a member's chat, or from a change a member tracked, waits under Waiting on the Memory page, read by nobody, until an admin keeps it. Members still see everything that is kept, and can still tick off their follow-ups. A tracked change now says who tracked it, and only they or an admin can conclude or delete it."
+    },
+    {
+     "kind": "fixed",
+     "tab": "memory",
+     "text": "The assistant now saves a note only when the message it is answering asks it to remember something. Before, the word remember anywhere earlier in the conversation was enough."
+    },
+    {
+     "kind": "fixed",
+     "tab": "chat",
+     "text": "The assistant can look up orders only for someone who has the Customers page, and the daily AI spending limit now holds when several questions arrive at once, with a question stopped part way still counted. A scanned document is counted by its pages, so reading one no longer turns everyone else's questions away."
+    }
+   ]
+  },
+  {
    "date": "2026-09-28",
    "title": "Labels size from the maker named",
    "items": [
