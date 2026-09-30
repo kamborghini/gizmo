@@ -7072,6 +7072,111 @@ def t_auth_the_print_document_needs_only_the_perimeter():
     with_accounts(go)
 
 @test
+def t_nothing_in_the_page_can_add_to_or_cut_the_shopify_label_print():
+    """The page's label print was changed on 30 September after a bench
+    browser put 66px of its own into the page and every label printed with a
+    blank after it: in print the labels are laid against the top of the page,
+    over anything else, and nothing beside body prints, so nothing in the page
+    can add a page (unless it is taller than the run), push a label down or
+    cut one off. The document Shopify's print action opens is the same labels
+    in another page, open to the same intrusion, so it gets the same rules:
+    all its labels in one box, laid when the document's own script marks the
+    page, which it does except in WebKit (laid, WebKit's A4 runs crept up the
+    page a little more on every label). Nothing is cut: a first fix that cut
+    the page to N labels tall took the last label off whenever anything sat
+    above the labels."""
+    def go():
+        ensure_auth()
+        r = client.post("/print/production-labels/sign", json={"ids": "12345,12346"},
+                        headers={"Authorization": "Bearer " + tok()})
+        eq(r.status_code, 200, r.text[:200])
+        path = r.json()["path"]
+        for size, orient, page_w, page_h in (("4x6", "", 101.6, 152.4), ("4x4", "", 101.6, 101.6),
+                                             ("4x2", "", 101.6, 50.8), ("a4", "", 210, 297),
+                                             ("4x6", "portrait", 152.4, 101.6), ("2x4", "", 50.8, 101.6)):
+            doc = client.get(path + "&size=" + size + ("&orient=" + orient if orient else "")).text
+            where = size + (" " + orient if orient else "") + ": "
+            head, _, body = doc.partition("</style>")
+            ok(re.search(r"@page \{ size: %smm %smm; margin: 0; \}" % (re.escape(str(page_w)), re.escape(str(page_h))), head),
+               where + "the printer's page is the stock asked for: " + head[head.find("@page"):][:80])
+            n = body.count("<div class='sheet'>")
+            ok(n >= 1, where + "the document has labels: " + doc[:200])
+            # The box's own closing tag, found by depth, so a label left
+            # outside it (and so not laid) is seen.
+            i = body.index("<div id='labels'>")
+            depth = 0
+            for m in re.finditer(r"<div\b|</div>", body[i:]):
+                depth += 1 if m.group(0) == "<div" else -1
+                if depth == 0:
+                    break
+            box, after = body[i:i + m.end()], body[i + m.end():]
+            eq(box.count("<div class='sheet'>"), n, where + "every label is in the one box that is laid")
+            ok("class='sheet'" not in after, where + "and none is left after it")
+            if orient:
+                eq(box.count("<div class='pw'>"), n, where + "one page wrapper per label")
+            i = head.index("@media print {")
+            depth, j = 0, i
+            for j in range(i, len(head)):
+                depth += head[j] == "{"
+                depth -= head[j] == "}"
+                if depth == 0 and head[j] == "}":
+                    break
+            block = head[i + len("@media print {"):j].strip()
+            ok("html > :not(head):not(body) { display: none !important; }" in block, where + "nothing beside body prints")
+            ok("html.lay, html.lay body { position: static !important; }" in block
+               and "html.lay #labels { position: absolute !important; top: 0 !important; left: 0 !important; "
+                   "z-index: 2147483647 !important; }" in block,
+               where + "the labels' box is laid against the top of the page, in front of anything else: " + block[:260])
+            ok("background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact;"
+               in head[head.index(".sheet {"):head.index("}", head.index(".sheet {"))],
+               where + "and each label is white, printed as such, so nothing laid under it shows through")
+            ok("overflow" not in block and "height" not in block,
+               where + "nothing is cut: a cut takes the last label off when anything sits above the labels")
+            ok("<script>(function(){if(navigator.vendor!=='Apple Computer, Inc.')"
+               "document.documentElement.classList.add('lay');" in body,
+               where + "the laying is switched on first thing, except in WebKit")
+    with_accounts(go)
+
+@test
+def t_the_shopify_print_knows_every_stock_and_starts_on_the_production_size():
+    """Cameron, 30 September: "add 4x4 to the shopify print too". The
+    document the print action opens knew five sizes and fell back to 4 x 6
+    for anything else, so the 4 x 4 the production printer is loaded with
+    could not come off it. It now prints every size the shop can choose, and
+    the signing call hands back the production printer's saved size so the
+    action opens on it: the stock is a shop setting, not a choice made at the
+    print button."""
+    def go():
+        ensure_auth()
+        eq(set(copilot.LABEL_STOCK_MM), set(copilot.LABEL_STOCK),
+           "the document can print every stock size the shop can choose")
+        eq(copilot.LABEL_STOCK_MM["4x4"], (101.6, 101.6), "4 x 4 is square, in millimetres")
+        before = post("/api/shipping/config", {"op": "get"}).json()["config"]["label_size_production"]
+        try:
+            for saved in ("4x4", "4x3", "a4"):
+                eq(post("/api/shipping/config", {"op": "set", "label_size_production": saved}).status_code, 200)
+                r = client.post("/print/production-labels/sign", json={"ids": "12345"},
+                                headers={"Authorization": "Bearer " + tok()})
+                eq(r.status_code, 200, r.text[:200])
+                eq(r.json().get("size"), saved, "the action opens on the production printer's size")
+            # A saved value the document cannot print is never handed on.
+            cfg = copilot._load_shipping()
+            cfg["label_size_production"] = "9x9"
+            copilot._save_shipping(cfg)
+            r = client.post("/print/production-labels/sign", json={"ids": "12345"},
+                            headers={"Authorization": "Bearer " + tok()})
+            eq(r.json().get("size"), "4x4", "an unknown saved size falls back to the production default")
+            path = r.json()["path"]
+            doc = client.get(path + "&size=4x4").text
+            ok("@page { size: 101.6mm 101.6mm; margin: 0; }" in doc, "a 4 x 4 print is on 4 x 4 paper")
+            ok(".sheet { width: 101.6mm; height: 101.6mm;" in doc, "with 4 x 4 labels")
+            doc = client.get(path + "&size=5x5").text
+            ok("@page { size: 101.6mm 152.4mm; margin: 0; }" in doc, "a size it does not know still prints, on 4 x 6")
+        finally:
+            eq(post("/api/shipping/config", {"op": "set", "label_size_production": before}).status_code, 200)
+    with_accounts(go)
+
+@test
 def t_tabs_are_locked_on_the_server_not_just_hidden():
     def go():
         ensure_auth()
@@ -23542,7 +23647,9 @@ def t_the_erasure_matcher_takes_whole_names_and_numbers_only():
        and not hs.knows("req", "0191 111 2222"), "an exact test, and only the asked-for address recognises")
     eq(d["erased_pd_persons"], ["20"])
     raw = json.dumps(d).lower()
-    ok("sarah" not in raw and "0191" not in raw, "nothing in the clear")
+    # The whole number, not a piece of it: the store holds random-salted hex
+    # hashes, and about 1 in 250 of them contains "0191" by chance.
+    ok("sarah" not in raw and "0191 111 2222" not in raw and "01911112222" not in raw, "nothing in the clear")
     old = d["erased_salt"]
     d["erased_salt"] = "not hex"
     copilot._erase_remember(d, ["Jo Smith"])

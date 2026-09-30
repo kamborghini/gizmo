@@ -1975,6 +1975,11 @@ _DEFAULT_BOXES = [
 # chosen at the print button. Kept here and offered by the config route so the
 # page and the server cannot drift about which sizes exist.
 LABEL_STOCK = ("4x2", "4x3", "4x4", "4x6", "2x4", "a4")
+# Each stock's width and height in millimetres, for the document Shopify's
+# print action opens: it knew five sizes and fell back to 4 x 6 for the rest,
+# so the 4 x 4 the production printer is loaded with could not come off it.
+LABEL_STOCK_MM = {"4x2": (101.6, 50.8), "4x3": (101.6, 76.2), "4x4": (101.6, 101.6),
+                  "4x6": (101.6, 152.4), "2x4": (50.8, 101.6), "a4": (210, 297)}
 
 _SHIPPING_DEFAULT = {
     "origin": {},
@@ -26123,8 +26128,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return JSONResponse({"error": "Request too large."}, status_code=413, headers={**_API_HEADERS, **cors})
         raw_ids = str(body.get("ids") or "")[:2000]
         raw_size = str(body.get("size") or "4x6")
-        if raw_size not in ("4x2", "4x3", "4x6", "2x4", "a4"):
+        if raw_size not in LABEL_STOCK:
             raw_size = "4x6"
+        # The action opens on the production printer's saved stock: which roll
+        # is loaded is a shop setting, not something chosen at the print button.
+        prod_size = _load_shipping().get("label_size_production")
+        if prod_size not in LABEL_STOCK:
+            prod_size = _SHIPPING_DEFAULT["label_size_production"]
         if not raw_ids.strip():
             return JSONResponse({"error": "No order ids given."}, status_code=400, headers={**_API_HEADERS, **cors})
         exp = int(time.time()) + 300
@@ -26140,8 +26150,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 else f"https://{request.headers.get('host', '')}")
         path = (f"/print/production-labels?ids={quote(raw_ids, safe='')}"
                 f"&exp={exp}&mode={mode}&sig={sig}")
-        logger.info("print-labels sign: ok ids=%s size=%s", raw_ids[:120], raw_size)
-        return JSONResponse({"url": base + path, "path": path, "expires_in": 300},
+        logger.info("print-labels sign: ok ids=%s size=%s opens=%s", raw_ids[:120], raw_size, prod_size)
+        return JSONResponse({"url": base + path, "path": path, "expires_in": 300, "size": prod_size},
                             headers={**_API_HEADERS, **cors})
 
     @mcp.custom_route("/print/production-labels", methods=["GET", "OPTIONS"])
@@ -26150,7 +26160,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         print modal loads this URL directly (with the embedded id_token appended, the
         same way it loads the app page) and shows it in the print preview, so the
         merchant prints without ever leaving the order. Accepts ?ids=<order ids or
-        GIDs, comma separated> and optional ?size=4x2|4x3|4x6|2x4|a4."""
+        GIDs, comma separated> and optional ?size=4x2|4x3|4x4|4x6|2x4|a4."""
         if request.method == "OPTIONS":
             return PlainTextResponse("", headers=_print_cors(request))
         pre = _pre_checks(request)
@@ -26239,9 +26249,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>No orders were selected.</p>",
                                 headers=doc_headers)
 
-        sizes = {"4x2": (101.6, 50.8), "4x3": (101.6, 76.2), "4x6": (101.6, 152.4),
-                 "2x4": (50.8, 101.6), "a4": (210, 297)}
-        w, h = sizes.get(str(request.query_params.get("size") or "4x6"), sizes["4x6"])
+        w, h = LABEL_STOCK_MM.get(str(request.query_params.get("size") or "4x6"), LABEL_STOCK_MM["4x6"])
 
         st_once, dp_once = _load_prod_state(), _load_dispatch()
         results = await asyncio.gather(*[run_production_labels(registry, order_id=i,
@@ -26346,6 +26354,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                "body { font-family: 'Bricolage Grotesque', -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; background: #fff; color: #000; }"
                ".sheet { width: " + str(w) + "mm; height: " + str(h) + "mm; padding: " + ("3.5mm 4mm" if compact else "5mm 5.5mm") + ";"
                " overflow: hidden; page-break-after: always; break-after: page; font-size: " + ("13px" if compact else "15px") + ";"
+               # White and printed as such, so nothing laid under a label shows through it.
+               " background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact;"
                " line-height: 1.22; }"
                ".sheet:last-child { page-break-after: auto; break-after: auto; }"
                # Header per the merchant's design: logo over a big company name and a
@@ -26386,12 +26396,26 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                ".rate .r1 { font-weight: 800; font-size: 1.06em; }"
                ".rate b { font-weight: 800; }"
                + rot_css
-               + "</style></head><body>"
+               # The same rules as the app's label print (30 September): something on
+               # a bench machine put 66px of its own into the page and every label
+               # printed with a blank after it. So nothing beside body prints, and
+               # the labels' box is laid against the top of the page in front of
+               # anything else, so nothing else put into the page can add a page
+               # (unless it is taller than the run), push a label down or cut one
+               # off. The script below
+               # turns the laying on except in WebKit, where A4 runs laid this way
+               # crept up the page a little more on every label.
+               + "@media print { html > :not(head):not(body) { display: none !important; }"
+               " html.lay, html.lay body { position: static !important; }"
+               " html.lay #labels { position: absolute !important; top: 0 !important; left: 0 !important; z-index: 2147483647 !important; } }"
+               + "</style></head><body><div id='labels'>"
                + ("".join("<div class='pw'>" + sh + "</div>" for sh in sheets) if portrait else "".join(sheets))
+               + "</div>"
                # Same shrink-to-fit as the app's preview: step the base font down until the
                # whole order fits its label. Measured only after the label typeface has
                # loaded (2s cap), or the metrics would be the fallback font's.
-               + "<script>(function(){function fit(){document.querySelectorAll('.sheet').forEach(function(s){"
+               + "<script>(function(){if(navigator.vendor!=='Apple Computer, Inc.')document.documentElement.classList.add('lay');"
+               "function fit(){document.querySelectorAll('.sheet').forEach(function(s){"
                "s.style.fontSize='';s.classList.remove('shed');"
                "var b=parseFloat(getComputedStyle(s).fontSize)||13,z=b,soft=b*0.75,f=b*0.6;"
                "while(s.scrollHeight>s.clientHeight&&z>soft){z-=0.5;s.style.fontSize=z+'px';}"

@@ -877,6 +877,177 @@ def t_nothing_pinned_to_the_viewport_prints():
     ok(HTML.index('<a class="skip-link"') < HTML.index('id="app"'),
        "it still comes first in the document, which is the point of it")
 
+def css_blocks(css):
+    """Top-level blocks of a stylesheet as (prelude, body) pairs, by counting
+    braces, so a rule is known to sit inside @media print and not after it."""
+    out, depth, start, head = [], 0, 0, ""
+    for i, ch in enumerate(css):
+        if ch == "{":
+            if depth == 0:
+                head, start = css[start:i].strip(), i + 1
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                out.append((head, css[start:i].strip()))
+                start = i + 1
+    return out
+
+
+@test
+def t_nothing_in_the_page_can_add_to_or_cut_a_label_print():
+    """Cameron, 30 September: "why you are printing blanks again on the
+    productions lables, how is this bug back". The bench printed a blank
+    after every label. The PDF saved from the bench's own print dialog (Opera,
+    Chromium 151) showed the page 66px taller than its 4 x 4 label, with
+    nothing drawn in those 66px, on the page's own body. The app's page,
+    printed by the same engine, was one page per label, and nothing the app
+    makes gets past the body-level hide: something on that machine put itself
+    inside the page and forced itself visible.
+
+    Hiding what is there cannot keep up with what might be there. A first fix
+    cut the page to exactly N labels tall; review and 3,138 test prints then
+    showed that anything ABOVE the labels pushed them down and the cut took
+    the last label off, with the page count still right. So nothing is cut:
+    in print the labels are laid against the top of the page, over anything
+    else, and nothing beside body prints. Measured in Chromium 151 and 154 and
+    Firefox 155 over 13 ways of forcing content into the page (above, below,
+    beside body, text, positioned, kept first), every label printed, one per
+    page, in place; only content taller than the whole run adds a (visible)
+    page, as before. WebKit is left as it was: laid this way, its A4 runs
+    crept up the page a little more on every label."""
+    ok("function labelPrintCss(" in SCRIPT, "one helper writes every fixed-size label print's page rule")
+    src = fn_src("function labelPrintCss(")
+    gate = re.search(r"const PRINT_LAYS_LABELS = [^;\n]+;", SCRIPT)
+    ok(gate, "whether this browser lays the labels is decided in one place")
+    if not any(os.access(os.path.join(p, "node"), os.X_OK)
+               for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    harness = """
+const out = [];
+for (const vendor of ['Google Inc.', '', 'Apple Computer, Inc.']) {
+  const run = new Function('navigator', `${GATE}
+${SRC}
+return labelPrintCss;`);
+  const labelPrintCss = run({vendor});
+  for (const d of [{w: 101.6, h: 50.8}, {w: 101.6, h: 76.2}, {w: 101.6, h: 101.6}, {w: 101.6, h: 152.4},
+                   {w: 50.8, h: 101.6}, {w: 210, h: 297}])
+    out.push({vendor, w: d.w, h: d.h, css: labelPrintCss(d)});
+}
+console.log(JSON.stringify(out));
+""".replace("${GATE}", gate.group(0).replace("`", "")).replace("${SRC}", src.replace("`", "").replace("${", "$ {"))
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(harness)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path], capture_output=True, text=True, timeout=30)
+        ok(r.returncode == 0, "labelPrintCss did not run: " + (r.stderr or "")[:300])
+        for c in json.loads(r.stdout):
+            css, w, h, vendor = c["css"], c["w"], c["h"], c["vendor"]
+            webkit = vendor == "Apple Computer, Inc."
+            where = "%s, %s x %s mm: " % (vendor or "Firefox", w, h)
+            blocks = css_blocks(css)
+            ok([b[0] for b in blocks] == ["@page", "@media print"],
+               where + "a page rule and a print block, and nothing that reaches the screen: %s" % [b[0] for b in blocks])
+            ok(blocks[0][1] == "size: %smm %smm; margin: 0;" % (w, h),
+               where + "the printer's page is the label stock, with no margin: " + blocks[0][1])
+            rules = dict(css_blocks(blocks[1][1]))
+            ok(rules.get("html:root > :not(head):not(body)") == "display: none !important;",
+               where + "nothing put beside body prints, in every browser")
+            ok("height" not in blocks[1][1] and "overflow" not in blocks[1][1],
+               where + "nothing is cut: a cut takes the last label off when anything sits above the labels")
+            laid = rules.get("html:root body.printing-label #label-print")
+            if webkit:
+                ok(laid is None and len(rules) == 1, where + "WebKit is left as it was")
+            else:
+                ok(laid == "position: absolute !important; top: 0 !important; left: 0 !important; "
+                           "z-index: 2147483647 !important;",
+                   where + "the labels are laid against the top of the page, in front of anything else: %s" % laid)
+                ok(rules.get("html:root, html:root body.printing-label") == "position: static !important;",
+                   where + "against the page itself: html and body are not what the labels are placed in")
+    finally:
+        os.unlink(path)
+    # The laid box must beat label mode's own rule for it in the stylesheet.
+    ok("body.printing-label #label-print { position: static !important; left: auto !important; }" in CSS,
+       "label mode's own rule for the box is (1,1,1); the laid rule's html:root makes it (1,2,2) and it wins")
+    # Both fixed-size label prints go through it; the A4 documents flow over
+    # as many pages as they need, so they keep their own page rule.
+    ok("rule.textContent = labelPrintCss(d);" in fn_src("function printLabels("),
+       "production labels are laid by it")
+    ok("rule.textContent = labelPrintCss(dims);" in fn_src("async function loanPrintSticker("),
+       "and so is the serial sticker")
+    # The laying is keyed on label mode, so both prints must switch it on
+    # before they print, after writing the rule.
+    for name in ("function printLabels(", "async function loanPrintSticker("):
+        f = fn_src(name)
+        on = f.find("document.body.classList.add('printing-label');")
+        ok(on > f.find("rule.textContent = labelPrintCss(") > 0 and on < f.find("window.print()"),
+           name + " writes the rule, then switches label mode on, then prints")
+    ok(not re.search(r"rule\.textContent = '@page \{ size: ' \+ \w+\.w \+ 'mm '", SCRIPT),
+       "no label print writes its page size by hand any more")
+
+
+@test
+def t_a_typeface_that_will_not_load_never_abandons_a_print():
+    """Review, 30 September: document.fonts.load REJECTS when the label
+    typeface cannot be fetched, and five print paths waited on it with a
+    rejection handler that only cleaned up, so a broken font file meant no
+    printout at all, silently. The serial sticker had been fixed for exactly
+    this; the others had not. The wait itself now never rejects: a broken
+    typeface prints in the fallback, as a slow one already did."""
+    src = fn_src("function labelFontReady(")
+    if not any(os.access(os.path.join(p, "node"), os.X_OK)
+               for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    harness = """
+const document = { fonts: { load: () => Promise.reject(new Error('network')) } };
+""" + src + """
+labelFontReady().then(() => console.log('resolved'), () => console.log('rejected'));
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(harness)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path], capture_output=True, text=True, timeout=30)
+        ok(r.returncode == 0, "labelFontReady did not run: " + (r.stderr or "")[:300])
+        eq_ = (r.stdout or "").strip()
+        ok(eq_ == "resolved", "a typeface that fails to load still lets the print go ahead (got %r)" % eq_)
+    finally:
+        os.unlink(path)
+
+
+@test
+def t_the_shopify_print_offers_every_stock_and_starts_on_the_production_size():
+    """Cameron, 30 September: "add 4x4 to the shopify print too". The print
+    action on an order in Shopify listed its own five sizes, without the 4 x 4
+    the production printer is loaded with, and always opened on 4 x 6. The
+    stock is a shop setting, not something chosen at the print button, so both
+    actions now offer exactly the sizes the server knows and open on the
+    production printer's saved size, which the signing call hands back."""
+    src = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    block = src[src.index("LABEL_STOCK = ("):]
+    server = set(re.findall(r'"([0-9a-z]+)"', block[:block.index(")")]))
+    for ext in ("print-label-order", "print-label-bulk"):
+        jsx = open(os.path.join(ROOT, "extensions", ext, "src", "PrintActionExtension.jsx"), encoding="utf-8").read()
+        sizes = jsx[jsx.index("const SIZES = ["):]
+        sizes = sizes[:sizes.index("];")]
+        offered = re.findall(r'value: "([0-9a-z]+)"', sizes)
+        ok(set(offered) == server, ext + " offers exactly the sizes the server can print (%s against %s)"
+           % (sorted(offered), sorted(server)))
+        ok(offered == ["4x2", "4x3", "4x4", "4x6", "2x4", "a4"], ext + " in the page's own order: %s" % offered)
+        ok('"4 x 4 in (102 x 102 mm)"' in sizes, ext + " names 4 x 4 as the page does")
+        ok("if (out.size && SIZES.some((o) => o.value === out.size)) setSize(out.size);" in jsx,
+           ext + " opens on the production printer's saved size when the server names one it offers")
+        ok("defaultSelected={o.value === size ? true : undefined}" in jsx,
+           ext + " and shows that size as chosen, not a fixed 4 x 6")
+        ok('disabled={status !== "ready"}' in jsx,
+           ext + " holds the size menu until the label is ready, so a size picked early is not overwritten")
+        ok('tone="subdued"' not in jsx and '<s-text color="subdued">' in jsx,
+           ext + " greys its note with color: admin s-text has no subdued tone")
+
+
 @test
 def t_the_print_sheet_fits_its_own_page_box():
     """The sheet was pinned to 186mm: 4mm wider than A4 portrait's print box, so

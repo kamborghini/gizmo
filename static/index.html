@@ -12036,9 +12036,13 @@ Projected Image UK"></textarea>
         // font-display:block, so until the file lands the text is INVISIBLE -
         // a cold cache printed a day sheet with missing text. 2s cap, because
         // a slow font must not mean no printout.
+        // It never rejects: document.fonts.load does when the file cannot be
+        // fetched, and the callers' rejection handlers only cleaned up, so a
+        // broken typeface meant no printout at all. It prints in the fallback,
+        // as a slow one does.
         function labelFontReady() {
             return (document.fonts && document.fonts.load)
-                ? Promise.race([document.fonts.load("15px 'Bricolage Grotesque'"),
+                ? Promise.race([document.fonts.load("15px 'Bricolage Grotesque'").catch(() => {}),
                                 new Promise(res => setTimeout(res, 2000))])
                 : Promise.resolve();
         }
@@ -12057,6 +12061,33 @@ Projected Image UK"></textarea>
         // the other printer must not re-point what the whole bench prints on.
         let labelSizeOverride = '';
         function labelDims() { return LABEL_SIZES[prodSize()] || LABEL_SIZES['4x4']; }
+        /* The printer's page for a label print of stock d, and where the
+           labels sit on it. Label mode hides every element at body level but
+           the sheets, and that was not enough: on 30 September something on a
+           bench machine put 66px of its own inside the page, visible in spite
+           of the hide, and every label printed with a blank one after it.
+           So in print the labels are laid against the top of the page, in
+           front of anything else in it, and nothing beside body prints.
+           Whatever else is put into the page then sits under the first label
+           and adds no page unless it is taller than the whole run, and cannot
+           push a label down or cut one off. (Styles set on body itself still
+           can, as before.) (A first fix cut the page to exactly N labels tall;
+           review found that anything above the labels then took the last
+           label off, with the page count still right.) WebKit (Safari, and
+           every browser on an iPhone or iPad) is left as it was: laid this
+           way, its A4 runs crept up the page a little more on every label.
+           For print only, so the page behind the dialog is left as it is. */
+        const PRINT_LAYS_LABELS = navigator.vendor !== 'Apple Computer, Inc.';
+        function labelPrintCss(d) {
+            return '@page { size: ' + d.w + 'mm ' + d.h + 'mm; margin: 0; }'
+                + '@media print {'
+                + ' html:root > :not(head):not(body) { display: none !important; }'
+                + (PRINT_LAYS_LABELS
+                    ? ' html:root, html:root body.printing-label { position: static !important; }'
+                      + ' html:root body.printing-label #label-print { position: absolute !important; top: 0 !important; left: 0 !important; z-index: 2147483647 !important; }'
+                    : '')
+                + ' }';
+        }
         // Shrink the text until the whole order fits on one label. Every internal size is
         // in em, so changing this one font-size scales the entire label proportionally.
         function fitLabel(sheet) {
@@ -13092,7 +13123,7 @@ Projected Image UK"></textarea>
             const dims = stickerDims();
             let rule = $('label-page-rule');
             if (!rule) { rule = document.createElement('style'); rule.id = 'label-page-rule'; document.head.append(rule); }
-            rule.textContent = '@page { size: ' + dims.w + 'mm ' + dims.h + 'mm; margin: 0; }';
+            rule.textContent = labelPrintCss(dims);
             box.append(loanStickerSheet(d));
             const cleanup = () => {
                 if (seq !== printSeq) return;
@@ -21299,7 +21330,7 @@ Projected Image UK"></textarea>
             // class and the report print rules already declare their own A4 page.
             let rule = $('label-page-rule');
             if (!rule) { rule = document.createElement('style'); rule.id = 'label-page-rule'; document.head.append(rule); }
-            rule.textContent = '@page { size: ' + d.w + 'mm ' + d.h + 'mm; margin: 0; }';
+            rule.textContent = labelPrintCss(d);
             // Staged off-screen with real layout so each label can be measured and fitted.
             const sheets = orders.map(o => { const s = labelSheet(o); box.append(s); return s; });
             let stamped = false;

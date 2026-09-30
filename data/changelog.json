@@ -2,6 +2,24 @@
  "releases": [
   {
    "date": "2026-09-30",
+   "title": "No blank page after each label",
+   "items": [
+    {
+     "kind": "fixed",
+     "text": "Production labels and serial stickers no longer print a blank page after each label when something else on the computer has put content of its own into the page, which is what happened at the bench. In Chrome, Opera, Edge and Firefox the labels are now laid at the top of the page, in front of anything else put into it, which no longer moves a label or adds a page unless it is taller than the whole run. Safari prints labels as it did before. Labels printed from an order in Shopify are printed the same way."
+    },
+    {
+     "kind": "added",
+     "text": "Shopify's print button on an order can print 4 x 4 labels, and opens on the production printer's label size rather than always on 4 x 6."
+    },
+    {
+     "kind": "fixed",
+     "text": "A label print no longer stops without a word when the label typeface cannot be loaded. It prints in a standard typeface instead, as it already did when the typeface was slow."
+    }
+   ]
+  },
+  {
+   "date": "2026-09-30",
    "title": "Customer erasures wait for an admin",
    "items": [
     {

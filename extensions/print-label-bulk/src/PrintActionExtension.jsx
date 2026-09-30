@@ -5,6 +5,7 @@ import { useEffect, useState } from "preact/hooks";
 const SIZES = [
   { value: "4x2", label: "4 x 2 in (102 x 51 mm)" },
   { value: "4x3", label: "4 x 3 in (102 x 76 mm)" },
+  { value: "4x4", label: "4 x 4 in (102 x 102 mm)" },
   { value: "4x6", label: "4 x 6 in (102 x 152 mm)" },
   { value: "2x4", label: "2 x 4 in (51 x 102 mm)" },
   { value: "a4", label: "A4 page" },
@@ -36,6 +37,9 @@ function Extension() {
         if (!res.ok) { setStatus("label service responded " + res.status); return; }
         const out = await res.json();
         if (!out.url) { setStatus("no document URL returned"); return; }
+        // Open on the production printer's saved stock: which roll is loaded
+        // is a shop setting, not something chosen here. Still changeable below.
+        if (out.size && SIZES.some((o) => o.value === out.size)) setSize(out.size);
         setBaseUrl(out.url);
         setStatus("ready");
       } catch (e) {
@@ -60,18 +64,21 @@ function Extension() {
             frame carries no gizmo session, so the document is read-only by
             design. Saying so beats letting the order sit in Unprocessed. */}
         {status === "ready" ? (
-          <s-text tone="subdued">
+          <s-text color="subdued">
             These orders still need Ready to make in Reactor to move into production
             and, on an account order, to start the 30-day payment terms.
           </s-text>
         ) : null}
+        {/* Held until the label is ready: the saved size lands then, and a
+            size picked before it would be overwritten. */}
         <s-select
           label="Label size"
           value={size}
+          disabled={status !== "ready"}
           onChange={(e) => e && e.target && e.target.value && setSize(e.target.value)}
         >
           {SIZES.map((o) => (
-            <s-option value={o.value} defaultSelected={o.value === "4x6" ? true : undefined}>
+            <s-option value={o.value} defaultSelected={o.value === size ? true : undefined}>
               {o.label}
             </s-option>
           ))}
