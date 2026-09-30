@@ -2,6 +2,22 @@
  "releases": [
   {
    "date": "2026-09-30",
+   "title": "Prints started close together",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "labels",
+     "text": "Starting a print while another is still getting ready now prints only the newer one, and only once. Before, the day sheet, the dispatch manifest, the stock usage sheet and the printed guide could open the print window over the newer print's page, so that page came out twice, or blank."
+    },
+    {
+     "kind": "fixed",
+     "tab": "loans",
+     "text": "If another print is started while a serial sticker is getting ready, the sticker no longer prints the other page in its place, and its button comes back instead of staying greyed out. Press Reprint to print the sticker."
+    }
+   ]
+  },
+  {
+   "date": "2026-09-30",
    "title": "Customer erasures wait for an admin",
    "items": [
     {

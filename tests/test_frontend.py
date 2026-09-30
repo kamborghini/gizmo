@@ -7376,6 +7376,124 @@ const settle = (p) => Promise.race([p.then(v => v), new Promise(r => setTimeout(
 
 
 @test
+def t_a_print_overtaken_by_a_newer_one_opens_no_dialog():
+    """Every print stages its page in one box (#label-print) under one page
+    rule, and a newer print takes both over, counted by printSeq. The
+    2026-09-30 review found the serial sticker and the four A4 sheets never
+    asked whether they had been overtaken before opening the dialog: the older
+    print opened it over the newer print's page, so that page printed twice,
+    and an overtaken sticker's tidy-up bailed out before re-enabling its
+    button, which then stayed dead. Run for real, in node, for every pair of
+    print paths on a clock the test drives: overtaken while waiting for the
+    typeface, in the moment before the dialog, and after the dialog but before
+    the tidy-up."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    ok("let printSeq = 0;" in SCRIPT, "the print paths share one sequence counter")
+    paths = ["function labelFontReady(", "function printLabels(", "async function loanPrintSticker(",
+             "function printDispatchManifest(", "function printStockUsage(", "function printDaySheet(",
+             "function printGuide("]
+    js = MINIDOM + r"""
+// A clock the test drives, so the typeface wait, the 40ms before the dialog
+// and the 800ms tidy-up happen in a known order and take no real time.
+let now = 0, tid = 0, timers = [];
+const setTimeout = (f, ms) => { timers.push({ at: now + (ms || 0), f, id: ++tid }); return tid; };
+const tick = () => new Promise(r => setImmediate(r));
+async function until(t) {
+  await tick();
+  for (;;) {
+    timers.sort((a, b) => a.at - b.at || a.id - b.id);
+    const next = timers[0];
+    if (!next || next.at > t) break;
+    timers.shift(); now = next.at; next.f(); await tick();
+  }
+  now = t;
+}
+Node_.prototype.removeChild = function (n) { n.remove(); return n; };
+document.head = new Node_('head'); document.head.parentNode = document;
+const printBox = el('div'); printBox.id = 'label-print'; document.body.append(printBox);
+const $ = (id) => { const walk = (n) => { if (n.id === id) return n;
+  for (const c of n.children || []) { const f = walk(c); if (f) return f; } return null; };
+  return walk(document.head) || walk(document.body); };
+// The typeface lands 100ms after it is asked for.
+document.fonts = { load: () => new Promise(res => setTimeout(res, 100)) };
+// The dialog: note which page it shows, then fire afterprint as Chrome does.
+const prints = []; let afterprint = [];
+const window = {
+  onafterprint: null,
+  addEventListener(t, f) { if (t === 'afterprint') afterprint.push(f); },
+  print() {
+    const r = $('label-page-rule');
+    prints.push({ page: printBox.textContent + ' | ' + (r ? r.textContent : 'no page rule'),
+                  mode: document.body.classList.contains('printing-label') });
+    afterprint.splice(0).forEach(f => f());
+  },
+};
+let printSeq = 0;
+const LABEL_SIZES = {};
+const labelDims = () => ({ w: 101.6, h: 50.8 });
+const stickerDims = () => ({ w: 101.6, h: 101.6 });
+const labelSheet = (o) => el('div', 'label-sheet', 'Label ' + o.name);
+const fitLabel = () => {}, stampPrinted = () => {}, loadLoans = () => {}, addToast = () => {}, toastError = () => {};
+const api = async () => ({ tag: 'PI-0001', barcode: '', qr: '' });
+const loanStickerSheet = (d) => el('div', 'loan-sticker', 'Sticker ' + d.tag);
+const labelOrders = () => [{ id: 1, name: '#1001', items: [{ production_size: '37.5', glass_type: 'Clear', quantity: 2 }] }];
+const prodStateOf = () => ({}), orderNo = (o) => o.name, fmtDate = (s) => s.slice(0, 10), guideText = (d) => String(d);
+""" + "\n".join(fn_src(p) for p in paths) + r"""
+let stickerBtn;
+const PATHS = {
+  labels: () => printLabels([{ id: 1, name: '#1001' }]),
+  sticker: () => loanPrintSticker({ id: 'u1' }, stickerBtn),
+  manifest: () => printDispatchManifest({ date: '2026-09-30', totals: { shipments: 1 }, rows: [] }),
+  usage: () => printStockUsage({ date: '2026-09-30', orders: 1, pieces: 2, rows: [], unresolved: [], stock: [], order_names: ['#1001'] }),
+  daysheet: () => printDaySheet(),
+  guide: () => printGuide([{ h: 'Printing', body: [['Labels', 'Print them.']] }]),
+};
+async function run(first, second, at) {
+  prints.length = 0; afterprint = []; timers = []; now = 0;
+  stickerBtn = el('button');
+  PATHS[first]();
+  if (second) { await until(at); PATHS[second](); }
+  await until(20000);
+  return { prints: prints.slice(), clean: !document.body.classList.contains('printing-label')
+             && !$('label-page-rule') && !printBox.children.length && !printBox.textContent,
+           buttonLive: !stickerBtn.disabled };
+}
+(async () => {
+  const names = Object.keys(PATHS), sig = {}, fails = [];
+  for (const n of names) {
+    const r = await run(n);
+    if (r.prints.length !== 1 || !r.prints[0].mode || !r.clean || !r.buttonLive)
+      fails.push(n + ' on its own: ' + JSON.stringify(r));
+    else sig[r.prints[0].page] = n;
+  }
+  if (Object.keys(sig).length !== names.length) fails.push('two paths print the same page: ' + JSON.stringify(sig));
+  // The first print starts at 0: its typeface lands at 100, its dialog opens
+  // at 140 and its timed tidy-up runs at 940.
+  const when = { 'while waiting for the typeface': 50, 'just before the dialog': 120, 'after the dialog': 500 };
+  for (const [moment, at] of Object.entries(when)) {
+    for (const a of names) for (const b of names) {
+      if (a === b) continue;
+      const r = await run(a, b, at);
+      const shown = r.prints.map(p => sig[p.page] || ('an unknown page: ' + p.page));
+      const want = at === 500 ? [a, b] : [b];
+      const bad = [];
+      if (JSON.stringify(shown) !== JSON.stringify(want)) bad.push('printed ' + JSON.stringify(shown));
+      if (r.prints.some(p => !p.mode)) bad.push('opened a dialog outside label mode');
+      if (!r.clean) bad.push('left the page in label mode or the box full');
+      if (!r.buttonLive) bad.push('left the sticker button dead');
+      if (bad.length) fails.push(a + ' overtaken by ' + b + ' ' + moment + ' ' + bad.join(' and '));
+    }
+  }
+  console.log(JSON.stringify({ fails }));
+})();
+"""
+    fails = _run_node(js)["fails"]
+    ok(not fails, "%d of 96 runs went wrong, first: %s" % (len(fails), "; ".join(fails[:4])))
+
+
+@test
 def t_bulk_undo_puts_back_every_batch_and_says_how_many():
     """A13 in the 2026-09-22 bug audit. A bulk action over 150 emails is sent
     in batches, each with its own undo token; the page kept only the last, so
