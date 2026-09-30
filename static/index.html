@@ -4944,6 +4944,10 @@ Projected Image UK"></textarea>
                         <option value="168">Weekly</option>
                     </select>
                 </div>
+                <div id="privacy-sec" hidden>
+                    <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Privacy requests</div>
+                    <div id="privacy-reqs"><div class="setting-sub">Checking requests…</div></div>
+                </div>
                 <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Connections</div>
                 <div id="connections"><div class="setting-sub">Checking connections…</div></div>
                 <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">AI usage (last 30 days)</div>
@@ -8866,6 +8870,23 @@ Projected Image UK"></textarea>
         async function loadAlerts() {
             try { const d = await api('/api/alerts', {}); if (d && Array.isArray(d.alerts)) alerts = d.alerts; } catch (e) {}
             if ($('view-overview').classList.contains('active') && overviewCache) renderOverview(overviewCache);
+            privacyNotice();
+        }
+        /* The Overview banner shows only once a report has been run, so a
+           privacy request waiting on an admin is also said on its own, once
+           a visit, until someone opens it or closes the notice. */
+        let privacyNoticed = false;
+        function openPrivacyRequests() {
+            $('settings-btn').click();
+            setTimeout(() => { const t = $('privacy-sec'); if (t && !t.hidden) t.scrollIntoView({ block: 'start' }); }, 300);
+        }
+        function privacyNotice() {
+            if (privacyNoticed || !connIsAdmin()) return;
+            const waiting = (alerts || []).some(a => a.status === 'new' && a.tab === 'settings' && /privacy requests/i.test(a.metric || ''));
+            if (!waiting) return;
+            privacyNoticed = true;
+            addToast('Privacy requests from Shopify are waiting for an admin.', null,
+                { sticky: true, action: { label: 'Open', fn: openPrivacyRequests } });
         }
         async function alertOp(payload) {
             try { const d = await api('/api/alerts', payload); if (d && Array.isArray(d.alerts)) alerts = d.alerts; }
@@ -8899,6 +8920,12 @@ Projected Image UK"></textarea>
                     metric.textContent = label;
                     metric.title = 'Open the size check and resolve this';
                     metric.onclick = () => { setView('labels'); runCoverage(); };
+                } else if (a.tab === 'settings' && /privacy requests/i.test(label)) {
+                    /* Where the request is dealt with, not just a notice of it. */
+                    metric = el('button', 'a-metric seclink');
+                    metric.textContent = label;
+                    metric.title = 'Open Settings, Privacy requests';
+                    metric.onclick = openPrivacyRequests;
                 } else {
                     metric = el('span', 'a-metric', label);
                 }
@@ -9982,7 +10009,8 @@ Projected Image UK"></textarea>
         /* Chrome removed alert()/confirm()/prompt() inside cross-origin iframes, and
            this app ALWAYS runs in one (embedded in the Shopify admin). Every message
            and every confirmation therefore has to be drawn in the page itself. */
-        function addToast(msg, kind) {
+        function addToast(msg, kind, opts) {
+            opts = opts || {};
             const text = String(msg == null ? '' : msg).trim();
             if (!text) return;
             let host = document.getElementById('toast-host');
@@ -9995,10 +10023,16 @@ Projected Image UK"></textarea>
             }
             const t = el('div', 'toast' + (kind ? ' ' + kind : ''));
             t.append(el('div', 'toast-msg', text));
+            if (opts.action) {
+                const b = el('button', 'btn btn-sm'); b.type = 'button'; b.textContent = opts.action.label;
+                b.onclick = () => { t.remove(); opts.action.fn(); };
+                t.append(b);
+            }
             const x = el('button', 'toast-x'); x.innerHTML = I.x; x.title = 'Dismiss';
             x.onclick = () => t.remove();
             t.append(x);
             host.append(t);
+            if (opts.sticky) return;         // stays until someone acts on it
             // Problems stay up long enough to be read and acted on.
             const life = kind === 'bad' ? 14000 : 7000;
             setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 320); }, life);
@@ -27797,6 +27831,7 @@ Projected Image UK"></textarea>
                 ov.style.display = 'none'; ov.dataset.mode = ''; appBehind(false); renderSidebar();
                 applyRoleChrome();
                 updatesBadge();
+                loadAlerts();       // the boot-time read ran signed out, and read nothing
                 // A deep link that hit the login screen carries on now.
                 const pend = window.__pendingAdminLink; window.__pendingAdminLink = null;
                 if (pend) (pend.dispatch ? dispatchFromAdminLink : printFromAdminLink)(pend.id);
@@ -27913,6 +27948,7 @@ Projected Image UK"></textarea>
                 const ov = $('auth-overlay'); if (ov) { ov.style.display = 'none'; ov.dataset.mode = ''; appBehind(false); renderSidebar(); }
                 applyRoleChrome();
                 updatesBadge();
+                loadAlerts();
                 window.__pendingAdminLink = null;   // the boot-time call ran with a live session
             } catch (e) {
                 attempt = attempt || 0;
@@ -29353,6 +29389,120 @@ Projected Image UK"></textarea>
             loadConnections();
             loadSchedule();
             loadUsage();
+            loadPrivacy();
+        }
+        /* Settings, Privacy requests (admins only; the server says the same).
+           A customer erasure Shopify asks for waits here for an admin, because
+           anyone holding the app's secret can send one and an erasure cannot
+           be undone: beside each, what Shopify says about the customer, how far
+           the erasure reaches, and whether the same one was stopped before.
+           Data requests are listed with the date the customer must have their
+           data by, until someone marks them answered. */
+        function loadPrivacy() {
+            const sec = $('privacy-sec'), box = $('privacy-reqs');
+            if (!sec || !box) return;
+            sec.hidden = !connIsAdmin();
+            if (sec.hidden) return;
+            box.replaceChildren(el('div', 'setting-sub', 'Checking requests…'));
+            api('/api/privacy', {}).then(paintPrivacy)
+                .catch(e => box.replaceChildren(el('div', 'setting-sub', 'Privacy requests could not be read. ' + (e.message || ''))));
+        }
+        function privacyShopify(h) {
+            const when = h.checked_at ? ' (checked ' + fmtDate(h.checked_at) + ')' : '';
+            if (h.shopify === 'live') return 'Shopify still has a customer with this customer number, or with an address this would erase' + when
+                + '. Check they were erased in Shopify before erasing them here.';
+            if (h.shopify === 'gone') return 'Shopify has no customer with this customer number or with any address this would erase' + when + '.';
+            return 'Shopify could not be asked about this customer yet.';
+        }
+        function privacyReach(sc) {
+            if (!sc || sc.unreadable) return 'The CRM cannot be read just now, so what this would erase is not known.';
+            if (sc.contacts == null) return '';
+            const n = sc.contacts || 0;
+            if (!n) return 'No contact in the CRM has this address; email threads from it go.';
+            let t = 'Erases ' + (n === 1 ? 'one contact' : n + ' contacts') + ' in the CRM';
+            if (sc.likely_duplicates) t += ', ' + (sc.likely_duplicates === 1 ? 'one of them only because it looks'
+                : sc.likely_duplicates + ' of them only because they look') + ' like the same person';
+            if (sc.other_addresses) t += (n === 1 ? ', which holds ' : ', which hold ') + (sc.other_addresses === 1 ? 'one other address' : sc.other_addresses + ' other addresses');
+            return t + ', with their deals, leads and email threads.';
+        }
+        function paintPrivacy(d) {
+            const box = $('privacy-reqs'); if (!box) return;
+            box.replaceChildren();
+            const held = (d && d.held) || [], asks = (d && d.data_requests) || [];
+            box.append(el('div', 'setting-sub', 'When you erase a customer in Shopify, Shopify asks Reactor to erase what it holds about them too. '
+                + 'Each request waits here for an admin to erase it, or to stop one nobody here asked for. Shopify allows thirty days from when it arrives.'));
+            if (!held.length && !asks.length) { box.append(el('div', 'setting-sub', 'Nothing waiting.')); return; }
+            /* A flood of erasure requests nobody asked for means the app's
+               secret is out: one click stops them all, each recorded. */
+            const total = held.length + ((d && d.held_more) || 0);
+            if (total > 10) {
+                const row = el('div', 'setting-row'); const text = el('div');
+                text.append(el('div', 'setting-title', total + ' erasure requests are waiting'),
+                    el('div', 'setting-sub', 'More than Shopify sends for one shop. If nobody here erased these customers in Shopify, stop them all: someone holds the app\u2019s secret.'));
+                const acts = el('div', 'row-acts');
+                const all = el('button', 'btn btn-sm'); all.type = 'button'; all.textContent = 'Stop all';
+                all.onclick = async () => {
+                    if (!await uiConfirm('Stop all ' + total + ' waiting erasure requests and keep those customers\u2019 records? Only if nobody here erased them in Shopify.',
+                        { title: 'Stop every erasure request', okText: 'Stop them all' })) return;
+                    privacyOp({ op: 'stop_all' }, all);
+                };
+                acts.append(all); row.append(text, acts); box.append(row);
+            }
+            held.forEach(h => {
+                const row = el('div', 'setting-row');
+                const text = el('div');
+                text.append(el('div', 'setting-title', h.email),
+                    el('div', 'setting-sub', 'Arrived ' + fmtDate(h.received) + (h.customer_id ? ', for Shopify customer ' + h.customer_id : '') + '. '
+                        + (h.overdue ? 'Overdue: Shopify allowed until ' + fmtDate(h.due) + '.' : 'Shopify allows until ' + fmtDate(h.due) + '.')),
+                    el('div', 'setting-sub', privacyShopify(h)));
+                const reach = privacyReach(h.scope);
+                if (reach) text.append(el('div', 'setting-sub', reach));
+                if (h.stopped_before) text.append(el('div', 'setting-sub', 'The same request was stopped as not asked for on ' + fmtDate(h.stopped_before) + '.'));
+                const acts = el('div', 'row-acts');
+                const er = el('button', 'btn btn-sm'); er.type = 'button'; er.textContent = 'Erase now';
+                if (h.scope && h.scope.unreadable) er.disabled = true;
+                er.onclick = async () => {
+                    if (!await uiConfirm('Erase what Reactor holds about ' + h.email + '? ' + reach
+                        + ' It cannot be undone. Dispatch and customs records stay, with a note, as the law requires.',
+                        { title: 'Erase customer records', okText: 'Erase' })) return;
+                    /* The reach shown, checked again by the server at the click. */
+                    privacyOp({ op: 'erase', id: h.id, reach: (h.scope && h.scope.key) || '' }, er);
+                };
+                const st = el('button', 'btn btn-sm'); st.type = 'button'; st.textContent = 'Not requested';
+                st.onclick = async () => {
+                    if (!await uiConfirm('Stop this request and keep ' + h.email + '\u2019s records? Only if nobody here erased them in Shopify: '
+                        + 'a request Shopify did not send means someone holds the app\u2019s secret.', { title: 'Stop erasure request', okText: 'Stop it' })) return;
+                    privacyOp({ op: 'stop', id: h.id }, st);
+                };
+                acts.append(er, st);
+                row.append(text, acts);
+                box.append(row);
+            });
+            if (d && d.held_more) box.append(el('div', 'setting-sub', 'And ' + d.held_more + ' more waiting, shown as these are settled.'));
+            asks.forEach(a => {
+                const row = el('div', 'setting-row'); const text = el('div');
+                text.append(el('div', 'setting-title', a.email || ('Customer ' + (a.customer_id || 'with no address given'))),
+                    el('div', 'setting-sub', 'Asked on ' + fmtDate(a.at) + ' for the data held about them. '
+                        + (a.overdue ? 'Overdue: they should have had it by ' + fmtDate(a.due) + '.' : 'Send it to them by ' + fmtDate(a.due) + '.')));
+                const acts = el('div', 'row-acts');
+                const done = el('button', 'btn btn-sm'); done.type = 'button'; done.textContent = 'Mark answered';
+                done.onclick = () => privacyOp(a.id ? { op: 'answered', id: a.id, email: a.email } : { op: 'answered', at: a.at, email: a.email }, done);
+                acts.append(done);
+                row.append(text, acts);
+                box.append(row);
+            });
+        }
+        async function privacyOp(payload, btn) {
+            setBusy(btn, true);
+            try {
+                const d = await api('/api/privacy', payload);
+                paintPrivacy(d);
+                if (d && d.notice) toastOk(d.notice);
+            } catch (e) {
+                setBusy(btn, false);
+                toastError('That was not done. ' + (e.message || ''));
+                loadPrivacy();
+            }
         }
         /* One way to save in the whole window: every switch saves the moment
            it is changed, and each block of text has its own Save under it.

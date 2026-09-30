@@ -239,6 +239,9 @@ client = TestClient(server.build_app())
 async def _install_unknown():
     return "unknown"
 copilot._install_checker = _install_unknown
+async def _customer_unknown(cid, email):
+    return "unknown"
+copilot._customer_checker = _customer_unknown
 APP_AUTH = {"session": "", "master": ""}
 MASTER_PW = "test-password-123"
 def ensure_auth():
@@ -4808,6 +4811,22 @@ def _seed_person_and_shipment(email):
     copilot._write_dispatch(disp)
 
 
+def redact_through_the_hold(raw, delivery):
+    """A customers/redact as Shopify sends it, then erased the only way it
+    now can be: by an admin, in Settings (see
+    t_a_signed_customer_redact_waits_for_an_admin)."""
+    r = client.post("/webhooks/privacy", content=raw,
+                    headers=wh_headers(raw, topic="customers/redact", delivery=delivery))
+    eq(r.status_code, 200, r.text)
+    addr = str(json.loads(raw)["customer"]["email"]).strip().lower()
+    h = [x for x in copilot._held_requests() if x["email"] == addr]
+    ok(h, "it is held for an admin, not erased on arrival")
+    ensure_auth()
+    shown = [x for x in post("/api/privacy", {}).json()["held"] if x["id"] == h[0]["id"]][0]
+    e = post("/api/privacy", {"op": "erase", "id": h[0]["id"], "reach": shown["scope"].get("key", "")})
+    eq(e.status_code, 200, e.text[:200])
+    return r
+
 @test
 def t_a_redact_request_erases_the_crm_person():
     """Relationship data goes. This is the half of the split with no legal
@@ -4817,9 +4836,7 @@ def t_a_redact_request_erases_the_crm_person():
     _seed_person_and_shipment(email)
     raw = json.dumps({"customer": {"id": 555, "email": email},
                       "shop_domain": "test-store.myshopify.com"}).encode()
-    r = client.post("/webhooks/privacy", content=raw,
-                    headers=wh_headers(raw, topic="customers/redact", delivery="pr1"))
-    eq(r.status_code, 200, r.text)
+    redact_through_the_hold(raw, "pr1")
     eq("p9001" in copilot._load_crm()["persons"], False,
        "the CRM person is gone")
 
@@ -4834,9 +4851,7 @@ def t_a_redact_request_keeps_the_dispatch_record_and_notes_it():
     _seed_person_and_shipment(email)
     raw = json.dumps({"customer": {"id": 556, "email": email},
                       "shop_domain": "test-store.myshopify.com"}).encode()
-    r = client.post("/webhooks/privacy", content=raw,
-                    headers=wh_headers(raw, topic="customers/redact", delivery="pr2"))
-    eq(r.status_code, 200, r.text)
+    redact_through_the_hold(raw, "pr2")
     rec = copilot._load_dispatch().get("104999") or {}
     ok(rec, "the shipment record survives")
     eq(rec.get("address1"), "1 Glass Works", "with the address HMRC can ask for")
@@ -4857,9 +4872,7 @@ def t_a_redact_request_erases_only_that_persons_email_threads():
     copilot._write_mail(store)
     raw = json.dumps({"customer": {"id": 558, "email": "gone@example.com"},
                       "shop_domain": "test-store.myshopify.com"}).encode()
-    r = client.post("/webhooks/privacy", content=raw,
-                    headers=wh_headers(raw, topic="customers/redact", delivery="pr6"))
-    eq(r.status_code, 200, r.text)
+    redact_through_the_hold(raw, "pr6")
     threads = copilot._load_mail()["threads"]
     eq("tgone" in threads, False, "their thread is gone, matched case-insensitively")
     eq("tstay" in threads, True, "and nobody else's was touched")
@@ -14195,17 +14208,445 @@ def t_restoring_the_pre_redact_archive_does_not_erase_again():
         old = (datetime.now(timezone.utc) - timedelta(hours=46)).isoformat()
         copilot._shop_owed_set({"since": old, "tries": 0})
         w = copilot._load_watch(); w["shopify_down"] = old; copilot._save_watch(w)
+        copilot._redact_hold_write(lambda hs: [{"id": "hbefore", "email": "before@example.com", "received": old}])
         buf, _added = copilot._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
         copilot._shop_owed_set(None)                     # settled since
         w = copilot._load_watch(); w.pop("shopify_down", None); copilot._save_watch(w)
+        # Since the backup: the waiting one was stopped (as any settlement is,
+        # with a decision recorded), and a new one arrived.
+        copilot._privacy_decision("before@example.com", "", "stopped", "Ada")
+        copilot._redact_hold_write(lambda hs: [{"id": "hafter", "email": "after@example.com", "received": old}])
         r = post("/api/restore", {"zip": blob})
         eq(r.status_code, 200, r.text[:200])
         eq(copilot._load_privacy_log().get("shop_owed"), None, "nothing owed comes back with the archive")
         eq(copilot._load_watch().get("shopify_down"), None, "nor the old outage")
+        eq([h["id"] for h in copilot._held_requests()], ["hafter"],
+           "the customer erasures waiting now stay, and a settled one does not come back")
+        copilot._redact_hold_write(lambda hs: [])
+        # Evidence since the backup is kept, a data request since it stays,
+        # and an erasure confirmed since it is owed again.
+        li = login("cameron", MASTER_PW)
+        APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
+        buf, _added = copilot._build_backup_zip()
+        blob = b64.b64encode(buf.getvalue()).decode()
+        copilot._privacy_note("customers/redact", "gone.since@example.com", "", "erased: confirmed by Ada")
+        copilot._privacy_decision("gone.since@example.com", "", "erased", "Ada")
+        copilot._ask_hold("asked.since@example.com", "")
+        r = post("/api/restore", {"zip": blob})
+        eq(r.status_code, 200, r.text[:200])
+        pl = copilot._load_privacy_log()
+        ok(any(e.get("email") == "gone.since@example.com" for e in pl["events"]), "the event since is kept")
+        ok(any(a.get("email") == "asked.since@example.com" for a in pl.get("asks") or []), "the data request stays")
+        ok(any(p.get("email") == "gone.since@example.com" for p in pl.get("pending") or []),
+           "and the erasure confirmed since is owed again, as the restore brought them back")
+        li = login("cameron", MASTER_PW)
+        APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
+        # Onto a fresh volume (no live log at all), the backup's waiting requests stay.
+        copilot._redact_hold_write(lambda hs: [{"id": "hfresh", "email": "fresh@example.com", "received": old}])
+        buf, _added = copilot._build_backup_zip()
+        blob = b64.b64encode(buf.getvalue()).decode()
+        os.remove(copilot.PRIVACY_LOG_PATH)
+        copilot._json_cache.clear()
+        r = post("/api/restore", {"zip": blob})
+        eq(r.status_code, 200, r.text[:200])
+        eq([h["id"] for h in copilot._held_requests()], ["hfresh"], "nothing waiting is wiped by an empty live log")
+        li = login("cameron", MASTER_PW)
+        APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
+        # An erasure confirmed BEFORE the backup was built is not owed again.
+        for k in ("pending", "decisions"):
+            copilot._redact_hold_write(lambda xs: [], key=k)
+        copilot._privacy_decision("before.backup@example.com", "", "erased", "Ada")
+        buf, _added = copilot._build_backup_zip()
+        blob = b64.b64encode(buf.getvalue()).decode()
+        r = post("/api/restore", {"zip": blob})
+        eq(r.status_code, 200, r.text[:200])
+        ok(not any(p.get("email") == "before.backup@example.com" for p in copilot._load_privacy_log().get("pending") or []),
+           "an erasure the backup already reflects is not run again")
+        li = login("cameron", MASTER_PW)
+        APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
+        copilot._redact_hold_write(lambda hs: [])
+        # An unreadable live log is what the restore repairs: the backup's lists stay.
+        copilot._redact_hold_write(lambda hs: [{"id": "hin", "email": "in.backup@example.com", "received": old}])
+        buf, _added = copilot._build_backup_zip()
+        blob = b64.b64encode(buf.getvalue()).decode()
+        open(copilot.PRIVACY_LOG_PATH, "w").write("{not json")
+        copilot._json_cache.clear()
+        r = post("/api/restore", {"zip": blob})
+        eq(r.status_code, 200, r.text[:200])
+        eq([h["id"] for h in copilot._held_requests()], ["hin"], "the backup's waiting request is not wiped")
+        copilot._redact_hold_write(lambda hs: [])
+        for k in ("asks", "decisions", "pending"):
+            copilot._redact_hold_write(lambda xs: [], key=k)
         li = login("cameron", MASTER_PW)
         APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
     with_accounts(go)
+
+
+@test
+def t_a_signed_customer_redact_waits_for_an_admin():
+    """The audit's R-C1, point 2, left open on 29 September and fixed on the
+    30th (Cameron: "fix the forged customer redact too"). A customers/redact is
+    signed with the app's secret, like every forgery by whoever holds it, and
+    one post erased any customer's CRM records and email threads on the spot.
+    Nothing checkable tells a forgery from Shopify's own request, and an
+    erasure cannot be undone, so each now waits for an admin in Settings,
+    Privacy requests, beside what Reactor can tell them: what Shopify says
+    about every address the erasure would take (refreshed hourly), how far it
+    reaches (worked out when shown, and checked again at the click), and
+    whether the same one was stopped before. The master is told at once, in
+    the app and by email naming nobody, and reminded daily as the thirty days
+    run out. Nothing is erased without an admin."""
+    from datetime import datetime, timedelta, timezone
+    copilot._webhook_seen.clear()
+    saved = (copilot._customer_checker, copilot._spawn_bg, copilot._send_alert_email)
+    spawned, sent_mail, queued = [], {"ok": True}, []
+
+    def spawn(coro):
+        spawned.append((coro.cr_code.co_name, dict(coro.cr_frame.f_locals)))
+        if coro.cr_code.co_name == "_privacy_mail_send":
+            queued.append(coro)      # run after the step, so 'mailed' follows what was sent
+        else:
+            coro.close()
+        return True
+
+    def ra(coro):
+        out = run_async(coro)
+        while queued:
+            run_async(queued.pop(0))
+        return out
+
+    async def _send_alert_email(subject, lines):
+        # Named as the real one, so one spawned directly is counted too.
+        spawned.append(("_send_alert_email", {"subject": subject, "lines": lines}))
+        return sent_mail["ok"]
+    send = _send_alert_email
+    live_for = {"addrs": set()}
+
+    async def checker(cid, email):
+        return "live" if email in live_for["addrs"] else ("unknown" if email == "unsure@example.com" else "gone")
+    copilot._spawn_bg, copilot._customer_checker, copilot._send_alert_email = spawn, checker, send
+    copilot._redact_hold_said.clear()
+
+    def held():
+        return copilot._held_requests()
+
+    def ask(email, cid, delivery):
+        raw = json.dumps({"customer": {"id": cid, "email": email},
+                          "shop_domain": "test-store.myshopify.com"}).encode()
+        return client.post("/webhooks/privacy", content=raw,
+                           headers=wh_headers(raw, topic="customers/redact", delivery=delivery))
+
+    def still_there(email):
+        return any(email in [str(e).lower() for e in (p.get("emails") or [])]
+                   for p in copilot._load_crm()["persons"].values())
+
+    def mails():
+        return [a for n, a in spawned if n == "_send_alert_email"]
+
+    def go():
+        ensure_auth()
+        for k in ("held", "stopped", "asks", "decisions"):
+            copilot._redact_hold_write(lambda xs: [], key=k)
+        copilot._write_json_store(copilot.ALERTS_PATH, None, [])
+        _a, msess, _p = ready_user("Mo Member", "mo_priv", role="member")
+        _b, asess, _q = ready_user("Ada Admin", "ada_priv", role="admin")
+        d = copilot._load_crm()
+        d["persons"]["pz0"] = {"id": "pz0", "name": "Fay Forged", "emails": ["forged@example.com"]}
+        d["persons"]["pz1"] = {"id": "pz1", "name": "Rae Real", "emails": ["real@example.com", "rae@old.example.com"],
+                               "phones": ["07700 900123"]}
+        d["persons"]["pz2"] = {"id": "pz2", "name": "Rae Real", "emails": ["rae.real@work.example.com"],
+                               "phones": ["07700 900123"]}
+        d["persons"]["pz3"] = {"id": "pz3", "name": "Val Two", "emails": ["val.old@example.com", "val@example.com"]}
+        copilot._write_crm(d)
+        # Signed, and held: nothing erased, the master told without a name.
+        eq(ask("forged@example.com", 991, "cr-1").status_code, 200)
+        ok(still_there("forged@example.com"), "nothing is erased on the signature alone")
+        eq([h["email"] for h in held()], ["forged@example.com"], "it waits for an admin")
+        eq(sum(1 for n, _ in spawned if n == "_redact_hold_check"), 1, "Shopify is asked about the customer")
+        ok(any(a.get("metric") == copilot._PRIVACY_ALERT for a in copilot._load_alerts() if isinstance(a, dict)),
+           "the app says so")
+        ra(copilot._redact_hold_check(held()[0]["id"]))
+        eq(held()[0]["shopify"], "gone", "what Shopify said is kept for the admin")
+        ok(mails() and "waiting" in mails()[-1]["subject"], mails())
+        ok(not any("forged@example.com" in l for l in mails()[-1]["lines"]), "and the email names nobody")
+        ok(held()[0]["mailed"], "marked mailed, as it went")
+        eq(ask("forged@example.com", 991, "cr-1b").status_code, 200)
+        eq(len(held()), 1, "the same person asked again is one request")
+        eq(sum(1 for n, _ in spawned if n == "_redact_hold_check"), 1, "and is not checked again for it")
+        # Nothing erases it but an admin, however long it waits.
+        old = (datetime.now(timezone.utc) - timedelta(days=29)).isoformat()
+        copilot._redact_hold_write(lambda hs: [{**h, "received": old} for h in hs])
+        ra(copilot._redact_hold_due())
+        ok(still_there("forged@example.com"), "twenty-nine days on, still there")
+        # Only an admin sees or settles them.
+        eq(post_s(msess, "/api/privacy", {}).status_code, 403, "a member cannot")
+        lst = post_s(asess, "/api/privacy", {}).json()
+        eq([h["email"] for h in lst["held"]], ["forged@example.com"], "an admin sees it")
+        # Stopped: nothing erased, said, remembered.
+        spawned.clear()
+        r = post_s(asess, "/api/privacy", {"op": "stop", "id": lst["held"][0]["id"]})
+        eq(r.status_code, 200, r.text)
+        eq((r.json()["held"], r.json()["notice"]), ([], "Stopped. Nothing was erased."), "no longer waiting")
+        ok(still_there("forged@example.com"), "and nothing was erased")
+        ok(any("stopped" in a["subject"] for a in mails()), mails())
+        eq(post_s(asess, "/api/privacy", {"op": "stop", "id": lst["held"][0]["id"]}).status_code, 404,
+           "a second admin acting on it finds it gone")
+        ok(any(x.get("action") == "stopped" for x in copilot._load_privacy_log().get("decisions") or []),
+           "the decision is kept apart from the event log")
+        ask("forged@example.com", 991, "cr-1c")
+        lst = post_s(asess, "/api/privacy", {}).json()
+        ok(lst["held"][0]["stopped_before"], "sent again, it says it was stopped before")
+        post_s(asess, "/api/privacy", {"op": "stop", "id": lst["held"][0]["id"]})
+        # The advice covers every address the erasure would take.
+        live_for["addrs"] = {"val@example.com"}
+        ask("val.old@example.com", 0, "cr-v")
+        ra(copilot._redact_hold_check(held()[0]["id"]))
+        eq(held()[0]["shopify"], "live", "Shopify still has the contact's other address: said")
+        post_s(asess, "/api/privacy", {"op": "stop", "id": held()[0]["id"]})
+        # How far it reaches is worked out when shown, and checked at the click.
+        live_for["addrs"] = set()
+        ask("real@example.com", 992, "cr-2")
+        h = post_s(asess, "/api/privacy", {}).json()["held"][0]
+        eq({k: h["scope"][k] for k in ("contacts", "likely_duplicates", "other_addresses")},
+           {"contacts": 2, "likely_duplicates": 1, "other_addresses": 2},
+           "two contacts, one only as a likely duplicate, holding two other addresses")
+        d = copilot._load_crm()
+        d["persons"]["pz4"] = {"id": "pz4", "name": "Rae Real", "emails": ["rae3@example.com"], "phones": ["07700 900123"]}
+        copilot._write_crm(d)
+        r = post_s(asess, "/api/privacy", {"op": "erase", "id": h["id"], "reach": h["scope"]["key"]})
+        eq(r.status_code, 409, "the CRM changed since it was shown: look again")
+        eq(post_s(asess, "/api/privacy", {"op": "erase", "id": h["id"]}).status_code, 409,
+           "and without what was shown, nothing is erased")
+        ok(still_there("real@example.com"), "and nothing went")
+        h = post_s(asess, "/api/privacy", {}).json()["held"][0]
+        eq(h["scope"]["contacts"], 3, "shown as it is now")
+        r = post_s(asess, "/api/privacy", {"op": "erase", "id": h["id"], "reach": h["scope"]["key"]})
+        eq((r.status_code, r.json()["notice"]), (200, "Erased."), r.text[:200])
+        ok(not still_there("real@example.com") and not still_there("rae3@example.com"),
+           "exactly what was shown went")
+        ok(any(x.get("action") == "erased" for x in copilot._load_privacy_log().get("decisions") or []))
+        # Shopify cannot be asked: the last answer stands; not asked while it is down.
+        ask("unsure@example.com", 993, "cr-3")
+        hid = held()[0]["id"]
+        copilot._redact_hold_set(hid, shopify="gone", checked_at="2026-09-01T00:00:00+00:00")
+        ra(copilot._redact_hold_due())
+        eq(held()[0]["shopify"], "gone", "a failed check keeps the last answer")
+        calls = []
+        async def counting(cid, email):
+            calls.append(email)
+            return "gone"
+        copilot._customer_checker = counting
+        ra(copilot._redact_hold_due(check=False))
+        eq(calls, [], "Shopify is not asked while it is down")
+        copilot._customer_checker = checker
+        # Reminded as the thirty days run out, once a day, in the app too.
+        copilot._redact_hold_write(lambda hs: [{**x, "received": (datetime.now(timezone.utc) - timedelta(days=22)).isoformat()} for x in hs])
+        copilot._redact_hold_said.clear()
+        copilot._write_json_store(copilot.ALERTS_PATH, None, [])     # dismissed by someone
+        spawned.clear()
+        ra(copilot._redact_hold_due())
+        ra(copilot._redact_hold_due())
+        eq(sum(1 for a in mails() if "still waiting" in a["subject"]), 1, "a reminder, once a day")
+        ok(any(a.get("metric") == copilot._PRIVACY_ALERT for a in copilot._load_alerts() if isinstance(a, dict)),
+           "and the notice is back in the app")
+        # An email that did not go is not counted as gone.
+        post_s(asess, "/api/privacy", {"op": "stop", "id": held()[0]["id"]})
+        sent_mail["ok"] = False
+        copilot._redact_hold_said.clear()
+        ask("nomail@example.com", 994, "cr-4")
+        ra(copilot._redact_hold_check(held()[0]["id"]))
+        eq(held()[0]["mailed"], False, "no email configured: still to be mailed")
+        sent_mail["ok"] = True
+        copilot._redact_hold_said.clear()
+        ra(copilot._redact_hold_due())
+        eq(held()[0]["mailed"], True, "and it goes the next hour")
+        post_s(asess, "/api/privacy", {"op": "stop", "id": held()[0]["id"]})
+        # The CRM unreadable: its reach is not known, so it is not erased.
+        ask("crmdown@example.com", 995, "cr-5")
+        copilot._poisoned_stores.add(copilot.CRM_PATH)
+        try:
+            h = post_s(asess, "/api/privacy", {}).json()["held"][0]
+            ok(h["scope"].get("unreadable"), h)
+            eq(post_s(asess, "/api/privacy", {"op": "erase", "id": h["id"], "reach": ""}).status_code, 503)
+        finally:
+            copilot._poisoned_stores.discard(copilot.CRM_PATH)
+        post_s(asess, "/api/privacy", {"op": "stop", "id": held()[0]["id"]})
+        # A request that cannot be recorded is sent back, and the master told.
+        good = open(copilot.PRIVACY_LOG_PATH, "rb").read()
+        open(copilot.PRIVACY_LOG_PATH, "w").write("{not json")
+        copilot._json_cache.clear()
+        spawned.clear()
+        try:
+            eq(ask("late2@example.com", 996, "cr-6").status_code, 503, "not recorded: sent again")
+            ok("cr-6" not in copilot._webhook_seen, "and the retry is not taken for a duplicate")
+            ok(any("could not record" in a["subject"] for a in mails()), mails())
+        finally:
+            open(copilot.PRIVACY_LOG_PATH, "wb").write(good)
+            copilot._json_cache.clear()
+            copilot._poisoned_stores.discard(copilot.PRIVACY_LOG_PATH)
+        # A log whose events are broken keeps what waits.
+        ask("kept@example.com", 997, "cr-7")
+        pl = copilot._load_privacy_log()
+        pl["events"] = "broken"
+        copilot._write_json_store(copilot.PRIVACY_LOG_PATH, None, pl)
+        ok(copilot._held_requests(), "the waiting requests survive a broken event list")
+        # A flood past the cap is sent back, and noted.
+        cap = copilot.REDACT_HELD_MAX
+        copilot.REDACT_HELD_MAX = len(held())
+        try:
+            eq(ask("one-too-many@example.com", 998, "cr-8").status_code, 503, "past the cap: sent back")
+            ok(any(e.get("email") == "one-too-many@example.com" and "not held" in e.get("detail", "")
+                   for e in copilot._load_privacy_log()["events"]), "and noted")
+        finally:
+            copilot.REDACT_HELD_MAX = cap
+        # Data requests: their own list, until answered, however old.
+        raw = json.dumps({"customer": {"id": 777, "email": "asks@example.com"}}).encode()
+        client.post("/webhooks/privacy", content=raw,
+                    headers=wh_headers(raw, topic="customers/data_request", delivery="cr-dr"))
+        while queued:
+            run_async(queued.pop(0))
+        copilot._redact_hold_write(lambda xs: [{**a, "received": (datetime.now(timezone.utc) - timedelta(days=61)).isoformat()}
+                                               for a in xs], key="asks")
+        asks = post_s(asess, "/api/privacy", {}).json()["data_requests"]
+        mine = [a for a in asks if a["email"] == "asks@example.com"]
+        ok(mine and mine[0]["overdue"] and mine[0]["id"], "sixty-one days on: still listed, and overdue")
+        r = post_s(asess, "/api/privacy", {"op": "answered", "id": mine[0]["id"], "email": "asks@example.com"}).json()
+        ok(not any(a["email"] == "asks@example.com" for a in r["data_requests"]), "answered, it leaves the list")
+        # A long list: the oldest shown, the rest counted; Stop all settles a flood.
+        for k in range(3):
+            ask("flood%d@example.com" % k, 1100 + k, "cr-fl%d" % k)
+        lim = copilot.REDACT_LIST_MAX
+        copilot.REDACT_LIST_MAX = 2
+        try:
+            lst = post_s(asess, "/api/privacy", {}).json()
+            eq((len(lst["held"]), lst["held_more"]), (2, len(held()) - 2), "shown in part, the rest counted")
+        finally:
+            copilot.REDACT_LIST_MAX = lim
+        r = post_s(asess, "/api/privacy", {"op": "stop_all"}).json()
+        eq(r["held"], [], "every one stopped")
+        ok(r["notice"].startswith("Stopped ") and "Nothing was erased" in r["notice"], r["notice"])
+        # Data requests past their cap: the newest is sent back, no older one dropped.
+        cap = copilot.REDACT_ASKS_MAX
+        copilot.REDACT_ASKS_MAX = len(copilot._open_asks()) + 1
+        try:
+            for k, dl in ((1, 200), (2, 503)):
+                raw = json.dumps({"customer": {"id": 800 + k, "email": "ask%d@example.com" % k}}).encode()
+                eq(client.post("/webhooks/privacy", content=raw,
+                               headers=wh_headers(raw, topic="customers/data_request", delivery="cr-da%d" % k)).status_code,
+                   dl, "past the cap, the newest is refused")
+        finally:
+            copilot.REDACT_ASKS_MAX = cap
+        # Damaged records do not lose a request or break the list.
+        copilot._redact_hold_write(lambda xs: [{"id": "tz", "email": "naive@example.com",
+                                                "received": "2026-09-01T10:00:00"}])
+        eq(post_s(asess, "/api/privacy", {}).status_code, 200, "a date with no timezone")
+        pl = copilot._load_privacy_log()
+        pl["held"], pl["stopped"] = {"not": "a list"}, 7
+        copilot._write_json_store(copilot.PRIVACY_LOG_PATH, None, pl)
+        eq(ask("damaged@example.com", 1200, "cr-dm").status_code, 200)
+        eq([h["email"] for h in held()], ["damaged@example.com"], "damaged lists are replaced, the request kept")
+        # The hourly tick runs it first, before anything that can fail.
+        src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+        tick = src.split("async def _watchdog_tick", 1)[1]
+        ok(tick.index("await _redact_hold_due(check=up)") < tick.index("run_label_coverage")
+           and tick.index("_redact_retry_pending()") < tick.index("run_label_coverage"),
+           "before the size-list check, which failed every hour once")
+    try:
+        with_accounts(go)
+    finally:
+        for c in queued:
+            c.close()
+        copilot._customer_checker, copilot._spawn_bg, copilot._send_alert_email = saved
+        for k in ("held", "stopped", "asks"):
+            copilot._redact_hold_write(lambda xs: [], key=k)
+        copilot._redact_hold_said.clear()
+        copilot._webhook_seen.clear()
+
+@test
+def t_the_customer_check_calls_only_an_answer_that_found_nobody_gone():
+    """What lets a held erasure go ahead. 'gone' is only Shopify answering
+    and finding no customer with that id (with an address) or that address;
+    an error, a refusal or nothing to ask with is 'unknown', which erases
+    nothing."""
+    saved = server._request
+    answers = []
+
+    async def fake(method, path, params=None, body=None, _retried=False, idempotent=None):
+        answers.append(body)
+        a = replies.pop(0)
+        if isinstance(a, Exception):
+            raise a
+        return a
+    server._request = fake
+    try:
+        def state(cid, email, *seq):
+            replies[:] = list(seq)
+            return run_async(server.shopify_customer_state(cid, email))
+        replies = []
+        def c(addr):
+            return {"id": "g", "defaultEmailAddress": {"emailAddress": addr} if addr else None}
+        eq(state("555", "jo@example.com", {"data": {"customer": c("jo@example.com"),
+                                                     "customers": {"nodes": []}}}), "live", "by id")
+        eq(state("555", "jo@example.com", {"data": {"customer": c("else@example.com"),
+                                                     "customers": {"nodes": []}}}), "live",
+           "an id with someone else's address is for an admin")
+        eq(state("555", "jo@example.com", {"data": {"customer": c(None),
+                                                     "customers": {"nodes": []}}}), "gone",
+           "a record with no address left says nothing")
+        eq(state("", "Jo@Example.com", {"data": {"customers": {"nodes": [c("jo@example.com")]}}}),
+           "live", "by address, any case")
+        eq(state("555", "jo@example.com", {"data": {"customer": None, "customers": {"nodes": [
+            c("jo@example.com.au")]}}}), "gone", "a longer address is someone else")
+        eq(state("424242", "josé@example.es", {"data": {"customer": None}}), "unknown",
+           "an address that cannot be asked about is never called gone")
+        eq(state("555", "jo@example.com", {"data": {"customer": None, "customers": {"nodes": [c("jo@example.com")]}},
+                                           "errors": [{"message": "Throttled"}]}), "live",
+           "a customer found is found, whatever else the reply says")
+        eq(state("\u00b2", "jo@example.com", {"data": {"customers": {"nodes": [c("jo@example.com")]}}}), "live",
+           "a customer number that is not plain digits does not hide the address check")
+        ok("defaultEmailAddress" in json.dumps(answers[-1]), "the field that is not deprecated")
+        eq(state("555", "jo@example.com", {"errors": [{"message": "Access denied"}]}), "unknown", "refused: unknown")
+        eq(state("555", "jo@example.com", RuntimeError("down")), "unknown", "an outage: unknown")
+        eq(state("", "", ), "unknown", "nothing to ask with")
+        eq(state("abc", 'x"y@example.com'), "unknown", "nothing safe to ask with")
+        ok('email:\"jo@example.com\"' in json.dumps(answers[0]) or "email:\\\"jo@example.com\\\"" in json.dumps(answers[0]),
+           answers[0])
+    finally:
+        server._request = saved
+
+
+@test
+def t_the_erasure_takes_exactly_whom_it_always_took():
+    """The duplicate rule now works each contact's words out once (a list of
+    waiting requests took minutes); who an erasure takes must not change.
+    Checked against the rule as it was, on a CRM built to have namesakes,
+    shared numbers, shared switchboards and chains of duplicates."""
+    import random
+    rnd = random.Random(30)
+    names = ["Jo Bloggs", "Sam Hart", "Alex Reed", "Priya Shah"]
+    phones = ["07700 900%03d" % i for i in range(6)]
+    persons = {}
+    for i in range(160):
+        persons["p%d" % i] = {"id": "p%d" % i, "name": rnd.choice(names),
+                              "emails": ["u%d@example.com" % rnd.randrange(40)] + (["x%d@example.com" % i] if i % 3 else []),
+                              "phones": rnd.sample(phones, rnd.randrange(0, 2))}
+    d = {"persons": persons}
+
+    def old(addr):
+        mine = [k for k, v in persons.items()
+                if addr in {str(e).strip().lower() for e in (v.get("emails") or [])}
+                or str(v.get("email") or "").strip().lower() == addr]
+        for k, v in persons.items():
+            if k not in mine and any(copilot._erase_same_person(copilot._erase_words_of(v),
+                                                                copilot._erase_words_of(persons[m])) for m in mine):
+                mine.append(k)
+        return mine
+    index = copilot._redact_index(d)
+    for n in range(40):
+        addr = "u%d@example.com" % n
+        eq(copilot._redact_people(d, addr, index)[0], old(addr), addr)
+        eq(copilot._redact_people(d, addr)[0], old(addr), addr + " without an index")
 
 
 @test
@@ -19238,9 +19679,7 @@ def t_an_erasure_survives_the_next_pipedrive_import():
             ok("sarah@lumen.co.uk" in person["emails"], "the imported person is there")
             raw = json.dumps({"customer": {"id": 901, "email": "Sarah@Lumen.co.uk"},
                               "shop_domain": "test-store.myshopify.com"}).encode()
-            r = client.post("/webhooks/privacy", content=raw,
-                            headers=wh_headers(raw, topic="customers/redact", delivery="res1"))
-            eq(r.status_code, 200, r.text)
+            redact_through_the_hold(raw, "res1")
             gone = copilot._load_crm()
             eq(any(p.get("pd_id") == "20" for p in gone["persons"].values()), False, "erased")
             ok("20" in (gone.get("pd_deleted_persons") or []), "and tombstoned as it went")
@@ -19267,9 +19706,7 @@ def t_an_erased_persons_email_is_not_re_imported_by_the_next_sync():
         copilot._write_mail(store)
         raw = json.dumps({"customer": {"id": 902, "email": "erase.me@example.com"},
                           "shop_domain": "test-store.myshopify.com"}).encode()
-        eq(client.post("/webhooks/privacy", content=raw,
-                       headers=wh_headers(raw, topic="customers/redact", delivery="res2")
-                       ).status_code, 200)
+        redact_through_the_hold(raw, "res2")
         store = copilot._load_mail()
         eq("tgone" in store["threads"], False, "gone")
         ok("erase.me@example.com" in (store.get("redacted") or []), "and remembered as erased")

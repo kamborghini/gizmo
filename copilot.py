@@ -6080,6 +6080,7 @@ _scope_reader = None
 _tax_id_reader = None
 _forecast_reader = None   # the forecast job's four store reads, made with the app's credential
 _install_checker = None   # "installed" / "gone" / "unknown": asked before a shop/redact erases
+_customer_checker = None  # "live" / "gone" / "unknown": asked before a customers/redact erases
 _order_writer = None
 # The tag that marks an order sold on account: releasing one to production is
 # the moment its 30-day clock should start ticking in Shopify.
@@ -11149,6 +11150,23 @@ async def _watchdog_tick(registry: dict) -> bool:
             state.pop("shopify_down", None)
             await _send_alert_email("Reactor: Shopify connection recovered",
                                     ["Reads are working again; scheduled audits resume."])
+        # The privacy duties first, each on its own: anything later in this
+        # tick that raises (the size-list check did, every hour) skipped them.
+        # A shop/redact still owed is tried against this tick's own record of
+        # how long the store has been out of reach.
+        try:
+            await _shop_redact_retry(state.get("shopify_down"))
+        except Exception:
+            logger.exception("shop/redact retry failed")
+        try:
+            # Shopify is not asked about customers while it cannot be reached.
+            await _redact_hold_due(check=up)
+        except Exception:
+            logger.exception("held customer erasures failed")
+        try:
+            _redact_retry_pending()      # an admin's erasure a store refused, tried again
+        except Exception:
+            logger.exception("the retry of an unfinished erasure failed")
         # Weekly size-list coverage: catch a new model going unmatched before a
         # CHECK label surprises the workbench.
         last_cov = state.get("coverage_at")
@@ -11230,16 +11248,10 @@ async def _watchdog_tick(registry: dict) -> bool:
                                              "master account, then the team's accounts."])
             _sessions_sweep()
             _work_close_orphans()
-            _redact_retry_pending()
             _events_flush()   # belt for the debounced ledger writes
         except Exception:
             logger.exception("team register check failed")
-        # A shop/redact still owed, tried again against this tick's own record
-        # of how long the store has been out of reach.
-        try:
-            await _shop_redact_retry(state.get("shopify_down"))
-        except Exception:
-            logger.exception("shop/redact retry failed")
+
         # Files trash past its 30-day window, and uploads that never finished.
         # Not gated on Shopify: the bucket is a different service entirely.
         # Under the store lock: the purge is a read-modify-write like any route.
@@ -14207,21 +14219,24 @@ def _erase_alive(people, names=()) -> set:
     return out
 
 
+def _erase_split(words) -> tuple:
+    """(names, addresses and numbers) of a record's words, canonical."""
+    names, ids = set(), set()
+    for w in words:
+        for kind, canon, _n in _erase_canon(w):
+            if kind == "name":
+                names.add(canon)
+            elif kind in ("email", "phone"):
+                ids.add((kind, canon))
+    return names, ids
+
+
 def _erase_same_person(a_words, b_words) -> bool:
     """Two contact records are one person when they have the same name AND
     share an address or a number. Either alone is not enough: a colleague
     shares the switchboard, a namesake shares the name."""
-    def split(words):
-        names, ids = set(), set()
-        for w in words:
-            for kind, canon, _n in _erase_canon(w):
-                if kind == "name":
-                    names.add(canon)
-                elif kind in ("email", "phone"):
-                    ids.add((kind, canon))
-        return names, ids
-    an, ai = split(a_words)
-    bn, bi = split(b_words)
+    an, ai = _erase_split(a_words)
+    bn, bi = _erase_split(b_words)
     return bool(an & bn) and bool(ai & bi)
 
 
@@ -15012,8 +15027,12 @@ def _load_privacy_log() -> dict:
     erased half leaves none by definition, and the retained half is retained on
     purpose. Without this there is no way to show a request was honoured."""
     d = _load_json_store(PRIVACY_LOG_PATH, None, {"events": []})
-    if not isinstance(d, dict) or not isinstance(d.get("events"), list):
-        d = {"events": []}
+    if not isinstance(d, dict):
+        return {"events": []}
+    if not isinstance(d.get("events"), list):
+        # Only the broken list goes: the requests held for an admin and the
+        # erasures owed must not go with it.
+        d["events"] = []
     return d
 
 
@@ -15327,7 +15346,8 @@ def _crm_erase_links(d: dict, pids: set, orgs_touched=()) -> tuple:
     return erased, threads
 
 
-def _redact_customer(email: str, customer_id="", retry: bool = False) -> dict:
+def _redact_customer(email: str, customer_id="", retry: bool = False,
+                     requested_at: Optional[str] = None) -> dict:
     """Erase what we hold about a person by choice; keep what we hold by law.
 
     The split is the whole design. CRM records and email threads are
@@ -15366,15 +15386,10 @@ def _redact_customer(email: str, customer_id="", retry: bool = False) -> dict:
         pids = set()
         erased_pd: set = set()          # their Pipedrive ids, so the import knows them
         orgs_touched: set = set()
-        mine = [k for k, v in (d.get("persons") or {}).items()
-                if addr in {str(e).strip().lower() for e in (v.get("emails") or [])}
-                or str(v.get("email") or "").strip().lower() == addr]
-        # A duplicate of them under another address (same name, and a shared
-        # address or number) is them too.
-        for k, v in (d.get("persons") or {}).items():
-            if k not in mine and any(_erase_same_person(_erase_words_of(v), _erase_words_of(d["persons"][m]))
-                                     for m in mine):
-                mine.append(k)
+        # Them, and a duplicate of them under another address (same name,
+        # and a shared address or number): the one rule, shared with the
+        # preview an admin decides on.
+        mine, _dupes = _redact_people(d, addr)
         for pid in mine:
             # TOMBSTONED, not just popped. The Pipedrive importer refuses to
             # recreate a contact it has been told is deleted, and it already
@@ -15475,7 +15490,7 @@ def _redact_customer(email: str, customer_id="", retry: bool = False) -> dict:
         failed.append("the mailbox")
 
     # --- retained, and noted -------------------------------------------------
-    stamp = datetime.now(timezone.utc).isoformat()
+    stamp = requested_at or datetime.now(timezone.utc).isoformat()
     try:
         orders = _load_dispatch()
         for rec in orders.values():
@@ -15517,6 +15532,475 @@ def _redact_pending_set(addr: str, customer_id, failed: list) -> None:
                 _write_json_store(PRIVACY_LOG_PATH, None, d)
     except Exception:
         logger.exception("privacy log: could not record a pending erasure")
+
+
+# A customers/redact is signed with the app's secret, and so is every forgery
+# by whoever holds it: before this, one post erased any customer's CRM records
+# and email threads on the spot. Nothing checkable separates a forgery from
+# Shopify's own request (Shopify may or may not still have the customer, and
+# many people in the CRM were never Shopify customers at all), and an erasure
+# cannot be undone. So each request waits for an admin, in Settings, Privacy
+# requests, with what Reactor can tell them beside it: whether Shopify still
+# has a customer with any address the erasure would take, how far it reaches
+# (worked out when the list is shown, and checked again at the click), and
+# whether the same request was stopped before. Shopify sends a genuine one
+# ten days after the merchant asks, and allows thirty days to act on it; an
+# admin is told at once (in the app and by email, neither naming the person)
+# and reminded daily as the thirty days run out. Data requests
+# (customers/data_request) wait in the same place until marked answered.
+REDACT_DEADLINE_DAYS = 30
+REDACT_REMIND_DAYS = 20        # from here on, a daily reminder
+REDACT_HELD_MAX = 2000         # more waiting than this is a flood: sent back, and said
+REDACT_ASKS_MAX = 1000
+REDACT_MAIL_HOURS = 1
+REDACT_CHECKS_PER_TICK = 50
+REDACT_LIST_MAX = 100          # rows worked out and shown at once
+_redact_hold_said: dict = {}
+_PRIVACY_ALERT = "Privacy requests are waiting for an admin in Settings"
+
+
+def _plist(d: dict, key: str) -> list:
+    """One of the privacy log's lists, as a list of records whatever was
+    stored: a hand-edited or damaged value must not throw away a request."""
+    v = d.get(key) if isinstance(d, dict) else None
+    return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
+
+
+def _held_requests(d: Optional[dict] = None) -> list:
+    d = _load_privacy_log() if d is None else d
+    return [h for h in _plist(d, "held") if h.get("id") and h.get("email")]
+
+
+def _open_asks(d: Optional[dict] = None) -> list:
+    d = _load_privacy_log() if d is None else d
+    return [a for a in _plist(d, "asks") if a.get("id") and not a.get("answered")]
+
+
+def _redact_hold_write(change, key: str = "held") -> bool:
+    """Apply change(list) -> list to one list in the privacy log and write it;
+    False when it cannot be written (an unreadable log, a full disk)."""
+    try:
+        d = _load_privacy_log()
+        if PRIVACY_LOG_PATH in _poisoned_stores or not _store_writable(PRIVACY_LOG_PATH):
+            return False
+        cur = _held_requests(d) if key == "held" else _plist(d, key)
+        d[key] = change(cur)
+        _write_json_store(PRIVACY_LOG_PATH, None, d)
+        return True
+    except Exception:
+        logger.exception("privacy requests: the privacy log could not be written")
+        return False
+
+
+def _privacy_decision(email: str, customer_id, action: str, by: str) -> None:
+    """The record of what an admin decided, kept apart from the event log so a
+    stream of signed requests cannot push it out."""
+    at = datetime.now(timezone.utc).isoformat()
+    _redact_hold_write(lambda xs: (xs + [{"at": at, "email": email, "customer_id": str(customer_id or ""),
+                                           "action": action, "by": by}])[-5000:], key="decisions")
+
+
+def _redact_index(d: dict) -> dict:
+    """Every CRM person's names, addresses and numbers, worked out once: the
+    duplicate rule compares each against everyone taken, and working them out
+    again per comparison made a list of waiting requests take minutes."""
+    return {k: _erase_split(_erase_words_of(v)) for k, v in (d.get("persons") or {}).items()}
+
+
+def _redact_people(d: dict, addr: str, index: Optional[dict] = None) -> tuple:
+    """(everyone an erasure for this address takes, those it takes only as a
+    likely duplicate of them): the CRM people with the address, and anyone
+    with the same name and a shared address or number. _redact_customer and
+    the Settings preview both read this, so what an admin is shown is what
+    goes (the page's figure is checked again at the click)."""
+    persons = d.get("persons") or {}
+    mine = [k for k, v in persons.items() if isinstance(v, dict) and (
+            addr in {str(e).strip().lower() for e in _erase_list(v.get("emails"))}
+            or str(v.get("email") or "").strip().lower() == addr)]
+    direct = set(mine)
+    if not mine:
+        return mine, []
+    idx = index if index is not None else _redact_index(d)
+    for k in persons:
+        # Against everyone taken so far, as the erasure always did (the same
+        # rule as _erase_same_person, on words worked out once).
+        if k in mine:
+            continue
+        kn, ki = idx.get(k) or (set(), set())
+        if kn and ki and any((kn & idx[m][0]) and (ki & idx[m][1]) for m in mine if m in idx):
+            mine.append(k)
+    return mine, [k for k in mine if k not in direct]
+
+
+def _redact_scope(addr: str, d: Optional[dict] = None, index: Optional[dict] = None) -> dict:
+    """How far an erasure for this address reaches now, the addresses its
+    contacts hold, and 'key', a fingerprint of exactly who it takes, which the
+    page sends back with Erase ({'unreadable': True} when the CRM cannot be
+    read). A caller listing many passes the CRM and its index in once."""
+    try:
+        if d is None:
+            if CRM_PATH in _poisoned_stores:
+                return {"unreadable": True}
+            d = _load_crm()
+        if CRM_PATH in _poisoned_stores:
+            return {"unreadable": True}
+        mine, dupes = _redact_people(d, addr, index)
+        addrs = []
+        for k in mine:
+            p = (d.get("persons") or {}).get(k) or {}
+            for e in list(p.get("emails") or []) + [p.get("email")]:
+                e = str(e or "").strip().lower()
+                if e and e not in addrs:
+                    addrs.append(e)
+        others = [a for a in addrs if a != addr]
+        key = hashlib.sha256(("|".join(sorted(mine)) + "#" + addr).encode()).hexdigest()[:16]
+        return {"contacts": len(mine), "likely_duplicates": len(dupes), "other_addresses": len(others),
+                "addresses": [addr] + others, "key": key}
+    except Exception:
+        logger.exception("customers/redact: the preview could not be read")
+        return {"unreadable": True}
+
+
+def _redact_hold(email: str, customer_id="") -> Optional[dict]:
+    """Hold one request for an admin; the held entry ('new' True when this
+    call made it), {} when it names nobody we could hold anything about, or
+    None when it could not be recorded."""
+    addr = str(email or "").strip().lower()
+    if not addr or "@" not in addr or len(addr) > 254:
+        _privacy_note("customers/redact", addr[:254], customer_id,
+                      "no usable email address given, and nothing here is kept by a customer id alone")
+        return {}
+    d = _load_privacy_log()
+    held = _held_requests(d)
+    twin = next((h for h in held if h.get("email") == addr), None)
+    if twin is not None:
+        return {**twin, "new": False}      # the same person asked again: one hold
+    if len(held) >= REDACT_HELD_MAX:
+        _privacy_note("customers/redact", addr, customer_id,
+                      f"not held: more than {REDACT_HELD_MAX} requests already waiting; sent back for Shopify to retry")
+        return None
+    stopped = next((x for x in reversed(_plist(d, "stopped")) if x.get("email") == addr), None)
+    entry = {"id": secrets.token_hex(5), "email": addr, "customer_id": str(customer_id or "")[:40],
+             "received": datetime.now(timezone.utc).isoformat(), "shopify": "unknown", "checked_at": "",
+             "mailed": False, "stopped_before": (stopped or {}).get("at") or ""}
+    if not _redact_hold_write(lambda hs: hs + [entry]):
+        return None
+    _privacy_note("customers/redact", addr, customer_id, "held for an admin to erase or stop")
+    _privacy_alert(force=True)
+    return {**entry, "new": True}
+
+
+def _ask_hold(email: str, customer_id="") -> bool:
+    """A data request, kept until someone marks it answered: in its own list,
+    so neither the event log's limit nor a restore can drop it. False when it
+    could not be kept (the log unwritable, or more than REDACT_ASKS_MAX open:
+    then the newest is refused, never an older one dropped)."""
+    addr = str(email or "").strip().lower()[:254]
+    d = _load_privacy_log()
+    if PRIVACY_LOG_PATH in _poisoned_stores:
+        return False
+    opened = _open_asks(d)
+    if addr and any(a.get("email") == addr for a in opened):
+        return True                      # the same person asking again: one entry
+    if len(opened) >= REDACT_ASKS_MAX:
+        return False
+    entry = {"id": secrets.token_hex(5), "email": addr, "customer_id": str(customer_id or "")[:40],
+             "received": datetime.now(timezone.utc).isoformat(), "answered": "", "mailed": False}
+
+    def change(asks):
+        answered = [a for a in asks if a.get("answered")]
+        still = [a for a in asks if not a.get("answered")]
+        # Answered ones go first when the list is long; open ones never do.
+        return answered[-max(0, REDACT_ASKS_MAX - len(still) - 1):] + still + [entry]
+    if not _redact_hold_write(change, key="asks"):
+        return False
+    _privacy_alert(force=True)
+    return True
+
+
+def _privacy_alert(force: bool = False) -> None:
+    """The in-app notice that something waits in Settings. Put back once a
+    day while anything does, as any account can dismiss the banner."""
+    try:
+        if not (_held_requests() or _open_asks()):
+            return
+        live = any(isinstance(a, dict) and a.get("metric") == _PRIVACY_ALERT and a.get("status") == "new"
+                   for a in _load_alerts())
+        if live:
+            return
+        last = _redact_hold_said.get("alert")
+        if not force and last is not None and time.monotonic() - last < 24 * 3600:
+            return
+        _redact_hold_said["alert"] = time.monotonic()
+        _add_alerts([{"tab": "settings", "tab_label": "Privacy", "metric": _PRIVACY_ALERT, "pct": None}])
+    except Exception:
+        logger.exception("privacy requests: the alert could not be added")
+
+
+def _redact_unrecorded() -> None:
+    """A request that could not be held is sent back for Shopify to retry;
+    the master hears, at most once an hour, that the log needs attention."""
+    now = time.monotonic()
+    last = _redact_hold_said.get("unrecorded")
+    if last is not None and now - last < 3600:
+        return
+    _redact_hold_said["unrecorded"] = now
+    _spawn_bg(_send_alert_email(
+        "Reactor: could not record a customer erasure request",
+        ["Shopify asked Reactor to erase a customer's records, but Reactor could not record the",
+         "request, so it was sent back for Shopify to try again (it does, for a few hours). Check",
+         "the server's storage, and deal with the requests waiting in Settings, under Privacy",
+         "requests, if there are many."]))
+
+
+def _redact_hold_set(hid: str, **changes) -> None:
+    _redact_hold_write(lambda held: [({**h, **changes} if h["id"] == hid else h) for h in held])
+
+
+def _redact_hold_drop(hid: str) -> Optional[dict]:
+    """Take one request off the list; the entry taken, or None when it had
+    already gone (another admin, a moment ago)."""
+    taken: list = []
+
+    def change(held):
+        taken.extend(h for h in held if h["id"] == hid)
+        return [h for h in held if h["id"] != hid]
+    if not _redact_hold_write(change):
+        return None
+    return taken[0] if taken else None
+
+
+async def _customer_state(h: dict, addresses: Optional[list] = None) -> str:
+    """'live' when Shopify still has a customer with this id or with any of
+    the addresses the erasure would take, 'gone' when it has none of them,
+    'unknown' when it could not be asked about all of them."""
+    if _customer_checker is None:
+        return "unknown"
+    addrs = [a for a in (addresses or [h.get("email")]) if a][:10]
+    seen = []
+    for k, a in enumerate(addrs):
+        try:
+            st = await asyncio.wait_for(
+                _customer_checker(str(h.get("customer_id") or "") if k == 0 else "", str(a)), 20)
+        except Exception:
+            logger.warning("customers/redact: the customer check did not answer")
+            st = "unknown"
+        if st == "live":
+            return "live"
+        seen.append(st)
+    return "gone" if seen and all(x == "gone" for x in seen) else "unknown"
+
+
+def _privacy_due(received: str) -> Optional[datetime]:
+    try:
+        at = datetime.fromisoformat(str(received))
+    except (ValueError, TypeError):
+        return None
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)   # a hand-edited date: read as UTC, not a crash
+    return at + timedelta(days=REDACT_DEADLINE_DAYS)
+
+
+def _privacy_mail(reminder: bool = False) -> None:
+    """Tell the master what waits: when a request has not been mailed yet (at
+    most once every REDACT_MAIL_HOURS), or as a reminder. It names nobody: an
+    email outlives the erasure it announces. A request is marked mailed only
+    once the email has gone."""
+    held, asks = _held_requests(), _open_asks()
+    if not (held or asks):
+        return
+    fresh = any(not x.get("mailed") for x in held + asks)
+    if not (fresh or reminder):
+        return
+    now = time.monotonic()
+    last = _redact_hold_said.get("mail")
+    if last is not None and now - last < REDACT_MAIL_HOURS * 3600:
+        return
+    _redact_hold_said["mail"] = now
+    dues = [d for d in (_privacy_due(x.get("received") or "") for x in held + asks) if d]
+    first = min(dues) if dues else None
+    parts = []
+    if held:
+        parts.append("one customer erasure request" if len(held) == 1 else f"{len(held)} customer erasure requests")
+    if asks:
+        parts.append("one request for a customer's data" if len(asks) == 1 else f"{len(asks)} requests for customers' data")
+    lines = [" and ".join(parts)[0].upper() + " and ".join(parts)[1:]
+             + (" is" if len(held) + len(asks) == 1 else " are")
+             + " waiting for an admin in Reactor, in Settings, under Privacy requests."]
+    if first is not None:
+        day = f"{first.day} {first:%b %Y}"
+        lines.append(("Shopify's thirty days for the oldest ran out on " if first < datetime.now(timezone.utc)
+                      else "Shopify allows thirty days, and the oldest is due by ") + day + ".")
+    if held:
+        lines += ["", "Shopify sends an erasure request when you erase a customer in Shopify. If nobody here",
+                  "did, stop it: only someone holding the app's secret can send one Shopify did not."]
+    held_ids, ask_ids = {h["id"] for h in held}, {a["id"] for a in asks}
+    subject = "Reactor: privacy requests " + ("still waiting" if reminder else "waiting")
+    _spawn_bg(_privacy_mail_send(subject, lines, held_ids, ask_ids))
+
+
+async def _privacy_mail_send(subject: str, lines: list, held_ids: set, ask_ids: set) -> None:
+    try:
+        sent = await _send_alert_email(subject, lines)
+    except Exception:
+        logger.exception("privacy requests: the email could not be sent")
+        sent = False
+    if not sent:
+        _redact_hold_said.pop("mail", None)          # the next hour tries again
+        return
+    _redact_hold_write(lambda hs: [({**h, "mailed": True} if h["id"] in held_ids else h) for h in hs])
+    _redact_hold_write(lambda xs: [({**a, "mailed": True} if a.get("id") in ask_ids else a) for a in xs], key="asks")
+
+
+_redact_checks_running = {"n": 0}
+
+
+async def _redact_hold_check(hid: str) -> None:
+    """After a request is held: ask Shopify about every address the erasure
+    would take, for the admin deciding, and tell the master. A few at a time:
+    a flood of requests would otherwise spend the store's allowance of
+    calls, and the hourly pass checks the rest."""
+    h = next((x for x in _held_requests() if x["id"] == hid), None)
+    if h is not None and _redact_checks_running["n"] < 3:
+        _redact_checks_running["n"] += 1
+        try:
+            scope = _redact_scope(h["email"])
+            st = await _customer_state(h, scope.get("addresses"))
+            if st != "unknown":
+                _redact_hold_set(hid, shopify=st, checked_at=datetime.now(timezone.utc).isoformat())
+        finally:
+            _redact_checks_running["n"] -= 1
+    _privacy_mail()
+
+
+async def _redact_hold_due(check: bool = True) -> int:
+    """Hourly: refresh what Shopify says about the waiting customers (oldest
+    checked first, REDACT_CHECKS_PER_TICK at a time, and not while Shopify is
+    down; an answer that could not be had keeps the last one), mail anything
+    not yet mailed, keep the in-app notice up, and remind daily once the
+    thirty days are running out. Nothing is erased here: only an admin
+    erases. How many requests wait."""
+    now = datetime.now(timezone.utc)
+    _load_privacy_log()
+    if PRIVACY_LOG_PATH in _poisoned_stores:
+        # Nothing waiting can be seen while the log cannot be read: said
+        # once a day rather than shown as "Nothing waiting".
+        last = _redact_hold_said.get("unreadable")
+        if last is None or time.monotonic() - last >= 24 * 3600:
+            _redact_hold_said["unreadable"] = time.monotonic()
+            _spawn_bg(_send_alert_email(
+                "Reactor: the privacy requests cannot be read",
+                ["Reactor keeps the customer erasure and data requests Shopify sends in a file it cannot",
+                 "read just now, so none of them can be shown or reminded about. Check the server's",
+                 "storage, or restore the latest backup."]))
+        return 0
+    crm = None if CRM_PATH in _poisoned_stores else _load_crm()
+    index = _redact_index(crm) if crm is not None and CRM_PATH not in _poisoned_stores else None
+    if check:
+        order = sorted(_held_requests(), key=lambda h: str(h.get("tried_at") or ""))
+        for h in order[:REDACT_CHECKS_PER_TICK]:
+            scope = _redact_scope(h["email"], crm, index) if index is not None else {}
+            st = await _customer_state(h, scope.get("addresses"))
+            changes = {"tried_at": now.isoformat()}
+            if st != "unknown":
+                changes.update(shopify=st, checked_at=now.isoformat())
+            if any(x["id"] == h["id"] for x in _held_requests()):
+                _redact_hold_set(h["id"], **changes)
+    _privacy_alert()
+    late = any((_privacy_due(x.get("received") or "") or now) - now
+               < timedelta(days=REDACT_DEADLINE_DAYS - REDACT_REMIND_DAYS)
+               for x in _held_requests() + _open_asks())
+    if late:
+        last = _redact_hold_said.get("remind")
+        if last is None or time.monotonic() - last >= 24 * 3600:
+            _redact_hold_said["remind"] = time.monotonic()
+            _redact_hold_said.pop("mail", None)
+            _privacy_alert(force=True)
+            _privacy_mail(reminder=True)
+            return len(_held_requests())
+    _privacy_mail()
+    return len(_held_requests())
+
+
+def _redact_hold_erase(h: dict, how: str, by: str = "") -> dict:
+    out = _redact_customer(h["email"], h.get("customer_id") or "", requested_at=h.get("received"))
+    _privacy_note("customers/redact", h["email"], h.get("customer_id") or "", how)
+    _privacy_decision(h["email"], h.get("customer_id"), "erased", by)
+    return out
+
+
+def _redact_hold_stop(h: dict, who_name: str) -> None:
+    """Remember a stopped request, so the same one sent again says so."""
+    at = datetime.now(timezone.utc).isoformat()
+    _redact_hold_write(lambda st: (st + [{"email": h["email"], "at": at, "by": who_name}])[-500:], key="stopped")
+    _privacy_note("customers/redact", h["email"], h.get("customer_id") or "",
+                  "stopped by " + who_name + ": not asked for, so nothing was erased")
+    _privacy_decision(h["email"], h.get("customer_id"), "stopped", who_name)
+
+
+def _keep_live_privacy(live: dict, built_at: str = "") -> None:
+    """After a restore, merge what is owed, waiting and decided now with the
+    backup's. A restore replaced the whole privacy log with an older one, so
+    requests that came in since were lost, settled ones came back, and the
+    record of what was erased went; and onto a fresh volume, with no live log
+    at all, taking the live lists as they were wiped the backup's.
+
+      waiting requests  the live ones, and the backup's not settled since
+      data requests     the live ones, and the backup's the live list lacks
+      stops, answers,   both, without repeats
+      decisions, owed
+      events            the backup's, and the live ones since it was built
+      shop erasure owed as live
+
+    An erasure confirmed since the backup was built is owed again, as the
+    restore has just brought that person's records back. Called only when the
+    live log could be read: an unreadable one is what a restore repairs."""
+    pl = _load_privacy_log()
+    old_events = _plist(pl, "events")
+    cut = str(built_at or "") or max((str(e.get("at") or "") for e in old_events), default="")
+    seen_ev = {(e.get("at"), e.get("topic"), e.get("email"), e.get("detail")) for e in old_events}
+    since = [e for e in _plist(live, "events") if str(e.get("at") or "") > cut
+             and (e.get("at"), e.get("topic"), e.get("email"), e.get("detail")) not in seen_ev]
+    pl["events"] = (old_events + since)[-2000:]
+    decisions, seen = [], set()
+    for x in _plist(pl, "decisions") + _plist(live, "decisions"):
+        key = (x.get("at"), x.get("email"), x.get("action"))
+        if key not in seen:
+            seen.add(key)
+            decisions.append(x)
+    pl["decisions"] = decisions[-5000:]
+
+    def settled_since(h: dict) -> bool:
+        return any(x.get("email") == h.get("email") and str(x.get("at") or "") >= str(h.get("received") or "")
+                   and x.get("action") in ("erased", "stopped") for x in decisions)
+    live_held = _held_requests(live)
+    ids = {h["id"] for h in live_held}
+    emails = {h["email"] for h in live_held}
+    pl["held"] = live_held + [h for h in _held_requests(pl) if h["id"] not in ids
+                              and h["email"] not in emails and not settled_since(h)]
+    live_asks = _plist(live, "asks")
+    ask_ids = {a.get("id") for a in live_asks}
+    pl["asks"] = live_asks + [a for a in _plist(pl, "asks") if a.get("id") not in ask_ids]
+    for k, ident in (("stopped", ("email", "at")), ("answered", ("at",))):
+        merged, keys = [], set()
+        for x in _plist(pl, k) + _plist(live, k):
+            key = tuple(x.get(f) for f in ident)
+            if key not in keys:
+                keys.add(key)
+                merged.append(x)
+        pl[k] = merged[-1000:]
+    if isinstance(live.get("shop_owed"), dict):
+        pl["shop_owed"] = live["shop_owed"]
+    else:
+        pl.pop("shop_owed", None)
+    pend = {p.get("email"): p for p in _plist(pl, "pending") + _plist(live, "pending") if p.get("email")}
+    for x in decisions:
+        if x.get("action") == "erased" and str(x.get("at") or "") > cut and x.get("email") not in pend:
+            pend[x["email"]] = {"email": x["email"], "customer_id": str(x.get("customer_id") or ""),
+                                "stores": ["the records a restore brought back"], "at": str(x.get("at") or "")}
+    pl["pending"] = list(pend.values())[-500:]
+    if _store_writable(PRIVACY_LOG_PATH):
+        _write_json_store(PRIVACY_LOG_PATH, None, pl)
 
 
 def _redact_retry_pending() -> int:
@@ -16113,7 +16597,7 @@ TAB_KEYS = ("overview", "seo", "keywords", "products", "customers", "liability",
 # _TAB_ROUTES is refused (see _tab_denied).
 _OPEN_API = ("/api/auth/", "/api/team/", "/api/work/", "/api/google/status", "/api/alerts",
              "/api/usage", "/api/cache", "/api/profile", "/api/layouts", "/api/status", "/api/updates",
-             "/api/schedule", "/api/backup", "/api/restore")
+             "/api/schedule", "/api/backup", "/api/restore", "/api/privacy")
 
 _TAB_ROUTES = (
     ("/api/overview", "overview"), ("/api/seo", "seo"), ("/api/keyword", "keywords"),
@@ -18279,13 +18763,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                fulfillment_canceler=None, webhook_ensurer=None,
                payment_terms_writer=None, order_writer=None,
                scope_reader=None, tax_id_reader=None, forecast_reader=None,
-               install_checker=None) -> None:
+               install_checker=None, customer_checker=None) -> None:
     # The write capabilities the server hands over. None of them ever joins any
     # tool registry: the AI can read the store; only the app's own print / Mark
     # made / Dispatch actions can touch tags or fulfillments.
     global _order_tag_writer, _fulfillment_writer, _fulfillment_canceler, _webhook_ensurer
     global _payment_terms_writer, _order_writer, _scope_reader, _tax_id_reader, _forecast_reader
-    global _install_checker
+    global _install_checker, _customer_checker
+    _customer_checker = customer_checker
     _scope_reader = scope_reader
     _forecast_reader = forecast_reader
     _install_checker = install_checker
@@ -18633,12 +19118,28 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         cid = cust.get("id") or ""
         try:
             if topic == "customers/redact":
-                _redact_customer(email, cid)
+                # Held, not erased on the spot: see _redact_hold. One that
+                # cannot be recorded is sent back for Shopify to retry.
+                held = _redact_hold(email, cid)
+                if held is None:
+                    if delivery:
+                        _webhook_seen.pop(delivery, None)
+                    _redact_unrecorded()
+                    return PlainTextResponse("retry", status_code=503)
+                if held and held.get("new"):
+                    _spawn_bg(_redact_hold_check(held["id"]))
             elif topic == "customers/data_request":
                 # Supplying the data is a human step on a 30-day clock. The
                 # app's job is to receive the request and not lose it.
                 _privacy_note(topic, email, cid,
                               "customer asked for their data; supply it within 30 days")
+                if not _ask_hold(email, cid):
+                    # Not kept: sent back for Shopify to retry, as an erasure is.
+                    if delivery:
+                        _webhook_seen.pop(delivery, None)
+                    _redact_unrecorded()
+                    return PlainTextResponse("retry", status_code=503)
+                _privacy_mail()
             elif topic == "shop/redact":
                 return await _shop_redact_checked(delivery)
             else:
@@ -18646,6 +19147,127 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except Exception:
             logger.exception("privacy webhook %s failed", topic)
         return PlainTextResponse("ok", status_code=200)
+
+    @mcp.custom_route("/api/privacy", methods=["POST"])
+    async def privacy_requests_route(request: Request):
+        """Settings, Privacy requests: the customer erasures Shopify asked for,
+        each waiting for an admin to erase or stop (see _redact_hold), and the
+        data requests to answer. An admin's: erasing is for good, and stopping
+        one keeps a customer's records against what Shopify asked."""
+        err, body, who = await _guard(request, min_level=ROLE_LEVELS["admin"])
+        if err:
+            return err
+        op = str(body.get("op") or "list")
+        notice = ""
+        name = _team_name(who) or "an admin"
+        _load_privacy_log()
+        if PRIVACY_LOG_PATH in _poisoned_stores:
+            return _json({"error": "The privacy requests cannot be read just now, so none can be shown. "
+                                   "Check the server's storage, or restore the latest backup."}, 503)
+        if op == "stop_all":
+            # A flood of requests nobody asked for means the app's secret is
+            # out; one click settles it, with each stop recorded as usual.
+            n = 0
+            for h in _held_requests():
+                taken = _redact_hold_drop(h["id"])
+                if taken is not None:
+                    _redact_hold_stop(taken, name)
+                    n += 1
+            _track(who, "privacy", "stopped every waiting erasure request", str(n))
+            notice = ("Stopped " + str(n) + (" request." if n == 1 else " requests.")) + " Nothing was erased."
+            _spawn_bg(_send_alert_email(
+                "Reactor: every waiting erasure request was stopped",
+                [name + " stopped every waiting request to erase customers' records (" + str(n) + "), as",
+                 "nobody asked for them. Change the app's secret, and give Reactor the new one."]))
+        if op in ("erase", "stop"):
+            hid = str(body.get("id") or "")
+            h = next((x for x in _held_requests() if x["id"] == hid), None)
+            if h is None:
+                return _json({"error": "That request is no longer waiting."}, 404)
+            if op == "erase":
+                scope = _redact_scope(h["email"])
+                if scope.get("unreadable"):
+                    return _json({"error": "The CRM cannot be read just now, so what this would erase is not "
+                                           "known. Try again once it can be read."}, 503)
+                # Who the admin was shown, checked again at the click: the CRM
+                # may have changed since the list was drawn.
+                if str(body.get("reach") or "") != scope.get("key"):
+                    return _json({"error": "What this would erase has changed since the list was shown. "
+                                           "Look at it again before erasing."}, 409)
+            # Taken off the list first: two admins cannot both act on one.
+            h = _redact_hold_drop(hid)
+            if h is None:
+                return _json({"error": "That request is no longer waiting."}, 404)
+            if op == "erase":
+                out = _redact_hold_erase(h, "erased: confirmed by " + name, name)
+                _track(who, "privacy", "erased a customer's records on Shopify's request")
+                notice = ("Erased, except a part that could not be erased yet: Reactor tries that again every hour."
+                          if out.get("failed") else "Erased.")
+            else:
+                _redact_hold_stop(h, name)
+                _track(who, "privacy", "stopped an erasure request nobody asked for")
+                notice = "Stopped. Nothing was erased."
+                last = _redact_hold_said.get("stopped")
+                if last is None or time.monotonic() - last >= 6 * 3600:
+                    _redact_hold_said["stopped"] = time.monotonic()
+                    _spawn_bg(_send_alert_email(
+                        "Reactor: an erasure request was stopped as not asked for",
+                        [name + " stopped a request to erase a customer's records, as nobody asked for it.",
+                         "Only someone holding the app's secret can send one that did not come from",
+                         "Shopify: change the app's secret, and give Reactor the new one."]))
+        elif op == "answered":
+            aid, at = str(body.get("id") or ""), str(body.get("at") or "")[:40]
+            stamp = datetime.now(timezone.utc).isoformat()
+            if aid:
+                _redact_hold_write(lambda xs: [({**a, "answered": stamp, "answered_by": name}
+                                                if a.get("id") == aid else a) for a in xs], key="asks")
+            elif at:
+                # One from before data requests had a list of their own.
+                _redact_hold_write(lambda xs: (xs + [{"at": at, "by": name}])[-1000:], key="answered")
+            _privacy_decision(str(body.get("email") or "")[:254], "", "data request answered", name)
+            notice = "Marked answered."
+        d = _load_privacy_log()
+        now = datetime.now(timezone.utc)
+
+        def due(at: str) -> tuple:
+            dd = _privacy_due(at)
+            return (dd.isoformat() if dd else "", bool(dd) and dd < now)
+        asks = []
+        for a in _open_asks(d):
+            du, late = due(str(a.get("received") or ""))
+            asks.append({"id": a["id"], "email": a.get("email") or "", "customer_id": a.get("customer_id") or "",
+                         "at": a.get("received") or "", "due": du, "overdue": late})
+        # Data requests recorded before they had a list of their own: from
+        # the log, until marked answered, however old.
+        answered = {str(x.get("at") or "") for x in (d.get("answered") or []) if isinstance(x, dict)}
+        # Anyone with an entry in the list (open or answered) is the list's.
+        known = {(str(a.get("email") or ""), "" if a.get("email") else str(a.get("customer_id") or ""))
+                 for a in (d.get("asks") or []) if isinstance(a, dict)}
+        for e in (d.get("events") or []):
+            if (isinstance(e, dict) and e.get("topic") == "customers/data_request"
+                    and str(e.get("detail") or "").startswith("customer asked")
+                    and str(e.get("at") or "") not in answered
+                    and (str(e.get("email") or ""), "" if e.get("email") else str(e.get("customer_id") or ""))
+                    not in known):
+                du, late = due(str(e.get("at") or ""))
+                asks.append({"id": "", "email": e.get("email") or "", "customer_id": str(e.get("customer_id") or ""),
+                             "at": e.get("at") or "", "due": du, "overdue": late})
+        # The oldest first (the nearest deadline), and only so many worked out
+        # at once: a flood of two thousand froze the app for minutes.
+        waiting = sorted(_held_requests(d), key=lambda h: str(h.get("received") or ""))
+        crm = None if CRM_PATH in _poisoned_stores else _load_crm()
+        index = _redact_index(crm) if crm is not None and CRM_PATH not in _poisoned_stores else None
+        held = []
+        for h in waiting[:REDACT_LIST_MAX]:
+            du, late = due(str(h.get("received") or ""))
+            sc = _redact_scope(h["email"], crm, index) if index is not None else {"unreadable": True}
+            sc.pop("addresses", None)
+            held.append({"id": h["id"], "email": h["email"], "customer_id": h.get("customer_id") or "",
+                         "received": h.get("received") or "", "due": du, "overdue": late,
+                         "shopify": h.get("shopify") or "unknown", "checked_at": h.get("checked_at") or "",
+                         "scope": sc, "stopped_before": h.get("stopped_before") or ""})
+        return _json({"held": held, "held_more": max(0, len(waiting) - REDACT_LIST_MAX),
+                      "data_requests": asks, "notice": notice, "deadline_days": REDACT_DEADLINE_DAYS})
 
     @mcp.custom_route("/healthz", methods=["GET"])
     async def healthz(request: Request):
@@ -21467,14 +22089,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # (name, target_dir) for every restorable entry; everything else named
         # in the manifest as skipped, so nothing ever vanishes silently.
         todo, skipped = [], []
-        built_at = ""
+        built_at = built_full = ""    # to the second for people; in full to order events by
         for info in zf.infolist():
             if info.is_dir():
                 continue
             base = os.path.basename(info.filename)
             if info.filename == "manifest.json":
                 try:
-                    built_at = str(json.loads(zf.read(info)).get("built_at") or "")[:19]
+                    built_full = str(json.loads(zf.read(info)).get("built_at") or "")
+                    built_at = built_full[:19]
                 except Exception:
                     pass
                 continue
@@ -21519,7 +22142,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # has been out of reach now. Restoring the pre-redact archive brought
         # back the owed record it was taken under, and the old outage stamp,
         # and the next hour erased the restored data again.
-        live_owed = _load_privacy_log().get("shop_owed")
+        live_priv: dict = {}
         live_watch = _load_watch()
         live_watch = live_watch if isinstance(live_watch, dict) else {}
         def _drop_all_caches():
@@ -21532,6 +22155,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             _dav_auth_cache.clear()
             _json_cache.clear()
         async with _files_lock:
+            # Read here, with nothing left to await before the writes, so a
+            # privacy request that arrives while the restore waits for the
+            # lock is not lost.
+            _pl = _load_privacy_log()
+            if PRIVACY_LOG_PATH not in _poisoned_stores:
+                live_priv.update(_pl)
             try:
                 for info, base, target in todo:
                     payload = zf.read(info)
@@ -21577,13 +22206,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             except Exception:
                 logger.exception("restore: files-clock normalisation failed")
             try:
-                pl = _load_privacy_log()
-                if isinstance(live_owed, dict):
-                    pl["shop_owed"] = live_owed
-                else:
-                    pl.pop("shop_owed", None)
-                if _store_writable(PRIVACY_LOG_PATH):
-                    _write_json_store(PRIVACY_LOG_PATH, None, pl)
+                if live_priv:
+                    try:
+                        _keep_live_privacy(live_priv, built_full)
+                    except Exception:
+                        logger.exception("restore: merging the live privacy requests failed")
                 w = _load_watch()
                 w = w if isinstance(w, dict) else {}
                 for k in ("shopify_down", "probe_fails"):

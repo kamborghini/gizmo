@@ -1,6 +1,20 @@
 {
  "releases": [
   {
+   "date": "2026-09-30",
+   "title": "Customer erasures wait for an admin",
+   "items": [
+    {
+     "kind": "fixed",
+     "text": "When Shopify asks Reactor to erase a customer's records, nothing is erased until an admin says so, in Settings under Privacy requests. Beside each request Reactor shows whether Shopify still has that customer, which contacts the erasure would take and whether the same request was stopped before, and an admin can erase it or stop one nobody here asked for, or stop them all at once if many arrive. You are told in the app and by email when one arrives, and reminded daily as Shopify's thirty days run out. Before, anyone holding the app's secret could send such a request and erase any customer's records and emails straight away."
+    },
+    {
+     "kind": "added",
+     "text": "Settings lists the requests customers make through Shopify for the data held about them, with the date they must have it by, until someone marks them answered."
+    }
+   ]
+  },
+  {
    "date": "2026-09-29",
    "title": "Five security fixes from the September review",
    "items": [

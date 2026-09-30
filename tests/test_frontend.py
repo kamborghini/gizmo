@@ -8366,6 +8366,28 @@ def t_members_see_only_the_memory_buttons_the_server_allows():
 
 
 @test
+def t_privacy_requests_are_an_admins_to_settle_in_settings():
+    """A customer erasure Shopify asks for waits in Settings, Privacy requests,
+    for an admin to erase now or stop (30 September 2026): the section is
+    shown to admins only, loaded when Settings opens, and each button asks
+    first, saying what goes and what stays."""
+    ok('<div id="privacy-sec" hidden>' in HTML, "hidden until known to be an admin")
+    lp = fn_src("function loadPrivacy(")
+    ok("sec.hidden = !connIsAdmin();" in lp and "api('/api/privacy', {})" in lp, "admins only")
+    ok("loadPrivacy();" in fn_src("function openSettings("), "loaded with Settings")
+    pp = fn_src("function paintPrivacy(")
+    ok("'Erase now'" in pp and "'Not requested'" in pp, "the two decisions")
+    ok(pp.count("await uiConfirm(") == 3, "each asks first: Erase, Not requested and Stop all")
+    ok("Dispatch and customs records stay" in pp, "and says what the law keeps")
+    ok("Send it to them by" in pp and "'Mark answered'" in pp, "data requests carry their date, until answered")
+    ok("privacyReach(h.scope)" in pp and "privacyShopify(h)" in pp,
+       "each erasure says what Shopify says and how far it reaches")
+    ok("reach: (h.scope && h.scope.key) || ''" in pp, "and who it would take, as shown, is sent to be checked at the click")
+    ok("privacyOp({ op: 'stop_all' }, all)" in pp and "if (total > 10)" in pp, "and a flood can be stopped at once")
+    ok("/privacy requests/i.test(label)" in SCRIPT, "the notice in the app opens Settings")
+
+
+@test
 def t_the_release_notes_are_ui_copy_and_keep_up_with_the_app():
     """What's new stopped at 8 Sep while sixty changes shipped, and its notes
     carried 46 dashes, the code name and developer words. The notes are read

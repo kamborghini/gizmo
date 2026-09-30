@@ -1402,6 +1402,60 @@ async def shopify_install_state(timeout: float = 4.0) -> str:
     return "gone" if code in (401, 403, 404) else "unknown"
 
 
+_CUSTOMER_EMAIL_OK = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~@-]{3,254}")
+
+
+async def shopify_customer_state(customer_id: str, email: str) -> str:
+    """"live", "gone" or "unknown": does Shopify still have a customer with
+    this id, or with this address?
+
+    Asked before a customers/redact erases anything. That webhook is signed
+    with the app's secret, so anyone holding the secret can post one naming
+    any customer; a customer Shopify still has is one an admin should look
+    at before their records go. "gone" is only an answer that found neither;
+    anything that went wrong is "unknown", and erases nothing. Read-only."""
+    cid = str(customer_id or "").strip()
+    addr = str(email or "").strip().lower()
+    # ASCII digits only: "²" is a digit to isdigit() and not to int().
+    gid = f"gid://shopify/Customer/{int(cid)}" if cid.isascii() and cid.isdigit() and len(cid) <= 20 else ""
+    q = f'email:"{addr}"' if addr and _CUSTOMER_EMAIL_OK.fullmatch(addr) else ""
+    if not gid and not q:
+        return "unknown"
+    # An address that cannot be asked about safely (non-ASCII, quotes) is
+    # not asked about, and then nothing can be called gone: only an id that
+    # still has an address can call it live.
+    unaskable = bool(addr) and not q
+    # defaultEmailAddress, not the email field deprecated in 2026-07.
+    query = ("query($id: ID!, $q: String!, $byId: Boolean!, $byMail: Boolean!) {"
+             " customer(id: $id) @include(if: $byId) { id defaultEmailAddress { emailAddress } }"
+             " customers(first: 5, query: $q) @include(if: $byMail) {"
+             " nodes { id defaultEmailAddress { emailAddress } } } }")
+    try:
+        payload = await _request("POST", "graphql.json", idempotent=True, body={
+            "query": query, "variables": {"id": gid or "gid://shopify/Customer/0", "q": q or "id:0",
+                                          "byId": bool(gid), "byMail": bool(q)}})
+    except Exception as e:
+        logger.warning("customer check failed: %s", type(e).__name__)
+        return "unknown"
+    data = payload.get("data") or {}
+
+    def mail_of(node) -> str:
+        return str((((node or {}).get("defaultEmailAddress")) or {}).get("emailAddress") or "").strip().lower()
+    # By id, a customer that still has an address (whoever's: an id paired
+    # with someone else's address is for an admin to look at). One kept with
+    # no address may be what an erasure leaves, and says nothing either way.
+    if gid and mail_of(data.get("customer")):
+        return "live"
+    nodes = ((data.get("customers") or {}).get("nodes")) or []
+    if any(mail_of(n) == addr for n in nodes if isinstance(n, dict)):
+        return "live"
+    # A customer found is found, whatever else the reply complains of; but
+    # an answer that carries an error cannot say nobody is there.
+    if payload.get("errors"):
+        return "unknown"
+    return "unknown" if unaskable else "gone"
+
+
 async def shopify_order_tax_id(order_id: int) -> dict:
     """{"tax_id": str, "source": str} - the RECEIVER's tax / VAT id for a
     customs declaration, or empty when the customer has not given one.
@@ -2048,7 +2102,8 @@ try:
                        tax_id_reader=shopify_order_tax_id,
                        order_writer=update_order_fields,
                        forecast_reader=forecast_store_read,
-                       install_checker=shopify_install_state)
+                       install_checker=shopify_install_state,
+                       customer_checker=shopify_customer_state)
 except Exception as e:
     # The whole app is these routes, not just the chat: say so, with the cause.
     logger.exception(f"Reactor could not start (every page and route is missing): {e}")
