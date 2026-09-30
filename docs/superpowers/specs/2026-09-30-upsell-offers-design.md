@@ -11,7 +11,7 @@ written.
 
 Cameron: "we need a page built on the app for upsell, that makes the most of
 shopifys available upsell options and lets me tune things like upsell in
-checkout etc. for plans that aren't shopify plus". The goals he named:
+checkout etc. for plans that aren't shopify plus". The goals they named:
 "Projectors to customers who have poor quality units, and warranties for
 people buying projectors".
 
