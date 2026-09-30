@@ -3,8 +3,9 @@
 Date: 2026-09-30. Status: design agreed section by section with Cameron on
 2026-09-30, then checked by three independent reviews (Shopify platform
 claims, Reactor code claims, and an adversarial completeness critique) and
-revised. For Cameron's review, with four decisions still open (last section),
-before the build plan is written.
+revised; the four decisions that review raised were answered by Cameron the
+same day (decisions 8 to 11). For Cameron's review before the build plan is
+written.
 
 ## Why
 
@@ -33,7 +34,7 @@ What exists today, measured 2026-09-30:
 | Thing | State |
 |---|---|
 | Customers' fixtures | Most gobo order lines name their fixture in line properties `Manufacturer` and `Model` (or a per-maker `<Maker> Models` dropdown). Reactor reads them with `_item_prop` (~5999), `_item_model` (~6049) and `_strip_price` (~5241, regex `_PRICE_SUFFIX_RE` ~5238), tidied with `_norm_key` (~5461), as `_shape_label_order` does (~6833), and sizes them with `_gobo_lookup` (~5733). Quote Engine stock lines often carry the fixture only as free text in `Item Notes` (not read), and some lines say `Model: other`; neither can match an offer |
-| How orders are made | About 80% of orders start as drafts from the Quote Engine and are completed without the buyer passing through checkout; many quoted projector lines are custom lines with no product, only a SKU (for example `P107W-QM`). Such orders never show a thank-you page |
+| How orders are made | About 80% of orders start as Quote Engine quotes, which become draft orders with a checkout the customer pays through (Cameron, 2026-09-30), so those buyers do see the thank-you page. Many quoted projector lines are custom lines with no product, only a SKU (for example `P107W-QM`) |
 | Projectors | Shopify products of type `Projector` (19, several in draft) |
 | Warranty products | None exist |
 | App permissions | `read_products`, `read_discounts`, `write_orders`, `write_merchant_managed_fulfillment_orders`; not `write_products`, `write_discounts` or `write_publications`. Publications access was dropped on purpose in the September scope trim, and `t_the_app_asks_for_no_scope_it_cannot_use` pins it |
@@ -62,6 +63,21 @@ Taken with Cameron on 2026-09-30:
    to Reactor. Accepted costs: shared codes, views not counted, and the
    fixture tidy existing a second time in the extension, kept to an exact
    lookup of spellings Reactor has already resolved.
+8. **Warranty products are put on sale by hand.** Reactor creates them
+   (UNLISTED); Cameron puts each one on sale in the Online Store; Reactor
+   checks it is on sale before offering it. No publications permission.
+9. **Reach.** No email channel: Quote Engine buyers pay through a checkout and
+   see the thank-you page.
+10. **Cover starts at dispatch.** The extra years count from the end of the
+    standard guarantee, which starts on the covered order's fulfilment date
+    (its order date while unfulfilled).
+11. **The warranty is Projected Image's own repair promise** (a service
+    contract): warranty products are created taxable. The accountant confirms
+    the VAT treatment before launch.
+
+**Hard rule (Cameron, 2026-09-30): Reactor never changes, hooks into or adds
+to the Quote Engine, its quotes or its draft orders.** Everything here reads
+orders only once the customer has paid.
 
 ## Design
 
@@ -226,13 +242,16 @@ setting or environment variable names, never the words Railway or gizmo.
   a variant per length with SKU prefix `WTY-`, each variant
   `inventoryItem: {requiresShipping: false, tracked: false}`, created and kept
   in step with `productSet`. Status `UNLISTED` (hidden from search,
-  collections, recommendations and the sitemap, still sellable by link) and on
-  sale on the Online Store channel (`publishablePublish`), which a cart link
-  needs. Titles never contain "projector" or "gobo" (for example "Extended
-  warranty, 20 Watt LED"), so the forecast's title fallback cannot file them
-  as projectors. Kept, never deleted and remade. Taxable or not per the answer
-  to decision D below. Needs `write_products`, and `write_publications` unless
-  decision A says otherwise.
+  collections, recommendations and the sitemap, still sellable by link).
+  A cart link can only sell a product on sale in the Online Store: Cameron
+  puts each warranty product on sale by hand (decision 8), and Reactor checks
+  it is (without the publications permission; the exact read, such as the
+  product's store link, is confirmed while building) before it goes into the
+  rules, listing any that are not as "Put on sale in Shopify first". Titles
+  never contain "projector" or "gobo" (for example "Extended warranty, 20 Watt
+  LED"), so the forecast's title fallback cannot file them as projectors.
+  Kept, never deleted and remade. Taxable (decision 11). Needs
+  `write_products`.
 - **The rules document.** `metafieldsSet` on the shop, `$app` / `upsell`,
   `json`. Before its first write, Publish reads
   `currentAppInstallation { app { apiKey } }` and refuses, with the reason,
@@ -240,7 +259,7 @@ setting or environment variable names, never the words Railway or gizmo.
   where the extension reads them. Whether the shop metafield needs a scope of
   its own is confirmed while building.
 - **Server side.** New writers in server.py (codes create, update and end;
-  warranty product create and update, and publish; shop and order
+  warranty product create and update; shop and order
   `metafieldsSet`), handed to `copilot.add_routes` as keywords and never added
   to `COPILOT_TOOLS`. Each returns `{ok, reason, detail}` and checks whether a
   lost create landed before retrying. `REQUIRED_WRITE_SCOPES` gains the new
@@ -336,8 +355,8 @@ offers. Any change Cameron makes needs Publish.
   preview; both paths join `_redact_shop`'s store list.
 - **Accounts.** Not in this build. Warranty sales reach Xero through the
   separate connector, which puts every line on one sales account and marks
-  untaxed lines zero-rated. A warranty account code (and an exempt tax type if
-  decision D says insurance) needs work in that repo: product type in its
+  untaxed lines zero-rated. A warranty account code needs work in that repo:
+  product type in its
   order read, an account per product type in the invoice and credit-note
   mappers, and a setting Reactor's Xero sync page can set.
 - **Forecast.** Warranties are their own product type (and titles avoid
@@ -355,7 +374,8 @@ offers. Any change Cameron makes needs Publish.
   automatic refresh that would go over keeps the last rules and raises an
   alert on the Upsell page and in the alert email.
 - **Drift (in the hourly tick).** Each code and warranty product still exists
-  and is on sale; each recommended projector is active, on sale on the Online
+  and is on sale (a warranty product taken off sale is dropped from the rules
+  and flagged "Put on sale in Shopify first"); each recommended projector is active, on sale on the Online
   Store and available; card prices, titles and images match the store. A
   change to any of those is republished automatically. An offer whose
   projector is unavailable is dropped from the rules and flagged "Projector
@@ -404,46 +424,27 @@ offers. Any change Cameron makes needs Publish.
   near the 100 KB cap, and the whole path to Results; both orders are then
   refunded and left out of Results.
 
-## Decisions still open (Cameron)
+## To check before launch
 
-A. **Publishing warranty products to the Online Store.** A cart link can only
-   sell a product on sale in the Online Store. Either the app regains
-   `write_publications` (dropped on purpose in the September scope trim) and
-   Reactor puts each warranty product on sale itself, or Reactor creates them
-   and you put each one on sale by hand in Shopify, with Reactor checking
-   before it offers it.
-
-B. **Reach.** About 80% of orders are completed drafts from the Quote Engine
-   that never pass through checkout, so their buyers never see a thank-you
-   page, and the order status page reaches them only from the order email's
-   link while it is live, and only on the new customer accounts. The design
-   stands for online orders, but most projector buyers would not see a
-   warranty offer. Options: accept this for the first version; or add the
-   email channel (a warranty offer sent by Reactor after a projector order)
-   now rather than later.
-
-C. **Standard guarantee.** "Extra years" needs each projector model's standard
-   guarantee, and when it starts (order, dispatch or delivery). The design
-   assumes the fulfilment date.
-
-D. **What the warranty is (not legal advice).** Your own promise to repair or
-   replace (a service contract, usually standard-rated for VAT) or backed by
-   an insurer (insurance: Financial Conduct Authority rules, VAT-exempt,
-   Insurance Premium Tax). For consumer sales of domestic electrical goods,
-   the 2005 Extended Warranties Order may also require a warranty's price and
-   duration next to the product's price on the product page, which would make
-   the product page block a launch requirement, and gives cancellation rights
-   the window and register must honour. Publish refuses warranties until this
-   answer and a Xero account code are recorded on the Upsell page. For your
-   accountant or adviser.
-
-Also to check before launch: the store's customer accounts version
-(`shop { customerAccountsV2 { customerAccountsVersion } }`, read only); the
-shop metafield scope; the app installation check in section 5.
+1. **VAT and consumer rules (not legal advice).** The warranty is Projected
+   Image's own repair promise (decision 11), usually standard-rated for VAT;
+   the accountant confirms. For consumer sales of domestic electrical goods,
+   the 2005 Extended Warranties Order may require a warranty's price and
+   duration next to the product's price on the product page and gives
+   cancellation rights the window and register must honour; if it applies,
+   the product page block becomes a launch requirement. Publish refuses
+   warranties until this is recorded on the Upsell page with a Xero account
+   code.
+2. **Customer accounts version** (`shop { customerAccountsV2 {
+   customerAccountsVersion } }`, read only): on legacy accounts the order
+   status card never shows.
+3. **The shop metafield scope** and **the app installation check** (section 5).
+4. **Placement:** the block must be added in the checkout and accounts editor;
+   until it is, nothing shows.
 
 ## Not in this version
 
-Product page and cart offers (unless decision D requires them), emails (unless
-decision B brings them in), single-use codes, view counting, the Xero warranty
+Product page and cart offers (unless check 1 requires them), emails, single-use
+codes, view counting, the Xero warranty
 account, and any in-checkout or post-purchase offer (Plus only for a custom
 app). Each can be added later without changing the rules document's shape.
