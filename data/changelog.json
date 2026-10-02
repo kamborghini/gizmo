@@ -12,6 +12,10 @@
     {
      "kind": "changed",
      "text": "Reactor now works with Shopify on its October 2026 version. The print buttons on Shopify's order pages move to the current version too, which takes effect the next time the app is published to Shopify."
+    },
+    {
+     "kind": "fixed",
+     "text": "Settings now shows which version of Shopify Reactor is working with, next to the store's name under Connections. It was meant to from the start, but the line never appeared on the live app."
     }
    ]
   },

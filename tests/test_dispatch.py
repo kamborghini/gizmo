@@ -579,6 +579,26 @@ def t_status_shipping_row():
     eq(sh["fulfillment"], True, "fulfillment wired")
 
 @test
+def t_settings_names_the_shopify_version_the_server_runs():
+    """Settings said "Connected" and never the Shopify version. Production
+    starts the app as `python server.py`, which Python files under __main__,
+    not "server", so copilot's sys.modules["server"] lookup found nothing and
+    the version was dropped. The suite imports `server` by name, which hid it.
+    The server now hands the version over, and nothing in copilot may find
+    the server by its module name."""
+    held = sys.modules.pop("server")          # the app as production runs it
+    try:
+        r = post("/api/status", {})
+    finally:
+        sys.modules["server"] = held
+    eq(r.status_code, 200, r.text)
+    eq(r.json()["shopify"]["api_version"], server.API_VERSION,
+       "the version the server talks to Shopify with, with no module named server")
+    ok(not re.search(r"sys\.modules(\.get\(|\[)\s*[\'\"]server[\'\"]",
+                     open(os.path.join(os.path.dirname(copilot.__file__), "copilot.py"), encoding="utf-8").read()),
+       "copilot never looks the server up by module name: in production it is __main__")
+
+@test
 def t_backup_excludes_secret():
     r = post("/api/backup", {})
     eq(r.status_code, 200, "backup ok")

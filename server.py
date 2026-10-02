@@ -2158,7 +2158,8 @@ try:
                        order_writer=update_order_fields,
                        forecast_reader=forecast_store_read,
                        install_checker=shopify_install_state,
-                       customer_checker=shopify_customer_state)
+                       customer_checker=shopify_customer_state,
+                       api_version=API_VERSION)
 except Exception as e:
     # The whole app is these routes, not just the chat: say so, with the cause.
     logger.exception(f"Reactor could not start (every page and route is missing): {e}")

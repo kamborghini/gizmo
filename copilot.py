@@ -6212,6 +6212,10 @@ _tax_id_reader = None
 _forecast_reader = None   # the forecast job's four store reads, made with the app's credential
 _install_checker = None   # "installed" / "gone" / "unknown": asked before a shop/redact erases
 _customer_checker = None  # "live" / "gone" / "unknown": asked before a customers/redact erases
+# The Shopify version the server talks to, handed over by add_routes. Never
+# found by the server's module name: production starts `python server.py`,
+# which Python files under __main__, so a lookup by name finds nothing there.
+_api_version = ""
 _order_writer = None
 # The tag that marks an order sold on account: releasing one to production is
 # the moment its 30-day clock should start ticking in Shopify.
@@ -19012,13 +19016,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                fulfillment_canceler=None, webhook_ensurer=None,
                payment_terms_writer=None, order_writer=None,
                scope_reader=None, tax_id_reader=None, forecast_reader=None,
-               install_checker=None, customer_checker=None) -> None:
+               install_checker=None, customer_checker=None, api_version: str = "") -> None:
     # The write capabilities the server hands over. None of them ever joins any
     # tool registry: the AI can read the store; only the app's own print / Mark
     # made / Dispatch actions can touch tags or fulfillments.
     global _order_tag_writer, _fulfillment_writer, _fulfillment_canceler, _webhook_ensurer
     global _payment_terms_writer, _order_writer, _scope_reader, _tax_id_reader, _forecast_reader
-    global _install_checker, _customer_checker
+    global _install_checker, _customer_checker, _api_version
+    _api_version = api_version
     _customer_checker = customer_checker
     _scope_reader = scope_reader
     _forecast_reader = forecast_reader
@@ -27485,7 +27490,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
-        api_version = getattr(sys.modules.get("server"), "API_VERSION", "") or ""
+        api_version = _api_version
         shop_ok, shop_name, currency = False, None, None
         try:
             shop = await _tool_json(registry, "shopify_get_shop", {})
