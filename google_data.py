@@ -43,6 +43,11 @@ SCOPES = [
     "https://www.googleapis.com/auth/webmasters.readonly",
     "https://www.googleapis.com/auth/analytics.readonly",
 ]
+# Google's consent screen lets a person untick either one, and the connection
+# still comes back with a refresh token. What was actually granted is in the
+# token answer's `scope`; it is kept with the token so the unticked side says
+# so rather than failing later with Google's 403.
+GRANTS = {"gsc": SCOPES[0], "ga4": SCOPES[1]}
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 AUTH_ENDPOINT  = "https://accounts.google.com/o/oauth2/v2/auth"
 
@@ -70,7 +75,21 @@ def _load_refresh_token() -> str:
         return ""
 
 
-def save_refresh_token(token: str) -> None:
+def granted() -> dict:
+    """{"gsc": bool|None, "ga4": bool|None}: what the stored connection may read.
+    None is unknown (a connection made before this was recorded), and unknown
+    is treated as granted, as it always was."""
+    try:
+        with open(OAUTH_TOKEN_PATH, "r", encoding="utf-8") as fh:
+            scopes = json.load(fh).get("scopes")
+    except Exception:
+        scopes = None
+    if not isinstance(scopes, list):
+        return {k: None for k in GRANTS}
+    return {k: (v in scopes) for k, v in GRANTS.items()}
+
+
+def save_refresh_token(token: str, scopes: list = None) -> None:
     os.makedirs(os.path.dirname(OAUTH_TOKEN_PATH) or ".", exist_ok=True)
     tmp = OAUTH_TOKEN_PATH + ".tmp"
     # 0600 from the moment it exists, like every other token file here: this
@@ -80,8 +99,11 @@ def save_refresh_token(token: str) -> None:
     # harmless the day it does not.
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"refresh_token": tokenvault.seal(token),
-                             "connected_at": datetime.now(timezone.utc).isoformat()}))
+        rec = {"refresh_token": tokenvault.seal(token),
+               "connected_at": datetime.now(timezone.utc).isoformat()}
+        if scopes is not None:
+            rec["scopes"] = sorted(scopes)
+        fh.write(json.dumps(rec))
     os.replace(tmp, OAUTH_TOKEN_PATH)
     try:
         os.chmod(OAUTH_TOKEN_PATH, 0o600)
@@ -98,13 +120,19 @@ def _auth_available() -> bool:
     return oauth_connected() or bool(GOOGLE_SA_JSON)
 
 
+def _not_refused(key: str) -> bool:
+    # A signed-in connection is the one used whenever it exists; the service
+    # account is only the fallback, and it has no consent screen to untick.
+    return not oauth_connected() or granted().get(key) is not False
+
+
 def gsc_configured() -> bool:
     """True when we can actually query Search Console right now."""
-    return _auth_available() and bool(GSC_SITE_URL)
+    return _auth_available() and bool(GSC_SITE_URL) and _not_refused("gsc")
 
 
 def ga4_configured() -> bool:
-    return _auth_available() and bool(GA4_PROPERTY_ID)
+    return _auth_available() and bool(GA4_PROPERTY_ID) and _not_refused("ga4")
 
 
 def gsc_enabled() -> bool:
@@ -128,6 +156,7 @@ def status() -> dict:
         "ga4_property": GA4_PROPERTY_ID or None,
         "gsc_ready": gsc_configured(),
         "ga4_ready": ga4_configured(),
+        "granted": granted() if oauth_connected() else {k: None for k in GRANTS},
     }
 
 
@@ -149,23 +178,34 @@ def consent_url(redirect_uri: str, state: str) -> str:
     return f"{AUTH_ENDPOINT}?{urlencode(params)}"
 
 
-async def exchange_code(code: str, redirect_uri: str) -> bool:
-    """Exchange an authorization code for tokens; persist the refresh token."""
+async def exchange_code(code: str, redirect_uri: str) -> dict:
+    """Exchange an authorization code for tokens and persist the refresh token
+    with what it was granted. {"ok": bool, "granted": {"gsc": bool, "ga4": bool}};
+    a connection granted neither is not saved, since it could read nothing."""
     async with httpx.AsyncClient(timeout=20.0) as c:
         r = await c.post(TOKEN_ENDPOINT, data={
             "client_id": OAUTH_CLIENT_ID, "client_secret": OAUTH_CLIENT_SECRET,
             "code": code, "grant_type": "authorization_code", "redirect_uri": redirect_uri,
         })
+    none = {k: False for k in GRANTS}
     if r.status_code != 200:
         logger.warning(f"OAuth code exchange failed: {r.status_code} {r.text[:200]}")
-        return False
+        return {"ok": False, "granted": none}
     data = r.json()
     rt = data.get("refresh_token")
     if not rt:
         logger.warning("OAuth exchange returned no refresh_token (already consented? use prompt=consent).")
-        return False
-    save_refresh_token(rt)
-    return True
+        return {"ok": False, "granted": none}
+    # Google always answers with `scope`; without it, record nothing rather
+    # than guess, and the connection behaves as it did before this was kept.
+    scope = data.get("scope")
+    scopes = str(scope).split() if isinstance(scope, str) else None
+    got = {k: (v in scopes) for k, v in GRANTS.items()} if scopes is not None else {k: True for k in GRANTS}
+    if not any(got.values()):
+        logger.warning("Google connect: neither Search Console nor Analytics was granted; not saved.")
+        return {"ok": False, "granted": got}
+    save_refresh_token(rt, scopes)
+    return {"ok": True, "granted": got}
 
 
 # ---------------------------------------------------------------------------

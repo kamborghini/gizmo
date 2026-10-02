@@ -2,6 +2,33 @@
  "releases": [
   {
    "date": "2026-10-02",
+   "title": "Clearer answers from Xero, Google and Shopify",
+   "items": [
+    {
+     "kind": "added",
+     "text": "Google's sign in screen lets you untick Search Console or Analytics. If one is left unticked, the page after connecting now says which, Settings says so on that row, and Reactor stops trying to read it rather than failing later with a refusal. Connect again and leave both ticked to put it right."
+    },
+    {
+     "kind": "fixed",
+     "text": "When Xero's daily allowance of reads for the organisation is used up, reconciliation now says so, and roughly when it frees up, at the first refusal. It used to try three more times and then report a bare error."
+    },
+    {
+     "kind": "added",
+     "text": "Settings shows which version of Shopify order changes arrive in, beside the time of the last one under Live updates."
+    },
+    {
+     "kind": "fixed",
+     "tab": "crm",
+     "text": "The Pipedrive survey counts archived leads too, which Pipedrive keeps apart from the rest."
+    },
+    {
+     "kind": "changed",
+     "text": "If Reactor's AI is ever switched to a Claude model other than Opus, each question now asks for as much thinking as that model offers. A cautious guess used to cut some models short and ask others for a level they refuse."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-02",
    "title": "Ready for Shopify's October update",
    "items": [
     {
