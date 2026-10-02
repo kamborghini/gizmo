@@ -13455,8 +13455,11 @@ def t_the_forecast_is_many_sources_ranked_by_what_each_was_worth():
     ok('env.get("FORECAST_M5", "0") == "1"' in nightly,
        "the per-variant model is OFF by default: it forecast October at a quarter of "
        "what October has ever been. Kept behind a switch, not deleted.")
-    ok("monthly_cash(orders, as_of)" in nightly and "daily_cash(orders, as_of)" in nightly,
+    ok("monthly_cash(orders, as_of, since)" in nightly and "daily_cash(orders, as_of)" in nightly,
        "both the history and the month-to-date are the order total, so they are the same money")
+    ok(".replace(day=1)" in nightly and "run_bulk_orders(store, pull_from)" in nightly
+       and "min_total=BIG_ORDER" in nightly and "big=big" in nightly,
+       "the pull starts on the 1st so every month is whole, and the big orders reach their source")
 
     mc = ingest.split("def monthly_cash(", 1)[1].split("\ndef ", 1)[0]
     ok('ser.index < pd.Period(as_of, freq="M")' in mc,
@@ -13508,8 +13511,10 @@ def t_the_forecast_is_many_sources_ranked_by_what_each_was_worth():
     ok("def pick_opinions(" in simple and "def daily_frame(" in simple,
        "the ranking and the monthly-to-daily spread live beside the models")
     df = simple.split("def daily_frame(", 1)[1].split("\ndef ", 1)[0]
-    ok('(model.get("score") or {}).get("mape")' in df,
-       "the band is the model's OWN measured error, not a number chosen to look confident")
+    bw = simple.split("def band_width(", 1)[1].split("\ndef ", 1)[0]
+    ok("band_width(model)" in df and 'sc.get("p80")' in bw,
+       "the band is the model's OWN measured misses (the one 8 in 10 stayed within), "
+       "not a number chosen to look confident")
     ok("statsmodels" in reqs and "statsforecast" in reqs,
        "the service image can actually import them")
     # The gradient boosters serve a model that has been off by default since it
@@ -13732,13 +13737,67 @@ def t_the_nightly_service_holds_no_shopify_secret():
     body = nightly.split("try:", 1)[1]
     ok("ShopifyStore(shop, stoken) if stoken else ReactorStore(base, token)" in body,
        "the store is chosen inside the try, so a refused read reaches the tab as a failed run")
-    ok("run_bulk_orders(store, since)" in nightly and "fetch_products(store)" in nightly,
+    ok("run_bulk_orders(store, pull_from)" in nightly and "fetch_products(store)" in nightly,
        "both Shopify reads go through the store chosen")
     ok('"/hooks/forecast/shopify"' in ingest and '"/hooks/forecast/shopify"' in
        open(os.path.join(root, "copilot.py"), encoding="utf-8").read(),
        "the job and Reactor name the same hook")
     ok("def shop_host(" in ingest and 'shop if "." in shop else shop + ".myshopify.com"' in ingest,
        "either spelling of the shop reaches Shopify at the same address")
+
+@test
+def t_the_record_keeps_what_the_forecast_in_use_said():
+    """A closed month is shown as what directors were told: the source in
+    use, its figure and likely range, and when, from the first run that had
+    seen every whole month before it. It is written once. September 2026 was
+    scored before this was kept, so its source in use (rebuilt from the
+    forecast's own code) is filled in from the source's own first figure and
+    marked as worked out afterwards."""
+    L = copilot._forecast_ledger
+    state = {}
+    sep9 = {"as_of": "2026-09-09", "seen_through": "2026-08",
+            "predictions": {"2026-09": {"Last year, adjusted for this year": 24677.35, "Trend": 39197.55},
+                            "2026-10": {"Last year, adjusted for this year": 41933.0}},
+            "in_use": {"source": "Last year, adjusted for this year",
+                       "months": {"2026-09": {"value": 24677.35, "p10": 17595.0, "p90": 31759.7, "shown": 30781.0},
+                                  "2026-10": {"value": 41933.0, "p10": 29898.0, "p90": 53967.0}}}}
+    state["ledger"] = L(state, sep9)
+    iu = state["ledger"]["in_use"]
+    eq(set(iu), {"2026-09"}, "only the month after the last whole one seen is kept: October is two months on")
+    eq((iu["2026-09"]["value"], iu["2026-09"]["made"], iu["2026-09"]["seen_through"]), (24677.35, "2026-09-09", "2026-08"))
+    eq(iu["2026-09"]["shown"], 30781.0, "with what the page showed, money already taken included")
+    again = json.loads(json.dumps(sep9)); again["as_of"] = "2026-09-20"
+    again["in_use"]["months"]["2026-09"]["value"] = 33000.0
+    state["ledger"] = L(state, again)
+    eq(state["ledger"]["in_use"]["2026-09"]["value"], 24677.35, "written once, never revised")
+    oct2 = {"as_of": "2026-10-01", "seen_through": "2026-09", "actuals": {"2026-09": 38740.89},
+            "predictions": {"2026-10": {"Big orders counted apart": 50568.0}},
+            "in_use": {"source": "Big orders counted apart",
+                       "months": {"2026-10": {"value": 50568.0, "p10": 36207.0, "p90": 64929.0, "shown": 50600.0}}}}
+    state["ledger"] = L(state, oct2)
+    led = state["ledger"]
+    sep = [r for r in led["results"] if r["month"] == "2026-09"][0]
+    eq(sep["in_use"]["source"], "Last year, adjusted for this year")
+    eq(sep["in_use"]["error"], round((24677.35 - 38740.89) / 38740.89, 4))
+    eq(sep["in_use"]["inside"], False, "38,741 was above its likely range")
+    ok(not sep["in_use"].get("reconstructed"), "recorded at the time, not worked out afterwards")
+    eq(sep["winner"], "Trend", "the closest source is still recorded beside it")
+    eq(led["in_use"]["2026-10"]["source"], "Big orders counted apart", "October's is kept from the 1 Oct run")
+    json.loads(json.dumps(led, allow_nan=False))
+    # September as it stands in the live ledger: scored, with no source in use.
+    live = {"ledger": {"predicted": {}, "results": [{
+        "month": "2026-09", "actual": 38740.89, "winner": "Trend and smoothing, averaged",
+        "by_source": {"Last year, adjusted for this year": {"predicted": 24677.35, "error": -0.363, "made": "2026-09-09"},
+                      "Trend and smoothing, averaged": {"predicted": 39197.55, "error": 0.0118, "made": "2026-09-09"}}}]}}
+    got = L(live, {"as_of": "2026-10-02"})["results"][0]["in_use"]
+    eq((got["source"], got["value"], got["made"], got["seen_through"]),
+       ("Last year, adjusted for this year", 24677.35, "2026-09-09", "2026-08"))
+    ok(got["reconstructed"] is True and got["inside"] is False and abs(got["p90"] - 24677.35 * 1.287) < 0.01, got)
+    later = L({"ledger": {"predicted": {}, "results": [{"month": "2026-10", "actual": 50000.0,
+                                                        "winner": "x", "by_source": {"x": {"predicted": 1.0, "error": 0.0}}}]}},
+              {"as_of": "2026-11-02"})["results"][0]
+    ok("in_use" not in later, "only the month it names is filled in; anything else stays not on record")
+
 
 @test
 def t_the_forecast_hook_takes_only_its_token_and_the_tab_reads_the_run():

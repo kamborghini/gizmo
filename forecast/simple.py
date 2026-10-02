@@ -51,6 +51,46 @@ def last_year_times_run_rate(y: pd.Series, h: int) -> Tuple[pd.Series, str]:
         f"last year x {r:.2f}"
 
 
+# An order of at least this much is a "big order": the quoted projector and
+# installation work that can be a tenth of a month on its own.
+BIG_ORDER = 2000.0
+BIG_ORDERS_NAME = "Big orders counted apart"
+
+
+def big_orders_apart(y: pd.Series, h: int, big: pd.Series) -> Tuple[pd.Series, str]:
+    """Regular orders by last year, adjusted for this year; big orders as their
+    average month over the last year.
+
+    Measured on Projected Image's own months it could not see (Jan to Sep
+    2026), orders of 2,000 or more caused 78% of "last year, adjusted"'s
+    squared error: it scales last year's one-off big orders into this year,
+    so nine big orders in January 2025 made it forecast January 2026 at
+    nearly double, and one 20,040 order in May 2025 added 18,900 to May 2026.
+    Split like this it was 20% out against 31% (17% against 37% on May to
+    September), and it held at thresholds of 3,000 and 5,000. It is a source
+    like the others: it leads only if it keeps scoring best.
+
+    `big` is the monthly total of big orders. Only its months up to the end of
+    `y` are read, so a backtest fold cannot see past its own cut-off."""
+    b = big.reindex(y.index).fillna(0.0).astype(float)
+    base = (y.astype(float) - b).clip(lower=0.0)
+    r = _ratio_to_last_year(base)
+    idx = _future_index(y, h)
+    level = float(b.iloc[-12:].mean()) if len(b) else 0.0
+    vals = [base.get(p - 12, np.nan) * r + level for p in idx]
+    return pd.Series(vals, index=idx, dtype=float), \
+        f"orders under {BIG_ORDER:,.0f}: last year x {r:.2f}; big orders {level:,.0f} a month"
+
+
+BIG_ORDERS_ABOUT = (
+    "It splits each month into orders under \u00a32,000 and big orders. The smaller ones follow "
+    "last year's same month, scaled by how this year is trading; the big ones are taken as "
+    "their average month over the last year, because a big one-off order rarely comes back "
+    "in the same month a year later. It misleads when big orders start arriving much more or "
+    "less often than they did over the last year.")
+BIG_ORDERS_BEST_AT = "Best at: a business where a few big orders make or break a month."
+
+
 def seasonal_share(y: pd.Series, h: int) -> Tuple[pd.Series, str]:
     """A typical month from the last year, split by each month's usual share."""
     df = pd.DataFrame({"v": y.values, "m": [p.month for p in y.index]})
@@ -237,12 +277,24 @@ def _folds(y: pd.Series, folds: int = 3, h: int = 3) -> List[Tuple[int, int]]:
     return out
 
 
-def _errors_to_score(errs: List[float]) -> Dict[str, Optional[float]]:
+def _errors_to_score(errs: List[float], spread: Optional[List[float]] = None) -> Dict[str, Optional[float]]:
+    """Typical error, bias and worst, against what came in; and `p80`, the
+    width of the likely range.
+
+    The range is drawn around the FORECAST, so its width is measured against
+    the forecast too: `spread` holds |actual - forecast| / forecast, and p80
+    is the size 8 in 10 of those stayed within, so forecast x (1 +/- p80)
+    holds 8 in 10 of the past outcomes. Measured against the actual instead,
+    the top of the range sat short exactly when a source forecast too low, as
+    September 2026's did. Plus or minus the AVERAGE miss held about 6 in 10."""
     if not errs:
-        return {"mape": None, "bias": None, "worst": None, "folds": 0}
+        return {"mape": None, "bias": None, "worst": None, "p80": None, "folds": 0}
     arr = np.array(errs, dtype=float)
+    sp = np.array([v for v in (spread or []) if np.isfinite(v)], dtype=float)
     return {"mape": float(np.mean(np.abs(arr))), "bias": float(np.mean(arr)),
-            "worst": float(np.max(np.abs(arr))), "folds": len(errs)}
+            "worst": float(np.max(np.abs(arr))),
+            "p80": float(np.quantile(sp, 0.8)) if len(sp) else None,
+            "folds": len(errs)}
 
 
 def _backtest_all(y: pd.Series, models: List[Tuple[str, object]], folds: int, h: int):
@@ -250,6 +302,13 @@ def _backtest_all(y: pd.Series, models: List[Tuple[str, object]], folds: int, h:
     them are scored on exactly the same months."""
     per_model: Dict[str, List[float]] = {m[0]: [] for m in models}
     per_combo: Dict[str, List[float]] = {c[0]: [] for c in COMBINERS}
+    # |actual - forecast| / forecast: the misses measured the way the range is drawn
+    sp_model: Dict[str, List[float]] = {m[0]: [] for m in models}
+    sp_combo: Dict[str, List[float]] = {c[0]: [] for c in COMBINERS}
+
+    def _spread(pred: np.ndarray, act: np.ndarray) -> List[float]:
+        p = np.where(pred > 0, pred, np.nan)
+        return [v for v in np.abs(act - pred) / p if np.isfinite(v)]
     for cut, hh in _folds(y, folds, h):
         act = y.iloc[cut:cut + hh]
         preds, order = {}, []
@@ -269,11 +328,14 @@ def _backtest_all(y: pd.Series, models: List[Tuple[str, object]], folds: int, h:
         safe = np.where(a == 0, np.nan, a)
         for name in order:
             per_model[name] += [v for v in (preds[name] - a) / safe if np.isfinite(v)]
+            sp_model[name] += _spread(preds[name], a)
         stack = np.vstack([preds[n] for n in order])
         for cname, fn, _n, _b, _ba in COMBINERS:
-            per_combo[cname] += [v for v in (fn(stack) - a) / safe if np.isfinite(v)]
-    return ({n: _errors_to_score(e) for n, e in per_model.items()},
-            {n: _errors_to_score(e) for n, e in per_combo.items()})
+            c = fn(stack)
+            per_combo[cname] += [v for v in (c - a) / safe if np.isfinite(v)]
+            sp_combo[cname] += _spread(c, a)
+    return ({n: _errors_to_score(e, sp_model[n]) for n, e in per_model.items()},
+            {n: _errors_to_score(e, sp_combo[n]) for n, e in per_combo.items()})
 
 
 
@@ -333,7 +395,8 @@ def _live_weights(live: Dict[str, Dict[str, float]], names: List[str]) -> Dict[s
 
 def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
                      folds: int = 3, fold_h: int = 3,
-                     results: Optional[List[dict]] = None) -> dict:
+                     results: Optional[List[dict]] = None,
+                     big: Optional[pd.Series] = None) -> dict:
     """Every source's next `horizon` months, plus combinations of them, each
     carrying the score it earned on this shop's own months.
 
@@ -351,7 +414,11 @@ def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
                           "before a seasonal model can say anything.",
                 "history": [], "models": []}
 
-    models = list(MODELS) + statsforecast_models()
+    models = list(MODELS)
+    if big is not None and len(big):
+        models.append((BIG_ORDERS_NAME, lambda yy, hh: big_orders_apart(yy, hh, big),
+                       BIG_ORDERS_ABOUT, BIG_ORDERS_BEST_AT))
+    models += statsforecast_models()
     mscore, cscore = _backtest_all(monthly, models, folds, fold_h)
 
     months = [str(p) for p in _future_index(monthly, horizon)]
@@ -446,15 +513,24 @@ def pick_opinions(result: dict, n: int = 3) -> List[dict]:
     return sorted(scored, key=lambda m: m["score"]["mape"])[:n]
 
 
+def band_width(model: dict) -> float:
+    """How far either side of a month the likely range reaches, as a share of
+    it: the miss 8 in 10 of the source's past ones stayed within, held between
+    10% and 90%."""
+    sc = model.get("score") or {}
+    err = float(sc.get("p80") or sc.get("mape") or 0.3)
+    return min(max(err, 0.10), 0.90)
+
+
 def daily_frame(model: dict, as_of, profile=None) -> "pd.DataFrame":
     """One model's months spread over their days, with a band.
 
     The variance engine reads a daily line, so a monthly forecast has to
     become one. The spread sums back to the month exactly. The band is the
     model's OWN measured error on this shop's history rather than a number
-    chosen to look confident: if it was typically 29% out, the band is 29%
-    wide, and December's disagreement between models is a separate signal
-    shown beside it."""
+    chosen to look confident: the band reaches as far as 8 in 10 of its past
+    misses did (see band_width), and December's disagreement between models
+    is a separate signal shown beside it."""
     from .cashflow import DayProfile, daily_from_monthly
     months = [(k, v) for k, v in (model.get("months") or {}).items() if v is not None]
     if not months:
@@ -476,11 +552,18 @@ def daily_frame(model: dict, as_of, profile=None) -> "pd.DataFrame":
     #
     # A single day really is that much noisier than a month, so the widened
     # number is the honest one for the daily view too.
-    err = float((model.get("score") or {}).get("mape") or 0.3)
-    err = min(max(err, 0.10), 0.75)
+    #
+    # The width is the miss that 8 in 10 of the source's past ones stayed
+    # within (p80), which is what "likely range, 8 times in 10" claims; the
+    # typical error is kept only for a run scored before p80 existed. `rel`
+    # carries the unclipped daily figure: once the width passes about 37%
+    # the daily p10 hits zero, and a month summed from clipped days came out
+    # lopsided and narrower than measured, so the month is built from `rel`.
+    err = band_width(model)
     dim = spread["date"].dt.days_in_month.astype(float)
     daily_err = err * np.sqrt(dim / BAND_PERSISTENCE_DAYS)
     spread["p10"] = (spread["p50"] * (1 - daily_err)).clip(lower=0.0)
     spread["p90"] = spread["p50"] * (1 + daily_err)
+    spread["rel"] = daily_err
     start = pd.Timestamp(as_of) + pd.Timedelta(days=1)
-    return spread[spread["date"] >= start][["date", "p10", "p50", "p90"]].reset_index(drop=True)
+    return spread[spread["date"] >= start][["date", "p10", "p50", "p90", "rel"]].reset_index(drop=True)

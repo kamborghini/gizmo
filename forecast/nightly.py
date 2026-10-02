@@ -11,7 +11,8 @@ service on this repo with a cron schedule.
   signs every webhook Reactor trusts. A run that finds them says so and does
   not use them.
   FORECAST_SCENARIO       optional: which scenario feeds the baseline feature
-  FORECAST_HISTORY_DAYS   optional, default 900
+  FORECAST_HISTORY_DAYS   optional, default 1830 (about five years), taken back
+                          to the 1st of that month so every month is whole
   FORECAST_HORIZON        optional, default 90
   FORECAST_NBEATS         optional, "1" to train N-BEATS (needs torch in the image)
   FORECAST_CATBOOST       optional, "0" to train LightGBM alone, which roughly
@@ -101,6 +102,32 @@ def _year_per_source(sanity: dict, monthly, cf) -> None:
         entry["year_months"] = len(have)
     sanity["year_banked"] = round(banked, 2)
     sanity["year_future_months"] = len(future)
+
+
+def _in_use(primary: dict, monthly, width: float) -> dict:
+    """The source in use, what it said for every month ahead with its likely
+    range, and the figure the page showed for that month."""
+    import math
+    import pandas as pd
+    shown = {}
+    for _, r in monthly.iterrows():
+        try:
+            v = float(r["projected_p50"])
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(v):           # NaN is not JSON the page can read
+            shown[pd.Timestamp(r["month"]).strftime("%Y-%m")] = round(v, 2)
+    months = {}
+    for m, v in (primary.get("months") or {}).items():
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(v):
+            continue
+        months[m] = {"value": round(v, 2), "p10": round(max(0.0, v * (1 - width)), 2),
+                     "p90": round(v * (1 + width), 2), "shown": shown.get(m)}
+    return {"source": primary.get("name"), "months": months}
 
 
 def _payload(cfg, cf, sanity, opinions, monthly, cash, alerts, summary, actual_daily, fdaily) -> dict:
@@ -227,7 +254,7 @@ def main() -> int:
         from .config import Config
         from .ingest import (ReactorStore, ShopifyStore, daily_cash, fetch_products, monthly_cash,
                              orders_to_rows, run_bulk_orders, to_daily_panel)
-        from .simple import daily_frame, pick_opinions, sanity_forecasts
+        from .simple import BIG_ORDER, band_width, daily_frame, pick_opinions, sanity_forecasts
         from .variance import VarianceEngine
         with tempfile.TemporaryDirectory() as tmp:
             wb = _fetch_workbook(base + "/hooks/forecast/workbook", token, Path(tmp))
@@ -239,9 +266,17 @@ def main() -> int:
             # Inside the try: a refused read is a run that failed, and the tab
             # should say so rather than the service exiting quietly.
             store = ShopifyStore(shop, stoken) if stoken else ReactorStore(base, token)
-            since = as_of - timedelta(days=int(env.get("FORECAST_HISTORY_DAYS", "900")))
-            log.info("pulling orders since %s (%s)", since, "own token" if stoken else "through Reactor")
-            orders = run_bulk_orders(store, since)
+            # From the 1st of a month, so the first month is whole. A window
+            # that started mid-month fed the models a part month as if it were
+            # complete, and with 900 days it cut May 2024 in half from late
+            # October 2026. Five years also stops the history being held at
+            # about 29 months for good.
+            since = (as_of - timedelta(days=int(env.get("FORECAST_HISTORY_DAYS", "1830")))).replace(day=1)
+            # One month earlier than the history kept, so monthly_cash can tell
+            # an opening half month (nothing before it) from a whole one.
+            pull_from = (since - timedelta(days=1)).replace(day=1)
+            log.info("pulling orders since %s (%s)", pull_from, "own token" if stoken else "through Reactor")
+            orders = run_bulk_orders(store, pull_from)
             cfg = Config(as_of=as_of, horizon_days=int(env.get("FORECAST_HORIZON", "90")))
 
             # THE FORECAST. Five plain models on the monthly total, ranked by
@@ -255,7 +290,10 @@ def main() -> int:
             # it predicts every product on every day and adds them up, and
             # half this revenue is quoted projector work where one order is a
             # tenth of the month.
-            months = monthly_cash(orders, as_of)
+            months = monthly_cash(orders, as_of, since)
+            # The same complete months, big orders only, for the source that
+            # forecasts them apart from the rest.
+            big = monthly_cash(orders, as_of, since, min_total=BIG_ORDER)
             actual_daily = daily_cash(orders, as_of)
             if months.empty:
                 raise RuntimeError("no orders came back from Shopify")
@@ -270,7 +308,7 @@ def main() -> int:
             horizon_months = int(env.get("FORECAST_MONTHS", "0")) or min(_need, 18)
             log.info("forecasting %d month(s), to %s", horizon_months, _last)
             record = _fetch_ledger(base + "/hooks/forecast/ledger", token)
-            sanity = sanity_forecasts(months, horizon=horizon_months, results=record)
+            sanity = sanity_forecasts(months, horizon=horizon_months, results=record, big=big)
             log.info("ranked on the %s (%d closed month(s) on record)",
                      sanity.get("ranked_on"), sanity.get("closed_months") or 0)
             if not sanity.get("available"):
@@ -300,6 +338,14 @@ def main() -> int:
             _year_per_source(sanity, monthly_view, cf)
             payload = _payload(cfg, cf, sanity, opinions, monthly_view, cash_view, alerts,
                                eng.summary(monthly_view, cash_view, alerts), actual_daily, fdaily)
+            # For the record: which source the page's numbers came from, what
+            # it said for each month with its likely range, what the page
+            # showed (money already taken included), and the last whole month
+            # it had seen. Reactor keeps the forecast made on the first run
+            # after the month before closed, so every month is judged on a
+            # forecast of the same age, and directors see what they were told.
+            payload["seen_through"] = str(months.index[-1])
+            payload["in_use"] = _in_use(primary, monthly_view, band_width(primary))
 
             if env.get("FORECAST_M5", "0") == "1":
                 # Kept, not deleted: it is a lot of careful work and it may yet

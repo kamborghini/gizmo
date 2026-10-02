@@ -155,7 +155,8 @@ def t_blend_weights_favour_the_model_that_was_right():
 
 def _tiny_cashflow():
     months = pd.date_range("2026-05-01", periods=12, freq="MS")
-    sc = pd.DataFrame({"month": months, "net_sales": 20000.0, "shipping": 800.0, "taxes": 4000.0, "total_sales": 24800.0})
+    # The plan in cash in: total_sales is what the forecast is compared with.
+    sc = pd.DataFrame({"month": months, "net_sales": 16200.0, "shipping": 600.0, "taxes": 3200.0, "total_sales": 20000.0})
     flows = pd.DataFrame({"month": months, "advance": [50000.0] + [0.0] * 11, "gross_sales": 24800.0, "overheads": 20000.0,
                           "glass": 744.0, "projector": 744.0, "marketing": 0.0, "unexpected": 1240.0, "repayment": 24800.0 * 0.1471,
                           "working_capital": 0.0, "loan_start": 55300.0})
@@ -198,6 +199,22 @@ def t_the_variance_engine_settles_each_month_one_way_and_calls_it():
     band = by.loc["2026-10", "projected_p90"] - by.loc["2026-10", "projected_p50"]
     ok(band < 31 * 400 / 2, "a month's band is far narrower than the sum of its days' bands")
     ok(by.loc["2027-03", "method"] == "extrapolated", "past the horizon the plan is scaled by the tracking ratio")
+    ok(by.loc["2026-10", "target|Algorithm 1"] == 20000.0,
+       "the plan is its cash-in line (Total Sales), the forecast's own money, not its 16,200 of net sales")
+    cash = eng.cash_view(m, "Algorithm 1").set_index("month")
+    ok(np.isclose(cash.loc[pd.Timestamp("2026-10-01"), "gross_sales"], by.loc["2026-10", "projected_p50"]),
+       "the cash path takes the forecast as the cash in it already is, not grossed up a second time")
+    # The per-product model forecasts NET sales: it is compared with the
+    # plan's net line and put into cash in for the cash path, as before.
+    net = VarianceEngine(cfg, cf, money="net")
+    mn = net.monthly_view(actual, fc)
+    bn = mn.set_index(mn["month"].dt.strftime("%Y-%m"))
+    ok(bn.loc["2026-10", "target|Algorithm 1"] == 16200.0, "a net forecast meets the plan's net line")
+    r = cf.sales_ratios()
+    cn = net.cash_view(mn, "Algorithm 1").set_index("month")
+    ok(np.isclose(cn.loc[pd.Timestamp("2026-10-01"), "gross_sales"],
+                  bn.loc["2026-10", "projected_p50"] * (1 + r["shipping"] + r["taxes"])),
+       "and is put into cash in for the cash path")
     alerts = eng.alerts(m, {"Algorithm 1": eng.cash_view(m, "Algorithm 1")})
     ok(any(a["kind"] == "sales" and a["verdict"] == "underrun" and a["month"] == "2026-10" for a in alerts), "the underrun raises an alert")
     ok(not any(a["kind"] == "sales" and a["month"] == "2026-05" for a in alerts), "a closed month does not")
@@ -315,7 +332,7 @@ def t_the_job_reads_the_store_through_reactor_and_holds_no_shopify_secret():
     body = nsrc.split("try:", 1)[1]
     # Chosen inside the try, so a refusal is posted to the tab.
     assert "ShopifyStore(shop, stoken) if stoken else ReactorStore(base, token)" in body
-    assert "run_bulk_orders(store, since)" in nsrc and "fetch_products(store)" in nsrc
+    assert "run_bulk_orders(store, pull_from)" in nsrc and "fetch_products(store)" in nsrc
 
 
 @test
@@ -461,24 +478,24 @@ def t_the_band_on_the_page_is_the_error_the_model_actually_earned():
     from forecast.simple import daily_frame, BAND_PERSISTENCE_DAYS
     from forecast.cashflow import DayProfile
     from forecast.variance import VarianceEngine
-    for mape in (0.10, 0.20, 0.287, 0.50, 0.75):
-        model = {"name": "t", "score": {"mape": mape}, "months": {"2026-10": 30000.0}}
+    # The range claims 8 times in 10, so it is drawn at the miss 8 in 10 of
+    # the source's past ones stayed within (p80), not at the average miss,
+    # which held only about 6 times in 10: September 2026 came in above the
+    # range on every day from the 1st to the 22nd. Both sides match even when
+    # the daily p10s bottom out at zero, because the month is built from the
+    # unclipped daily width.
+    for p80 in (0.10, 0.20, 0.287, 0.50, 0.75):
+        model = {"name": "t", "score": {"mape": p80 * 0.6, "p80": p80}, "months": {"2026-10": 30000.0}}
         fd = daily_frame(model, pd.Timestamp("2026-09-30"), DayProfile.uniform())
         lo, mid, hi = VarianceEngine._window_band(fd)
-        drawn = (hi - mid) / mid
-        ok(abs(drawn - mape) < 0.005,
-           "a %.1f%% model is drawn at %.1f%%" % (mape * 100, drawn * 100))
-        # No day is forecast to take negative money, so on a very wide band the
-        # low side stops at zero and is narrower than the high side. That is
-        # the floor doing its job, not the round trip failing.
-        clipped = float(fd["p10"].min()) <= 0.0
-        low = (mid - lo) / mid
-        if clipped:
-            ok(low < mape + 0.005 and lo >= 0.0,
-               "a clipped low side stays inside the measured error and above zero")
-        else:
-            ok(abs(low - mape) < 0.005, "and the low side matches too")
+        ok(abs((hi - mid) / mid - p80) < 0.005, "a p80 of %.1f%% is drawn at %.1f%%" % (p80 * 100, (hi - mid) / mid * 100))
+        ok(abs((mid - lo) / mid - p80) < 0.005, "and the low side matches, clipped days or not")
         ok(float(fd["p10"].min()) >= 0.0, "no day is forecast to take negative money")
+    # A run scored before p80 existed still draws at its typical error.
+    fd = daily_frame({"name": "t", "score": {"mape": 0.287}, "months": {"2026-10": 30000.0}},
+                     pd.Timestamp("2026-09-30"), DayProfile.uniform())
+    lo, mid, hi = VarianceEngine._window_band(fd)
+    ok(abs((hi - mid) / mid - 0.287) < 0.005, "with no p80 the typical error is the width")
     # One constant, or the round trip silently stops closing.
     import inspect, forecast.variance as _v
     ok("BAND_PERSISTENCE_DAYS" in inspect.getsource(_v),
@@ -503,6 +520,114 @@ def t_every_source_blurb_stands_as_its_own_sentence():
         ok(not b.startswith("The same"), "and no pointer to a neighbour: %r" % b[:40])
     src = inspect.getsource(fs)
     ok('"about": "It weights every source' in src, "the track-record source too")
+
+
+@test
+def t_a_shops_opening_month_is_not_fed_as_a_whole_one():
+    """Projected Image opened about 15 April 2024 and that half April went to
+    the models as a complete month; on its own it decided which source led.
+    A pull that starts before the first month with orders drops that month;
+    a pull that starts on the 1st of a trading month keeps it, whole."""
+    from forecast.ingest import monthly_cash
+    orders = [{"created_at": "2024-04-15T10:00:00Z", "order_total": "500"},
+              {"created_at": "2024-05-02T10:00:00Z", "order_total": "3000"},
+              {"created_at": "2024-06-20T10:00:00Z", "order_total": "2500"},
+              {"created_at": "2024-06-21T10:00:00Z", "order_total": "100"}]
+    opened = monthly_cash(orders, date(2024, 7, 3), since=date(2024, 3, 1))
+    ok([str(p) for p in opened.index] == ["2024-05", "2024-06"], "the opening month is dropped: %s" % list(opened.index))
+    # The history starting in the opening month itself: nothing before it, so
+    # it is still the opening half month, and still dropped.
+    same = monthly_cash(orders, date(2024, 7, 3), since=date(2024, 4, 1))
+    ok([str(p) for p in same.index] == ["2024-05", "2024-06"],
+       "a history that starts in the opening month still leaves it out: %s" % list(same.index))
+    # Trade in the month before (the extra month the job pulls): the shop was
+    # already open, so the first month wanted is whole, and the extra one is
+    # not returned.
+    traded = [{"created_at": "2024-03-20T10:00:00Z", "order_total": "50"}] + orders
+    whole = monthly_cash(traded, date(2024, 7, 3), since=date(2024, 4, 1))
+    ok([str(p) for p in whole.index] == ["2024-04", "2024-05", "2024-06"],
+       "with trade before it, the first month is whole, and the month before is not fed: %s" % list(whole.index))
+    big = monthly_cash(orders, date(2024, 7, 3), since=date(2024, 3, 1), min_total=2000)
+    ok(list(big.index) == list(opened.index) and float(big["2024-05"]) == 3000.0 and float(big["2024-06"]) == 2500.0,
+       "big orders come on exactly the same months, the small order left out: %s" % big.to_dict())
+
+
+@test
+def t_big_orders_are_counted_apart():
+    """'Last year, adjusted' scales last year's whole month, one-off big orders
+    included. Orders of 2,000 or more caused 78% of its error on the months it
+    could not see in 2026: nine big orders in January 2025 made it forecast
+    January 2026 at nearly double. Counted apart, the regular orders follow
+    last year and the big ones are their average month over the last year."""
+    from forecast.simple import (BIG_ORDERS_ABOUT, BIG_ORDERS_NAME, big_orders_apart,
+                                 last_year_times_run_rate, sanity_forecasts)
+    idx = pd.period_range("2023-10", "2026-08", freq="M")
+    y = pd.Series(20000.0, index=idx)
+    big = pd.Series(0.0, index=idx)
+    big[pd.Period("2025-09", freq="M")] = 30000.0         # one huge order last September
+    y = y + big
+    plain, _ = last_year_times_run_rate(y, 1)
+    split, note = big_orders_apart(y, 1, big)
+    sep = pd.Period("2026-09", freq="M")
+    ok(plain[sep] > 40000, "scaling last year's whole month repeats the one-off: %.0f" % plain[sep])
+    ok(abs(split[sep] - (20000.0 + 30000.0 / 12)) < 1.0,
+       "counted apart: last year's regular month plus big orders' average month: %.0f" % split[sep])
+    ok("big orders" in note, note)
+    # A backtest fold cut before the big order cannot see it.
+    early = y[y.index <= pd.Period("2025-06", freq="M")]
+    f, _ = big_orders_apart(early, 3, big)
+    ok(all(abs(v - 20000.0) < 1.0 for v in f.values), "a fold cut before the big order knows nothing of it: %s" % list(f.values))
+    with_big = sanity_forecasts(y, horizon=2, big=big)
+    without = sanity_forecasts(y, horizon=2)
+    ok(any(m["name"] == BIG_ORDERS_NAME and m.get("months") for m in with_big["models"]),
+       "given the big orders, it is a source like the others, scored and ranked")
+    ok(all(m["name"] != BIG_ORDERS_NAME for m in without["models"]), "and absent without them")
+    ok(BIG_ORDERS_ABOUT.startswith("It ") and BIG_ORDERS_ABOUT.count(". ") >= 1, "its blurb reads like the others")
+
+
+@test
+def t_the_range_is_the_miss_8_in_10_stayed_within():
+    from forecast.simple import _errors_to_score, band_width
+    # Ten past forecasts and what came in, September 2026's leader among them.
+    pred = np.array([24677.0, 41933.0, 30000.0, 52000.0, 18000.0, 61000.0, 27000.0, 35000.0, 12000.0, 44000.0])
+    act = np.array([38741.0, 40000.0, 33000.0, 47000.0, 16000.0, 70000.0, 30000.0, 22000.0, 15444.0, 47000.0])
+    errs = list((pred - act) / act)
+    spread = list(np.abs(act - pred) / pred)
+    sc = _errors_to_score(errs, spread)
+    ok(abs(sc["p80"] - float(np.quantile(spread, 0.8))) < 1e-9,
+       "p80 is measured against the forecast the range is drawn around: %s" % sc["p80"])
+    inside = np.abs(act - pred) <= sc["p80"] * pred
+    ok(inside.sum() >= 8, "so forecast x (1 +/- p80) holds 8 in 10 of what came in: %d" % inside.sum())
+    # Measured against the actual instead, the same rule held fewer, and missed
+    # on the side September did: a forecast too low.
+    wrong = float(np.quantile(np.abs(np.array(errs)), 0.8))
+    ok((np.abs(act - pred) <= wrong * pred).sum() < 8, "the old measure did not hold 8 in 10 here")
+    ok(sc["p80"] > sc["mape"], "and wider than the average miss")
+    ok(band_width({"score": sc}) == sc["p80"], "the range uses it")
+    ok(band_width({"score": {"mape": 0.287}}) == 0.287, "a run without it falls back to the typical error")
+    ok(band_width({"score": {"p80": 2.0}}) == 0.90 and band_width({"score": {"p80": 0.01}}) == 0.10, "held between 10% and 90%")
+    ok(_errors_to_score([])["p80"] is None, "no errors, no width")
+
+
+@test
+def t_the_run_tells_the_record_which_source_is_in_use():
+    """Reactor keeps, for every month, what the forecast in use said and its
+    likely range, so a closed month can be shown as what directors were told,
+    not as whichever source turned out closest."""
+    from forecast.nightly import _in_use
+    view = pd.DataFrame({"month": [pd.Timestamp("2026-10-01"), pd.Timestamp("2026-11-01"), pd.Timestamp("2026-12-01")],
+                         "projected_p50": [52000.0, 45044.0, float("nan")]})
+    got = _in_use({"name": "Big orders counted apart",
+                   "months": {"2026-10": 50568.0, "2026-11": 45044.0, "2026-12": float("nan"), "2027-01": None}},
+                  view, 0.284)
+    ok(got["source"] == "Big orders counted apart", got)
+    oct_ = got["months"]["2026-10"]
+    ok(oct_["value"] == 50568.0 and abs(oct_["p10"] - 50568 * 0.716) < 0.01 and abs(oct_["p90"] - 50568 * 1.284) < 0.01,
+       "its figure and its likely range: %s" % oct_)
+    ok(oct_["shown"] == 52000.0, "and what the page showed, money already taken included")
+    ok("2026-12" not in got["months"] and "2027-01" not in got["months"], "a month it cannot give is left out, never NaN")
+    import json
+    json.loads(json.dumps(got, allow_nan=False))
 
 
 if __name__ == "__main__":

@@ -303,7 +303,8 @@ class Runner:
     def variance(self) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame], List[dict], str]:
         if self.cf is None:
             return pd.DataFrame(), {}, [], "no cash flow model supplied"
-        eng = VarianceEngine(self.cfg, self.cf)
+        # This path forecasts cfg.target, line-item net sales, not cash in.
+        eng = VarianceEngine(self.cfg, self.cf, money="cash" if self.cfg.target != "net_sales" else "net")
         total = self.forecast_long[self.forecast_long["level"] == "total"][["date", "p10", "p50", "p90"]]
         monthly = eng.monthly_view(self.total_daily, total)
         cash = {name: eng.cash_view(monthly, name) for name in self.cf.scenario_names if name in self.cf.flows}

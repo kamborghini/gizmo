@@ -2,6 +2,47 @@
  "releases": [
   {
    "date": "2026-10-02",
+   "title": "The Forecast, checked against September",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "forecast",
+     "text": "The Forecast now measures itself against your plan in the same money: the plan's Total Sales, cash in with VAT and shipping. It used to compare with the plan's net sales, which made every month look about a fifth better against plan than it was. September showed 12% ahead of Algorithm 2 when it was really 9% short."
+    },
+    {
+     "kind": "fixed",
+     "tab": "forecast",
+     "text": "The cash projection no longer adds VAT and shipping a second time to a forecast that already includes them. That roughly doubled the working capital it showed by next April."
+    },
+    {
+     "kind": "added",
+     "tab": "forecast",
+     "text": "A new source, Big orders counted apart, forecasts orders under £2,000 from last year and adds big orders as their usual month, because a big one-off order rarely comes back in the same month a year later. On this year's months it was about 20% out, against 31% for the source that was leading, and it is ranked like every other source."
+    },
+    {
+     "kind": "changed",
+     "tab": "forecast",
+     "text": "The likely range now reaches as far as 8 in 10 of the forecast's past misses did, so \"8 times in 10\" means what it says. It is wider than before: September came in above the old range on every day from the 1st to the 22nd."
+    },
+    {
+     "kind": "fixed",
+     "tab": "forecast",
+     "text": "The forecast learns only from whole months now. The half month when the shop opened in April 2024 was being counted as a full one, and on its own it decided which source led."
+    },
+    {
+     "kind": "fixed",
+     "tab": "forecast",
+     "text": "On the 1st of a month, the Forecast no longer shows the whole of last month's takings as taken so far in the new one."
+    },
+    {
+     "kind": "added",
+     "tab": "forecast",
+     "text": "The drawer What each source said, and what came in, now gives each closed month in pounds: what came in, what the forecast in use said and when, whether it landed inside its likely range, and which source came closest. The chart's Was predicted line shows what the forecast in use said, not whichever source turned out closest afterwards."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-02",
    "title": "Clearer answers from Xero, Google and Shopify",
    "items": [
     {

@@ -230,8 +230,10 @@ class CashFlowModel:
         return pd.DatetimeIndex(first["month"])
 
     def sales_ratios(self) -> Dict[str, float]:
-        """Shipping and taxes as a share of net sales, from the actual years: the
-        forecast is Net Sales and the cash mechanics run on gross."""
+        """Shipping and taxes as a share of net sales, from the actual years.
+        Used to put net sales into cash in: a plan that names net sales alone,
+        and the per-product model's net forecast. The nightly forecast is
+        already cash in (order totals) and is not grossed up."""
         a = self.actuals
         net = float(a["net_sales"].sum()) or 1.0
         return {"shipping": float(a["shipping"].sum()) / net, "taxes": float(a["taxes"].sum()) / net}

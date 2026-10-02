@@ -18101,6 +18101,16 @@ def _forecast_state() -> dict:
 def _forecast_token_ok(request: Request) -> bool:
     return _secret_ok(str(request.headers.get("x-forecast-token") or ""), FORECAST_INGEST_TOKEN)
 
+# Months scored before the ledger kept the source in use. September 2026 was
+# forecast by "Last year, adjusted for this year" (its run of 9 September was
+# rebuilt from the forecast's own code and matched the notes of that day to
+# the pound: 0.65 x last September, likely range +/-28.7%). Its figure is the
+# source's own first word, already in the ledger; only the label is supplied.
+FORECAST_IN_USE_BACKFILL = {
+    "2026-09": {"source": "Last year, adjusted for this year", "seen_through": "2026-08", "band": 0.287},
+}
+
+
 def _forecast_ledger(state: dict, body: dict) -> dict:
     """The standing record of who was right, kept across runs.
 
@@ -18113,11 +18123,39 @@ def _forecast_ledger(state: dict, body: dict) -> dict:
 
     Predictions are recorded once and never revised. A later run may have
     a better opinion about a month, but overwriting the earlier one would
-    turn a forecast into a hindcast and every source would look excellent."""
+    turn a forecast into a hindcast and every source would look excellent.
+
+    `in_use` is the other half: what the page's numbers came from. For each
+    month it keeps the source in use, its figure and likely range and what the
+    page showed, from the first run that had seen every whole month before it
+    (seen_through = the month before). Every month is then judged on a
+    forecast of the same age, made without any of its own whole-month data,
+    and a director can see what they were actually told. `predicted` keeps
+    each source's first word, whenever that was, for the ranking."""
     import math
     led = state.get("ledger") if isinstance(state.get("ledger"), dict) else {}
     predicted = led.get("predicted") if isinstance(led.get("predicted"), dict) else {}
+    in_use = led.get("in_use") if isinstance(led.get("in_use"), dict) else {}
     results = led.get("results") if isinstance(led.get("results"), list) else []
+
+    def _num(x):
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            return None
+        return round(v, 2) if math.isfinite(v) else None
+
+    seen = str(body.get("seen_through") or "")[:7]
+    iu = body.get("in_use") if isinstance(body.get("in_use"), dict) else {}
+    if re.fullmatch(r"\d{4}-\d{2}", seen) and isinstance(iu.get("months"), dict):
+        y, mo = int(seen[:4]), int(seen[5:7])
+        nxt = f"{y + (mo == 12)}-{(mo % 12) + 1:02d}"
+        rec = iu["months"].get(nxt)
+        if nxt not in in_use and isinstance(rec, dict) and _num(rec.get("value")) is not None:
+            in_use[nxt] = {"source": str(iu.get("source") or "")[:80], "value": _num(rec.get("value")),
+                           "p10": _num(rec.get("p10")), "p90": _num(rec.get("p90")),
+                           "shown": _num(rec.get("shown")), "made": body.get("as_of"),
+                           "seen_through": seen}
 
     preds = body.get("predictions")
     if isinstance(preds, dict):
@@ -18158,10 +18196,29 @@ def _forecast_ledger(state: dict, body: dict) -> dict:
             if not by:
                 continue
             winner = min(by.items(), key=lambda kv: abs(kv[1]["error"]))
-            results.append({"month": month, "actual": round(actual, 2), "by_source": by,
-                            "winner": winner[0], "winner_error": winner[1]["error"],
-                            "closed_at": datetime.now(timezone.utc).isoformat()})
+            entry = {"month": month, "actual": round(actual, 2), "by_source": by,
+                     "winner": winner[0], "winner_error": winner[1]["error"],
+                     "closed_at": datetime.now(timezone.utc).isoformat()}
+            u = in_use.get(month)
+            if isinstance(u, dict) and isinstance(u.get("value"), (int, float)):
+                lo, hi = u.get("p10"), u.get("p90")
+                entry["in_use"] = dict(u, error=round((u["value"] - actual) / actual, 4),
+                                       inside=(bool(lo <= actual <= hi)
+                                               if isinstance(lo, (int, float)) and isinstance(hi, (int, float))
+                                               else None))
+            results.append(entry)
             scored.add(month)
+
+    for r in results:
+        b = FORECAST_IN_USE_BACKFILL.get(r.get("month")) if isinstance(r, dict) else None
+        src = ((r.get("by_source") or {}).get(b["source"]) if b else None) or {}
+        if b and "in_use" not in r and isinstance(src.get("predicted"), (int, float)) and r.get("actual"):
+            v, a = float(src["predicted"]), float(r["actual"])
+            lo, hi = round(max(0.0, v * (1 - b["band"])), 2), round(v * (1 + b["band"]), 2)
+            r["in_use"] = {"source": b["source"], "value": round(v, 2), "p10": lo, "p90": hi,
+                           "shown": None, "made": src.get("made"), "seen_through": b["seen_through"],
+                           "error": round((v - a) / a, 4), "inside": bool(lo <= a <= hi),
+                           "reconstructed": True}
 
     results.sort(key=lambda r: r.get("month") or "")
     results = results[-FORECAST_LEDGER_MONTHS:]
@@ -18169,7 +18226,8 @@ def _forecast_ledger(state: dict, body: dict) -> dict:
     # A month still ahead keeps its predictions; one long closed does not.
     predicted = {m: v for m, v in predicted.items()
                  if m in keep or m >= min(keep, default=m)}
-    return {"predicted": predicted, "results": results}
+    in_use = {m: v for m, v in in_use.items() if m in keep or m >= min(keep, default=m)}
+    return {"predicted": predicted, "in_use": in_use, "results": results}
 
 # ----- Shared inbox: who owns which email ----------------------------
 async def _mail_guard(request: Request):
