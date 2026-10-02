@@ -80,24 +80,51 @@ for _src, _dst in ((os.path.join(os.path.dirname(__file__), "..", "data", "gobo-
 for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
     os.environ.pop(v, None)
 
-# The suite never reaches the network. Twenty tests did, quietly: Gmail syncs
-# posted their dummy refresh token to Google, the Settings status and the
+# The suite never reaches the network. Twenty-five tests did, quietly: Gmail
+# syncs posted their dummy refresh token to Google, the Settings status and the
 # customs quote asked the test store's real Shopify address, and a label test
 # fetched from the courier. Each passed only because the outside world answered
-# the way it happened to that day. Now every name lookup outside this machine
-# is refused before a connection exists, and the test that tried fails, naming
-# the host; a test that needs an outside answer gives itself one. Installed
-# before the app is imported, so even an import-time lookup is caught.
-import socket as _socket
+# the way it happened to that day. Now every name lookup and every connection
+# outside this machine is refused, and the test that tried fails, naming the
+# host; a test that needs an outside answer gives itself one. Installed before
+# the app is imported, so an import-time attempt is refused too. A proxy
+# setting would carry traffic out through a local port, so none is inherited.
+import socket as _socket, ipaddress as _ipaddress, errno
+for _v in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy",
+           "ANTHROPIC_BASE_URL"):
+    os.environ.pop(_v, None)
 NET_REACHED = []
+def _is_local(h):
+    if h in ("localhost", "testserver"):
+        return True
+    try:
+        return _ipaddress.ip_address(h.split("%", 1)[0]).is_loopback
+    except ValueError:
+        return False
 _REAL_GETADDRINFO = _socket.getaddrinfo
 def _no_network(host, *a, **k):
     h = host.decode() if isinstance(host, bytes) else str(host or "")
-    if h in ("localhost", "testserver", "::1") or h.startswith("127."):
+    if _is_local(h):
         return _REAL_GETADDRINFO(host, *a, **k)
     NET_REACHED.append(h)
     raise _socket.gaierror(_socket.EAI_NONAME, "the test suite does not reach the network: " + h)
 _socket.getaddrinfo = _no_network
+# An address given as numbers skips the lookup (asyncio connects to it
+# directly), so the connection itself is checked as well.
+_REAL_CONNECT, _REAL_CONNECT_EX = _socket.socket.connect, _socket.socket.connect_ex
+def _outside(address):
+    return isinstance(address, tuple) and address and not _is_local(str(address[0]))
+def _no_connect(self, address):
+    if _outside(address):
+        NET_REACHED.append(str(address[0]))
+        raise ConnectionRefusedError("the test suite does not reach the network: " + str(address[0]))
+    return _REAL_CONNECT(self, address)
+def _no_connect_ex(self, address):
+    if _outside(address):
+        NET_REACHED.append(str(address[0]))
+        return errno.ECONNREFUSED
+    return _REAL_CONNECT_EX(self, address)
+_socket.socket.connect, _socket.socket.connect_ex = _no_connect, _no_connect_ex
 
 import jwt
 import server, copilot, worldoptions, pipedrive
@@ -2362,11 +2389,12 @@ def t_a_new_field_in_the_customs_blocks_shows_up_here():
     the saved schema. The customs blocks, sent on international bookings only,
     were not walked, and by October 2026 World Options had added four optional
     strings to them (the receiver's EORI number, and three product ids on each
-    goods line) that no test noticed. Every nillable string in them is now sent
-    or named below as not sent, so the next one fails here, not on a booking.
-    Whether the new four should be sent is a question for World Options."""
+    goods line) that no test noticed. Every field in them is now sent or named
+    below as not sent, so the next new field of any kind fails here, not on a
+    booking. Whether the new four should be sent is a question for World Options."""
     NOT_SENT = {
-        "wsAddlShipmentDetail": {"DeliveryType", "TotalCalculatedValue", "ReceiverEORINumber"},
+        "wsAddlShipmentDetail": {"DeliveryType", "TotalCalculatedValue", "ReceiverEORINumber",
+                                 "TradeDocuments"},
         "wsAddlShipmentDetail.GoodsDetail": {"ManufacturerProductID", "MerchantProductID",
                                              "StandardisedProductID"},
     }
@@ -2393,8 +2421,8 @@ def t_a_new_field_in_the_customs_blocks_shows_up_here():
         for tname, pattern in blocks.items():
             body = re.search(pattern, x, re.S)
             ok(body, tname + " is in the envelope")
-            fields = _xsd_nillable_strings(tname)
-            ok(fields, tname + " is in the saved schema")
+            fields = _xsd_sequence(tname)
+            ok(fields and set(_xsd_nillable_strings(tname)) <= set(fields), tname + " is in the saved schema")
             for el in fields:
                 if el not in NOT_SENT[tname]:
                     ok(re.search(r"<ad:%s>" % el, body.group(1)),
@@ -3197,6 +3225,71 @@ def t_the_locks_match_their_pins_and_carry_hashes():
             line = line.split("#")[0].strip()
             if line:
                 ok(re.match(r"^[A-Za-z0-9._-]+==\S+$", line), extra + " pins exactly: " + line)
+
+
+@test
+def t_the_suite_cannot_reach_the_network():
+    """The guard itself: a name, an address given as numbers (which skips the
+    name lookup on the async path) and a name that merely starts like a
+    loopback address are all refused, and loopback still works. The attempts
+    are taken back off the record so the run loop does not charge this test."""
+    import httpx as _hx
+    before = len(NET_REACHED)
+    try:
+        for url in ("https://example.com/", "http://192.0.2.1/", "http://127.0.0.1.nip.io/"):
+            for how in ("sync", "async"):
+                try:
+                    if how == "sync":
+                        _hx.get(url, timeout=2)
+                    else:
+                        run(_hx.AsyncClient(timeout=2).get(url))
+                    ok(False, how + " " + url + " reached the network")
+                except (_hx.ConnectError, OSError):
+                    pass
+        hosts = set(NET_REACHED[before:])
+        ok({"example.com", "192.0.2.1", "127.0.0.1.nip.io"} <= hosts, hosts)
+        ok(_is_local("127.0.0.1") and _is_local("::1") and not _is_local("127.0.0.1.nip.io"))
+        ok(not any(v in os.environ for v in ("HTTPS_PROXY", "https_proxy", "ANTHROPIC_BASE_URL")),
+           "no proxy or alternative service address is inherited")
+    finally:
+        del NET_REACHED[before:]
+
+
+@test
+def t_the_permissions_settings_shows_are_read_from_shopify():
+    """The suite gives the routes a refusing stand-in for this reader, so the
+    real one is held here: it asks Shopify what the installation may do, names
+    each write the app needs that is missing, keeps a good answer for a while,
+    and reports a failed read as unknown, never as permissions missing."""
+    seen = []
+    answer = {}
+    async def fake_request(method, path, **kw):
+        seen.append((method, path, kw.get("body", {}).get("query", "")))
+        if isinstance(answer.get("raise"), Exception):
+            raise answer["raise"]
+        return answer["data"]
+    saved = (server._request, dict(server._granted_scopes))
+    server._request = fake_request
+    try:
+        server._granted_scopes.update({"at": 0.0, "scopes": None, "error": ""})
+        answer["data"] = {"data": {"currentAppInstallation": {"accessScopes": [
+            {"handle": "read_orders"}, {"handle": "write_orders"}, {"handle": "write_fulfillments"}]}}}
+        got = run(server.shopify_granted_scopes())
+        ok("currentAppInstallation" in seen[0][2] and seen[0][:2] == ("POST", "graphql.json"), seen)
+        eq(got["error"], "")
+        eq(set(got["missing"]), {"write_merchant_managed_fulfillment_orders", "write_payment_terms"},
+           "each missing write is named")
+        ok(all(got["missing"].values()), "with what it is for")
+        run(server.shopify_granted_scopes())
+        eq(len(seen), 1, "a good answer is kept rather than asked again")
+        server._granted_scopes.update({"at": 0.0, "scopes": None, "error": ""})
+        answer["raise"] = RuntimeError("Shopify refused the token")
+        got = run(server.shopify_granted_scopes())
+        eq((got["scopes"], got["missing"]), ([], {}), "a failed read claims nothing is missing")
+        ok("refused" in got["error"], got)
+    finally:
+        server._request = saved[0]
+        server._granted_scopes.clear(); server._granted_scopes.update(saved[1])
 
 
 @test
@@ -16826,7 +16919,8 @@ def t_a_google_connection_says_which_permission_was_left_unticked():
     gd.OAUTH_TOKEN_PATH = os.path.join(tempfile.mkdtemp(), "google_oauth.json")
     gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID = "sc-domain:example.com", "123456789"
     answer = {}
-    gd.httpx = _RoutedHttpx(lambda request: _httpx.Response(200, json=answer))
+    gd.httpx = _RoutedHttpx(lambda request: _httpx.Response(
+        answer.get("_status", 200), json={k: v for k, v in answer.items() if k != "_status"}))
     try:
         answer.update(refresh_token="rt-1", access_token="at", scope=gd.SCOPES[0])
         eq(run(gd.exchange_code("c", "https://app.test/cb")),
@@ -16843,11 +16937,27 @@ def t_a_google_connection_says_which_permission_was_left_unticked():
         answer.update(scope="openid")
         eq(run(gd.exchange_code("c", "https://app.test/cb"))["ok"], False)
         ok(not gd.oauth_connected(), "a connection that could read nothing is not kept")
+        copilot._oauth_states["st-neither"] = time.time() + 60
+        page = client.get("/oauth/google/callback?state=st-neither&code=c").text
+        ok("Nothing was linked" in page and "both left unticked" in page, page[-500:])
         # The connect page names the side left unticked.
         answer.update(scope=gd.SCOPES[1])
         copilot._oauth_states["st-ga4-only"] = time.time() + 60
         page = client.get("/oauth/google/callback?state=st-ga4-only&code=c").text
         ok("without Search Console" in page and "left unticked" in page, page[-500:])
+        # And the chat says the same, rather than that Google is not connected.
+        said = json.loads(copilot._google_not_ready("gsc"))["error"]
+        ok("without permission to read Search Console" in said, said)
+        # A failure that is not about the boxes (a used code, a wrong secret)
+        # says the connection failed, not that both were unticked.
+        os.remove(gd.OAUTH_TOKEN_PATH)
+        answer.clear(); answer.update(_status=400, error="invalid_grant")
+        eq(run(gd.exchange_code("c", "https://app.test/cb")), {"ok": False, "granted": {}})
+        copilot._oauth_states["st-bad-code"] = time.time() + 60
+        page = client.get("/oauth/google/callback?state=st-bad-code&code=c").text
+        ok("Connection failed" in page and "unticked" not in page, page[-500:])
+        eq(json.loads(copilot._google_not_ready("gsc"))["error"],
+           "Google isn't connected yet. Connect it in Settings.", "with no connection, it says so")
     finally:
         gd.OAUTH_TOKEN_PATH, gd.httpx, gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID = real
     page = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
@@ -25670,7 +25780,8 @@ def t_each_request_takes_the_effort_its_model_accepts():
                                                       "enabled": {"supported": True}}}})
     table = {"claude-sonnet-5-5": caps(("low", "medium", "high", "xhigh", "max")),
              "claude-opus-4-6": caps(("low", "medium", "high", "max")),
-             "claude-haiku-4-5": caps((), adaptive=False)}
+             "claude-haiku-4-5": caps((), adaptive=False),
+             "claude-opus-5-5": _types.SimpleNamespace(capabilities=None)}
     asked = []
     def send(model, **kw):
         fake = _OpusFake([_OpusResp([_OpusBlock("text", text="ok")])])
@@ -25700,6 +25811,12 @@ def t_each_request_takes_the_effort_its_model_accepts():
         eq(asked.count("claude-opus-4-6"), 1, "each model is asked once")
         eq(send("claude-sonnet-9", output_config={"effort": "max"})["output_config"], {"effort": "high"},
            "with the Models API unreachable, the cautious rule as before")
+        # An answer with no capabilities (the field may be null) is unknown:
+        # the cautious rule, not "takes nothing", and asked again later.
+        o = send("claude-opus-5-5", output_config={"effort": "max"}, thinking={"type": "adaptive"})
+        eq((o.get("output_config"), o.get("thinking")), ({"effort": "max"}, {"type": "adaptive"}),
+           "a null answer leaves effort and thinking as asked for")
+        eq(copilot._MODEL_CAPS["claude-opus-5-5"][1], None, "and is kept only as unknown, to be asked again")
         mine = {"effort": "xhigh"}
         send("claude-opus-4-6", output_config=mine)
         eq(mine, {"effort": "xhigh"}, "and the request the caller built is not altered under it")

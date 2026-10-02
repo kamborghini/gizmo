@@ -180,22 +180,25 @@ def consent_url(redirect_uri: str, state: str) -> str:
 
 async def exchange_code(code: str, redirect_uri: str) -> dict:
     """Exchange an authorization code for tokens and persist the refresh token
-    with what it was granted. {"ok": bool, "granted": {"gsc": bool, "ga4": bool}};
-    a connection granted neither is not saved, since it could read nothing."""
+    with what it was granted. {"ok": bool, "granted": {"gsc": bool, "ga4": bool}},
+    with granted empty when the exchange itself failed; a connection granted
+    neither is not saved, since it could read nothing."""
     async with httpx.AsyncClient(timeout=20.0) as c:
         r = await c.post(TOKEN_ENDPOINT, data={
             "client_id": OAUTH_CLIENT_ID, "client_secret": OAUTH_CLIENT_SECRET,
             "code": code, "grant_type": "authorization_code", "redirect_uri": redirect_uri,
         })
-    none = {k: False for k in GRANTS}
+    # A failure that is not about the boxes (a used or expired code, a wrong
+    # client secret) grants nothing that can be named: an empty map, so the
+    # page says the connection failed rather than that both were unticked.
     if r.status_code != 200:
         logger.warning(f"OAuth code exchange failed: {r.status_code} {r.text[:200]}")
-        return {"ok": False, "granted": none}
+        return {"ok": False, "granted": {}}
     data = r.json()
     rt = data.get("refresh_token")
     if not rt:
         logger.warning("OAuth exchange returned no refresh_token (already consented? use prompt=consent).")
-        return {"ok": False, "granted": none}
+        return {"ok": False, "granted": {}}
     # Google always answers with `scope`; without it, record nothing rather
     # than guess, and the connection behaves as it did before this was kept.
     scope = data.get("scope")
