@@ -6,9 +6,9 @@
 # These were once unbounded (">="), so any redeploy could pull a new major
 # release with no change on our side. To upgrade: raise a pin here, run
 # `make lock`, run `make check`, and check /healthz after the deploy.
-# The newest 1.x: mcp supports only its newest 1.x and 2.x releases. The [cli]
-# extra installed a command-line tool nothing here runs.
-mcp==1.30.0
+# mcp supports only its newest 1.x and 2.x releases. 2.x renamed FastMCP to
+# MCPServer and moved the transport settings onto the app (server.MCP_HTTP).
+mcp==2.2.0
 httpx==0.28.1
 pydantic==2.13.5
 uvicorn==0.54.0
@@ -39,12 +39,10 @@ pillow==12.3.0
 #   cryptography      statically linked OpenSSL fix, cert-chain blowup, wildcard
 #                     name-constraint bypass (GHSA-537c-gmf6-5ccf and others)
 #   pyasn1            quadratic OID decoding and unbounded tag ids (PYSEC-2026-3455/56/57)
-#   pydantic-settings symlink escape from secrets_dir (GHSA-4xgf-cpjx-pc3j)
 starlette==1.7.0
 python-multipart==0.0.32
 cryptography==50.0.2
 pyasn1==0.6.4
-pydantic-settings==2.15.0
 boto3==1.43.107
 
 # The serial sticker's two codes, generated SERVER-side and placed as data:

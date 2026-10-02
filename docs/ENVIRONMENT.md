@@ -153,7 +153,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `MASTER_RESET` | `None` | copilot |  |
 | `MASTER_RESET_MINUTES` | `"30"` | copilot |  |
 | `PRIVACY_LOG_PATH` | `"/data/privacy_log.json"` | copilot |  |
-| `RAILWAY_GIT_COMMIT_SHA` | `None` | copilot |  |
+| `RAILWAY_GIT_COMMIT_SHA` | `None` | copilot, server |  |
 | `SESSIONS_PER_USER` | `"12"` | copilot |  |
 | `SESSION_HOURS` | `"24"` | copilot |  |
 | `SESSION_MAX_DAYS` | `"30"` | copilot |  |

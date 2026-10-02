@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Shopify MCP Server: READ-ONLY Admin API tools via FastMCP, plus Reactor.
+Shopify MCP Server: READ-ONLY Admin API tools via the MCP server SDK, plus Reactor.
 The /mcp tools read products, orders, customers, collections, inventory,
 fulfilments, payouts and webhooks through the Shopify Admin REST API. They
 do not write: the create, update, delete, close, cancel, set-inventory and
@@ -29,7 +29,7 @@ from typing import Optional, List, Dict, Any
 from enum import Enum
 import httpx
 from pydantic import BaseModel, Field, ConfigDict, field_validator
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from starlette.responses import JSONResponse
 from starlette.datastructures import MutableHeaders
 
@@ -78,8 +78,16 @@ MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "streamable-http")
 # its default (before, sessions lived for ever); it is stated here so it is a
 # choice, not something a library update changes underneath.
 MCP_SESSION_IDLE_SECS = 1800
-mcp = FastMCP("shopify_mcp", host="0.0.0.0", port=PORT, json_response=True,
-              session_idle_timeout=MCP_SESSION_IDLE_SECS)
+# How the /mcp endpoint is served. host="0.0.0.0" matters: mcp 2.x otherwise
+# builds the app for 127.0.0.1 and switches on DNS-rebinding protection, which
+# answers 421 to any Host but localhost, so the Claude.ai connector at the
+# public name would be refused. That protection is for servers on a person's
+# own machine; this one is public, and every /mcp call needs the bearer token
+# (MCPAuthMiddleware). t_the_connector_endpoint_answers_at_its_public_name
+# holds it.
+MCP_HTTP = {"json_response": True, "session_idle_timeout": MCP_SESSION_IDLE_SECS, "host": "0.0.0.0"}
+# The version the connector is told is the deployed commit, as /healthz says.
+mcp = MCPServer("shopify_mcp", version=(os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12] or "dev")
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +364,7 @@ def build_app():
         copilot.rescue_misfiled_junk()
     except Exception:
         logger.exception("files: junk rescue failed; continuing")
-    app = mcp.streamable_http_app()
+    app = mcp.streamable_http_app(**MCP_HTTP)
     app.add_middleware(MCPAuthMiddleware)
     # Added last, so it wraps outermost and sees every response, including the
     # static assets and the print pages.
@@ -2170,4 +2178,4 @@ if __name__ == "__main__":
         # already log every meaningful request without secrets.
         uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info", access_log=False)
     else:
-        mcp.run(transport=MCP_TRANSPORT)
+        mcp.run(transport=MCP_TRANSPORT, host="0.0.0.0", port=PORT)

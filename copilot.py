@@ -17866,7 +17866,7 @@ def _files_tick() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Route registration (mounted onto the existing FastMCP app)
+# Route registration (mounted onto the existing MCP server app)
 # ---------------------------------------------------------------------------
 
 # ---- values add_routes used to build every time it ran ---------------------

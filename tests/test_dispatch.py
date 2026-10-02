@@ -3021,8 +3021,10 @@ def t_connector_sessions_expire_by_our_choice():
     """mcp 1.30 started closing idle sessions after 30 minutes by default. It
     is stated in server.py so a library update cannot change it unseen."""
     import server as srv
-    eq(srv.mcp.settings.session_idle_timeout, srv.MCP_SESSION_IDLE_SECS, "the server's own setting is in force")
     eq(srv.MCP_SESSION_IDLE_SECS, 1800, "thirty minutes")
+    eq(srv.MCP_HTTP["session_idle_timeout"], srv.MCP_SESSION_IDLE_SECS, "and it is what the endpoint is built with")
+    import inspect as _ins
+    ok("mcp.streamable_http_app(**MCP_HTTP)" in _ins.getsource(srv.build_app), "by the app exactly as served")
 
 
 def _lock_packages(text: str) -> dict:
@@ -7068,7 +7070,7 @@ def t_files_concurrent_uploads_do_not_clobber_the_store():
         import httpx
         async def race():
             copilot._rl_hits.clear(); copilot._rl_global.clear()
-            transport = httpx.ASGITransport(app=server.mcp.streamable_http_app())
+            transport = httpx.ASGITransport(app=server.mcp.streamable_http_app(**server.MCP_HTTP))
             headers = {"Authorization": "Bearer " + tok(), "X-App-Session": ensure_auth()}
             async with httpx.AsyncClient(transport=transport, base_url="http://testserver",
                                          headers=headers) as ac:
@@ -13817,6 +13819,40 @@ def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
     copilot._mail_apply_thread(store, {"id": "t1", "messages": [msg]}, "shop@example.com")
     t = (store.get("threads") or {}).get("t1") or {}
     ok("jo@x.com" not in json.dumps(t), "an overlong header naming an erased address is erased whole")
+
+@test
+def t_the_connector_endpoint_answers_at_its_public_name():
+    """The Claude.ai connector reaches /mcp at the app's public host name. mcp
+    2.x switches on DNS-rebinding protection by default and answers 421
+    "Invalid Host header" to any host but localhost, and the shared test
+    client never started the session manager, so nothing here would have
+    seen it. This starts the app exactly as served and drives initialize and
+    tools/list with the public host name, and a bearer token."""
+    import server
+    host = "gizmo-production-c8c1.up.railway.app"
+    saved = server.MCP_BEARER_TOKEN
+    server.MCP_BEARER_TOKEN = "t" * 40
+    hdr = {"Authorization": "Bearer " + "t" * 40, "Content-Type": "application/json",
+           "Accept": "application/json, text/event-stream"}
+    try:
+        with TestClient(server.build_app(), base_url="https://" + host) as c:
+            r = c.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                     "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                                                "clientInfo": {"name": "suite", "version": "1"}}}, headers=hdr)
+            eq(r.status_code, 200, "initialize at the public name: " + r.text[:300])
+            sid = r.headers.get("mcp-session-id") or ""
+            ok(sid, "a session is given")
+            h2 = dict(hdr, **{"mcp-session-id": sid})
+            c.post("/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"}, headers=h2)
+            r = c.post("/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, headers=h2)
+            eq(r.status_code, 200, "tools/list: " + r.text[:300])
+            tools = (r.json().get("result") or {}).get("tools") or []
+            ok(len(tools) >= 20, "the read tools are listed: %d" % len(tools))
+            ok(all((t.get("annotations") or {}).get("readOnlyHint") for t in tools),
+               "each one marked read-only for the client")
+    finally:
+        server.MCP_BEARER_TOKEN = saved
+
 
 @test
 def t_the_desktop_ai_endpoint_reads_and_every_call_is_recorded():
