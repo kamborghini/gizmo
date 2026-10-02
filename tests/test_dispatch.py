@@ -13457,7 +13457,8 @@ def t_the_forecast_is_many_sources_ranked_by_what_each_was_worth():
        "what October has ever been. Kept behind a switch, not deleted.")
     ok("monthly_cash(orders, as_of, since)" in nightly and "daily_cash(orders, as_of)" in nightly,
        "both the history and the month-to-date are the order total, so they are the same money")
-    ok(".replace(day=1)" in nightly and "min_total=BIG_ORDER" in nightly and "big=big" in nightly,
+    ok(".replace(day=1)" in nightly and "run_bulk_orders(store, pull_from)" in nightly
+       and "min_total=BIG_ORDER" in nightly and "big=big" in nightly,
        "the pull starts on the 1st so every month is whole, and the big orders reach their source")
 
     mc = ingest.split("def monthly_cash(", 1)[1].split("\ndef ", 1)[0]
@@ -13736,7 +13737,7 @@ def t_the_nightly_service_holds_no_shopify_secret():
     body = nightly.split("try:", 1)[1]
     ok("ShopifyStore(shop, stoken) if stoken else ReactorStore(base, token)" in body,
        "the store is chosen inside the try, so a refused read reaches the tab as a failed run")
-    ok("run_bulk_orders(store, since)" in nightly and "fetch_products(store)" in nightly,
+    ok("run_bulk_orders(store, pull_from)" in nightly and "fetch_products(store)" in nightly,
        "both Shopify reads go through the store chosen")
     ok('"/hooks/forecast/shopify"' in ingest and '"/hooks/forecast/shopify"' in
        open(os.path.join(root, "copilot.py"), encoding="utf-8").read(),

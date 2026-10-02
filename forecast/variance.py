@@ -25,9 +25,17 @@ from .config import Config
 
 
 class VarianceEngine:
-    def __init__(self, cfg: Config, cashflow: CashFlowModel):
+    def __init__(self, cfg: Config, cashflow: CashFlowModel, money: str = "cash"):
+        """`money` says what the forecast it is handed is in: "cash", order
+        totals with VAT and shipping (the nightly job), or "net", line-item net
+        sales (the per-product model, off by default). The plan and the cash
+        path are read in the same money, so neither path compares unlike with
+        unlike."""
         self.cfg = cfg
         self.cf = cashflow
+        if money not in ("cash", "net"):
+            raise ValueError(f"money must be 'cash' or 'net', not {money!r}")
+        self.money = money
 
     def monthly_view(self, actual_daily: pd.Series, forecast_daily: pd.DataFrame) -> pd.DataFrame:
         """actual_daily: date -> cash in (order totals, history to as_of).
@@ -75,7 +83,9 @@ class VarianceEngine:
         r = self.cf.sales_ratios()
         for name, sc in self.cf.scenarios.items():
             sc = sc.set_index("month")
-            if "total_sales" in sc.columns and float(sc["total_sales"].abs().sum()) > 0:
+            if self.money == "net":
+                t = sc["net_sales"]
+            elif "total_sales" in sc.columns and float(sc["total_sales"].abs().sum()) > 0:
                 t = sc["total_sales"]
             else:
                 t = sc["net_sales"] * (1 + r["shipping"] + r["taxes"])
@@ -163,6 +173,11 @@ class VarianceEngine:
         which drew Algorithm 1's working capital at April 2027 at about
         153k where like for like it is about 76k."""
         gross = monthly.set_index("month")["projected_p50"]
+        if self.money == "net":
+            # The per-product model forecasts net sales: put it into cash in
+            # by the actual years' own shipping and tax ratios.
+            r = self.cf.sales_ratios()
+            gross = gross * (1 + r["shipping"] + r["taxes"])
         path = self.cf.project_cash(scenario, gross)
         path["below_buffer"] = path["working_capital"] < self.cfg.cash_buffer
         path["negative"] = path["working_capital"] < 0
