@@ -14571,8 +14571,7 @@ Projected Image UK"></textarea>
            method, no algorithm and no statistics. */
         function fcOverviewCard(latest, sc) {
             const rows = latest.monthly || [];
-            const cur = rows.find(r => (r.method || '').indexOf('actual_to_date') === 0)
-                || rows.find(r => r.method === 'forecast') || rows[0];
+            const cur = fcCurrentRow(latest);
             const box = el('div');
             box.append(el('div', 'section-title', 'Where things stand'));
             if (!cur) { const c = el('div', 'card'); c.append(el('div', 'empty', 'No run to summarise yet.')); box.append(c); return box; }
@@ -14642,11 +14641,27 @@ Projected Image UK"></textarea>
            so either answers it; the daily sum is preferred because it is what
            the chart draws. */
         function fcBankedThisMonth(latest) {
-            const asOf = (latest.as_of || '').slice(0, 7);
-            const days = ((latest.daily || {}).history || []).filter(d => (d.date || '').slice(0, 7) === asOf);
+            const cm = fcCurrentMonth(latest);
+            const days = ((latest.daily || {}).history || []).filter(d => (d.date || '').slice(0, 7) === cm);
             if (days.length) return days.reduce((a, d) => a + (Number(d.actual) || 0), 0);
-            const m = (latest.monthly || []).find(r => (r.month || '') === asOf);
+            const m = (latest.monthly || []).find(r => (r.month || '') === cm);
             return m && m.actual_to_date != null ? m.actual_to_date : 0;
+        }
+        /* The month the reader is in: the day after the run's as_of. The 03:00
+           run on the 1st is as of the last day of the month before, and the
+           page used to take that month for this one: on 1 Oct it read "38,741
+           taken so far in Oct 2026, 30 of 30 days in", September's whole
+           takings, and showed October's forecast less that as still to come. */
+        function fcCurrentMonth(latest) {
+            const d = new Date((latest.as_of || fcISO(new Date())) + 'T00:00:00');
+            d.setDate(d.getDate() + 1);
+            return fcISO(d).slice(0, 7);
+        }
+        function fcCurrentRow(latest) {
+            const rows = latest.monthly || [];
+            return rows.find(r => r.month === fcCurrentMonth(latest))
+                || rows.find(r => (r.method || '').indexOf('actual_to_date') === 0)
+                || rows.find(r => r.method === 'forecast') || rows[0];
         }
 
         /* ---------- 5. WHY: what is driving the number ----------
@@ -14657,9 +14672,7 @@ Projected Image UK"></textarea>
            drives the figure, is how much is already banked, how much is still
            expected, and what the leading source keyed that expectation off. */
         function fcDriversCard(latest, sc) {
-            const rows = latest.monthly || [];
-            const cur = rows.find(r => (r.method || '').indexOf('actual_to_date') === 0)
-                || rows.find(r => r.method === 'forecast') || rows[0];
+            const cur = fcCurrentRow(latest);
             if (!cur || cur.p50 == null) return null;
             const box = el('div');
             box.append(el('div', 'section-title', 'Why the forecast is what it is'));
@@ -14714,12 +14727,13 @@ Projected Image UK"></textarea>
             return box;
         }
         function fcDaysSoFar(latest) {
-            const d = new Date((latest.as_of || fcISO(new Date())) + 'T00:00:00');
-            return d.getDate();
+            const asOf = latest.as_of || fcISO(new Date());
+            return asOf.slice(0, 7) === fcCurrentMonth(latest)
+                ? new Date(asOf + 'T00:00:00').getDate() : 0;
         }
         function fcDaysInMonth(latest) {
-            const d = new Date((latest.as_of || fcISO(new Date())) + 'T00:00:00');
-            return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+            const cm = fcCurrentMonth(latest);
+            return new Date(+cm.slice(0, 4), +cm.slice(5, 7), 0).getDate();
         }
 
         function fcChartCard(latest, ledger, sanity) {
@@ -14812,12 +14826,16 @@ Projected Image UK"></textarea>
                     hi: rows.map((r, i) => joins(i, r.p90)) }
                 : null;
             if (grain === 'month') {
-                /* What was said BEFORE each of those months began, so the gap
-                   between expectation and outcome is on the same picture. */
+                /* What the forecast in use said for each closed month, from
+                   the first run after the month before had closed, so the
+                   gap between what directors were told and what came in is
+                   on one picture. It used to plot whichever source turned out
+                   closest, chosen after the month closed, which made a 36%
+                   miss look like a hit. A month closed before the record kept
+                   the source in use draws no point rather than a guess. */
                 const said = {};
                 ((ledger || {}).results || []).forEach(r => {
-                    const w = (r.by_source || {})[r.winner];
-                    if (w) said[r.month] = w.predicted;
+                    if (r.in_use && r.in_use.value != null) said[r.month] = r.in_use.value;
                 });
                 if (Object.keys(said).length) {
                     series.push({ name: 'Was predicted', color: CH[3] || CH[2],
@@ -15077,8 +15095,36 @@ Projected Image UK"></textarea>
                 });
             });
             const names = Object.keys(tally).sort((a, b) => (tally[a].abs / tally[a].n) - (tally[b].abs / tally[b].n));
+            /* Each closed month first, newest at the top, in pounds: what came
+               in, what the forecast in use said and when, whether it landed
+               in its likely range, and which source came closest. The table
+               of percentages alone said none of that: not what directors were
+               told, not when, and not in money. */
+            res.slice().reverse().forEach(r => {
+                const p = el('p', 'card-sub');
+                p.append(el('b', null, fcMonth(r.month) + ': ' + fcMoney(r.actual) + ' came in.'));
+                const u = r.in_use;
+                let line;
+                if (u && u.value != null) {
+                    line = ' The forecast in use, ' + u.source + ', said ' + fcMoney(u.value)
+                        + (u.made ? ' on ' + fcDay(u.made) : '')
+                        + (u.seen_through ? ', from takings to the end of ' + fcMonth(u.seen_through) : '')
+                        + ': ' + fcPct(u.error) + ' out'
+                        + (u.inside == null ? '.'
+                            : (u.inside ? ', inside' : ', outside') + ' its likely range of '
+                              + fcMoney(u.p10) + ' to ' + fcMoney(u.p90) + '.')
+                        + (u.reconstructed ? ' Worked out afterwards from the forecast\u2019s own code: the '
+                            + 'record keeps the source in use from October 2026.' : '');
+                } else {
+                    line = ' Which source the page was using is not on record for this month.';
+                }
+                const w = (r.by_source || {})[r.winner];
+                if (w) line += ' Closest: ' + r.winner + ', ' + fcMoney(w.predicted) + ' (' + fcPct(w.error) + ').';
+                p.append(document.createTextNode(line));
+                card.append(p);
+            });
             card.append(el('p', 'card-sub',
-                'Each month, what every source predicted before the month began, against what came in. '
+                'Below, how far out each source\u2019s first figure for the month was. '
                 + (sn.ranked_on === 'record'
                     ? 'With ' + (sn.closed_months || res.length) + ' closed months on record, this is what the '
                       + 'forecast is now ranked on rather than the backtest.'
@@ -15347,7 +15393,7 @@ Projected Image UK"></textarea>
             detail.append(fcDrawer('Every source, side by side' + (nsrc ? ' (' + nsrc + ')' : ''), function () {
                 return fcUntitled(fcSanityCard(latest, sc));
             }));
-            detail.append(fcDrawer('What each source said before the month began', function () {
+            detail.append(fcDrawer('What each source said, and what came in', function () {
                 return fcUntitled(fcRecordCard(c));
             }));
             numbers.append(detail);

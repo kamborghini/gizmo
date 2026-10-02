@@ -464,15 +464,9 @@ def _assemble_bulk(lines: List[dict]) -> List[dict]:
 
 
 
-def monthly_cash(orders: List[dict], as_of: date) -> "pd.Series":
-    """Cash in by calendar month, COMPLETE months only.
-
-    The month in progress is dropped on purpose. Half a September looks like a
-    collapse to any model that is handed it, and every one of them would then
-    forecast the rest of the year down from that. The panel's own target is
-    line-item NET sales; this is the order total, because it is what the plan
-    and Shopify's forecast are both denominated in."""
-    rows = []
+def _cash_rows(orders: List[dict]):
+    """(day, order total) for every order that counts as money in: not a test,
+    not cancelled, not voided. The one filter every cash series shares."""
     for o in orders:
         if o.get("test") or o.get("cancelled_at"):
             continue
@@ -481,11 +475,41 @@ def monthly_cash(orders: List[dict], as_of: date) -> "pd.Series":
         d = _day(o.get("created_at"))
         if d is None:
             continue
-        rows.append((pd.Period(d, freq="M"), float(o.get("order_total") or 0)))
+        yield d, float(o.get("order_total") or 0)
+
+
+def monthly_cash(orders: List[dict], as_of: date, since: Optional[date] = None,
+                 min_total: Optional[float] = None) -> "pd.Series":
+    """Cash in by calendar month, COMPLETE months only.
+
+    The month in progress is dropped on purpose. Half a September looks like a
+    collapse to any model that is handed it, and every one of them would then
+    forecast the rest of the year down from that. The panel's own target is
+    line-item NET sales; this is the order total, because it is what the plan
+    and Shopify's forecast are both denominated in.
+
+    The FIRST month can be part of a month too. `since` is where the pull
+    began, on the 1st of a month. When the first month with any orders comes
+    after it, that is the month the shop opened, and it is dropped: Projected
+    Image opened about 15 April 2024, and that half April went in as if it
+    were a whole month, which on its own decided which source led. A month the
+    pull started in is whole, because the pull starts on its 1st.
+
+    `min_total` keeps only orders of at least that much, for the series of big
+    orders; its months are the same complete months as the total's."""
+    rows = [(pd.Period(d, freq="M"), t) for d, t in _cash_rows(orders)]
     if not rows:
         return pd.Series(dtype=float)
     ser = pd.DataFrame(rows, columns=["month", "total"]).groupby("month")["total"].sum().sort_index()
-    return ser[ser.index < pd.Period(as_of, freq="M")]
+    ser = ser[ser.index < pd.Period(as_of, freq="M")]
+    if since is not None and len(ser) and ser.index[0] > pd.Period(since, freq="M"):
+        ser = ser.iloc[1:]
+    if min_total is not None:
+        big = [(pd.Period(d, freq="M"), t) for d, t in _cash_rows(orders) if t >= min_total]
+        bser = (pd.DataFrame(big, columns=["month", "total"]).groupby("month")["total"].sum()
+                if big else pd.Series(dtype=float))
+        ser = bser.reindex(ser.index, fill_value=0.0).astype(float)
+    return ser
 
 
 
@@ -495,16 +519,7 @@ def daily_cash(orders: List[dict], as_of: date) -> "pd.Series":
     The month-to-date figure the variance table shows comes from here, so it
     has to be the same money as the forecast it is compared with: the order
     total, not the panel's line-item net."""
-    rows = []
-    for o in orders:
-        if o.get("test") or o.get("cancelled_at"):
-            continue
-        if str(o.get("financial_status") or "").lower() in ("voided",):
-            continue
-        d = _day(o.get("created_at"))
-        if d is None or d > as_of:
-            continue
-        rows.append((pd.Timestamp(d), float(o.get("order_total") or 0)))
+    rows = [(pd.Timestamp(d), t) for d, t in _cash_rows(orders) if d <= as_of]
     if not rows:
         return pd.Series(dtype=float)
     ser = pd.DataFrame(rows, columns=["date", "total"]).groupby("date")["total"].sum().sort_index()

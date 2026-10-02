@@ -9213,6 +9213,63 @@ def t_a_label_row_printed_by_name_starts_after_its_count_and_wraps():
        "and its count's column is not held wide")
 
 
+@test
+def t_the_forecast_reads_the_month_the_reader_is_in():
+    """The 03:00 run on the 1st is as of the last day of the month before. The
+    page took that month for this one: on 1 Oct 2026 it read "38,741 taken so
+    far in Oct 2026, 30 of 30 days in", September's whole takings, and showed
+    October's forecast less that as still to come. Run as written in node."""
+    if not _node_ok():
+        return
+    pick = lambda name: fn_src("function " + name + "(")
+    iso = re.search(r"const fcISO = \(d\) => [^;]+;", SCRIPT).group(0)
+    js = iso + "\n" + "\n".join(pick(n) for n in ("fcBankedThisMonth", "fcCurrentMonth", "fcCurrentRow",
+                                                   "fcDaysSoFar", "fcDaysInMonth")) + """
+const hist = [{date: '2026-09-29', actual: 1000}, {date: '2026-09-30', actual: 2000}, {date: '2026-10-01', actual: 700}];
+const rows = [{month: '2026-09', method: 'actual', p50: 38741}, {month: '2026-10', method: 'forecast', p50: 50568}];
+const first = {as_of: '2026-09-30', daily: {history: hist.slice(0, 2)}, monthly: rows};
+const second = {as_of: '2026-10-01', daily: {history: hist},
+                monthly: [rows[0], {month: '2026-10', method: 'actual_to_date + forecast', p50: 51000}]};
+const mid = {as_of: '2026-09-09', daily: {history: [{date: '2026-09-09', actual: 300}]},
+             monthly: [{month: '2026-09', method: 'actual_to_date + forecast', p50: 30781}]};
+const f = (l) => ({month: fcCurrentMonth(l), banked: fcBankedThisMonth(l), sofar: fcDaysSoFar(l),
+                   days: fcDaysInMonth(l), row: fcCurrentRow(l).month});
+console.log(JSON.stringify([f(first), f(second), f(mid)]));
+"""
+    a, b, c = _run_node(js)
+    ok(a == {"month": "2026-10", "banked": 0, "sofar": 0, "days": 31, "row": "2026-10"},
+       "on the 1st, the new month with nothing taken yet, not last month's whole takings: %s" % a)
+    ok(b == {"month": "2026-10", "banked": 700, "sofar": 1, "days": 31, "row": "2026-10"},
+       "a day in, the day's takings: %s" % b)
+    ok(c == {"month": "2026-09", "banked": 300, "sofar": 9, "days": 30, "row": "2026-09"},
+       "mid-month, as before: %s" % c)
+
+
+@test
+def t_a_closed_month_is_shown_as_what_directors_were_told():
+    """The chart's "Was predicted" plotted whichever source turned out closest,
+    chosen after the month closed, so September's 36% miss looked like a hit.
+    It plots what the forecast in use said. The record card says each closed
+    month in pounds: what came in, what the forecast in use said and when,
+    whether it landed inside its likely range, and the closest source, and it
+    no longer claims every figure was made before the month began."""
+    chart = fn_src("function fcChartCard(")
+    said = chart.split("const said = {};", 1)[1].split("series.push", 1)[0]
+    ok("r.in_use" in said and "r.winner" not in said,
+       "the predicted line is the forecast in use, never the hindsight winner")
+    rec = fn_src("function fcRecordCard(")
+    ok("r.in_use" in rec and "' came in.'" in rec and "fcMoney(u.value)" in rec,
+       "each closed month in pounds, with what the forecast in use said")
+    ok("fcDay(u.made)" in rec and "u.seen_through" in rec, "and when, from which whole months")
+    ok("its likely range of" in rec and "u.inside" in rec, "and whether it landed inside its range")
+    ok("u.reconstructed" in rec and "Worked out afterwards" in rec,
+       "a month filled in afterwards says so")
+    ok("Closest: " in rec, "and the closest source beside it")
+    fc = "".join(fn_src("function " + n + "(") for n in ("fcRecordCard", "fcChartCard"))
+    ok("before the month began" not in fc and "What each source said before the month began" not in SCRIPT,
+       "nothing claims every figure was made before the month began")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
