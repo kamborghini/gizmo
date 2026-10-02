@@ -6422,13 +6422,15 @@ def _flag_address_divergence(order_id, live: dict) -> None:
 
 
 def _rest_totals(o: dict) -> dict:
-    """An order's tax, total and amount outstanding, from a REST read, in the
-    shape the order writer returns them."""
+    """An order's tax and total from a REST read, in the shape the order writer
+    returns them. Not the amount outstanding: GraphQL's is documented as signed
+    (negative when the customer is owed), REST's is not, so a note built from a
+    REST read says what the totals alone can say."""
     cur = str(o.get("currency") or "")
     def money(key):
         return {"amount": str(o.get(key) or ""), "currency": cur}
     return {"tax": money("current_total_tax"), "total": money("current_total_price"),
-            "outstanding": money("total_outstanding")}
+            "outstanding": {"amount": "", "currency": cur}}
 
 
 def _tax_change_note(before: dict, totals: dict) -> str:
@@ -6452,16 +6454,28 @@ def _tax_change_note(before: dict, totals: dict) -> str:
         return ("\u00a3%.2f" % x) if cur in ("GBP", "") else ("%s %.2f" % (cur, x))
     total_was = num((before.get("total") or {}).get("amount"))
     total_now = num((totals.get("total") or {}).get("amount"))
+    # Shopify's amount outstanding after the change, signed: above nothing the
+    # customer owes it, below nothing it is theirs to be refunded. It already
+    # counts what they paid, which the change in total alone does not.
     owed = num((totals.get("outstanding") or {}).get("amount"))
     msg = ("Shopify recalculated the tax for the new address: " + fmt(tax_was) + " before, "
            + fmt(tax_now) + " now")
     if total_now is not None:
         msg += ", so the order total is " + fmt(total_now)
-    if owed and owed > 0:
-        return msg + ". The customer now owes " + fmt(owed) + "."
-    if total_was is not None and total_now is not None and total_now < total_was:
-        return msg + (". If they have paid, " + fmt(total_was - total_now)
-                      + " is due back to them: refund it in Shopify.")
+    if owed is not None:
+        if owed > 0:
+            return msg + ". The customer now owes " + fmt(owed) + "."
+        if owed < 0:
+            return msg + ". " + fmt(-owed) + " is due back to them: refund it in Shopify."
+        return msg + ". Nothing more is owed either way."
+    # No amount outstanding to go on (the order was read back after a lost
+    # answer): only the change in total, said as what it might mean.
+    if total_was is not None and total_now is not None and total_now != total_was:
+        if total_now < total_was:
+            return msg + (". If they had paid in full, " + fmt(total_was - total_now)
+                          + " is due back to them: check the order in Shopify.")
+        return msg + (". If they had paid in full, " + fmt(total_now - total_was)
+                      + " more is due: check the order in Shopify.")
     return msg + "."
 
 
@@ -6504,6 +6518,13 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
             # The parcel may already be moving under the old address. Changing
             # Shopify does NOT change a label that is printed and booked, so the
             # merchant has to say out loud that they know that.
+            if "ship_to" in fields:
+                # The order's own province code goes back as a code whatever
+                # its shape (Dublin is "D", Tokyo "JP-13"), not as the
+                # deprecated free-text province.
+                own = str(((o.get("shipping_address") or {}).get("province_code")) or "").strip()
+                if own and str(fields["ship_to"].get("state") or "").strip() == own:
+                    fields["ship_to"]["state_is_code"] = True
             booked = _live_booking(order_id)
             if booked and "ship_to" in fields and not body.get("confirm_booked"):
                 return False, ("A courier label is already booked for this order ("

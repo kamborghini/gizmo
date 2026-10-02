@@ -3,8 +3,9 @@
 Each extension is bundled with esbuild exactly as the Shopify CLI bundles it,
 and its compressed size checked against Shopify's 64 KB limit. Its source is
 then type-checked with tsc against the @shopify/ui-extensions version it
-declares, through the per-module shopify.d.ts the CLI generates, built here
-in a temporary folder so the extension folders are not touched. esbuild does
+declares, through the per-module shopify.d.ts the CLI generates, built in a
+temporary folder inside the extension (removed after), so tsc resolves the
+same @shopify/ui-extensions the extension's own build does. esbuild does
 not type-check and neither does the CLI, so a prop or API Shopify renamed in a
 new version would otherwise surface only in the admin.
 
@@ -78,11 +79,13 @@ def main() -> int:
             print("%s: builds, %d bytes compressed (limit %d)" % (name, size, LIMIT))
             if size > LIMIT:
                 bad += 1
-            # The type check runs on a copy of the source beside the CLI-style
-            # declaration, resolving packages from the root node_modules.
-            check = os.path.join(tmp, "check")
+        # The type check runs on a copy of the source beside the CLI-style
+        # declaration, in a folder INSIDE the extension: packages then resolve
+        # as the extension's build resolves them, its own node_modules first
+        # (where npm puts a version it could not share) and then the root's.
+        check = tempfile.mkdtemp(prefix=".ext-check-", dir=src_dir)
+        try:
             shutil.copytree(os.path.join(src_dir, "src"), os.path.join(check, "src"))
-            os.symlink(os.path.join(ROOT, "node_modules"), os.path.join(check, "node_modules"))
             rel = "./" + os.path.relpath(entry, src_dir).replace(os.sep, "/")
             with open(os.path.join(check, "shopify.d.ts"), "w", encoding="utf-8") as fh:
                 fh.write("import '@shopify/ui-extensions';\n\n//@ts-ignore\ndeclare module '%s' {\n"
@@ -97,6 +100,8 @@ def main() -> int:
                 bad += 1
             else:
                 print(name + ": types check against " + target)
+        finally:
+            shutil.rmtree(check, ignore_errors=True)
     return 1 if bad else 0
 
 

@@ -44,3 +44,5 @@ node_modules/
 forecast_out/
 synthetic/
 catboost_info/
+# tools/ext_check.py's temporary type-check folders, removed after each run
+.ext-check-*/

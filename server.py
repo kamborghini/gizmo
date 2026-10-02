@@ -2026,8 +2026,14 @@ def _addr_input(a: dict) -> dict:
         out["countryCode"] = country.upper()
     state = str(a.get("state") or "").strip()
     if state:
-        out["provinceCode" if len(state) in (2, 3) else "province"] = (
-            state.upper() if len(state) in (2, 3) else state)
+        # A code when it is the order's own province code (any shape: "D" for
+        # Dublin, "Q ROO"), or when it has a code's shape: one to three letters
+        # or digits ("ON", "ENG", "D") or Shopify's "JP-13" form. No province's
+        # name is that short, so a typed name still goes as text.
+        if a.get("state_is_code") or re.fullmatch(r"[A-Za-z0-9]{1,3}|[A-Za-z]{2}-[A-Za-z0-9]{1,3}", state):
+            out["provinceCode"] = state.upper()
+        else:
+            out["province"] = state
     return out
 
 
@@ -2091,6 +2097,20 @@ async def update_order_fields(order_id: int, fields: dict) -> dict:
                 for e in errs)[:300]
             return {"ok": False, "reason": "user_error", "detail": detail}
         order = ((m.get("data") or {}).get("orderUpdate") or {}).get("order") or {}
+        # Shopify's advice after an address change is to query the order for
+        # the updated totals, so they are read back; the mutation's own answer
+        # is used only if that read fails.
+        if "shippingAddress" in inp:
+            try:
+                q = await _request("POST", "graphql.json", idempotent=True, body={
+                    "query": "query($id: ID!) { order(id: $id) {"
+                             "   currentTotalTaxSet { shopMoney { amount currencyCode } }"
+                             "   currentTotalPriceSet { shopMoney { amount currencyCode } }"
+                             "   totalOutstandingSet { shopMoney { amount currencyCode } } } }",
+                    "variables": {"id": inp["id"]}})
+                order = ((q.get("data") or {}).get("order")) or order
+            except Exception as e:
+                logger.warning("order totals read-back failed for order %s: %s", order_id, str(e)[:200])
 
         def money(key):
             v = ((order.get(key) or {}).get("shopMoney") or {})

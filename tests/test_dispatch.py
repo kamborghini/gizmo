@@ -24939,7 +24939,9 @@ def t_an_address_edit_that_changes_the_tax_says_so():
     live.update({"current_total_tax": "20.00", "current_total_price": "120.00",
                  "total_outstanding": "0.00", "currency": "GBP"})
     sent = []
-    answer = {"tax": "0.00", "total": "100.00", "outstanding": "0.00"}
+    # A fully paid £120 order: after the tax drops £20, Shopify's amount
+    # outstanding is -£20, which is the customer's to be refunded.
+    answer = {"tax": "0.00", "total": "100.00", "outstanding": "-20.00"}
     async def tools(registry, name, args):
         if name == "shopify_get_order":
             return _copy.deepcopy(live)
@@ -24947,28 +24949,47 @@ def t_an_address_edit_that_changes_the_tax_says_so():
     async def req(method, path, params=None, body=None, **kw):
         sent.append(body)
         m = lambda v: {"shopMoney": {"amount": v, "currencyCode": "GBP"}}
-        return {"data": {"orderUpdate": {"order": {"id": "gid://shopify/Order/12345",
-                                                   "currentTotalTaxSet": m(answer["tax"]),
-                                                   "currentTotalPriceSet": m(answer["total"]),
-                                                   "totalOutstandingSet": m(answer["outstanding"])},
-                                         "userErrors": []}}}
+        order = {"id": "gid://shopify/Order/12345", "currentTotalTaxSet": m(answer["tax"]),
+                 "currentTotalPriceSet": m(answer["total"]), "totalOutstandingSet": m(answer["outstanding"])}
+        if body["query"].lstrip().startswith("mutation"):
+            # The mutation's own answer is stale here; the read-back is not.
+            stale = dict(order, currentTotalTaxSet=m("20.00"))
+            return {"data": {"orderUpdate": {"order": stale, "userErrors": []}}}
+        return {"data": {"order": order}}
     saved = (copilot._tool_json, _srv._request, copilot._order_writer)
     copilot._tool_json, _srv._request, copilot._order_writer = tools, req, _srv.update_order_fields
     try:
         r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 6JK"}})
         eq(r.status_code, 200, r.text)
-        q = sent[-1]["query"]
-        ok("currentTotalTaxSet" in q and "totalOutstandingSet" in q, "the totals are asked for with the change")
-        addr = sent[-1]["variables"]["input"]["shippingAddress"]
+        mutation, readback = sent[-2], sent[-1]
+        ok(mutation["query"].lstrip().startswith("mutation") and "currentTotalTaxSet" in mutation["query"],
+           "the totals are asked for with the change")
+        ok(readback["query"].lstrip().startswith("query") and "totalOutstandingSet" in readback["query"],
+           "and read back after it, as Shopify advises")
+        addr = mutation["variables"]["input"]["shippingAddress"]
         ok("country" not in addr and addr.get("countryCode") == "GB", "the country goes as its code only")
         eq(r.json()["warnings"], ["Shopify recalculated the tax for the new address: \u00a320.00 before, "
-                                  "\u00a30.00 now, so the order total is \u00a3100.00. If they have paid, "
+                                  "\u00a30.00 now, so the order total is \u00a3100.00. "
                                   "\u00a320.00 is due back to them: refund it in Shopify."],
-           "a lower tax says what is due back")
+           "a lower tax on a paid order says what is due back, from the read-back, not the stale answer")
         ok("tax recalculated" in r.json()["changed"], "and the ledger records it")
+        # Partly paid (£110 of £120): Shopify says £10 is theirs, not the £20 drop.
+        answer.update({"outstanding": "-10.00"})
+        r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 6JJ"}})
+        ok(r.json()["warnings"][-1].endswith(" \u00a310.00 is due back to them: refund it in Shopify."),
+           r.json()["warnings"])
+        answer.update({"outstanding": "0.00"})
+        r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 6JH"}})
+        ok(r.json()["warnings"][-1].endswith("Nothing more is owed either way."), r.json()["warnings"])
         answer.update({"tax": "30.00", "total": "130.00", "outstanding": "10.00"})
         r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 7AA"}})
         ok(r.json()["warnings"][-1].endswith("The customer now owes \u00a310.00."), r.json()["warnings"])
+        # Read back after a lost answer (REST, no signed amount outstanding):
+        # only what the change in total can say, hedged.
+        note = copilot._tax_change_note(
+            {"tax": {"amount": "20.00", "currency": "GBP"}, "total": {"amount": "120.00", "currency": "GBP"}},
+            copilot._rest_totals({"current_total_tax": "0.00", "current_total_price": "100.00", "currency": "GBP"}))
+        ok(note.endswith("If they had paid in full, \u00a320.00 is due back to them: check the order in Shopify."), note)
         answer.update({"tax": "20.00", "total": "120.00", "outstanding": "0.00"})
         r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 8BB"}})
         eq(r.json()["warnings"], [], "nothing is said when the tax did not change (every version before 2026-10)")
@@ -24987,6 +25008,11 @@ def t_an_order_address_goes_to_shopify_as_codes():
     import server as _srv
     eq(_srv._addr_input({"country": "gb", "state": "ON"}), {"countryCode": "GB", "provinceCode": "ON"})
     eq(_srv._addr_input({"country": "CA", "state": "Ontario"}), {"countryCode": "CA", "province": "Ontario"})
+    eq(_srv._addr_input({"country": "IE", "state": "D"}), {"countryCode": "IE", "provinceCode": "D"},
+       "Dublin's one-letter code is a code")
+    eq(_srv._addr_input({"country": "JP", "state": "JP-13"}), {"countryCode": "JP", "provinceCode": "JP-13"})
+    eq(_srv._addr_input({"country": "MX", "state": "Q ROO", "state_is_code": True}),
+       {"countryCode": "MX", "provinceCode": "Q ROO"}, "and the order's own code goes back as a code, any shape")
     try:
         _srv._addr_input({"country": "United Kingdom"})
         ok(False, "a country name is refused, not sent as deprecated free text")
@@ -24994,6 +25020,32 @@ def t_an_order_address_goes_to_shopify_as_codes():
         ok("two-letter code" in str(e), str(e))
     r = run_async(_srv.update_order_fields(1, {"ship_to": {"country": "United Kingdom"}}))
     eq((r["ok"], r["reason"]), (False, "user_error"), "and the writer reports it instead of raising")
+
+
+@test
+def t_an_edit_sends_the_orders_own_province_code_back_as_a_code():
+    """The order's own province code goes back as a code whatever its shape
+    (Dublin is "D"), not as the deprecated free-text province."""
+    ensure_auth(); reset_dispatch(); reset_prod()
+    live = _copy.deepcopy(ORDER)
+    live["shipping_address"].update({"address1": "1 Grafton Street", "address2": "", "city": "Dublin",
+                                     "province_code": "D", "zip": "D02 X285", "country_code": "IE"})
+    async def tools(registry, name, args):
+        if name == "shopify_get_order":
+            return _copy.deepcopy(live)
+        return await fake_tool_json(registry, name, args)
+    saved = copilot._tool_json
+    copilot._tool_json = tools
+    try:
+        r = _edit({"ship_to": {"street2": "Floor 2"}})
+        eq(r.status_code, 200, r.text)
+        ship = ORDER_WRITES[-1][1]["ship_to"]
+        eq((ship.get("state"), ship.get("state_is_code")), ("D", True), "Dublin's code is marked as a code")
+        import server as _srv
+        eq(_srv._addr_input(ship).get("provinceCode"), "D", "and goes to Shopify as provinceCode")
+    finally:
+        copilot._tool_json = saved
+        reset_dispatch()
 
 
 @test
