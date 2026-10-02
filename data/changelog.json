@@ -23,7 +23,7 @@
     },
     {
      "kind": "changed",
-     "text": "If Reactor's AI is ever switched to a Claude model other than Opus, each question now asks for as much thinking as that model offers. A cautious guess used to cut some models short and ask others for a level they refuse."
+     "text": "If Reactor's AI is ever switched to a Claude model other than Opus, Deep analysis now gets the deepest thinking that model offers, and no model is asked for a level it refuses. A cautious guess used to cut some models short and ask others for levels they cannot do."
     }
    ]
   },

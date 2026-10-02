@@ -443,10 +443,16 @@ async def _model_caps(client, model: str):
         info = await client.models.retrieve(model)
         c = info.capabilities
         c = c.model_dump() if hasattr(c, "model_dump") else dict(c or {})
-        eff = c.get("effort") or {}
+        # The API may answer with no capabilities at all (the field is
+        # nullable). That says nothing about the model, so it is unknown,
+        # asked again later, never "takes nothing": that reading would strip
+        # effort and thinking from every request on it until a restart.
+        if not isinstance(c.get("effort"), dict) or not isinstance(c.get("thinking"), dict):
+            raise ValueError("the answer named no effort or thinking capabilities")
+        eff = c["effort"]
         caps = {"efforts": tuple(lvl for lvl in _EFFORT_LADDER
                                  if eff.get("supported") and (eff.get(lvl) or {}).get("supported")),
-                "adaptive": bool((((c.get("thinking") or {}).get("types") or {})
+                "adaptive": bool(((c["thinking"].get("types") or {})
                                   .get("adaptive") or {}).get("supported"))}
     except Exception as e:
         logger.info("model capabilities for %s unavailable (%s); using the cautious effort rule",
@@ -4773,6 +4779,16 @@ class DaysInput(BaseModel):
     days: Optional[int] = Field(default=28, ge=1, le=180, description="Look-back window in days.")
 
 
+def _google_not_ready(key: str) -> str:
+    """Why the chat cannot read one Google source: an unticked permission is
+    not the same as no connection, and saying so tells the person what to do."""
+    if google_data.oauth_connected() and google_data.granted().get(key) is False:
+        name = {"gsc": "Search Console", "ga4": "Analytics"}[key]
+        return json.dumps({"error": f"Google is connected without permission to read {name}. "
+                                    f"Connect Google again in Settings and leave {name} ticked."})
+    return json.dumps({"error": "Google isn't connected yet. Connect it in Settings."})
+
+
 def _build_google_tools() -> dict:
     tools: dict = {}
     if google_data.gsc_enabled():
@@ -4782,7 +4798,7 @@ def _build_google_tools() -> dict:
             Use this to ground SEO advice in how the store actually performs in Google Search —
             e.g. high-impression, low-CTR, mid-position queries are title/meta rewrite opportunities."""
             if not google_data.gsc_configured():
-                return json.dumps({"error": "Google isn't connected yet. Connect it in Settings."})
+                return _google_not_ready("gsc")
             days = params.days or 28
             return json.dumps({"overview": await google_data.gsc_overview(days),
                                "top_queries": await google_data.gsc_top_queries(days)}, default=str)
@@ -4794,7 +4810,7 @@ def _build_google_tools() -> dict:
             the top traffic channels over the window. Use to ground answers about traffic, acquisition
             and on-site performance in real analytics rather than order data alone."""
             if not google_data.ga4_configured():
-                return json.dumps({"error": "Google isn't connected yet. Connect it in Settings."})
+                return _google_not_ready("ga4")
             return json.dumps(await google_data.ga4_summary(params.days or 28), default=str)
         tools["get_ga4_data"] = (get_ga4_data, DaysInput)
 
