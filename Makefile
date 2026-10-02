@@ -1,7 +1,7 @@
 # The developer's entry points. Every command a person runs against this repo
 # is here, so nothing lives only in somebody's memory.
 #
-#   make install        create .venv and install the pinned requirements
+#   make install        create .venv (Python 3.14) from the hashed locks
 #   make run            start the app on :8000, loading .env if there is one
 #   make test           the dispatch suite (about a minute, no network)
 #   make test-frontend  the static guards on the single-page app (seconds)
@@ -9,18 +9,35 @@
 #   make sast           CI's blocking security scan (bandit, high severity)
 #   make check          everything CI runs that needs no network
 #   make env-doc        regenerate docs/ENVIRONMENT.md from the code
+#   make lock           compile the exact pins (*.in) into the hashed lock files
 
 PY ?= .venv/bin/python
 
-.PHONY: help install run test test-frontend test-forecast sweep sast env-doc check
+.PHONY: help install run test test-frontend test-forecast sweep sast env-doc check lock
 
 help:
-	@sed -n '4,12p' Makefile
+	@sed -n '4,13p' Makefile
 
+# requirements.in and forecast/requirements-service.in hold the direct pins;
+# the .txt beside each is every package installed, transitive ones included,
+# pinned with hashes, for every platform (macOS here, Linux in the image and
+# CI). The header names the pip-compile command Dependabot regenerates them
+# with when it raises a pin. Needs uv (brew install uv).
+LOCK = uv pip compile --universal --python-version 3.14 --generate-hashes --quiet
+lock:
+	$(LOCK) requirements.in -o requirements.txt \
+	  --custom-compile-command "pip-compile --generate-hashes --output-file=requirements.txt requirements.in"
+	cd forecast && $(LOCK) requirements-service.in -o requirements-service.txt \
+	  --custom-compile-command "pip-compile --generate-hashes --output-file=requirements-service.txt requirements-service.in"
+
+# The same Python as the images and CI, from the same hashed lock. The forecast
+# lock and the scanners make check uses come too, so `make check` runs here
+# exactly as CI does. Needs uv (brew install uv).
 install:
-	python3 -m venv .venv
-	$(PY) -m pip install --quiet --upgrade pip
-	$(PY) -m pip install --quiet -r requirements.txt
+	uv venv --python 3.14 .venv
+	uv pip install --python $(PY) --quiet --require-hashes -r requirements.txt
+	uv pip install --python $(PY) --quiet --require-hashes -r forecast/requirements-service.txt
+	uv pip install --python $(PY) --quiet bandit==1.9.4 pip-audit==2.10.1
 
 # `.env` is read here, by the shell, and nowhere in the code: production has
 # no such file (Railway injects variables), and a loader in the app would let

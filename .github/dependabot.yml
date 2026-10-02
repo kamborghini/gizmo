@@ -1,19 +1,57 @@
+# Keeps every dependency current by pull request. It does nothing until
+# Dependabot is switched on in the repository's settings (Settings, Advanced
+# Security): the alerts, the security updates and the version updates.
 version: 2
 updates:
+  # Python, for the app (requirements.in) and the nightly forecast service
+  # (forecast/requirements-service.in). Each hashed lock beside them carries a
+  # pip-compile header, so a pull request raises the pin in the .in and
+  # recompiles the lock together. A new release waits five days before it is
+  # proposed, so a broken or hijacked one has time to be pulled.
   - package-ecosystem: pip
-    directory: /
+    directories: ["/", "/forecast"]
     schedule: { interval: weekly }
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
+    cooldown:
+      default-days: 5
+    # The forecast service's numpy follows pandas: pandas 2.3 (the newest that
+    # statsforecast takes) warns under numpy 2.5, a warning numpy will make an
+    # error. Lift this when statsforecast takes pandas 3.
+    ignore:
+      - dependency-name: numpy
+        versions: [">=2.5"]
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+      minor-and-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
+  # The CI actions are pinned by SHA with the version in a comment; one pull
+  # request moves them all.
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
-  # The base image is pinned by tag, so nothing was watching it: "Dependabot
-  # will bump it" was only true for the ecosystems actually listed here.
+    groups:
+      actions:
+        patterns: ["*"]
+  # Both images are pinned by tag and digest. Dependabot refreshes the digest
+  # when the image is rebuilt with Debian security fixes, and proposes Python
+  # patch releases; a new Python minor (3.15) stays a deliberate change.
   - package-ecosystem: docker
-    directory: /
+    directories: ["/", "/forecast"]
     schedule: { interval: weekly }
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
   # The two Shopify admin print extensions build from this lockfile.
   - package-ecosystem: npm
     directory: /
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 5
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]

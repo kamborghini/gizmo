@@ -19,9 +19,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.12'
-      - run: pip install -r requirements.txt pip-audit
+          python-version: '3.14'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      # The lock is installed on its own: hash-checking applies to the whole
+      # command, and pip-audit is not in the lock.
+      - run: pip install --require-hashes -r requirements.txt
+      - run: pip install pip-audit==2.10.1
       - name: Python dependencies (whole installed environment)
         run: pip-audit --progress-spinner off
+      - name: The forecast service's dependencies (checked as locked)
+        run: pip-audit --progress-spinner off -r forecast/requirements-service.txt
       - name: JavaScript dependencies
         run: npm audit --omit=dev

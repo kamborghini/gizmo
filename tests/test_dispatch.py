@@ -100,7 +100,19 @@ def tok(sub=None):
     if sub is not None:
         claims["sub"] = str(sub)
     return jwt.encode(claims, SECRET, algorithm="HS256")
-def run(coro): return asyncio.get_event_loop().run_until_complete(coro)
+_RUN_LOOP = None
+
+
+def run(coro):
+    """Run a coroutine on the suite's own loop. Python 3.14 has no implicit
+    loop to borrow (3.12 already warned that asking for one was going away),
+    and asyncio.run() elsewhere closes whatever loop is current, so the suite
+    keeps its own and makes another only if that one was closed."""
+    global _RUN_LOOP
+    if _RUN_LOOP is None or _RUN_LOOP.is_closed():
+        _RUN_LOOP = asyncio.new_event_loop()
+    asyncio.set_event_loop(_RUN_LOOP)
+    return _RUN_LOOP.run_until_complete(coro)
 
 # ---- Fake Shopify order + shop ---------------------------------------------
 ORDER = {
@@ -2993,8 +3005,7 @@ def t_print_cors_credentials_go_only_to_this_shop():
 
 @test
 def t_dependencies_are_pinned_and_the_mcp_fix_is_in():
-    reqs = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             "requirements.txt"), encoding="utf-8").read()
+    reqs = open(os.path.join(HERE, "requirements.in"), encoding="utf-8").read()
     for line in reqs.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -3014,16 +3025,78 @@ def t_connector_sessions_expire_by_our_choice():
     eq(srv.MCP_SESSION_IDLE_SECS, 1800, "thirty minutes")
 
 
+def _lock_packages(text: str) -> dict:
+    """name -> (version, hashes) from a hashed lock written by `make lock`."""
+    out, cur = {}, None
+    for raw in text.splitlines():
+        line = raw.strip()
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==([^\s;\\]+)", raw)
+        if m:
+            cur = m.group(1).lower().replace("_", "-")
+            out[cur] = [m.group(2), 0]
+        elif line.startswith("--hash=sha256:") and cur:
+            out[cur][1] += 1
+    return out
+
+
+@test
+def t_the_locks_match_their_pins_and_carry_hashes():
+    """requirements.in and forecast/requirements-service.in hold the exact
+    pins; `make lock` compiles each into the hashed lock beside it, which is
+    what the images and CI install. A pin raised without recompiling, or a
+    package in the lock without a hash, fails here rather than in a build."""
+    for pins_path, lock_path in (("requirements.in", "requirements.txt"),
+                                 ("forecast/requirements-service.in", "forecast/requirements-service.txt")):
+        pins = open(os.path.join(HERE, pins_path), encoding="utf-8").read()
+        lock_text = open(os.path.join(HERE, lock_path), encoding="utf-8").read()
+        ok("pip-compile --generate-hashes" in lock_text.split("\n", 3)[1], lock_path + " says how it is rebuilt")
+        lock = _lock_packages(lock_text)
+        ok(len(lock) >= 10, lock_path + " lists every package, not just the direct ones")
+        for name, (ver, hashes) in lock.items():
+            ok(hashes >= 1, lock_path + ": " + name + " has a hash")
+        for line in pins.splitlines():
+            m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==(\S+)", line.strip())
+            if not m:
+                continue
+            name = m.group(1).lower().replace("_", "-")
+            ok(name in lock, lock_path + " has " + name)
+            eq(lock[name][0], m.group(2), lock_path + ": " + name + " is the version " + pins_path + " pins")
+    for extra in ("forecast/requirements-m5.txt", "forecast/requirements.txt"):
+        for line in open(os.path.join(HERE, extra), encoding="utf-8").read().splitlines():
+            line = line.split("#")[0].strip()
+            if line:
+                ok(re.match(r"^[A-Za-z0-9._-]+==\S+$", line), extra + " pins exactly: " + line)
+
+
+@test
+def t_every_image_is_pinned_by_digest_and_runs_the_tested_python():
+    """A build must get exactly the image that was tested: a tag alone moves
+    whenever the image is rebuilt. And the images run the Python the suites
+    ran on in CI."""
+    ci = open(os.path.join(HERE, ".github", "workflows", "tests.yml"), encoding="utf-8").read()
+    tested = set(re.findall(r"python-version: '(\d+\.\d+)'", ci))
+    eq(len(tested), 1, "CI tests one Python")
+    for path in ("Dockerfile", os.path.join("forecast", "Dockerfile")):
+        froms = re.findall(r"^FROM\s+(\S+)", open(os.path.join(HERE, path), encoding="utf-8").read(), re.M)
+        ok(froms, path + " has a base image")
+        for ref in froms:
+            ok(re.search(r"@sha256:[0-9a-f]{64}$", ref), path + " pins " + ref + " by digest")
+            m = re.match(r"python:(\d+\.\d+)", ref)
+            ok(m and m.group(1) in tested, path + " runs the Python CI tests: " + ref)
+
+
 @test
 def t_the_google_service_account_transport_is_installed():
     """requests was dropped on 2026-09-07 as unused, but google-auth reaches
     Google through it, imported only when the service-account sign-in runs:
     a fresh deploy could not sign in that way, and the local environment hid
-    it. CI installs from requirements.txt alone, so this import is the check."""
+    it. CI installs from the lock alone, so this import is the check."""
     from google.auth.transport.requests import Request
     ok(Request, "google-auth's requests transport imports")
-    reqs = open(os.path.join(HERE, "requirements.txt"), encoding="utf-8").read()
-    ok(re.search(r"^google-auth\[requests\]==", reqs, re.M), "and requirements.txt asks for it by name")
+    pins = open(os.path.join(HERE, "requirements.in"), encoding="utf-8").read()
+    ok(re.search(r"^google-auth\[requests\]==", pins, re.M), "and requirements.in asks for it by name")
+    lock = open(os.path.join(HERE, "requirements.txt"), encoding="utf-8").read()
+    ok(re.search(r"^requests==", lock, re.M), "so the lock carries requests")
 
 @test
 def t_app_errors_are_recorded_and_surfaced():
@@ -6667,10 +6740,7 @@ def run_async(coro):
     asyncio.run() CLOSES the loop and leaves the thread without one, which
     breaks every test after it."""
     import asyncio as _a
-    try:
-        prev = _a.get_event_loop()
-    except RuntimeError:
-        prev = None
+    prev = _RUN_LOOP if _RUN_LOOP is not None and not _RUN_LOOP.is_closed() else None
     loop = _a.new_event_loop()
     _a.set_event_loop(loop)
     try:
@@ -20283,7 +20353,7 @@ def t_the_connector_token_only_travels_somewhere_it_is_safe():
             eq(copilot._connector_url_safe(url), allowed, url)
         os.environ["CONNECTOR_URL"] = "http://connector.example.com"
         try:
-            asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+            asyncio.new_event_loop().run_until_complete(
                 copilot._connector_call("GET", "/status"))
             ok(False, "a plain http host should have been refused")
         except RuntimeError as e:
