@@ -204,6 +204,17 @@ def t_the_variance_engine_settles_each_month_one_way_and_calls_it():
     cash = eng.cash_view(m, "Algorithm 1").set_index("month")
     ok(np.isclose(cash.loc[pd.Timestamp("2026-10-01"), "gross_sales"], by.loc["2026-10", "projected_p50"]),
        "the cash path takes the forecast as the cash in it already is, not grossed up a second time")
+    # The per-product model forecasts NET sales: it is compared with the
+    # plan's net line and put into cash in for the cash path, as before.
+    net = VarianceEngine(cfg, cf, money="net")
+    mn = net.monthly_view(actual, fc)
+    bn = mn.set_index(mn["month"].dt.strftime("%Y-%m"))
+    ok(bn.loc["2026-10", "target|Algorithm 1"] == 16200.0, "a net forecast meets the plan's net line")
+    r = cf.sales_ratios()
+    cn = net.cash_view(mn, "Algorithm 1").set_index("month")
+    ok(np.isclose(cn.loc[pd.Timestamp("2026-10-01"), "gross_sales"],
+                  bn.loc["2026-10", "projected_p50"] * (1 + r["shipping"] + r["taxes"])),
+       "and is put into cash in for the cash path")
     alerts = eng.alerts(m, {"Algorithm 1": eng.cash_view(m, "Algorithm 1")})
     ok(any(a["kind"] == "sales" and a["verdict"] == "underrun" and a["month"] == "2026-10" for a in alerts), "the underrun raises an alert")
     ok(not any(a["kind"] == "sales" and a["month"] == "2026-05" for a in alerts), "a closed month does not")
@@ -321,7 +332,7 @@ def t_the_job_reads_the_store_through_reactor_and_holds_no_shopify_secret():
     body = nsrc.split("try:", 1)[1]
     # Chosen inside the try, so a refusal is posted to the tab.
     assert "ShopifyStore(shop, stoken) if stoken else ReactorStore(base, token)" in body
-    assert "run_bulk_orders(store, since)" in nsrc and "fetch_products(store)" in nsrc
+    assert "run_bulk_orders(store, pull_from)" in nsrc and "fetch_products(store)" in nsrc
 
 
 @test
@@ -524,8 +535,18 @@ def t_a_shops_opening_month_is_not_fed_as_a_whole_one():
               {"created_at": "2024-06-21T10:00:00Z", "order_total": "100"}]
     opened = monthly_cash(orders, date(2024, 7, 3), since=date(2024, 3, 1))
     ok([str(p) for p in opened.index] == ["2024-05", "2024-06"], "the opening month is dropped: %s" % list(opened.index))
-    whole = monthly_cash(orders, date(2024, 7, 3), since=date(2024, 4, 1))
-    ok(str(whole.index[0]) == "2024-04", "a month the pull starts on the 1st of is kept")
+    # The history starting in the opening month itself: nothing before it, so
+    # it is still the opening half month, and still dropped.
+    same = monthly_cash(orders, date(2024, 7, 3), since=date(2024, 4, 1))
+    ok([str(p) for p in same.index] == ["2024-05", "2024-06"],
+       "a history that starts in the opening month still leaves it out: %s" % list(same.index))
+    # Trade in the month before (the extra month the job pulls): the shop was
+    # already open, so the first month wanted is whole, and the extra one is
+    # not returned.
+    traded = [{"created_at": "2024-03-20T10:00:00Z", "order_total": "50"}] + orders
+    whole = monthly_cash(traded, date(2024, 7, 3), since=date(2024, 4, 1))
+    ok([str(p) for p in whole.index] == ["2024-04", "2024-05", "2024-06"],
+       "with trade before it, the first month is whole, and the month before is not fed: %s" % list(whole.index))
     big = monthly_cash(orders, date(2024, 7, 3), since=date(2024, 3, 1), min_total=2000)
     ok(list(big.index) == list(opened.index) and float(big["2024-05"]) == 3000.0 and float(big["2024-06"]) == 2500.0,
        "big orders come on exactly the same months, the small order left out: %s" % big.to_dict())
@@ -567,9 +588,20 @@ def t_big_orders_are_counted_apart():
 @test
 def t_the_range_is_the_miss_8_in_10_stayed_within():
     from forecast.simple import _errors_to_score, band_width
-    sc = _errors_to_score([0.05, -0.10, 0.12, -0.20, 0.30, -0.36, 0.08, -0.56, 0.02, 0.15])
-    ok(abs(sc["p80"] - float(np.quantile([0.05, 0.10, 0.12, 0.20, 0.30, 0.36, 0.08, 0.56, 0.02, 0.15], 0.8))) < 1e-9,
-       "p80 is the 80th percentile of the size of the misses: %s" % sc["p80"])
+    # Ten past forecasts and what came in, September 2026's leader among them.
+    pred = np.array([24677.0, 41933.0, 30000.0, 52000.0, 18000.0, 61000.0, 27000.0, 35000.0, 12000.0, 44000.0])
+    act = np.array([38741.0, 40000.0, 33000.0, 47000.0, 16000.0, 70000.0, 30000.0, 22000.0, 15444.0, 47000.0])
+    errs = list((pred - act) / act)
+    spread = list(np.abs(act - pred) / pred)
+    sc = _errors_to_score(errs, spread)
+    ok(abs(sc["p80"] - float(np.quantile(spread, 0.8))) < 1e-9,
+       "p80 is measured against the forecast the range is drawn around: %s" % sc["p80"])
+    inside = np.abs(act - pred) <= sc["p80"] * pred
+    ok(inside.sum() >= 8, "so forecast x (1 +/- p80) holds 8 in 10 of what came in: %d" % inside.sum())
+    # Measured against the actual instead, the same rule held fewer, and missed
+    # on the side September did: a forecast too low.
+    wrong = float(np.quantile(np.abs(np.array(errs)), 0.8))
+    ok((np.abs(act - pred) <= wrong * pred).sum() < 8, "the old measure did not hold 8 in 10 here")
     ok(sc["p80"] > sc["mape"], "and wider than the average miss")
     ok(band_width({"score": sc}) == sc["p80"], "the range uses it")
     ok(band_width({"score": {"mape": 0.287}}) == 0.287, "a run without it falls back to the typical error")

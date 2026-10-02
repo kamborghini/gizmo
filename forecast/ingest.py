@@ -488,12 +488,14 @@ def monthly_cash(orders: List[dict], as_of: date, since: Optional[date] = None,
     line-item NET sales; this is the order total, because it is what the plan
     and Shopify's forecast are both denominated in.
 
-    The FIRST month can be part of a month too. `since` is where the pull
-    began, on the 1st of a month. When the first month with any orders comes
-    after it, that is the month the shop opened, and it is dropped: Projected
-    Image opened about 15 April 2024, and that half April went in as if it
-    were a whole month, which on its own decided which source led. A month the
-    pull started in is whole, because the pull starts on its 1st.
+    The FIRST month can be part of a month too. `since` is the first month
+    wanted, and the caller pulls orders from one month BEFORE it. When there
+    is no order before `since`, the first month with orders is the month the
+    shop opened, and it is dropped: Projected Image opened about 15 April
+    2024, and that half April went in as if it were whole, which on its own
+    decided which source led. When there is trade before `since`, the shop was
+    already open and `since`'s month is whole. The extra month itself is never
+    returned, so the one month that cannot be judged never reaches a model.
 
     `min_total` keeps only orders of at least that much, for the series of big
     orders; its months are the same complete months as the total's."""
@@ -502,8 +504,12 @@ def monthly_cash(orders: List[dict], as_of: date, since: Optional[date] = None,
         return pd.Series(dtype=float)
     ser = pd.DataFrame(rows, columns=["month", "total"]).groupby("month")["total"].sum().sort_index()
     ser = ser[ser.index < pd.Period(as_of, freq="M")]
-    if since is not None and len(ser) and ser.index[0] > pd.Period(since, freq="M"):
-        ser = ser.iloc[1:]
+    if since is not None and len(ser):
+        start = pd.Period(since, freq="M")
+        first_trade = min(p for p, _ in rows)
+        ser = ser[ser.index >= start]
+        if len(ser) and first_trade >= start and ser.index[0] == first_trade:
+            ser = ser.iloc[1:]
     if min_total is not None:
         big = [(pd.Period(d, freq="M"), t) for d, t in _cash_rows(orders) if t >= min_total]
         bser = (pd.DataFrame(big, columns=["month", "total"]).groupby("month")["total"].sum()

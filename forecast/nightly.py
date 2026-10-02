@@ -272,8 +272,11 @@ def main() -> int:
             # October 2026. Five years also stops the history being held at
             # about 29 months for good.
             since = (as_of - timedelta(days=int(env.get("FORECAST_HISTORY_DAYS", "1830")))).replace(day=1)
-            log.info("pulling orders since %s (%s)", since, "own token" if stoken else "through Reactor")
-            orders = run_bulk_orders(store, since)
+            # One month earlier than the history kept, so monthly_cash can tell
+            # an opening half month (nothing before it) from a whole one.
+            pull_from = (since - timedelta(days=1)).replace(day=1)
+            log.info("pulling orders since %s (%s)", pull_from, "own token" if stoken else "through Reactor")
+            orders = run_bulk_orders(store, pull_from)
             cfg = Config(as_of=as_of, horizon_days=int(env.get("FORECAST_HORIZON", "90")))
 
             # THE FORECAST. Five plain models on the monthly total, ranked by

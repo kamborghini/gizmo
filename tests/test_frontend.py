@@ -9265,9 +9265,25 @@ def t_a_closed_month_is_shown_as_what_directors_were_told():
     ok("u.reconstructed" in rec and "Worked out afterwards" in rec,
        "a month filled in afterwards says so")
     ok("Closest: " in rec, "and the closest source beside it")
-    fc = "".join(fn_src("function " + n + "(") for n in ("fcRecordCard", "fcChartCard"))
-    ok("before the month began" not in fc and "What each source said before the month began" not in SCRIPT,
+    ok("before the month began" not in SCRIPT and "before each month began" not in SCRIPT,
        "nothing claims every figure was made before the month began")
+    ok("Worked out afterwards" in rec and "October 2026" not in rec,
+       "a filled-in month says so without a date that only holds if this ships in October")
+
+
+@test
+def t_the_chart_starts_at_the_month_the_reader_is_in():
+    """On the 1st the chart's default view, This month, drew September (the
+    run's as_of month) while the overview above it had moved on to October.
+    "This month" and "The months ahead" start from the reader's month."""
+    chart = fn_src("function fcChartCard(")
+    ok("const curMonth = fcCurrentMonth(latest);" in chart, "the chart works out the reader's month")
+    month = chart.split("range === 'month')", 1)[1].split("\n", 1)[0]
+    ahead = chart.split("range === 'ahead')", 1)[1].split("\n", 1)[0]
+    ok("curMonth + '-01'" in month and "from = curMonth;" in ahead,
+       "This month and The months ahead start there: %s | %s" % (month.strip(), ahead.strip()))
+    ok("r.date.slice(0, 7) === curMonth" in chart and "fcISO(asOf).slice(0, 7)" not in chart,
+       "and the month's days are the reader's month, not the run's")
 
 
 if __name__ == "__main__":

@@ -14744,14 +14744,19 @@ Projected Image UK"></textarea>
                 .concat((days.forecast || []).map(r => ({ date: r.date, actual: null, p50: r.p50, p10: r.p10, p90: r.p90 })));
             const months = latest.months || [];
             const shift = (n) => { const d = new Date(asOf); d.setDate(d.getDate() - n); return fcISO(d); };
+            /* "This month" and "The months ahead" start at the month the reader
+               is in, not the run's as_of month: the 03:00 run on the 1st is as
+               of the last day of the month before, and the default view drew
+               September, headed This month, on 1 October. */
+            const curMonth = fcCurrentMonth(latest);
             let grain = 'day', from = '', to = '', title = '', period = '';
             const [cf, ct] = fcCustom();
             if (range === 'today') { from = shift(6); to = fcISO(asOf); title = 'Today, and the six days before it'; period = 'the day, against the average of the six before it'; }
             else if (range === 'week') { from = shift(6); to = fcISO(asOf); title = 'The last seven days'; period = 'the last seven days'; }
-            else if (range === 'month') { from = fcISO(asOf).slice(0, 8) + '01'; to = ''; title = 'This month, day by day'; period = 'taken so far, then the rest of the month forecast'; }
+            else if (range === 'month') { from = curMonth + '-01'; to = ''; title = 'This month, day by day'; period = 'taken so far, then the rest of the month forecast'; }
             else if (range === 'q') { from = shift(91); to = fcISO(asOf); title = 'The last three months'; period = 'day by day'; }
             else if (range === 'year') { grain = 'month'; from = ''; to = ''; title = 'The last twelve months'; period = 'month by month, with what was predicted at the time'; }
-            else if (range === 'ahead') { grain = 'month'; from = fcISO(asOf).slice(0, 7); to = ''; title = 'The months ahead'; period = 'the leading source, with its own measured error as the band'; }
+            else if (range === 'ahead') { grain = 'month'; from = curMonth; to = ''; title = 'The months ahead'; period = 'the leading source, with its own measured error as the band'; }
             else { from = cf; to = ct; title = 'The range you chose'; period = 'day by day'; }
 
             let rows;
@@ -14763,7 +14768,7 @@ Projected Image UK"></textarea>
                 if (range === 'ahead') rows = rows.slice(0, 12);
             } else {
                 rows = dayRows.filter(r => (!from || r.date >= from) && (!to || r.date <= to));
-                if (range === 'month') rows = rows.filter(r => r.date.slice(0, 7) === fcISO(asOf).slice(0, 7));
+                if (range === 'month') rows = rows.filter(r => r.date.slice(0, 7) === curMonth);
             }
             /* The range strip rides in the section title, where this page already
                puts the scenario control, rather than inside the chart card,
@@ -14962,7 +14967,7 @@ Projected Image UK"></textarea>
             head.append(act);
             card.append(head);
             card.append(el('p', 'card-sub', onRecord
-                ? 'It is judged on months it could not see: what it said before each month began, against '
+                ? 'It is judged on months it could not see: the first figure it gave for each month, against '
                   + 'what came in. At the end of every month every source is marked again, and if another '
                   + 'starts coming closer, it takes over without anyone changing a setting.'
                 : 'Once three months have closed, the choice moves onto that record instead, which is the '
@@ -15113,8 +15118,8 @@ Projected Image UK"></textarea>
                         + (u.inside == null ? '.'
                             : (u.inside ? ', inside' : ', outside') + ' its likely range of '
                               + fcMoney(u.p10) + ' to ' + fcMoney(u.p90) + '.')
-                        + (u.reconstructed ? ' Worked out afterwards from the forecast\u2019s own code: the '
-                            + 'record keeps the source in use from October 2026.' : '');
+                        + (u.reconstructed ? ' Worked out afterwards from the forecast\u2019s own code, because '
+                            + 'the record did not yet keep the source in use.' : '');
                 } else {
                     line = ' Which source the page was using is not on record for this month.';
                 }

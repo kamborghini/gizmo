@@ -277,17 +277,23 @@ def _folds(y: pd.Series, folds: int = 3, h: int = 3) -> List[Tuple[int, int]]:
     return out
 
 
-def _errors_to_score(errs: List[float]) -> Dict[str, Optional[float]]:
-    """Typical error, bias, worst, and `p80`: the miss that 8 in 10 of the
-    past ones stayed within. The likely range is drawn from p80, not from the
-    typical error: plus or minus an AVERAGE miss holds only about 6 times in
-    10, and September 2026 came in above that range on every day from the 1st
-    to the 22nd."""
+def _errors_to_score(errs: List[float], spread: Optional[List[float]] = None) -> Dict[str, Optional[float]]:
+    """Typical error, bias and worst, against what came in; and `p80`, the
+    width of the likely range.
+
+    The range is drawn around the FORECAST, so its width is measured against
+    the forecast too: `spread` holds |actual - forecast| / forecast, and p80
+    is the size 8 in 10 of those stayed within, so forecast x (1 +/- p80)
+    holds 8 in 10 of the past outcomes. Measured against the actual instead,
+    the top of the range sat short exactly when a source forecast too low, as
+    September 2026's did. Plus or minus the AVERAGE miss held about 6 in 10."""
     if not errs:
         return {"mape": None, "bias": None, "worst": None, "p80": None, "folds": 0}
     arr = np.array(errs, dtype=float)
+    sp = np.array([v for v in (spread or []) if np.isfinite(v)], dtype=float)
     return {"mape": float(np.mean(np.abs(arr))), "bias": float(np.mean(arr)),
-            "worst": float(np.max(np.abs(arr))), "p80": float(np.quantile(np.abs(arr), 0.8)),
+            "worst": float(np.max(np.abs(arr))),
+            "p80": float(np.quantile(sp, 0.8)) if len(sp) else None,
             "folds": len(errs)}
 
 
@@ -296,6 +302,13 @@ def _backtest_all(y: pd.Series, models: List[Tuple[str, object]], folds: int, h:
     them are scored on exactly the same months."""
     per_model: Dict[str, List[float]] = {m[0]: [] for m in models}
     per_combo: Dict[str, List[float]] = {c[0]: [] for c in COMBINERS}
+    # |actual - forecast| / forecast: the misses measured the way the range is drawn
+    sp_model: Dict[str, List[float]] = {m[0]: [] for m in models}
+    sp_combo: Dict[str, List[float]] = {c[0]: [] for c in COMBINERS}
+
+    def _spread(pred: np.ndarray, act: np.ndarray) -> List[float]:
+        p = np.where(pred > 0, pred, np.nan)
+        return [v for v in np.abs(act - pred) / p if np.isfinite(v)]
     for cut, hh in _folds(y, folds, h):
         act = y.iloc[cut:cut + hh]
         preds, order = {}, []
@@ -315,11 +328,14 @@ def _backtest_all(y: pd.Series, models: List[Tuple[str, object]], folds: int, h:
         safe = np.where(a == 0, np.nan, a)
         for name in order:
             per_model[name] += [v for v in (preds[name] - a) / safe if np.isfinite(v)]
+            sp_model[name] += _spread(preds[name], a)
         stack = np.vstack([preds[n] for n in order])
         for cname, fn, _n, _b, _ba in COMBINERS:
-            per_combo[cname] += [v for v in (fn(stack) - a) / safe if np.isfinite(v)]
-    return ({n: _errors_to_score(e) for n, e in per_model.items()},
-            {n: _errors_to_score(e) for n, e in per_combo.items()})
+            c = fn(stack)
+            per_combo[cname] += [v for v in (c - a) / safe if np.isfinite(v)]
+            sp_combo[cname] += _spread(c, a)
+    return ({n: _errors_to_score(e, sp_model[n]) for n, e in per_model.items()},
+            {n: _errors_to_score(e, sp_combo[n]) for n, e in per_combo.items()})
 
 
 
@@ -512,9 +528,9 @@ def daily_frame(model: dict, as_of, profile=None) -> "pd.DataFrame":
     The variance engine reads a daily line, so a monthly forecast has to
     become one. The spread sums back to the month exactly. The band is the
     model's OWN measured error on this shop's history rather than a number
-    chosen to look confident: if it was typically 29% out, the band is 29%
-    wide, and December's disagreement between models is a separate signal
-    shown beside it."""
+    chosen to look confident: the band reaches as far as 8 in 10 of its past
+    misses did (see band_width), and December's disagreement between models
+    is a separate signal shown beside it."""
     from .cashflow import DayProfile, daily_from_monthly
     months = [(k, v) for k, v in (model.get("months") or {}).items() if v is not None]
     if not months:
