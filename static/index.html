@@ -18276,7 +18276,10 @@ Projected Image UK"></textarea>
                        them anyway and a button that always errors is worse than
                        no button. */
                     const act = el('td');
-                    if (sizeRulesCanEdit) {
+                    /* A gobo sold with a projector that its order cannot size
+                       (no projector on it, or two sizes) is not a gap in the
+                       size list: a size rule would not settle it. */
+                    if (sizeRulesCanEdit && !r.order_problem) {
                         const fix = el('button', 'btn btn-sm', 'Resolve');
                         fix.onclick = () => openSizeRuleModal(r, () => runCoverage());
                         act.append(fix);
@@ -18792,8 +18795,10 @@ Projected Image UK"></textarea>
             if (!orders.length) { addToast('Nothing to make: every live order is marked made.'); return; }
             const agg = {};
             const stock = {};
-            let flagged = 0, notGobo = 0;
+            let flagged = 0, notGobo = 0, projectors = 0;
             orders.forEach(o => (o.items || []).forEach(it => {
+                // A projector or accessory goes in the box but is not cut.
+                if (it.projector) { projectors += it.quantity || 1; return; }
                 // Ruled not a gobo: nothing to cut, and nothing to put right.
                 if (it.not_gobo) { notGobo += it.quantity || 1; return; }
                 /* A stock gobo is named, not sized: it is not summed by size
@@ -18836,6 +18841,9 @@ Projected Image UK"></textarea>
                 + ' CHECK-flagged and not in this list. Resolve them on the Labels tab first.'));
             if (notGobo) ds.append(el('div', 'ds-orders', notGobo + (notGobo === 1 ? ' item is' : ' items are')
                 + ' ruled not a gobo, so not in this list.'));
+            if (projectors) ds.append(el('div', 'ds-orders', projectors + (projectors === 1
+                ? ' item is a projector or accessory' : ' items are projectors or accessories')
+                + ', so not in this list.'));
             ds.append(el('div', 'ds-orders', 'Orders: ' + orders.map(o => orderNo(o)).join('   ')));
             box.append(ds);
             let rule = $('label-page-rule');

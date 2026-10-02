@@ -6075,6 +6075,130 @@ def _line_has_model(li: dict) -> bool:
     return bool(_strip_price(_item_model(li, _strip_price(_item_prop(li, "Manufacturer")))))
 
 
+# A gobo the Quote Engine sells with a projector names no fixture of its own:
+# its variant says so ("Single Colour Glass Original With Projector (Quote) /
+# IH") because its fixture is the projector on the same order (#104453).
+_WITH_PROJECTOR_RE = re.compile(r"\bwith projector\b", re.I)
+_PROJECTOR_WATTS_RE = re.compile(r"\b(\d{1,3})\s*(?:watt|w)\b", re.I)
+PROJECTOR_TYPE = "projector"
+
+
+def _with_projector_variant(li: dict) -> bool:
+    return bool(_WITH_PROJECTOR_RE.search(str(li.get("variant_title") or "") + " " + str(li.get("name") or "")))
+
+
+def _sold_with_projector(li: dict) -> bool:
+    """A With Projector gobo that is cut for the projector on its order. The old
+    quote machine wrote the gobo's fixture into one "Note" property instead
+    ("Manufacturer: Standard\nStandard Models: B Size"), which nothing here
+    reads, and #103894's said B Size beside a 20 Watt: such a line keeps its
+    CHECK rather than be cut against what it says."""
+    return (_with_projector_variant(li)
+            and not re.search(r"(?im)^\s*manufacturer\s*:", _item_prop(li, "Note")))
+
+
+def _projector_watts(li: dict) -> int:
+    """A projector line's wattage ("Projected Image 40 Watt LED Weatherproof
+    Gobo Projector" is 40), or 0 for anything else. Read from what the line
+    says, not its product type: the type Projector also covers rain hoods,
+    lenses, holders and bundles, which name wattages too ("Rain Hood (40W &
+    80W)") but never "Gobo Projector"; and the old quote machine sold projectors
+    as "Outdoor Gobo Projectors" typed Custom Gobos, named in the variant."""
+    if _line_has_model(li) or _with_projector_variant(li):
+        return 0
+    text = str(li.get("title") or "") + " " + str(li.get("variant_title") or "")
+    if "gobo projector" not in text.lower():
+        return 0
+    m = _PROJECTOR_WATTS_RE.search(text)
+    return int(m.group(1)) if m else 0
+
+
+def _projector_entries(watts: int, cache: dict) -> list:
+    """The size list's Projected Image rows naming this wattage ("40/80 Watt
+    Range" for a 40 or an 80), rulings applied. Read from the rows rather than
+    through the lookup, whose spellings are uneven here: "80 Watt" finds its
+    row and "40 Watt" does not. A row is matched by its own name or by the name
+    an alias gave it, so pointing "300 Watt" at a row in the size check settles
+    a 300 Watt; and a row named for the wattage itself ("40 Watt", made by a
+    size rule) wins over a range that includes it, so ruling it decides."""
+    exact, ranged, seen = [], [], set()
+    for lm, words, e in cache.get("rows") or []:
+        model = str(e.get("model") or "")
+        own = " ".join(words)
+        if lm != "projected image" or ("watt" not in own and "watt" not in model.lower()):
+            continue
+        if str(watts) not in set(re.findall(r"\d+", own)) | set(re.findall(r"\d+", model)):
+            continue
+        is_exact = own == "%d watt" % watts
+        key = (is_exact, _norm_key(model), str(e.get("production_size") or ""))
+        if key not in seen:
+            seen.add(key)
+            (exact if is_exact else ranged).append(e)
+    return exact or ranged
+
+
+def _projector_size(o: dict, cache: dict) -> dict:
+    """What a With Projector gobo on order `o` is cut at (Cameron, 2026-10-02):
+    the size of the projector on the same order. {"size", "note", "entry"} when
+    every projector on the order agrees; otherwise {"reason"}, the CHECK the
+    label prints, with "fix" when a size rule would settle it: the (maker,
+    model) of a wattage the size list has no row for."""
+    lines = [li for li in (o.get("line_items") or []) if _line_qty(li) > 0]
+    # An upgrade changes which projector the customer gets ("Projector
+    # Upgrade", "80 Watt to 200 Watt"): which size is for a person to say.
+    if any(not _line_has_model(li) and re.search(r"\bupgrade\b", str(li.get("title") or "") + " "
+                                                 + str(li.get("variant_title") or ""), re.I) for li in lines):
+        return {"reason": "Sold with a projector, and this order upgrades one: check which size"}
+    watts = set()
+    for li in lines:
+        w = _projector_watts(li)
+        if not w:
+            continue
+        # Our rows are for our projectors. Another maker's (an Evica GP10 is
+        # 22.5, not our 10 Watt's 37.5) is for a person to size.
+        maker = _gobo_split_maker(str(li.get("title") or ""), cache)[0]
+        if maker and _norm_key(maker) != "projected image":
+            return {"reason": "Sold with a projector by %s: check its size" % maker}
+        watts.add(w)
+    watts = sorted(watts)
+    if not watts:
+        return {"reason": "Sold with a projector, but no projector is on this order"}
+    domain = _order_email_domain(o)
+    sizes, entry, by_domain = set(), None, False
+    for w in watts:
+        # A size the size check set for this customer on the wattage itself.
+        mine = _gobo_domain_size("Projected Image", "%d Watt" % w, None, domain, cache=cache)
+        if mine:
+            sizes.add(mine)
+            by_domain = True
+            continue
+        got = set()
+        for e in _projector_entries(w, cache):
+            d = _gobo_domain_size(e["manufacturer"], e["model"], e, domain, cache=cache)
+            by_domain = by_domain or bool(d)
+            got.add(d or str(e.get("production_size") or ""))
+            entry = entry or e
+        if not got or "" in got:
+            return {"reason": "No size list row for the %d Watt projector on this order" % w,
+                    "fix": ("Projected Image", "%d Watt" % w)}
+        if len(got) > 1:
+            # The size list's own clash: a rule on the wattage settles it.
+            return {"reason": "The size list gives the %d Watt projector two sizes" % w,
+                    "fix": ("Projected Image", "%d Watt" % w)}
+        sizes |= got
+    names = [str(w) for w in watts]
+    named = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    if len(sizes) > 1:
+        return {"reason": "Sold with a projector: this order has %s Watt projectors, cut at different sizes" % named}
+    if by_domain:
+        note = "Size for this customer"
+    else:
+        note = "For the %s Watt projector%s on this order" % (named, "" if len(watts) == 1 else "s")
+        if entry and entry.get("review"):
+            note += ". " + entry["review"]
+    return {"size": sizes.pop(), "note": note, "entry": entry}
+
+
 UNPROCESSED_TAG = os.environ.get("UNPROCESSED_TAG", "Unprocessed")
 MADE_TAG = os.environ.get("MADE_TAG", "PC")
 PROPOSAL_HOST = os.environ.get("PROPOSAL_HOST", "quote.projectedimage.com")
@@ -6824,6 +6948,7 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
     cache = cache or _gobo_sizes()   # one sheet snapshot for the whole order
     proposal_url, note_clean = _extract_proposal(str(o.get("note") or "").strip())
     items = []
+    with_projector = None   # what a With Projector gobo is cut at, worked out once
     for li in (o.get("line_items") or []):
         if _label_skip_item(str(li.get("title") or li.get("name") or "")):
             continue
@@ -6832,12 +6957,19 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
             continue    # refunded or edited off the order: nothing to make
         mfr = _strip_price(_item_prop(li, "Manufacturer"))
         model = _strip_price(_item_model(li, mfr))
+        # A projector or a projector accessory (a rain hood, a lens, a bundle)
+        # is not cut: it prints by name, with no size and no CHECK, and uses no
+        # glass (Cameron, 2026-10-02). #104453 printed its 40 Watt as a second
+        # "CHECK No model specified" the bench could not tell from the gobo's.
+        ptype = str((types or {}).get(li.get("product_id")) or "").strip().lower()
+        projector = not mfr and not model and (ptype == PROJECTOR_TYPE or bool(_projector_watts(li)))
+        sold_with = not mfr and not model and not projector and _sold_with_projector(li)
         # A model ruled not a gobo (Resolve, in the Size check) is not cut:
         # no size and no CHECK, printed by its name as a stock gobo is, with a
         # line saying why. The lookup does not read those rulings, and its
         # word-run step found a neighbouring row: Chauvet Rogue R2 Spot Metal,
         # ruled not a gobo, printed 26.5, the Rogue R2 Spot's size.
-        not_gobo = bool(model) and (_norm_key(mfr), _norm_key(model)) in (cache.get("excludes") or set())
+        not_gobo = projector or (bool(model) and (_norm_key(mfr), _norm_key(model)) in (cache.get("excludes") or set()))
         entry, reason = (None, "") if not_gobo else _gobo_lookup(mfr, model, cache=cache)
         dsize = None if not_gobo else _gobo_domain_size(mfr, model, entry, domain, cache=cache)
         title = str(li.get("title") or li.get("name") or "Item").strip()
@@ -6848,9 +6980,30 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
         # from Smoke & Mirrors. A stock gobo that DOES name its fixture (the
         # wedding gobos do) still goes through the lookup and keeps its size;
         # an unknown product type keeps the CHECK, which is the safe side.
-        stock = str((types or {}).get(li.get("product_id")) or "").strip().lower() == STOCK_GOBO_TYPE
+        stock = ptype == STOCK_GOBO_TYPE
         if stock and not model:
             entry, reason, dsize = None, "", None
+        size = dsize or (entry["production_size"] if (entry and not reason) else "")
+        size_note = ("Not a gobo" if not_gobo else "Size for this customer" if dsize
+                     else (entry["review"] if entry and entry["production_size"] and entry["review"] else ""))
+        why = "" if dsize else (reason or "")
+        if projector:
+            # The variant says which projector or accessory ("40W with Rain
+            # Hood", "B Size Glass Gobo Holder"), on the line under the name,
+            # which wraps; a bare wattage only repeats the title.
+            variant = str(li.get("variant_title") or "").strip()
+            size, why = "", ""
+            size_note = ("" if not variant or _norm_key(variant) == "default title"
+                         or re.fullmatch(r"\d+\s*w(att)?", variant, re.I) else variant)
+        elif sold_with:
+            # Cut for the projector on the same order; two projector sizes,
+            # or none, is for a person to decide, and the CHECK says which.
+            if with_projector is None:
+                with_projector = _projector_size(o, cache)
+            entry = with_projector.get("entry")
+            size = with_projector.get("size") or ""
+            size_note = with_projector.get("note") or ""
+            why = with_projector.get("reason") or ""
         items.append({
             "title": title,
             "artwork": ("" if _norm_key(title) in _GENERIC_TITLES else title),
@@ -6861,12 +7014,12 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
             "model": model,
             "glass_type": _item_glass(li),
             "price": str(li.get("price") or ""),
-            "production_size": dsize or (entry["production_size"] if (entry and not reason) else ""),
-            "size_note": ("Not a gobo" if not_gobo else "Size for this customer" if dsize
-                          else (entry["review"] if entry and entry["production_size"] and entry["review"] else "")),
-            "review_reason": "" if dsize else (reason or ""),
+            "production_size": size,
+            "size_note": size_note,
+            "review_reason": why,
             "stock": stock,
             "not_gobo": not_gobo,
+            "projector": projector,
         })
     return {
         "id": o.get("id"),
@@ -9087,7 +9240,7 @@ async def run_missing_production(registry: dict, tag: Optional[str] = None) -> d
             if _label_skip_item(str(li.get("title") or li.get("name") or "")):
                 continue
             mfr = _strip_price(_item_prop(li, "Manufacturer"))
-            if mfr or _item_model(li, mfr):
+            if mfr or _item_model(li, mfr) or _with_projector_variant(li):
                 gobo += 1
         if not gobo:
             continue
@@ -9772,13 +9925,38 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
     sheet = _gobo_sizes()   # one snapshot for the whole scan
     items_seen = gobo_items = sized = no_model = ruled_out = 0
     flagged: dict = {}
+    def flag(o, oname, mfr, model, reason, order_problem=False):
+        f = flagged.setdefault((mfr, model, reason), {"manufacturer": mfr, "model": model or "(blank)",
+                                                      "reason": reason, "count": 0, "orders": []})
+        if order_problem:
+            # Not a gap in the size list: the order itself has to be looked at,
+            # so the page offers no size rule for it.
+            f["order_problem"] = True
+        f["count"] += 1
+        if oname not in [x["name"] for x in f["orders"]] and len(f["orders"]) < 3:
+            f["orders"].append({"name": oname, "admin_url": _admin_order_url(o.get("id"))})
+
     for o in orders:
         oname = str(o.get("name") or "").strip() or ("#" + str(o.get("order_number") or ""))
         domain = _order_email_domain(o)
+        with_projector = None
         for li in (o.get("line_items") or []):
             items_seen += 1
             mfr = _strip_price(_item_prop(li, "Manufacturer"))
             model = _strip_price(_item_model(li, mfr))
+            if not model and not mfr and _sold_with_projector(li):
+                # A gobo sold with a projector names no fixture but is a gobo,
+                # sized by the projector on its order exactly as its label is.
+                gobo_items += 1
+                if with_projector is None:
+                    with_projector = _projector_size(o, sheet)
+                if with_projector.get("size"):
+                    sized += 1
+                else:
+                    fix = with_projector.get("fix")
+                    flag(o, oname, *(fix or ("", "Sold with a projector")), with_projector["reason"],
+                         order_problem=not fix)
+                continue
             if not model and not mfr:
                 # No gobo options at all: an accessory or plain product, not a miss.
                 no_model += 1
@@ -9796,12 +9974,7 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
             if not reason:
                 sized += 1
                 continue
-            key = (mfr, model, reason)
-            f = flagged.setdefault(key, {"manufacturer": mfr, "model": model or "(blank)",
-                                         "reason": reason, "count": 0, "orders": []})
-            f["count"] += 1
-            if oname not in [x["name"] for x in f["orders"]] and len(f["orders"]) < 3:
-                f["orders"].append({"name": oname, "admin_url": _admin_order_url(o.get("id"))})
+            flag(o, oname, mfr, model, reason)
     rows = sorted(flagged.values(), key=lambda r: -r["count"])[:100]
     return {"orders_scanned": len(orders), "items_seen": items_seen,
             "gobo_items": gobo_items, "sized": sized,

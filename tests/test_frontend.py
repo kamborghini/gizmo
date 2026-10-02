@@ -3980,7 +3980,7 @@ def t_the_size_alert_leads_to_the_thing_that_fixes_it():
 @test
 def t_the_resolve_button_is_hidden_when_the_server_would_refuse_it():
     """A button that always errors is worse than no button."""
-    ok("if (sizeRulesCanEdit)" in SCRIPT, "the action is gated on the grant")
+    ok(re.search(r"if \(sizeRulesCanEdit(\)| && )", SCRIPT), "the action is gated on the grant")
     ok("let sizeRulesCanEdit = false" in SCRIPT,
        "defaulting to hidden, so a failed permission read does not offer it")
     ok("function loadSizeRulePerm(" in SCRIPT
@@ -9180,6 +9180,23 @@ def t_the_app_wide_layout_sweep_holds():
     body = fn_src("function bodyToNodes(")
     ok("mdTableRule(lines[i + 1].trim())" in body and "pipeTable(rows)" in body, "a Markdown table in a report is a table")
     ok("else if (connQuar && !connQuar.length) qHost.append(" in SCRIPT, "an empty quarantine list says so")
+
+
+@test
+def t_the_day_sheet_leaves_projectors_out_and_says_so():
+    """A projector or accessory is not glass to cut (order #104453): the day
+    sheet does not count it as a CHECK it cannot resolve, and says how many it
+    left out. The coverage card offers a size rule only for a gap in the size
+    list, never for an order that has no projector on it."""
+    ok("function printDaySheet(" in SCRIPT, "the day sheet exists")
+    body = fn_src("function printDaySheet(")
+    ok("if (it.projector) {" in body and "if (it.not_gobo)" in body
+       and body.index("if (it.projector) {") < body.index("if (it.not_gobo)"),
+       "projectors are taken out before anything else is counted")
+    ok("projector or accessory" in body and "projectors or accessories" in body,
+       "and the sheet says how many it left out")
+    cov = SCRIPT[SCRIPT.index("const fix = el('button', 'btn btn-sm', 'Resolve');") - 400:][:600]
+    ok("!r.order_problem" in cov, "Resolve is offered only for a gap in the size list")
 
 
 if __name__ == "__main__":

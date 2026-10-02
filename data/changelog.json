@@ -1,6 +1,27 @@
 {
  "releases": [
   {
+   "date": "2026-10-02",
+   "title": "Gobos sold with a projector",
+   "items": [
+    {
+     "kind": "fixed",
+     "text": "A gobo sold with a projector now prints the size of the projector on the same order, with a line under it saying so, instead of CHECK No model specified. A 40 Watt or an 80 Watt is cut at 53.3, as the size list says. When the order has projectors cut at two different sizes, no projector at all, another maker's projector, or a projector upgrade, the label says CHECK and says which.",
+     "tab": "labels"
+    },
+    {
+     "kind": "fixed",
+     "text": "Projectors, rain hoods, lenses and other projector accessories print on the production label by name, with no size and no CHECK, and with what was chosen, such as a rain hood, on the line under the name. Before, each printed a second CHECK row the bench could not tell from the gobo's. They are left out of the day sheet's cut list, which says how many it left out, and are not counted as glass used.",
+     "tab": "labels"
+    },
+    {
+     "kind": "fixed",
+     "text": "The size check counts gobos sold with a projector, and the check for paid orders that never reached production counts them too. A projector size missing from the size list can be settled in the size check as any other model can.",
+     "tab": "labels"
+    }
+   ]
+  },
+  {
    "date": "2026-09-30",
    "title": "No blank page after each label",
    "items": [

@@ -6130,6 +6130,208 @@ def t_a_stock_gobo_prints_its_name_not_a_check():
 
 
 @test
+def t_a_gobo_sold_with_a_projector_is_cut_for_that_projector():
+    """Order #104453 printed "1x CHECK No model specified on this item" twice:
+    once for a "Single Colour Glass Original With Projector" gobo, which the
+    Quote Engine sells with no fixture because its fixture is the projector on
+    the same order, and once for the projector itself, which is not a gobo. A
+    flagged row drops the item's name, so the bench could not tell them apart.
+
+    Cameron's rulings (2026-10-02): a projector or accessory prints by name with
+    no CHECK and uses no glass; a With Projector gobo is cut for the projector on
+    its order, through the Projected Image row in the size list that names its
+    wattage; two projector sizes, or none, is a CHECK that says so; a plain
+    fixture-less custom gobo keeps its CHECK."""
+    sheet = copilot._gobo_sizes()
+    ok(any(r[0] == "projected image" for r in sheet.get("rows") or []),
+       "the size list has its Projected Image rows")
+    def gobo(**kw):
+        li = {"title": "Custom Gobos", "quantity": 1, "product_id": 900, "properties": [],
+              "sku": "SCGOWPIH", "variant_title": "Single Colour Glass Original With Projector (Quote) / IH",
+              "name": "Custom Gobos - Single Colour Glass Original With Projector (Quote) / IH"}
+        li.update(kw)
+        return li
+    def proj(title, sku, variant=None, qty=1, pid=901):
+        return {"title": title, "quantity": qty, "product_id": pid, "properties": [], "sku": sku,
+                "variant_title": variant, "name": title + (" - " + variant if variant else "")}
+    def shape(*lines, types=None, email="buyer@acme.co.uk"):
+        o = {"id": 1, "name": "#104453", "order_number": 104453, "note": "", "tags": "Unprocessed",
+             "email": email, "line_items": list(lines)}
+        return copilot._shape_label_order(o, {}, cache=copilot._gobo_sizes(), types=types)["items"]
+    types = {900: "Custom Gobos", 901: "Projector", 902: "Projector", 903: "Projector"}
+
+    # #104453 itself: a With Projector gobo and a 40 Watt weatherproof.
+    g, p = shape(gobo(), proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W"), types=types)
+    eq((g["production_size"], g["review_reason"], g["glass_type"]), ("53.3", "", "Colour - Original"),
+       "the gobo is cut for the 40 Watt on its order (40/80 Watt Range)")
+    eq(g["size_note"], "For the 40 Watt projector on this order", "and the label says why that size")
+    eq((p["review_reason"], p["production_size"], p["artwork"]),
+       ("", "", "Projected Image 40 Watt LED Weatherproof Gobo Projector"),
+       "the projector prints by name, with no CHECK and no size")
+    ok(p["projector"] is True and p["not_gobo"] is True, "it is marked a projector, and not a gobo")
+    eq(copilot._usage_lines({"items": [g, p]}), [{"size": "53.3", "family": "Colour", "qty": 1}],
+       "only the gobo uses glass: the projector is neither a blank nor a CHECK line")
+
+    # #104196: the projector's variant says it comes with a rain hood.
+    g, _p = shape(gobo(), proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W-Unit+RH",
+                               "40W with Rain Hood"), types=types)
+    eq(g["production_size"], "53.3", "a projector sold with its rain hood is still a 40 Watt")
+    # #103962: eight 20 Watt projectors and their gobos.
+    g, _p = shape(gobo(quantity=8), proj("Projected Image 20 Watt LED Gobo Projector", "P220", qty=8), types=types)
+    eq((g["production_size"], g["quantity"]), ("37.5", 8), "20 Watt Range")
+    # #104156: four 200 Watt, an original and three copies.
+    o2, c3, _p = shape(gobo(), gobo(quantity=3, sku="SCGCWPIH",
+                                    variant_title="Single Colour Glass Copy With Projector (Quote) / IH"),
+                       proj("Projected Image 200 Watt LED Weatherproof Gobo Projector", "P107W-200W+RH",
+                            "200W with Rain Hood", qty=4), types=types)
+    eq((o2["production_size"], c3["production_size"], c3["glass_type"]), ("66", "66", "Colour - Copy"),
+       "150/200 Watt Range, originals and copies alike")
+    # A 40 and an 80 on one order are both 53.3: nothing to ask.
+    g, _a, _b = shape(gobo(), proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W"),
+                      proj("Projected Image 80 Watt LED Weatherproof Gobo Projector", "P103W", pid=902),
+                      types=types)
+    eq((g["production_size"], g["size_note"]), ("53.3", "For the 40 and 80 Watt projectors on this order"),
+       "two wattages cut at the same size agree")
+
+    # #104204: an 80 Watt and a 200 Watt, which are cut at different sizes.
+    g, _a, _b = shape(gobo(), proj("Projected Image 200 Watt LED Weatherproof Gobo Projector", "P107W", "200W"),
+                      proj("Projected Image 80 Watt LED Weatherproof Gobo Projector", "P103W", "80W", pid=902),
+                      types=types)
+    eq((g["production_size"], g["review_reason"]),
+       ("", "Sold with a projector: this order has 80 and 200 Watt projectors, cut at different sizes"),
+       "two sizes on one order is a person's decision, and the CHECK says which two")
+    # #104375: the projector was on another order.
+    (g,) = shape(gobo(properties=[{"name": "Item Notes", "value": "20 Watt Projector\nOrder #104349"}]), types=types)
+    eq(g["review_reason"], "Sold with a projector, but no projector is on this order",
+       "no projector on the order is a CHECK that says so")
+    # A projector the size list has no row for.
+    g, _p = shape(gobo(), proj("Projected Image 300 Watt LED Weatherproof Gobo Projector", "P300", pid=903),
+                  types=types)
+    eq(g["review_reason"], "No size list row for the 300 Watt projector on this order",
+       "a wattage with no row is a CHECK naming it")
+    # A refunded projector is not on the order any more.
+    (g,) = shape(gobo(), dict(proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W"),
+                              current_quantity=0), types=types)
+    eq(g["review_reason"], "Sold with a projector, but no projector is on this order",
+       "a projector refunded off the order does not size its gobo")
+
+    # Rain hoods and lenses name wattages but are not projectors.
+    g, hood = shape(gobo(), proj("Weatherproof Rain Hood (40W & 80W)", "RH4080", pid=902), types=types)
+    eq(g["review_reason"], "Sold with a projector, but no projector is on this order",
+       "a rain hood's wattages do not size a gobo")
+    eq((hood["review_reason"], hood["projector"], hood["artwork"]), ("", True, "Weatherproof Rain Hood (40W & 80W)"),
+       "and the hood, typed Projector, prints by name")
+
+    # Another maker's projector is not sized from our rows: the Evica GP10 is
+    # 22.5 in the size list, not the 37.5 of our 10 Watt.
+    g, ev = shape(gobo(), proj("Evica GP10 - 10 watt LED Gobo Projector", "P100"), types=types)
+    eq((g["production_size"], g["review_reason"]), ("", "Sold with a projector by Evica: check its size"),
+       "a projector by another maker is a CHECK naming the maker, never our size")
+    eq((ev["review_reason"], ev["projector"]), ("", True), "and the Evica itself prints by name")
+    # An upgrade changes which projector the customer gets: an 80 Watt
+    # upgraded to a 200 Watt is cut at 66, not 53.3.
+    g, _p, up = shape(gobo(), proj("Projected Image 80 Watt LED Weatherproof Gobo Projector", "P103W"),
+                      proj("Projector Upgrade", "Projector Upgrade - 80 Watt to 200 Watt", "80 Watt to 200 Watt",
+                           pid=902), types=types)
+    eq((g["production_size"], g["review_reason"]),
+       ("", "Sold with a projector, and this order upgrades one: check which size"),
+       "an upgrade on the order is a person's decision")
+    eq((up["artwork"], up["size_note"]), ("Projector Upgrade", "80 Watt to 200 Watt"),
+       "and the upgrade prints by name, its variant under it")
+    # A projector's variant goes under its name, where it can wrap; a bare
+    # wattage repeating the title does not.
+    _g, hooded = shape(gobo(), proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W-Unit+RH",
+                                    "40W with Rain Hood"), types=types)
+    eq((hooded["artwork"], hooded["size_note"]),
+       ("Projected Image 40 Watt LED Weatherproof Gobo Projector", "40W with Rain Hood"),
+       "a projector sold with its hood says so under its name")
+    _g, bare = shape(gobo(), proj("Projected Image 80 Watt LED Weatherproof Gobo Projector", "P103W", "80W"),
+                     types=types)
+    eq(bare["size_note"], "", "a variant that only repeats the wattage is left off")
+    (holder,) = shape(proj("Gobo Holders", "Allholders-B Size Glass Gobo Holder", "B Size Glass Gobo Holder",
+                           pid=902), types=types)
+    eq((holder["artwork"], holder["size_note"], holder["review_reason"]),
+       ("Gobo Holders", "B Size Glass Gobo Holder", ""), "a holder says which holder")
+
+    # A plain custom gobo with no fixture keeps its CHECK (Cameron: only the
+    # With Projector variant says it is for that projector).
+    plain, _p = shape(gobo(sku="SCGO", variant_title="Single Colour Glass Original (Quote) / IH",
+                           name="Custom Gobos - Single Colour Glass Original (Quote) / IH"),
+                      proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W"), types=types)
+    eq(plain["review_reason"], "No model specified on this item", "a plain gobo keeps its CHECK")
+    # A With Projector gobo that names its own fixture is sized by it.
+    own, _p = shape(gobo(properties=[{"name": "Manufacturer", "value": "Robe"}, {"name": "Model", "value": "Forte"}]),
+                    proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W"), types=types)
+    eq(own["production_size"], "30.8", "its own fixture wins over the projector")
+
+    # The old quote machine: the projector typed Custom Gobos, named in its variant.
+    g, p = shape(gobo(), {"title": "Outdoor Gobo Projectors", "quantity": 1, "product_id": 904, "properties": [],
+                          "sku": None, "variant_title": "Projected Image 80 Watt LED Weatherproof Gobo Projector (Quote) / Rolls Royce",
+                          "name": "Outdoor Gobo Projectors - Projected Image 80 Watt LED Weatherproof Gobo Projector (Quote) / Rolls Royce"},
+                 types={900: "Custom Gobos", 904: "Custom Gobos"})
+    eq((g["production_size"], p["review_reason"], p["projector"]), ("53.3", "", True),
+       "a projector named in its variant counts, and prints by name")
+    eq(p["size_note"], "Projected Image 80 Watt LED Weatherproof Gobo Projector (Quote) / Rolls Royce",
+       "with the variant that says which projector, since its title does not")
+    # #103894: that machine wrote the gobo's own fixture into a Note nothing
+    # reads, and it named a B Size beside a 20 Watt. Not cut against it.
+    noted, _p = shape(gobo(properties=[{"name": "Note", "value": "Projection Type: Front\nManufacturer: Standard\n"
+                                                                 "Standard Models: B Size"}]),
+                      proj("Projected Image 20 Watt LED Gobo Projector", "P220"), types=types)
+    eq(noted["review_reason"], "No model specified on this item",
+       "a gobo whose old Note names a fixture keeps its CHECK rather than be sized against it")
+    # Without types (an older caller) a projector is still read from its name.
+    g, p = shape(gobo(), proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W"))
+    eq((g["production_size"], p["review_reason"]), ("53.3", ""), "the name alone is enough")
+
+    # A size for one customer applies through the projector's row too.
+    cache = copilot._gobo_sizes()
+    saved = list(cache["domain_rules"])
+    try:
+        cache["domain_rules"].append({"key": ("projected image", "40/80 watt range"), "domain": "acme.co.uk",
+                                      "size": "52", "manufacturer": "Projected Image", "model": "40/80 Watt Range"})
+        g, _p = shape(gobo(), proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W"), types=types)
+        eq((g["production_size"], g["size_note"]), ("52", "Size for this customer"),
+           "a size ruled for this customer's domain wins, as for any gobo")
+    finally:
+        cache["domain_rules"][:] = saved
+
+
+@test
+def t_coverage_counts_gobos_sold_with_a_projector():
+    """The coverage report counted a With Projector gobo as an accessory, so its
+    CHECK never showed there. It is a gobo: sized when the projector on its order
+    sizes it, flagged with the label's own reason when not, and only a missing
+    size list row can be settled with a size rule."""
+    gobo = {"title": "Custom Gobos", "quantity": 1, "product_id": 900, "properties": [], "sku": "SCGOWPIH",
+            "variant_title": "Single Colour Glass Original With Projector (Quote) / IH"}
+    p40 = {"title": "Projected Image 40 Watt LED Weatherproof Gobo Projector", "quantity": 1, "product_id": 901,
+           "properties": [], "sku": "P102W", "variant_title": None}
+    p300 = dict(p40, title="Projected Image 300 Watt LED Weatherproof Gobo Projector", sku="P300")
+    orders = [{"id": 1, "name": "#104453", "line_items": [gobo, p40]},
+              {"id": 2, "name": "#104375", "line_items": [gobo]},
+              {"id": 3, "name": "#104999", "line_items": [gobo, p300]}]
+    async def tj(registry, name, args):
+        if name == "shopify_list_orders":
+            return {"orders": orders}
+        return await fake_tool_json(registry, name, args)
+    copilot._tool_json = tj
+    try:
+        r = run_async(copilot.run_label_coverage({}, 10))
+    finally:
+        copilot._tool_json = fake_tool_json
+    eq((r["gobo_items"], r["sized"], r["skipped_no_model"]), (3, 1, 2),
+       "three gobos, one sized by its projector; the two projectors are accessories")
+    by = {f["orders"][0]["name"]: f for f in r["flagged"]}
+    eq((by["#104375"]["model"], by["#104375"]["reason"], by["#104375"].get("order_problem")),
+       ("Sold with a projector", "Sold with a projector, but no projector is on this order", True),
+       "an order with no projector is flagged as the order's problem, not the size list's")
+    eq((by["#104999"]["manufacturer"], by["#104999"]["model"], by["#104999"].get("order_problem", False)),
+       ("Projected Image", "300 Watt", False),
+       "a wattage with no row is the size list's gap, settled with a size rule like any model")
+
+
+@test
 def t_the_push_lines_match_the_day_sheet_resolution():
     # One resolver feeds both, so the stock app and the printed day sheet can
     # never disagree about what a day's making consumed.
@@ -24088,6 +24290,95 @@ def t_the_missing_check_reads_every_open_order():
         eq(res["checked"], 261, "every open order is read")
         eq([m["name"] for m in res["missing"]], ["#1"], "and the oldest untagged one is found")
         eq(res["truncated"], False)
+    finally:
+        copilot._tool_json = saved
+
+
+@test
+def t_a_projector_wattage_is_settled_by_any_size_rule():
+    """The review of the #104453 change: the size check offers "Projected Image
+    | 300 Watt" for a projector the size list has no row for, and only one of
+    its three answers cleared the CHECK. A size, an alias to a row, and a size
+    for one customer must each settle it; and a row named for the wattage
+    itself wins over a range that includes it, so ruling "40 Watt" decides."""
+    def order(watts, email="buyer@acme.co.uk"):
+        return {"id": 1, "name": "#104999", "order_number": 104999, "note": "", "email": email, "line_items": [
+            {"title": "Custom Gobos", "quantity": 1, "product_id": 900, "properties": [], "sku": "SCGOWPIH",
+             "variant_title": "Single Colour Glass Original With Projector (Quote) / IH"},
+            {"title": "Projected Image %d Watt LED Weatherproof Gobo Projector" % watts, "quantity": 1,
+             "product_id": 901, "properties": [], "sku": "P%d" % watts}]}
+    def gobo_of(o):
+        return copilot._shape_label_order(o, {}, cache=copilot._gobo_sizes(),
+                                          types={900: "Custom Gobos", 901: "Projector"})["items"][0]
+    paths = {k: copilot.GOBO_RULE_FILES[k][1] for k in ("override", "alias")}
+    seeds = {k: open(copilot.GOBO_RULE_FILES[k][0], encoding="utf-8").read() for k in paths}
+    saved = {k: (open(p_, encoding="utf-8").read() if os.path.exists(p_) else None) for k, p_ in paths.items()}
+    def put(kind, line):
+        os.makedirs(os.path.dirname(paths[kind]), exist_ok=True)
+        with open(paths[kind], "w", encoding="utf-8") as fh:
+            fh.write(seeds[kind].rstrip("\n") + "\n" + line + "\n")
+        os.utime(paths[kind], (time.time() + 5, time.time() + 5))
+    def clear():
+        for kind, p_ in paths.items():
+            if os.path.exists(p_):
+                os.remove(p_)
+    try:
+        clear()
+        eq(gobo_of(order(300))["review_reason"], "No size list row for the 300 Watt projector on this order")
+        put("override", "Projected Image,300 Watt,,72")
+        g = gobo_of(order(300))
+        eq((g["production_size"], g["review_reason"]), ("72", ""), "a size settles it")
+        clear()
+        put("alias", "Projected Image,300 Watt,150/200 Watt Range")
+        g = gobo_of(order(300))
+        eq((g["production_size"], g["review_reason"]), ("66", ""), "so does pointing it at a row")
+        clear()
+        put("override", "Projected Image,300 Watt,acme.co.uk,70")
+        g = gobo_of(order(300))
+        eq((g["production_size"], g["size_note"]), ("70", "Size for this customer"),
+           "and a size for one customer settles it for that customer")
+        eq(gobo_of(order(300, email="someone@else.test"))["review_reason"],
+           "No size list row for the 300 Watt projector on this order", "but for nobody else")
+        clear()
+        put("override", "Projected Image,40 Watt,,50")
+        g = gobo_of(order(40))
+        eq((g["production_size"], g["review_reason"]), ("50", ""),
+           "a rule for the wattage itself wins over the range that includes it")
+        eq(gobo_of(order(80))["production_size"], "53.3", "and leaves the rest of the range alone")
+        # Two rows naming the same wattage at different sizes is the size
+        # list's own clash: the size check offers a rule on the wattage.
+        row = lambda model, size: ("projected image", tuple(copilot._loose_key(model).split()),
+                                   {"manufacturer": "Projected Image", "model": model,
+                                    "production_size": size, "review": ""})
+        clash = {"rows": [row("40/80 Watt Range", "53.3"), row("40 Watt Range Weatherproof", "50")],
+                 "domain_rules": [], "excludes": set()}
+        eq(copilot._projector_size(order(40), clash),
+           {"reason": "The size list gives the 40 Watt projector two sizes", "fix": ("Projected Image", "40 Watt")},
+           "a clash in the size list carries the rule that settles it")
+    finally:
+        clear()
+        for kind, text in saved.items():
+            if text is not None:
+                with open(paths[kind], "w", encoding="utf-8") as fh:
+                    fh.write(text)
+
+
+@test
+def t_the_missing_check_counts_a_gobo_sold_with_a_projector():
+    """An order whose only gobo is a With Projector one (#104375's shape) has a
+    gobo on it, so a paid order of that shape that never reached the bench is
+    reported like any other."""
+    o = _open_order(7)
+    o["line_items"] = [{"title": "Custom Gobos", "quantity": 1, "properties": [], "sku": "SCGOWPIH",
+                        "variant_title": "Single Colour Glass Original With Projector (Quote) / IH"}]
+    async def tools(registry, name, args):
+        if name == "shopify_list_orders":
+            return {"orders": [dict(o)] if not int(args.get("since_id") or 0) else []}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        res = run_async(copilot.run_missing_production({}))
+        eq([m["name"] for m in res["missing"]], ["#7"], "it is reported as missing from production")
     finally:
         copilot._tool_json = saved
 
