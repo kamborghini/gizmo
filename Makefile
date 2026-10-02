@@ -11,13 +11,15 @@
 #   make env-doc        regenerate docs/ENVIRONMENT.md from the code
 #   make lock           compile the exact pins (*.in) into the hashed lock files
 #   make ext-check      build and type-check the Shopify extensions (needs npm ci)
+#   make shopify-deploy stage a new app version on Shopify (needs npm ci; releases nothing)
+#   make shopify-release VERSION=reactor-NN   release a staged version to the store
 
 PY ?= .venv/bin/python
 
-.PHONY: help install run test test-frontend test-forecast sweep sast env-doc check lock ext-check
+.PHONY: help install run test test-frontend test-forecast sweep sast env-doc check lock ext-check shopify-deploy shopify-release
 
 help:
-	@sed -n '4,14p' Makefile
+	@sed -n '4,16p' Makefile
 
 # requirements.in and forecast/requirements-service.in hold the direct pins;
 # the .txt beside each is every package installed, transitive ones included,
@@ -79,3 +81,15 @@ ext-check:
 check: test-frontend test-forecast sweep sast ext-check
 	$(PY) tools/env_reference.py --check
 	$(PY) tests/test_dispatch.py
+
+# Shopify's own tool, at a version this repo names, so a new release of it
+# cannot change what a deploy sends (permissions, extensions, the webhook
+# version) without a commit here. 4.8.4 staged and released reactor-21 on
+# 2 October 2026. Review the pin when the api_versions move. Both open a
+# browser to sign in, so run them from a terminal.
+SHOPIFY = npx --yes @shopify/cli@4.8.4
+shopify-deploy:
+	$(SHOPIFY) app deploy --no-release
+shopify-release:
+	@test -n "$(VERSION)" || { echo "usage: make shopify-release VERSION=reactor-NN (the name shopify-deploy printed)"; exit 2; }
+	$(SHOPIFY) app release --version $(VERSION)

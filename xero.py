@@ -25,9 +25,14 @@ Token mechanics (Xero specifics that bite if forgotten):
   * the tenant id comes from GET /connections after consent and rides on every
     API call in the xero-tenant-id header.
 
-Rate limits: 60 calls/minute, 5000/day per tenant. The client self-paces under
-the minute limit and honours 429 Retry-After with a ceiling (the same rule as
-the Shopify layer: a sleep must never park the app for an hour).
+Rate limits, per organisation (tenant): 60 calls a minute and 5 at once on
+every tier; 1,000 calls a day on Starter, the tier new apps have had since
+2 March 2026, and 5,000 a day from Core up (Starter also allows only five
+connected organisations). The client self-paces under the minute limit and
+honours a minute 429's Retry-After with a ceiling (the same rule as the Shopify
+layer: a sleep must never park the app for an hour). A daily 429 is not
+retried: it asks for a wait of hours, so it is raised at once as XeroDailyLimit,
+in words a person can act on.
 """
 from __future__ import annotations
 
@@ -223,6 +228,20 @@ def consent_url(redirect_uri: str, state: str) -> str:
 # Waits between retries of the token endpoint. One entry per retry, so the
 # count of attempts and the patience between them are the same knob.
 RETRY_WAITS = (1.0, 2.0)
+
+
+class XeroDailyLimit(RuntimeError):
+    """Xero's calls for the day are used up for this organisation. Not
+    transient in the network sense and not a dead token: the advice is to wait,
+    and the wait runs to hours, so retrying only spends the rest of the sweep."""
+
+
+def _wait_words(seconds: float) -> str:
+    mins = max(1, round(seconds / 60))
+    if mins < 90:
+        return f"{mins} minute{'s' if mins != 1 else ''}"
+    hours = round(seconds / 3600)
+    return f"{hours} hour{'s' if hours != 1 else ''}"
 
 
 class XeroTransient(RuntimeError):
@@ -429,14 +448,24 @@ async def _get(path: str, params: Optional[dict] = None,
             continue
         if resp.status_code == 304:
             return {"_not_modified": True}
-        if resp.status_code == 429 and attempt < 3:
+        if resp.status_code == 429:
+            problem = (resp.headers.get("X-Rate-Limit-Problem") or "").strip().lower()
             try:
-                wait = min(float(resp.headers.get("Retry-After", "5")), 20.0)
+                after = float(resp.headers.get("Retry-After", "5"))
             except ValueError:
-                wait = 5.0
-            logger.warning("xero 429 on %s; backing off %.1fs", path, wait)
-            await asyncio.sleep(max(wait, 1.0))
-            continue
+                after = 5.0
+            # A daily 429 asks for hours: say so now rather than spend three
+            # retries on it. A minute's wait never runs past 60 seconds, so a
+            # long one marks the daily limit even if the header's wording moves.
+            if problem.startswith("da") or after > 300:
+                logger.warning("xero daily limit reached on %s (retry after %.0fs)", path, after)
+                raise XeroDailyLimit("Xero's daily limit for this organisation is used up; "
+                                     "it frees up in about " + _wait_words(after) + ".")
+            if attempt < 3:
+                wait = min(after, 20.0)
+                logger.warning("xero 429 on %s; backing off %.1fs", path, wait)
+                await asyncio.sleep(max(wait, 1.0))
+                continue
         if resp.status_code >= 500 and attempt < 3:
             await asyncio.sleep(min(2 ** attempt, 8))
             continue

@@ -80,6 +80,25 @@ for _src, _dst in ((os.path.join(os.path.dirname(__file__), "..", "data", "gobo-
 for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
     os.environ.pop(v, None)
 
+# The suite never reaches the network. Twenty tests did, quietly: Gmail syncs
+# posted their dummy refresh token to Google, the Settings status and the
+# customs quote asked the test store's real Shopify address, and a label test
+# fetched from the courier. Each passed only because the outside world answered
+# the way it happened to that day. Now every name lookup outside this machine
+# is refused before a connection exists, and the test that tried fails, naming
+# the host; a test that needs an outside answer gives itself one. Installed
+# before the app is imported, so even an import-time lookup is caught.
+import socket as _socket
+NET_REACHED = []
+_REAL_GETADDRINFO = _socket.getaddrinfo
+def _no_network(host, *a, **k):
+    h = host.decode() if isinstance(host, bytes) else str(host or "")
+    if h in ("localhost", "testserver", "::1") or h.startswith("127."):
+        return _REAL_GETADDRINFO(host, *a, **k)
+    NET_REACHED.append(h)
+    raise _socket.gaierror(_socket.EAI_NONAME, "the test suite does not reach the network: " + h)
+_socket.getaddrinfo = _no_network
+
 import jwt
 import server, copilot, worldoptions, pipedrive
 import xero as xero_api
@@ -254,6 +273,40 @@ copilot._install_checker = _install_unknown
 async def _customer_unknown(cid, email):
     return "unknown"
 copilot._customer_checker = _customer_unknown
+# Shopify's answer to the suite's dummy token is a refusal, and that is what the
+# two other readers the routes call on their own give back here: the Settings
+# permissions read (an error, never a scope reported missing) and the customs
+# tax id (empty, so the operator types it). Twelve tests asked the test store's
+# real address for these. A test that needs an answer sets its own.
+async def _scopes_refused(max_age=900.0):
+    return {"scopes": [], "missing": {}, "error": "Shopify refused the suite's dummy token"}
+copilot._scope_reader = _scopes_refused
+async def _tax_id_refused(order_id):
+    return {"tax_id": "", "source": "", "error": "Shopify refused the suite's dummy token"}
+copilot._tax_id_reader = _tax_id_refused
+# Google, likewise. The Gmail syncs that tests start post their dummy refresh
+# token to Google's token door, which refuses it; here that door gives the same
+# refusal word for word (asked once, 2 October 2026) and nothing else on Google
+# answers at all. Every Gmail and Search Console function stays real; a test
+# that wants Gmail to answer stubs _call or _token as before, and a test that
+# swaps httpx.AsyncClient for its own transport still wins.
+import httpx as _httpx
+import google_mail as _google_mail, google_data as _google_data
+def _google_offline(request):
+    if request.url.host == "oauth2.googleapis.com" and request.url.path == "/token":
+        return _httpx.Response(400, json={"error": "invalid_request",
+                                          "error_description": "Could not determine client ID from request."})
+    raise _httpx.ConnectError("the test suite does not reach " + request.url.host, request=request)
+class _RoutedHttpx:
+    """A module's httpx, with every AsyncClient it makes answered by one handler."""
+    def __init__(self, handler):
+        self._handler = handler
+    def __getattr__(self, name):
+        return getattr(_httpx, name)
+    def AsyncClient(self, *a, **k):
+        k.setdefault("transport", _httpx.MockTransport(self._handler))
+        return _httpx.AsyncClient(*a, **k)
+_google_mail.httpx = _google_data.httpx = _RoutedHttpx(_google_offline)
 APP_AUTH = {"session": "", "master": ""}
 MASTER_PW = "test-password-123"
 def ensure_auth():
@@ -2304,6 +2357,53 @@ def t_no_nillable_string_reaches_the_service_as_null():
         worldoptions._soap_call = saved
 
 @test
+def t_a_new_field_in_the_customs_blocks_shows_up_here():
+    """The test above walks the address, shipping and billing blocks against
+    the saved schema. The customs blocks, sent on international bookings only,
+    were not walked, and by October 2026 World Options had added four optional
+    strings to them (the receiver's EORI number, and three product ids on each
+    goods line) that no test noticed. Every nillable string in them is now sent
+    or named below as not sent, so the next one fails here, not on a booking.
+    Whether the new four should be sent is a question for World Options."""
+    NOT_SENT = {
+        "wsAddlShipmentDetail": {"DeliveryType", "TotalCalculatedValue", "ReceiverEORINumber"},
+        "wsAddlShipmentDetail.GoodsDetail": {"ManufacturerProductID", "MerchantProductID",
+                                             "StandardisedProductID"},
+    }
+    holder = {}
+    async def cap(service, action, inner, retryable=True):
+        holder["xml"] = inner
+        return ET.fromstring(BOOK_XML)
+    saved = worldoptions._soap_call; worldoptions._soap_call = cap
+    try:
+        customs = {"eori": "GB123456789000", "export_reason": "Sale", "trade_term": "DAP",
+                   "invoice_number": "#104239", "receiver_tax_id": "DE-TAX-1",
+                   "goods": [{"description": "Glass projection gobo", "quantity": 2,
+                              "unit_price": 62.5, "hs": "70200080", "country": "GB", "weight": 0.1}],
+                   "total_value": 125.0}
+        run(worldoptions.book({"service_type_code": "UPS_Express", "package_type_code": "UPS_My_Packaging",
+                               "carrier_name": "UPS"},
+                              {"postcode": "LS1 1AA", "country": "GB"},
+                              {"postcode": "10115", "country": "DE", "city": "Berlin"},
+                              [{"width": 20, "length": 15, "depth": 8, "weight": 0.6}], customs=customs))
+        x = holder["xml"]
+        blocks = {"wsAddlShipmentDetail": r"<wo:AdditionalShipmentDetail>(.*?)</wo:AdditionalShipmentDetail>",
+                  "wsAddlShipmentDetail.GoodsDetail":
+                      r"<ad:wsAddlShipmentDetail\.GoodsDetail>(.*?)</ad:wsAddlShipmentDetail\.GoodsDetail>"}
+        for tname, pattern in blocks.items():
+            body = re.search(pattern, x, re.S)
+            ok(body, tname + " is in the envelope")
+            fields = _xsd_nillable_strings(tname)
+            ok(fields, tname + " is in the saved schema")
+            for el in fields:
+                if el not in NOT_SENT[tname]:
+                    ok(re.search(r"<ad:%s>" % el, body.group(1)),
+                       tname + "." + el + " is neither sent nor named as deliberately not sent")
+            eq(NOT_SENT[tname] - set(fields), set(), tname + ": a name listed as not sent is in the schema")
+    finally:
+        worldoptions._soap_call = saved
+
+@test
 def t_the_merchant_pays_for_the_carriage_not_the_customer():
     # TransportationPayorTypes begins with Bill_To_Receiver, so saying nothing bills
     # the CUSTOMER for the shipping. It is stated explicitly on every booking.
@@ -2540,12 +2640,16 @@ def t_an_unfetchable_link_is_kept_not_lost():
     copilot._save_dispatch_labels(778, [{"type": "url", "value": "/GetLabel.ashx?id=9"}])
     async def dead_fetch(url):
         return {}
-    saved_fetch = worldoptions.fetch_label; worldoptions.fetch_label = dead_fetch
+    # The evidence panel asks the link what it answers; a dead link answers 404.
+    async def dead_link(url, timeout):
+        return 404, b"<html>Not Found</html>", url
+    saved = (worldoptions.fetch_label, worldoptions._get_label_bytes)
+    worldoptions.fetch_label, worldoptions._get_label_bytes = dead_fetch, dead_link
     try:
         r = post("/api/dispatch/label", {"order_id": 778})
         eq(r.json()["labels"][0]["type"], "url", "the link survives when the download fails")
     finally:
-        worldoptions.fetch_label = saved_fetch
+        worldoptions.fetch_label, worldoptions._get_label_bytes = saved
 
 @test
 def t_label_urls_only_fetch_from_world_options():
@@ -3093,6 +3197,41 @@ def t_the_locks_match_their_pins_and_carry_hashes():
             line = line.split("#")[0].strip()
             if line:
                 ok(re.match(r"^[A-Za-z0-9._-]+==\S+$", line), extra + " pins exactly: " + line)
+
+
+@test
+def t_node_is_chosen_in_one_place():
+    """CI ran whatever Node the runner image carried until the workflows named
+    one, and then each named it for itself. .nvmrc holds it now: every
+    setup-node step reads that file, and package.json's floor is the same."""
+    major = open(os.path.join(HERE, ".nvmrc")).read().strip()
+    ok(re.fullmatch(r"\d+", major), ".nvmrc holds a major version: %r" % major)
+    steps = 0
+    for wf in sorted(glob.glob(os.path.join(HERE, ".github", "workflows", "*.yml"))):
+        text = open(wf, encoding="utf-8").read()
+        name = os.path.basename(wf)
+        ok("node-version:" not in text, name + " names a Node version of its own")
+        eq(text.count("actions/setup-node@"), text.count("node-version-file: .nvmrc"),
+           name + ": every setup-node step reads .nvmrc")
+        steps += text.count("node-version-file: .nvmrc")
+    ok(steps >= 2, "the test job and the weekly audit both set Node up")
+    eq(json.load(open(os.path.join(HERE, "package.json")))["engines"]["node"], ">=" + major)
+
+
+@test
+def t_shopify_deploys_use_a_pinned_tool():
+    """A deploy sends the app's permissions, extensions and webhook version to
+    the store at once. Run as @latest, a new release of Shopify's tool could
+    change what it sends with nothing here changing, so the Makefile names
+    the version and its deploy only stages; releasing is its own step."""
+    mk = open(os.path.join(HERE, "Makefile"), encoding="utf-8").read()
+    ok(re.search(r"^SHOPIFY = npx --yes @shopify/cli@\d+\.\d+\.\d+$", mk, re.M),
+       "the Makefile pins an exact version of Shopify's tool")
+    deploy = mk.split("\nshopify-deploy:\n", 1)[1].split("\n", 1)[0]
+    ok("app deploy --no-release" in deploy, "and its deploy stages without releasing: " + deploy)
+    for f in ("README.md", "Makefile", "forecast/README.md"):
+        ok("@shopify/cli@latest" not in open(os.path.join(HERE, f), encoding="utf-8").read(),
+           f + " deploys with whatever version is newest")
 
 
 @test
@@ -4237,6 +4376,20 @@ def t_a_signed_order_event_retires_the_order_snapshot():
     eq(r.status_code, 200, r.text)
     ok(copilot._orders_epoch > before, "the snapshot was retired")
     ok(copilot._webhook_state["count"] >= 1, "and the event was counted")
+
+@test
+def t_settings_names_the_version_shopify_sends_order_events_in():
+    """The order subscriptions keep the Shopify version they were made with,
+    and nothing showed which: an old one only moves forward, silently, when
+    Shopify retires it. Each event says its version in a header; the last one
+    is kept and Settings shows it beside the time of the last event."""
+    copilot._webhook_seen.clear()
+    raw = json.dumps({"id": 3}).encode()
+    h = dict(wh_headers(raw, delivery="ev-version"), **{"X-Shopify-API-Version": "2026-10"})
+    eq(client.post("/webhooks/orders", content=raw, headers=h).status_code, 200)
+    eq(post("/api/status", {}).json()["webhooks"]["version"], "2026-10")
+    page = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    ok("', Shopify version ' + wh.version" in page, "and the Live updates row says it")
 
 @test
 def t_an_unsigned_or_missigned_event_is_refused():
@@ -5773,6 +5926,7 @@ def t_pipedrive_survey_names_what_would_not_survive_an_import():
             ("organizations", "v2"): {"data": []},
             ("activities", "v2"): {"data": [{"id": 5, "type": "site"}]},
             ("leads", "v1"): {"data": []},
+            ("leads/archived", "v1"): {"data": [{"id": "l1"}, {"id": "l2"}]},
         }
         async def fake_get(path, params=None, version="v2"):
             if path == "deals/archived":
@@ -5788,6 +5942,7 @@ def t_pipedrive_survey_names_what_would_not_survive_an_import():
             eq(j["account"]["company"], "Projected Image")
             eq(j["counts"]["deals"], 2)
             eq(j["counts"]["archived_deals"], 1, "the back catalogue is counted separately")
+            eq(j["counts"]["archived_leads"], 2, "and so are archived leads, which /v1/leads leaves out")
             warn = " ".join(j["warnings"])
             ok("2 pipelines are in use" in warn, warn)
             ok("more than one currency" in warn, warn)
@@ -16257,6 +16412,60 @@ def t_a_token_that_could_not_be_saved_retries_inside_xeros_grace():
 
 
 @test
+def t_xeros_daily_limit_is_said_at_once_not_retried():
+    """Xero allows 1,000 calls a day per organisation on its Starter tier and
+    5,000 above it. A daily 429 asks for a wait of hours: the client spent
+    three retries on it and then showed a bare 429 in the reconciliation notes.
+    It now says what happened, and when it clears, on the first answer."""
+    calls, answers = [], []
+    class _R:
+        def __init__(self, status, headers):
+            self.status_code, self.headers, self.content = status, headers, b"{}"
+        def json(self):
+            return {"Invoices": []}
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(self.status_code)
+    class _C:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, **kw):
+            calls.append(url)
+            return answers.pop(0)
+    async def _tok():
+        return "at"
+    async def _no_pace():
+        return None
+    saved = (xero_api.httpx.AsyncClient, xero_api._access_token, xero_api._pace)
+    xero_api.httpx.AsyncClient = lambda *a, **k: _C()
+    xero_api._access_token, xero_api._pace = _tok, _no_pace
+    try:
+        answers[:] = [_R(429, {"X-Rate-Limit-Problem": "day", "Retry-After": "18000"})]
+        try:
+            run(xero_api._get("Invoices"))
+            ok(False, "a daily 429 must raise")
+        except xero_api.XeroDailyLimit as e:
+            ok("daily limit" in str(e) and "about 5 hours" in str(e), str(e))
+            ok(len(str(e)) <= 120, "and fits the line the reconciliation notes show")
+        eq(len(calls), 1, "asked once, not retried")
+        # A long wait marks the daily limit even if the header's wording changes.
+        calls.clear(); answers[:] = [_R(429, {"Retry-After": "7200"})]
+        try:
+            run(xero_api._get("Invoices"))
+            ok(False, "a two-hour wait must raise")
+        except xero_api.XeroDailyLimit as e:
+            ok("about 2 hours" in str(e), str(e))
+        eq(xero_api._wait_words(600), "10 minutes")
+        # The minute limit is still waited out and retried.
+        calls.clear()
+        answers[:] = [_R(429, {"X-Rate-Limit-Problem": "minute", "Retry-After": "1"}), _R(200, {})]
+        eq(run(xero_api._get("Invoices")), {"Invoices": []})
+        eq(len(calls), 2, "one wait, then the answer")
+    finally:
+        xero_api.httpx.AsyncClient, xero_api._access_token, xero_api._pace = saved
+
+
+@test
 def t_a_failed_revocation_keeps_the_token_rather_than_stranding_it():
     """Deleting our only copy of a token Xero would not revoke leaves a live
     credential in their hands with nothing left to kill it with. Keep it, say
@@ -16602,6 +16811,48 @@ def t_every_oauth_token_file_is_written_private():
         eq(_gd._load_refresh_token(), "test-refresh-token", "and it did write")
     finally:
         _gd.OAUTH_TOKEN_PATH = real
+
+
+@test
+def t_a_google_connection_says_which_permission_was_left_unticked():
+    """Google's consent screen lets a person untick Search Console or Analytics
+    and still hands back a refresh token. The connection was saved as working
+    and the unticked side failed later with Google's 403. What was granted is
+    kept with the token now: the connect page and Settings say which side is
+    missing, that side is not offered as ready, and a connection granted
+    neither is not saved at all, since it could read nothing."""
+    gd = _google_data
+    real = (gd.OAUTH_TOKEN_PATH, gd.httpx, gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID)
+    gd.OAUTH_TOKEN_PATH = os.path.join(tempfile.mkdtemp(), "google_oauth.json")
+    gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID = "sc-domain:example.com", "123456789"
+    answer = {}
+    gd.httpx = _RoutedHttpx(lambda request: _httpx.Response(200, json=answer))
+    try:
+        answer.update(refresh_token="rt-1", access_token="at", scope=gd.SCOPES[0])
+        eq(run(gd.exchange_code("c", "https://app.test/cb")),
+           {"ok": True, "granted": {"gsc": True, "ga4": False}})
+        eq(gd.granted(), {"gsc": True, "ga4": False}, "kept with the token")
+        ok(gd.gsc_configured() and not gd.ga4_configured(), "only the granted side is ready")
+        eq(gd.status()["granted"], {"gsc": True, "ga4": False}, "and Settings is told")
+        # A connection made before this was kept reads exactly as it did.
+        gd.save_refresh_token("rt-old")
+        eq(gd.granted(), {"gsc": None, "ga4": None})
+        ok(gd.ga4_configured() and gd.gsc_configured(), "unknown is not refused")
+        # Granted neither: nothing is saved.
+        os.remove(gd.OAUTH_TOKEN_PATH)
+        answer.update(scope="openid")
+        eq(run(gd.exchange_code("c", "https://app.test/cb"))["ok"], False)
+        ok(not gd.oauth_connected(), "a connection that could read nothing is not kept")
+        # The connect page names the side left unticked.
+        answer.update(scope=gd.SCOPES[1])
+        copilot._oauth_states["st-ga4-only"] = time.time() + 60
+        page = client.get("/oauth/google/callback?state=st-ga4-only&code=c").text
+        ok("without Search Console" in page and "left unticked" in page, page[-500:])
+    finally:
+        gd.OAUTH_TOKEN_PATH, gd.httpx, gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID = real
+    page = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    ok("g.granted.ga4 === false" in page and "g.granted.gsc === false" in page,
+       "Settings' Google rows say which permission is missing")
 
 
 @test
@@ -25403,6 +25654,62 @@ def _opus_run(model, script, **kw):
 
 
 @test
+def t_each_request_takes_the_effort_its_model_accepts():
+    """Each tier's effort was capped at 'high' for any model not named Opus, on
+    a guess that xhigh and max are Opus only. Sonnet 5.5 takes the whole ladder,
+    so a Deep run on it was cut short; Opus 4.6 has max but not xhigh, so xhigh
+    on it was refused; Haiku 4.5 takes neither an effort nor adaptive thinking,
+    so every call on it failed over. Each request now fits what Anthropic's
+    Models API says its model accepts, asked once per model."""
+    import types as _types
+    def caps(efforts, adaptive=True):
+        return _types.SimpleNamespace(capabilities={
+            "effort": {"supported": bool(efforts),
+                       **{lvl: {"supported": lvl in efforts} for lvl in copilot._EFFORT_LADDER}},
+            "thinking": {"supported": True, "types": {"adaptive": {"supported": adaptive},
+                                                      "enabled": {"supported": True}}}})
+    table = {"claude-sonnet-5-5": caps(("low", "medium", "high", "xhigh", "max")),
+             "claude-opus-4-6": caps(("low", "medium", "high", "max")),
+             "claude-haiku-4-5": caps((), adaptive=False)}
+    asked = []
+    def send(model, **kw):
+        fake = _OpusFake([_OpusResp([_OpusBlock("text", text="ok")])])
+        async def retrieve(m):
+            asked.append(m)
+            if m not in table:
+                raise RuntimeError("the Models API is unreachable")
+            return table[m]
+        fake.models = _types.SimpleNamespace(retrieve=retrieve)
+        saved = copilot._spend_guard
+        copilot._spend_guard = lambda *a, **k: None
+        try:
+            _run(copilot._xcreate(fake, model=model, max_tokens=100,
+                                  messages=[{"role": "user", "content": "Order 1"}], **kw))
+        finally:
+            copilot._spend_guard = saved
+        return fake.calls[0]
+    copilot._MODEL_CAPS.clear()
+    try:
+        eq(send("claude-sonnet-5-5", output_config={"effort": "max"})["output_config"], {"effort": "max"},
+           "a Sonnet 5.5 Deep run keeps max")
+        eq(send("claude-opus-4-6", output_config={"effort": "xhigh"})["output_config"], {"effort": "high"},
+           "xhigh steps down to the next level a model has")
+        eq(send("claude-opus-4-6", output_config={"effort": "max"})["output_config"], {"effort": "max"})
+        h = send("claude-haiku-4-5", output_config={"effort": "high"}, thinking={"type": "adaptive"})
+        ok("output_config" not in h and "thinking" not in h, "Haiku is sent neither: %r" % h)
+        eq(asked.count("claude-opus-4-6"), 1, "each model is asked once")
+        eq(send("claude-sonnet-9", output_config={"effort": "max"})["output_config"], {"effort": "high"},
+           "with the Models API unreachable, the cautious rule as before")
+        mine = {"effort": "xhigh"}
+        send("claude-opus-4-6", output_config=mine)
+        eq(mine, {"effort": "xhigh"}, "and the request the caller built is not altered under it")
+        eq(copilot._effort_for("claude-sonnet-5-5", True), copilot.ANTHROPIC_EFFORT_DEEP,
+           "the tier's effort is asked for as configured")
+    finally:
+        copilot._MODEL_CAPS.clear()
+
+
+@test
 def t_opus_5_5_is_the_default_and_counted_at_its_price():
     src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
     ok('or "claude-opus-5-5"\n' in src and 'os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-5-5")' in src,
@@ -25981,8 +26288,12 @@ for fn in TESTS:
     # handful, which is what LOGIN_MAX_PER_MIN is sized for. The ceiling has
     # its own test rather than being weakened for everyone else's sake.
     copilot._login_hits.clear()
+    reached = len(NET_REACHED)
     try:
-        fn(); passed += 1; print(f"  PASS  {fn.__name__}")
+        fn()
+        if len(NET_REACHED) > reached:
+            raise AssertionError("reached the network: " + ", ".join(sorted(set(NET_REACHED[reached:]))))
+        passed += 1; print(f"  PASS  {fn.__name__}")
     except Exception as e:
         failed += 1; print(f"  FAIL  {fn.__name__}: {e}")
 print(f"\n{passed} passed, {failed} failed")

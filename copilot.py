@@ -408,16 +408,95 @@ def _pick_model(deep: bool) -> str:
 
 
 def _effort_for(model: str, deep: bool = False) -> str:
-    """The everyday effort, or Deep analysis's. effort 'max' and 'xhigh' are
-    Opus-tier only and 400 on Sonnet/Haiku - cap non-Opus models at 'high' so
-    the request never errors."""
-    return _cap_effort(model, ANTHROPIC_EFFORT_DEEP if deep else ANTHROPIC_EFFORT)
+    """The everyday effort, or Deep analysis's, as configured. What the model
+    behind it accepts is settled where every request goes out (_fit_to_model)."""
+    return ANTHROPIC_EFFORT_DEEP if deep else ANTHROPIC_EFFORT
 
 
 def _cap_effort(model: str, eff: str) -> str:
+    """The cautious rule, for when the Models API cannot be asked: xhigh and
+    max only on a model named Opus."""
     if "opus" not in (model or "").lower() and eff in ("max", "xhigh"):
         return "high"
     return eff
+
+
+# What each model accepts, from Anthropic's Models API, read once per model.
+# A hand-kept list of which model takes which effort went stale: it capped
+# every non-Opus model at high, so a Sonnet 5.5 Deep run was cut short, while
+# letting xhigh through to Opus 4.6, which has max but not xhigh, and sending
+# Haiku 4.5 an effort and adaptive thinking, neither of which it takes.
+_EFFORT_LADDER = ("low", "medium", "high", "xhigh", "max")
+_MODEL_CAPS: dict = {}            # model -> (asked_at, caps or None)
+_MODEL_CAPS_RETRY = 600.0         # a failed read is asked again after this
+
+
+async def _model_caps(client, model: str):
+    """{"efforts": (levels it takes, low to max), "adaptive": bool}, or None
+    when the Models API could not be asked (then the cautious rule applies)."""
+    now = time.monotonic()
+    hit = _MODEL_CAPS.get(model)
+    if hit and (hit[1] is not None or now - hit[0] < _MODEL_CAPS_RETRY):
+        return hit[1]
+    caps = None
+    try:
+        info = await client.models.retrieve(model)
+        c = info.capabilities
+        c = c.model_dump() if hasattr(c, "model_dump") else dict(c or {})
+        eff = c.get("effort") or {}
+        caps = {"efforts": tuple(lvl for lvl in _EFFORT_LADDER
+                                 if eff.get("supported") and (eff.get(lvl) or {}).get("supported")),
+                "adaptive": bool((((c.get("thinking") or {}).get("types") or {})
+                                  .get("adaptive") or {}).get("supported"))}
+    except Exception as e:
+        logger.info("model capabilities for %s unavailable (%s); using the cautious effort rule",
+                    model, type(e).__name__)
+    _MODEL_CAPS[model] = (now, caps)
+    return caps
+
+
+def _fit_effort(caps, model: str, eff: str):
+    """The effort to send: as asked if the model takes it, else the nearest
+    level below that it does, or none at all for a model that takes none."""
+    if caps is None:
+        return _cap_effort(model, eff)
+    have = caps["efforts"]
+    if not have:
+        return None
+    if eff in have:
+        return eff
+    want = _EFFORT_LADDER.index(eff) if eff in _EFFORT_LADDER else _EFFORT_LADDER.index("high")
+    below = [lvl for lvl in have if _EFFORT_LADDER.index(lvl) <= want]
+    return below[-1] if below else have[0]
+
+
+async def _fit_to_model(client, kwargs: dict) -> dict:
+    """kwargs as its model will accept them: the effort fitted, and adaptive
+    thinking dropped for a model without it. A new dict only when something
+    changes, so the caller's own request is never altered under it."""
+    oc = kwargs.get("output_config")
+    effort = oc.get("effort") if isinstance(oc, dict) else None
+    adaptive = (kwargs.get("thinking") or {}).get("type") == "adaptive"
+    if not effort and not adaptive:
+        return kwargs
+    model = str(kwargs.get("model") or "")
+    caps = await _model_caps(client, model)
+    out = kwargs
+    if effort:
+        fitted = _fit_effort(caps, model, effort)
+        if fitted != effort:
+            rest = {k: v for k, v in oc.items() if k != "effort"}
+            out = dict(kwargs)
+            if fitted:
+                out["output_config"] = {**rest, "effort": fitted}
+            elif rest:
+                out["output_config"] = rest
+            else:
+                out.pop("output_config")
+    if adaptive and caps is not None and not caps["adaptive"]:
+        out = dict(out) if out is kwargs else out
+        out.pop("thinking")
+    return out
 
 
 
@@ -3406,9 +3485,6 @@ async def _xcreate(client, **kwargs):
         alt["model"] = fb
         if _forces_tool(alt) and not _can_force_tool(fb):
             must = _unforce(alt)
-        oc = alt.get("output_config")
-        if isinstance(oc, dict) and oc.get("effort"):
-            alt["output_config"] = {**oc, "effort": _cap_effort(fb, oc["effort"])}
         try:
             resp = await _xcreate_once(client, alt)
         except anthropic.APIError as e2:
@@ -3445,6 +3521,7 @@ async def _xcreate_once(client, kwargs: dict):
     the big system prompt (profile + memory + skills + store knowledge) and the
     tool schemas are identical across the many rounds of a chat loop, so caching
     them stops the same tokens being bought again on every round."""
+    kwargs = await _fit_to_model(client, kwargs)
     est_in, est = _call_estimate(kwargs)
     _spend_guard(est)
     system = kwargs.get("system")
@@ -3787,7 +3864,7 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
         kwargs = {
             "model": model, "max_tokens": MAX_TOKENS, "system": system,
             "tools": all_tools, "messages": messages,
-            "output_config": {"effort": _cap_effort(model, effort) if effort else _effort_for(model)},
+            "output_config": {"effort": effort or _effort_for(model)},
         }
         if THINKING_MODE:  # adaptive thinking: deeper reasoning, model self-paces
             kwargs["thinking"] = {"type": THINKING_MODE}
@@ -5021,7 +5098,10 @@ _orders_epoch = 0             # bumped by every write that changes what a sweep 
 # late; the payload is treated purely as a trigger and never as state.
 # ---------------------------------------------------------------------------
 WEBHOOK_MAX_BYTES = 1024 * 1024        # a full order payload, with headroom
-_webhook_state = {"last_at": 0.0, "last_topic": "", "count": 0, "ensured": None}
+# version: the Shopify version the last event was sent in, from its own header.
+# The subscriptions keep the version they were made with, which nothing else
+# here shows, and an old one silently moves forward when Shopify retires it.
+_webhook_state = {"last_at": 0.0, "last_topic": "", "count": 0, "ensured": None, "version": ""}
 _webhook_seen: dict = {}               # delivery id -> monotonic time (dedupe)
 
 
@@ -19173,6 +19253,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _bust_orders()
         _webhook_state["last_at"] = time.time()
         _webhook_state["last_topic"] = str(request.headers.get("x-shopify-topic") or "")
+        _webhook_state["version"] = str(request.headers.get("x-shopify-api-version") or "")[:16]
         _webhook_state["count"] += 1
         try:
             # Deferred, so the whole-store scan never stalls the receiver (a
@@ -27284,12 +27365,24 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not code:
             return _oauth_page("Connection failed", "No authorization code returned.")
         try:
-            ok = await google_data.exchange_code(code, _redirect_uri(request))
+            got = await google_data.exchange_code(code, _redirect_uri(request))
         except Exception:
             logger.exception("Google OAuth exchange error")
-            ok = False
-        if not ok:
+            got = {"ok": False, "granted": {}}
+        granted = got.get("granted") or {}
+        names = {"gsc": "Search Console", "ga4": "Analytics"}
+        left = [names[k] for k in ("gsc", "ga4") if granted.get(k) is False]
+        if not got.get("ok"):
+            if granted and len(left) == len(names):
+                return _oauth_page("Nothing was linked",
+                                   "Search Console and Analytics were both left unticked on Google's "
+                                   "screen, so Reactor could read neither. Connect again and leave them ticked.")
             return _oauth_page("Connection failed", "Couldn't complete the connection. Please try again.")
+        if left:
+            kept = [n for k, n in names.items() if granted.get(k)]
+            return _oauth_page("✅ Connected to Google, without " + left[0],
+                               kept[0] + " is linked. " + left[0] + " was left unticked on Google's screen, "
+                               "so Reactor can't read it: connect again and leave it ticked.")
         return _oauth_page("✅ Connected to Google", "Search Console & Analytics are now linked. "
                            "You can close this tab and return to Reactor.")
 
@@ -27556,6 +27649,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             "webhooks": {"ok": bool((_webhook_state.get("ensured") or {}).get("ok")),
                          "detail": (_webhook_state.get("ensured") or {}).get("detail") or "",
                          "last_event_at": (_webhook_state["last_at"] or None),
+                         "version": _webhook_state.get("version") or None,
                          "events": _webhook_state["count"]},
             # The stock bridge: glass booked at the stock app when orders are
             # marked made. Pending = bookings still waiting on a retry.

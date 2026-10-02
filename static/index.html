@@ -22237,6 +22237,7 @@ Projected Image UK"></textarea>
             stat('Organisations', c.organizations, !c.orgs_complete);
             stat('Activities', c.activities, !c.activities_complete);
             stat('Leads', c.leads, !c.leads_complete);
+            stat('Archived leads', c.archived_leads, !c.archived_leads_complete);
             stat('Pipelines', c.pipelines);
             stat('Users', c.users);
             host.append(grid);
@@ -22289,7 +22290,8 @@ Projected Image UK"></textarea>
                     + ', people ' + c.persons + (c.persons_complete ? '' : '+')
                     + ', orgs ' + c.organizations + (c.orgs_complete ? '' : '+')
                     + ', activities ' + c.activities + (c.activities_complete ? '' : '+')
-                    + ', leads ' + c.leads + ', pipelines ' + c.pipelines
+                    + ', leads ' + c.leads + ', archived leads ' + c.archived_leads
+                    + (c.archived_leads_complete ? '' : '+') + ', pipelines ' + c.pipelines
                     + ', users ' + c.users);
                 (r.pipelines || []).forEach(p => L.push('Pipeline: ' + p.name + ' - '
                     + p.deals + ' deals, ' + p.stages + ' stages'));
@@ -29058,7 +29060,8 @@ Projected Image UK"></textarea>
                     : 'last event ' + Math.floor(m / 60) + 'h ago';
             };
             host.append(connRow('Live updates', wh.ok ? 'on' : 'mid',
-                wh.ok ? ('Shopify pushes order changes to the app as they happen (' + evAge(wh.last_event_at) + ').')
+                wh.ok ? ('Shopify pushes order changes to the app as they happen (' + evAge(wh.last_event_at)
+                         + (wh.version ? ', Shopify version ' + wh.version : '') + ').')
                       : ('Not receiving order events yet'
                          + (wh.detail ? (/unset/i.test(wh.detail) ? ': the app does not know its own public address (set APP_URL in Railway).' : ': ' + wh.detail + '.') : '.')
                          + ' The app falls back to refreshing on a short timer, which still works.'), ['Receiving', 'Not yet', 'Off']));
@@ -29110,12 +29113,14 @@ Projected Image UK"></textarea>
             host.append(connRow('Google Analytics 4',
                 g.ga4_ready ? 'on' : (g.connected || g.oauth_client) ? 'mid' : 'off',
                 g.ga4_ready ? ('Connected' + (g.ga4_property ? ' (property ' + g.ga4_property + ')' : '')) :
+                    (g.granted && g.granted.ga4 === false) ? 'Connected without permission to read Analytics. Connect Google again and leave Analytics ticked.' :
                     g.connected ? 'Connected, but set GA4_PROPERTY_ID to pull traffic data.' :
                         g.oauth_client ? 'Connect Google via the one-time setup link.' : 'Set up the Google connection to add traffic and revenue data.'));
             // Search Console
             host.append(connRow('Google Search Console',
                 g.gsc_ready ? 'on' : (g.connected || g.oauth_client) ? 'mid' : 'off',
                 g.gsc_ready ? ('Connected' + (g.gsc_site ? ' (' + g.gsc_site + ')' : '')) :
+                    (g.granted && g.granted.gsc === false) ? 'Connected without permission to read Search Console. Connect Google again and leave Search Console ticked.' :
                     g.connected ? 'Connected, but set GSC_SITE_URL to pull search data.' :
                         g.oauth_client ? 'Connect Google via the one-time setup link.' : 'Set up the Google connection to add keyword and search data.'));
             // Google Ads (CPC) rides on GA4

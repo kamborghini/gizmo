@@ -69,9 +69,14 @@ branch protected so a red build cannot reach the desk (this is the open item
 in the security register). The data volume mounts at `/data`; everything the
 app keeps lives there and is covered by the in-app backup.
 
-The Shopify app configuration is `shopify.app.toml`; changing scopes or the
-compliance webhooks needs `npx @shopify/cli@latest app deploy`, which forces a
-reinstall on the store.
+The Shopify app configuration is `shopify.app.toml`, and the print and dispatch
+buttons Shopify shows are in `extensions/`. Neither reaches Shopify with a push:
+after `npm ci`, `make shopify-deploy` stages a new app version without releasing
+it, and `make shopify-release VERSION=<the name it printed>` lists every change
+and asks before releasing. Stop if that list removes anything. When the
+permissions change, Shopify may ask the store to approve them; Settings shows
+whether everything the app writes is permitted. The Shopify tool's version is
+pinned in the Makefile.
 
 ## The MCP endpoint
 
