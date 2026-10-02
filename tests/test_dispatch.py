@@ -13855,6 +13855,20 @@ def t_the_connector_endpoint_answers_at_its_public_name():
 
 
 @test
+def t_no_transport_serves_the_tools_without_the_token():
+    """Only streamable-http goes through build_app(), where the bearer token
+    guards /mcp. MCP_TRANSPORT=sse served every tool to anyone who could reach
+    the port, with no token (found in review, older than the mcp 2 move), so
+    any transport but streamable-http or stdio is refused at start."""
+    import subprocess
+    env = {**os.environ, "MCP_TRANSPORT": "sse", "PORT": "18999", "MCP_BEARER_TOKEN": "t" * 40}
+    r = subprocess.run([sys.executable, "server.py"], env=env, cwd=HERE, capture_output=True,
+                       text=True, timeout=120)
+    eq(r.returncode, 2, "refused, not started: " + (r.stdout + r.stderr)[-300:])
+    ok("is not served" in r.stdout + r.stderr, "and it says why")
+
+
+@test
 def t_the_desktop_ai_endpoint_reads_and_every_call_is_recorded():
     """Audit R-002, R-025, R-038 and chains R-C2, R-C8 (29 September 2026).
     /mcp published nine Shopify write tools behind one shared bearer token,

@@ -18,6 +18,7 @@ Token Management:
 """
 import gzip
 import re
+import sys
 import urllib.parse
 import json
 import os
@@ -2177,5 +2178,13 @@ if __name__ == "__main__":
         # this app include live session tokens and signed print URLs. Route handlers
         # already log every meaningful request without secrets.
         uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info", access_log=False)
+    elif MCP_TRANSPORT == "stdio":
+        mcp.run(transport="stdio")
     else:
-        mcp.run(transport=MCP_TRANSPORT, host="0.0.0.0", port=PORT)
+        # Only streamable-http goes through build_app(), where MCPAuthMiddleware
+        # holds /mcp behind the bearer token. Anything else ("sse") would serve
+        # every tool to whoever can reach the port, with no token at all, so it
+        # is refused rather than started.
+        logger.error("MCP_TRANSPORT=%r is not served: use streamable-http (the default) or stdio.",
+                     MCP_TRANSPORT)
+        sys.exit(2)
