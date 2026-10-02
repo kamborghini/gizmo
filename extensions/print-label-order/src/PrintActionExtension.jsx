@@ -75,7 +75,11 @@ function Extension() {
           label="Label size"
           value={size}
           disabled={status !== "ready"}
-          onChange={(e) => e && e.target && e.target.value && setSize(e.target.value)}
+          onChange={(e) => {
+            // Typed as a plain Event; what changed is the select itself.
+            const sel = /** @type {{ value?: string } | null} */ (/** @type {unknown} */ (e && e.target));
+            if (sel && sel.value) setSize(sel.value);
+          }}
         >
           {SIZES.map((o) => (
             <s-option value={o.value} defaultSelected={o.value === size ? true : undefined}>
@@ -86,7 +90,10 @@ function Extension() {
         <s-checkbox
           label="Rotate 90 degrees (for printers that feed labels upright)"
           checked={portrait}
-          onChange={(e) => setPortrait(!!(e && e.target && e.target.checked))}
+          onChange={(e) => {
+            const box = /** @type {{ checked?: boolean } | null} */ (/** @type {unknown} */ (e && e.target));
+            setPortrait(!!(box && box.checked));
+          }}
         ></s-checkbox>
       </s-stack>
     </s-admin-print-action>

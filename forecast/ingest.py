@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 import urllib.error
@@ -25,6 +26,10 @@ import pandas as pd
 from .config import Config
 
 _LONDON = ZoneInfo("Europe/London")
+
+# The Admin API version for the job's own token: the same setting and the same
+# default as the app's (server.py), so moving one moves both.
+API_VERSION = os.environ.get("SHOPIFY_API_VERSION", "2026-10")
 
 log = logging.getLogger("forecast.ingest")
 
@@ -222,7 +227,7 @@ class ShopifyStore:
     used directly. Each method answers in the shape ReactorStore answers in,
     so the pullers below do not know which one they were handed."""
 
-    def __init__(self, shop: str, token: str, api_version: str = "2026-07"):
+    def __init__(self, shop: str, token: str, api_version: str = API_VERSION):
         self.shop, self.token, self.api_version = shop, token, api_version
 
     def _gql(self, query: str, variables: Optional[dict] = None) -> dict:

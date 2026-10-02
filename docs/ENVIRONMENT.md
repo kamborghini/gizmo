@@ -15,7 +15,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `MCP_TRANSPORT` | `"streamable-http"` | server |  |
 | `PORT` | `"8000"` | server |  |
 | `SHOPIFY_ACCESS_TOKEN` | `""` | server | Static token (shpat_...) |
-| `SHOPIFY_API_VERSION` | `"2026-07"` | server |  |
+| `SHOPIFY_API_VERSION` | `"2026-10"` | server |  |
 | `SHOPIFY_MAX_CONCURRENCY` | `"4"` | server |  |
 | `TOKEN_REFRESH_BUFFER` | `"1800"` | server |  |
 | `WEBHOOK_ALLOWED_HOSTS` | `""` | server | comma-separated host names or addresses (a staging copy of Reactor) whose webhooks the hourly repair keeps |

@@ -2,6 +2,21 @@
  "releases": [
   {
    "date": "2026-10-02",
+   "title": "Ready for Shopify's October update",
+   "items": [
+    {
+     "kind": "added",
+     "text": "Changing the delivery address of an unfulfilled order can now change its tax, for example when a UK address is corrected to one abroad: Shopify recalculates it from its October update on. When that happens the edit says so, with the tax before and after, the new total, and what the customer owes or is due back, and the activity board records it.",
+     "tab": "labels"
+    },
+    {
+     "kind": "changed",
+     "text": "Reactor now works with Shopify on its October 2026 version. The print buttons on Shopify's order pages move to the current version too, which takes effect the next time the app is published to Shopify."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-02",
    "title": "Everything underneath brought up to date",
    "items": [
     {

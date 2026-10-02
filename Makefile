@@ -10,13 +10,14 @@
 #   make check          everything CI runs that needs no network
 #   make env-doc        regenerate docs/ENVIRONMENT.md from the code
 #   make lock           compile the exact pins (*.in) into the hashed lock files
+#   make ext-check      build and type-check the Shopify extensions (needs npm ci)
 
 PY ?= .venv/bin/python
 
-.PHONY: help install run test test-frontend test-forecast sweep sast env-doc check lock
+.PHONY: help install run test test-frontend test-forecast sweep sast env-doc check lock ext-check
 
 help:
-	@sed -n '4,13p' Makefile
+	@sed -n '4,14p' Makefile
 
 # requirements.in and forecast/requirements-service.in hold the direct pins;
 # the .txt beside each is every package installed, transitive ones included,
@@ -70,6 +71,11 @@ sast:
 env-doc:
 	$(PY) tools/env_reference.py --write
 
-check: test-frontend test-forecast sweep sast
+# Skips with a note when node_modules are not installed; CI installs them and
+# passes --require.
+ext-check:
+	$(PY) tools/ext_check.py
+
+check: test-frontend test-forecast sweep sast ext-check
 	$(PY) tools/env_reference.py --check
 	$(PY) tests/test_dispatch.py

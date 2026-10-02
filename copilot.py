@@ -6421,6 +6421,50 @@ def _flag_address_divergence(order_id, live: dict) -> None:
         logger.exception("could not compare the booked address for %s", order_id)
 
 
+def _rest_totals(o: dict) -> dict:
+    """An order's tax, total and amount outstanding, from a REST read, in the
+    shape the order writer returns them."""
+    cur = str(o.get("currency") or "")
+    def money(key):
+        return {"amount": str(o.get(key) or ""), "currency": cur}
+    return {"tax": money("current_total_tax"), "total": money("current_total_price"),
+            "outstanding": money("total_outstanding")}
+
+
+def _tax_change_note(before: dict, totals: dict) -> str:
+    """What an address edit did to the order's tax, said plainly, or ''.
+
+    From Shopify API 2026-10 a new shipping address on an unfulfilled order
+    recalculates its tax: a UK address corrected to an export destination, or
+    the other way, changes the total and so what the customer owes. Shopify
+    makes the change; this says so, rather than leave it to be found."""
+    def num(v):
+        try:
+            return round(float(v), 2)
+        except (TypeError, ValueError):
+            return None
+    was, now = before.get("tax") or {}, totals.get("tax") or {}
+    tax_was, tax_now = num(was.get("amount")), num(now.get("amount"))
+    if tax_was is None or tax_now is None or tax_was == tax_now:
+        return ""
+    cur = str(now.get("currency") or was.get("currency") or "")
+    def fmt(x):
+        return ("\u00a3%.2f" % x) if cur in ("GBP", "") else ("%s %.2f" % (cur, x))
+    total_was = num((before.get("total") or {}).get("amount"))
+    total_now = num((totals.get("total") or {}).get("amount"))
+    owed = num((totals.get("outstanding") or {}).get("amount"))
+    msg = ("Shopify recalculated the tax for the new address: " + fmt(tax_was) + " before, "
+           + fmt(tax_now) + " now")
+    if total_now is not None:
+        msg += ", so the order total is " + fmt(total_now)
+    if owed and owed > 0:
+        return msg + ". The customer now owes " + fmt(owed) + "."
+    if total_was is not None and total_now is not None and total_now < total_was:
+        return msg + (". If they have paid, " + fmt(total_was - total_now)
+                      + " is due back to them: refund it in Shopify.")
+    return msg + "."
+
+
 async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
     """Apply a merchant's edit to a placed order.
 
@@ -6479,7 +6523,7 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
                     now_there["note"] = str(again.get("note") or "")
                     _f2, _w2, still, _warn2 = _clean_edit_fields(body, now_there)
                     if not still:
-                        r = {"ok": True}
+                        r = {"ok": True, "totals": _rest_totals(again)}
                 if not r.get("ok"):
                     return False, ("Shopify did not answer, so it is not known whether the change "
                                    "was made. Open the order in Shopify to check before trying again."), \
@@ -6492,6 +6536,10 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
                                    "doesn't have the write_orders permission yet."), [], name, []
                 return False, ("Shopify refused the change"
                                + (": " + detail if detail else ".")), [], name, []
+            note = _tax_change_note(_rest_totals(o), r.get("totals") or {})
+            if note:
+                warn = list(warn) + [note]
+                changed = list(changed) + ["tax recalculated"]
             if booked and "ship_to" in fields:
                 # Mark the divergence so the fulfilment path can refuse rather
                 # than email the customer tracking for a parcel addressed

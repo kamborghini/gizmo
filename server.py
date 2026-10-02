@@ -53,7 +53,7 @@ SHOPIFY_STORE        = os.environ.get("SHOPIFY_STORE", "")           # e.g. "my-
 SHOPIFY_TOKEN        = os.environ.get("SHOPIFY_ACCESS_TOKEN", "")    # Static token (shpat_...)
 SHOPIFY_CLIENT_ID    = os.environ.get("SHOPIFY_CLIENT_ID", "")
 SHOPIFY_CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
-API_VERSION          = os.environ.get("SHOPIFY_API_VERSION", "2026-07")
+API_VERSION          = os.environ.get("SHOPIFY_API_VERSION", "2026-10")
 
 # Refresh buffer: refresh token 30 minutes before expiry (only used with OAuth)
 
@@ -1470,9 +1470,10 @@ async def shopify_order_tax_id(order_id: int) -> dict:
     has no tax-id field at all, so all three are asked in ONE query and the
     most authoritative answer wins:
 
-      1. the order's own localization extensions with purpose TAX - the
+      1. the order's own localized fields with purpose TAX - the
          country-specific credential a checkout collects (ES, IT, PT, TR, MX,
-         BR and the rest);
+         BR and the rest). localizedFields replaced the deprecated
+         localizationExtensions, which asked the same thing;
       2. a B2B order's company location tax registration id (purchasingEntity
          -> PurchasingCompany -> location.taxSettings.taxRegistrationId);
       3. a customer metafield that names itself tax or vat - where a shop
@@ -1482,8 +1483,8 @@ async def shopify_order_tax_id(order_id: int) -> dict:
     number as they always have."""
     q = """query($id: ID!) {
       order(id: $id) {
-        localizationExtensions(first: 10, purposes: [TAX]) {
-          edges { node { key value title countryCode } } }
+        localizedFields(first: 10, purposes: [TAX]) {
+          nodes { key value title countryCode } }
         purchasingEntity {
           ... on PurchasingCompany {
             company { name }
@@ -1497,8 +1498,8 @@ async def shopify_order_tax_id(order_id: int) -> dict:
         order = ((data.get("data") or {}).get("order")) or {}
         if not order:
             return {"tax_id": "", "source": ""}
-        for e in (((order.get("localizationExtensions") or {}).get("edges")) or []):
-            n = e.get("node") or {}
+        for n in (((order.get("localizedFields") or {}).get("nodes")) or []):
+            n = n or {}
             val = str(n.get("value") or "").strip()
             if val:
                 what = str(n.get("title") or n.get("key") or "tax id")
@@ -2006,11 +2007,13 @@ _ORDER_ADDR_MAP = {
 def _addr_input(a: dict) -> dict:
     """Our address shape -> Shopify's address input.
 
-    Country and province each have a code form and a free-text form, and sending
-    both invites a conflict, so exactly one of each goes: the code when it looks
-    like a code, the text otherwise. A merchant who types "United Kingdom" gets
-    `country`; one who types "GB" gets `countryCode`, which is the enum Shopify
-    actually validates against.
+    The country goes as countryCode, the enum Shopify validates against: the
+    free-text `country` is deprecated, and the Edit panel already refuses any
+    country that is not a two-letter code (_country_ready), so anything else
+    here is refused rather than sent. The province goes as provinceCode when it
+    looks like one; a typed name ("Ontario") still goes as the free-text
+    `province`, which is deprecated with no removal date, rather than be
+    dropped or guessed at.
     """
     out = {}
     for ours, theirs in _ORDER_ADDR_MAP.items():
@@ -2018,8 +2021,9 @@ def _addr_input(a: dict) -> dict:
             out[theirs] = str(a.get(ours) or "")
     country = str(a.get("country") or "").strip()
     if country:
-        out["countryCode" if len(country) == 2 else "country"] = (
-            country.upper() if len(country) == 2 else country)
+        if not re.fullmatch(r"[A-Za-z]{2}", country):
+            raise ValueError("The country must be its two-letter code, for example GB.")
+        out["countryCode"] = country.upper()
     state = str(a.get("state") or "").strip()
     if state:
         out["provinceCode" if len(state) in (2, 3) else "province"] = (
@@ -2048,7 +2052,10 @@ async def update_order_fields(order_id: int, fields: dict) -> dict:
     """
     inp = {"id": f"gid://shopify/Order/{int(order_id)}"}
     if isinstance(fields.get("ship_to"), dict):
-        addr = _addr_input(fields["ship_to"])
+        try:
+            addr = _addr_input(fields["ship_to"])
+        except ValueError as e:
+            return {"ok": False, "reason": "user_error", "detail": str(e)}
         if addr:
             inp["shippingAddress"] = addr
     for ours, theirs in (("email", "email"), ("phone", "phone"), ("note", "note")):
@@ -2058,8 +2065,14 @@ async def update_order_fields(order_id: int, fields: dict) -> dict:
         return {"ok": False, "reason": "nothing", "detail": "Nothing to change."}
     try:
         m = await _request("POST", "graphql.json", body={
+            # The totals come back with the change: from API 2026-10 a new
+            # shipping address recalculates the tax on an unfulfilled order,
+            # which changes what the customer owes, and the caller says so.
             "query": "mutation($input: OrderInput!) { orderUpdate(input: $input) {"
-                     "   order { id }"
+                     "   order { id"
+                     "     currentTotalTaxSet { shopMoney { amount currencyCode } }"
+                     "     currentTotalPriceSet { shopMoney { amount currencyCode } }"
+                     "     totalOutstandingSet { shopMoney { amount currencyCode } } }"
                      "   userErrors { field message } } }",
             "variables": {"input": inp}})
         for e in (m.get("errors") or []):
@@ -2077,7 +2090,14 @@ async def update_order_fields(order_id: int, fields: dict) -> dict:
                  if e.get("field") else "") + str(e.get("message") or "")
                 for e in errs)[:300]
             return {"ok": False, "reason": "user_error", "detail": detail}
-        return {"ok": True}
+        order = ((m.get("data") or {}).get("orderUpdate") or {}).get("order") or {}
+
+        def money(key):
+            v = ((order.get(key) or {}).get("shopMoney") or {})
+            return {"amount": str(v.get("amount") or ""), "currency": str(v.get("currencyCode") or "")}
+        return {"ok": True, "totals": {"tax": money("currentTotalTaxSet"),
+                                       "total": money("currentTotalPriceSet"),
+                                       "outstanding": money("totalOutstandingSet")}}
     except httpx.HTTPStatusError as e:
         code = e.response.status_code if e.response is not None else 0
         if code in (401, 403):

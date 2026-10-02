@@ -36,6 +36,13 @@ jobs:
         run: python tests/test_frontend.py
       - name: JavaScript dependency audit (blocking; the print extensions' lockfile)
         run: npm audit --omit=dev
+      # esbuild does not type-check and neither does the Shopify CLI, so a prop
+      # or API Shopify renames in a new version would otherwise surface only in
+      # the admin, after a deploy.
+      - name: The Shopify extensions build and type-check
+        run: |
+          npm ci --no-audit --no-fund
+          python tools/ext_check.py --require
       - name: No em or en dashes in UI copy
         run: |
           if grep -qE '—|–|\\u201[34]|&[mn]dash;' static/index.html static/composer.js; then

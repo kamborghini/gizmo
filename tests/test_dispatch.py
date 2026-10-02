@@ -3184,8 +3184,12 @@ def t_the_shopify_api_version_is_supported():
     ok({"shopify.app.toml", os.path.join("extensions", "print-label-order", "shopify.extension.toml"),
         os.path.join("extensions", "print-label-bulk", "shopify.extension.toml")} <= set(found),
        "every known pin was read, so none is skipped unchecked: " + ", ".join(sorted(found)))
-    fc = re.search(r'api_version: str = "(\d{4}-\d{2})"', open(os.path.join(HERE, "forecast", "ingest.py"), encoding="utf-8").read())
+    fc = re.search(r'^API_VERSION = os\.environ\.get\("SHOPIFY_API_VERSION", "(\d{4}-\d{2})"\)',
+                   open(os.path.join(HERE, "forecast", "ingest.py"), encoding="utf-8").read(), re.M)
     ok(fc and fc.group(1) >= floor, "and the forecast's own reads")
+    eq(fc and fc.group(1), re.search(r'"SHOPIFY_API_VERSION", "(\d{4}-\d{2})"',
+                                     open(os.path.join(HERE, "server.py"), encoding="utf-8").read()).group(1),
+       "the forecast's default is the app's, so one move moves both")
 
 @test
 def t_customs_values_are_remembered_per_product():
@@ -24921,6 +24925,96 @@ def t_a_lost_answer_to_an_address_edit_is_settled_by_reading_the_order():
     finally:
         copilot._tool_json, _srv._request, copilot._order_writer = saved
         reset_dispatch()
+
+
+@test
+def t_an_address_edit_that_changes_the_tax_says_so():
+    """From Shopify API 2026-10 a new shipping address on an unfulfilled order
+    recalculates its tax, so correcting a UK address to an export one (or the
+    other way) changes what the customer owes. Shopify makes the change; the
+    Edit panel must say so, with the amounts, and the ledger must record it."""
+    import server as _srv
+    ensure_auth(); reset_dispatch(); reset_prod()
+    live = _copy.deepcopy(ORDER)
+    live.update({"current_total_tax": "20.00", "current_total_price": "120.00",
+                 "total_outstanding": "0.00", "currency": "GBP"})
+    sent = []
+    answer = {"tax": "0.00", "total": "100.00", "outstanding": "0.00"}
+    async def tools(registry, name, args):
+        if name == "shopify_get_order":
+            return _copy.deepcopy(live)
+        return await fake_tool_json(registry, name, args)
+    async def req(method, path, params=None, body=None, **kw):
+        sent.append(body)
+        m = lambda v: {"shopMoney": {"amount": v, "currencyCode": "GBP"}}
+        return {"data": {"orderUpdate": {"order": {"id": "gid://shopify/Order/12345",
+                                                   "currentTotalTaxSet": m(answer["tax"]),
+                                                   "currentTotalPriceSet": m(answer["total"]),
+                                                   "totalOutstandingSet": m(answer["outstanding"])},
+                                         "userErrors": []}}}
+    saved = (copilot._tool_json, _srv._request, copilot._order_writer)
+    copilot._tool_json, _srv._request, copilot._order_writer = tools, req, _srv.update_order_fields
+    try:
+        r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 6JK"}})
+        eq(r.status_code, 200, r.text)
+        q = sent[-1]["query"]
+        ok("currentTotalTaxSet" in q and "totalOutstandingSet" in q, "the totals are asked for with the change")
+        addr = sent[-1]["variables"]["input"]["shippingAddress"]
+        ok("country" not in addr and addr.get("countryCode") == "GB", "the country goes as its code only")
+        eq(r.json()["warnings"], ["Shopify recalculated the tax for the new address: \u00a320.00 before, "
+                                  "\u00a30.00 now, so the order total is \u00a3100.00. If they have paid, "
+                                  "\u00a320.00 is due back to them: refund it in Shopify."],
+           "a lower tax says what is due back")
+        ok("tax recalculated" in r.json()["changed"], "and the ledger records it")
+        answer.update({"tax": "30.00", "total": "130.00", "outstanding": "10.00"})
+        r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 7AA"}})
+        ok(r.json()["warnings"][-1].endswith("The customer now owes \u00a310.00."), r.json()["warnings"])
+        answer.update({"tax": "20.00", "total": "120.00", "outstanding": "0.00"})
+        r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 8BB"}})
+        eq(r.json()["warnings"], [], "nothing is said when the tax did not change (every version before 2026-10)")
+        ok("tax recalculated" not in r.json()["changed"], "and nothing is recorded")
+    finally:
+        copilot._tool_json, _srv._request, copilot._order_writer = saved
+        reset_dispatch()
+
+
+@test
+def t_an_order_address_goes_to_shopify_as_codes():
+    """MailingAddressInput's free-text country and province are deprecated.
+    The country goes only as its code (the Edit panel refuses anything else
+    already); a province goes as its code when it is one, and a typed name
+    still goes as text rather than be dropped or guessed at."""
+    import server as _srv
+    eq(_srv._addr_input({"country": "gb", "state": "ON"}), {"countryCode": "GB", "provinceCode": "ON"})
+    eq(_srv._addr_input({"country": "CA", "state": "Ontario"}), {"countryCode": "CA", "province": "Ontario"})
+    try:
+        _srv._addr_input({"country": "United Kingdom"})
+        ok(False, "a country name is refused, not sent as deprecated free text")
+    except ValueError as e:
+        ok("two-letter code" in str(e), str(e))
+    r = run_async(_srv.update_order_fields(1, {"ship_to": {"country": "United Kingdom"}}))
+    eq((r["ok"], r["reason"]), (False, "user_error"), "and the writer reports it instead of raising")
+
+
+@test
+def t_the_receivers_tax_id_is_read_from_the_orders_localized_fields():
+    """Order.localizationExtensions is deprecated in favour of localizedFields,
+    which asks the same thing (the TAX credential a checkout collects)."""
+    import server as _srv
+    seen = []
+    async def req(method, path, params=None, body=None, **kw):
+        seen.append(body["query"])
+        return {"data": {"order": {"localizedFields": {"nodes": [
+            {"key": "TAX_CREDENTIAL_IT", "value": "IT12345678901", "title": "Codice fiscale", "countryCode": "IT"}]},
+            "purchasingEntity": None, "customer": None}}}
+    saved = _srv._request
+    _srv._request = req
+    try:
+        got = run_async(_srv.shopify_order_tax_id(12345))
+    finally:
+        _srv._request = saved
+    eq(got, {"tax_id": "IT12345678901", "source": "the order's Codice fiscale"})
+    ok("localizedFields(" in seen[-1] and "localizationExtensions" not in seen[-1], "through the current field")
 
 
 @test
