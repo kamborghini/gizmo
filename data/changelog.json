@@ -2,6 +2,20 @@
  "releases": [
   {
    "date": "2026-10-02",
+   "title": "Everything underneath brought up to date",
+   "items": [
+    {
+     "kind": "fixed",
+     "text": "A Google connection made with a service account, rather than by signing in, works again after an update. A part it needs had been removed as unused in September, and a fresh install could not connect that way at all."
+    },
+    {
+     "kind": "changed",
+     "text": "The parts Reactor is built on are on their current releases, with their security fixes: the AI connection, the PDF reader that turns courier labels into print images and reads supplier invoices, and the web server underneath every page. Nothing you do changes."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-02",
    "title": "Gobos sold with a projector",
    "items": [
     {

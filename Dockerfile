@@ -3,6 +3,10 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY requirements.txt .
+# The image's own pip (25.0.1, bundled with CPython 3.12) has six advisories
+# that CI never sees: CI audits its runner, not this image. Raised before it
+# installs anything.
+RUN pip install --no-cache-dir pip==26.2.1
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .

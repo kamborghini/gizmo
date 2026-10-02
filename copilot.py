@@ -86,7 +86,7 @@ def _env_num(cast, raw, default, name):
 # ---------------------------------------------------------------------------
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 # Model tiers. Claude Opus 5.5 everywhere by default; the env vars let a
-# cheaper tier (e.g. claude-sonnet-5) take everyday chat without a code change.
+# cheaper tier (e.g. claude-sonnet-5-5) take everyday chat without a code change.
 MODEL_FAST = os.environ.get("ANTHROPIC_MODEL_FAST") or os.environ.get("ANTHROPIC_MODEL") or "claude-opus-5-5"
 MODEL_DEEP = os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-5-5")
 # Asked once, with the same request, when the model above fails at Anthropic
@@ -211,7 +211,9 @@ GOBO_SIZES_PATH    = os.environ.get("GOBO_SIZES_PATH",
 # cache read 0.1x input unless _CACHE_READ_RATE says otherwise.
 _MODEL_PRICE = {
     "claude-opus-5-5": (4.0, 20.0),
+    "claude-opus-5": (5.0, 25.0),
     "claude-opus-4-8": (5.0, 25.0),
+    "claude-sonnet-5-5": (2.0, 10.0),
     "claude-sonnet-5": (2.0, 10.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-haiku-4-5": (1.0, 5.0),
@@ -3491,7 +3493,7 @@ def _usage_summary(days: int = 30) -> dict:
         i_, o_, cr, cw = e.get("in", 0), e.get("out", 0), e.get("cache_read", 0), e.get("cache_write", 0)
         b["runs"] += 1; b["in"] += i_; b["out"] += o_; b["cost"] += e.get("cost", 0)
         tot_cost += e.get("cost", 0); tot_in += i_; tot_out += o_
-        cost_sonnet += _price_for("claude-sonnet-5", i_, o_, cr, cw)
+        cost_sonnet += _price_for("claude-sonnet-5-5", i_, o_, cr, cw)
         cost_haiku += _price_for("claude-haiku-4-5", i_, o_, cr, cw)
     for b in by_kind.values():
         b["cost"] = round(b["cost"], 4)

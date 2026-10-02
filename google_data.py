@@ -233,7 +233,9 @@ def _date_range(days: int, lag_days: int = 0) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 def _gsc_url() -> str:
-    return f"https://www.googleapis.com/webmasters/v3/sites/{quote(GSC_SITE_URL, safe='')}/searchAnalytics/query"
+    # The Search Console API's own host; the shared www.googleapis.com one is the
+    # older address for the same call (same path, body, scope and answer).
+    return f"https://searchconsole.googleapis.com/webmasters/v3/sites/{quote(GSC_SITE_URL, safe='')}/searchAnalytics/query"
 
 
 async def gsc_overview(days: int = 28) -> dict:

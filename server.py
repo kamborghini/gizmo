@@ -73,7 +73,13 @@ if logdrain.install():
 PORT          = _env_num(int, os.environ.get("PORT", "8000"), "8000", "PORT")
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "streamable-http")
 
-mcp = FastMCP("shopify_mcp", host="0.0.0.0", port=PORT, json_response=True)
+# A connector session left idle for 30 minutes is closed, and the client starts
+# a new one, as it already must after every deploy restart. mcp 1.30 made this
+# its default (before, sessions lived for ever); it is stated here so it is a
+# choice, not something a library update changes underneath.
+MCP_SESSION_IDLE_SECS = 1800
+mcp = FastMCP("shopify_mcp", host="0.0.0.0", port=PORT, json_response=True,
+              session_idle_timeout=MCP_SESSION_IDLE_SECS)
 
 
 # ---------------------------------------------------------------------------

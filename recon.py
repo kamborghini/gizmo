@@ -1421,7 +1421,7 @@ def _pdf_text(data: bytes) -> str:
         doc = pdfium.PdfDocument(data)
         parts = []
         for i in range(min(len(doc), 12)):
-            parts.append(doc[i].get_textpage().get_text_range())
+            parts.append(doc[i].get_textpage().get_text_bounded())
         return "\n".join(parts)
     except Exception:
         logger.exception("recon: pdf text extraction failed")

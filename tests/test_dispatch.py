@@ -3000,8 +3000,30 @@ def t_dependencies_are_pinned_and_the_mcp_fix_is_in():
         if not line or line.startswith("#"):
             continue
         ok("==" in line, "pinned exactly: " + line)
-    ok("mcp[cli]==1.28.1" in reqs,
-       "mcp is on the release that fixes session hijacking (PYSEC-2026-3481/2/3)")
+    m = re.search(r"^mcp(?:\[[a-z,]+\])?==(\d+)\.(\d+)\.(\d+)$", reqs, re.M)
+    ok(m and tuple(int(x) for x in m.groups()) >= (1, 28, 1),
+       "mcp is on or after the release that fixes session hijacking (PYSEC-2026-3481/2/3)")
+
+
+@test
+def t_connector_sessions_expire_by_our_choice():
+    """mcp 1.30 started closing idle sessions after 30 minutes by default. It
+    is stated in server.py so a library update cannot change it unseen."""
+    import server as srv
+    eq(srv.mcp.settings.session_idle_timeout, srv.MCP_SESSION_IDLE_SECS, "the server's own setting is in force")
+    eq(srv.MCP_SESSION_IDLE_SECS, 1800, "thirty minutes")
+
+
+@test
+def t_the_google_service_account_transport_is_installed():
+    """requests was dropped on 2026-09-07 as unused, but google-auth reaches
+    Google through it, imported only when the service-account sign-in runs:
+    a fresh deploy could not sign in that way, and the local environment hid
+    it. CI installs from requirements.txt alone, so this import is the check."""
+    from google.auth.transport.requests import Request
+    ok(Request, "google-auth's requests transport imports")
+    reqs = open(os.path.join(HERE, "requirements.txt"), encoding="utf-8").read()
+    ok(re.search(r"^google-auth\[requests\]==", reqs, re.M), "and requirements.txt asks for it by name")
 
 @test
 def t_app_errors_are_recorded_and_surfaced():
@@ -3043,12 +3065,49 @@ def t_weekly_snapshot_writes_once_a_week_and_excludes_credentials():
         ok("wo_secret" not in n and "google_oauth" not in n,
            "no credential file in a snapshot: " + n)
 
+def _oldest_accessible_shopify_version(now=None) -> str:
+    """Shopify's rule: a version is released on the 1st of its quarter at
+    17:00 UTC and stays accessible until the 16th of the same month a year
+    later at 15:00 UTC (2025-10 until 2026-10-16), then is silently served
+    from the oldest one still accessible."""
+    from datetime import datetime as _dt, timezone as _tz
+    now = now or _dt.now(_tz.utc)
+    live = []
+    for y in range(now.year - 2, now.year + 1):
+        for m in (1, 4, 7, 10):
+            released = _dt(y, m, 1, 17, tzinfo=_tz.utc)
+            gone = _dt(y + 1, m, 16, 15, tzinfo=_tz.utc)
+            if released <= now < gone:
+                live.append("%d-%02d" % (y, m))
+    return min(live)
+
+
 @test
 def t_the_shopify_api_version_is_supported():
-    # 2024-10 fell out of Shopify's 12-month support window, and an unsupported
-    # version is silently served from the oldest supported one.
+    """2024-10 fell out of Shopify's support window, and an unsupported version
+    is silently served from the oldest supported one. The floor is worked out
+    from today's date, not written down, so a pin that ages out fails here
+    rather than months later (a written "2025-10" would have passed after
+    2026-10-16, when 2025-10 stopped being served)."""
+    from datetime import datetime as _dt, timezone as _tz
+    eq(_oldest_accessible_shopify_version(_dt(2026, 10, 2, tzinfo=_tz.utc)), "2025-10", "the rule, checked")
+    eq(_oldest_accessible_shopify_version(_dt(2026, 10, 17, tzinfo=_tz.utc)), "2026-01", "2025-10 goes on the 16th")
+    floor = _oldest_accessible_shopify_version()
     import server as srv
-    ok(srv.API_VERSION >= "2025-10", "on a supported version, not " + srv.API_VERSION)
+    ok(srv.API_VERSION >= floor, "the Admin API on a served version, not " + srv.API_VERSION)
+    pins = {"shopify.app.toml": open(os.path.join(HERE, "shopify.app.toml"), encoding="utf-8").read()}
+    for ext in sorted(glob.glob(os.path.join(HERE, "extensions", "*", "shopify.extension.toml"))):
+        pins[os.path.relpath(ext, HERE)] = open(ext, encoding="utf-8").read()
+    found = []
+    for name, text in pins.items():
+        for v in re.findall(r'^\s*api_version\s*=\s*["\'](\d{4}-\d{2})["\']', text, re.M):
+            found.append(name)
+            ok(v >= floor, name + " pins " + v + ", older than the oldest served version " + floor)
+    ok({"shopify.app.toml", os.path.join("extensions", "print-label-order", "shopify.extension.toml"),
+        os.path.join("extensions", "print-label-bulk", "shopify.extension.toml")} <= set(found),
+       "every known pin was read, so none is skipped unchecked: " + ", ".join(sorted(found)))
+    fc = re.search(r'api_version: str = "(\d{4}-\d{2})"', open(os.path.join(HERE, "forecast", "ingest.py"), encoding="utf-8").read())
+    ok(fc and fc.group(1) >= floor, "and the forecast's own reads")
 
 @test
 def t_customs_values_are_remembered_per_product():
@@ -13633,10 +13692,16 @@ def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
     import google_mail as _gm, pipedrive as _pd, recon as _rc
     def secs(fn, *a):
         t0 = time.perf_counter(); fn(*a); return time.perf_counter() - t0
-    ok(secs(_gm._strip_html, "<p>x</p>" + "<" * 2_000_000) < 0.5, "a 2 MB run of '<' is stripped at once")
-    ok(secs(_gm._strip_html, "<p>" + "<script" * 200_000) < 0.5, "and a run of unclosed script openings")
-    ok(secs(_pd._strip_note, "<p>x</p>" + "<" * 400_000) < 0.5, "a Pipedrive note the same")
-    ok(secs(_rc._AMOUNT_RE.findall, "1" + ",111" * 100_000) < 0.5, "a PDF's endless thousands groups")
+    # Each limit separates linear from quadratic with room for a busy machine
+    # (half a second failed on a loaded one with nothing wrong). The inputs
+    # are capped before scanning (300 KB of mail, 100 KB of a note), and at
+    # those caps the quadratic forms measured 5 to 265 seconds against the
+    # linear ones' hundredths: one second leaves a margin both ways.
+    LIMIT = 1.0
+    ok(secs(_gm._strip_html, "<p>x</p>" + "<" * 2_000_000) < LIMIT, "a 2 MB run of '<' is stripped at once")
+    ok(secs(_gm._strip_html, "<p>" + "<script" * 200_000) < LIMIT, "and a run of unclosed script openings")
+    ok(secs(_pd._strip_note, "<p>x</p>" + "<" * 400_000) < LIMIT, "a Pipedrive note the same")
+    ok(secs(_rc._AMOUNT_RE.findall, "1" + ",111" * 100_000) < LIMIT, "a PDF's endless thousands groups")
     eq(_gm._strip_html("<p>Hello <b>there</b></p><script>bad()</script>"), "Hello there", "ordinary mail reads as before")
     eq(_gm._strip_html("<p>left <script>evil()"), "left", "an unclosed script still goes")
     eq(_rc._AMOUNT_RE.findall("Total 1,234.56 and \u00a399.00 then 12,345,678.90"),
@@ -13655,8 +13720,9 @@ def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
        "and data: in a sentence is not an inline image")
     eq(_gm._strip_html('<div style="background:url(data:image/png;base64,QUJD)">Hello</div>'), "Hello",
        "one in a style goes with the tag")
-    ok(secs(_gm._strip_html, "data:" + "a" * 3_000_000) < 0.5, "a long data run is dropped at once")
-    ok(secs(_gm._strip_html, "data:a/b;" * 300_000) < 1.0,
+    ok(secs(_gm._strip_html, "data:" + "a" * 3_000_000) < LIMIT, "a long data run is dropped at once")
+    # The slowest linear case (0.44 s measured), so it keeps a wider limit.
+    ok(secs(_gm._strip_html, "data:a/b;" * 300_000) < 3.0,
        "and 2.7 MB of 'data:a/b;' is linear too (unbounded, 288 KB of it took 37 seconds)")
     import inspect as _ins
     ok("asyncio.to_thread(_strip_html" in _ins.getsource(_gm.read_thread), "and it is stripped off the loop")

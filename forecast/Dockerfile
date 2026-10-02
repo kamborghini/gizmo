@@ -11,6 +11,8 @@ WORKDIR /app
 # by default. To turn it back on, copy requirements-m5.txt too and add it to
 # the pip install below.
 COPY forecast/requirements-service.txt /app/forecast/requirements-service.txt
+# The image's own pip (25.0.1) has six advisories CI never sees; raised first.
+RUN pip install --no-cache-dir pip==26.2.1
 RUN pip install --no-cache-dir -r /app/forecast/requirements-service.txt
 COPY forecast /app/forecast
 CMD ["python", "-m", "forecast", "nightly"]
