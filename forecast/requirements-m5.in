@@ -1,0 +1,12 @@
+# Only for the per-variant M5-style model, which is OFF by default
+# (FORECAST_M5=1 turns it on). `make lock` compiles this, with the service's
+# own pins, into requirements-m5.txt: one hashed lock of the whole service plus
+# the gradient boosters, installed IN PLACE of requirements-service.txt:
+#     pip install --require-hashes -r forecast/requirements-m5.txt
+# (Two files cannot be mixed: one with hashes makes pip demand them of both.)
+# Kept out of the default image because it is the larger part of it and serves
+# a model this business does not use.
+-r requirements-service.in
+scikit-learn==1.9.1
+lightgbm==4.7.0
+catboost==1.2.10

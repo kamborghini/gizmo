@@ -3046,7 +3046,8 @@ def t_the_locks_match_their_pins_and_carry_hashes():
     what the images and CI install. A pin raised without recompiling, or a
     package in the lock without a hash, fails here rather than in a build."""
     for pins_path, lock_path in (("requirements.in", "requirements.txt"),
-                                 ("forecast/requirements-service.in", "forecast/requirements-service.txt")):
+                                 ("forecast/requirements-service.in", "forecast/requirements-service.txt"),
+                                 ("forecast/requirements-m5.in", "forecast/requirements-m5.txt")):
         pins = open(os.path.join(HERE, pins_path), encoding="utf-8").read()
         lock_text = open(os.path.join(HERE, lock_path), encoding="utf-8").read()
         ok("pip-compile --generate-hashes" in lock_text.split("\n", 3)[1], lock_path + " says how it is rebuilt")
@@ -3061,7 +3062,11 @@ def t_the_locks_match_their_pins_and_carry_hashes():
             name = m.group(1).lower().replace("_", "-")
             ok(name in lock, lock_path + " has " + name)
             eq(lock[name][0], m.group(2), lock_path + ": " + name + " is the version " + pins_path + " pins")
-    for extra in ("forecast/requirements-m5.txt", "forecast/requirements.txt"):
+    m5 = _lock_packages(open(os.path.join(HERE, "forecast", "requirements-m5.txt"), encoding="utf-8").read())
+    service = _lock_packages(open(os.path.join(HERE, "forecast", "requirements-service.txt"), encoding="utf-8").read())
+    for name, (ver, _h) in service.items():
+        eq(m5.get(name, [None])[0], ver, "the M5 lock carries the whole service at its versions: " + name)
+    for extra in ("forecast/requirements.txt",):
         for line in open(os.path.join(HERE, extra), encoding="utf-8").read().splitlines():
             line = line.split("#")[0].strip()
             if line:

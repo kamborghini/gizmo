@@ -311,8 +311,8 @@ def main() -> int:
                 if not any(gbdt_available().values()):
                     raise RuntimeError(
                         "FORECAST_M5=1 but no gradient booster is installed. The image ships "
-                        "without them: add `-r forecast/requirements-m5.txt` to the pip install "
-                        "in forecast/Dockerfile, or unset FORECAST_M5.")
+                        "without them: install forecast/requirements-m5.txt in place of "
+                        "requirements-service.txt in forecast/Dockerfile, or unset FORECAST_M5.")
                 from .pipeline import Runner
                 # CatBoost runs up to 1200 rounds a fit and there are forty fits
                 # in a run, so it is the long pole by a distance when this path

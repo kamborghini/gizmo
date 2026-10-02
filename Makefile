@@ -29,12 +29,14 @@ lock:
 	  --custom-compile-command "pip-compile --generate-hashes --output-file=requirements.txt requirements.in"
 	cd forecast && $(LOCK) requirements-service.in -o requirements-service.txt \
 	  --custom-compile-command "pip-compile --generate-hashes --output-file=requirements-service.txt requirements-service.in"
+	cd forecast && $(LOCK) requirements-m5.in -o requirements-m5.txt \
+	  --custom-compile-command "pip-compile --generate-hashes --output-file=requirements-m5.txt requirements-m5.in"
 
 # The same Python as the images and CI, from the same hashed lock. The forecast
 # lock and the scanners make check uses come too, so `make check` runs here
 # exactly as CI does. Needs uv (brew install uv).
 install:
-	uv venv --python 3.14 .venv
+	uv venv --clear --python 3.14 .venv
 	uv pip install --python $(PY) --quiet --require-hashes -r requirements.txt
 	uv pip install --python $(PY) --quiet --require-hashes -r forecast/requirements-service.txt
 	uv pip install --python $(PY) --quiet bandit==1.9.4 pip-audit==2.10.1
