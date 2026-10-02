@@ -2272,6 +2272,7 @@
         .label-sheet .ls-desc { color: var(--paper-ink-4); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
         .label-sheet .ls-it.wrap { white-space: normal; overflow: visible; }
         .label-sheet .ls-it.wrap .ls-desc { overflow: visible; text-overflow: clip; }
+        .label-sheet .ls-it.named .ls-iqs { min-width: 0; }
         .label-sheet .ls-ctx { font-size: .78em; color: var(--paper-ink-3); margin-top: .12em; padding-left: 1.6em; }
         .label-sheet.shed .ls-rate { display: none; }
         /* Customer strip: follows the last item, rule directly beneath it. */
@@ -18322,6 +18323,11 @@ Projected Image UK"></textarea>
                     row.append(el('span', 'ls-desc', it.review_reason));
                     li.append(row);
                 } else {
+                    /* A row with no size (a projector, an accessory, a stock
+                       gobo) has nothing to line up with: its name starts after
+                       the count and wraps, rather than being cut short after a
+                       gap (#104453's projector). */
+                    if (!it.production_size) row.classList.add('named', 'wrap');
                     row.append(el('span', 'ls-iqs',
                         it.quantity + 'x' + (it.production_size ? ' ' + it.production_size + 'mm' : '')));
                     if (it.glass_type) row.append(el('span', 'ls-chip', it.glass_type));

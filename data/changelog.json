@@ -18,6 +18,11 @@
      "kind": "fixed",
      "text": "The size check counts gobos sold with a projector, and the check for paid orders that never reached production counts them too. A projector size missing from the size list can be settled in the size check as any other model can.",
      "tab": "labels"
+    },
+    {
+     "kind": "fixed",
+     "text": "A label row printed by name, such as a projector, starts straight after its count and runs onto a second line when it is long, instead of being cut short after a gap.",
+     "tab": "labels"
     }
    ]
   },

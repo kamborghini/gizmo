@@ -7274,6 +7274,40 @@ def t_auth_the_print_document_needs_only_the_perimeter():
     with_accounts(go)
 
 @test
+def t_a_row_printed_by_name_starts_after_its_count_and_wraps():
+    """#104453's projector printed in Shopify's label as `1x` then a gap, then
+    "Projected Image 40 Watt LED Weather...": the count's column is held wide
+    so sizes line up, and a row's text is cut to one line. A row with no size
+    (a projector, an accessory, a stock gobo) has nothing to line up with, so
+    its name starts after the count and wraps; a sized row is unchanged."""
+    o = _copy.deepcopy(ORDER)
+    o["line_items"] = [
+        {"id": 1, "title": "Custom Gobos", "quantity": 1, "product_id": 900, "properties": [], "sku": "SCGOWPIH",
+         "variant_title": "Single Colour Glass Original With Projector (Quote) / IH"},
+        {"id": 2, "title": "Projected Image 40 Watt LED Weatherproof Gobo Projector", "quantity": 1,
+         "product_id": 901, "properties": [], "sku": "P102W"}]
+    async def tj(registry, name, args):
+        if name == "shopify_get_order":
+            return _copy.deepcopy(o)
+        return await fake_tool_json(registry, name, args)
+    def go():
+        ensure_auth()
+        r = client.post("/print/production-labels/sign", json={"ids": str(o["id"]), "size": "4x4"},
+                        headers={"Authorization": "Bearer " + tok()})
+        eq(r.status_code, 200, r.text[:200])
+        doc = client.get(r.json()["path"]).text
+        ok("<div class='it named wrap'><span class='iqs'>1x</span><span class='desc'>&quot;Projected Image 40 Watt "
+           "LED Weatherproof Gobo Projector&quot;</span>" in doc, "the projector's row starts after its count and wraps")
+        ok("<div class='it'><span class='iqs'>1x 53.3mm</span>" in doc, "the sized gobo's row is as it was")
+        ok(".it.named .iqs { min-width: 0; }" in doc, "and the count's column is not held wide for it")
+    copilot._tool_json = tj
+    try:
+        with_accounts(go)
+    finally:
+        copilot._tool_json = fake_tool_json
+
+
+@test
 def t_nothing_in_the_page_can_add_to_or_cut_the_shopify_label_print():
     """The page's label print was changed on 30 September after a bench
     browser put 66px of its own into the page and every label printed with a

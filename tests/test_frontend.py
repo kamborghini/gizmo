@@ -9199,6 +9199,20 @@ def t_the_day_sheet_leaves_projectors_out_and_says_so():
     ok("!r.order_problem" in cov, "Resolve is offered only for a gap in the size list")
 
 
+@test
+def t_a_label_row_printed_by_name_starts_after_its_count_and_wraps():
+    """#104453's projector printed as `1x` then a gap, then "Projected Image 40
+    Watt LED Weather...": the count's column is held wide so sizes line up, and
+    a row's text is cut to one line. A row with no size has nothing to line up
+    with, so its name starts after the count and wraps."""
+    ok("function labelSheet(" in SCRIPT, "the label exists")
+    body = fn_src("function labelSheet(")
+    ok("if (!it.production_size) row.classList.add('named', 'wrap');" in body,
+       "a row with no size is marked to start after its count and to wrap")
+    ok(".label-sheet .ls-it.named .ls-iqs { min-width: 0; }" in CSS,
+       "and its count's column is not held wide")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

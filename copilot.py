@@ -26470,7 +26470,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 size = esc(it.get("production_size", ""))
                 chip = ("<span class='chip'>" + esc(it["glass_type"]) + "</span>") if it.get("glass_type") else ""
                 art = it.get("artwork", it.get("title", ""))
-                row = ("<li class='row'><div class='it'><span class='iqs'>" + qty + "x"
+                # A row with no size (a projector, an accessory, a stock gobo)
+                # has nothing to line up with: its name starts after the
+                # count and wraps, rather than being cut short after a gap.
+                row = ("<li class='row'><div class='" + ("it" if size else "it named wrap") + "'><span class='iqs'>"
+                       + qty + "x"
                        + ((" " + size + "mm") if size else "") + "</span>" + chip
                        + (("<span class='desc'>&quot;" + esc(art) + "&quot;</span>") if art else "")
                        + "</div>")
@@ -26552,6 +26556,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                ".desc { color: #333; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }"
                # Flagged rows may wrap so the reason stays readable.
                ".it.wrap { white-space: normal; overflow: visible; } .it.wrap .desc { overflow: visible; text-overflow: clip; }"
+               ".it.named .iqs { min-width: 0; }"
                ".ctx { font-size: .78em; color: #222; margin-top: .12em; padding-left: 1.6em; }"
                # A dead order must be unmissable at arm's length.
                ".dead { border: 3px solid #000; font-size: 1.68em; font-weight: 800; letter-spacing: .04em;"
