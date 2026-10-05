@@ -240,6 +240,11 @@
                reference's h-7. It was written as a bare 28px in ten rules,
                so a field beside a small button could not be matched to it. */
             --control-h-md: 28px;
+            /* A choice inside a segmented track: the track (2px inset, hairline
+               edge) then stands at a small control's 28, level with the search
+               field and small buttons it shares a toolbar with. At 24 inside it
+               the track was 30, two pixels proud of all of them. */
+            --segment-h: calc(var(--control-h-md) - 2 * var(--sp-0-5) - 2 * var(--bw-hairline));
             --control-pad-y: 5px;   /* (32 - 20 line - 2 hairlines) / 2 */
             /* The sign-in card: a sky tint fading to white, a blue hairline,
                and a button that darkens toward its foot. */
@@ -361,12 +366,19 @@
            gates Reconciliation keeps working - the tab simply is not built
            for an account that cannot open it. */
         .page-tabs { display: flex; align-items: center; gap: var(--sp-3);
-            flex-wrap: wrap; margin-bottom: var(--sp-6); }
+            flex-wrap: wrap; margin-bottom: var(--sp-6);
+            /* One height whether or not the row carries a button, so the
+               underline and the first block do not jump between tabs. */
+            min-height: var(--control-h-md); }
         /* The strip shares its row with the stamp and Refresh, centred: its own
            space below would lift its labels 6px above them. */
         .page-tabs > .tabs { margin-bottom: 0; }
         .page-tabs .spacer { flex: 1 1 auto; }
-        .page-tabs-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-3); }
+        .page-tabs-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); }
+        /* On a phone, when the stamp and its buttons take a line of their own,
+           the stamp starts at the page edge and the buttons sit at the right:
+           the layout the page header's own rail has there. */
+        @media (max-width: 640px) { .page-tabs-end { flex: 1 1 100%; margin-left: 0; justify-content: space-between; } }
         .page-tabs .updated { font-size: var(--text-xs); color: var(--text-tertiary); }
         /* One courier per row, two across where there is room: fourteen
            carriers in a single column is a scroll, and in four columns the
@@ -426,6 +438,8 @@
             min-width: var(--control-h-md); min-height: var(--control-h-md); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
         .icon-btn:hover { background: var(--surface-tertiary); color: var(--text-primary); }
         .icon-btn:active { background: var(--surface-sunken); }
+        /* Conversations' + on the column the group chevrons and the account dots share. */
+        .convo-head .icon-btn { margin-right: calc(-1 * var(--sp-1-5)); }
         .icon-btn[aria-disabled="true"], .icon-btn:disabled { background: transparent; color: var(--text-disabled); cursor: not-allowed; }
         .icon-btn svg { width: var(--icon-md); height: var(--icon-md); }
         .convos { flex: none; padding: 0 var(--sp-2) var(--sp-2); display: flex; flex-direction: column; gap: 0; }
@@ -473,7 +487,7 @@
         /* ---------- Main ---------- */
         .main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
         .topbar { height: var(--topbar-h); flex-shrink: 0; border-bottom: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary);
-            display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-6); position: relative; z-index: 5; }
+            display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--wrap-pad); position: relative; z-index: 5; }
         /* One line, always. A conversation title is user-written and can run to
            sixty characters; at 375px that wrapped to three lines inside a
            48px bar and spilled over its border. min-width:0 lets the flex item
@@ -495,7 +509,11 @@
         .topbar-search kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 var(--sp-1-5);
             border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-2xs); background: var(--surface-tertiary);
             font-family: inherit; font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-tertiary); }
-        @media (max-width: 640px) { .topbar-search .ts-label, .topbar-search kbd { display: none; } }
+        @media (max-width: 640px) { .topbar-search .ts-label, .topbar-search kbd { display: none; }
+            /* The page's gutter steps down on a phone, and the top bar, which
+               takes the same token, steps with it, so its controls line up
+               with the page under them. */
+            :root { --wrap-pad: var(--sp-4); } }
         /* The page list behind the search: an input on top, the pages under it
            grouped as the sidebar groups them. */
         .dpanel-search { padding: var(--sp-1); gap: var(--sp-1); min-width: 320px; }
@@ -648,11 +666,14 @@
            header's internal 16px rather than the 24px that separates one
            section from the next. */
         .ov-hero:has(+ .page-tabs) { margin-bottom: var(--sp-4); }
-        /* And its paragraph holds a three-line box, so the strip lands at the
-           same y on every tab in the set. Liability's intro is two lines and
-           Reconciliation's is three, which moved the tab you had just clicked
-           20px out from under the cursor. */
-        .ov-hero:has(+ .page-tabs) p { min-height: 60px; }
+        /* Every screen's section tabs, not only Finance's: CRM, Production
+           Manager, Team and the Guide sat 24 under their header, Finance 16. */
+        .ov-hero:has(+ .tabs) { margin-bottom: var(--sp-4); }
+        /* The Finance paragraph no longer holds a three-line box. It was meant
+           to land the strip at one y on all four pages, but Forecast's intro
+           runs to four lines, so it never did, and a two-line intro (Xero
+           sync) carried an empty line under it: 40px of header gap where
+           every other page had 16. */
         /* No icon beside a page title: the reference does not have one on any
            of its pages, and at 30px the title carries the page on its own. */
         .ov-hero .badge { width: var(--box-xl); height: var(--box-xl); border-radius: var(--radius-sm); background: var(--surface-tertiary); color: var(--text-secondary);
@@ -674,7 +695,11 @@
         .ov-hero p { margin: 0; color: var(--text-tertiary); font-size: var(--text-sm); line-height: var(--lh-control); max-width: 62ch; }
         .ov-updated { font-size: var(--text-xs); color: var(--text-tertiary); margin-left: auto; white-space: nowrap; padding-top: var(--sp-1-5); }
         .ov-hero-act { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); flex: none; padding-top: var(--sp-1); }
-        .ov-hero-act .ov-updated { margin-left: 0; padding-top: 0; font-size: var(--text-sm); }
+        /* Filled later or never (a page not yet set up), or holding only a
+           hidden button (Guide's Print on its other tabs): it takes no line,
+           which on a phone added 12 of dead air under the intro. */
+        .ov-hero-act:not(:has(> :not([hidden]))) { display: none; }
+        .ov-hero-act .ov-updated { margin-left: 0; padding-top: 0; }
         /* Above a phone the rail kept its full width and the page's intro
            gave way: at 768 on a tablet Overview's sentence was a column 122px
            wide, SEO's 71px and Size list's 56px, and the rail's last button
@@ -727,6 +752,11 @@
            tiny tiles is a different thing from a KPI row. */
         .metrics { display: grid; gap: var(--sp-4); margin-bottom: var(--sp-6);
             grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        /* The caveat that qualifies a row of figures sits at its own 12 under
+           them, not 24 away and as near the next section as its own. */
+        .metrics:has(+ .fc-conf) { margin-bottom: 0; }
+        /* A row of figures inside a card: the card's 16 gap, not the page's 24 on top. */
+        .card > .metrics { margin-bottom: 0; }
         @media (max-width: 1100px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         /* Two up on a phone, the Finance rule, for every KPI row: a tile that
            carries a sparkline takes the row, a label and a figure take half,
@@ -924,8 +954,9 @@
         .az button:disabled { color: var(--text-disabled); cursor: default; background: transparent; }
         .tbl-pages { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
         .tbl-page { font-size: var(--text-sm); color: var(--text-tertiary); }
-        .metrics-finance .stat .label { font-size: var(--text-md); }
-        .metrics-finance .stat .value { font-size: var(--text-3xl); }
+        /* One figure card everywhere (2026-10-05). Finance's tiles carried a
+           16px label and a 30px figure, Loan units an icon and a 30px figure,
+           the rest the strip's 14 over 24: three cards doing one job. */
         .metrics-strip .stat.stat-pick:is(.on, [aria-pressed="true"]) { box-shadow: var(--ring-action-2); }
         /* Two up on a phone rather than one. A card with a sparkline and a
            delta pill needs the full width; these carry a label and a figure,
@@ -939,39 +970,60 @@
         /* Two columns below that: the third tile takes the row, not a half
            with an empty cell beside it that reads as a tile that failed. */
         @media (max-width: 1100px) { .metrics.metrics-3 > :nth-child(3):last-child { grid-column: 1 / -1; } }
-        /* One frame, every row of it full. The strip is sixty tracks so any
-           count divides: four across by default, five or six across when there
-           are five or six (three across for six on a narrower page), and a
-           short last row shares the width - seven is four then three, nine is
-           four, four, then one across - instead of a boxed hole at the end,
-           which is what seven SEO checks left in a fixed four-column grid. */
-        .metrics.metrics-strip { grid-template-columns: repeat(60, minmax(0, 1fr));
-            /* Sixty tracks means fifty-nine gaps, and at 16px each that is
-               944px of gap before a single card gets a pixel. On a page
-               narrower than that the tracks resolved to 0 and every card fell
-               out of the grid at its own min-content width - measured 464px
-               cards spilling 624px past a 568px strip. The gap gives way
-               first: it is never wider than one track's share of the strip,
-               which always leaves the sixty tracks something to divide,
-               however narrow the page gets. */
-            column-gap: min(var(--sp-4), calc(100% / 60)); }
+        /* One frame, every row of it full. The strip is twelve tracks: four
+           across by default, five or six across when there are five or six
+           (three across for six on a narrower page), and a short last row
+           shares the width - seven is four then three, nine is four, four, then
+           one across - instead of a boxed hole at the end. It was sixty tracks,
+           and fifty-nine gaps forced the column gap to shrink to a sixtieth of
+           the strip (12px at 1024, 6 on a phone) while rows stayed 16 apart, so
+           tiles sat glued side by side. Twelve tracks keep the 16 both ways. */
+        .metrics.metrics-strip { grid-template-columns: repeat(12, minmax(0, 1fr)); }
         @media (min-width: 901px) {
-            .metrics-strip > .stat { grid-column: span 15; }
-            .metrics-strip > .stat:nth-child(4n+1):last-child { grid-column: span 60; }
+            .metrics-strip > .stat { grid-column: span 3; }
+            .metrics-strip > .stat:nth-child(4n+1):last-child { grid-column: span 12; }
             .metrics-strip > .stat:nth-child(4n+1):nth-last-child(2),
-            .metrics-strip > .stat:nth-child(4n+2):last-child { grid-column: span 30; }
+            .metrics-strip > .stat:nth-child(4n+2):last-child { grid-column: span 6; }
             .metrics-strip > .stat:nth-child(4n+1):nth-last-child(3),
             .metrics-strip > .stat:nth-child(4n+2):nth-last-child(2),
-            .metrics-strip > .stat:nth-child(4n+3):last-child { grid-column: span 20; }
-            .metrics-strip:has(> :nth-child(5):last-child) > .stat { grid-column: span 12; }
-            .metrics-strip:has(> :nth-child(6):last-child) > .stat { grid-column: span 20; }
+            .metrics-strip > .stat:nth-child(4n+3):last-child { grid-column: span 4; }
+            /* Five do not divide twelve, so five take a grid of their own. */
+            .metrics.metrics-strip:has(> :nth-child(5):last-child) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+            .metrics-strip:has(> :nth-child(5):last-child) > .stat { grid-column: auto; }
+            .metrics-strip:has(> :nth-child(6):last-child) > .stat { grid-column: span 4; }
         }
-        @media (min-width: 1500px) { .metrics-strip:has(> :nth-child(6):last-child) > .stat { grid-column: span 10; } }
+        @media (min-width: 1500px) { .metrics-strip:has(> :nth-child(6):last-child) > .stat { grid-column: span 2; } }
         /* Two across on a narrow page, an odd last cell taking the row. */
         @media (max-width: 900px) {
-            .metrics-strip > .stat { grid-column: span 30; }
-            .metrics-strip > .stat:nth-child(odd):last-child { grid-column: span 60; }
+            .metrics-strip > .stat { grid-column: span 6; }
+            .metrics-strip > .stat:nth-child(odd):last-child { grid-column: span 12; }
         }
+        /* Three figures stay three across down to a phone: two and a lone
+           full-width third read as a row that ran out. */
+        @media (min-width: 641px) and (max-width: 900px) {
+            .metrics-strip:has(> :nth-child(3):last-child) > .stat { grid-column: span 4; } }
+        /* A figure sits under its label at one distance in every tile. Pinned
+           to the foot of the tile (margin-top: auto), a tile with a shorter note
+           or an unwrapped change pill dropped its figure lower than its
+           neighbours', and a row of figures stopped lining up. */
+        .metrics-strip > .stat > .stat-row { margin-top: 0; }
+        /* A row of tiles shares its label, figure and note rows (subgrid), so a
+           label that wraps in one tile moves every figure in the row down with
+           it and the figures stay level. Tiles with a sparkline keep their own
+           flow: the spark is a fourth part the shared rows do not have. */
+        .metrics-strip > .stat:not(:has(.stat-spark)) { display: grid; grid-row: span 3; grid-template-rows: subgrid;
+            grid-template-columns: minmax(0, 1fr); row-gap: var(--sp-1); align-content: start; }
+        .metrics-strip:has(> .stat .stat-spark) > .stat { grid-row: auto; }
+        /* A tile too narrow for its figure and change pill on one line puts the
+           pill under the figure. Tiles in a row are one width, so every tile in
+           it decides the same way: one pill wrapping and the next not read as
+           two designs. The container is the figure's own line, not the tile:
+           a tile that is a container cannot share its rows (subgrid, above). */
+        .metrics-strip .stat-row { container-type: inline-size; row-gap: var(--sp-1);
+            /* Its row is as tall as the tallest in the line of tiles, so the
+               figure starts at the top of it rather than floating in the middle. */
+            align-content: flex-start; }
+        @container (max-width: 13rem) { .metrics-strip .stat-row > .value { flex-basis: 100%; } }
         /* A KPI card that is also a filter has to answer the click that set
            it, with an inset hairline in the accent: no lift is ADDED, because a
            card does not float, and the base lift is not taken away either -
@@ -1049,6 +1101,7 @@
            header's internal 16 there rather than the gap between two blocks,
            as .ov-hero:has(+ .page-tabs) gives it in the flow. */
         .ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-4) - var(--page-rhythm)); }
+        .ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-4) - var(--page-rhythm)); }
         /* A segment bar is as wide as its buttons in the flow; a grid item
            would stretch its track across the whole row. */
         .ov-wrap.wgrid > :is(.tabs, .segmented) { justify-self: start; }
@@ -1464,6 +1517,11 @@
         /* Its own padding-inline: 0 is declared above the card rule and lost
            to it, so it took the gutter twice: margin and padding, 32px in. */
         .card > .know-body, .card > .fc-alert { padding-inline: 0; }
+        /* In a card the card's 16 gap spaces the rows, so a row adds nothing
+           above it but the 16 below the hairline that divides it from the last:
+           16 either side of the rule, like every other divided list. */
+        .card > .fc-alert { padding-block: 0; }
+        .card > .fc-alert + .fc-alert { padding-top: var(--sp-4); }
         /* The list's markers sit inside the card's gutter, not over it. */
         .card > .setup-steps { padding-left: calc(var(--sp-4) + var(--sp-5)); }
         /* A setting's name or an address inside a step's sentence stays whole:
@@ -1472,6 +1530,9 @@
            the next line whole, and only an address longer than the line breaks:
            kept on one line regardless, the callback address ran off a phone. */
         .setup-steps li > .setup-code { word-break: normal; overflow-wrap: anywhere; }
+        /* A value standing in a row with its Copy button is as tall as the
+           button; a value inside a sentence stays inline text. */
+        .act-row > .setup-code { display: inline-flex; align-items: center; min-height: var(--control-h-md); padding-inline: var(--sp-2-5); }
         /* One algorithm explained: a name, what it does, what it suits and how
            right it has been. A list of these is reference material, so it is
            quiet - separated by a hairline rather than boxed, because a stack of
@@ -1596,7 +1657,11 @@
         }
         @media (max-width: 640px) {
             .card-head { grid-template-columns: 1fr; }
-            .card-act { grid-column: 1; grid-row: auto; justify-content: flex-start; }
+            .card-act { grid-column: 1; grid-row: auto; justify-content: flex-start; margin-top: var(--sp-2); }
+            /* A single icon button (the Guide's print) stays beside its title,
+               as on a desktop, rather than taking a line of its own. */
+            .card-head:has(> .card-act > :only-child:is(.mem-btn, .icon-btn, .btn-icon)) { grid-template-columns: 1fr auto; }
+            .card-head > .card-act:has(> :only-child:is(.mem-btn, .icon-btn, .btn-icon)) { grid-column: 2; grid-row: 1 / span 2; margin-top: 0; }
         }
 
         /* ---------- Form controls: one recipe, applied by element ---------- */
@@ -2344,7 +2409,7 @@
            rule paints - so every filter select in the app rendered as a plain
            bordered pill with no sign it opened anything. Same reason on hover:
            a shorthand there made the caret vanish under the pointer. */
-        .lbl-size { background-color: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset);
+        .lbl-size { background-color: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field);
             color: var(--text-primary); font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); padding: var(--control-pad-y) var(--sp-3);
             line-height: var(--lh-control); cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); min-height: var(--control-h); }
         /* The caret needs its gutter back too: the padding shorthand above
@@ -2456,7 +2521,7 @@
         .disp-origin { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
         .disp-fld { display: flex; flex-direction: column; gap: var(--sp-1); }
         .disp-fld-lab { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: var(--weight-medium); }
-        .disp-num { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset);
+        .disp-num { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field);
             color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-2); line-height: var(--lh-control);
             min-height: var(--control-h); width: 100%; }
         .disp-subhead { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: var(--weight-medium); margin-bottom: var(--sp-1); }
@@ -2469,7 +2534,7 @@
         .disp-addr-f { display: flex; flex-direction: column; gap: var(--sp-1); }
         .disp-addr-f > .field-help { margin: 0; }
         .disp-addr-lab { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: var(--weight-medium); }
-        .disp-text { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset);
+        .disp-text { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field);
             color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-2-5); line-height: var(--lh-control);
             min-height: var(--control-h); width: 100%; box-sizing: border-box; }
         /* The stage editor's number boxes are number-sized; the stage's name takes the rest. */
@@ -2589,7 +2654,7 @@
             grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); }
         /* A column of cards at the page's own rhythm, for a page that lists
            sections one under another (the Guide). */
-        .card-stack { display: grid; gap: var(--sp-4); }
+        .card-stack { display: grid; gap: var(--page-rhythm); }
         /* A segmented control with something quiet on its right. */
         .seg-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
         .seg-row > :is(.tabs, .segmented) { margin-bottom: 0; }
@@ -2598,20 +2663,19 @@
         .guide-rows > .guide-row[hidden] { display: none; }
         /* Columns, not a grid: a grid row was as tall as its taller card, so
            a short section beside Files left 541px of nothing. */
-        .guide-grid { column-width: calc(var(--sp-8) * 16); column-gap: var(--sp-4); }
-        .guide-grid > .guide-card { break-inside: avoid; margin-bottom: var(--sp-4); }
+        .guide-grid { column-width: calc(var(--sp-8) * 16); column-gap: var(--page-rhythm); }
+        .guide-grid > .guide-card { break-inside: avoid; margin-bottom: var(--page-rhythm); }
         .guide-grid > .guide-card[hidden] { display: none; }
         .guide-t { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-primary); }
         .guide-d { margin: var(--sp-1) 0 0; font-size: var(--text-sm); color: var(--text-secondary); line-height: var(--lh-body); max-width: 75ch; overflow-wrap: anywhere; }
-        .guide-d .setup-code { word-break: break-all; }
+        .guide-d .setup-code { word-break: normal; overflow-wrap: anywhere; }
         .guide-copy { margin-left: var(--sp-1); vertical-align: middle; }
         .guide-tools { display: grid; gap: var(--sp-3); margin-bottom: var(--sp-4); }
         /* Stretched by the grid, the search's box ran the width of the page
            and its clear button sat at the far end, 605px from the field. */
-        .guide-tools > .tbl-search { justify-self: start; }
         /* Design, in the Guide: only the frame the gallery needs. The parts in
            it are styled by their own rules, never here. */
-        .ds-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
+        .ds-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--page-rhythm); }
         .ds-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
         .ds-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--sp-8) * 6), 1fr)); gap: var(--sp-4); }
         .ds-swatch { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
@@ -2622,7 +2686,7 @@
         .ds-use { font-size: var(--text-xs); color: var(--text-secondary); line-height: var(--lh-body); margin-top: var(--sp-0-5); }
         .ds-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--sp-8) * 6), 1fr)); gap: var(--sp-2) var(--sp-4); }
         .ds-fields :is(input, select, textarea) { width: 100%; }
-        .guide-toc { display: flex; flex-wrap: wrap; gap: var(--sp-1-5); }
+        .guide-toc { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
         .guide-card h3:focus { outline: 0; }
         .guide-none[hidden] { display: none; }
         .guide-print-row { margin: 0 0 var(--sp-2); }
@@ -2639,8 +2703,8 @@
         /* A lead is a short form and an insight is a chart set: both read
            better measured than stretched. Deals, contacts and activities are
            data and take the whole wrap. */
-        .crm-seg-leads { max-width: 760px; }
-        .crm-seg-insights { max-width: 1120px; }
+        /* The Leads and Insights sections take the page's width like every
+           other CRM section: capped, they ended short of the card above. */
         /* Kept: older markup and the tests still name it. */
 
         .crm-board { display: flex; gap: var(--sp-4); overflow-x: auto; align-items: flex-start;
@@ -2656,8 +2720,19 @@
         .crm-col { min-width: 256px; flex: 1 0 256px; background: var(--surface-secondary); border: var(--bw-hairline) solid var(--border-default);
             border-radius: var(--radius-card) var(--radius-card) 0 0; padding: 0 0 var(--sp-3); min-height: 380px; display: flex; flex-direction: column; }
         .crm-col .crm-col-add { margin-top: auto; }
+        /* Above a phone the pipeline's lanes share the board: at 256px each and
+           unable to shrink, the fifth stage sat wholly past the card's edge at
+           1440 with nothing to say the board scrolls. A board too narrow for
+           five 200px lanes still scrolls, now with a lane visibly cut. */
+        @media (min-width: 641px) { .crm-pipeline > .crm-col { flex: 1 1 0; min-width: calc(var(--sp-8) * 4); } }
+        /* Where five lanes (nearly) fit, the board keeps no extra room under
+           them for a scrollbar: a lane's own 12px foot takes an overlay bar. */
+        @media (min-width: 1101px) { .crm-pipeline { padding-bottom: 0; } }
         .crm-col.dragover { border-color: var(--border-selected); background: var(--surface-sunken); }
         .crm-col-name { font-size: var(--text-md); font-weight: var(--weight-medium); color: var(--text-primary); line-height: var(--lh-none); padding: var(--sp-4) var(--sp-4) 0; }
+        /* Two lines' room, so a stage name that wraps at a narrow lane does not
+           start its lane's money line lower than its neighbours'. */
+        .crm-pipeline .crm-col-name { min-height: calc(var(--sp-4) + 2em); }
         .crm-col-sum { font-size: var(--text-sm); color: var(--text-tertiary); line-height: var(--lh-none); padding: var(--sp-1) var(--sp-4) var(--sp-3); }
         /* Two line boxes, always. Below 1440 a pipeline column is 228px and the
            longer money strings wrap, so three of the five headers stayed one
@@ -2669,7 +2744,10 @@
         .crm-col-note { font-size: var(--text-xs); color: var(--text-tertiary); padding: 0 var(--sp-4) var(--sp-3);
             line-height: var(--lh-snug); }
         .crm-col-add { width: auto; margin: 0 var(--sp-3); border: var(--bw-hairline) solid var(--border-default); background: none;
-            border-radius: var(--radius-sm); color: var(--text-tertiary); font: inherit; font-size: var(--text-sm); padding: var(--sp-1) 0; cursor: pointer; }
+            border-radius: var(--radius-control); color: var(--text-tertiary); font: inherit; font-size: var(--text-sm); cursor: pointer;
+            display: flex; align-items: center; justify-content: center; gap: var(--sp-1);
+            min-height: var(--control-h-md); padding: 0; line-height: var(--lh-control); }
+        .crm-col-add svg { width: var(--icon-sm); height: var(--icon-sm); }
         .crm-col-add:hover { color: var(--text-brand); border-color: var(--border-selected); }
         .crm-card { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card);
             padding: var(--sp-4); margin: 0 var(--sp-3) var(--sp-3); box-shadow: var(--shadow-sm); cursor: grab; }
@@ -3187,10 +3265,10 @@
         /* --radius-inset, not --radius-card: this box sits inside the deals card, in the same 1px
            grey, and repeating the parent's corner reads as one frame drawn
            twice. */
-        .crm-onboard { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-5);
-            margin: var(--sp-2) 0; text-align: left; max-width: 560px; }
-        .crm-onboard h3 { margin: 0 0 var(--sp-1-5); font-size: var(--text-md); font-weight: var(--weight-medium); }
-        .crm-onboard p { margin: 0 0 var(--sp-2-5); font-size: var(--text-sm); color: var(--text-secondary); }
+        .crm-onboard { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-4);
+            margin: 0 0 var(--sp-4); text-align: left; max-width: 560px; }
+        .crm-onboard h3 { margin: 0 0 var(--sp-1); font-size: var(--text-md); font-weight: var(--weight-medium); }
+        .crm-onboard p { margin: 0 0 var(--sp-4); font-size: var(--text-sm); color: var(--text-secondary); }
         /* Idle and armed measure the same, so ticking a row never moves the
            table under the pointer: 28px is the armed height, the small button
            the card header and the toolbar above it are both built from. */
@@ -3230,8 +3308,8 @@
             .crm-col { min-width: 240px; flex-basis: 240px; min-height: 200px; }
             .crm-chev { flex-wrap: wrap; }
             .crm-chev-s { flex: 1 1 30%; clip-path: none !important; border-radius: var(--radius-xs); }
-            .crm-bar-lab { width: 92px; font-size: var(--text-xs); }
-            .crm-bar-val { width: 66px; font-size: var(--text-xs); }
+            .crm-bar-lab { width: calc(var(--sp-8) * 3); font-size: var(--text-xs); }
+            .crm-bar-val { width: var(--field-w-xs); font-size: var(--text-xs); }
             /* Order and email rows are built from hard min-widths plus a row
                of buttons whose min-content exceeds a 390px phone, so they
                spilled past the card and pushed the page sideways. On a phone
@@ -3642,7 +3720,7 @@
            the card's 16px padding with the card's own 16px gap between them.
            Every number here was read off the reference's rendered page. */
         .tbl-tools { display: flex; align-items: center; justify-content: space-between;
-            gap: var(--sp-3); flex-wrap: wrap; }
+            gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; }
         /* min-width: 0 on both rails and on the field's own wrapper. Without it
            a flex item's automatic minimum is its CONTENT, so the 320px field
            below propped the whole toolbar open at 320 and the card's 16px
@@ -3650,12 +3728,21 @@
            was resolving against a wrapper that could not shrink. */
         .tbl-tools-l, .tbl-tools-r { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
             min-width: 0; max-width: 100%; }
+        /* On a phone a rail holding a segmented track takes the whole line, so
+           the track fills it as it does everywhere else, and an empty left rail
+           no longer pushes it to the right. */
+        @media (max-width: 640px) { .tbl-tools-r:has(> .segmented) { flex: 1 1 100%; } .tbl-tools-l:empty { display: none; } }
         .tbl-search { position: relative; display: flex; min-width: 0; max-width: 100%; }
         /* The declared 28 has to beat the 32px min-height every field carries,
            or the search sits 4px proud of the 28px card actions above it. */
         .tbl-search input { height: var(--control-h-md); min-height: var(--control-h-md); width: 320px; max-width: 100%;
             padding: var(--sp-1) var(--sp-2-5) var(--sp-1) var(--sp-7); border-radius: var(--radius-sm);
             font-size: var(--text-sm); line-height: var(--lh-control); }
+        /* On a phone the search gives way so Print stays beside it. */
+        @media (max-width: 640px) {
+            .guide-tools > .act-row { flex-wrap: nowrap; }
+            .guide-tools > .act-row > .tbl-search { flex: 1 1 0; }
+            .guide-tools > .act-row > .tbl-search input { width: 100%; } }
         .tbl-search .ic { position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
             color: var(--text-tertiary); pointer-events: none; }
         .tbl-search .ic svg { width: var(--icon-md); height: var(--icon-md); }
@@ -3689,8 +3776,11 @@
            search beside it. Both are re-cut to the row here. */
         /* 28 on the right, not 10: the base rule draws its 16px caret at
            `right 9px center`, so a symmetric padding put the label under it. */
-        .tbl-tools select { height: var(--control-h-md); min-height: var(--control-h-md); padding: var(--sp-1) var(--chevron-room) var(--sp-1) var(--sp-2-5);
+        .tbl-tools select { font-weight: var(--weight-regular); height: var(--control-h-md); min-height: var(--control-h-md); padding: var(--sp-1) var(--chevron-room) var(--sp-1) var(--sp-2-5);
             border-radius: var(--radius-sm); font-size: var(--text-sm); line-height: var(--lh-control); }
+        /* On a phone each line of selects fills to the card's gutter rather
+           than ending wherever its words do. */
+        @media (max-width: 640px) { .tbl-tools-l > select, .tbl-tools-r > select { flex: 1 1 calc(var(--sp-8) * 3); } }
         /* A variant that changes the gap must change the TOKEN, not the raw
            padding: the thumb's radius is derived from it, so setting padding
            directly left the thumb rounded for a 4px gap while sitting in a 2px
@@ -3707,7 +3797,7 @@
            that carry a literal height take the small step. */
         @media (hover: none) and (pointer: coarse) {
             :root { --control-h: 40px; --control-h-md: 36px; --control-h-sm: 32px; }
-            .tab, .segmented > button { min-height: var(--control-h-sm); }
+            .tab { min-height: var(--control-h-sm); }
             .tbl-search .tbl-clear { width: var(--control-h-sm); height: var(--control-h-sm); }
             .track-btn, .chart-expand, .toggle { min-height: var(--control-h-sm); }
             .chart-expand { min-width: var(--control-h-sm); }
@@ -3722,6 +3812,7 @@
            card's own 16px gap never reaches between them and the steps sat on
            the table's bottom border. Fires only on that exact adjacency. */
         .ktable-wrap + .tbl-foot { margin-top: var(--sp-4); }
+        .card > .ktable-wrap + .tbl-foot { margin-top: 0; }
         .tbl-count { flex: 1 1 auto; font-size: var(--text-sm); color: var(--text-tertiary); }
         .tbl-pager { display: flex; align-items: center; gap: var(--sp-7); }
         .tbl-rows { display: flex; align-items: center; gap: var(--sp-2);
@@ -3806,6 +3897,11 @@
            families did these two jobs before 2026-10-05 (.ptab, .ftab, .seg,
            .lbl-seg, and Guide's own): built by tabStrip() and segmented(). */
         .tabs { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1); max-width: 100%; margin-bottom: var(--sp-3); }
+        /* In a card the card's own 16 gap spaces it, as it does a toolbar. */
+        .card > .tabs { margin-bottom: 0; }
+        /* The 28 row the Finance strip sits in, for every page's strip, so the
+           underline lands at one distance under every header. */
+        .ov-wrap > .tabs { min-height: var(--control-h-md); }
         .tab { position: relative; display: inline-flex; align-items: center; gap: var(--sp-1-5);
             height: var(--control-h-sm); padding: var(--sp-0-5) var(--sp-1-5); border: 0; background: none;
             border-radius: var(--radius-xs); font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium);
@@ -3827,13 +3923,29 @@
         @media (max-width: 900px) {
             .tabs { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding: var(--sp-1);
                 margin: calc(-1 * var(--sp-1)) calc(-1 * var(--sp-1)) var(--sp-1); max-width: calc(100% + 2 * var(--sp-1)); }
-            .tab .beta-tag { display: none; } }
+            .tab .beta-tag { display: none; }
+            /* A strip inside a card keeps the card's 16 gutter: its 4px padding,
+               which holds the outline, comes out of the gutter, not the border. */
+            .card > .tabs { margin: calc(-1 * var(--sp-1)) calc(var(--sp-4) - var(--sp-1));
+                max-width: calc(100% - 2 * (var(--sp-4) - var(--sp-1))); }
+            /* The page's own rhythm rule outranks the take-back above, so the
+               4px is taken back here too: the labels land where they do on a
+               desktop, and the first block the rhythm under them. In a row
+               (Finance) the strip's 4px top and bottom come out of the row. */
+            .ov-wrap:not(.wgrid) > .tabs { margin-top: calc(-1 * var(--sp-1)); margin-bottom: calc(var(--page-rhythm) - var(--sp-1)); }
+            .ov-wrap > .tabs { min-height: calc(var(--control-h-md) + 2 * var(--sp-1)); }
+            .ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-4) - var(--page-rhythm) - var(--sp-1)); }
+            .page-tabs > .tabs { margin-block: calc(-1 * var(--sp-1)); } }
         /* align-self: a card is a column flexbox, and stretched across it the
            track ran from border to border with its choices bunched at one end. */
         .segmented { display: inline-flex; flex-wrap: wrap; align-items: center; align-self: flex-start; gap: var(--sp-0-5); max-width: 100%;
             padding: var(--sp-0-5); background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default);
             border-radius: var(--radius-control); }
-        .segmented > button { display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--control-h-sm);
+        /* flex: 1 1 auto shares out the spare room of a line, which a track
+           only has once it wraps: a wrapped track fills its lines rather than
+           stranding one choice at the left of the second. On one line the track
+           is as wide as its choices, so nothing grows. */
+        .segmented > button { flex: 1 1 auto; justify-content: center; display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--segment-h);
             padding: 0 var(--sp-2-5); border: 0; background: transparent; border-radius: var(--radius-control);
             font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); line-height: var(--lh-control);
             color: var(--text-secondary); cursor: pointer; white-space: nowrap;
@@ -3844,13 +3956,18 @@
         .segmented > button:disabled { color: var(--text-disabled); background: transparent; cursor: not-allowed; }
         .segmented > button .cdot { display: inline-grid; place-items: center; vertical-align: middle; color: var(--success); }
         .segmented > button .cdot svg { width: var(--icon-xs); height: var(--icon-xs); }
-        /* On a phone a track that wraps fills each line, so a choice on a second
-           line reads as part of the control, not a stray. Its corner is the
-           card's there: a pill two or three lines tall is a stadium, and the
-           choices at its ends poked out through the curve. */
+        /* On a phone a track takes a line of its own and fills it, so a choice
+           on a second line reads as part of the control, not a stray. align-self
+           fills a column parent, the 100% basis a row parent (a toolbar, a
+           section title), where align-self only sets the height. */
         @media (max-width: 640px) {
-            .segmented { display: flex; align-self: stretch; border-radius: var(--radius-card); }
+            .segmented { display: flex; align-self: stretch; flex: 1 1 100%; }
             .segmented > * { flex: 1 1 auto; justify-content: center; } }
+        /* A track that wraps onto two or more lines takes the card's corner: a
+           pill that tall is a stadium, and the choices at its ends poked out
+           through the curve. The script marks it (chooser), since CSS cannot
+           see a wrap; a track on one line stays a pill at every width. */
+        .segmented.wrapped { border-radius: var(--radius-card); }
         /* A 14px box inside a 14px box with 16px of padding reads blocky at
            the inner corner. The tables already step down to the base radius
            inside a card; these were the three shapes that had not. */
@@ -3910,6 +4027,9 @@
         /* ---------- Charts ---------- */
         .chart-card { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card);
             box-shadow: var(--shadow-sm); padding: var(--sp-4); margin-bottom: var(--sp-4); position: relative; }
+        /* A chart card with another card after it in the same block sits the
+           page rhythm from it, as two cards anywhere else on a page do. */
+        .ov-wrap .widget-bare > .chart-card:not(:last-child) { margin-bottom: var(--page-rhythm); }
         .chart-head { display: flex; align-items: flex-start; gap: var(--sp-3); margin-bottom: var(--sp-4); }
         /* Title over a muted line, like every card header in the reference -
            not a micro-label over a big number, which is the KPI pattern and
@@ -3976,8 +4096,6 @@
         .chart-split { stroke: var(--border-emphasis); stroke-width: 1; stroke-dasharray: 3 3;
             vector-effect: non-scaling-stroke; }
         .chart-tip .sw.band { border-radius: var(--radius-xs); opacity: .45; }
-        /* Sits under the two rows it summarises, aligned with them. */
-        .fc-more-row { margin-top: var(--sp-2); }
 
         /* The caveat under the KPI blocks. One quiet line, not a second
            frame competing with the numbers it qualifies: the Bank of England
@@ -4004,13 +4122,13 @@
            segments fill it edge to edge and are the whole point of it. */
         .fc-split-bar { display: flex; height: 10px; border-radius: var(--radius-xs);
             overflow: hidden; background: var(--surface-secondary);
-            margin-bottom: var(--sp-4); padding-inline: 0; }
+            padding-inline: 0; }
         .fc-split-seg { height: 100%; }
         .fc-split-seg.taken { background: var(--chart-1); }
         .fc-split-seg.due { background: var(--chart-1); opacity: .3; }
         /* Measured like prose, because it is read like a receipt: at the full
            card width the amounts would sit a screen away from their names. */
-        .fc-drive { display: flex; flex-direction: column; gap: var(--sp-2-5); font-size: var(--text-sm); max-width: 52ch; }
+        .fc-drive { display: flex; flex-direction: column; gap: var(--sp-3); font-size: var(--text-sm); max-width: 52ch; }
         .fc-drive-row { display: flex; align-items: baseline; gap: var(--sp-3); }
         .fc-drive-key { flex: none; width: var(--dot-lg); height: var(--dot-lg); border-radius: var(--radius-xs);
             background: var(--chart-1); align-self: center; }
@@ -4021,7 +4139,7 @@
         .fc-drive-lbl { color: var(--text-secondary); }
         /* The total: under a rule that spans the list's own measure, in the
            primary ink, so it reads as the sum of the two lines above it. */
-        .fc-drive-tot { margin-top: var(--sp-1); padding-block-start: var(--sp-3); padding-inline: 0;
+        .fc-drive-tot { margin-top: 0; padding-block-start: var(--sp-3); padding-inline: 0;
             border-top: var(--bw-hairline) solid var(--border-default); }
         .fc-drive-tot .fc-drive-lbl, .fc-drive-tot .fc-drive-amt { color: var(--text-primary); font-weight: var(--weight-medium); }
         .chart-dot { stroke: var(--surface-primary); stroke-width: 2; }
@@ -4033,7 +4151,10 @@
         /* 14, like every other card description on the page: at 12 the header
            read 16 -> 20 -> 12 and the line that says where a number came from
            was the smallest type on the page outside the axis. */
-        .chart-head .cs { font-size: var(--text-sm); color: var(--text-tertiary); margin-top: var(--sp-1); display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1); }
+        .chart-head .cs { font-size: var(--text-sm); color: var(--text-tertiary); margin-top: var(--sp-1); display: block; }
+        /* Inline, so a phone breaks the line between words rather than
+           between two boxes, which left the separator hanging. */
+        .chart-head .cs .cs-period { margin-left: var(--sp-1); }
         /* The window is one phrase. Left in the same text node it broke as
            "... last 12 / months" on a phone; as its own unwrappable item the
            line breaks after the separator instead, which is where a reader
@@ -4143,6 +4264,7 @@
 
         .load-failed, .pchat-err, .chat-err { display: flex; align-items: center; justify-content: space-between;
             gap: var(--sp-3); flex-wrap: wrap; margin: var(--sp-1) 0 0; }
+        .card > .load-failed { margin-top: 0; }
         .thinking { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-secondary); font-size: var(--text-sm); }
         .thinking .spinner { flex: none; }
         .spinner { display: inline-grid; place-items: center; width: var(--box-xs); height: var(--box-xs); color: var(--text-tertiary); }
@@ -4166,10 +4288,10 @@
         #input:focus { box-shadow: none; }
         /* No keys on a touch screen, so no keyboard hint either. */
         @media (hover: none) { .composer .hint { display: none; } }
-        .send { width: var(--box-xl); height: var(--box-xl); border-radius: var(--radius-sm); border: 0; background: var(--action-primary); color: var(--text-on-action); display: grid; place-items: center; flex-shrink: 0; transition: background var(--dur) var(--ease); }
+        .send { width: var(--box-xl); height: var(--box-xl); border-radius: var(--radius-control); border: 0; background: var(--action-primary); color: var(--text-on-action); display: grid; place-items: center; flex-shrink: 0; transition: background var(--dur) var(--ease); }
         .send:hover { background: var(--action-hover); } .send:active { background: var(--action-active); } .send:disabled { background: var(--surface-tertiary); color: var(--text-disabled); cursor: not-allowed; }
         .send svg { width: var(--icon-lg); height: var(--icon-lg); }
-        .composer .row { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); padding: 0 var(--sp-1);
+        .composer .row { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); padding: 0;
             flex-wrap: wrap; row-gap: var(--sp-1); }
         .toggle { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); color: var(--text-secondary); cursor: pointer; user-select: none; }
         /* The knob is not a box on the box scale: its size is DECIDED by the
@@ -4262,8 +4384,10 @@
         .crr-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .crr-at { font-size: var(--text-xs); color: var(--text-tertiary); flex: none; }
         @media (max-width: 900px) {
-            .chat-inner { padding-inline: var(--sp-4); }
-            .composer-wrap { padding-inline: var(--sp-4); }
+            /* The page gutter token: 24 on a tablet, 16 on a phone, as every
+               other screen and the top bar have it. */
+            .chat-inner { padding-inline: var(--wrap-pad); }
+            .composer-wrap { padding-inline: var(--wrap-pad); }
         }
 
         @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
@@ -4275,10 +4399,12 @@
            showed the worst of every squeeze in the app. */
         .backdrop { display: none; }
         @media (max-width: 900px) {
-            .sidebar { position: fixed; z-index: 30; height: 100%; box-shadow: var(--shadow-lg); margin-left: calc(-1 * var(--sidebar-w));
+            .sidebar { position: fixed; z-index: 30; height: 100%; margin-left: calc(-1 * var(--sidebar-w));
                 padding-top: env(safe-area-inset-top, 0px);
                 padding-bottom: env(safe-area-inset-bottom, 0px); }
-            .sidebar.open { margin-left: 0; }
+            /* The lift only while open: parked off-screen it still painted its
+               blur over the left edge of every page and the top bar. */
+            .sidebar.open { margin-left: 0; box-shadow: var(--shadow-lg); }
             .backdrop.show { display: block; position: fixed; inset: 0; background: var(--overlay-scrim); z-index: 20; }
         }
 
@@ -4538,7 +4664,9 @@
         .tm-list .files-rename { width: 100%; min-width: 0; }
         /* Team's cards are spaced like every page's: the Work tab's three sat
            edge to edge in plain divs. */
-        #team-content .card + .card { margin-top: var(--sp-4); }
+        #team-content .card + .card { margin-top: var(--page-rhythm); }
+        /* A 12px time beside a 14px sentence shares its baseline. */
+        #team-content .tm-row:not(:has(> .files-acts)) { align-items: baseline; }
         /* An activity line wraps rather than ending in '...' with no way to
            read the rest, and the hours stay on one line in a table that
            already scrolls. */
@@ -4574,6 +4702,9 @@
         .tm-date { flex-direction: row; align-items: center; gap: var(--sp-2); }
         .tm-day { background: var(--surface-secondary); }
         .tm-date > span { font-size: var(--text-xs); font-weight: var(--weight-regular); color: var(--text-secondary); }
+        /* Stacked on a phone, the two fields start at one x; side by side each
+           label keeps its own width. */
+        @media (max-width: 640px) { .tm-date > span { min-width: var(--sp-7); } }
         .tm-foot { max-width: 75ch; }
         .tm-panel { display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-4);
             background: var(--surface-secondary); border-top: var(--bw-hairline) solid var(--border-default); }
@@ -4601,6 +4732,9 @@
             .files-name { flex: 1 1 0; }
             .files-acts { order: 2; }
             .files-meta { order: 3; flex: 1 1 100%; margin: 0 0 0 var(--sp-6); }
+            /* Team's Activity rows have no file icon to clear: their time and
+               area stay beside the sentence. */
+            #team-content .tm-row:not(:has(> .files-acts)) > .files-meta { margin-left: 0; flex: none; }
             .tm-row .files-acts { order: 4; }
             /* The cells step down a line under the name, packed rather than
                tracked: fixed columns are for a list wide enough to have them,
@@ -6979,7 +7113,33 @@ Projected Image UK"></textarea>
                 };
                 bar.append(b);
             });
+            if (kind === 'segmented') segWrapWatch(bar);
+            /* A strip that scrolls (a phone) is redrawn scrolled to its start,
+               which left the active tab cut off at the edge, so it is brought
+               into view once the strip is on the page. Not scrollIntoView:
+               that can scroll the page itself as well. */
+            if (kind === 'tabs' && typeof requestAnimationFrame === 'function') requestAnimationFrame(() => {
+                const on = bar.querySelector('.tab.on');
+                if (!on || !bar.isConnected || bar.scrollWidth <= bar.clientWidth) return;
+                const d = on.getBoundingClientRect().right - bar.getBoundingClientRect().right;
+                if (d > 0) bar.scrollLeft += d + (parseFloat(getComputedStyle(bar).paddingRight) || 0);
+            });
             return bar;
+        }
+        /* One observer for every segmented track: marks a track whose choices
+           run onto a second line, so it can take the card's corner (CSS cannot
+           see a wrap). A track taken off the page reports a zero size and is let
+           go then, so repainting a screen does not pile up old ones. */
+        let segWrapObserver = null;
+        function segWrapWatch(bar) {
+            if (typeof ResizeObserver !== 'function') return;
+            if (!segWrapObserver) segWrapObserver = new ResizeObserver(entries => entries.forEach(e => {
+                const t = e.target;
+                if (!t.isConnected) { segWrapObserver.unobserve(t); return; }
+                const first = t.firstElementChild;
+                t.classList.toggle('wrapped', !!first && t.clientHeight > first.offsetHeight * 1.5);
+            }));
+            segWrapObserver.observe(bar);
         }
         function tabStrip(items, current, onPick, opts) { return chooser('tabs', items, current, onPick, opts); }
         function segmented(items, current, onPick, opts) { return chooser('segmented', items, current, onPick, opts); }
@@ -7462,7 +7622,9 @@ Projected Image UK"></textarea>
             }
             if (Array.isArray(s.metrics) && s.metrics.length) {
                 const b = el('div', 'block' + (chat ? ' chat-metrics' : ''));
-                b.append(metricsGrid(s.metrics)); container.append(as(b, 'metrics'));
+                /* The chat column keeps its compact two-up figures; a page gets
+                   the one figure card every other page uses. */
+                b.append(chat ? metricsGrid(s.metrics) : metricsStrip(s.metrics)); container.append(as(b, 'metrics'));
             }
             if (Array.isArray(s.insights) && s.insights.length) {
                 const b = el('div', 'block insights'); s.insights.forEach((ins, i) => b.append(insightCard(ins, i))); container.append(as(b, 'insights'));
@@ -10050,7 +10212,8 @@ Projected Image UK"></textarea>
         function loadFailure(msg, retry) {
             const box = el('div', 'msg error load-failed');
             box.append(el('div', null, msg));
-            const b = el('button', 'btn'); b.textContent = 'Try again';
+            /* The small button, as every Try again and header action is. */
+            const b = el('button', 'btn btn-sm'); b.textContent = 'Try again';
             b.onclick = retry; box.append(b);
             return box;
         }
@@ -11693,7 +11856,7 @@ Projected Image UK"></textarea>
             /* Colour is a judgement, so only a figure that is one gets it: due
                soon and overdue when there is some. 'Due soon £0' was amber
                while 'Overdue £0' was green. */
-            const grid = el('div', 'metrics metrics-flat metrics-3 metrics-strip metrics-finance');
+            const grid = el('div', 'metrics metrics-flat metrics-3 metrics-strip');
             [['Total outstanding', d.total, liaNum(d.total, v => liaMoney(v, cur, 0)), ''],
              ['Within terms', within, liaNum(within, v => liaMoney(v, cur, 0)), ''],
              ['Due soon', d.due_soon, liaNum(d.due_soon, v => liaMoney(v, cur, 0)), d.due_soon > 0 ? 'warn' : ''],
@@ -13213,13 +13376,12 @@ Projected Image UK"></textarea>
             const counts = d.counts || { out: 0, in: 0, late: 0 };
             /* Three stats, three columns: on the shared four-column grid the
                empty fourth cell read as a KPI that had failed to load. */
-            const mgrid = metricsGrid([
+            const mgrid = metricsStrip([
                 { label: 'Out now', value: String(counts.out), note: 'with customers' },
                 { label: 'On the shelf', value: String(counts.in), note: 'ready to go' },
                 { label: 'Overdue', value: String(counts.late),
                   note: counts.late ? 'past the date agreed' : 'nothing past its date',
                   trend: counts.late ? 'down' : '' }]);
-            mgrid.classList.add('metrics-3');
             box.append(widget(mgrid, 'counts', 'full', 'Loan counts'));
 
             /* ---- what is out ---- */
@@ -14947,13 +15109,15 @@ Projected Image UK"></textarea>
                        daily range the honest thing is one line saying so and a
                        button that gets the reader to a range where it works -
                        not the whole set, disabled, for them to click at. */
-                    const p = el('p', 'card-sub', 'Each source forecasts a month, so they can be compared on a '
-                        + 'monthly range rather than day by day.');
+                    /* The line is the card's description, title + 4 + line
+                       like every card head, not a block 16 under it. */
+                    h3.append(el('p', 'card-desc', 'Each source forecasts a month, so they can be compared on a '
+                        + 'monthly range rather than day by day.'));
                     const row = el('div', 'fc-more-row');
                     const go = el('button', 'btn btn-sm', 'Show the last twelve months');
                     go.type = 'button'; go.onclick = () => setFcRange('year');
                     row.append(go);
-                    c3.append(p, row);
+                    c3.append(row);
                 } else {
                     const chips = el('div', 'fc-cmp');
                     srcs.forEach(m => {
@@ -15301,10 +15465,9 @@ Projected Image UK"></textarea>
                met, before they had been told where the business stands; it is
                a good answer to a question nobody has asked yet, and it now
                lives at the bottom under How this forecast works. */
-            ht.append(title, el('p', null, 'What the shop has taken so far, where the next few months are heading, '
-                + 'and how that sits against the cash flow plan. Figures are cash in, the same money the plan '
-                + 'is written in. Anything still to come is an expectation with a range around it, never a '
-                + 'promise.'));
+            ht.append(title, el('p', null, 'What the shop has taken, where the coming months are heading, and how '
+                + 'that compares with the cash flow plan. Figures are cash in; what is still to come is a range, '
+                + 'never a promise.'));
             hero.append(badge, ht); box.append(hero);
             const latest = c && c.latest;
             const stamp = latest ? ('Run as of ' + fmtDate(latest.as_of)) : (c && !c.error ? 'No run yet' : '');
@@ -16381,9 +16544,8 @@ Projected Image UK"></textarea>
             const ht = el('div');
             const rTitle = el('h2', null, 'Reconciliation');
             ht.append(rTitle,
-                el('p', null, 'An independent check that Shopify, Xero and the inbox agree: '
-                    + 'every sale in the books, every payout in the bank, every document accounted for. '
-                    + 'It reads all three systems and writes to none of them.'));
+                el('p', null, 'Checks that Shopify, Xero and the inbox agree: every sale in the books, every '
+                    + 'payout in the bank, every document accounted for. It reads all three and changes none.'));
             hero.append(badge, ht); box.append(hero);
             /* Freshness is stated in the tabs slot and nowhere else, as the
                Liability tab states it: the connection card printed the same
@@ -16453,7 +16615,7 @@ Projected Image UK"></textarea>
                 }
                 disconnecting = false;
             };
-            const sw = el('button', 'btn btn-primary'); sw.append(ico(I.refresh),
+            const sw = el('button', 'btn btn-sm btn-primary'); sw.append(ico(I.refresh),
                 document.createTextNode(st.sweeping ? 'Sweeping\u2026' : 'Sweep now'));
             sw.disabled = !!st.sweeping || !xs.connected;
             if (!xs.connected) sw.title = 'Connect Xero first';
@@ -16463,7 +16625,7 @@ Projected Image UK"></textarea>
                 refreshRecon(); };
             acts.append(sw);
             if (xs.connected || mb.connected) {
-                const manage = el('button', 'btn');
+                const manage = el('button', 'btn btn-sm');
                 manage.type = 'button';
                 /* Name first, caret last: the house menu trigger. */
                 manage.append(document.createTextNode('Manage'), ico(I.chevDown));
@@ -16680,7 +16842,7 @@ Projected Image UK"></textarea>
                the other. Each card is also the filter for its own severity, so
                it has to show when it is the one that is set. */
             const counts = st.open_counts || {};
-            const mets = el('div', 'metrics metrics-flat metrics-strip metrics-finance');
+            const mets = el('div', 'metrics metrics-flat metrics-strip');
             [['critical', 'Critical', 'bad'], ['high', 'High', 'bad'],
              ['medium', 'Medium', 'warn'], ['low', 'Low', '']].forEach(([k, lab, tone]) => {
                 /* The tiles count what is still OPEN; the list under them shows
@@ -21705,18 +21867,19 @@ Projected Image UK"></textarea>
             box.classList.toggle('no-intro', !firstPaint('guide'));
             const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.book;
             const ht = el('div');
-            const desc = el('p', 'guide-desc');
-            ht.append(el('h2', null, 'Guide'), desc);
-            const pr = el('button', 'btn btn-sm'); pr.type = 'button'; pr.append(ico(I.printer), document.createTextNode('Print this'));
-            pr.title = 'Print the whole guide'; pr.onclick = () => printGuide();
-            hero.append(badge, ht, heroAct('', pr));
+            /* One header for the whole set, the same on every tab: a sentence
+               swapped per tab (one line on some, two on Design) and a Print
+               button shown on one tab only moved the strip under the pointer
+               on every click. Print sits with the Guide's own search. */
+            ht.append(el('h2', null, 'Guide'), el('p', 'guide-desc',
+                'How the desk runs, what changed in Reactor, and what the team has asked for.'));
+            hero.append(badge, ht);
             box.append(hero);
             /* A row of tabs that says which is showing, and keeps focus where
                it was pressed: the whole page was rebuilt and focus fell away. */
             if (!guideSegs().some(s => s[0] === guideSeg)) guideSeg = 'guide';
             box.append(tabStrip(guideSegs().map(([k, lab]) => [k, lab]), guideSeg, (k) => { guideSeg = k; paintGuideSeg(); }, { label: 'Guide sections' }));
             const host = el('div', 'guide-host'); host.id = 'guide-host'; box.append(host);
-            box._desc = desc; box._print = pr;
             paintGuideSeg();
         }
         function paintGuideSeg() {
@@ -21724,8 +21887,6 @@ Projected Image UK"></textarea>
             if (!host) { renderGuide(); return; }
             const meta = guideSegs().find(s => s[0] === guideSeg) || GUIDE_SEGS[0];
             if (meta[0] !== guideSeg) guideSeg = meta[0];
-            box._desc.textContent = meta[2];
-            box._print.hidden = guideSeg !== 'guide';
             box.querySelectorAll(':scope > .tabs > .tab').forEach(b => { const on = b.dataset.k === guideSeg; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
             paintGuideDots();
             host.replaceChildren();
@@ -21836,7 +21997,12 @@ Projected Image UK"></textarea>
                     const ratio = on ? dsContrast(c, dsColour(on)) : dsContrast(c, white);
                     const words = on ? (on === '--text-on-action' ? 'ink on it' : on === '--text-brand' ? 'teal words on it' : 'words on it') : 'on a card';
                     const facts = el('div', 'ds-facts');
-                    facts.append(el('div', 'ds-name', name), el('div', 'ds-val', dsHex(c) + ' · ' + ratio.toFixed(1) + ':1 ' + words));
+                    /* A ratio says how well something reads on a card. A ground, a
+                       tint or white words meant for a coloured fill (all near 1:1
+                       against a card) are not read on one, so they show the value
+                       alone rather than a figure that looks like a failure. */
+                    const reads = !!on || ratio >= 1.5;
+                    facts.append(el('div', 'ds-name', name), el('div', 'ds-val', dsHex(c) + (reads ? ' · ' + ratio.toFixed(1) + ':1 ' + words : '')));
                     if (use) facts.append(el('div', 'ds-use', use));
                     facts.title = token;
                     sw.append(chip, facts);
@@ -21925,11 +22091,14 @@ Projected Image UK"></textarea>
             const search = tableSearch('Search the guide…', guideView.q, (v) => { guideView.q = v; filterBook(); });
             const toc = el('nav', 'guide-toc'); toc.setAttribute('aria-label', 'Contents');
             secs.forEach(sec => {
-                const a = el('button', 'fchip', sec.h); a.type = 'button';
+                const a = el('button', 'chip', sec.h); a.type = 'button';
                 a.onclick = () => { const t = $('g-' + sec.id); if (t) { t.scrollIntoView({ block: 'start' }); const h = t.querySelector('h3'); if (h) { h.tabIndex = -1; h.focus({ preventScroll: true }); } } };
                 toc.append(a);
             });
-            tools.append(search, toc);
+            const pr = el('button', 'btn btn-sm'); pr.type = 'button'; pr.append(ico(I.printer), document.createTextNode('Print the guide'));
+            pr.onclick = () => printGuide();
+            const lead = el('div', 'act-row'); lead.append(search, pr);
+            tools.append(lead, toc);
             host.append(tools);
             const grid = el('div', 'guide-grid'); host.append(grid);
             const none = el('div', 'empty guide-none'); none.hidden = true; host.append(none);
@@ -22873,7 +23042,7 @@ Projected Image UK"></textarea>
                 pl.onclick = crmStageEditor;
                 p.append(pl, document.createTextNode('.'));
                 ob.append(p);
-                const go = el('button', 'btn btn-primary'); go.append(ico(I.plus), document.createTextNode('First deal'));
+                const go = el('button', 'btn btn-sm btn-primary'); go.append(ico(I.plus), document.createTextNode('First deal'));
                 go.onclick = () => crmDealForm();
                 ob.append(go);
                 host.append(ob);
@@ -23835,7 +24004,7 @@ Projected Image UK"></textarea>
                attached inside paint, where the filtered list actually exists. */
             const expBtn = el('button', 'btn btn-sm');
             expBtn.append(ico(I.download), document.createTextNode('Export CSV'));
-            bar.append(expBtn, add);
+            bar.append(expBtn);
             if ((!teamMe || teamMe.role === 'master') && crmContactsMode === 'people') {
                 /* Bulk email-matching of contacts to Shopify customers. Runs
                    nightly by itself; the button is for not waiting overnight. */
@@ -23862,6 +24031,8 @@ Projected Image UK"></textarea>
                 };
                 bar.append(link);
             }
+            /* The filled button ends the row, as on Deals. */
+            bar.append(add);
             const seg = segmented([['people', 'People'], ['orgs', 'Organisations']], crmContactsMode,
                                   (k) => { crmContactsMode = k; crmContactsPage = 1; renderCRM(); }, { label: 'Show' });
             /* Finding a person while they are ON THE PHONE is the single most
@@ -24932,24 +25103,31 @@ Projected Image UK"></textarea>
             const d = mailCache;
             const hero = mailHero(box);
             if (!d.connected) {
+                /* The setup card is built from the parts Reconciliation's own
+                   mailbox card uses (a card head, numbered steps, a copyable
+                   address with a Copy button), so the two read as one design.
+                   It used to borrow the Settings window's row styles and set
+                   its own sizes inline. */
                 const card = el('div', 'card');
-                card.append(el('div', 'setting-title', 'Connect the shared mailbox'));
+                const head = el('div', 'card-head');
+                head.append(el('h3', 'card-title', 'Connect the shared mailbox'));
+                card.append(head);
                 /* Master OR not-yet-known, as with Restore in Settings: the
                    board can paint before authBoot resolves, and telling the
                    master to "ask an admin" strands the one person who can do
                    it. The server refuses anyone else regardless. */
                 if (!teamMe || teamMe.role === 'master') {
-                    const p1 = el('div', 'setting-sub');
-                    p1.textContent = d.client
+                    head.append(el('p', 'card-desc', d.client
                         ? 'Connect the mailbox whose email the team answers. Google will ask which '
                           + 'account to use: choose the shared mailbox, not your own account. Whichever '
-                          + 'account you pick is the one this board reads.'
+                          + 'account you pick is the one this board reads. Google opens in a new tab, '
+                          + 'and nothing is stored until you approve it there.'
                         : 'The server needs GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET set first, '
-                          + 'with the Gmail API enabled in the same Google Cloud project.';
-                    card.append(p1);
+                          + 'with the Gmail API enabled in the same Google Cloud project.'));
                     if (d.client) {
-                        const go = el('button', 'btn btn-primary', 'Connect mailbox');
-                        go.style.marginTop = 'var(--sp-2-5)';
+                        const row = el('div', 'act-row');
+                        const go = el('button', 'btn btn-primary btn-sm');
+                        go.append(ico(I.mail), document.createTextNode('Connect mailbox'));
                         go.onclick = async () => {
                             /* The tab must be opened INSIDE the click, before any
                                await, or the popup blocker eats it. Google refuses
@@ -24966,9 +25144,8 @@ Projected Image UK"></textarea>
                             }
                             go.disabled = false;
                         };
-                        card.append(go);
-                        card.append(el('div', 'setting-sub',
-                            'Opens Google in a new tab. Nothing is stored until you approve it there.'));
+                        row.append(go);
+                        card.append(row);
                     }
                     /* First-time setup: two switches inside the Google project
                        this app ALREADY uses. Nothing else changes, so the
@@ -24980,44 +25157,37 @@ Projected Image UK"></textarea>
                        convenience for the deep links. A client id the parser
                        cannot read must not take the address down with it. */
                     if (d.client && su.redirect_uri) {
-                        const box2 = el('div');
-                        box2.style.cssText = 'margin-top:var(--sp-4);padding-top:var(--sp-3);border-top:var(--bw-hairline) solid var(--border-default)';
-                        box2.append(el('div', 'setting-title', 'First time? Two switches in Google'));
-                        box2.append(el('div', 'setting-sub', su.project
+                        card.append(el('div', 'radar-h', 'First time? Two switches in Google'));
+                        card.append(el('p', 'card-sub', su.project
                             ? 'These open the Google project this app already uses (project '
                               + su.project + '), so nothing you have already set up changes.'
                             : 'Do these in the Google project this app already uses, so nothing '
                               + 'you have already set up changes.'));
-                        const step = (n, text, href, linkText) => {
-                            const row = el('div', 'setting-sub');
-                            row.style.marginTop = 'var(--sp-2)';
-                            row.append(document.createTextNode(n + '. ' + text + ' '));
-                            const a = el('a', null, linkText);
-                            a.href = href; a.target = '_blank'; a.rel = 'noopener';
-                            a.style.color = 'var(--text-link)';
-                            row.append(a);
-                            box2.append(row);
-                            return row;
-                        };
                         const proj = su.project ? '?project=' + encodeURIComponent(su.project) : '';
-                        step(1, 'Switch on the Gmail API:',
-                            'https://console.cloud.google.com/apis/library/gmail.googleapis.com' + proj,
-                            'open that page');
-                        step(2, 'Open your existing web client and add one more address under Authorised redirect URIs:',
-                            'https://console.cloud.google.com/auth/clients' + proj, 'open your clients');
-                        const uri = el('div');
-                        uri.style.cssText = 'font-family:var(--font-mono);font-size:var(--text-xs);user-select:all;'
-                            + 'background:var(--surface-tertiary);border:1px solid var(--border-default);border-radius:6px;'
-                            + 'padding:6px 8px;margin-top:6px;word-break:break-all';
-                        uri.textContent = su.redirect_uri || '';
-                        box2.append(uri);
-                        box2.append(el('div', 'setting-sub',
-                            'Keep the address that is already listed. Add this one alongside it, then come '
-                            + 'back here and press Connect mailbox.'));
-                        card.append(box2);
+                        const link = (href, text) => { const a = el('a', 'action-link', text); a.href = href; a.target = '_blank'; a.rel = 'noopener'; return a; };
+                        const steps = el('ol', 'setup-steps');
+                        const s1 = el('li', null, 'Switch on the Gmail API.');
+                        const r1 = el('div', 'act-row');
+                        r1.append(link('https://console.cloud.google.com/apis/library/gmail.googleapis.com' + proj, 'Open that page'));
+                        s1.append(r1);
+                        const s2 = el('li', null, 'Open your existing web client and add this address under Authorised '
+                            + 'redirect URIs. Keep the address that is already listed: add this one alongside it, then '
+                            + 'come back here and press Connect mailbox.');
+                        const r2 = el('div', 'act-row');
+                        r2.append(el('code', 'setup-code', su.redirect_uri || ''));
+                        const cp = el('button', 'btn btn-sm'); cp.type = 'button';
+                        cp.append(ico(I.copy), document.createTextNode('Copy'));
+                        cp.onclick = async () => {
+                            try { await navigator.clipboard.writeText(su.redirect_uri || ''); toastOk('Address copied.'); }
+                            catch (e) { toastError('Select the address and copy it.'); }
+                        };
+                        r2.append(cp, link('https://console.cloud.google.com/auth/clients' + proj, 'Open your clients'));
+                        s2.append(r2);
+                        steps.append(s1, s2);
+                        card.append(steps);
                     }
                 } else {
-                    card.append(el('div', 'setting-sub', 'Ask an admin to connect the shared mailbox. '
+                    head.append(el('p', 'card-desc', 'Ask an admin to connect the shared mailbox. '
                         + 'Once it is linked, every email shows up here with an owner.'));
                 }
                 box.append(card);

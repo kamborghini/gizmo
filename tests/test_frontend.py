@@ -2135,9 +2135,11 @@ def t_contacts_is_a_table_not_a_run_together_line():
 def t_each_crm_segment_declares_its_own_width():
     """crm-narrow capped four segments at 1120 with no auto margins, so they
     hugged the left edge with an empty band down the right."""
+    # Since 2026-10-05 no section is capped: capped, Leads ended 350px short of
+    # the Pipedrive card stacked above it. Every CRM section takes the page.
     ok("crm-seg-" in SCRIPT, "the segment carries its own class")
-    ok(".crm-seg-leads" in CSS and ".crm-seg-insights" in CSS,
-       "and the short ones are capped by name rather than by a blanket rule")
+    ok(not re.search(r"\.crm-seg-[a-z]+ \{[^}]*max-width", CSS) and ".crm-narrow" not in CSS,
+       "and no section is capped, so stacked cards end on one edge")
 
 
 @test
@@ -5504,11 +5506,15 @@ def t_loan_units_puts_three_stats_on_three_columns():
     """The shared grid is four columns wide. Three stats on it leave a hole where
     a fourth would be, which reads as a KPI that failed to load rather than as a
     row of three."""
+    # Since 2026-10-05 they are the one figure card every page uses: the strip,
+    # whose twelve tracks share any count across the row (three take a third each).
     fn = fn_src("function renderLoans(")
-    head = fn[:fn.index("mgrid.classList")] if "mgrid.classList" in fn else fn
-    ok("metrics-3" in fn, "the three-column modifier is applied")
-    ok(head.count("{ label: ") == 3,
-       "and there are still exactly three stats - a fourth means dropping metrics-3")
+    ok("const mgrid = metricsStrip([" in fn, "the counts are the app's one figure strip")
+    ok(".metrics-strip > .stat:nth-child(4n+3):last-child { grid-column: span 4; }" in CSS
+       and ".metrics.metrics-strip { grid-template-columns: repeat(12, minmax(0, 1fr)); }" in CSS,
+       "which seats three as thirds of its twelve tracks, no hole")
+    head = fn[fn.index("const mgrid = metricsStrip(["):]
+    ok(head[:600].count("{ label: ") == 3, "and there are still exactly three stats")
 
 
 @test
@@ -9141,7 +9147,7 @@ def t_the_app_wide_layout_sweep_holds():
         ".dpanel.dpanel-search { min-width: 0; width: min(340px, calc(100vw - 16px)); }": "the search palette has one width",
         ".dmenu { max-width: min(420px, calc(100vw - 16px)); }": "a menu is never wider than the window",
         ".card[hidden] { display: none; }": "a hidden card is hidden",
-        ".guide-tools > .tbl-search { justify-self: start; }": "the guide search's clear button is in its field",
+        ".guide-tools > .act-row > .tbl-search { flex: 1 1 0; }": "the guide search gives way to Print on a phone",
         ".setting-row > div:first-child { flex: 1 1 12rem; }": "a settings row keeps 12rem of words",
         ".build-bar { max-width: min(460px, calc(100vw - 32px)); }": "the update bar fits a phone",
         ".toggle .sw { flex: none; }": "the Deep analysis switch never squeezes",
@@ -9154,7 +9160,7 @@ def t_the_app_wide_layout_sweep_holds():
         ".followed > .ic { display: inline-grid; }": "the book icon leads its line",
         ".lia-name { font-size: var(--text-sm); font-weight: var(--weight-medium); flex: 0 0 clamp(150px, 30%, 320px);": "one name width per list",
         "body:has(#view-chat.active) .build-bar { bottom: auto; top: calc(var(--topbar-h) + 12px); }": "the update bar is clear of the composer on Chat",
-        "#team-content .card + .card { margin-top: var(--sp-4); }": "Team's cards are spaced",
+        "#team-content .card + .card { margin-top: var(--page-rhythm); }": "Team's cards are spaced at the page rhythm",
         # operations
         "flex-wrap: wrap; row-gap: var(--sp-1); }": "courier chips wrap",
         "@container loans (max-width: 620px)": "loan rows by the card's width",
@@ -9407,8 +9413,10 @@ def t_the_brand_pilot_review_findings_stay_fixed():
     inset = CSS.split("Those are inset by margin instead.")[1].split("{")[0]
     ok(".segmented" in inset, "and a track put straight into a card is inset like every boxed child")
     phone = CSS.split("@media (max-width: 640px) {\n            .segmented {")[1].split("}")[0]
-    ok("align-self: stretch" in phone and "border-radius: var(--radius-card)" in phone,
-       "on a phone it fills its line, with the card's corner so a wrapped track is not a stadium")
+    ok("align-self: stretch" in phone and "flex: 1 1 100%" in phone,
+       "on a phone it takes and fills a line of its own, in a column parent or a row")
+    ok(".segmented.wrapped { border-radius: var(--radius-card); }" in CSS and "segWrapWatch(bar)" in SCRIPT,
+       "and only a track that wraps takes the card's corner, so it is never a stadium")
     # The Finance strip lines up with the stamp beside it.
     ok(".page-tabs > .tabs { margin-bottom: 0; }" in CSS, "the Finance strip carries no space below it in its row")
     # On a phone a scrolling strip holds the focus outline as well as the underline.
@@ -9438,7 +9446,7 @@ def t_a_chooser_hears_a_press_on_a_choice_it_was_told_to_show():
     if not _node_ok():
         print("       (node unavailable, skipped)")
         return
-    js = MINIDOM + fn_src("function chooser(") + r"""
+    js = MINIDOM + fn_src("function segWrapWatch(") + "\n" + fn_src("function chooser(") + r"""
 const picks = [];
 const bar = chooser('segmented', [['board', 'Board'], ['list', 'List']], 'board', (k) => picks.push(k));
 const [board, list] = bar.children;
@@ -9452,6 +9460,60 @@ console.log(JSON.stringify({ picks, listOn: list.classList.contains('on'), board
     got = _run_node(js)
     eq(got["picks"], ["list", "board"], "the press on the shown choice counts once, and a repeat does not")
     ok(got["boardOn"] and not got["listOn"], "and the marks follow the last press")
+
+
+@test
+def t_every_field_takes_the_field_corner():
+    """The size select and the two dispatch fields were given the corner of a
+    box inside a card (6) when the corners got roles, beside fields at 8. A
+    field is a field wherever it sits."""
+    for sel in (".lbl-size {", ".disp-num {", ".disp-text {", ".psel {", ".tm-field {", ".sk-input, .sk-textarea {",
+                ".pf-input {", ".pchat-ta {", ".tm-role-fixed {"):
+        rule = CSS.split("\n        " + sel)[1].split("}")[0]
+        ok("border-radius: var(--radius-field)" in rule, sel + " has the field corner")
+
+
+@test
+def t_the_spacing_pass_holds():
+    """2026-10-05, Cameron: "it needs to all be beautifully spaced, no overlaps or
+    elements pushing other elements out the way". An audit of every screen at
+    five sizes and three reviewers found these; each is held here."""
+    ok(".ov-hero:has(+ .tabs) { margin-bottom: var(--sp-4); }" in CSS, "a tab strip sits 16 under its header on every screen")
+    ok("min-height: 60px" not in CSS.split(".ov-hero:has(+ .page-tabs)")[1][:600], "Finance intros reserve no empty line")
+    ok("--segment-h: calc(var(--control-h-md) - 2 * var(--sp-0-5) - 2 * var(--bw-hairline));" in CSS
+       and "height: var(--segment-h);" in CSS.split("\n        .segmented > button {")[1].split("}")[0],
+       "a segmented track is a small control's 28, level with the field beside it")
+    ok("flex: 1 1 auto;" in CSS.split("\n        .segmented > button {")[1].split("}")[0], "and a wrapped track fills its lines")
+    ok(".metrics.metrics-strip { grid-template-columns: repeat(12, minmax(0, 1fr)); }" in CSS
+       and "calc(100% / 60)" not in CSS, "figures keep a 16 gap both ways at every width")
+    ok(".metrics-strip > .stat > .stat-row { margin-top: 0; }" in CSS, "a figure sits one distance under its label")
+    ok("grid-row: span 3; grid-template-rows: subgrid;" in CSS, "and a row of tiles shares its label, figure and note rows")
+    # A tile that is a size container cannot share its parent's rows: the narrow
+    # check lives on the figure's line, never on the tile.
+    ok(".metrics-strip .stat-row { container-type: inline-size;" in CSS
+       and not re.search(r"\.metrics-strip > \.stat \{[^}]*container-type", CSS),
+       "the narrow-tile check is on the figure line, so the tile can still share rows")
+    ok(".tbl-tools-r:has(> .segmented) { flex: 1 1 100%; }" in CSS, "a phone toolbar's segmented track fills its line")
+    ok(".ov-wrap > .tabs { min-height: var(--control-h-md); }" in CSS, "every page's strip sits in Finance's 28 row")
+    ok("metrics-finance" not in CSS, "one figure card, not a Finance size of it")
+    ok("@media (min-width: 641px) { .crm-pipeline > .crm-col { flex: 1 1 0; min-width: calc(var(--sp-8) * 4); } }" in CSS,
+       "the pipeline's stages share the board instead of one sitting past its edge")
+    ok(".sidebar.open { margin-left: 0; box-shadow: var(--shadow-lg); }" in CSS, "a closed drawer paints no shadow on the page")
+    ok("padding: 0 var(--wrap-pad);" in CSS.split(".topbar {")[1].split("}")[0], "the top bar keeps the page's gutter")
+    ok(".ov-hero-act:not(:has(> :not([hidden]))) { display: none; }" in CSS, "an empty header rail takes no line")
+    ok(".card > .ktable-wrap + .tbl-foot { margin-top: 0; }" in CSS and ".card > .metrics { margin-bottom: 0; }" in CSS
+       and ".card > .tabs { margin-bottom: 0; }" in CSS and ".card > .load-failed { margin-top: 0; }" in CSS,
+       "a page margin never adds to a card's own 16")
+    for sel in ("#team-content .card + .card { margin-top: var(--page-rhythm); }", ".ds-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--page-rhythm); }",
+                ".guide-grid > .guide-card { break-inside: avoid; margin-bottom: var(--page-rhythm); }"):
+        ok(sel in CSS, "stacked cards are the page rhythm apart: " + sel[:40])
+    guide = SCRIPT.split("function renderGuide() {")[1].split("\n        function ")[0]
+    ok("heroAct(" not in guide and "box._desc" not in SCRIPT and "box._print" not in SCRIPT,
+       "the Guide's header is the same on every tab")
+    ok("const b = el('button', 'btn btn-sm'); b.textContent = 'Try again';" in SCRIPT, "every Try again is the small button")
+    mail = SCRIPT.split("function renderMail() {")[1][:6000]
+    ok("el('h3', 'card-title', 'Connect the shared mailbox')" in mail and "'setting-title'" not in mail and ".style.cssText" not in mail,
+       "the Inbox setup card is built from the shared parts, with no sizes of its own")
 
 
 if __name__ == "__main__":
