@@ -26,8 +26,7 @@
     },
     {
      "kind": "added",
-     "tab": "guide",
-     "text": "Admins have a new Design section in the Guide: every colour, typeface and part Reactor is made of, drawn by the same code as the screens, with how readable each colour is. Every screen takes its look from the one place this shows, so they stay alike."
+     "text": "Admins have a new Design section in the Guide: every colour and typeface in Reactor and the shared parts its screens are built from, drawn by the same code as the screens, with how readable each colour is. Every screen takes its look from the one place this shows, so they stay alike."
     }
    ]
   },
